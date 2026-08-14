@@ -41,168 +41,6 @@ describing the same incident.
 
 ---
 
-## ERR-151 — The business-applications endpoint accepts `user_id=`, ignores it, and returns the whole table, so a per-customer lookup would have named a stranger's company (2026-08-09)
-
-**Context.** The one-click Business upgrade puts an "Upgrade to Business" button on the admin customer
-drawer. Before offering it, the drawer should say what the customer's standing already is — already a
-business account, application pending, or neither — because upgrading auto-closes any pending
-application as superseded, and re-upgrading an existing account is a 409. The only readable evidence
-is `GET /api/admin/business-applications`, which returns `user_id` on every row. The obvious call is
-`?user_id=<the customer>`.
-
-**Root cause.** That parameter is accepted and silently ignored. Measured against production:
-`?user_id=00000000-0000-0000-0000-000000000000` — a UUID belonging to nobody — returns the full table,
-and so does `?search=zzzznotreal`. Only `status=` filters, and it is Joi-validated, so a bogus *status*
-400s loudly while a bogus *identity* returns everything quietly.
-
-Had the frontend trusted it, `applications[0]` would have been treated as "this customer's
-application" for every customer in the system. The drawer would have reported the first row's company
-name — a real business, someone else's — as this customer's, marked them already upgraded, and hidden
-the button. Every customer, one wrong answer, no error anywhere.
-
-**Why it looked right.** The parameter is the obvious name, the endpoint returns 200, the payload has
-the right shape, and the rows contain a `user_id` field — which reads as confirmation that the server
-understood the question. Nothing in the response distinguishes "filtered to your customer" from "here
-is everything".
-
-**The fix.** `matchApplications(rows, userId, pagination)` in
-`js/admin/utils/business-accounts.js` matches on `user_id` in the frontend, over rows fetched with no
-identity parameter at all, and `AdminAPI.listBusinessApplications` refuses to send one — pinned by a
-source-level test, because the trap is invisible at runtime.
-
-The same function draws the line that matters afterwards: a page of rows can prove **presence**, but
-only a complete read can prove **absence**. A partial or failed read that finds no match returns
-`unknown`, never "not a business account", and the drawer renders that as a read problem rather than a
-verdict. The endpoint caps `limit` at 100 with a 400 rather than clamping, so the read pages until it
-has covered `pagination.total`.
-
-**Verified:** live in the admin centre against production. The queue renders its one real row; a
-customer with no application resolves to "Not a business account. No application on file."; a real
-409 from the live endpoint renders "This customer already has a business account."
-
-**The lesson.** ERR-075 was a filter whose bogus value returned **nothing**, silently. This is the
-same defect pointing the other way, and the other way is worse: zero rows looks like a bug and gets
-investigated, whereas a full table looks like data and gets rendered. **An accepted query parameter is
-not an honoured one.** The test is one request with a value that must match nothing — if it comes back
-full, the server is ignoring you. Run it before building anything on top of a filter, and do the
-matching locally when the answer has to be right.
-
----
-
-## ERR-152 — A fail-soft lookup pointed at a URL nobody had ever served, and "waiting for the endpoint" looked identical to asking the wrong question (2026-08-09)
-
-**Context.** `standalone_invoices.business_account_id` is the one value that puts an invoice on a
-customer's Business Centre. On 2026-08-03 no endpoint exposed a `business_accounts.id`, so
-`AdminAPI.listBusinessAccounts()` was written to fail soft — resolve `null`, let the invoice editor
-say the control is unavailable, and, in its own comment, "light up the moment the endpoint ships".
-
-**Root cause.** It asked for `/api/admin/business-accounts`. Every admin business route the backend
-actually serves sits under the `/api/admin/business/` prefix — `…/business/applications`,
-`…/business/accounts`. The hyphenated path is in a namespace that has never existed for accounts, so
-the call was not waiting for anything. It would have 404'd forever, and the day the real endpoint
-shipped it would have kept on 404ing.
-
-**Why it looked right.** Because a fail-soft read cannot tell you which failure it is having. `null`
-meant "we could not ask", and "we could not ask" was true — the reason just wasn't the one written in
-the comment. The UI state was correct, the tests were green, and the code was honest about its
-uncertainty in every respect except the one that mattered. A promise that something will start working
-later is only worth the URL it is pointed at, and nothing checks a URL that is expected to fail.
-
-**The fix.** Repointed at `/api/admin/business/accounts` (still a 404 today — but now a 404 from the
-namespace the backend uses, so it really will light up), with a test asserting the prefix so the guess
-cannot come back. Accounts created through the new upgrade flow are merged in from the device-local
-registry tagged `_source: 'device'`, and when every option carries that tag the invoice editor says so
-in words rather than presenting a picker that implies the endpoint shipped.
-
-**The lesson.** **A URL you expect to fail still has to be verified.** The whole point of fail-soft is
-that nothing downstream notices, which is exactly why a typo, a wrong prefix or a retired path can sit
-in one for months. When writing "this lights up when X ships", curl it once and record the status you
-got and the date — a 404 from a real namespace and a 404 from a fictional one are the same response
-and completely different facts. The sibling probe from ERR-140 is the tool: ask for a route you know
-is bogus and compare.
-
----
-
-## ERR-153 — The new business-account management endpoint is PATCH, and this API still refuses PATCH at CORS, so it cannot be called from a browser at all (2026-08-09)
-
-**Context.** The one-click upgrade handoff pairs `POST /api/admin/business/accounts` with
-`PATCH /api/admin/business/accounts/:id` for credit limit, Net 30 and suspend/close. Both were
-verified live with curl before any code was written: 401 unauthenticated, correct 400/404 validation,
-correct 404 for an unknown account id. Both work.
-
-**Root cause.** Neither works from a browser. The API answers a PATCH preflight with
-
-```
-Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
-```
-
-— no PATCH — so Chrome kills the request before it is sent. This is **BF-021**, first measured
-2026-07-25 for the invoice paid-toggle and still open. The invoice case had somewhere to go:
-`PUT /api/admin/invoices/:id` exists, so `setStatusWithFallback` falls back to a full update. Here
-there is nowhere: `PUT`, `POST` and `DELETE` on `…/business/accounts/:id` all 404, and
-`X-HTTP-Method-Override` is not in `Access-Control-Allow-Headers`. PATCH is the only verb, and it is
-the one verb the browser may not use.
-
-**Why curl said it was fine.** curl does not do preflight. Every probe that verified this contract was
-correct about the server and silent about the transport, because CORS is not a property of the
-endpoint — it is a property of the browser's relationship to it. A route can be simultaneously live,
-correct, and unreachable.
-
-**The fix (frontend side).** The failure is named instead of dressed up. `isNetworkFailure()` — no
-status and no code, because there was no response to read either out of — routes to copy that says the
-request was **never sent**, that **nothing was changed**, and that it needs a one-line backend fix.
-The generic `TypeError: Failed to fetch` would have read as a timeout, and a timeout is the single
-interpretation under which the write might have landed. The local record is not mirrored on failure.
-
-PATCH is still attempted first and directly, so the feature starts working the day BF-021 lands with
-no frontend change — the invoices precedent.
-
-**Still open, and now blocking a second feature.** Filed again in
-`business-one-click-upgrade-FE-response-aug2026.md` as ask 1.
-
-**The lesson.** **Verify a contract with the transport that will actually use it.** A curl probe
-proves the route exists; it does not prove the browser may call it. When a handoff introduces a verb
-this API has not used from the frontend before, send one `OPTIONS` with
-`Access-Control-Request-Method` before writing the client — it costs one request and it is the
-difference between shipping a feature and shipping a button that throws.
-
----
-
-## ERR-154 — A slash-star inside a line comment swallowed 2.7kB of real code from the test suite's source stripper (2026-08-09)
-
-**Context.** Structural tests in this repo assert against source with comments stripped, so a literal
-in a docblock cannot satisfy an assertion. Two new source-level tests sliced
-`AdminAPI.listBusinessAccounts` out of the stripped `js/admin/api.js` and both failed with
-`Cannot read properties of null` — the regex had matched nothing.
-
-**Root cause.** A comment written minutes earlier, explaining this very fix:
-
-```js
-// every admin business route lives under `/api/admin/business/*`. The comment
-```
-
-The stripper removes block comments with `/\/\*[\s\S]*?\*\//g` before line comments. That `/*` inside
-backticks inside a `//` comment is, to a regex, a block-comment opener. It ran forward to the next
-`*/` — the end of a JSDoc block 2,698 characters later — and deleted everything between: the whole of
-`listBusinessAccounts`, `createBusinessAccount` and half of `updateBusinessAccount`.
-
-**Why it was nearly missed.** The file was syntactically perfect and every runtime path worked; only
-the test's *view* of it was mutilated. The failure mode is silent in the dangerous direction — a
-stripped-away function makes `doesNotMatch` assertions **pass**. Had those two tests been written as
-"this bad path must not appear" rather than "this good path must", the swallowed region would have
-made them green, and the region a comment can eat is unbounded.
-
-**The fix.** Write the prefix out (`the /api/admin/business/ prefix`) instead of glob-punctuating it,
-with a note in place saying why. A repo-wide grep found no other instance.
-
-**The lesson.** In a codebase whose tests read source as text, **`/*` inside a line comment is not
-punctuation, it is an operator.** Prose in comments is normally free; here it can delete code from
-every structural assertion in the suite. And the tell was available: a source regex returning `null`
-means the anchor is gone, which is either a rename or — much more interesting — a stripper that ate
-it. Print the stripped region before assuming the regex is wrong.
-
----
-
 ## ERR-166 — The admin's "Delete Products" button calls an endpoint that does not exist — **OPEN (backend, BF-041)** (2026-08-14)
 
 **Date**: 2026-08-14
@@ -401,6 +239,519 @@ enrolled.
 
 **Lesson**: when a handoff says "one `<option>`", count the vocabularies first. The cost of the
 missing option was zero errors and six wrong answers.
+
+---
+
+## ERR-161 — Customer order lines may not carry `source`, so order-detail badges went from wrong to absent — **OPEN (backend, BF-040)** (2026-08-12)
+
+**Date**: 2026-08-12
+**Context**: direct fallout of ERR-157. The genuine/compatible badge is tri-state now, so an order
+line the backend does not classify renders nothing instead of asserting GENUINE. That is the
+correct behaviour — but it may mean historical receipts lose a badge they used to show, and we
+could not confirm either way before shipping.
+
+**What is known.** `GET /api/admin/orders/:id` returns `order_items` with **no `source` field at
+all** — keys are `id, product_name, name, sku, qty, quantity, sell_price, unit_price, price,
+line_total, supplier_cost_snapshot, image_url, origin, suppliers`. Against that,
+`order-confirmation-page.js` reads `item.product?.source || item.source` and gates on
+`if (item.source)`, which is code written by someone who expected the field on the **customer**
+route.
+
+**What is not known.** The customer route `GET /api/orders/:id`. The admin test account has zero
+orders of its own, and other customers' orders 403. Placing a real order to find out is not a
+reasonable probe. So this is recorded as an open question rather than a verified state.
+
+**Why we shipped anyway**: the alternative is keeping a default that says GENUINE — on an order
+line, for a product we cannot classify. A missing badge is a smaller and more honest failure than a
+false manufacturer claim, and it is *visible*, which a wrong badge is not.
+
+**Asked**: BF-040 — project `source` onto `order_items` on the customer order routes, the same
+one-field change already made for the cart. Filed in
+`public-volume-pricing-FE-response-round2-aug2026.md`.
+
+**Do not "fix" this by inferring from `product_name`.** That is precisely ERR-157, and
+order-detail was its worst offender — an unanchored `.includes('compatible')` that also mislabels
+genuine cartridges whose names mention printer compatibility.
+
+---
+
+## ERR-157 — The cart printed GENUINE on compatible cartridges for months, because a name regex broke and the badge had no third answer (2026-08-12)
+
+**Date**: 2026-08-12
+**Context**: the backend shipped `source` on the cart line (`items[].product.source` plus the
+line-level sibling `items[].source`), answering ask 1 of `public-volume-pricing-FE-response-aug2026.md`.
+Claiming it meant looking at what the field feeds.
+
+**Two defects that were each survivable alone and were catastrophic together.**
+
+### (a) The name fallback had been dead since May 2026 and nobody noticed
+
+`Cart._isCompatible` read `product_source`, then a non-sentinel `source`, then — for legacy
+localStorage rows — `/^compatible\b/i` on the stored **name**. That last branch was written when
+compatible products were named "Compatible Ink Cartridge for …".
+
+The May 2026 catalog rename moved the word out of first position. Live rows read
+`"143ABK Compatible Toner Cartridge for HP 143A Black Neverstop Reload Kit"` — the word is *there*,
+just not leading — so the regex returned **false for every compatible cartridge in the catalogue**.
+
+A dead branch is not a bug on its own. This one was a bug because of what sat above it.
+
+### (b) The badge was binary, so "cannot prove compatible" rendered as "GENUINE"
+
+Four surfaces ended in `isCompatible ? 'COMPATIBLE' : 'GENUINE'` — cart, checkout, favourites and
+order-detail. There was no unknown state. So the moment the field above the dead regex was empty,
+the cart asserted an OEM manufacturer claim on third-party cartridges.
+
+And it *was* empty, on the path that matters most: a locally-added row carried `product_source`
+from the card's data attribute, but `GET /api/cart` did not project `source`, so `_parseServerCart`
+wrote `product_source: null`. **One page reload after filling the cart, every compatible line
+claimed to be genuine** — then `saveToLocalStorage` persisted the mislabelled row, so it stuck.
+
+Measured on a real 11-line cart after a reload: 7 compatible lines badged GENUINE, 4 genuine lines
+badged GENUINE. Every badge on the page said the same word, and four of them happened to be right.
+
+**Why nothing caught it.** Three tests covered this area and all three passed, because they pinned
+the *mechanism* rather than the *claim*: one asserted the regex was present and anchored, one
+asserted the badge delegated to `_isCompatible`, one asserted the parser copied
+`item.product.source`. Each was true. The parser was faithfully copying a field the backend wasn't
+sending, into a helper whose fallback no longer matched anything, feeding a badge with no way to
+say "I don't know". Nobody owned the sentence "the badge is correct".
+
+**Why it looked right in review**: a name-based fallback for legacy rows is a reasonable idea, and
+`/^compatible\b/i` is *carefully* written — anchored to the leading word specifically to avoid
+overmatching description text. It is the conscientious version of the wrong instrument.
+
+**Five rules for one question.** The audit found six surfaces classifying genuine-vs-compatible
+and five distinct rules. The worst was `order-detail-page.js`:
+`item.source === 'compatible' || (item.product_name || '').toLowerCase().includes('compatible')`
+— unanchored, so it *also* labels a GENUINE cartridge COMPATIBLE when its name reads "compatible
+with DCP-J1050DW". Two more (`shop-page.js` `adaptSuggestProduct`, `search.js` `adaptForCard`) read
+`p.source || (p.is_genuine ? 'genuine' : 'compatible')`, which **invents `'compatible'`** for a row
+carrying neither field, because `undefined ? a : b` takes the false branch. Only the PDP was right,
+and it had been right all along: `source === 'genuine'` → GENUINE, `=== 'compatible'` → COMPATIBLE,
+otherwise **hide the badge** — "we never assert a status we don't know".
+
+**Fix**: `BrandSource` in `js/utils.js`, one vocabulary, tri-state.
+`of(row)` → `'genuine' | 'compatible' | null`, reading `product_source` → `product.source` →
+`source` (ignoring the cart's `core`/`cross-sell` namespace sentinels) → `is_genuine` *only when it
+is a real boolean*. No name inspection at any level. `badgeHTML()` returns `''` for null, so the
+four dishonest surfaces now render nothing rather than a claim. `_parseServerCart` reads both of the
+backend's copies (`item.product.source || item.source`) so neither disappearing alone can dark it.
+
+Note the two defaults point in **different directions on purpose**: the badge question resolves
+unknown to *silence*, while the colour-tile question (`isCompatible()`) resolves unknown to *false*,
+so an unproven row gets the neutral placeholder rather than a coloured gradient implying
+third-party (the genuine-no-colour-tile invariant, ERR-143). Same field, two questions, two safe
+directions. A single boolean could not express that, which is part of why it went wrong.
+
+Also fixed while in there: `getColorPlaceholder` gated on `source && source !== 'compatible'`, so a
+line with **no** source fell past the guard and painted a coloured tile — the invariant held for
+proven-genuine rows and quietly failed for unproven ones, which is the population it most needed
+to cover. Now `source !== 'compatible'`.
+
+**Verified**: live guest cart, full page reload, signed out — 7/7 compatible lines COMPATIBLE, 4/4
+genuine lines GENUINE. A line with `source` stripped from both copies renders no badge and the
+string `GENUINE` does not appear.
+
+**Test**: `tests/cart-line-source-aug2026.test.js`, built from the real payload captured that day —
+including the exact product name that defeats the retired regex. It greps all of `js/` for the
+three inference patterns that shipped and fails on any of them. Mutation-tested both directions:
+restoring the binary badge fails 2 tests, sneaking the regex back into `favourites.js` fails the
+fence and names the file.
+
+**Lesson**: **a fallback is a claim, and a claim needs a way to say "I don't know."** The regex
+failing was routine; what turned it into a compliance defect was a boolean with no third value, so
+"unproven" and "genuine" were the same output. Where a label carries a factual assertion —
+manufacturer, warranty, origin — the type must have an unknown, and the renderer must be willing
+to print nothing. **And test the claim, not the mechanism**: three green tests each verified a
+correct link in a chain that produced a false statement, because no test asked what the customer
+saw. When a rule exists in more than one file it is not a rule, it is a coincidence — six surfaces,
+five spellings, and the two that were right were right by accident.
+
+---
+
+## ERR-158 — Deleting a retired fallback is how a discount row goes dark silently, so we left a watchdog (2026-08-12)
+
+**Date**: 2026-08-12
+**Context**: the backend dropped the `b2b_discount` alias on 2026-08-10, as we'd cleared them to.
+Confirmed absent from both the top level and `summary` on a live guest cart. Time to remove the
+fallback readers in `cart.js` and `payment-page.js`.
+
+**The near-miss**: the obvious change is to delete the `|| s.b2b_discount` arms and move on. But
+that fallback existed precisely so a rollback on their side couldn't dark the row — and deleting it
+restores exactly the failure it was insurance against, with the additional insult that it now
+*looks* deliberate. A cart that loses its "Volume discount −$2.76" line still charges the discounted
+total and still adds up. Nothing throws. The customer is simply never told why the number moved.
+That is the ERR-063/068/073/149/150 shape: absence rendering as a confident nothing.
+
+**Fix**: replace the silent fallback with a loud one. `_parseServerCart` no longer *reads* the alias
+as a normal path, but it watches for an alias-only payload, logs it at **error** level naming the
+date the backend dropped it, and honours it anyway. A rendered discount beats a correct-looking cart
+that quietly lost a row.
+
+**What was deliberately NOT changed**: `order-totals.js` still reads the alias. That file normalises
+**orders**, not carts; the backend's note covered the cart response only, and an order stored before
+the cutover keeps its spelling forever. Removing it there would zero the volume-discount row on
+historical receipts — where nobody would notice, because the totals still add up. Commented in place
+with the condition for removing it later (check a real pre-August order first).
+
+**Also fixed**: `scripts/sweep-business-pricing.mjs` returned `null` when it couldn't read a cart, and
+the consistency-gate test **skips** when the cart record is absent — so a hard cutover there would
+have turned the gate off and gone green while checking nothing. Its own comment warned about this;
+the warning would have been read *after* the cutover. It now returns a named reason
+(`cart-empty`, `no-volume-discount-on-cart`, `no-credentials`) and the report says
+"UNAVAILABLE (reason) — the consistency gate did NOT run" instead of "none".
+
+**Lesson**: **removing a fallback is a behaviour change, not cleanup.** Before deleting one, ask what
+it was insurance against and whether that risk expired — usually only the *likelihood* dropped, not
+the *consequence*. The upgrade path is silent → loud, not present → absent. And a skip is not a pass:
+any gate that can decline to run must say so by name, or its silence reads as agreement.
+
+---
+
+## ERR-159 — We reported a cache regression that did not exist, because `curl -I` sends HEAD (2026-08-12)
+
+**Date**: 2026-08-12 (defect introduced 2026-08-09)
+**Context**: our round-1 reply told the backend the catalog API was not being edge-cached at all,
+with evidence:
+
+```
+curl -sI https://api.inkcartridges.co.nz/api/products?page=1&limit=20
+→ cache-control: private, no-store, no-cache, must-revalidate, proxy-revalidate
+→ cf-cache-status: DYNAMIC
+```
+
+**Root cause**: `curl -I` sends **HEAD**. The origin's cache-header middleware marked only `GET` as
+cacheable; every other method got the hard `private, no-store` treatment. The header was real — for
+a method no visitor ever uses. Real GETs were returning
+`public, max-age=0, s-maxage=300, stale-while-revalidate=600` and going MISS → HIT the whole time.
+
+**Why it was convincing**: the output was *specific*. A precise, plausible, correctly-transcribed
+header, with `cf-cache-status: DYNAMIC` agreeing with it. Both facts were true and the conclusion
+drawn from them was false. We also had a prior measurement to anchor against (ERR-124's
+44 ms cached vs 205 ms uncached), which made "this regressed" the natural reading — the evidence
+fitted a story we already had.
+
+**Why it survived review**: `-I` is muscle memory for "just show me the headers", and it reads as a
+formatting flag rather than a method change. Nothing in the output says HEAD.
+
+**Fix**: `scripts/probe-edge-cache.mjs` + `npm run audit:edge-cache`. Real GETs, twice per endpoint,
+asserting MISS→HIT, and it **refuses to issue HEAD** via a guard that throws — not a comment,
+because a future edit adding `method: 'HEAD'` to make the probe cheaper would read like an
+optimisation in review. It also separates two failures that look identical from outside: *header not
+cacheable* (origin) versus *header cacheable but edge not storing* (Cache Rule).
+
+**What the committed probe immediately found**, which the hand-typed one never could:
+- `/api/search/smart` sends a fully cacheable header and is `DYNAMIC` on every request — the Cache
+  Rule doesn't match `/api/search/*`. Search rows carry `quantity_breaks`, so the volume ladder is
+  riding an uncached payload on every search. (BF-039)
+- `/api/site/nav` sends `public, max-age=3600` and is also `DYNAMIC`. (BF-040)
+- BF-014/BF-019 were **not** HEAD artefacts — `/api/ribbons`, `/api/printers/trending`,
+  `/api/settings`, `/api/schema/site` genuinely return `private, no-store` to a real GET today.
+- `/api/color-packs/config` now 404s while `js/api.js:1938` still calls it.
+
+**Corrected**: the claim in `public-volume-pricing-FE-response-aug2026.md` §(a) (struck through
+in place, with the correction beside it rather than rewritten away), the memory notes carrying it
+forward, and — back to the backend — their "the same TTL the in-memory catalog cache already had":
+`API.SWR_TTL_MS` is **60 s** for catalog GETs, not 5 minutes. The 5-minute TTL is taxonomy/schema/nav only.
+
+**Lesson**: **measure the method your users use.** `-I`/HEAD, `OPTIONS` preflights and `?debug=1`
+variants are all different requests than the one being debugged, and a server may legitimately
+answer them differently. Deeper: a probe that lives in a document is a rumour — it cannot be re-run,
+reviewed or regression-checked, and it outlives its own accuracy by being quoted. The correction is
+not "be careful with flags", it is **commit the probe**. Ours has now found three real problems the
+original was never capable of finding.
+
+---
+
+## ERR-160 — Every product surface but one showed the volume ladder, and the exception was invisible (2026-08-12)
+
+**Date**: 2026-08-12
+**Context**: found while verifying ERR-157. `js/search.js` — the smart-search typeahead dropdown —
+renders product cards through `Products.renderCard`, the same component every grid uses.
+
+**Root cause**: every other surface pairs its paint with `Products.decorateBusinessPricing(container,
+products)`, which ingests the payload's `quantity_breaks` and overlays the bulk price:
+`products.js`, `shop-page.js` (both browse and search-results), `landing.js`, `ribbons-page.js`,
+`favourites.js`, the PDP. `search.js` contained **no reference to the pricing module at all** — the
+string `Business.` appeared zero times in the file.
+
+So a shopper saw "Bulk price $7.67 ea · Buy 3+" on `/shop` and nothing in the dropdown, for the same
+SKU, one keystroke apart.
+
+**Why it stayed hidden**: the card still rendered, with the correct retail price. The missing thing
+was an *addition*, and an addition that is absent looks exactly like a product that has no volume
+discount — which is a real and common state. There is no error, no gap in the layout, no console
+warning. `Business.CARD_SELECTOR`'s own comment says listing the surfaces centrally is "what keeps a
+shopper from seeing bulk pricing on /shop and not on /account/favourites" — the module had
+anticipated this exact failure and still could not prevent it, because the selector only matches
+cards someone has handed over.
+
+**Fix**: one call after the dropdown paints, passing `renderedOrder` — the **raw** `/smart` rows, not
+the `adaptForCard` copies. (`adaptForCard` spreads with `Object.assign` so the field does survive,
+but handing a re-shaped copy to an ingester is precisely how ERR-150 happened.) Costs zero requests:
+`/api/search/smart` already embeds `quantity_breaks`.
+
+**Verified**: 13/13 dropdown cards decorated, signed out, with **zero** requests to `/api/business/*`.
+Checked the footprint too — `search.css:836` hides `.product-card__badge` inside `.smart-ac__grid`,
+but the overlay is a `.product-card__biz-price` in the price block, so it is unaffected and reads
+cleanly in the tight grid.
+
+**Lesson**: **"every surface calls X" is a claim about a list nobody maintains.** ERR-150 was the
+same feature going missing at a *whitelist parser*; this was it going missing at a *call site*. Both
+are silent because the surface still renders something plausible. When a capability is opt-in per
+surface, the enrolment list belongs in a test — grep for the renderer and assert every caller also
+calls the decorator — because the module's own selector cannot see the surfaces that never
+introduced themselves.
+
+---
+
+## ERR-156 — A new analytics beacon passed 48 unit tests and sent nothing at all, because `window.Config` does not exist (2026-08-12)
+
+**Date**: 2026-08-12
+**Context**: the Aug 2026 search hand-off asked for one build — `POST /api/search/click` on
+every search-results card click, so the backend can measure CTR by query and position. Pure
+telemetry: no UI, no error state, no retry, and nothing on the page depends on it.
+
+**Two defects, both invisible, both caught by a test rather than by reading the code.**
+
+### (a) `Config` is not on `window`, and the beacon read `window.Config`
+
+`js/config.js` declares `const Config = { API_URL: … }` at the top level of a classic
+script. That binding lives in the global **lexical** environment: `Config` resolves as a bare
+identifier from any other classic script, and `window.Config` is `undefined`. Verified in
+the browser: `typeof window.Config` → `"undefined"`, bare `Config.API_URL` →
+`"https://ink-backend-zaeq.onrender.com"`.
+
+The first cut of `js/search-click-beacon.js` resolved its API base via `window.Config`, got
+nothing, and returned `''` — so it never sent a single request. Every guard was correct, the
+module armed, the listeners attached, the payload was built. Zero requests, no error.
+
+**Why nothing noticed.** This is the worst possible failure mode for this specific feature,
+because *every* signal that would normally reveal it is absent by design:
+- fire-and-forget: nothing awaits a response, so there is nothing to log;
+- `navigator.sendBeacon()` returns `true` once the request is **queued** — it reports nothing
+  about the response, so 204 and "never sent" are indistinguishable;
+- the only symptom is a table on a backend dashboard staying empty, which reads exactly like
+  "customers aren't clicking search results."
+
+**Why the tests missed it.** The vm sandbox did `sandbox.window = sandbox`, which is the
+default reflex and is *wrong*: it makes `window.X` and bare `X` the same lookup, the one
+thing a real page does **not** do for script-scoped `const`s. `window.Config` worked in the
+sandbox and only in the sandbox. 48 tests passed against a global object shape that no
+browser has.
+
+**Fix**: read the bare identifier behind a `typeof` guard, exactly as `js/traffic-tracker.js:84`
+already did — `if (typeof Config !== 'undefined' && Config.API_URL)`. `window.Config` is
+still tried first, harmlessly, in case config.js ever starts exporting it. And the harness
+now builds `window` as an object **distinct** from the sandbox global, carrying only what the
+source actually assigns with `window.X = X` (`DebugLog`, `CompatSource`) — so the same class
+of bug now fails the suite instead of passing it.
+
+**Note the asymmetry that makes this a trap**: `DebugLog` and `CompatSource` *are* on
+`window` (utils.js assigns them explicitly). `Config` is not. Three globals in the same app,
+two reachable one way and one the other. Never assume — grep for the `window.X =` line.
+
+### (b) Both card CTAs live *inside* the card's anchor, so "only the link counts" matched them
+
+The guard was `target.closest('.product-card__link')`, on the reasoning that Add to Cart and
+Contact us are not click-throughs and would therefore be excluded. They are not: they sit
+**inside** `<a class="product-card__link">`, because `shop-page.js` keeps them `<button>`
+elements precisely so a nested `<a>` won't auto-close the outer anchor. `closest()` walks
+*up*, so it found the anchor and the beacon logged an add-to-cart as a click-through.
+
+In the browser this was masked: those handlers call `stopPropagation()`, so the event never
+reached the delegated container listener. A mask is not a guard — it made a real logic error
+invisible at exactly the layer where it would have been caught.
+
+**Fix**: `if (target.closest('button')) return false;` **before** the anchor test. Excludes
+cart, contact, favourite and any control added later, by element type, independently of
+whether anything calls `stopPropagation()`.
+
+**Verified live** (localhost against the production API, which allow-lists
+`http://localhost:3000`): click → one `POST /api/search/click` → **204**, body
+`{"q":"toner","sku":"CC301BK","position":1,"page":2}`, request `Content-Type:
+application/json`. Middle-click fires; right-click, Add to Cart and favourite do not. A
+`/shop?printer_slug=` level painting 7 cards into the **same two grids** fired zero beacons.
+The typeahead dropdown fired zero beacons **while the page beacon was armed**.
+
+**Lessons**:
+1. **A test harness that sets `window = globalThis` cannot see how a browser resolves
+   script-scoped `const`s.** Model `window` as a separate object holding only what the source
+   explicitly assigns to it. Otherwise the sandbox proves a global shape no browser has.
+2. **For fire-and-forget telemetry, "the tests pass" is not evidence it works.** There is no
+   runtime signal to fall back on, so one real end-to-end observation is mandatory before
+   calling it done. Forcing the fetch fallback (`sendBeacon = () => false`) is the trick that
+   makes the status code observable at all.
+3. **`closest()` walks up, so "only element X counts" also matches everything nested inside
+   X.** Check what the markup actually nests before trusting a `closest()` allow-list, and
+   never let `stopPropagation()` elsewhere stand in for a guard here.
+
+See `.claude/memory/project_search_click_beacon_aug2026.md`. Pinned by
+`tests/search-click-beacon-aug2026.test.js` (50 tests); live contract guarded by
+`npm run audit:searchclick`.
+
+---
+
+## ERR-151 — The business-applications endpoint accepts `user_id=`, ignores it, and returns the whole table, so a per-customer lookup would have named a stranger's company (2026-08-09)
+
+**Context.** The one-click Business upgrade puts an "Upgrade to Business" button on the admin customer
+drawer. Before offering it, the drawer should say what the customer's standing already is — already a
+business account, application pending, or neither — because upgrading auto-closes any pending
+application as superseded, and re-upgrading an existing account is a 409. The only readable evidence
+is `GET /api/admin/business-applications`, which returns `user_id` on every row. The obvious call is
+`?user_id=<the customer>`.
+
+**Root cause.** That parameter is accepted and silently ignored. Measured against production:
+`?user_id=00000000-0000-0000-0000-000000000000` — a UUID belonging to nobody — returns the full table,
+and so does `?search=zzzznotreal`. Only `status=` filters, and it is Joi-validated, so a bogus *status*
+400s loudly while a bogus *identity* returns everything quietly.
+
+Had the frontend trusted it, `applications[0]` would have been treated as "this customer's
+application" for every customer in the system. The drawer would have reported the first row's company
+name — a real business, someone else's — as this customer's, marked them already upgraded, and hidden
+the button. Every customer, one wrong answer, no error anywhere.
+
+**Why it looked right.** The parameter is the obvious name, the endpoint returns 200, the payload has
+the right shape, and the rows contain a `user_id` field — which reads as confirmation that the server
+understood the question. Nothing in the response distinguishes "filtered to your customer" from "here
+is everything".
+
+**The fix.** `matchApplications(rows, userId, pagination)` in
+`js/admin/utils/business-accounts.js` matches on `user_id` in the frontend, over rows fetched with no
+identity parameter at all, and `AdminAPI.listBusinessApplications` refuses to send one — pinned by a
+source-level test, because the trap is invisible at runtime.
+
+The same function draws the line that matters afterwards: a page of rows can prove **presence**, but
+only a complete read can prove **absence**. A partial or failed read that finds no match returns
+`unknown`, never "not a business account", and the drawer renders that as a read problem rather than a
+verdict. The endpoint caps `limit` at 100 with a 400 rather than clamping, so the read pages until it
+has covered `pagination.total`.
+
+**Verified:** live in the admin centre against production. The queue renders its one real row; a
+customer with no application resolves to "Not a business account. No application on file."; a real
+409 from the live endpoint renders "This customer already has a business account."
+
+**The lesson.** ERR-075 was a filter whose bogus value returned **nothing**, silently. This is the
+same defect pointing the other way, and the other way is worse: zero rows looks like a bug and gets
+investigated, whereas a full table looks like data and gets rendered. **An accepted query parameter is
+not an honoured one.** The test is one request with a value that must match nothing — if it comes back
+full, the server is ignoring you. Run it before building anything on top of a filter, and do the
+matching locally when the answer has to be right.
+
+---
+
+## ERR-152 — A fail-soft lookup pointed at a URL nobody had ever served, and "waiting for the endpoint" looked identical to asking the wrong question (2026-08-09)
+
+**Context.** `standalone_invoices.business_account_id` is the one value that puts an invoice on a
+customer's Business Centre. On 2026-08-03 no endpoint exposed a `business_accounts.id`, so
+`AdminAPI.listBusinessAccounts()` was written to fail soft — resolve `null`, let the invoice editor
+say the control is unavailable, and, in its own comment, "light up the moment the endpoint ships".
+
+**Root cause.** It asked for `/api/admin/business-accounts`. Every admin business route the backend
+actually serves sits under the `/api/admin/business/` prefix — `…/business/applications`,
+`…/business/accounts`. The hyphenated path is in a namespace that has never existed for accounts, so
+the call was not waiting for anything. It would have 404'd forever, and the day the real endpoint
+shipped it would have kept on 404ing.
+
+**Why it looked right.** Because a fail-soft read cannot tell you which failure it is having. `null`
+meant "we could not ask", and "we could not ask" was true — the reason just wasn't the one written in
+the comment. The UI state was correct, the tests were green, and the code was honest about its
+uncertainty in every respect except the one that mattered. A promise that something will start working
+later is only worth the URL it is pointed at, and nothing checks a URL that is expected to fail.
+
+**The fix.** Repointed at `/api/admin/business/accounts` (still a 404 today — but now a 404 from the
+namespace the backend uses, so it really will light up), with a test asserting the prefix so the guess
+cannot come back. Accounts created through the new upgrade flow are merged in from the device-local
+registry tagged `_source: 'device'`, and when every option carries that tag the invoice editor says so
+in words rather than presenting a picker that implies the endpoint shipped.
+
+**The lesson.** **A URL you expect to fail still has to be verified.** The whole point of fail-soft is
+that nothing downstream notices, which is exactly why a typo, a wrong prefix or a retired path can sit
+in one for months. When writing "this lights up when X ships", curl it once and record the status you
+got and the date — a 404 from a real namespace and a 404 from a fictional one are the same response
+and completely different facts. The sibling probe from ERR-140 is the tool: ask for a route you know
+is bogus and compare.
+
+---
+
+## ERR-153 — The new business-account management endpoint is PATCH, and this API still refuses PATCH at CORS, so it cannot be called from a browser at all (2026-08-09)
+
+**Context.** The one-click upgrade handoff pairs `POST /api/admin/business/accounts` with
+`PATCH /api/admin/business/accounts/:id` for credit limit, Net 30 and suspend/close. Both were
+verified live with curl before any code was written: 401 unauthenticated, correct 400/404 validation,
+correct 404 for an unknown account id. Both work.
+
+**Root cause.** Neither works from a browser. The API answers a PATCH preflight with
+
+```
+Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
+```
+
+— no PATCH — so Chrome kills the request before it is sent. This is **BF-021**, first measured
+2026-07-25 for the invoice paid-toggle and still open. The invoice case had somewhere to go:
+`PUT /api/admin/invoices/:id` exists, so `setStatusWithFallback` falls back to a full update. Here
+there is nowhere: `PUT`, `POST` and `DELETE` on `…/business/accounts/:id` all 404, and
+`X-HTTP-Method-Override` is not in `Access-Control-Allow-Headers`. PATCH is the only verb, and it is
+the one verb the browser may not use.
+
+**Why curl said it was fine.** curl does not do preflight. Every probe that verified this contract was
+correct about the server and silent about the transport, because CORS is not a property of the
+endpoint — it is a property of the browser's relationship to it. A route can be simultaneously live,
+correct, and unreachable.
+
+**The fix (frontend side).** The failure is named instead of dressed up. `isNetworkFailure()` — no
+status and no code, because there was no response to read either out of — routes to copy that says the
+request was **never sent**, that **nothing was changed**, and that it needs a one-line backend fix.
+The generic `TypeError: Failed to fetch` would have read as a timeout, and a timeout is the single
+interpretation under which the write might have landed. The local record is not mirrored on failure.
+
+PATCH is still attempted first and directly, so the feature starts working the day BF-021 lands with
+no frontend change — the invoices precedent.
+
+**Still open, and now blocking a second feature.** Filed again in
+`business-one-click-upgrade-FE-response-aug2026.md` as ask 1.
+
+**The lesson.** **Verify a contract with the transport that will actually use it.** A curl probe
+proves the route exists; it does not prove the browser may call it. When a handoff introduces a verb
+this API has not used from the frontend before, send one `OPTIONS` with
+`Access-Control-Request-Method` before writing the client — it costs one request and it is the
+difference between shipping a feature and shipping a button that throws.
+
+---
+
+## ERR-154 — A slash-star inside a line comment swallowed 2.7kB of real code from the test suite's source stripper (2026-08-09)
+
+**Context.** Structural tests in this repo assert against source with comments stripped, so a literal
+in a docblock cannot satisfy an assertion. Two new source-level tests sliced
+`AdminAPI.listBusinessAccounts` out of the stripped `js/admin/api.js` and both failed with
+`Cannot read properties of null` — the regex had matched nothing.
+
+**Root cause.** A comment written minutes earlier, explaining this very fix:
+
+```js
+// every admin business route lives under `/api/admin/business/*`. The comment
+```
+
+The stripper removes block comments with `/\/\*[\s\S]*?\*\//g` before line comments. That `/*` inside
+backticks inside a `//` comment is, to a regex, a block-comment opener. It ran forward to the next
+`*/` — the end of a JSDoc block 2,698 characters later — and deleted everything between: the whole of
+`listBusinessAccounts`, `createBusinessAccount` and half of `updateBusinessAccount`.
+
+**Why it was nearly missed.** The file was syntactically perfect and every runtime path worked; only
+the test's *view* of it was mutilated. The failure mode is silent in the dangerous direction — a
+stripped-away function makes `doesNotMatch` assertions **pass**. Had those two tests been written as
+"this bad path must not appear" rather than "this good path must", the swallowed region would have
+made them green, and the region a comment can eat is unbounded.
+
+**The fix.** Write the prefix out (`the /api/admin/business/ prefix`) instead of glob-punctuating it,
+with a note in place saying why. A repo-wide grep found no other instance.
+
+**The lesson.** In a codebase whose tests read source as text, **`/*` inside a line comment is not
+punctuation, it is an operator.** Prose in comments is normally free; here it can delete code from
+every structural assertion in the suite. And the tell was available: a source regex returning `null`
+means the anchor is gone, which is either a rename or — much more interesting — a stripper that ate
+it. Print the stripped region before assuming the regex is wrong.
 
 ---
 

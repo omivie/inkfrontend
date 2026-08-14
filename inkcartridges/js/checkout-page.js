@@ -14,9 +14,13 @@
         // SVG so a genuine pack with image_url=NULL never shows a colored
         // gradient (which would falsely imply third-party / compatible).
         getItemImageHTML(item) {
-            const isCompatibleItem = (typeof Cart !== 'undefined' && Cart._isCompatible)
-                ? Cart._isCompatible(item)
-                : /^compatible\b/i.test(item.name || '');
+            // One vocabulary (BrandSource, utils.js, ERR-157). The old fallback
+            // for "Cart not loaded yet" was an inline `/^compatible\b/i` on the
+            // name — a second, quieter copy of the rule that the May 2026
+            // rename had already broken. utils.js is loaded before this file on
+            // every page that renders a checkout line, so BrandSource is the
+            // fallback-free answer; unknown ⇒ false ⇒ neutral placeholder.
+            const isCompatibleItem = BrandSource.isCompatible(item);
             const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
             const colorStyle = isCompatibleItem ? rawColorStyle : null;
             // Stale-swatch fallback — render canonical color block instead
@@ -583,7 +587,7 @@
                         <span class="checkout-summary__item-qty">${item.quantity}</span>
                     </div>
                     <div class="checkout-summary__item-details">
-                        <span class="source-badge source-badge--${Cart._isCompatible(item) ? 'compatible' : 'genuine'}">${Cart._isCompatible(item) ? 'COMPATIBLE' : 'GENUINE'}</span>
+                        ${BrandSource.badgeHTML(item)}
                         <h3 class="checkout-summary__item-title">${Security.escapeHtml(item.name || '')}</h3>
                         <p class="checkout-summary__item-variant">${Security.escapeHtml(item.brand || item.sku || '')}</p>
                     </div>

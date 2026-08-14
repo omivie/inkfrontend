@@ -81,7 +81,23 @@ const SITE = path.join(ROOT, 'inkcartridges');
 const RECORD_PATH = path.join(ROOT, 'tests', 'fixtures', 'business-pricing-sweep.json');
 
 const ARGS = new Set(process.argv.slice(2));
-const CHECK_ONLY = ARGS.has('--check');
+// SAFE MODE IS THE DEFAULT (2026-08-12). This script used to WRITE the committed
+// record whenever it was run without `--check` — i.e. the read-only mode was the
+// opt-in one, and `npm run sweep:b2b` (the obvious thing to type when you mean
+// "see if anything drifted") silently overwrote the fixture it was meant to be
+// compared against. It did exactly that on 2026-08-12, replacing a July snapshot
+// with a throwaway test cart; caught only by `git status`.
+//
+// A probe that records is a probe whose green result may be green BECAUSE it just
+// overwrote the thing it was comparing against. So recording is now `--record`,
+// explicit, and the mode is printed before any work starts.
+//
+// `--check` is still accepted and still means read-only — it is the default now,
+// so the flag is a no-op kept for the committed `sweep:b2b:check` script and any
+// muscle memory. Sibling scripts agree on this polarity: audit-ribbon-typeahead
+// writes only under `--update-baseline`, audit-search-click-beacon never writes.
+const RECORD_MODE = ARGS.has('--record');
+const CHECK_ONLY = !RECORD_MODE;
 const MARKDOWN = ARGS.has('--markdown');
 const JSON_OUT = ARGS.has('--json');
 
@@ -527,23 +543,29 @@ async function fetchCart(token) {
         if (!body || body.ok !== true || !body.data) return null;
         const d = body.data;
         const items = d.items || d.cart_items || [];
-        // `volume_discount` is the current field; `b2b_discount` is the backend's
-        // transitional alias for the identical object. Read both, because a hard
-        // cutover here would return null and SILENTLY disable the consistency
-        // gate — the suite skips that test when the cart record is absent, so it
-        // would go green while checking nothing.
+        // `volume_discount` is the only field name now — the `b2b_discount`
+        // alias was dropped by the backend on 2026-08-10 (ERR-158).
+        //
+        // WHY THIS RETURNS A REASON INSTEAD OF null. The old code read both
+        // spellings specifically because a hard cutover here would return null
+        // and SILENTLY disable the consistency gate: the suite skips that test
+        // when the cart record is absent, so it would go green while checking
+        // nothing. That hazard is real and it outlives the alias — a cart that
+        // is empty, unauthenticated, or simply below the volume threshold hits
+        // exactly the same path. So absence is now reported as a NAMED reason
+        // that travels into the record, and the gate fails on a reason it does
+        // not recognise rather than skipping on a bare null.
         const isObj = (v) => !!v && typeof v === 'object';
-        const b2b = [d.volume_discount, d.b2b_discount].find(isObj) || null;
-        const summaryAmount = d.summary
-            ? (d.summary.volume_discount !== undefined ? d.summary.volume_discount : d.summary.b2b_discount)
-            : undefined;
-        if (!items.length || !b2b) return null;
+        const b2b = isObj(d.volume_discount) ? d.volume_discount : null;
+        const summaryAmount = d.summary ? d.summary.volume_discount : undefined;
+        if (!items.length) return { unavailable: 'cart-empty' };
+        if (!b2b) return { unavailable: 'no-volume-discount-on-cart' };
         return {
             lines: items
                 .map(i => ({ sku: (i.sku || (i.product && i.product.sku) || '').trim(), quantity: Number(i.quantity) }))
                 .filter(l => l.sku && Number.isFinite(l.quantity)),
-            b2b_discount: b2b,
-            summary_b2b_discount: summaryAmount
+            volume_discount: b2b,
+            summary_volume_discount: summaryAmount
         };
     } catch {
         return null;
@@ -598,7 +620,12 @@ async function main() {
         die('inkcartridges/js/business.js no longer exposes describeLadder() — the sweep must not re-implement it');
     }
 
-    say(`\nVolume-pricing sweep\n  API   ${API_BASE}\n`);
+    // State the mode BEFORE doing any work. The whole defect this inversion fixes
+    // was that nothing in the command name or its output told you it would write.
+    say(`\nVolume-pricing sweep\n  API   ${API_BASE}`);
+    say(RECORD_MODE
+        ? `  MODE  RECORD — this run WILL OVERWRITE ${path.relative(ROOT, RECORD_PATH)}\n`
+        : `  MODE  check (read-only) — nothing on disk will change; use --record to re-record\n`);
 
     say('1/4  catalog walk (anonymous)…');
     const catalog = await collectCatalog();
@@ -664,8 +691,8 @@ async function main() {
     if (!token) {
         say('     note: no credentials, so the cart consistency gate was NOT run\n');
     }
-    const cart = token ? await fetchCart(token) : null;
-    if (cart) {
+    const cart = token ? await fetchCart(token) : { unavailable: 'no-credentials' };
+    if (cart && !cart.unavailable) {
         // The consistency gate needs the ladder for every line in the cart, not
         // just the four sample SKUs: it re-derives each line's rung from these
         // and asserts the sum equals the server's own `discount_amount`. Stored
@@ -702,7 +729,11 @@ async function main() {
     say(`  bands ${record.bands.length} · range ${record.percent_range.min}%–${record.percent_range.max}%`);
     say(`  answered ${record.totals.answered} · not_found ${record.totals.not_found} · empty_ladder ${record.totals.empty_ladder} · no_ladder_after_normalise ${record.totals.no_ladder_after_normalise}`);
     say(`  floored ${record.totals.any_floored_raw} raw / ${record.totals.any_floored} still visible after collapse · collapsed rungs ${record.totals.collapsed_rungs_total} · dropped at/above retail ${record.totals.rungs_dropped_at_or_above_retail}`);
-    say(`  cart ${cart ? `${cart.lines.length} line(s), discount_amount ${cart.b2b_discount.discount_amount}` : 'none (consistency gate will use the recorded ladders only)'}`);
+    // Name the reason. "none" read as "nothing to check here"; a named reason
+    // is the difference between a gate that was satisfied and one that never ran.
+    say(`  cart ${cart && !cart.unavailable
+        ? `${cart.lines.length} line(s), discount_amount ${cart.volume_discount.discount_amount}`
+        : `UNAVAILABLE (${(cart && cart.unavailable) || 'unknown'}) — the consistency gate did NOT run`}`);
     if (Business.__warnings.length) {
         say(`\n  describeLadder warned ${Business.__warnings.length}x:`);
         for (const w of [...new Set(Business.__warnings)].slice(0, 5)) say(`    ${w}`);
@@ -712,7 +743,7 @@ async function main() {
 
     if (CHECK_ONLY) {
         if (!fs.existsSync(RECORD_PATH)) {
-            die(`--check needs a committed record at ${path.relative(ROOT, RECORD_PATH)}; run the sweep without --check first`);
+            die(`no committed record at ${path.relative(ROOT, RECORD_PATH)}; create one with \`npm run sweep:b2b:record\``);
         }
         const committed = JSON.parse(fs.readFileSync(RECORD_PATH, 'utf8'));
         const a = JSON.stringify(driftView(committed), null, 2);
@@ -731,15 +762,19 @@ async function main() {
             }
         }
         console.error(
-            `\n  Re-run \`npm run sweep:b2b\` to re-record, then re-read\n` +
-            `  tests/business-account-pricing-jul2026.test.js and the /business page copy.\n`
+            `\n  Drift is not automatically wrong — the catalogue moves. To accept it, run\n` +
+            `  \`npm run sweep:b2b:record\`, REVIEW THE DIFF, then re-read\n` +
+            `  tests/business-account-pricing-jul2026.test.js and the /business page copy.\n` +
+            `  Note the record embeds the CART the sweep read, so record from a cart you\n` +
+            `  meant to snapshot — not whatever happened to be in the browser.\n`
         );
         process.exit(1);
     }
 
     fs.mkdirSync(path.dirname(RECORD_PATH), { recursive: true });
     fs.writeFileSync(RECORD_PATH, JSON.stringify(record, null, 2) + '\n');
-    say(`\n✔ wrote ${path.relative(ROOT, RECORD_PATH)}\n`);
+    say(`\n✔ RECORDED — overwrote ${path.relative(ROOT, RECORD_PATH)}`);
+    say(`  Review the diff before committing: git diff ${path.relative(ROOT, RECORD_PATH)}\n`);
 }
 
 main().catch(e => die(e && e.message ? e.message : String(e)));

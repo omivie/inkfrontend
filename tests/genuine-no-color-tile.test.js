@@ -129,8 +129,16 @@ test('cart.js — _parseServerCart preserves product_source (so server-loaded ca
     const m = CART_SRC.match(/_parseServerCart:\s*function\s*\(responseData\)\s*\{([\s\S]*?)return\s*\{\s*items/);
     assert.ok(m, 'cart.js must define _parseServerCart');
     const body = m[1];
-    assert.match(body, /product_source:\s*item\.product\.source/,
-        '_parseServerCart must copy item.product.source onto the parsed row as product_source');
+    // Aug 2026 (ERR-157): the backend now sends TWO consistent copies of the
+    // brand source — `items[].product.source` and the line-level sibling
+    // `items[].source` — and the parser reads both, in that order, so neither
+    // copy disappearing on its own can dark the badge.
+    assert.match(body, /product_source:\s*item\.product\.source\s*\|\|\s*item\.source/,
+        '_parseServerCart must copy item.product.source (then item.source) onto the parsed row as product_source');
+    // `source` itself must stay pinned to the cart namespace — letting the
+    // server's brand source land there would re-key every server-loaded line.
+    assert.match(body, /source:\s*['"]core['"]/,
+        "_parseServerCart must keep the cart's own `source` namespace sentinel");
 });
 
 test('favourites.js — _isCompatible exists and getItemImageHTML gates the color tile through it', () => {
@@ -138,10 +146,14 @@ test('favourites.js — _isCompatible exists and getItemImageHTML gates the colo
     const helperMatch = FAVOURITES_SRC.match(/_isCompatible\s*\(item\)\s*\{([\s\S]*?)\n\s{4}\},/);
     assert.ok(helperMatch, 'favourites.js must define _isCompatible');
     const helperBody = helperMatch[1];
-    assert.match(helperBody, /product_source\s*===\s*['"]compatible['"]/,
-        'favourites._isCompatible must check product_source first');
-    assert.match(helperBody, /\/\^compatible\\b\/i/,
-        'favourites._isCompatible legacy fallback must be anchored to leading-word /^compatible\\b/i');
+    // ERR-157: classification is one vocabulary now (BrandSource, utils.js).
+    // This helper used to be a byte-identical hand copy of Cart._isCompatible,
+    // including the leading-word name regex that the May 2026 rename had
+    // already broken in both files at once.
+    assert.match(helperBody, /BrandSource\.isCompatible\s*\(\s*item\s*\)/,
+        'favourites._isCompatible must delegate to BrandSource.isCompatible');
+    assert.doesNotMatch(helperBody, /compatible\\b/,
+        'favourites._isCompatible must not carry a name regex');
 
     // Image render uses the helper.
     const renderMatch = FAVOURITES_SRC.match(/getItemImageHTML\(item\)\s*\{([\s\S]*?)\n\s{4}\},/);
@@ -163,12 +175,17 @@ test('favourites.js — loadFromServer preserves product_source from server resp
         'loadFromServer must copy fav.product.source onto each parsed row as product_source');
 });
 
-test('checkout-page.js — getItemImageHTML gates color tile via Cart._isCompatible', () => {
+test('checkout-page.js — getItemImageHTML gates color tile via BrandSource', () => {
     const m = CHECKOUT_SRC.match(/getItemImageHTML\(item\)\s*\{([\s\S]*?)\n\s{8}\},/);
     assert.ok(m, 'checkout-page.js must define getItemImageHTML');
     const body = m[1];
-    assert.match(body, /Cart\._isCompatible/,
-        'checkout getItemImageHTML must consult Cart._isCompatible');
+    // ERR-157. This previously consulted Cart._isCompatible with an inline
+    // `/^compatible\b/i` on the name as its "Cart not loaded yet" fallback —
+    // a third quiet copy of a rule that was already wrong.
+    assert.match(body, /BrandSource\.isCompatible/,
+        'checkout getItemImageHTML must consult BrandSource.isCompatible');
+    assert.doesNotMatch(body, /compatible\\b/,
+        'checkout getItemImageHTML must not fall back to a name regex');
     assert.match(body, /isCompatibleItem\s*\?\s*rawColorStyle\s*:\s*null/,
         'checkout getItemImageHTML must null out colorStyle when item is genuine');
 });
@@ -191,16 +208,26 @@ test('order-detail-page.js — getColorPlaceholder takes source and short-circui
     const m = ORDER_DETAIL_SRC.match(/getColorPlaceholder\(productName,\s*source,\s*color\)\s*\{([\s\S]*?)\n\s{8}\},/);
     assert.ok(m, 'order-detail-page.js must define getColorPlaceholder(productName, source, color)');
     const body = m[1];
-    // For non-compatible (i.e. genuine) the function must short-circuit to the
-    // neutral cartridge SVG before any color-derivation branches run.
-    assert.match(body, /source\s*&&\s*source\s*!==\s*['"]compatible['"]/,
-        'getColorPlaceholder must short-circuit to neutral SVG when source is set and not "compatible"');
+    // Anything NOT PROVEN COMPATIBLE must short-circuit to the neutral
+    // cartridge SVG before any colour-derivation branch runs.
+    //
+    // ERR-157 tightened this. The gate used to read
+    // `source && source !== 'compatible'`, so a line with NO source at all
+    // fell straight past it and painted a coloured tile — the invariant held
+    // for proven-genuine rows and quietly failed for unproven ones, which is
+    // exactly the population it most needed to cover.
+    assert.match(body, /if\s*\(\s*source\s*!==\s*['"]compatible['"]\s*\)/,
+        'getColorPlaceholder must short-circuit to neutral SVG for anything not proven compatible');
+    assert.doesNotMatch(body, /source\s*&&\s*source\s*!==\s*['"]compatible['"]/,
+        'the gate must not require a truthy source — an absent source must take the safe branch');
     // The genuine gate must precede every colour-derivation branch.
     assert.ok(body.indexOf('!== \'compatible\'') < body.indexOf('getProductStyle'),
         'the genuine short-circuit must run BEFORE any ProductColors lookup');
-    // The caller must pass item.source through.
-    assert.match(ORDER_DETAIL_SRC, /this\.getColorPlaceholder\(item\.product_name,\s*item\.source,/,
-        'order-item render must pass item.source to getColorPlaceholder');
+    // The caller must resolve the source through the one vocabulary, so an
+    // order line spelling it `product.source` classifies the same as one
+    // spelling it `source`.
+    assert.match(ORDER_DETAIL_SRC, /this\.getColorPlaceholder\(item\.product_name,\s*BrandSource\.of\(item\),/,
+        'order-item render must pass BrandSource.of(item) to getColorPlaceholder');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -181,19 +181,28 @@ test('§1 cart / checkout / favourites / order-detail keep .source-badge line-it
     // the source label still adds signal (a single line of "LC39BK Compatible…"
     // mid-cart can blur with adjacent items). Different element entirely
     // (.source-badge, not .product-card__badge--*).
+    //
+    // The MARKUP moved to BrandSource.badgeHTML in utils.js (ERR-157) — one
+    // vocabulary for a claim four surfaces were each spelling differently — so
+    // the four line-item views no longer contain the class name themselves.
+    // Assert what the contract actually is: each surface still emits the chip,
+    // and the chip is still a `.source-badge--<source>`.
     const CART_CODE       = stripComments(READ(JS('cart.js')));
     const CHECKOUT_CODE   = stripComments(READ(JS('checkout-page.js')));
     const FAVS_CODE       = stripComments(READ(JS('favourites.js')));
     const ORDER_CODE      = stripComments(READ(JS('order-detail-page.js')));
+    const UTILS_CODE      = stripComments(READ(JS('utils.js')));
     for (const [label, code] of [
         ['cart.js',              CART_CODE],
         ['checkout-page.js',     CHECKOUT_CODE],
         ['favourites.js',        FAVS_CODE],
         ['order-detail-page.js', ORDER_CODE],
     ]) {
-        assert.match(code, /source-badge--/,
-            `${label}: must keep its line-item .source-badge chip`);
+        assert.match(code, /BrandSource\.badgeHTML\s*\(/,
+            `${label}: must keep its line-item source chip, via BrandSource.badgeHTML`);
     }
+    assert.match(UTILS_CODE, /source-badge/,
+        'utils.js BrandSource.badgeHTML must still emit the .source-badge chip markup');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

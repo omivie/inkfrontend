@@ -30,17 +30,28 @@
  * it is authoritative — never recompute it. See business.js.
  *
  * TWO PAYLOAD SHAPES, both handled (verified live 2026-07-20, re-verified
- * unchanged under volume pricing 2026-07-31).
- * The handoff documents `summary.b2b_discount` as the metadata OBJECT. The live
+ * unchanged under volume pricing 2026-07-31, re-verified again 2026-08-12
+ * after the alias removal below).
+ * The handoff documented the metadata as an OBJECT in `summary`. The live
  * API actually sends:
- *     summary.b2b_discount  ->  4.88                       (a NUMBER, the amount)
- *     response.b2b_discount ->  { company_name, effective_percent,
- *                                 discount_amount, floored_line_count,
- *                                 source: 'volume' }        (the OBJECT)
- * Reading only the documented shape rendered NOTHING, because `typeof 4.88`
+ *     summary.volume_discount  ->  2.76                    (a NUMBER, the amount)
+ *     response.volume_discount ->  { company_name, effective_percent,
+ *                                    discount_amount, floored_line_count,
+ *                                    source: 'volume' }     (the OBJECT)
+ * Reading only the documented shape rendered NOTHING, because `typeof 2.76`
  * is not 'object'. So both are accepted: whichever carries the object becomes
  * the metadata, whichever carries a number becomes the amount. If the backend
  * later moves the object into `summary`, this keeps working unchanged.
+ *
+ * THE `b2b_discount` ALIAS IS GONE (ERR-158). It was the transitional spelling
+ * of this same block and was read here as a fallback so the backend could drop
+ * it without a coordinated frontend deploy. They dropped it on 2026-08-10;
+ * confirmed absent from both the top level and `summary` on a live guest cart
+ * on 2026-08-12, so the fallback reads are removed rather than left to rot.
+ * `_parseServerCart` still WATCHES for it and complains loudly if it ever comes
+ * back alone — see the note there. Note that order-totals.js deliberately keeps
+ * its own alias read: that file normalises ORDERS, a different payload, and
+ * historical order rows were never in scope for this removal.
  *
  * `pricing_tier` and `discount_percent` are GONE from that block as of v2 —
  * the ceiling now varies per line, so there is no single cart-wide rate.
@@ -54,7 +65,7 @@
  *
  * @param {object|null} summary  the API cart `summary` object
  * @param {number} [total]       aggregate discount; defaults to summary.discount
- * @param {object|number|null} [b2bBlock]  the response-level `b2b_discount`
+ * @param {object|number|null} [b2bBlock]  the response-level `volume_discount`
  * @returns {{loyalty:number, b2b:number, other:number, total:number,
  *            b2bMeta:(object|null)}}
  */
@@ -71,14 +82,14 @@ function computeDiscountBreakdown(summary, total, b2bBlock) {
     const loyalty = num(s.loyalty_discount_amount);
 
     // Metadata: whichever source carries the object. `volume_discount` is the
-    // current field; `b2b_discount` is the backend's transitional alias for the
-    // identical object, kept only as a fallback so they can drop it unannounced.
+    // only spelling as of 2026-08-10 — the `b2b_discount` alias was read here
+    // as a fallback until then and is now gone on both sides (ERR-158).
     const b2bMeta = isObj(b2bBlock)
         ? b2bBlock
-        : (isObj(s.volume_discount) ? s.volume_discount : (isObj(s.b2b_discount) ? s.b2b_discount : null));
+        : (isObj(s.volume_discount) ? s.volume_discount : null);
     // Amount: prefer the object's own figure, else whichever source is numeric.
     const b2b = num(b2bMeta && b2bMeta.discount_amount)
-        || num(s.volume_discount) || num(s.b2b_discount) || num(b2bBlock);
+        || num(s.volume_discount) || num(b2bBlock);
 
     return {
         loyalty,
@@ -548,25 +559,33 @@ const Cart = {
     },
 
     /**
-     * Decide whether a stored cart/favourites/checkout item is a Compatible
-     * product. Reads `product_source` first (the field added by addItem in
-     * the May 2026 catalog overhaul cleanup), falls back to `source` only
-     * when it carries a brand-source value (i.e. not the cart-namespace
-     * sentinels 'core' / 'cross-sell'), and finally — for legacy localStorage
-     * rows that predate the field — looks at the leading "Compatible" word
-     * of the stored name. The name fallback is constrained to leading word
-     * to dodge accidental matches in description text and is the only
-     * survival path for carts saved before this field existed.
+     * Is this stored cart/favourites/checkout row a PROVEN compatible product?
+     *
+     * Delegates to the one brand-source vocabulary (BrandSource, utils.js,
+     * ERR-157). Kept as a named method because several surfaces and three test
+     * files call `Cart._isCompatible(item)` by name, and because the boolean
+     * collapse belongs here rather than at each call site:
+     *
+     *   UNKNOWN COLLAPSES TO FALSE, AND THAT IS ONLY SAFE FOR SOME QUESTIONS.
+     *
+     * This answers "may we paint the colour tile?", where false is the safe
+     * direction — an unproven row gets the neutral placeholder instead of a
+     * coloured gradient that would imply third-party (genuine-no-colour-tile,
+     * ERR-143). It is NOT the right helper for "which badge?": there, false
+     * used to mean "print GENUINE", which asserted a manufacturer claim we had
+     * no evidence for. Badges call BrandSource.badgeHTML, which renders
+     * nothing when the source is unknown.
+     *
+     * There is deliberately no name-based fallback any more. The old
+     * `/^compatible\b/i` on the stored name was dead weight AND wrong: the May
+     * 2026 rename moved the word out of first position, so it returned false
+     * for every compatible cartridge in the catalogue and the binary badge
+     * then printed GENUINE on them. The backend now projects `source` onto
+     * every cart line, so a server reload re-proves the answer; a legacy
+     * localStorage row simply reads as unknown until that first reload.
      */
     _isCompatible: function(item) {
-        if (!item) return false;
-        if (item.product_source === 'compatible') return true;
-        if (item.product_source) return false; // explicit non-compatible
-        if (item.source && !['core', 'cross-sell'].includes(item.source)) {
-            return item.source === 'compatible';
-        }
-        // Legacy stored row — last-resort check on the persisted name.
-        return /^compatible\b/i.test(item.name || '');
+        return BrandSource.isCompatible(item);
     },
 
     /**
@@ -1155,15 +1174,30 @@ const Cart = {
                 color: item.product.color || '',
                 color_hex: item.product.color_hex || null,
                 quantity: item.quantity,
+                // The cart's SUBSYSTEM namespace, not a brand source. It is
+                // half of the composite key (see cartItemKey), so it is pinned
+                // to 'core' here and the server's brand source must NEVER be
+                // allowed to land in this slot — `source: item.source` would
+                // read like a harmless fix and would silently re-key every
+                // server-loaded line from "core:SKU" to "compatible:SKU",
+                // orphaning the pending-op journal and the localStorage rows.
                 source: 'core',
-                // Preserve the brand-source field separately from the cart's
-                // 'core' subsystem namespace. _isCompatible reads this first
-                // so the COMPATIBLE/GENUINE badge — and the color-tile gate
-                // in getItemImageHTML — both stay correct after a server
-                // cart reload, which is when the legacy name fallback
-                // (`/^compatible\b/`) would silently misfire on the May 2026
-                // "Compatible Ink Cartridge Replacement for …" rename.
-                product_source: item.product.source || null,
+                // The brand source (genuine|compatible), kept under its own
+                // name for exactly that reason. Feeds BrandSource, which feeds
+                // the badge and the colour-tile gate (ERR-157, ERR-143).
+                //
+                // The backend sends TWO consistent copies as of Aug 2026 —
+                // `product.source` and the line-level sibling `items[].source`
+                // — and invited us to read whichever suits. We read both, in
+                // that order, so neither copy going away can dark the badge on
+                // its own. Verified live 2026-08-12 on a guest cart: both
+                // present, both agreeing, on a genuine line and a compatible one.
+                //
+                // Until that deploy this resolved to null on every server
+                // reload, and the binary badge beneath it printed GENUINE on
+                // compatible cartridges. That is the whole reason ERR-157
+                // exists — see the BrandSource header in utils.js.
+                product_source: item.product.source || item.source || null,
                 // Per-line value-pack upsell (mobile-ux-audit-jul2026 §3c/§6):
                 // present on single-colour lines that have a cheaper KCMY/CMY
                 // pack; absent otherwise. Render-only — never used for pricing.
@@ -1195,20 +1229,45 @@ const Cart = {
         // through all of them. The bare number is kept when no object is sent.
         // See computeDiscountBreakdown() above. (ERR-110)
         //
-        // `volume_discount` is the current name; `b2b_discount` is the backend's
-        // transitional alias for the same object and is read only as a fallback,
-        // so they can drop it whenever. Both the READ and the WRITTEN key move
-        // together on purpose: cart.js's _renderDiscountRows and
-        // checkout-page.js's calculateDiscount call computeDiscountBreakdown with
-        // NO second source, so they see this metadata only because it was folded
-        // in here. Renaming one side alone would drop the company label and the
-        // floored-lines note on those two surfaces while payment-page — which
-        // reads the top level directly — kept working. A very quiet split-brain.
-        const volumeBlock = [responseData.volume_discount, responseData.b2b_discount]
-            .find(v => v && typeof v === 'object') || null;
-        if (summary && volumeBlock) {
-            summary.volume_discount = volumeBlock;
-            summary.b2b_discount = volumeBlock;
+        // `volume_discount` is the only name now. The `b2b_discount` alias was
+        // read here and written back into the summary as a second key until
+        // 2026-08-10, when the backend dropped it; confirmed absent from a live
+        // guest cart on 2026-08-12 (ERR-158).
+        //
+        // The fold itself stays and is load-bearing: cart.js's
+        // _renderDiscountRows and checkout-page.js's calculateDiscount call
+        // computeDiscountBreakdown with NO second source, so they see this
+        // metadata only because it was folded in here. Dropping the fold would
+        // take the company label and the floored-lines note off those two
+        // surfaces while payment-page — which reads the top level directly —
+        // kept working. A very quiet split-brain.
+        const volumeBlock = (responseData.volume_discount && typeof responseData.volume_discount === 'object')
+            ? responseData.volume_discount
+            : null;
+
+        // WATCHDOG, not a fallback (ERR-158).
+        //
+        // Deleting a fallback outright converts a backend rollback into a
+        // silently darked discount row — the shopper is charged the discounted
+        // total and shown no line explaining it. That is the ERR-063/068/073/
+        // 149/150 shape and it is the reason the alias was kept as long as it
+        // was. So: the alias is no longer a normal read, but if it ever comes
+        // back ALONE we say so at error level AND still honour it, because a
+        // rendered discount the customer can see beats a correct-looking cart
+        // that lost a row.
+        const orphanAlias = (!volumeBlock && responseData.b2b_discount && typeof responseData.b2b_discount === 'object')
+            ? responseData.b2b_discount
+            : null;
+        if (orphanAlias) {
+            DebugLog.error(
+                '[Cart] Cart response carries the retired `b2b_discount` alias with NO `volume_discount`. ' +
+                'The backend dropped this alias on 2026-08-10 (ERR-158) — this looks like a rollback. ' +
+                'Honouring the alias so the discount row still renders, but the field contract has regressed.'
+            );
+        }
+        const effectiveVolumeBlock = volumeBlock || orphanAlias;
+        if (summary && effectiveVolumeBlock) {
+            summary.volume_discount = effectiveVolumeBlock;
         }
 
         // The WHOLE coupon object, not just its code and amount. The backend now
@@ -3005,7 +3064,7 @@ const Cart = {
                             ' + self.getItemImageHTML(item) + '\
                         </div>\
                         <div class="cart-item__details">\
-                            <span class="source-badge source-badge--' + (Cart._isCompatible(item) ? 'compatible' : 'genuine') + '">' + (Cart._isCompatible(item) ? 'COMPATIBLE' : 'GENUINE') + '</span>\
+                            ' + BrandSource.badgeHTML(item) + '\
                             <h3 class="cart-item__name">\
                                 <a href="' + productLink + '">' + escapedName + '</a>\
                             </h3>\

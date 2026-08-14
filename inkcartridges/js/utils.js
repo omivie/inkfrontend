@@ -1844,7 +1844,188 @@ const SeriesCodes = (function () {
 if (typeof window !== 'undefined') window.SeriesCodes = SeriesCodes;
 
 // ---------------------------------------------------------------------------
+// BRAND SOURCE — genuine vs compatible, one vocabulary (ERR-157)
+//
+// NOT THE SAME THING AS `CompatSource` BELOW. Read this before using either.
+//
+//   BrandSource  — is this PRODUCT an OEM cartridge or a third-party one?
+//                  Answers 'genuine' | 'compatible' | null. Backend field:
+//                  `source` on the product row.
+//   CompatSource — did this product/printer MATCH come from a trustworthy
+//                  place, or did the frontend guess? Answers PROVEN |
+//                  UNPROVEN. Backend table: `product_compatibility`.
+//
+// Two modules whose names both say "source" is a trap, so they live next to
+// each other with this note rather than a file apart pretending to be unrelated.
+//
+// WHY THIS EXISTS
+// ---------------
+// Six surfaces classified genuine-vs-compatible with five different rules, and
+// four of them ended in the same wrong place: `<proven compatible> ? COMPATIBLE
+// : GENUINE`. That default is a claim we cannot back. It broke in production.
+//
+// The May 2026 catalog rename moved the word out of first position — live rows
+// read "143ABK Compatible Toner Cartridge for HP 143A …" — so the leading-word
+// fallback `/^compatible\b/i` returned false for every compatible cartridge in
+// the catalogue, and the cart's binary default then printed **GENUINE** on
+// them. It only bit server-loaded rows (the locally-added row carried
+// `product_source` from the card), which is to say: it bit every cart, one
+// reload after it was filled. The backend shipping `source` on the cart line
+// (Aug 2026) is what makes the honest version possible.
+//
+// order-detail-page.js had the same default reached a worse way — an unanchored
+// `(product_name || '').includes('compatible')`, which also says COMPATIBLE for
+// a genuine cartridge whose name reads "compatible with DCP-J1050DW".
+//
+// THE RULE
+// --------
+//     THE FRONTEND NEVER INFERS BRAND SOURCE FROM A NAME.
+//
+// The backend pinned the same rule on their side (CLAUDE.md §4.2: every
+// cart-items SELECT must keep projecting `source`). Ours is enforced by
+// tests/cart-line-source-aug2026.test.js, which greps the whole of js/ for
+// name-shaped inference and fails on a new one.
+//
+// UNKNOWN IS AN ANSWER, AND IT IS NOT "GENUINE"
+// ---------------------------------------------
+// `of()` returns null rather than picking a side, and `badgeHTML()` renders
+// nothing for null. That is what the PDP has always done
+// (product-detail-page.js: "we never assert a status we don't know") and what
+// Merchant Center and the OEM-warranty claim rules require of us (ERR-063,
+// ERR-078). A missing badge is a smaller failure than a false one, in both
+// directions: calling a third-party cartridge "GENUINE" is a misrepresentation,
+// and calling an OEM cartridge "COMPATIBLE" devalues it.
+//
+// The colour-tile gate asks a DIFFERENT question and keeps its own default:
+// `isCompatible()` is false for unknown, so an unproven row falls through to
+// the neutral placeholder rather than a coloured tile (the genuine-no-colour-
+// tile invariant, ERR-143). Both defaults point away from an assertion; they
+// just point in different directions because the two questions differ.
+const BrandSource = (function () {
+    const GENUINE = 'genuine';
+    const COMPATIBLE = 'compatible';
+
+    // Values the CART writes into a row's `source` slot for its own bookkeeping.
+    // `cartItemKey()` builds "<subsystem>:<sku>" composite keys out of this, so
+    // the field is a namespace there, NOT a brand source — and a server cart
+    // line carries the brand source in the sibling `source` one level up. Any
+    // row whose `source` is one of these is telling us which subsystem added it
+    // and nothing at all about the manufacturer.
+    const CART_NAMESPACE_SENTINELS = ['core', 'cross-sell'];
+
+    function normalise(value) {
+        const v = String(value == null ? '' : value).trim().toLowerCase();
+        if (v === GENUINE) return GENUINE;
+        if (v === COMPATIBLE) return COMPATIBLE;
+        return null;
+    }
+
+    /**
+     * The product's brand source, or null when we cannot prove one.
+     *
+     * Reads, in order of trustworthiness:
+     *   1. `product_source`  — the cart/favourites/checkout stored-row spelling,
+     *                          captured at add time from the card's data
+     *                          attribute and re-derived on every server reload.
+     *   2. `product.source`  — a nested catalog object (an order line, a
+     *                          favourite, a cart line handed over whole).
+     *   3. `source`          — the catalog spelling, ignoring the cart's own
+     *                          namespace sentinels.
+     *   4. `is_genuine`      — /suggest's boolean, and ONLY when it really is a
+     *                          boolean. `undefined` is not `false`; treating it
+     *                          as false is how `is_genuine ? 'genuine' :
+     *                          'compatible'` invented a source for rows that
+     *                          carried neither field.
+     *
+     * @param {object|null} row  a product, cart line, favourite or order line
+     * @returns {'genuine'|'compatible'|null}
+     */
+    function of(row) {
+        if (!row || typeof row !== 'object') return null;
+
+        const stored = normalise(row.product_source);
+        if (stored) return stored;
+
+        const nested = row.product && typeof row.product === 'object'
+            ? normalise(row.product.source)
+            : null;
+        if (nested) return nested;
+
+        const raw = row.source;
+        if (raw != null && !CART_NAMESPACE_SENTINELS.includes(String(raw).toLowerCase())) {
+            const direct = normalise(raw);
+            if (direct) return direct;
+        }
+
+        if (typeof row.is_genuine === 'boolean') return row.is_genuine ? GENUINE : COMPATIBLE;
+
+        return null;
+    }
+
+    /** True only for a PROVEN compatible. Unknown ⇒ false — see the tile note above. */
+    function isCompatible(row) {
+        return of(row) === COMPATIBLE;
+    }
+
+    /** True only for a PROVEN genuine. Unknown ⇒ false. */
+    function isGenuine(row) {
+        return of(row) === GENUINE;
+    }
+
+    /** True when we can prove either answer — i.e. when a badge may be rendered. */
+    function isKnown(row) {
+        return of(row) !== null;
+    }
+
+    /** 'GENUINE' | 'COMPATIBLE' | null. Null means "render nothing". */
+    function label(row) {
+        const s = of(row);
+        return s ? s.toUpperCase() : null;
+    }
+
+    /**
+     * The shared `.source-badge` pill, or '' when the source is unknown.
+     *
+     * Returning '' rather than a placeholder is the point: callers concatenate
+     * this straight into a template, so an unknown source costs one empty
+     * string and no layout. Every customer-facing genuine/compatible pill goes
+     * through here so there is one place to audit the claim.
+     *
+     * Values are drawn from a closed set ('genuine'/'compatible'), never from
+     * caller input, so there is nothing here to escape.
+     *
+     * @param {object|null} row
+     * @param {string} [baseClass='source-badge']
+     * @returns {string} HTML, possibly empty
+     */
+    function badgeHTML(row, baseClass) {
+        const s = of(row);
+        if (!s) return '';
+        const cls = baseClass || 'source-badge';
+        return `<span class="${cls} ${cls}--${s}">${s.toUpperCase()}</span>`;
+    }
+
+    return {
+        GENUINE,
+        COMPATIBLE,
+        CART_NAMESPACE_SENTINELS,
+        of,
+        isCompatible,
+        isGenuine,
+        isKnown,
+        label,
+        badgeHTML
+    };
+})();
+
+if (typeof window !== 'undefined') window.BrandSource = BrandSource;
+
+// ---------------------------------------------------------------------------
 // COMPATIBILITY PROVENANCE — one vocabulary (ERR-135)
+//
+// NOT `BrandSource` ABOVE. This module is about whether a product/printer MATCH
+// is trustworthy; `BrandSource` is about whether a PRODUCT is OEM or
+// third-party. Neither answers the other's question.
 //
 // A customer bought a cartridge that didn't fit their printer. The backend
 // removed the bad `product_compatibility` rows, but an audit of the frontend
@@ -2418,6 +2599,8 @@ if (typeof module !== 'undefined' && module.exports) {
         ProductSort,
         ProductName,
         SeriesCodes,
+        BrandSource,
+        CompatSource,
         canonicalizeCategory,
         TrustStats,
         DispatchCountdown,

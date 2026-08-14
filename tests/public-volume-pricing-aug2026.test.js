@@ -677,7 +677,7 @@ test('both apply paths mention the clamp at the moment the code is applied', () 
 // 11. volume_discount cutover — both spellings resolve
 // ═════════════════════════════════════════════════════════════════════════════
 
-test('computeDiscountBreakdown reads volume_discount AND the b2b_discount alias', () => {
+test('computeDiscountBreakdown reads volume_discount in both live shapes', () => {
     const sandbox = { console };
     vm.createContext(sandbox);
     vm.runInContext(
@@ -687,30 +687,81 @@ test('computeDiscountBreakdown reads volume_discount AND the b2b_discount alias'
 
     const block = { company_name: null, effective_percent: 3, discount_amount: 2.01, source: 'volume' };
 
-    // The current field.
+    // The object shape, wherever it arrives from.
     let r = compute({ discount: 2.01, volume_discount: block }, 2.01);
     assert.equal(r.b2b, 2.01);
     assert.equal(r.b2bMeta.source, 'volume');
 
-    // The transitional alias, so the backend can drop it whenever without a
-    // frontend deploy — and so we keep working if they drop it tomorrow.
-    r = compute({ discount: 2.01, b2b_discount: block }, 2.01);
+    r = compute({ discount: 2.01 }, 2.01, block);
     assert.equal(r.b2b, 2.01);
     assert.equal(r.b2bMeta.source, 'volume');
 
-    // Bare numbers, both spellings.
+    // The bare-number shape the live summary actually sends.
     assert.equal(compute({ discount: 5, volume_discount: 5 }, 5).b2b, 5);
-    assert.equal(compute({ discount: 5, b2b_discount: 5 }, 5).b2b, 5);
+
+    // ERR-158 — the `b2b_discount` alias is RETIRED. The backend dropped it on
+    // 2026-08-10 and it was confirmed absent from both the top level and
+    // `summary` on a live guest cart on 2026-08-12. It must no longer be read
+    // here: a stray alias-only payload resolves to nothing, and it is
+    // _parseServerCart's watchdog — not a silent fallback in this pure helper —
+    // that notices and complains.
+    assert.equal(compute({ discount: 2.01, b2b_discount: block }, 2.01).b2bMeta, null,
+        'the retired alias must not be read as metadata here');
+    assert.equal(compute({ discount: 5, b2b_discount: 5 }, 5).b2b, 0,
+        'the retired alias must not be read as an amount here');
 });
 
-test('the parser folds the volume block under BOTH keys, or the surfaces split-brain', () => {
+test('the parser folds the volume block into the summary, or the surfaces split-brain', () => {
     const fn = CART_SRC.slice(CART_SRC.indexOf('_parseServerCart: function'));
     const body = fn.slice(0, fn.indexOf('\n    },'));
-    assert.match(body, /summary\.volume_discount = volumeBlock/);
-    assert.match(body, /summary\.b2b_discount = volumeBlock/,
-        'cart and checkout call computeDiscountBreakdown with no second source, so they ' +
-        'see the metadata ONLY via this fold — writing one key and reading the other ' +
-        'silently drops the company label and the floored note on those two surfaces');
+    // cart.js's _renderDiscountRows and checkout-page.js's calculateDiscount
+    // both call computeDiscountBreakdown with NO second source, so they see the
+    // company label and floored-lines note ONLY because of this fold.
+    assert.match(body, /summary\.volume_discount = effectiveVolumeBlock/,
+        'the response-level metadata object must be folded into the summary');
+    // ERR-158: the second write under the retired alias is gone.
+    assert.doesNotMatch(body, /summary\.b2b_discount\s*=/,
+        'the parser must not write the retired b2b_discount alias back into the summary');
+});
+
+test('ERR-158 — the retired alias is watched for, LOUDLY, not silently honoured', () => {
+    // Deleting a fallback outright turns a backend rollback into a silently
+    // darked discount row: the shopper is charged the discounted total and
+    // shown no line explaining it (the ERR-063/068/073/149/150 shape). So the
+    // parser still notices an alias-only payload, says so at ERROR level, and
+    // honours it anyway — a visible discount beats a correct-looking cart that
+    // lost a row.
+    const fn = CART_SRC.slice(CART_SRC.indexOf('_parseServerCart: function'));
+    const body = fn.slice(0, fn.indexOf('\n    },'));
+
+    assert.match(body, /orphanAlias/,
+        'the parser must detect an alias-only payload');
+    assert.match(body, /DebugLog\.error\(/,
+        'an alias-only payload must be reported at ERROR level, not warn and not silence');
+
+    // The guard must fire only when volume_discount is ABSENT — otherwise every
+    // normal cart during an overlap window would log an error and train the
+    // team to ignore it.
+    assert.match(body, /!volumeBlock\s*&&\s*responseData\.b2b_discount/,
+        'the watchdog must fire only when volume_discount is absent');
+
+    // And it must still render: the alias feeds the same fold.
+    assert.match(body, /const effectiveVolumeBlock = volumeBlock \|\| orphanAlias/,
+        'an alias-only payload must still produce a rendered discount row');
+});
+
+test('ERR-158 — no cart-path surface reads the retired alias any more', () => {
+    const PAYMENT_SRC = JS('payment-page.js');
+    for (const [label, code] of [['cart.js', CART_SRC], ['payment-page.js', PAYMENT_SRC]]) {
+        // Strip the watchdog block, which legitimately names the field.
+        const withoutWatchdog = code.replace(/const orphanAlias[\s\S]*?effectiveVolumeBlock = volumeBlock \|\| orphanAlias;/, '');
+        const stripped = withoutWatchdog
+            .split('\n')
+            .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l))
+            .join('\n');
+        assert.doesNotMatch(stripped, /\|\|\s*\w+\.b2b_discount/,
+            `${label} must not fall back to the retired b2b_discount alias`);
+    }
 });
 
 test('order-totals normalise accepts volume_discount in every live shape', () => {

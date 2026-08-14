@@ -259,10 +259,13 @@
                 // row; both are netted out of the generic discount line so they
                 // aren't double-counted (summary.discount is the aggregate).
                 // Shared with cart.js so the two summaries cannot drift.
-                // cartData.volume_discount is the response-level metadata object
-                // (b2b_discount is the backend's transitional alias for the same
-                // object); summary.* is the bare amount. The helper takes both.
-                const volumeBlock = cartData.volume_discount || cartData.b2b_discount;
+                // cartData.volume_discount is the response-level metadata object;
+                // summary.* is the bare amount. The helper takes both.
+                // The `b2b_discount` alias that used to be read here as a
+                // fallback was dropped by the backend on 2026-08-10 and is gone
+                // from this path (ERR-158). _parseServerCart watches for it
+                // coming back and complains loudly if it ever does.
+                const volumeBlock = cartData.volume_discount;
                 const breakdown = computeDiscountBreakdown(summary, this.totals.discount, volumeBlock);
                 const loyaltyDiscount = breakdown.loyalty;
                 const b2bDiscount = breakdown.b2b;

@@ -24,8 +24,8 @@
     {
       "query": "CE60",
       "direct": 1,
-      "compat": 1,
-      "suggest": 2,
+      "compat": 4,
+      "suggest": 5,
       "products": 1,
       "swapped": false,
       "lost": 0
@@ -42,8 +42,8 @@
     {
       "query": "AX220",
       "direct": 1,
-      "compat": 1,
-      "suggest": 2,
+      "compat": 2,
+      "suggest": 3,
       "products": 0,
       "swapped": false,
       "lost": 0
@@ -78,8 +78,8 @@
     {
       "query": "XR20",
       "direct": 3,
-      "compat": 1,
-      "suggest": 1,
+      "compat": 2,
+      "suggest": 2,
       "products": 0,
       "swapped": false,
       "lost": 0
@@ -87,8 +87,8 @@
     {
       "query": "GX6750",
       "direct": 0,
-      "compat": 1,
-      "suggest": 1,
+      "compat": 2,
+      "suggest": 2,
       "products": 0,
       "swapped": false,
       "lost": 0

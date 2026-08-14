@@ -116,12 +116,21 @@ function loadApi() {
 // pull the body via regex and `new Function` it, which is what
 // tests/genuine-no-color-tile.test.js already does.
 
+// The lifted body now reads `BrandSource` (ERR-157 — one vocabulary), which is
+// a global supplied by utils.js in the browser and is not in scope inside a
+// `new Function`. Inject the REAL shipped module rather than a stub: the point
+// of lifting the body at all is to run the code that ships, and a stub here
+// would let the helper and the vocabulary drift apart silently — which is the
+// class of bug ERR-157 was.
+const { BrandSource } = require(path.join(JS_DIR, 'utils.js'));
+
 function liftIsCompatible(source) {
     // _isCompatible(item) { … } — body delimited by the next `\n    },` line
     // (4-space indent for module-level methods on the object literal).
     const m = source.match(/_isCompatible\s*[:=]?\s*(?:function\s*)?\(item\)\s*\{([\s\S]*?)\n\s{4}\},/);
     assert.ok(m, '_isCompatible not found in source');
-    return new Function('item', m[1]);
+    const fn = new Function('item', 'BrandSource', m[1]);
+    return (item) => fn(item, BrandSource);
 }
 
 // ─── (1) compat extractor still recovers BCI3 / BCI6 ─────────────────────────
@@ -191,16 +200,37 @@ test('Cart._isCompatible — new genuine "Canon Genuine CI3ECMY …" returns fal
     assert.equal(isCompatibleCart(renamedGenuine), false);
 });
 
-test('Cart._isCompatible — name-only fallback rejects "Canon Genuine CI…"', () => {
-    // Legacy localStorage row missing product_source — only the leading-word
-    // /^compatible\b/ regex fires. The new "Canon Genuine CI…" name must
-    // fall through to false.
+test('Cart._isCompatible — a source-less legacy row is not compatible', () => {
+    // Legacy localStorage row missing product_source. This assertion is
+    // unchanged; its REASON changed (ERR-157). It used to pass because the
+    // leading-word /^compatible\b/ regex did not match this genuine name. The
+    // regex is gone, and it passes now because an unprovable row is not
+    // claimed to be anything.
     const legacy = {
         name: 'Canon Genuine CI3ECMY Ink Cartridge CI3E CMY 3-Pack (280 pages)'
         // no product_source, no source
     };
     assert.equal(isCompatibleCart(legacy), false,
-        'genuine name must not match the /^compatible\\b/ regex');
+        'a row with no source field must not be classified from its name');
+});
+
+test('Cart._isCompatible — a source-less COMPATIBLE-named row is ALSO not claimed (ERR-157)', () => {
+    // The other half of the rule, and the half the old regex got wrong in the
+    // dangerous direction. Under the May 2026 naming the word is present but
+    // not leading, so /^compatible\b/ answered false here too — same result,
+    // reached by accident. What matters is that the badge no longer treats
+    // "not compatible" as "therefore genuine": BrandSource.of() is null, so
+    // badgeHTML renders nothing at all.
+    const legacyCompatible = {
+        name: '143ABK Compatible Toner Cartridge for HP 143A Black Neverstop Reload Kit'
+        // no product_source, no source — a row saved before the field existed
+    };
+    assert.equal(isCompatibleCart(legacyCompatible), false,
+        'no name inference in either direction');
+    assert.equal(BrandSource.of(legacyCompatible), null,
+        'an unprovable row must classify as null, not as a side');
+    assert.equal(BrandSource.badgeHTML(legacyCompatible), '',
+        'an unprovable row must render NO badge — never a GENUINE claim');
 });
 
 test('Cart._isCompatible — compat with BCI prefix still detected', () => {
@@ -219,11 +249,31 @@ test('Favourites._isCompatible — mirrors Cart._isCompatible for renamed genuin
     assert.equal(isCompatibleFav(renamedGenuine), false);
 });
 
-test('Favourites._isCompatible — name-only fallback rejects "Canon Genuine CI…"', () => {
+test('Favourites._isCompatible — a source-less legacy row is not compatible', () => {
     const legacy = {
         name: 'Canon Genuine CI3ECMY Ink Cartridge CI3E CMY 3-Pack (280 pages)'
     };
     assert.equal(isCompatibleFav(legacy), false);
+});
+
+test('Cart and Favourites _isCompatible agree on every shape (one vocabulary, ERR-157)', () => {
+    // They were byte-identical hand copies in two files. Now they both
+    // delegate, so this is cheap to assert and catches a future re-fork.
+    const shapes = [
+        { product_source: 'compatible' },
+        { product_source: 'genuine' },
+        { source: 'compatible' },
+        { source: 'core' },
+        { product: { source: 'compatible' } },
+        { is_genuine: false },
+        { name: '143ABK Compatible Toner Cartridge for HP 143A Black' },
+        { name: 'Canon Genuine CI3ECMY Ink Cartridge' },
+        {},
+    ];
+    for (const shape of shapes) {
+        assert.equal(isCompatibleCart(shape), isCompatibleFav(shape),
+            `Cart and Favourites disagreed on ${JSON.stringify(shape)}`);
+    }
 });
 
 // ─── (3) cart + favourites hydrate name from live server, not localStorage ──
@@ -232,8 +282,14 @@ test('cart._parseServerCart sources name from item.product.name (live, not cache
     // The parser must read name from item.product.name on every load — that's
     // how the rename propagates. If anyone ever wires it to read from a stored
     // snapshot first, this test fails.
-    const idx = cartSrc.indexOf('_parseServerCart');
-    assert.ok(idx !== -1);
+    // Anchor on the DEFINITION, not the first textual mention. `indexOf
+    // ('_parseServerCart')` used to land on whichever comment named the
+    // function first — and once a doc comment elsewhere in the file mentioned
+    // it, the 4000-char window slid off the real body and the test failed while
+    // the code was correct. A source-text test that can be moved by a comment
+    // is measuring the wrong thing (the ERR-154 lesson).
+    const idx = cartSrc.indexOf('_parseServerCart: function');
+    assert.ok(idx !== -1, 'cart.js must define _parseServerCart as a method');
     const slice = cartSrc.slice(idx, idx + 4000);
     assert.match(slice, /name\s*:\s*item\.product\.name/,
         '_parseServerCart must map name from item.product.name (live API field)');

@@ -494,7 +494,7 @@ const Favourites = {
                         ${this.getItemImageHTML(item)}
                     </div>
                     <div class="favourite-item__info">
-                        <span class="source-badge source-badge--${Cart._isCompatible(item) ? 'compatible' : 'genuine'}">${Cart._isCompatible(item) ? 'COMPATIBLE' : 'GENUINE'}</span>
+                        ${BrandSource.badgeHTML(item)}
                         <h3 class="favourite-item__name">${Security.escapeHtml(item.name)}</h3>
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
                         ${(item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : '')) ? `<p class="favourite-item__color">${Security.escapeHtml(item.color || ProductColors.detectFromName(item.name))}</p>` : ''}
@@ -573,22 +573,23 @@ const Favourites = {
     },
 
     /**
-     * Detect whether a favourited item is a compatible product. Mirrors
-     * Cart._isCompatible — preferences `product_source` (the canonical brand
-     * source field), then a non-sentinel `source`, then a leading-word name
-     * regex for very old persisted rows. Used to gate the color-tile
-     * fallback so the genuine-no-color-tile invariant holds for genuine
-     * packs that ship with image_url=NULL until the composite-image
-     * generator catches up.
+     * Is this favourited row a PROVEN compatible product?
+     *
+     * Delegates to the one brand-source vocabulary (BrandSource, utils.js,
+     * ERR-157). This used to be a byte-identical hand copy of
+     * Cart._isCompatible — two copies of a rule that had to agree, sitting in
+     * different files, which is how the leading-word name fallback survived
+     * the May 2026 rename in both places at once.
+     *
+     * Used to gate the colour-tile fallback, where "unknown ⇒ false" is the
+     * safe direction: a genuine pack shipping with image_url=NULL falls
+     * through to the placeholder rather than a coloured tile
+     * (genuine-no-colour-tile, ERR-143). The BADGE does not use this — it
+     * calls BrandSource.badgeHTML, which renders nothing for an unknown source
+     * instead of asserting GENUINE.
      */
     _isCompatible(item) {
-        if (!item) return false;
-        if (item.product_source === 'compatible') return true;
-        if (item.product_source) return false;
-        if (item.source && !['core', 'cross-sell'].includes(item.source)) {
-            return item.source === 'compatible';
-        }
-        return /^compatible\b/i.test(item.name || '');
+        return BrandSource.isCompatible(item);
     },
 
     /**

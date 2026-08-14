@@ -16,9 +16,15 @@
  *       "Compatible <Type> Cartridge Replacement for <Brand> <Codes> <Color>".
  *       Frontend must NOT regex `name` to detect source. `Shop` /
  *       `ProductDetail` / `Cart` / `Checkout` / `Favourites` must read
- *       `product.source` (and the cart's `_isCompatible` helper must read
- *       `product_source` first, with the legacy substring as a final
- *       fallback for old localStorage rows).
+ *       `product.source`.
+ *       UPDATED 2026-08-12 (ERR-157): the "legacy substring as a final
+ *       fallback for old localStorage rows" clause is RETIRED. That fallback
+ *       was `/^compatible\b/i`, and the very rename this section is about had
+ *       already broken it — live names read "143ABK Compatible Toner …", so
+ *       the word is present but not leading. It returned false for every
+ *       compatible cartridge and the binary badge then asserted GENUINE.
+ *       Classification is now one vocabulary (BrandSource, utils.js) with a
+ *       null answer for unprovable rows, and no name inspection anywhere.
  *
  *   §4  Series chip cache — bumped to v6 so Epson specialty colors
  *       collapse into base T-series chips (T3127 → T312) and bare-numeric
@@ -161,29 +167,36 @@ test('§2 ProductDetail.extractProductCode prefers backend series_codes', () => 
         'series_codes branch must appear BEFORE the name regex fallback (priority order)');
 });
 
-test('§2 Cart, Checkout, Favourites read source via Cart._isCompatible — no inline name fallback', () => {
-    // The badge code now delegates to Cart._isCompatible, which encapsulates
-    // the product_source > legacy-source > leading-word-name precedence.
+test('§2 Cart, Checkout, Favourites classify source through BrandSource — no inline name fallback', () => {
+    // UPDATED 2026-08-12 (ERR-157). This used to require each surface to call
+    // `Cart._isCompatible(item)`; the classification now lives in ONE place,
+    // BrandSource in utils.js, which those helpers delegate to. What §2 is
+    // actually about — "the frontend must NOT regex `name` to detect source" —
+    // is asserted harder than before: no name-shaped test may appear at all.
     for (const [name, code] of [['cart', CART_CODE], ['checkout', CHECKOUT_CODE], ['favourites', FAVOURITES_CODE]]) {
-        // Inline `(item.name || '').toLowerCase().includes('compatible')` must be gone.
         assert.doesNotMatch(code, /\(item\.name\s*\|\|\s*['"]['"]\s*\)\.toLowerCase\(\)\.includes\(\s*['"]compatible['"]/,
             `${name} must not inline-fallback to item.name.includes("compatible")`);
-        // Each must call the helper.
-        assert.match(code, /Cart\._isCompatible\s*\(\s*item\s*\)/,
-            `${name} must read source via Cart._isCompatible(item)`);
+        assert.doesNotMatch(code, /\/\^compatible\\b\/i/,
+            `${name} must not carry the legacy leading-word name regex (ERR-157)`);
+        assert.match(code, /BrandSource\./,
+            `${name} must classify brand source through BrandSource`);
     }
 });
 
-test('§2 Cart._isCompatible exists, prefers product_source, falls back to legacy name only as last resort', () => {
+test('§2 Cart._isCompatible delegates to BrandSource and infers nothing from a name', () => {
     const m = CART_CODE.match(/_isCompatible:\s*function\s*\(item\)\s*\{([\s\S]*?)\n\s{4}\},/);
     assert.ok(m, 'Cart._isCompatible must be defined as a method');
     const body = m[1];
-    assert.match(body, /item\.product_source\s*===\s*['"]compatible['"]/,
-        '_isCompatible must check product_source first');
-    // The legacy name fallback must be anchored to the leading word ("^compatible\b"),
-    // not a loose .includes — that would overmatch on the new compatible name format.
-    assert.match(body, /\/\^compatible\\b\/i/,
-        '_isCompatible legacy fallback must be anchored to leading-word /^compatible\\b/i');
+    assert.match(body, /BrandSource\.isCompatible\s*\(\s*item\s*\)/,
+        '_isCompatible must delegate to BrandSource.isCompatible');
+    // The legacy leading-word regex is GONE. It was dead weight and wrong: the
+    // May 2026 rename moved the word out of first position, so it answered
+    // false for every compatible cartridge in the catalogue and the binary
+    // badge above it then printed GENUINE on them (ERR-157).
+    assert.doesNotMatch(body, /compatible\\b/,
+        '_isCompatible must not fall back to a leading-word name regex');
+    assert.doesNotMatch(body, /item\.name/,
+        '_isCompatible must not read the product name at all');
 });
 
 test('§2 Cart.addItem captures product_source and stores it on the row', () => {

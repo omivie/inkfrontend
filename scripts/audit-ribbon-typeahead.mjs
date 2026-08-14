@@ -395,21 +395,27 @@ async function main() {
         }
     }
     {
-        // Spaced-query normalisation: "TCX 11" should reach the same ribbon as
-        // "TCX-11". Flagged for the backend in July for "ap 830"; still open.
+        // Spaced-query normalisation: "TCX 11" must reach the same ribbon as
+        // "TCX-11". This WAS an open backend finding (reported 2026-07-30 for
+        // "ap 830", re-raised 2026-08-04) and it is now FIXED — re-measured
+        // 2026-08-12, both forms return the identical 2 rows (36000.02,
+        // 36000.01). The separator work landed with the Aug 2026 recall
+        // improvements (search-click-tracking-fe-handoff-aug2026 §3, the same
+        // change that made glued printer codes like `dcpj1050dw` resolve).
+        //
+        // So this is no longer a finding to report — it is a FIX TO DEFEND.
+        // Inverted rather than deleted: the audit's whole value is that a
+        // recorded state which can only go green-to-red rots silently
+        // (ERR-140's lesson). A positive assertion keeps a regression loud;
+        // removing the block would have made a backend regression invisible.
         const [hyphen, spaced] = await Promise.all([suggest('TCX-11', 8), suggest('TCX 11', 8)]);
         if (hyphen.__err || spaced.__err) bad('spaced-query probe', hyphen.__err || spaced.__err);
         else {
             const hKeys = new Set(rowsOf(hyphen, 'suggestions').map(idKey));
             const overlap = rowsOf(spaced, 'suggestions').filter((s) => hKeys.has(idKey(s)));
-            if (overlap.length === 0) {
-                note('matched_token / query normalisation still separator-sensitive',
-                    '"TCX 11" and "TCX-11" return disjoint sets — a customer typing the space form misses the ribbon. '
-                    + 'Reported 2026-07-30 (ap 830) and again 2026-08-04.');
-            } else {
-                bad('spaced-query baseline is stale',
-                    '"TCX 11" now reaches the same rows as "TCX-11" — the backend fixed it. REMOVE this entry.');
-            }
+            check(overlap.length > 0, 'spaced query reaches the same rows as the hyphenated form',
+                '"TCX 11" and "TCX-11" returned disjoint sets — separator tolerance REGRESSED. '
+                + 'It was fixed as of 2026-08-12; a customer typing the space form now misses the ribbon again.');
         }
     }
     {

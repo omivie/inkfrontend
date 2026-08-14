@@ -106,17 +106,24 @@
                             // Stale-swatch fallback — for compatibles whose
                             // hand-uploaded swatch image is now out of date,
                             // fall through to the canonical color placeholder.
-                            const _swatchStale = typeof ProductColors !== 'undefined' && ProductColors.isPlaceholderSwatchImage(rawImageUrl) && (item.source === 'compatible' || /^compatible\b/i.test(item.product_name || ''));
+                            // Brand source via the one vocabulary (BrandSource,
+                            // utils.js, ERR-157). Order lines carry `source`
+                            // directly (verified live 2026-08-12); the old
+                            // `/^compatible\b/i` on product_name was a second
+                            // rule that disagreed with the badge two lines
+                            // below, which used an UNANCHORED `.includes`.
+                            const _isCompatibleLine = BrandSource.isCompatible(item);
+                            const _swatchStale = typeof ProductColors !== 'undefined' && ProductColors.isPlaceholderSwatchImage(rawImageUrl) && _isCompatibleLine;
                             return `
                             <div class="order-item">
                                 <div class="order-item__image">
                                     ${(imageUrl && !_swatchStale)
                                         ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">`
-                                        : this.getColorPlaceholder(item.product_name, item.source, item.product?.color || item.color)
+                                        : this.getColorPlaceholder(item.product_name, BrandSource.of(item), item.product?.color || item.color)
                                     }
                                 </div>
                                 <div class="order-item__details">
-                                    <span class="source-badge source-badge--${item.source === 'compatible' || (item.product_name || '').toLowerCase().includes('compatible') ? 'compatible' : 'genuine'}">${item.source === 'compatible' || (item.product_name || '').toLowerCase().includes('compatible') ? 'COMPATIBLE' : 'GENUINE'}</span>
+                                    ${BrandSource.badgeHTML(item)}
                                     <h3>${esc(item.product_name)}</h3>
                                     <p class="order-item__sku">SKU: ${esc(item.product_sku || 'N/A')}</p>
                                     <p class="order-item__qty">Qty: ${item.quantity} × ${formatPrice(item.unit_price)}</p>
@@ -294,7 +301,15 @@
             // neutral cartridge SVG. Compatible items keep the color tile —
             // it helps customers recognize what they bought.
             // THIS GATE RUNS FIRST AND IS LOAD-BEARING — do not reorder.
-            if (source && source !== 'compatible') {
+            //
+            // The test is "NOT PROVEN COMPATIBLE", not "has some other source"
+            // (ERR-157). The old `source && source !== 'compatible'` let a line
+            // with NO source at all fall through and paint a coloured tile —
+            // the invariant held for proven-genuine rows and quietly failed for
+            // unproven ones, which is the population it most needed to cover.
+            // Callers pass BrandSource.of(item), so `source` here is already
+            // 'genuine' | 'compatible' | null and never a raw payload value.
+            if (source !== 'compatible') {
                 return `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="9" y1="6" x2="15" y2="6"/></svg>`;
             }
 

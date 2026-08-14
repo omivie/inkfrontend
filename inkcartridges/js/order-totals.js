@@ -170,10 +170,20 @@
 
         // Volume discount: several live payload shapes, same as
         // computeDiscountBreakdown() — whichever source carries the object is the
-        // metadata, whichever is numeric is the amount. See cart.js:32-43.
-        // `volume_discount` is the current field name; `b2b_discount` is the
-        // backend's transitional alias for the identical object, and `b2bMeta` is
-        // this function's OWN output (normalise must stay idempotent).
+        // metadata, whichever is numeric is the amount. See cart.js.
+        // `volume_discount` is the current field name and `b2bMeta` is this
+        // function's OWN output (normalise must stay idempotent).
+        //
+        // `b2b_discount` IS DELIBERATELY STILL READ HERE (ERR-158). The backend
+        // dropped that alias on 2026-08-10 and cart.js/payment-page.js stopped
+        // reading it — but this function normalises ORDERS, which is a different
+        // payload with a different lifetime. The backend's note covers the cart
+        // response only, and an order placed before the cutover keeps whatever
+        // spelling it was stored with, forever. Removing it here would silently
+        // zero the volume-discount row on historical receipts and order-detail
+        // pages, where nobody would notice because the totals still add up.
+        // Do not "finish the job" without first confirming, against a real
+        // pre-August order, that the order payload never carries this key.
         const isObj = (v) => !!v && typeof v === 'object';
         const b2bMeta = [o.volume_discount, o.b2b_discount, o.b2bMeta].find(isObj) || null;
         const b2bDiscount = pick(

@@ -84,8 +84,18 @@ test('search.js — dropdown splits into Compatible + Genuine sections (source =
     // The product/shop page partitions on source and renders two labelled
     // sections; the dropdown must copy that so genuine + compatible variants of
     // the same code don't interleave.
-    assert.match(SEARCH_JS, /source\s*\|\|[^\n]*\)\s*===\s*['"]compatible['"]/,
-        'dropdown must partition on the canonical source field like shop-page.js');
+    //
+    // ERR-157: the predicate is now BrandSource.isCompatible rather than an
+    // inline `(p.source || (p.is_genuine ? 'genuine' : 'compatible'))`. The old
+    // expression INVENTED 'compatible' for a row carrying neither field.
+    // Partition behaviour is unchanged for real payloads — /smart ships
+    // `source`, /suggest ships `is_genuine` as a real boolean — and a row with
+    // neither now lands in the non-compatible group instead of being asserted
+    // third-party on the way in.
+    assert.match(SEARCH_JS, /BrandSource\.isCompatible\s*\(\s*p\s*\)/,
+        'dropdown must partition through the one brand-source vocabulary');
+    assert.doesNotMatch(SEARCH_JS, /is_genuine\s*\?\s*['"]genuine['"]\s*:\s*['"]compatible['"]/,
+        'dropdown must not invent a source from a missing is_genuine flag');
     assert.match(SEARCH_JS, /products-section__badge--compatible/,
         'dropdown must render a Compatible section badge (reuses the page chip)');
     assert.match(SEARCH_JS, /products-section__badge--genuine/,

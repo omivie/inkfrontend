@@ -1050,9 +1050,13 @@ test('computeDiscountBreakdown: LIVE shape — number in summary, object at top 
 });
 
 test('computeDiscountBreakdown: still reads the object if the backend moves it into summary', () => {
+    // Spelled `volume_discount` since ERR-158 — the `b2b_discount` alias this
+    // July fixture was captured under was dropped by the backend on 2026-08-10.
+    // LIVE_CART keeps the original key because it is a record of what the API
+    // sent that day; the READER is what moved.
     const { computeDiscountBreakdown } = loadCartHelpers();
     const r = computeDiscountBreakdown(
-        Object.assign({}, LIVE_CART.summary, { b2b_discount: LIVE_CART.b2b_discount }), 3.92);
+        Object.assign({}, LIVE_CART.summary, { volume_discount: LIVE_CART.b2b_discount }), 3.92);
     assert.equal(r.b2b, 3.92);
     assert.equal(r.b2bMeta.source, 'volume');
 });
@@ -1060,7 +1064,7 @@ test('computeDiscountBreakdown: still reads the object if the backend moves it i
 test('computeDiscountBreakdown: b2b and loyalty are both netted out of "You Save"', () => {
     const { computeDiscountBreakdown } = loadCartHelpers();
     const r = computeDiscountBreakdown(
-        { discount: 30, loyalty_discount_amount: 10, b2b_discount: 15 }, 30);
+        { discount: 30, loyalty_discount_amount: 10, volume_discount: 15 }, 30);
     assert.equal(r.b2b, 15);
     assert.equal(r.loyalty, 10);
     assert.equal(r.other, 5, 'the same dollars must never be shown twice');
@@ -1653,17 +1657,45 @@ test('the swept record is SELF-consistent, so an edited record cannot pose as a 
 
 test('the swept cart still reproduces its own b2b discount to the cent',
     { skip: !SWEEP_RECORD && 'no sweep record — run npm run sweep:b2b' }, () => {
+        // THIS GATE MUST NOT SKIP ITSELF (ERR-158).
+        //
+        // It used to be reachable only via `SWEEP_RECORD.cart`, which the sweep
+        // set to `null` whenever it could not read a cart — and a null cart made
+        // the assertions below throw on a property of null, or (worse, in the
+        // original shape) quietly pass over nothing. The sweep now reports a
+        // NAMED reason instead of null, so "the gate did not run" is a visible
+        // state with a cause attached rather than an absence.
+        const cart = SWEEP_RECORD.cart;
+        assert.ok(cart, 'the sweep record must carry a cart field at all');
+        assert.ok(!cart.unavailable,
+            `the consistency gate did NOT run: ${cart.unavailable}. ` +
+            'Re-record with credentials (npm run sweep:b2b) — a skipped gate is not a passing gate.');
+
+        // FIXTURE-COMPAT SHIM, not a production fallback.
+        //
+        // The committed record was captured in July under the backend's old
+        // `b2b_discount` spelling; the sweep script emits `volume_discount` since
+        // ERR-158. Both spellings are accepted HERE, and only here, so the
+        // committed fixture keeps working until it is next re-recorded and the
+        // re-record does not silently disable this gate. Production code reads
+        // one name only — see cart.js.
+        const block = cart.volume_discount || cart.b2b_discount;
+        const summaryAmount = cart.summary_volume_discount !== undefined
+            ? cart.summary_volume_discount
+            : cart.summary_b2b_discount;
+        assert.ok(block, 'the swept cart must carry a volume-discount block under either spelling');
+
         // The fixture cart above is a snapshot; this proves the snapshot matches
         // the live cart the sweep read at the same moment.
-        assert.deepEqual(SWEEP_RECORD.cart.b2b_discount, LIVE_CART.b2b_discount);
-        assert.equal(SWEEP_RECORD.cart.summary_b2b_discount, LIVE_CART.summary.b2b_discount,
+        assert.deepEqual(block, LIVE_CART.b2b_discount);
+        assert.equal(summaryAmount, LIVE_CART.summary.b2b_discount,
             'the number in summary and the object at the top level must still agree');
 
         // And the fixture ladders reproduce that cart's discount independently:
         // only CTN1070BK x 4 qualifies, on the 4+ rung.
         const B = loadBusiness();
-        const line = SWEEP_RECORD.cart.lines.find(l => l.sku === 'CTN1070BK');
+        const line = cart.lines.find(l => l.sku === 'CTN1070BK');
         assert.equal(line.quantity, 4);
         assert.equal(B.lineSavings(B.describeLadder(LIVE_LADDER_CART_LINE), line.quantity),
-            SWEEP_RECORD.cart.b2b_discount.discount_amount);
+            block.discount_amount);
     });

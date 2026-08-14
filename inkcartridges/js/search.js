@@ -137,7 +137,14 @@
         return Object.assign({}, p, {
             retail_price: p.retail_price != null ? p.retail_price : p.price,
             sku: p.sku || '',
-            source: p.source || (p.is_genuine ? 'genuine' : 'compatible'),
+            // ONE brand-source vocabulary (BrandSource, utils.js, ERR-157).
+            // The old expression invented 'compatible' for a row carrying
+            // neither field, because `undefined ? … : …` takes the false
+            // branch. /api/search/suggest ships `is_genuine` as a real boolean
+            // on every row and /api/search/smart ships `source` (both verified
+            // live 2026-08-12), so this resolves identically for real payloads
+            // — it just stops guessing when neither is there.
+            source: BrandSource.of(p),
             brand: p.brand || null,
             category: p.category || null,
         });
@@ -434,8 +441,12 @@
             // shop-page.js loadSearchResults (source === 'compatible'). The
             // injected break <div>s and section heads are skipped by the
             // .product-card keyboard-nav / highlight selectors below.
-            const isCompatibleProduct = (p) =>
-                (p.source || (p.is_genuine ? 'genuine' : 'compatible')) === 'compatible';
+            // ONE brand-source vocabulary (BrandSource, utils.js, ERR-157).
+            // Partition behaviour is deliberately unchanged: a row we cannot
+            // classify is not compatible, so it lands in the second group
+            // exactly as before. What changed is that an unclassifiable row is
+            // no longer ASSERTED compatible on the way in.
+            const isCompatibleProduct = (p) => BrandSource.isCompatible(p);
             const compatibleItems = list.filter(isCompatibleProduct);
             const genuineItems = list.filter((p) => !isCompatibleProduct(p));
 
@@ -499,6 +510,32 @@
                 : '';
             state.list.innerHTML = `${matchedRowHTML}${dymRowHTML}${sectionsHTML}${viewAllHTML}`;
             positionDropdown();
+
+            // PUBLIC VOLUME PRICING — the dropdown was the last product surface
+            // without it (ERR-160).
+            //
+            // Every other grid pairs its paint with this call: products.js:626,
+            // shop-page.js (search results + browse), landing.js, ribbons-page.js,
+            // favourites.js, and the PDP. This one never did — the file had no
+            // `Business.` reference at all — so a shopper saw "Bulk price $21.82"
+            // on /shop and /search and nothing here, on the same SKU, one
+            // keystroke apart. Business.CARD_SELECTOR already matches these
+            // cards (`.product-card[data-sku]`, which Products.renderCard emits);
+            // nobody had ever handed them over.
+            //
+            // Pass `renderedOrder` — the RAW /smart rows, in painted order.
+            // `adaptForCard` copies are equivalent today because it spreads with
+            // Object.assign rather than whitelisting, but the raw rows are what
+            // carry `quantity_breaks` by contract and passing a re-shaped copy
+            // to an ingester is precisely how ERR-150 happened.
+            //
+            // Costs zero requests: /api/search/smart embeds `quantity_breaks` on
+            // every row (verified live 2026-08-12), so ingest() answers from the
+            // payload and decorateCards() never reaches for the authed route
+            // while signed out.
+            if (typeof Products !== 'undefined' && typeof Products.decorateBusinessPricing === 'function') {
+                Products.decorateBusinessPricing(state.list, renderedOrder);
+            }
 
             // Apply <mark> highlighting to the (already-escaped) product titles.
             // Spec §1.2: highlight name+sku, never highlight description HTML.

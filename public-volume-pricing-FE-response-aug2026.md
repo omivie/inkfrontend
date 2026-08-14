@@ -28,7 +28,7 @@ network                      → ZERO requests to /api/business/* while signed o
 | # | Ask | Why |
 |---|---|---|
 | **1** | **Add `source` to the cart line's `product` object** | Without it the cart badges compatible cartridges as **GENUINE**. Compliance-sensitive; one field; `/api/products` already returns it. Details in §(b). |
-| **2** | **Check why the catalog API sends `cache-control: private, no-store`** | Nothing is edge-cached, so the ladder rides an uncached payload on every request. May predate this deploy. Details in §(a). |
+| **2** | ~~**Check why the catalog API sends `cache-control: private, no-store`**~~ — **WITHDRAWN 2026-08-12 (ERR-159): our probe was a HEAD request. Real GETs were edge-cached all along.** See §(a). | ~~Nothing is edge-cached…~~ |
 | **3** | *(no action, just confirmation)* | You are clear to **drop `b2b_discount` / `summary.b2b_discount`** whenever you like. Please **keep `/api/business/pricing`** for now. |
 
 Nothing here blocks the volume-pricing rollout — it is live and correct. Ask 1 is a pre-existing
@@ -84,7 +84,25 @@ one-line change on each side.
 Nothing about the pricing contract. Two findings that are adjacent to it, both of which may predate
 your deploy — reporting with evidence rather than as regressions.
 
-### (a) The catalog API is not being edge-cached at all
+### (a) ~~The catalog API is not being edge-cached at all~~
+
+> **CORRECTED 2026-08-12 (ERR-159). This section was wrong, and the mistake was ours.**
+>
+> The probe below is `curl -sI`, which sends **HEAD**. The origin's cache-header
+> middleware only marked GET as cacheable, so every other method got the hard
+> `private, no-store` treatment. We measured a method no visitor uses.
+>
+> Real GETs were edge-cached the whole time, then and now:
+> `/api/products?page=1&limit=20` → `public, max-age=0, s-maxage=300,
+> stale-while-revalidate=600`, MISS then **HIT**. Re-measured 2026-08-12.
+>
+> `npm run audit:edge-cache` now performs this measurement, with GETs, and
+> refuses to issue HEAD at all. The full corrected picture — including two Cache
+> Rule gaps this section missed — is in
+> `public-volume-pricing-FE-response-round2-aug2026.md`.
+>
+> The "silver lining" paragraph at the end of this section is also wrong: there
+> IS a stale window, up to 5 minutes at the edge.
 
 Measured today, unauthenticated, on both hostnames:
 
