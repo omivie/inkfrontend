@@ -1375,7 +1375,12 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
     // Dates are never carried by a preset — always re-anchor on today.
     set('#e-date', todayInputValue());
     set('#e-due', '');
-    if ($('#e-paid')) { $('#e-paid').checked = false; $('#e-paid-wrap')?.classList.add('hidden'); }
+    // "Already paid" comes back CHECKED — same default as freshDraft(). A preset is
+    // re-used for a spend that has just gone out the door, so unchecking it here made
+    // every preset-loaded expense land as unpaid until the owner noticed. The paid
+    // date is today's re-anchored expense date, never anything the preset carried
+    // (presets store no dates at all — see utils/expense-presets.js).
+    if ($('#e-paid')) { $('#e-paid').checked = true; $('#e-paid-wrap')?.classList.remove('hidden'); }
     // Re-arm the paid-date mirror against the re-anchored expense date.
     if (paidDate) { paidDate.dataset.touched = ''; paidDate.value = $('#e-date').value; }
 

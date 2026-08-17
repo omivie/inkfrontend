@@ -202,3 +202,33 @@ test('presetNameExists is case- and whitespace-insensitive', () => {
 test('PRESET_KEY is namespaced for the shared admin_ui_prefs blob', () => {
   assert.equal(sandbox.PRESET_KEY, 'expenses.presets');
 });
+
+// ─── editor contract: loading a preset ───────────────────────────────────────
+// Static source assertions against the page (matching the other admin-expenses-*
+// tests) — the pure module above can't see the DOM the editor writes into.
+const PAGE_SRC = fs.readFileSync(
+  path.resolve(__dirname, '..', 'inkcartridges', 'js', 'admin', 'pages', 'expenses.js'), 'utf8');
+
+test('a fresh draft is Already-paid by default', () => {
+  assert.match(PAGE_SRC, /function freshDraft\(\)[\s\S]*?paid_date: todayInputValue\(\)/,
+    'freshDraft must seed paid_date with today so "Already paid" starts checked');
+});
+
+test('loading a preset leaves "Already paid" CHECKED and its date row visible', () => {
+  const apply = PAGE_SRC.slice(PAGE_SRC.indexOf('const applyPreset = (preset)'));
+  assert.ok(apply, 'applyPreset must exist');
+  assert.match(apply, /\$\('#e-paid'\)\.checked = true/,
+    'applying a preset must CHECK "Already paid" (same default as freshDraft)');
+  assert.match(apply, /#e-paid-wrap'\)\?\.classList\.remove\('hidden'\)/,
+    'the paid-date row must be revealed, not left hidden behind a checked box');
+  assert.doesNotMatch(apply.slice(0, apply.indexOf('Toast.info')), /\$\('#e-paid'\)\.checked = false/,
+    'nothing in applyPreset may uncheck "Already paid" again');
+});
+
+test('a preset-loaded paid date re-anchors on the expense date, never on the preset', () => {
+  const apply = PAGE_SRC.slice(PAGE_SRC.indexOf('const applyPreset = (preset)'));
+  assert.match(apply, /paidDate\.dataset\.touched = '';\s*paidDate\.value = \$\('#e-date'\)\.value/,
+    'the paid date must be re-armed to the re-anchored (today) expense date');
+  assert.doesNotMatch(apply.slice(0, apply.indexOf('Toast.info')), /patch\.paid_date|patch\.expense_date/,
+    'applyPreset must never read a date off the preset patch');
+});

@@ -41,6 +41,49 @@ describing the same incident.
 
 ---
 
+## ERR-171 — Loading an expense preset silently un-ticked "Already paid", so the one-click path was the only path that booked an unpaid bill — **RESOLVED (2026-08-18)**
+
+**Date**: 2026-08-18
+**Context**: owner reported it from the Add-expense drawer: save a preset, click the chip, and
+"Already paid" comes back unticked every time — even though opening the drawer fresh has it ticked.
+
+**Root cause.** Two code paths set the same checkbox and they disagreed. `freshDraft()`
+(`js/admin/pages/expenses.js`) seeds `paid_date: todayInputValue()`, and the template renders the
+box `${m.paid_date ? 'checked' : ''}` — so a blank Add-expense form is paid-by-default (that was the
+deliberate change in `22ff120`). But `applyPreset()` ended its "re-anchor every date on today" block
+with a hard `$('#e-paid').checked = false` plus `#e-paid-wrap` hidden. That line predates
+paid-by-default and was never revisited when the default flipped, so the preset path kept the old
+default while every other entry path moved on.
+
+Consequence is quiet, not loud: `collectPayload()` only writes `paid_date` when `#e-paid` is
+checked, so a preset-loaded expense saved with no `paid_date` — status `scheduled/overdue`, absent
+from the cash-basis spend series and sitting in "Due (unpaid)" — while the operator believed they
+had just recorded money that had already left the account. Nothing errored; the number simply
+landed on the wrong side of the ledger.
+
+**Fix.** `applyPreset()` now ticks the box and reveals the paid-date row
+(`checked = true` + `classList.remove('hidden')`), matching `freshDraft()`. The paid date still
+comes from the re-armed mirror — `paidDate.dataset.touched = ''; paidDate.value = $('#e-date').value`
+— i.e. today's re-anchored expense date. **No date is read off the preset**: presets store none, by
+design (`utils/expense-presets.js` strips `expense_date`/`due_date`/`paid_date`/`recurrence_end` on
+the way in *and* out), because re-using an old bill's date on a cash-basis P&L books real money into
+the wrong month. That rule is untouched here — this is a checkbox default, not a stored date.
+
+A repeating preset also gets the tick, but the box lives inside `.exp-oneoff-only`, which `setType`
+hides, and `collectPayload` reads it only when `type === 'none'` — so nothing leaks onto a series.
+
+**Verified.** `tests/admin-expenses-presets.test.js` +3 (fresh draft is paid-by-default; applying a
+preset leaves the box checked with its date row visible and never re-unchecks; the paid date
+re-anchors on `#e-date` and `applyPreset` reads no date off the patch) — 26/26 in that file, and the
+paid-mirror suite still green. `node --check` clean; `npm run build` restamped the admin bundle.
+
+**Lesson.** When a default is flipped, the flip has to be chased into every path that *writes* the
+same control, not just the one that renders it. A hardcoded `= false` sitting under a comment about
+dates reads as date hygiene and survives the review that changed the default — grep the control's
+id, not the feature's name.
+
+---
+
 ## ERR-168 — Every discounted order overstated its profit, and reported $4.00 of GST on a $116.60 sale — **RESOLVED (2026-08-17)**
 
 **Date**: 2026-08-17

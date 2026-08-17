@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.08.17-order-profit-net-of-discount';
+const APP_VERSION = '2026.08.18-preset-already-paid';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
