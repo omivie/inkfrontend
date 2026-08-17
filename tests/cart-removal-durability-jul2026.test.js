@@ -642,8 +642,16 @@ test('§7.3 a stale snapshot is discarded, re-fetched a BOUNDED number of times,
     const body = methodBody(CART_SRC, 'async _handleStaleSnapshot(where)');
     assert.ok(/_staleRefetches/.test(body), 'the refetch budget must be tracked');
     assert.ok(/_staleRefetches < 2/.test(body), 'the refetch budget must be bounded');
-    assert.ok(/serverSummary = null/.test(body),
+    // This used to pin the literal `serverSummary = null`. That was the
+    // implementation, not the rule (the ERR-073 lesson), and it tripped the moment
+    // the drop was routed through a helper that ALSO records why — which is a
+    // strictly stronger version of the same guarantee, not a regression.
+    // The rule is: on exhaustion we must give up the server totals rather than
+    // invent them, and we must be able to say we did.
+    assert.ok(/serverSummary = null|_losePricing\(/.test(body),
         'on exhaustion the UI must admit it has no server totals rather than invent them');
+    assert.ok(!/serverSummary\s*=\s*(?!null)[^;]/.test(body),
+        'and must never assign a fabricated summary here');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

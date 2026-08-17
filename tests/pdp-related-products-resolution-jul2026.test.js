@@ -239,24 +239,48 @@ test('§3 an unhealthy response sets fetchFailed and STOPS — never counted as 
         'a failed read must be recorded as a failure and end the loop');
 });
 
-test('§3 the empty-result return branches on fetchFailed', () => {
+test('§3 an empty result caused by a FAILURE renders the error state, in EVERY category', () => {
+    // Rewritten Aug 2026 (ERR-170). This used to require the fetchFailed branch to
+    // live INSIDE `if (related.length === 0 && info.category !== 'ribbon')` — which
+    // pinned the shape of the guard rather than the rule, and baked in the very bug
+    // that guard had: ribbons were excluded, so a curated rail whose query errored
+    // rendered its empty state and read as "the owner curated nothing".
+    //
+    // The rule is category-independent: an empty result that came from a failure is
+    // not an empty result. The guard is now checked BEFORE the category test.
     const body = methodBody(PDP_SRC, 'renderRelatedProducts');
-    const m = /if\s*\(related\.length === 0 && info\.category !== 'ribbon'\)\s*\{([\s\S]{0,300}?)\}/.exec(body);
-    assert.ok(m, 'the non-ribbon empty guard must be a block, not a bare early return');
-    assert.match(m[1], /if\s*\(fetchFailed\)\s*this\._renderRelatedError\(/,
+    const m = /if\s*\(related\.length === 0 && fetchFailed\)\s*\{([\s\S]{0,300}?)\}/.exec(body);
+    assert.ok(m, 'a failure-caused empty result must have its own guard, ahead of any category test');
+    assert.match(m[1], /this\._renderRelatedError\(/,
         'a failed fetch must render the error state instead of silently hiding the section');
     assert.match(m[1], /return;/);
+
+    // …and it must come first, or ribbons fall through to the silent path again.
+    const iFail = body.indexOf('related.length === 0 && fetchFailed');
+    const iCat = body.indexOf("related.length === 0 && info.category !== 'ribbon'");
+    assert.ok(iFail > -1 && iCat > -1, 'both guards must exist');
+    assert.ok(iFail < iCat,
+        'the failure guard must precede the category guard, or a failed ribbon lookup is swallowed');
 });
 
 test('§3 a SUCCESSFUL empty family still hides silently (no error box on a singleton)', () => {
     const body = methodBody(PDP_SRC, 'renderRelatedProducts');
+    // The silent path — a genuine empty result — must contain no error render at
+    // all, or all 767 legitimate singletons grow an error box.
     const m = /if\s*\(related\.length === 0 && info\.category !== 'ribbon'\)\s*\{([\s\S]{0,300}?)\}/.exec(body);
-    // Every _renderRelatedError call inside the guard must sit behind the
-    // fetchFailed gate. Strip the gated form; anything left is an unconditional
-    // call, which would put an error box on all 767 legitimate singletons.
-    const ungated = m[1].replace(/if\s*\(fetchFailed\)\s*this\._renderRelatedError\([^)]*\);/g, '');
-    assert.doesNotMatch(ungated, /_renderRelatedError/,
-        'the error state must be gated on fetchFailed, never rendered unconditionally');
+    assert.ok(m, 'the non-ribbon empty guard must still exist');
+    assert.doesNotMatch(m[1], /_renderRelatedError/,
+        'the silent hide path must never render the error state — that branch is for failures only');
+
+    // Every error render must be reachable only from a FAILURE — either the
+    // fetchFailed flag or the method's outer catch (a throw is a failure too).
+    // Anything else would put an error box on a legitimately empty result.
+    const renders = (body.match(/this\._renderRelatedError\(/g) || []).length;
+    const fromFlag = (body.match(/fetchFailed[\s\S]{0,200}?this\._renderRelatedError\(/g) || []).length;
+    const fromCatch = (body.match(/\}\s*catch\s*\([\s\S]{0,900}?this\._renderRelatedError\(/g) || []).length;
+    assert.equal(renders, fromFlag + fromCatch,
+        `all ${renders} _renderRelatedError call(s) must be reachable only from a failure `
+        + `(${fromFlag} via fetchFailed, ${fromCatch} via catch)`);
 });
 
 test('§3 _renderRelatedError reuses the shop page pane and wires a working Retry', () => {

@@ -1101,6 +1101,30 @@
 .admin-order-items tfoot tr { border-top: 2px solid var(--border-strong); }
 .admin-order-items tfoot td { padding-top: 8px; border-bottom: none; }
 
+/* Order-discount foot rows (ERR-168). The Price foot is REALISED revenue — the
+   line sum less the order discount — so these two rows show the subtraction that
+   gets there. Only the final total row keeps the heavy rule: the gross and
+   discount rows lead into it and reading as three separate totals would be
+   worse than reading as one sum. */
+.admin-order-items tfoot .admin-order-items__gross,
+.admin-order-items tfoot .admin-order-items__discount { border-top: none; }
+.admin-order-items tfoot .admin-order-items__gross td,
+.admin-order-items tfoot .admin-order-items__discount td { padding-top: 4px; padding-bottom: 0; }
+.admin-order-items tfoot .admin-order-items__gross { border-top: 2px solid var(--border-strong); }
+.admin-order-items tfoot .admin-order-items__total { border-top: 1px solid var(--border); }
+.admin-order-items__footlabel { text-align: right; font-size: 13px; }
+.admin-order-items__discount .mono { color: var(--danger); }
+
+/* Muted "−$12.90" beneath a list row's Total. Sits on its own line so it never
+   competes with the total itself. */
+.order-discount-sub {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
 /* ---- Charts ---- */
 .admin-chart-box { position: relative; height: 280px; }
 .admin-chart-box--tall { height: 340px; }

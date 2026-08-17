@@ -343,6 +343,27 @@
             const b2b = computeDiscountBreakdown(serverSummary);
             this.totals.b2bDiscount = b2b.b2b;
             this.totals.b2bMeta = b2b.b2bMeta;
+
+            // ERR-169. Two ways this page can be quietly wrong about a discount,
+            // and until now it reported neither — a null serverSummary read as
+            // "no B2B discount" is indistinguishable from a real absence.
+            //
+            // Nothing here corrects a figure: the backend re-prices the order at
+            // submit, so the customer is never charged these numbers. But an
+            // unannounced gap between what the cart promised and what checkout
+            // shows is how a shopper loses trust at the worst possible moment.
+            this.pricingDegraded = (typeof Cart !== 'undefined' && typeof Cart.isPricingDegraded === 'function')
+                ? Cart.isPricingDegraded()
+                : false;
+            this.discountShortfall = Number(b2b.shortfall) > 0 ? Number(b2b.shortfall) : 0;
+            if (this.pricingDegraded) {
+                DebugLog.error('Checkout: no server pricing (' + (Cart.pricingState || 'unknown')
+                    + ') — volume discounts are NOT reflected in the figures on screen.');
+            }
+            if (this.discountShortfall > 0) {
+                DebugLog.error('Checkout: discount rows exceed the deducted aggregate by '
+                    + this.discountShortfall + ' — a discount is displayed that is not in the total.');
+            }
         },
 
         // Update shipping cost and UI info (ETA, spend-more, split shipment)

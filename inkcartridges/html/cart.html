@@ -223,6 +223,14 @@
                              actually failed — never while merely in flight. -->
                         <p class="alert alert--warning" id="cart-removal-notice" role="status" aria-live="polite" hidden></p>
 
+                        <!-- Durable disclosure for prices we could not confirm, and for a
+                             discount that is displayed but not deducted (ERR-169). Written
+                             only by Cart._renderPricingNotice(), which is called from
+                             _renderDiscountRows() so BOTH summary paths reach it. Never
+                             shown while a re-price is merely in flight — that is what
+                             .cart-layout--syncing is for. -->
+                        <p class="alert alert--warning" id="cart-pricing-notice" role="status" aria-live="polite" hidden></p>
+
                         <div class="cart-items" id="cart-items">
                         </div>
 
@@ -491,7 +499,7 @@
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/cart.js?v=4de8d119"></script>
+    <script defer src="/js/cart.js?v=32e0bddc"></script>
     <script defer src="/js/cart-analytics.js?v=b2724a74"></script>
     <script defer src="/js/cart-page.js?v=ec3e4d49"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>

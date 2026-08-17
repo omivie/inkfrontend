@@ -14,6 +14,7 @@
     "audit:searchclick": "node scripts/audit-search-click-beacon.mjs",
     "audit:colours:static": "node scripts/audit-colour-vocabulary.mjs --static",
     "audit:edge-cache": "node scripts/probe-edge-cache.mjs",
+    "probe:order-discount": "node scripts/probe-order-discount.mjs",
     "probe:invoice-quote": "node scripts/probe-invoice-quote.mjs",
     "verify:business": "node scripts/verify-business-centre.mjs",
     "sweep:b2b": "node scripts/sweep-business-pricing.mjs",

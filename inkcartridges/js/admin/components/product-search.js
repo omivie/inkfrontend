@@ -100,32 +100,29 @@ export async function resolveSkus(codes) {
 /**
  * Search products for the picker.
  *
- * Supabase first — not just because it's faster (it skips the Render hop, same
- * reasoning as pages/products.js:722), but because cost_price is the whole point
- * of this picker now and there is NO evidence /api/admin/products returns it:
- * the Products page reads cost_price from a direct Supabase select, and only
- * falls back to HTTP for margin/image/stock filters. Selecting the column
- * explicitly here is what guarantees it reaches onPick.
+ * HTTP ONLY, deliberately (ERR-170).
  *
- * The HTTP path remains as a fallback so the picker still works (minus the cost
- * auto-fill) when Supabase is unavailable. And even then COGS stays correct: the
- * backend snapshots products.cost_price at save time when the client sends none.
+ * This used to query Supabase directly and select `cost_price`, on the stated
+ * premise that "there is NO evidence /api/admin/products returns it". That
+ * premise was wrong — measured live 2026-08-17, GET /api/admin/products returns
+ * `cost_price` on every row (and `profit_ex_gst` / `margin_pct` besides), for
+ * both the list and the detail route, gated to super_admin.
+ *
+ * Why that matters more than the saved Render hop: Postgres column grants cannot
+ * tell an admin apart from a shopper inside the `authenticated` role, so as long
+ * as ANY admin surface reads `cost_price` through the public Supabase client, the
+ * backend cannot revoke that column from `authenticated` — and until it does,
+ * every self-signup account can read our whole supplier-cost table. Routing this
+ * read through the admin API is what lets that revoke happen.
+ *
+ * Nothing is lost in the swap. Search parity was measured across exact-code and
+ * broad terms (identical result counts; exact-SKU lookups identical, which is
+ * what the picker is actually used for), cost reaches onPick exactly as before,
+ * and the `product_images(...)` join the Supabase query carried was already dead
+ * weight — resolveImg reads `images` / `primary_image` / `image_url` and never
+ * touched it.
  */
 async function searchProducts(q) {
-  const sb = (typeof Auth !== 'undefined' && Auth?.supabase) ? Auth.supabase : null;
-  const term = sbSafe(q);
-  if (sb && term) {
-    try {
-      const { data, error } = await sb
-        .from('products')
-        .select('id, sku, name, retail_price, cost_price, image_url, product_images(path, is_primary, sort_order)')
-        .or(`name.ilike.%${term}%,sku.ilike.%${term}%`)
-        .limit(12);
-      if (!error && Array.isArray(data) && data.length) return data;
-    } catch (err) {
-      window.DebugLog?.warn?.('[ProductSearch] Supabase lookup failed, falling back to HTTP', err?.message || err);
-    }
-  }
   const data = await AdminAPI.getProducts({ search: q }, 1, 12);
   return data?.products || data?.items || [];
 }

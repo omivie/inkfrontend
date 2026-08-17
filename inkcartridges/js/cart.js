@@ -60,6 +60,27 @@
  * only a B2B discount reported discount === b2b_discount === 4.88), so the B2B
  * row must be netted out of "You Save" exactly like loyalty.
  *
+ * ── THE ASSUMPTION THIS FUNCTION USED TO HIDE (ERR-169) ─────────────────────
+ *
+ * Everything above rests on `summary.discount` INCLUDING the volume and loyalty
+ * amounts. That was verified live and is recorded above — but it was only ever
+ * an assumption, and the code was written so that breaking it was invisible.
+ *
+ * The rows the shopper SEES come from the components (`b2b`, `loyalty`). The
+ * total the shopper PAYS is computed elsewhere as `subtotal − aggregate`. If the
+ * aggregate ever stops containing a component, those two disagree — the volume
+ * row still says −$4.80 while the total deducts nothing — and the old
+ * `Math.max(0, aggregate − loyalty − b2b)` clamped the contradiction to a tidy
+ * zero on the way past. A displayed discount that is not in the total, with no
+ * error on any channel. That is the absence-read-as-healthy-zero shape of
+ * ERR-063/068, and the clamp was the silencer.
+ *
+ * So the clamp stays (a negative "You Save" row would be worse), but the amount
+ * it swallowed is now RETURNED as `shortfall`. Partial-ness belongs in the
+ * return value, not in a comment. Callers must surface it; they must NOT
+ * silently correct the total, because the backend owns the money and the
+ * customer sees its figures verbatim.
+ *
  * Pure: no DOM, no I/O. Shared by cart.js, checkout-page.js, payment-page.js
  * and order-confirmation-page.js so the four summaries cannot drift apart.
  *
@@ -67,7 +88,10 @@
  * @param {number} [total]       aggregate discount; defaults to summary.discount
  * @param {object|number|null} [b2bBlock]  the response-level `volume_discount`
  * @returns {{loyalty:number, b2b:number, other:number, total:number,
- *            b2bMeta:(object|null)}}
+ *            b2bMeta:(object|null), shortfall:number}}
+ *          `shortfall` > 0 means the named rows sum to MORE than the aggregate
+ *          being deducted — i.e. we are about to show a discount we are not
+ *          taking off. 0 when sound.
  */
 function computeDiscountBreakdown(summary, total, b2bBlock) {
     const s = summary && typeof summary === 'object' ? summary : {};
@@ -91,12 +115,19 @@ function computeDiscountBreakdown(summary, total, b2bBlock) {
     const b2b = num(b2bMeta && b2bMeta.discount_amount)
         || num(s.volume_discount) || num(b2bBlock);
 
+    // The components we are about to DISPLAY, against the aggregate that will
+    // actually be DEDUCTED. A negative residual is not a rounding artefact — it
+    // means one of the named rows is not inside the aggregate at all.
+    // Half a cent of tolerance keeps float noise out of it.
+    const residual = aggregate - loyalty - b2b;
+
     return {
         loyalty,
         b2b,
-        other: Math.max(0, aggregate - loyalty - b2b),
+        other: Math.max(0, residual),
         total: aggregate,
-        b2bMeta
+        b2bMeta,
+        shortfall: residual < -0.005 ? Math.abs(residual) : 0
     };
 }
 if (typeof window !== 'undefined') window.computeDiscountBreakdown = computeDiscountBreakdown;
@@ -452,6 +483,38 @@ if (typeof window !== 'undefined') {
     window.classifyRemovalOutcome = classifyRemovalOutcome;
 }
 
+/**
+ * Why we do not have server pricing right now (ERR-169).
+ *
+ * `serverSummary === null` used to be the whole story, and it was told at eight
+ * different sites meaning two completely different things: four genuine failures
+ * and four deliberate invalidations while a mutation is confirmed. Downstream
+ * they were indistinguishable, so nothing could tell "we could not price this
+ * cart" apart from "we are about to re-price it", and the UI showed neither.
+ *
+ * DebugLog is a no-op outside localhost, so in production the failures were
+ * silent on every channel. A shopper in that state is shown local math — which
+ * has no volume discount in it, because the ladder lives on the server response —
+ * and so sees prices that checkout will beat.
+ *
+ * DEGRADED reasons are the ones that warrant telling the shopper. PENDING is
+ * not a failure and must never raise the notice, or every normal quantity change
+ * flashes a warning.
+ */
+const PRICING = {
+    OK: 'ok',
+    FETCH_FAILED: 'fetch-failed',
+    SERVER_EMPTY: 'server-empty',
+    STALE_BUDGET: 'stale-budget',
+    NO_API: 'no-api',
+    LOCAL_ONLY: 'local-only',
+    PENDING: 'pending',
+};
+const PRICING_DEGRADED = new Set([
+    PRICING.FETCH_FAILED, PRICING.SERVER_EMPTY, PRICING.STALE_BUDGET, PRICING.NO_API,
+]);
+if (typeof window !== 'undefined') window.PRICING = PRICING;
+
 const Cart = {
     // Storage key for guest cart data
     STORAGE_KEY: 'inkcartridges_cart',
@@ -462,6 +525,14 @@ const Cart = {
     // Server-provided summary (subtotal, shipping, discount, total)
     // This is the source of truth for all pricing display when available.
     serverSummary: null,
+
+    // WHY serverSummary is null, when it is. One of the PRICING.* reasons above.
+    // Never read this to decide a price — only to decide what to SAY about one.
+    pricingState: PRICING.LOCAL_ONLY,
+
+    // Bounded one-shot re-fetch after a failed cart GET, mirroring the
+    // _staleRefetches budget. Reset on every successful adoption.
+    _pricingRefetches: 0,
 
     // Conversion signals from the cart response (mobile-ux-audit-jul2026 §6):
     // { trust_signals, delivery_estimate, free_shipping_unlock, cart_saved_until }.
@@ -1066,6 +1137,56 @@ const Cart = {
     },
 
     /**
+     * Render the durable disclosure for pricing we could not confirm (ERR-169).
+     *
+     * TWO different faults land here, and they need different words:
+     *
+     *   1. DEGRADED — we have no server summary at all. Every figure on screen is
+     *      local arithmetic over cached prices, and local arithmetic has NO volume
+     *      discount in it, because the ladder only exists on the server response.
+     *      The shopper is being shown prices that checkout will beat.
+     *   2. SHORTFALL — we DO have a summary, but the discount rows we are about to
+     *      display sum to more than the aggregate the total deducts. A discount is
+     *      on screen that is not in the price. This is the reported symptom.
+     *
+     * In both cases we state the problem and leave the numbers alone. The backend
+     * owns the money; the customer sees its figures verbatim and a mismatch is
+     * disclosed, never silently recomputed (see order-totals.js's `footing`).
+     *
+     * Never shown while merely in flight — `loading` and PRICING.PENDING both
+     * suppress it, or every quantity change flashes a warning. That is what the
+     * `cart-layout--syncing` class is for.
+     *
+     * @param {number} [shortfall] from computeDiscountBreakdown(); 0/absent = sound
+     */
+    _renderPricingNotice(shortfall) {
+        const el = document.getElementById('cart-pricing-notice');
+        if (!el) return;
+
+        const gap = Number(shortfall);
+        const hasShortfall = Number.isFinite(gap) && gap > 0;
+        const degraded = this.isPricingDegraded() && this.items.length > 0 && !this.loading;
+
+        if (!degraded && !hasShortfall) {
+            el.hidden = true;
+            el.textContent = '';
+            return;
+        }
+
+        // A shortfall is the more specific and more alarming of the two — it means
+        // a number on this page is wrong right now — so it wins the copy.
+        el.innerHTML = hasShortfall
+            ? '<strong>These totals don\'t add up.</strong> '
+                + 'A discount of ' + Security.escapeHtml(formatPrice(gap)) + ' is shown below but isn\'t '
+                + 'coming off the total. Please refresh before checking out — and if it persists, '
+                + 'contact us rather than paying this amount.'
+            : '<strong>We couldn\'t confirm today\'s prices.</strong> '
+                + 'You\'re seeing your last saved prices, which may not include volume discounts. '
+                + 'Your total will be recalculated at checkout. Refresh to try again.';
+        el.hidden = false;
+    },
+
+    /**
      * Initialize cart - SERVER FIRST
      * Waits for Auth to initialize before loading cart
      */
@@ -1109,7 +1230,7 @@ const Cart = {
                     this.items = [];
                     this.appliedCoupon = null;
                     this.discountAmount = 0;
-                    this.serverSummary = null;
+                    this._losePricing(PRICING.LOCAL_ONLY);
                     this.isAuthenticated = false;
                     this.validationState = 'unknown';
                     this.validationErrors = [];
@@ -1223,9 +1344,9 @@ const Cart = {
         // Normalise the volume-discount block at the boundary. The live API puts
         // the metadata OBJECT at the response top level and leaves
         // `summary.volume_discount` as a bare NUMBER (the amount). Folding the
-        // object into the summary here means every one of the ~15
-        // `this.serverSummary = parsed.summary` assignments carries the company
-        // name and floored_line_count for free, instead of threading a new field
+        // object into the summary here means every adoption of a parsed summary
+        // (they all go through _adoptServerSummary now) carries the company name
+        // and floored_line_count for free, instead of threading a new field
         // through all of them. The bare number is kept when no object is sent.
         // See computeDiscountBreakdown() above. (ERR-110)
         //
@@ -1356,14 +1477,16 @@ const Cart = {
                             // If server has items, use them (with fresh prices)
                             if (parsed.items.length > 0) {
                                 this.items = parsed.items;
-                                this.serverSummary = parsed.summary;
+                                this._adoptServerSummary(parsed.summary);
                                 this.appliedCoupon = parsed.couponCode;
                                 this.discountAmount = parsed.discountAmount;
                                 this.saveToLocalStorage();
                                 this.updateUI();
                             } else if (localItemCount > 0) {
                                 // Server empty but localStorage has items - keep localStorage
-                                this.serverSummary = null; // No server totals for local-only items
+                                // The server knows nothing about these items, so it cannot price
+                                // them — and the volume ladder lives on its response. Degraded.
+                                this._losePricing(PRICING.SERVER_EMPTY);
                                 this.updateUI();
                                 // Sync localStorage items to server in background
                                 const localItems = this.getGuestCartItems();
@@ -1385,7 +1508,7 @@ const Cart = {
                                         refreshed.items = this._filterPendingRemovals(refreshed.items);
                                         if (refreshed.items.length > 0) {
                                             this.items = refreshed.items;
-                                            this.serverSummary = refreshed.summary;
+                                            this._adoptServerSummary(refreshed.summary);
                                             this.saveToLocalStorage();
                                             this.updateUI();
                                         }
@@ -1394,14 +1517,16 @@ const Cart = {
                                     DebugLog.warn('Failed to refresh after sync:', e);
                                 }
                             } else {
-                                this.serverSummary = null;
+                                // Both sides empty — nothing to price and nothing to warn about.
+                                this._losePricing(PRICING.LOCAL_ONLY);
                                 this.updateUI();
                             }
                         }
                     } catch (error) {
                         DebugLog.warn('Could not load guest cart from server:', error.message);
                         // Keep localStorage data, but mark that we have no server totals
-                        this.serverSummary = null;
+                        this._losePricing(PRICING.FETCH_FAILED);
+                        await this._retryPricingOnce('loadCart(guest)');
                     }
                 }
             } finally {
@@ -1410,7 +1535,7 @@ const Cart = {
                 this.updateUI();
             }
         } else {
-            this.serverSummary = null;
+            this._losePricing(PRICING.NO_API);
             this.loading = false;
             this.updateUI();
         }
@@ -1454,7 +1579,7 @@ const Cart = {
                 // Guard: don't clear local items if server unexpectedly returns empty
                 if (parsed.items.length === 0 && this._filterPendingRemovals(this.items).length > 0) {
                     DebugLog.warn('Server returned empty cart — keeping local items as fallback');
-                    this.serverSummary = null;
+                    this._losePricing(PRICING.SERVER_EMPTY);
                     this.updateUI();
                     return;
                 }
@@ -1481,7 +1606,7 @@ const Cart = {
                     await this.loadFromServer();
                     this.saveToLocalStorage();
                 }
-                this.serverSummary = parsed.summary;
+                this._adoptServerSummary(parsed.summary);
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
                 this.loyalty = parsed.loyalty;
@@ -1492,8 +1617,9 @@ const Cart = {
             }
         } catch (error) {
             DebugLog.warn('Could not sync cart with server:', error.message);
-            this.serverSummary = null;
-            // Keep using localStorage data
+            this._losePricing(PRICING.FETCH_FAILED);
+            // Keep using localStorage data — but try once more before settling for it.
+            await this._retryPricingOnce('syncWithServer');
         }
     },
 
@@ -1531,7 +1657,7 @@ const Cart = {
                 parsed.items = this._filterPendingRemovals(parsed.items);
 
                 this.items = parsed.items;
-                this.serverSummary = parsed.summary;
+                this._adoptServerSummary(parsed.summary);
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
                 this.loyalty = parsed.loyalty;
@@ -1539,8 +1665,9 @@ const Cart = {
             }
         } catch (error) {
             DebugLog.error('Failed to load cart from server:', error);
-            this.serverSummary = null;
+            this._losePricing(PRICING.FETCH_FAILED);
             // Keep existing items on failure (don't clear)
+            await this._retryPricingOnce('loadFromServer');
         }
     },
 
@@ -1558,7 +1685,43 @@ const Cart = {
             return this.loadFromServer();
         }
         DebugLog.warn('Cart: stale-snapshot refetch budget exhausted — keeping local items without server totals');
-        this.serverSummary = null;
+        this._losePricing(PRICING.STALE_BUDGET);
+    },
+
+    /**
+     * One bounded re-fetch after a cart GET failed (ERR-169).
+     *
+     * `API._fetchWithAuth` already retries the transport (429 ladder, transient
+     * 5xx, network blips), so by the time we land in a catch the request has
+     * genuinely given up. But the common real-world cause is a Render cold start
+     * that outlived the timeout, and a single retry a moment later usually wins —
+     * the difference between a shopper seeing their volume discount and not.
+     *
+     * Bounded to ONE attempt, mirroring the _staleRefetches idiom. The counter is
+     * incremented BEFORE the call, so loadFromServer's own catch re-entering here
+     * terminates instead of recursing. Reset on every successful adoption, so a
+     * later unrelated failure still gets its own retry.
+     *
+     * Returns whether pricing was recovered — the caller may want to know, and a
+     * bare `await` that silently either worked or didn't is the habit this whole
+     * change exists to break.
+     */
+    async _retryPricingOnce(where) {
+        if (this._pricingRefetches >= 1) return false;
+        if (typeof API === 'undefined') return false;
+        this._pricingRefetches++;
+        DebugLog.warn('Cart: retrying the cart fetch once after a failure in ' + where);
+        try {
+            await this.loadFromServer();
+        } catch (e) {
+            DebugLog.error('Cart: pricing retry threw:', e);
+        }
+        const recovered = !!this.hasServerPricing();
+        if (recovered) {
+            DebugLog.log('Cart: pricing recovered on retry after ' + where);
+            this.updateUI();
+        }
+        return recovered;
     },
 
     /**
@@ -1573,11 +1736,11 @@ const Cart = {
             // item flashing back before the server reconcile lands. Synchronous:
             // no await is introduced ahead of the first render (ERR-121).
             this.items = this._filterPendingRemovals(items);
-            this.serverSummary = null; // localStorage has no server totals
+            this._losePricing(PRICING.LOCAL_ONLY); // localStorage has no server totals
         } catch (e) {
             DebugLog.error('Failed to load guest cart:', e);
             this.items = [];
-            this.serverSummary = null;
+            this._losePricing(PRICING.LOCAL_ONLY);
         }
     },
 
@@ -2080,7 +2243,7 @@ const Cart = {
                         if (response.data?.items) {
                             const parsed = this._parseServerCart(response.data);
                             this.items = parsed.items;
-                            this.serverSummary = parsed.summary;
+                            this._adoptServerSummary(parsed.summary);
                             this.appliedCoupon = parsed.couponCode;
                             this.discountAmount = parsed.discountAmount;
                         } else {
@@ -2215,7 +2378,14 @@ const Cart = {
      * @param {number} discount  aggregate discount (Cart.getDiscount())
      */
     _renderDiscountRows: function(discount) {
-        const { loyalty, b2b, other, b2bMeta } = computeDiscountBreakdown(this.serverSummary, discount);
+        const { loyalty, b2b, other, b2bMeta, shortfall } = computeDiscountBreakdown(this.serverSummary, discount);
+
+        // The footing gate (ERR-169). Called from HERE rather than from the two
+        // summary renderers because this is the one function both of them share —
+        // the same reason the discount rows themselves were centralised (ERR-110).
+        // A gate wired into only one of the two paths is a gate that passes by
+        // being skipped.
+        this._renderPricingNotice(shortfall);
 
         const setRow = (rowId, valueId, amount) => {
             const row = document.getElementById(rowId);
@@ -2397,7 +2567,7 @@ const Cart = {
         }
 
         // Invalidate server summary (will be refreshed after server confirms)
-        this.serverSummary = null;
+        this._losePricing(PRICING.PENDING);
         this._mutationEpoch++;
 
         // Always save to localStorage as backup (for cross-origin cookie issues)
@@ -2614,7 +2784,7 @@ const Cart = {
             // Single cap. This clamped to 99 while the six other sites used 100, so a
             // programmatic set-to-100 silently became 99.
             item.quantity = Math.min(quantity, this.MAX_QUANTITY);
-            this.serverSummary = null; // Invalidate until server confirms
+            this._losePricing(PRICING.PENDING); // Invalidate until server confirms
             this._mutationEpoch++;
             this.saveToLocalStorage();
             this.updateUI();
@@ -2701,7 +2871,7 @@ const Cart = {
         this.items = this.items.filter(function(item) {
             return item.key !== itemId && item.id !== itemId;
         });
-        this.serverSummary = null; // Invalidate until server confirms
+        this._losePricing(PRICING.PENDING); // Invalidate until server confirms
         this._mutationEpoch++;
         this.saveToLocalStorage();
         this.updateUI();
@@ -2821,7 +2991,7 @@ const Cart = {
         this.items = [];
         this.appliedCoupon = null;
         this.discountAmount = 0;
-        this.serverSummary = null;
+        this._losePricing(PRICING.PENDING);
         this._mutationEpoch++;
         // NOTE: the localStorage mirror is NOT dropped here. It used to be, before
         // the server had confirmed anything, so a failed clear left the rollback
@@ -2877,6 +3047,50 @@ const Cart = {
      */
     hasServerPricing: function() {
         return this.serverSummary && this.serverSummary.subtotal !== undefined;
+    },
+
+    /**
+     * Adopt a server summary. The ONE place `serverSummary` becomes non-null.
+     *
+     * Centralised so the reason can never drift out of step with the value —
+     * previously ~6 sites assigned the summary and 8 nulled it, and nothing tied
+     * the two together.
+     */
+    _adoptServerSummary(summary) {
+        this.serverSummary = summary;
+        this.pricingState = PRICING.OK;
+        this._pricingRefetches = 0;
+        return summary;
+    },
+
+    /**
+     * Drop server pricing, RECORDING WHY.
+     *
+     * Deliberately not defaulted: every caller must state its reason, so a new
+     * failure path cannot inherit "pending" and vanish from the UI. Callers pass
+     * PRICING.PENDING when they are invalidating ahead of a confirmed mutation —
+     * that is not a failure and raises no notice.
+     */
+    _losePricing(reason) {
+        this.serverSummary = null;
+        this.pricingState = reason;
+        if (PRICING_DEGRADED.has(reason)) {
+            // DebugLog is a no-op in production, which is exactly why this state
+            // went unseen for so long. The durable channel is the on-page notice
+            // rendered by _renderPricingNotice(); this line is for local dev.
+            DebugLog.error('Cart: no server pricing (' + reason + ') — showing local estimates, '
+                + 'which do NOT include volume discounts.');
+        }
+    },
+
+    /**
+     * Are we showing prices we could not confirm with the server?
+     *
+     * TRUE only for genuine failures. An in-flight re-price (PENDING) is not a
+     * degraded state and must not be reported as one.
+     */
+    isPricingDegraded: function() {
+        return !this.hasServerPricing() && PRICING_DEGRADED.has(this.pricingState);
     },
 
     /**

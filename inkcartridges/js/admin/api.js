@@ -325,6 +325,12 @@ async function analyticsHttpGet(path, signal) {
   }
 }
 
+/**
+ * Product columns the ribbon admin reads. Deliberately EXCLUDES every
+ * cost-bearing column — cost_price, profit_ex_gst, margin_pct — see ERR-170.
+ */
+const RIBBON_PRODUCT_COLS = 'id, sku, brand_id, name, manufacturer_part_number, retail_price, compare_price, stock_quantity, low_stock_threshold, stock_status, color, color_hex, page_yield, barcode, category, weight_kg, image_url, product_type, is_active, is_featured, is_reviewed, reviewed_at, reviewed_by_email, import_locked, source, pack_type, supplier, supplier_sku, description, description_html, compatible_devices_html, related_product_skus, slug, meta_title, meta_description, meta_keywords, tags, internal_notes, ribbon_brand_id, created_at, updated_at';
+
 const AdminAPI = {
   // ---- Orders ----
   async getOrders(filters = {}, page = 1, limit = 20, signal = null) {
@@ -1464,11 +1470,25 @@ const AdminAPI = {
   },
 
   // ---- Ribbon Products (Supabase direct — includes new columns) ----
+  //
+  // NB both methods below are currently UNREFERENCED (verified repo-wide,
+  // 2026-08-17). They are kept rather than deleted because they are public API
+  // surface, but they are narrowed to an explicit column list so that re-wiring
+  // one cannot silently reintroduce the cost leak they used to carry.
+
   async getRibbonProducts(filters = {}) {
     try {
       const sb = this._sb();
       if (!sb) return null;
-      const selectCols = '*, ribbon_brands!products_ribbon_brand_id_fkey(id, name, slug, image_url)';
+      // EXPLICIT COLUMNS, NOT `*` (ERR-170). `products` holds cost_price,
+      // profit_ex_gst and margin_pct — each of which recovers our supplier cost —
+      // and a `select('*')` here drags all three through the public Supabase
+      // client. Column grants cannot separate an admin from a shopper inside the
+      // `authenticated` role, so every such read is what blocks the backend from
+      // revoking those columns. Enumerated so the exposure cannot creep back in
+      // when someone adds a column to the table.
+      const selectCols = RIBBON_PRODUCT_COLS
+        + ', ribbon_brands!products_ribbon_brand_id_fkey(id, name, slug, image_url)';
       let query = sb.from('products').select(selectCols, { count: 'exact' })
         .in('product_type', ['printer_ribbon', 'typewriter_ribbon', 'correction_tape']);
       if (filters.ribbon_brand_id) {
@@ -1509,7 +1529,15 @@ const AdminAPI = {
     try {
       const sb = this._sb();
       if (!sb) return null;
-      const { data, error } = await sb.from('products').select('*, ribbon_brands!products_ribbon_brand_id_fkey(id, name, slug)')
+      // EXPLICIT COLUMNS, NOT `*` (ERR-170). `products` holds cost_price,
+      // profit_ex_gst and margin_pct — each of which recovers our supplier cost —
+      // and a `select('*')` here drags all three through the public Supabase
+      // client. Column grants cannot separate an admin from a shopper inside the
+      // `authenticated` role, so every such read is what blocks the backend from
+      // revoking those columns. Enumerated so the exposure cannot creep back in
+      // when someone adds a column to the table.
+      const { data, error } = await sb.from('products')
+        .select(RIBBON_PRODUCT_COLS + ', ribbon_brands!products_ribbon_brand_id_fkey(id, name, slug)')
         .eq('id', productId).single();
       if (error) throw error;
       if (data) {

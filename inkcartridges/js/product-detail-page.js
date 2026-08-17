@@ -1801,10 +1801,31 @@
                                     if (!seenCand.has(c)) { seenCand.add(c); candidates.push(c); }
                                 }
                             }
-                            const { data: manualProducts } = await sb.from('products')
-                                .select('*')
+                            // EXPLICIT COLUMNS, NOT `*` (ERR-170). `products` holds
+                            // `cost_price`, and the backend is revoking that column from
+                            // the public `anon` role (migration 137). Under column-level
+                            // privileges PostgREST fails the WHOLE `select('*')` with
+                            // 42501, so a signed-OUT visitor would get nothing here while
+                            // a signed-in one still worked — the hardest kind of bug to
+                            // see. Every column below is verified to exist on the table;
+                            // a name that doesn't is a hard 400, which is strictly worse
+                            // than the over-broad `*` this replaces. This is exactly what
+                            // Products.renderCard and its helpers read, and no more.
+                            const RELATED_COLS = 'id, sku, name, slug, retail_price, compare_price, '
+                                + 'image_url, color, color_hex, pack_type, source, product_type, '
+                                + 'stock_quantity, stock_status, is_active, brand:brands(name, slug)';
+                            // The error was DISCARDED here. A permissions failure returned
+                            // { data: null }, optional chaining swallowed it, and the rail
+                            // rendered its empty state — indistinguishable from "the owner
+                            // curated nothing". A fetch that failed is not an empty result.
+                            const { data: manualProducts, error: manualError } = await sb.from('products')
+                                .select(RELATED_COLS)
                                 .in('sku', candidates)
                                 .eq('is_active', true);
+                            if (manualError) {
+                                fetchFailed = true;
+                                DebugLog.error('Curated related-products lookup failed:', manualError.message || manualError);
+                            }
                             if (manualProducts?.length) {
                                 const byUpper = {};
                                 manualProducts.forEach(p => { byUpper[String(p.sku).toUpperCase()] = p; });
@@ -1887,8 +1908,17 @@
                 //     singletons (mono toners, drums, label tapes).
                 //   fetch FAILED → say so and offer a retry. Hiding here would
                 //     claim "this product has no relatives", which we don't know.
+                // A FAILED lookup is not an empty result — and that is true for
+                // ribbons too (ERR-170). Ribbons were excluded from this branch
+                // entirely, so when the curated query errored the rail fell through
+                // and rendered its empty state, which reads as "the owner curated
+                // nothing" — a claim we have no basis for. Checked BEFORE the
+                // category test so the error pane is reachable from both paths.
+                if (related.length === 0 && fetchFailed) {
+                    this._renderRelatedError(section, info);
+                    return;
+                }
                 if (related.length === 0 && info.category !== 'ribbon') {
-                    if (fetchFailed) this._renderRelatedError(section, info);
                     return;
                 }
 

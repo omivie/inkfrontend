@@ -41,6 +41,153 @@ describing the same incident.
 
 ---
 
+## ERR-168 — Every discounted order overstated its profit, and reported $4.00 of GST on a $116.60 sale — **RESOLVED (2026-08-17)**
+
+**Date**: 2026-08-17
+**Context**: backend brief `order-profit-net-of-discount-aug2026.md`. Reported as a profit-column
+overstatement; it was that, plus a GST row nobody had looked at.
+
+**Root cause.** `utils/order-profit.js` built an order's revenue as `Σ(unit_price × qty)` over the
+line items. Line items carry the price *before* any order-level discount. Since public volume
+pricing shipped (Aug 2026) most orders also carry `orders.discount_amount` — the GST-INCLUSIVE
+aggregate of volume + coupon + loyalty — and nothing in the admin read it. `discount_amount`
+appeared **nowhere** under `js/admin/`. The data had been arriving on every payload and being
+ignored: `AdminAPI.getOrder` returns the raw order row with no field whitelist.
+
+So profit was overstated by `discount / 1.15` on every discounted order — $11.22 on the proof
+order `20260817000002`.
+
+**The half the brief did not mention.** `computeProfitBreakdown` derives
+`gstCollected = customerPaid − revenue`. `customerPaid` (the order total) has ALWAYS been stored
+net of the discount, while revenue was gross — so the two sides of that subtraction sat on
+different bases. The waterfall reported **$4.00 of GST collected on a $116.60 sale**; the true
+figure is $15.22. Netting the discount out of revenue puts both sides back on one basis and fixes
+that row for free, which is the argument for treating a discount as a REVENUE REDUCTION rather
+than as another deduction alongside the Stripe fee. Routing it through the cost side would have
+fixed the profit line and left the GST line exactly as wrong.
+
+**Fix.** `orderDiscountParts()` in `utils/profitability.js` (mirrors `absorbedShippingParts` — anchor
+on the incl-GST figure, derive `gst = incl × 3/23`, derive `exGst = incl − gst` so the waterfall
+foots regardless of rounding). `orderProfitFromDetail` nets it out and apportions it across the line
+entries by ex-GST revenue share, BEFORE both `computeLineProfits` and `computeProfitBreakdown`, so
+the per-line Profit column and the take-home cannot disagree (ERR-113). `totalRevenueExGst` is
+re-totalled from the apportioned lines rather than computed as `gross − discount`: two
+independently-derived totals drift by a float ulp, which is enough to break the
+`Σ lineProfits === netProfit` invariant.
+
+**Three UI decisions worth keeping:**
+1. The items foot now shows `Line items $112.60` → `Order discount −$11.22` → `Revenue $101.38`.
+   Without it the Price foot no longer relates to the unit prices above it.
+2. **The cash waterfall gets NO discount row**, deliberately. It is anchored on `Customer paid`,
+   which is already net of the discount; a `−discount` row there would double-count and stop
+   Take-home footing. The brief's §4 mockup assumed a revenue-first breakdown and would have walked
+   into exactly that. It is rendered as a qualifier on the opening figure instead.
+3. Adjacent lie fixed: the UNKNOWN copy hardcoded "N of M items have no recorded supplier cost",
+   but UNKNOWN is also reachable with `missingCostCount === 0` (the `!breakdown` branch, and now a
+   discount at or above the line total). It printed "0 of 2 items have…". Now branches on the cause.
+
+**Verification.** `npm run probe:order-discount` — a new READ-ONLY live probe. All four orders the
+brief named reconcile: 12.90 / 8.15 / 6.62 / 2.40, and realised revenue reproduces the charged total
+to within a cent. Confirmed in the real admin UI: revenue $101.38, take-home $37.91 → $26.69.
+
+**Backend note:** `loyalty_discount_amount` is **absent** on the admin order route, though the brief
+said it was exposed. Labelling only — the money comes from the aggregate — so it degrades to no
+caption. Reported, not blocking.
+
+**Tests**: `tests/admin-order-profit-discount-aug2026.test.js` (28), incl. an ENROLMENT sweep
+asserting `order-profit.js` is the only place in `js/admin/` that accumulates order revenue — the
+ERR-150/160 lesson that "every surface calls X" is a list nobody maintains.
+
+---
+
+## ERR-169 — A discount could be displayed and not deducted, and `Math.max(0, …)` was the silencer — **RESOLVED (2026-08-17)**
+
+**Date**: 2026-08-17
+**Context**: the owner reported "the discounts on bulk orders are showing, however they are not
+added into the total price at the end." The backend investigated and concluded the cart was fine
+and the screenshot showed a stale localStorage state. The cart *was* fine that day. The mechanism
+that produces exactly that symptom was still there, and was invisible by construction.
+
+**Root cause.** `cart.js` `computeDiscountBreakdown` ended with:
+
+```js
+other: Math.max(0, aggregate - loyalty - b2b)
+```
+
+The rows the shopper SEES are the components (`b2b`, `loyalty`). The total the shopper PAYS is
+computed elsewhere as `subtotal − aggregate`. The whole design rests on `summary.discount`
+containing the components — recorded as verified-live in a comment, and checked nowhere. The moment
+it does not hold, the volume row still renders −$4.80 while the total deducts nothing, and the
+clamp flattens the contradiction to a tidy zero on the way past. Absence read as a healthy zero,
+the ERR-063/068/149 shape, with the clamp as the silencer.
+
+**Second fault, same notice.** `serverSummary = null` was set at **eight** sites meaning two
+different things — four genuine failures and four deliberate invalidations pending a mutation — and
+carried no reason, so nothing downstream could tell "we could not price this cart" from "we are
+about to re-price it". In production both were silent on every channel: `DebugLog` is a **no-op
+outside localhost**, and `Cart.isUsingEstimatedPrices()` had **zero callers** in the entire repo
+despite a docblock claiming checkout should be blocked on it. A shopper in that state is shown
+local arithmetic, and local arithmetic contains no volume discount at all, because the ladder only
+exists on the server response — so they see prices checkout will beat.
+
+**Fix.** The clamp stays (a negative "You Save" row would be worse) but what it swallowed is
+returned as `shortfall`. `PRICING.*` reasons replace the bare null, `_adoptServerSummary` /
+`_losePricing` are the only writers, `_losePricing` takes **no default reason** so a new failure
+path cannot inherit `PENDING` and vanish. One bounded re-fetch on a failed cart GET. A durable
+`#cart-pricing-notice` (cloned from the ERR-136 removal-notice pattern) rendered from
+`_renderDiscountRows` — the one function BOTH summary paths share, because those two drifted before
+(ERR-110) and a gate wired into one of them passes by being skipped.
+
+**Nothing is silently corrected.** The backend owns the money; a mismatch is disclosed, never
+recomputed on screen. And the local fallback is kept — this makes it loud, it does not delete it.
+
+**Tests**: `tests/cart-discount-footing-aug2026.test.js` (23).
+
+---
+
+## ERR-170 — Supplier cost was readable with the PUBLIC key, and the fix for it would have silently broken every curated ribbon rail — **RESOLVED (frontend) / OPEN (backend)** (2026-08-17)
+
+**Date**: 2026-08-17
+**Context**: backend brief §8 said migration 137 "revokes the column from `anon`" as done, and asked
+the frontend to prepare for phase 2.
+
+**Measured live, and the brief was wrong on the first point:** migration 137 has **not** landed.
+`cost_price` was still readable with the anon key that ships in the frontend bundle — one
+unauthenticated request returns **3,978 rows** of supplier cost and margin.
+
+**And revoking `cost_price` alone would not close it.** `products` also carries `profit_ex_gst` and
+`margin_pct`, both publicly readable, and each recovers the cost from the retail price
+(`122.43 − 56.33 = $66.10`). All three columns have to go.
+
+**The frontend trap.** `product-detail-page.js` resolved a ribbon's curated `related_product_skus`
+with `select('*')`. Under column-level privileges PostgREST fails the WHOLE wildcard select with
+42501 — so the moment the backend runs the revoke, that rail dies for **signed-out visitors only**
+(signed-in users are the `authenticated` role and keep working). Worse, the query **discarded its
+`error`**, so the failure rendered the empty state, which reads as "the owner curated nothing" — and
+the error pane was gated on `info.category !== 'ribbon'`, so even once the flag was set the ribbon
+path could never show it. Both halves fixed; the explicit column list was verified against the live
+schema first, because **nine** plausible-sounding fields (`in_stock`, `average_rating`,
+`review_count`, `canonical_url`, …) are API-computed and not table columns — an unknown column is a
+hard 400, strictly worse than the wildcard.
+
+**Ordering matters:** this fix must be DEPLOYED BEFORE the backend runs the revoke.
+
+**Phase-2 unblocking.** Three of four admin `cost_price` reads are migrated:
+`admin/api.js` `getRibbonProducts`/`getRibbonProduct` (both `select('*')`, both **unreferenced** —
+narrowed rather than deleted so re-wiring one cannot reopen the hole; the brief listed only one of
+them), and `components/product-search.js`, now REST-only — `/api/admin/products` returns
+`cost_price` on list and detail, contradicting that file's own comment claiming no evidence it did.
+
+**Still blocking (BF-044):** `pages/products.js` cannot drop it. Its Supabase branch exists because
+`/api/admin/products` cannot express three of the page's filters (pack, supplier, product-type
+group) and omits the sourcing fields the Supplier/Origin columns render. Dropping the column would
+blank the owner's Cost column on the DEFAULT view or silently unfilter the list.
+
+**Tests**: `tests/admin-supabase-cost-exposure-aug2026.test.js` (7, an enrolment sweep with one
+documented exception that must justify itself), `tests/pdp-related-select-columns-aug2026.test.js` (12).
+
+---
+
 ## ERR-167 — `window.Security` has never existed, so twelve escaping guards were an off switch — **RESOLVED (2026-08-17)**
 
 **Date**: 2026-08-17

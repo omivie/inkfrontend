@@ -381,3 +381,46 @@ test('computeLineProfits: absorbed courier drops the total and is allocated by r
   const dropSmall = noCourier.lineProfits[1] - withCourier.lineProfits[1];
   assert.ok(Math.abs(dropBig / dropSmall - 3) < 1e-9, `allocation ratio ${dropBig / dropSmall} ≠ 3`);
 });
+
+// ─── orderDiscountParts — order-level discount, GST-inclusive (ERR-168) ──────
+//
+// Added Aug 2026. `orders.discount_amount` is the aggregate of volume + coupon +
+// loyalty and is stored GST-INCLUSIVE, while revenue is ex-GST — so it has to be
+// converted before it can be netted out. This mirrors absorbedShippingParts()
+// exactly, and for the same reason: one statement of the GST convention, in the
+// module that owns the money math.
+
+test('orderDiscountParts: derives the GST inside a GST-inclusive amount (× 3/23)', () => {
+  const d = sandbox.orderDiscountParts(12.90);
+  assert.equal(d.applies, true);
+  assert.ok(Math.abs(d.gst - 12.90 * 3 / 23) < 1e-9, `gst ${d.gst}`);
+  assert.ok(Math.abs(d.exGst - 12.90 / 1.15) < 1e-9, `exGst ${d.exGst}`);
+  // exGst is derived by SUBTRACTION so the waterfall foots exactly, and must
+  // still equal the /1.15 form the backend brief states.
+  assert.ok(Math.abs((d.inclGst - d.gst) - d.exGst) < 1e-12, 'exGst must be incl − gst');
+});
+
+test('orderDiscountParts: the parts always reconstruct the whole', () => {
+  for (const amount of [0.01, 2.40, 6.62, 8.15, 12.90, 999.99]) {
+    const d = sandbox.orderDiscountParts(amount);
+    assert.ok(Math.abs(d.exGst + d.gst - d.inclGst) < 1e-12, `${amount} does not reconstruct`);
+  }
+});
+
+test('orderDiscountParts: absent/null/zero/negative means NO discount, not a $0 one', () => {
+  // Same LOUD-by-absence rule as absorbedShippingParts: callers gate on
+  // `applies`, so a field the backend never sent can never be read as a decision.
+  for (const v of [undefined, null, 0, -1, NaN, 'x', {}, []]) {
+    const d = sandbox.orderDiscountParts(v);
+    assert.equal(d.applies, false, `${JSON.stringify(v)} must not apply`);
+    assert.equal(d.exGst, 0);
+    assert.equal(d.gst, 0);
+    assert.equal(d.inclGst, 0);
+  }
+});
+
+test('orderDiscountParts: honours a custom GST rate, like every other helper here', () => {
+  const d = sandbox.orderDiscountParts(110, 0.10);
+  assert.ok(Math.abs(d.exGst - 100) < 1e-9, `exGst ${d.exGst}`);
+  assert.ok(Math.abs(d.gst - 10) < 1e-9, `gst ${d.gst}`);
+});

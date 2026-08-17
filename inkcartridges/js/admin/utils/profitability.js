@@ -73,6 +73,38 @@ function absorbedShippingParts(opts, gstRate = GST_RATE) {
   return { exGst, gst, inclGst };
 }
 
+/**
+ * Split an order-level discount into its GST parts.
+ *
+ * `orders.discount_amount` is the AGGREGATE of every discount applied to the
+ * order — volume pricing, coupon and loyalty — and the backend stores it
+ * GST-INCLUSIVE. There is no per-component column on the order row;
+ * `loyalty_discount_amount` is a subset of it, exposed only for labelling.
+ *
+ * Netting the aggregate is the right thing to do: all three reduce realised
+ * revenue identically for profit purposes.
+ *
+ * Convention matches absorbedShippingParts() deliberately — anchor on the
+ * incl-GST figure, derive the GST inside it (× rate/(1+rate) = × 3/23 at 15%),
+ * and derive exGst as incl − gst rather than incl / 1.15. The two are
+ * arithmetically identical; deriving by subtraction keeps the waterfall footing
+ * exactly regardless of rounding.
+ *
+ * Fail-soft & LOUD-by-absence: a missing, null, non-finite or non-positive
+ * amount yields all zeroes with applies:false. A discount that was never
+ * recorded must never invent a revenue reduction — and, just as importantly,
+ * `Number(null) === 0` must not be allowed to look like a real "$0 discount"
+ * decision. Callers read `applies`, not the amount.
+ */
+export function orderDiscountParts(discountInclGst, gstRate = GST_RATE) {
+  const inclGst = Number(discountInclGst);
+  if (!Number.isFinite(inclGst) || inclGst <= 0) {
+    return { applies: false, inclGst: 0, gst: 0, exGst: 0 };
+  }
+  const gst = inclGst * (gstRate / (1 + gstRate)); // GST inside a GST-incl amount
+  return { applies: true, inclGst, gst, exGst: inclGst - gst };
+}
+
 export function computeProfitability(row, gstRate = GST_RATE) {
   const retail = Number(row?.retail_price);
   const cost = Number(row?.cost_price);

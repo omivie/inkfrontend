@@ -119,6 +119,25 @@ function forgetProfit(id) {
  * other — is exactly how the dashboard once reported a clean bill of health off
  * a scan that never ran (ERR-074).
  */
+/**
+ * Muted "−$12.90" under a list row's Total, when the order carries one.
+ *
+ * Reads the LIST row directly — `discount_amount` and `coupon_code` ride every
+ * row since backend 52abc83, so this costs no request. Deliberately NOT owner-
+ * gated: a discount is customer money, not cost.
+ *
+ * Absent / null / 0 renders nothing at all. An order with no discount must look
+ * like an order with no discount, not like one discounted by $0.00.
+ */
+function orderDiscountSubline(r) {
+  const amount = Number(r?.discount_amount);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const code = r?.coupon_code ? String(r.coupon_code) : null;
+  const tip = `Volume pricing, coupon and loyalty combined — already deducted from this total.`
+    + (code ? ` Includes promo code ${code}.` : '');
+  return `<span class="order-discount-sub" title="${esc(tip)}">−${formatPrice(amount)}</span>`;
+}
+
 function profitCellHtml(row, info) {
   const id = esc(row.id);
   const open = (cls, title) =>
@@ -134,9 +153,16 @@ function profitCellHtml(row, info) {
       return `${open('order-profit--none', 'No line items recorded on this order, so there is nothing to cost.')}${MISSING}</span>`;
     case PROFIT_STATE.UNKNOWN: {
       const n = info.missingCostCount;
-      const tip = `${n} of ${info.itemCount} item${info.itemCount === 1 ? '' : 's'} `
-        + `${n === 1 ? 'has' : 'have'} no recorded supplier cost — profit can't be computed. `
-        + `It is UNKNOWN, not $0.`;
+      // Two causes, two sentences — see the modal's unknownFootTip for why this
+      // must not always blame a missing supplier cost.
+      const tip = n > 0
+        ? `${n} of ${info.itemCount} item${info.itemCount === 1 ? '' : 's'} `
+          + `${n === 1 ? 'has' : 'have'} no recorded supplier cost — profit can't be computed. `
+          + `It is UNKNOWN, not $0.`
+        : info.discountExceedsRevenue
+          ? `The recorded order discount is at or above this order's entire line total, so revenue `
+            + `and profit can't be stated. UNKNOWN, not $0 — check the order's discount_amount.`
+          : `This order's revenue can't be stated, so profit can't be computed. UNKNOWN, not $0.`;
       return `${open('order-profit--none', tip)}${MISSING}</span>`;
     }
     case PROFIT_STATE.FAILED:
@@ -149,6 +175,13 @@ function profitCellHtml(row, info) {
     ? 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. Invoiced sale paid by bank transfer, so no card fee.'
     : 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount.')
     + (info.absorbedApplies ? ' Absorbed courier cost (free shipping) is subtracted.' : '')
+    // Revenue here is REALISED revenue — the line sum less the order discount
+    // (ERR-168). Naming the amount stops this figure looking wrong beside a Total
+    // the operator can see is lower than the line prices.
+    + (info.discountApplies
+      ? ` Revenue is net of the ${formatPrice(info.orderDiscountInclGst)} order discount`
+        + ` (${formatPrice(info.orderDiscountExGst)} ex-GST).`
+      : '')
     + ' Open the order for the full breakdown.';
   const lossCls = info.netProfit < 0 ? ' order-profit__amt--loss' : '';
   return `${open('', tip)}`
@@ -326,7 +359,13 @@ const COLUMNS = [
   },
   {
     key: 'total', label: 'Total', sortable: true, gst: GST_INCL,
-    render: (r) => `<span class="cell-mono cell-right">${(r.total_amount ?? r.total) != null ? formatPrice(r.total_amount ?? r.total) : MISSING}</span>`,
+    // The list endpoint carries discount_amount / coupon_code since backend
+    // 52abc83, so the discount is scannable with NO detail fetch — unlike the
+    // Profit column beside it, which has to fan out for costs (ERR-039).
+    render: (r) => `<span class="cell-mono cell-right">`
+      + `${(r.total_amount ?? r.total) != null ? formatPrice(r.total_amount ?? r.total) : MISSING}`
+      + orderDiscountSubline(r)
+      + `</span>`,
     align: 'right',
   },
   {
@@ -913,14 +952,32 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     if (profitInfo.absorbedApplies) {
       profitFootTip += ' Absorbed courier cost (free shipping) is subtracted — see the Profit Breakdown.';
     }
+    // The per-line Profit figures carry their revenue share of the order discount,
+    // so a line's profit is lower than (its price − its cost − its fee share) would
+    // suggest. Say so, or the column looks wrong against the Price column beside it.
+    if (profitInfo.discountApplies) {
+      profitFootTip += ` The ${formatPrice(profitInfo.orderDiscountExGst)} order discount (ex-GST) is`
+        + ' apportioned across the lines by revenue share, so each line carries its part of it.';
+    }
     // A line with no recorded supplier cost makes the ORDER total unknowable — its
     // cost would otherwise count as $0 and the foot would print a confident,
     // over-stated profit (ERR-122; the ERR-028/068 class). The per-line figures
     // above stay valid: each is its own revenue minus its own cost minus its
     // revenue share of the order fee, which doesn't depend on the missing line.
-    const unknownFootTip = `${missingCostCount} of ${itemCount} item${itemCount === 1 ? '' : 's'} `
-      + `${missingCostCount === 1 ? 'has' : 'have'} no recorded supplier cost — this order's total profit can't be computed. `
-      + `It is UNKNOWN, not $0.`;
+    // UNKNOWN has TWO causes and they must not share one sentence. The missing-cost
+    // case is the common one; the other is a revenue figure the math refuses (zero,
+    // or an order discount at/above the whole line sum). Printing "0 of 2 items have
+    // no recorded supplier cost" for the second is a straight falsehood, and it was
+    // reachable before the discount work too — see order-profit.js's !breakdown branch.
+    const unknownFootTip = missingCostCount > 0
+      ? `${missingCostCount} of ${itemCount} item${itemCount === 1 ? '' : 's'} `
+        + `${missingCostCount === 1 ? 'has' : 'have'} no recorded supplier cost — this order's total profit can't be computed. `
+        + `It is UNKNOWN, not $0.`
+      : profitInfo.discountExceedsRevenue
+        ? `The recorded order discount (${formatPrice(profitInfo.orderDiscountInclGst)} incl-GST) is at or above `
+          + `this order's entire line total, so realised revenue can't be stated and neither can profit. `
+          + `It is UNKNOWN, not $0 — check the discount on the order row.`
+        : `This order's revenue can't be stated, so profit can't be computed. It is UNKNOWN, not $0.`;
     itemRows.forEach(({ item, itemPrice, itemHref }, idx) => {
       const profitCell = showCost
         ? `<td class="mono" style="color:var(--success-text,#15803d)">${lineProfits[idx] != null ? formatPrice(lineProfits[idx]) : MISSING}</td>`
@@ -941,8 +998,34 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     const profitFoot = profitInfo.netProfit != null
       ? `<td class="mono" style="color:var(--success-text,#15803d)" title="${esc(profitFootTip)}"><strong>${formatPrice(profitInfo.netProfit)}</strong></td>`
       : `<td class="mono admin-text-muted" title="${esc(unknownFootTip)}"><strong>${MISSING}</strong></td>`;
-    itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
-      <td colspan="5"></td>
+    // The Price foot is REALISED revenue — net of the order discount (ERR-168).
+    // Without these two rows it no longer relates to the unit prices above it and
+    // reads like an arithmetic error. Shown to every admin, not just owners: a
+    // discount is customer money, not cost, so it is not behind showCost.
+    let discountFootRows = '';
+    if (profitInfo.discountApplies) {
+      const blankCostCells = showCost ? '<td></td><td></td>' : '';
+      const discountLabel = profitInfo.couponCode
+        ? `Order discount <span class="admin-text-muted">(incl. code ${esc(profitInfo.couponCode)})</span>`
+        : 'Order discount <span class="admin-text-muted">(volume / coupon / loyalty)</span>';
+      const discountTip = `${formatPrice(profitInfo.orderDiscountInclGst)} incl-GST on the order row, `
+        + `shown here ex-GST because revenue is. It is the aggregate of volume pricing, any coupon and any `
+        + `loyalty redemption — the backend keeps no per-component column. `
+        + `The customer's total was already net of it; this is the matching reduction on the revenue side.`;
+      discountFootRows = `
+      <tr class="admin-order-items__gross">
+        <td colspan="5" class="admin-order-items__footlabel admin-text-muted">Line items${gstSub(GST_EXCL)}</td>
+        <td class="mono admin-text-muted">${formatPrice(profitInfo.grossRevenueExGst)}</td>
+        ${blankCostCells}
+      </tr>
+      <tr class="admin-order-items__discount">
+        <td colspan="5" class="admin-order-items__footlabel"><span title="${esc(discountTip)}">${discountLabel} ⓘ</span></td>
+        <td class="mono">−${formatPrice(profitInfo.orderDiscountExGst)}</td>
+        ${blankCostCells}
+      </tr>`;
+    }
+    itemsHtml += `</tbody><tfoot>${discountFootRows}<tr class="admin-order-items__total">
+      <td colspan="5"${profitInfo.discountApplies ? ' class="admin-order-items__footlabel"' : ''}>${profitInfo.discountApplies ? `Revenue${gstSub(GST_EXCL)}` : ''}</td>
       <td class="mono"><strong>${formatPrice(profitInfo.totalRevenueExGst)}</strong></td>
       ${showCost ? `${costFoot}${profitFoot}` : ''}
     </tr></tfoot></table></div>`;
@@ -974,7 +1057,21 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     const pbRow = (label, value, valStyle = '') =>
       `<div class="om-meta-row"><span>${label}</span><span class="mono"${valStyle ? ` style="${valStyle}"` : ''}>${value}</span></div>`;
     profitBreakdownInner += `<div class="om-meta-addr-label">Profit breakdown</div>`;
-    profitBreakdownInner += pbRow(`Customer paid ${muted('(incl. GST)')}`, formatPrice(b.customerPaidInclGst));
+    // THE ORDER DISCOUNT DOES NOT GET ITS OWN ROW HERE, AND MUST NOT (ERR-168).
+    // This is a CASH waterfall: it starts from what the customer actually paid,
+    // which the backend already computed net of the discount. Subtracting the
+    // discount again would double-count it and stop Take-home footing. The
+    // discount's real effect is on the REVENUE side — see the items-table foot,
+    // where it is shown in full. Here it is a qualifier on the opening figure,
+    // so an owner can see why the charge is below the line prices.
+    const discountQualifier = profitInfo.discountApplies
+      ? `<span title="${esc(`Volume pricing, coupon and loyalty combined. Already deducted from what the customer paid — `
+          + `it is not subtracted again below. ${profitInfo.couponCode ? `Includes promo code ${profitInfo.couponCode}. ` : ''}`
+          + `${profitInfo.loyaltyDiscountInclGst > 0 ? `Includes ${formatPrice(profitInfo.loyaltyDiscountInclGst)} of loyalty credit. ` : ''}`
+          + `The matching revenue reduction is ${formatPrice(profitInfo.orderDiscountExGst)} ex-GST.`)}">`
+        + muted(` after −${formatPrice(profitInfo.orderDiscountInclGst)} discount ⓘ`) + `</span>`
+      : '';
+    profitBreakdownInner += pbRow(`Customer paid ${muted('(incl. GST)')}${discountQualifier}`, formatPrice(b.customerPaidInclGst));
     profitBreakdownInner += pbRow(`Paid to supplier ${muted(`(incl. ${formatPrice(b.supplierCostGst)} GST)`)}`, neg(b.supplierCostInclGst));
     // An invoiced sale never touched a card processor. Rendering a "Paid to Stripe −$0.00"
     // row would imply a fee was charged and rounded away; the honest thing is to say
@@ -1014,18 +1111,29 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
       .map(it => it.sku || it.product_sku)
       .filter(Boolean);
     const n = profitInfo.missingCostCount;
-    profitUnknownInner = `
-      <div class="om-meta-addr-label">Profit breakdown</div>
-      <div class="om-profit-unknown">
-        <div class="om-profit-unknown__title">Profit can't be computed</div>
-        <div class="om-profit-unknown__text">
-          ${n} of ${profitInfo.itemCount} item${profitInfo.itemCount === 1 ? '' : 's'}
+    // Same two-cause split as unknownFootTip above — never explain a refused
+    // revenue figure as a missing supplier cost.
+    const unknownBody = n > 0
+      ? `${n} of ${profitInfo.itemCount} item${profitInfo.itemCount === 1 ? '' : 's'}
           ${n === 1 ? 'has' : 'have'} no recorded supplier cost, so take-home is
           <strong>unknown</strong> — not $0.
           ${uncostedSkus.length ? `Missing: <span class="mono">${esc(uncostedSkus.slice(0, 4).join(', '))}</span>${uncostedSkus.length > 4 ? ` +${uncostedSkus.length - 4} more` : ''}.` : ''}
           ${isInvoiceOrder(o)
             ? 'Set "Our Cost" on the invoice to fix it.'
-            : 'Set the product’s cost price to fix it for future orders.'}
+            : 'Set the product’s cost price to fix it for future orders.'}`
+      : profitInfo.discountExceedsRevenue
+        ? `The order discount recorded on this order
+          (<strong>${formatPrice(profitInfo.orderDiscountInclGst)}</strong> incl-GST) is at or above its entire
+          line total${profitInfo.grossRevenueExGst ? ` (${formatPrice(profitInfo.grossRevenueExGst)} ex-GST)` : ''},
+          so realised revenue can't be stated and take-home is <strong>unknown</strong> — not $0.
+          Check <span class="mono">discount_amount</span> on the order row.`
+        : `This order's revenue can't be stated, so take-home is <strong>unknown</strong> — not $0.`;
+    profitUnknownInner = `
+      <div class="om-meta-addr-label">Profit breakdown</div>
+      <div class="om-profit-unknown">
+        <div class="om-profit-unknown__title">Profit can't be computed</div>
+        <div class="om-profit-unknown__text">
+          ${unknownBody}
         </div>
       </div>`;
   }
@@ -1041,6 +1149,16 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     breakdownHtml += `<div class="om-meta-grid">`;
     let bLeft = '';
     if (breakdown.subtotal_excl_gst != null) bLeft += omRow(`Subtotal${gstSub(GST_EXCL)}`, formatPrice(breakdown.subtotal_excl_gst));
+    // Customer-money view of the same discount the profit math nets out (ERR-168).
+    // Stated incl-GST here because every other row in this section is, and because
+    // that is the figure on the order row. Sourced from the order, not the
+    // breakdown endpoint, which carries no discount field.
+    if (profitInfo.discountApplies) {
+      const dLabel = profitInfo.couponCode
+        ? `Discount <span class="admin-text-muted">(code ${esc(profitInfo.couponCode)})</span>`
+        : 'Discount <span class="admin-text-muted">(volume / coupon / loyalty)</span>';
+      bLeft += omRow(`${dLabel}${gstSub(GST_INCL)}`, `−${formatPrice(profitInfo.orderDiscountInclGst)}`);
+    }
     if (breakdown.gst_amount != null) bLeft += omRow('GST (15%)', formatPrice(breakdown.gst_amount));
     if (breakdown.total_incl_gst != null) bLeft += omRow(`Total${gstSub(GST_INCL)}`, `<strong>${formatPrice(breakdown.total_incl_gst)}</strong>`);
     if (breakdown.shipping_fee != null) bLeft += omRow(`Shipping${gstSub(GST_INCL)}`, formatPrice(breakdown.shipping_fee));

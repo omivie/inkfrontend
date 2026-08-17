@@ -29,9 +29,24 @@
  *   PENDING    — (set by the caller) the fetch is in flight.
  *
  * In every one of those states `netProfit` is null, never 0.
+ *
+ * ── REVENUE IS NET OF THE ORDER DISCOUNT (ERR-168, Aug 2026) ────────────────
+ *
+ * Line items carry the price BEFORE any order-level discount. Since public
+ * volume pricing shipped, most orders also carry `orders.discount_amount` — the
+ * GST-INCLUSIVE aggregate of volume + coupon + loyalty. Summing the lines and
+ * stopping there overstates revenue, and therefore profit, by discount/1.15 on
+ * every discounted order.
+ *
+ * It is not only the profit line. `computeProfitBreakdown` derives
+ * `gstCollected = customerPaid − revenue`, and `customerPaid` (the order total)
+ * has ALWAYS been net of the discount. So while revenue stayed gross the two
+ * sides were on different bases: the proof order reported $4.00 of GST collected
+ * on a $116.60 sale. Netting the discount out of revenue is what puts both sides
+ * on the same footing.
  */
 
-import { computeLineProfits, computeProfitBreakdown, NO_PAYMENT_FEES } from './profitability.js';
+import { computeLineProfits, computeProfitBreakdown, orderDiscountParts, NO_PAYMENT_FEES } from './profitability.js';
 
 export const PROFIT_STATE = {
   OK: 'ok',
@@ -83,6 +98,17 @@ function result(state, extra = {}) {
     totalCostExGst: null,
     isInvoice: false,
     absorbedApplies: false,
+    // Order-level discount (ERR-168). `grossRevenueExGst` is the raw line sum —
+    // kept so a surface can show WHY revenue is lower than the prices above it
+    // without re-summing the items itself. `discountApplies` is the gate every
+    // consumer reads; a $0 amount and an absent one are both `false`.
+    grossRevenueExGst: null,
+    orderDiscountInclGst: 0,
+    orderDiscountExGst: 0,
+    discountApplies: false,
+    discountExceedsRevenue: false,
+    couponCode: null,
+    loyaltyDiscountInclGst: 0,
     ...extra,
   };
 }
@@ -104,7 +130,14 @@ function result(state, extra = {}) {
  * @returns {{state:string, netProfit:number|null, netMarginPct:number|null,
  *   breakdown:object|null, lineProfits:Array<number|null>, missingCostCount:number,
  *   itemCount:number, totalRevenueExGst:number|null, totalCostExGst:number|null,
- *   isInvoice:boolean, absorbedApplies:boolean}}
+ *   isInvoice:boolean, absorbedApplies:boolean, grossRevenueExGst:number|null,
+ *   orderDiscountInclGst:number, orderDiscountExGst:number, discountApplies:boolean,
+ *   discountExceedsRevenue:boolean, couponCode:string|null,
+ *   loyaltyDiscountInclGst:number}}
+ *
+ * `totalRevenueExGst` is REALISED revenue — net of the order discount.
+ * `grossRevenueExGst` is the raw line sum. They differ exactly when
+ * `discountApplies`, and the difference is `orderDiscountExGst`.
  */
 export function orderProfitFromDetail(order, opts = {}) {
   if (!order || typeof order !== 'object') return result(PROFIT_STATE.FAILED);
@@ -138,6 +171,57 @@ export function orderProfitFromDetail(order, opts = {}) {
     if (hasCost) totalCostExGst += item.supplier_cost_snapshot * qty;
     else missingCostCount++;
     lines.push({ revenueExGst: lineRevenue, costExGst: hasCost ? item.supplier_cost_snapshot * qty : null });
+  }
+
+  // ── Net out the order-level discount (ERR-168) ─────────────────────────────
+  //
+  // The line loop above summed the price BEFORE any order discount. The order
+  // row carries the aggregate (volume + coupon + loyalty) GST-INCLUSIVE, so it
+  // is converted before being netted against ex-GST revenue.
+  //
+  // It is applied HERE, before both profit calls, rather than being handed to
+  // computeOrderProfit as another deduction alongside the Stripe fee and the
+  // absorbed courier. A discount is a REVENUE REDUCTION, not a cost: routing it
+  // through the cost side would leave `revenueExGst` gross, which keeps
+  // `gstCollected = customerPaid − revenue` wrong and overstates the margin
+  // denominator. Both surfaces need revenue itself to be the realised figure.
+  //
+  // Absent / null / 0 ⇒ a strict no-op, the same LOUD-by-absence rule as
+  // shipping_absorbed. Old cached list rows without the field cannot turn a
+  // real profit into null.
+  const grossRevenueExGst = totalRevenueExGst;
+  const discount = orderDiscountParts(order.discount_amount);
+  let discountExceedsRevenue = false;
+  if (discount.applies && grossRevenueExGst > 0) {
+    // Apportion across the lines by ex-GST revenue share — the same convention
+    // the order-level fee already uses — so the modal's per-line Profit column
+    // keeps footing to the order total (ERR-113 / ERR-118).
+    const share = discount.exGst / grossRevenueExGst;
+    if (share >= 1) {
+      // A discount at or above the entire line sum is a data problem, not a
+      // free order. Clamp so revenue can't go negative, and say so: the order
+      // will resolve to UNKNOWN below rather than print a confident figure.
+      discountExceedsRevenue = true;
+      warn(`[order-profit] discount ${discount.inclGst} incl-GST exceeds line revenue `
+        + `${grossRevenueExGst} ex-GST for ${order.order_number || order.id} — revenue clamped to 0`);
+    }
+    const keep = Math.max(0, 1 - share);
+    // Re-total from the apportioned lines rather than computing
+    // `gross − discountExGst` separately. computeLineProfits recomputes its own
+    // total from `lines`, and two independently-derived totals can drift by a
+    // float ulp — which is exactly enough to break the Σ lineProfits === netProfit
+    // invariant that the per-line column and the waterfall both depend on.
+    let apportioned = 0;
+    for (const l of lines) {
+      l.revenueExGst *= keep;
+      apportioned += l.revenueExGst;
+    }
+    totalRevenueExGst = apportioned;
+  } else if (discount.applies) {
+    // Discount recorded but there is no revenue to apportion it across.
+    discountExceedsRevenue = true;
+    warn(`[order-profit] discount ${discount.inclGst} incl-GST on an order with no line revenue `
+      + `(${order.order_number || order.id})`);
   }
 
   // Fee base: what actually hit the card, incl. shipping + GST.
@@ -178,6 +262,17 @@ export function orderProfitFromDetail(order, opts = {}) {
     totalCostExGst: missingCostCount ? null : totalCostExGst,
     isInvoice,
     absorbedApplies,
+    grossRevenueExGst,
+    orderDiscountInclGst: discount.inclGst,
+    orderDiscountExGst: discount.exGst,
+    discountApplies: discount.applies,
+    discountExceedsRevenue,
+    // Labelling only — the amounts above are the aggregate and are what the
+    // money is derived from. A non-null coupon_code means SOME of the aggregate
+    // is a promo code; loyalty_discount_amount is a subset of it. Neither is
+    // subtracted again anywhere.
+    couponCode: order.coupon_code ? String(order.coupon_code) : null,
+    loyaltyDiscountInclGst: orderDiscountParts(order.loyalty_discount_amount).inclGst,
   };
 
   if (missingCostCount > 0) return result(PROFIT_STATE.UNKNOWN, common);
