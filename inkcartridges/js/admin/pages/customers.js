@@ -13,7 +13,7 @@ import {
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 // Invoicing address is stored as string[]; edited as a \n-joined textarea.
 const linesToText = (a) => (Array.isArray(a) ? a.join('\n') : (a || ''));
 const textToLines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);

@@ -140,6 +140,18 @@ function makeSandbox() {
     marginBadge: () => '', formatProfitDollars: () => '',
     GST_INCL: '', GST_EXCL: '', GST_NET: '', gstSub: () => '',
     esc: (s) => String(s ?? ''), icon: () => '',
+    // Security is a bare top-level `const` in security.js, reachable as a global
+    // lexical binding and NOT as window.Security (ERR-167) — mirror that here.
+    Security: { escapeHtml: (s) => String(s ?? ''), escapeAttr: (s) => String(s ?? '') },
+    // utils/invoice-quote.js — the volume-ladder half of the line model.
+    PRICE_AUTO: 'auto', PRICE_MANUAL: 'manual', FREIGHT_CUSTOM: 'custom', MAX_QUOTE_LINES: 200,
+    computeInvoiceVolumeSavings: () => 0, lineDocNote: () => '',
+    quoteRequestBody: () => null, normalizeQuote: () => null,
+    applyQuoteToLines: (lines) => ({ lines, applied: [], offers: [], changed: false }),
+    clearVolume: (l) => l, volumeBadge: () => null, formatVolumePercent: () => '',
+    resolveShippingSelection: () => ({ key: 'custom', option: null, isCustom: true, available: false }),
+    freeShippingLost: () => ({ lost: false }), freeShippingAvailable: () => false,
+    parcelWeightNote: () => '',
     AdminAuth: { isOwner: () => true },
     AdminAPI,
     Toast: {

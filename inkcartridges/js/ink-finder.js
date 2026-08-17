@@ -67,13 +67,15 @@
         if (b.dataset.brand) BRAND_NAMES[b.dataset.brand] = b.getAttribute('aria-label') || b.dataset.brand;
     });
 
+    // ERR-167: this used to branch on `window.Security`, which does not exist —
+    // security.js declares a bare top-level `const`, so the binding is global and
+    // LEXICAL, not a property of window. Every call therefore took the local
+    // fallback, which escapes strictly LESS than Security.escapeHtml does (it
+    // misses `/` and the backtick). Calling the real one is an upgrade, not a
+    // removed fallback; security.js is `defer`-loaded before this file on both
+    // pages that use it (index.html, html/index.html).
     function escapeHtml(str) {
-        if (window.Security && typeof Security.escapeHtml === 'function') {
-            return Security.escapeHtml(str);
-        }
-        return String(str == null ? '' : str)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        return Security.escapeHtml(str);
     }
 
     // ============================================

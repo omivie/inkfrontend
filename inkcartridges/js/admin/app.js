@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.08.14-maintenance-box-product-type';
+const APP_VERSION = '2026.08.17-invoice-quote-freight-volume';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

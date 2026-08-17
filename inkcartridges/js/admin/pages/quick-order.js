@@ -25,6 +25,11 @@ import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
 import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../components/product-search.js';
+import {
+  PRICE_AUTO, PRICE_MANUAL, MAX_QUOTE_LINES,
+  quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume,
+  formatVolumePercent,
+} from '../utils/invoice-quote.js';
 import { costOrNull } from '../utils/invoice-math.js';
 import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
 import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
@@ -39,7 +44,7 @@ const MISSING = '—';
 const canSeeCost = () => AdminAuth.isOwner();
 
 // ---- small helpers (self-contained copies of the invoice-page primitives) ----
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 const money = (n) => (typeof window.formatPrice === 'function' ? window.formatPrice(Number(n) || 0) : '$' + (Number(n) || 0).toFixed(2));
 const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -80,15 +85,36 @@ let _fillSource = null;      // { type, label }
 let _acHandles = [];         // attachAutocomplete handles to destroy on rebuild/teardown
 const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 
+// ── Volume-ladder quote (POST /api/admin/invoices/quote) ─────────────────────
+// The same endpoint the Invoices editor uses, for the same reason: a walk-in
+// buying seven of something must get the price the website would have given
+// them. Only the per-line half is used here — a quick order has no freight
+// field, so the shipping half of the response is simply not read.
+let _quote = null;
+let _quoteSeq = 0;
+let _quoteDebounce = null;
+let _volumeOffers = [];
+const QUOTE_DEBOUNCE_MS = 400;
+
 // =========================================================================
 //  Draft model
 // =========================================================================
 // unitPrice     — ex-GST SELL price (what the customer is charged).
 // supplierCost  — ex-GST price WE paid. INTERNAL. null = unknown, NOT 0.
 // costSource    — 'auto' (from products.cost_price) | 'manual' (typed over).
+// priceSource   — the same distinction for the SELL price. 'auto' = we filled it
+//                 and the volume ladder may replace it; 'manual' = the operator
+//                 authored it and nothing may overwrite it.
+// volumePercent / volumeSaving / volumeQuantity
+//               — the discount the backend said applied when we filled the price.
+//                 Carried across the sessionStorage bridge so a quick order that
+//                 becomes an invoice keeps the bulk note it was priced with.
 // Kept in lockstep with the Invoices editor: the two share the .inv-line grid AND
 // the sessionStorage bridge in createInvoiceFrom().
-const blankLine = () => ({ code: '', description: '', qty: 1, unitPrice: 0, supplierCost: null, costSource: 'auto' });
+const blankLine = () => ({
+  code: '', description: '', qty: 1, unitPrice: 0, supplierCost: null, costSource: 'auto',
+  priceSource: PRICE_AUTO, volumePercent: null, volumeSaving: null, volumeQuantity: null,
+});
 
 function freshDraft() {
   return {
@@ -126,6 +152,11 @@ function draftFromRecord(rec) {
     unitPrice: num(l.unit_price_excl_gst ?? l.unitPrice ?? 0),
     supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
     costSource: l.cost_source || l.costSource || 'auto',
+    // A saved price is operator-authored history — the ladder may offer, never take.
+    priceSource: PRICE_MANUAL,
+    volumePercent: l.volume_discount_percent ?? l.volumePercent ?? null,
+    volumeSaving: l.volume_saving_excl_gst ?? l.volumeSaving ?? null,
+    volumeQuantity: l.volume_quantity ?? l.volumeQuantity ?? null,
   })) : [blankLine()];
   d.notes = rec.notes ?? '';
   return d;
@@ -157,6 +188,12 @@ function buildPayload(d) {
       // OUR cost — internal. null tells the backend to snapshot products.cost_price itself.
       supplier_cost_excl_gst: costOrNull(l.supplierCost),
       cost_source: l.costSource || 'auto',
+      // The volume discount actually applied. No columns for these yet (BF-043);
+      // unknown keys are ignored, and they matter most on the invoice this quick
+      // order becomes — which carries them across via the sessionStorage bridge.
+      volume_discount_percent: l.volumePercent ?? null,
+      volume_saving_excl_gst: l.volumeSaving ?? null,
+      volume_quantity: l.volumeQuantity ?? null,
     })),
     notes: d.notes,
     // Client preview only — backend recomputes authoritatively and ignores these.
@@ -262,6 +299,9 @@ function createInvoiceFrom(rec) {
 function openEditor(draft) {
   _draft = draft;
   _fillSource = null;
+  // A quote describes ONE draft; carrying it over would badge this one with the
+  // previous order's discounts.
+  resetQuoteState();
   const token = ++_editorToken;
   const footer = `
     <button class="admin-btn admin-btn--ghost" data-ed-action="cancel">Cancel</button>
@@ -273,7 +313,7 @@ function openEditor(draft) {
     width: 'min(860px, 96vw)',
     body: editorBodyHtml(draft),
     footer,
-    onClose: () => { if (token === _editorToken) { _editorToken++; teardownAutocompletes(); _draft = null; _editorRefs = null; } },
+    onClose: () => { if (token === _editorToken) { _editorToken++; teardownAutocompletes(); _draft = null; _editorRefs = null; resetQuoteState(); } },
   });
   if (!drawer) return;
   _editorRefs = { drawer };
@@ -287,6 +327,78 @@ function teardownAutocompletes() {
   _acHandles = [];
 }
 
+// =========================================================================
+//  Volume-ladder quote
+// =========================================================================
+// Deliberately the same shape as the Invoices editor's copy, minus the shipping
+// half. Both call the SAME decision functions in utils/invoice-quote.js, so the
+// counter and the invoice cannot disagree about what a bulk price is.
+
+function resetQuoteState() {
+  clearTimeout(_quoteDebounce);
+  _quoteDebounce = null;
+  _quoteSeq++;              // bumped, not zeroed — an in-flight reply for the old
+  _quote = null;            // draft can then never be mistaken for this one's
+  _volumeOffers = [];
+}
+
+function scheduleQuote() {
+  clearTimeout(_quoteDebounce);
+  _quoteDebounce = setTimeout(() => { requestQuote(); }, QUOTE_DEBOUNCE_MS);
+}
+
+async function requestQuote() {
+  const token = _editorToken;
+  const seq = ++_quoteSeq;
+  const req = quoteRequestBody(_draft);
+  if (!req) return;
+  if (req.truncated > 0) warn(`quote covers the first ${MAX_QUOTE_LINES} lines; ${req.truncated} were not priced`);
+
+  const res = await AdminAPI.quoteInvoice(req.body);
+  // The drawer can close mid-flight (ERR-045), and replies can land out of order
+  // — an older one carries an older quantity. Only the newest may write.
+  if (!editorAlive(token) || seq !== _quoteSeq) return;
+  if (!res.ok) return;      // keep whatever we had; never blank a filled price
+
+  const quote = normalizeQuote(res.data);
+  if (!quote) return;
+  _quote = quote;
+
+  const { lines, offers, changed } = applyQuoteToLines(_draft.lines, quote);
+  _volumeOffers = offers;
+  if (changed) _draft.lines = lines;
+  renderLines();
+  if (changed) refreshTotals();
+}
+
+/** The quote's answer for one draft-line index, if we have one. */
+function quoteLineAt(i) {
+  return (_quote?.lines || []).find((l) => l.position === i) || null;
+}
+
+/**
+ * The strip under one line row. Full-width child of the `.inv-line` grid
+ * (`grid-column: 1/-1`) — NOT a seventh cell, which would misalign the six-column
+ * grid this editor shares verbatim with the Invoices editor.
+ */
+function lineQuoteNote(l, i) {
+  const bits = [];
+  const pct = Number(l.volumePercent);
+  if (Number.isFinite(pct) && pct > 0) {
+    const saving = num(l.volumeSaving) > 0 ? ` · customer saves ${money(l.volumeSaving)}` : '';
+    bits.push(`<span class="inv-vol inv-vol--applied">Volume &minus;${esc(formatVolumePercent(pct))}${esc(saving)}</span>`);
+  } else {
+    const offer = _volumeOffers.find((o) => o.position === i);
+    if (offer) {
+      bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="apply-volume" data-line="${i}">Apply volume price ${esc(money(offer.badge.unitPrice))} (&minus;${esc(offer.badge.percentText)})</button>`);
+    }
+  }
+  const ql = quoteLineAt(i);
+  if (ql && ql.resolved && !ql.isActive) bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
+  if (!bits.length) return '';
+  return `<div class="inv-line__note">${bits.join('')}</div>`;
+}
+
 function bindEditorBody(drawer) {
   const form = drawer.body.querySelector('.invoice-editor__form');
   form.addEventListener('input', onFormInput);
@@ -295,6 +407,7 @@ function bindEditorBody(drawer) {
   renderLines();
   attachPartyPicker();
   refreshTotals();
+  scheduleQuote();
 }
 
 // Replace the body in-place (used after an auto-fill that touches many fields).
@@ -328,6 +441,14 @@ function onFormInput(e) {
       // Typing a cost promotes the line to a manual override; clearing it reverts
       // to auto (and to "unknown" — '' is not 0).
       if (f === 'supplierCost') _draft.lines[i].costSource = t.value === '' ? 'auto' : 'manual';
+      // Typing a PRICE does the same on the sell side and drops any volume claim:
+      // the number is theirs now, so a "−6%" beside it would describe a discount
+      // we did not give. The ladder becomes an offer instead.
+      if (f === 'unitPrice') {
+        _draft.lines[i].priceSource = PRICE_MANUAL;
+        _draft.lines[i] = clearVolume(_draft.lines[i]);
+      }
+      if (f === 'code' || f === 'qty' || f === 'unitPrice') scheduleQuote();
     }
     refreshTotals();
   } else { return; }
@@ -338,11 +459,28 @@ function onFormInput(e) {
 function onFormClick(e) {
   const act = e.target.closest('[data-form-action]')?.dataset.formAction;
   if (!act) return;
-  if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshTotals(); }
+  if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshTotals(); scheduleQuote(); }
   else if (act === 'remove-line') {
     const i = +e.target.closest('[data-line]').dataset.line;
     _draft.lines.splice(i, 1);
     if (!_draft.lines.length) _draft.lines.push(blankLine());
+    // Positions shift, so every cached answer now describes the wrong row.
+    _quote = null; _volumeOffers = [];
+    renderLines(); refreshTotals(); scheduleQuote();
+  } else if (act === 'apply-volume') {
+    // The ONE path by which a hand-edited price is replaced: the operator asked.
+    const i = +e.target.closest('[data-line]').dataset.line;
+    const offer = _volumeOffers.find((o) => o.position === i);
+    if (!offer || !_draft.lines[i]) return;
+    _draft.lines[i] = {
+      ..._draft.lines[i],
+      unitPrice: offer.badge.unitPrice,
+      priceSource: PRICE_AUTO,
+      volumePercent: offer.badge.percent,
+      volumeSaving: offer.badge.lineSaving,
+      volumeQuantity: num(_draft.lines[i].qty),
+    };
+    _volumeOffers = _volumeOffers.filter((o) => o.position !== i);
     renderLines(); refreshTotals();
   } else if (act === 'clear-fill') {
     _draft.customer = { name: '', company: '', phone: '', email: '', address: '' };
@@ -447,9 +585,10 @@ function renderLines() {
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
-      <input class="admin-input" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitPrice" value="${escA(l.unitPrice)}">
+      <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitPrice" value="${escA(l.unitPrice)}">
       ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
+      ${lineQuoteNote(l, i)}
     </div>`;
   }).join('');
   // Product autocomplete on both code + description inputs of every line.
@@ -471,11 +610,17 @@ function renderLines() {
             code: sku,
             description: p.name || p.product_name || '',
             qty: prev.qty || 1,
+            // Qty-1 retail ex-GST, shown until the quote answers. Kept as the
+            // fallback on purpose: dropping it would leave the row blank whenever
+            // the quote is slow or unavailable (ERR-158 — removing a fallback is
+            // a behaviour change, not a cleanup).
             unitPrice: ex,
             supplierCost: keepManual ? prev.supplierCost : productCostExGst(p),
             costSource: keepManual ? 'manual' : 'auto',
+            priceSource: PRICE_AUTO,
+            volumePercent: null, volumeSaving: null, volumeQuantity: null,
           };
-          renderLines(); refreshTotals();
+          renderLines(); refreshTotals(); scheduleQuote();
         },
       });
       _acHandles.push(h);
@@ -768,5 +913,6 @@ export default {
     _draft = null;
     _editorRefs = null;
     _fillSource = null;
+    resetQuoteState();         // also cancels the pending debounced quote
   },
 };

@@ -4918,6 +4918,50 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   margin: 8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
 }
 
+/* Freight row — the typed box and the courier picker sit side by side.
+   The INPUT is unchanged and still authoritative; the select only writes into
+   it, which is why nothing about saving an invoice had to change. */
+.inv-freight { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 12px; }
+.inv-freight .inv-field--freight { margin-top: 0; }
+.inv-freight__pick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; flex: 1 1 260px; min-width: 0; }
+.inv-field--freightpick { flex: 1 1 220px; min-width: 0; max-width: 340px; }
+.inv-field--freightpick .admin-select { width: 100%; }
+/* Every state of the picker says which one it is — an empty dropdown would read
+   as "there are no shipping options", which is the absence-as-zero failure. */
+.inv-freight__note { font-size: 11.5px; color: var(--text-muted); padding-bottom: 9px; }
+.inv-freight__note--warn { color: var(--danger); }
+.inv-freight__free {
+  align-self: center; padding: 5px 10px; font: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--success); background: var(--success-dim);
+  border: 1px solid transparent; border-radius: 999px; cursor: pointer;
+}
+.inv-freight__free:hover { border-color: var(--success); }
+
+/* Volume-ladder strip under a line row.
+   NB grid-column: 1/-1 — this is a FULL-WIDTH CHILD of the six-column .inv-line
+   grid, never a seventh cell. That grid is shared verbatim with the Quick Order
+   editor and a seventh column would misalign every one of its rows. */
+.inv-line__note {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: -2px 0 6px; padding-left: 2px;
+}
+.inv-vol {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; line-height: 1.4; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid transparent;
+}
+.inv-vol--applied { color: var(--cyan); background: rgba(38,127,181,0.10); font-weight: 600; }
+.inv-vol--offer {
+  font-family: inherit; cursor: pointer; font-weight: 600;
+  color: var(--cyan); background: transparent; border-color: var(--cyan);
+}
+.inv-vol--offer:hover { background: rgba(38,127,181,0.12); }
+.inv-vol--warn { color: var(--danger); background: rgba(239,68,68,0.10); }
+/* A hand-authored price, marked the same way a manual cost is — so "we filled
+   this" and "you filled this" are told apart at a glance. */
+.inv-line__price--manual { border-color: var(--accent, #2f6fed); font-weight: 600; }
+
 /* Internal margin readout under the line items (owner-only, form side only). */
 .inv-cogs {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -5129,11 +5173,20 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-doc__items .inv-doc__cost, .inv-doc__items th.inv-doc__cost { text-align: right; white-space: nowrap; }
 .inv-doc__cost-note { display: block; font-weight: 400; font-size: 0.7em; opacity: 0.6; line-height: 1.15; margin-top: 1px; }
 .inv-doc__empty { color: #999; font-style: italic; }
+/* Bulk-price sub-line under a description. It lives INSIDE the description cell
+   on purpose: the items table must stay at four columns (a fifth is how our
+   margin would end up on a customer's invoice — see
+   tests/admin-invoice-cost-not-on-document.test.js). */
+.inv-doc__line-note { display: block; font-size: 0.82em; font-style: italic; opacity: 0.75; margin-top: 2px; }
 
 .inv-doc__totals { margin-left: auto; border-collapse: collapse; min-width: 230px; margin-bottom: 22px; }
 .inv-doc__totals td { padding: 2px 0; }
 .inv-doc__totals td:last-child { text-align: right; padding-left: 28px; white-space: nowrap; }
 .inv-doc__grand td { border-top: 1.5px solid #1b1b1b; font-weight: 700; font-size: 16px; padding-top: 6px; }
+/* What the customer saved by buying in bulk. Deliberately NOT a totals row: the
+   line prices already carry the discount, so a "less discount" row would take it
+   off a second time. This states a fact about numbers already shown. */
+.inv-doc__savings { text-align: right; margin: -12px 0 22px; font-size: 12.5px; font-style: italic; }
 
 .inv-doc__pay-due { font-weight: 700; margin-bottom: 6px; }
 .inv-doc__pay-title { font-weight: 700; text-decoration: underline; margin-bottom: 6px; }

@@ -15,8 +15,8 @@ import { AdminAPI } from '../app.js';
 import { costOrNull } from '../utils/invoice-math.js';
 
 const PLACEHOLDER_IMG = '/assets/images/placeholder-product.svg';
-const escH = (s) => (window.Security?.escapeHtml ? Security.escapeHtml(String(s ?? '')) : String(s ?? ''));
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escH = (s) => Security.escapeHtml(String(s ?? ''));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 const money = (n) => (typeof window.formatPrice === 'function' ? window.formatPrice(Number(n) || 0) : '$' + (Number(n) || 0).toFixed(2));
 
 // Resolve a usable image URL from the many shapes /api/admin/products can return

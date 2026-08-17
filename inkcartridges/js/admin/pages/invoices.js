@@ -28,8 +28,14 @@ import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../util
 import { parseQuickOrderPrefill, flipTargetFrom } from '../utils/quick-order-bridge.js';
 import {
   costOrNull, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
-  normalizeInvoice, invoiceDocRows,
+  normalizeInvoice, invoiceDocRows, computeInvoiceVolumeSavings,
 } from '../utils/invoice-math.js';
+import {
+  PRICE_AUTO, PRICE_MANUAL, FREIGHT_CUSTOM, MAX_QUOTE_LINES,
+  quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume, lineDocNote,
+  volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
+  freeShippingAvailable, parcelWeightNote,
+} from '../utils/invoice-quote.js';
 import { marginBadge, formatProfitDollars } from '../utils/profitability.js';
 import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 
@@ -47,7 +53,7 @@ const GST_RATE = 0.15;
 const canSeeCost = () => AdminAuth.isOwner();
 
 // ---- small helpers ------------------------------------------------------
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 const money = (n) => (typeof window.formatPrice === 'function' ? window.formatPrice(Number(n) || 0) : '$' + (Number(n) || 0).toFixed(2));
 const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -256,6 +262,23 @@ let _editorToken = 0;     // bumped each editor open/close — async destroy gua
 let _fillSource = null;   // { type:'contact'|'customer'|'order', label } — drives the "filled from" chip
 const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 
+// ── Quote state (POST /api/admin/invoices/quote) ─────────────────────────────
+// Advisory only. None of this is saved; it decides what to autofill and what the
+// shipping row says. It lives outside _draft on purpose — see _freightChoice.
+let _quote = null;            // last GOOD normalizeQuote() result, or null
+let _quoteStatus = 'idle';    // 'idle'|'loading'|'ready'|'limited'|'unavailable'
+let _quoteSeq = 0;            // out-of-order guard: only the newest reply is used
+let _quoteDebounce = null;
+let _volumeOffers = [];       // [{position, badge}] — hand-edited lines with a better price
+// The operator's explicit shipping pick for this editor session, or null to let
+// it be derived from the freight value. NOT stored on the invoice: buildPayload's
+// key set is walked by setStatusViaFullUpdate() and diffed by documentDrift(),
+// so a new key there would change the paid-toggle's full-record PUT. The freight
+// NUMBER is the durable record; the option is a label for it.
+let _freightChoice = null;
+
+const QUOTE_DEBOUNCE_MS = 400;   // brief suggests 300–500ms; budget is 60/min
+
 // =========================================================================
 //  Draft model
 // =========================================================================
@@ -267,7 +290,20 @@ const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 // costSource    — 'auto'   = mirrored from products.cost_price by the picker
 //                 'manual' = the operator typed over it; survives a re-pick of
 //                            the same SKU.
-const blankLine = () => ({ code: '', description: '', qty: 1, unitCost: 0, supplierCost: null, costSource: 'auto' });
+// priceSource   — the same distinction for the SELL price, and the whole reason
+//                 volume autofill is safe. 'auto' = we put the number there and
+//                 may replace it; 'manual' = the operator authored it and we
+//                 must not. NB "authored" includes a price loaded off a SAVED
+//                 invoice or a real ORDER — both are history, not suggestions.
+// volumePercent / volumeSaving / volumeQuantity
+//               — the discount the BACKEND said applied at the moment we filled
+//                 the price. Printed on the customer's invoice, so they are
+//                 cleared the instant the price stops being ours (see
+//                 applyQuoteToLines): we never claim a discount we did not give.
+const blankLine = () => ({
+  code: '', description: '', qty: 1, unitCost: 0, supplierCost: null, costSource: 'auto',
+  priceSource: PRICE_AUTO, volumePercent: null, volumeSaving: null, volumeQuantity: null,
+});
 
 function freshDraft() {
   const L = window.LegalConfig || {};
@@ -347,6 +383,18 @@ function draftFromInvoice(rec) {
     // Absent (backend hasn't shipped the column yet) => unknown, not 0.
     supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
     costSource: l.cost_source || l.costSource || 'auto',
+    // A SAVED price is operator-authored, full stop. Re-pricing it from today's
+    // ladder would silently rewrite what a customer was already invoiced — so
+    // every loaded line is 'manual' and volume autofill can only ever OFFER.
+    priceSource: PRICE_MANUAL,
+    // The discount that was actually given, if the backend ever echoes it back.
+    // It does not today (BF-043) — and when it is absent the invoice simply
+    // prints no bulk note, because absence here means "we don't know what
+    // discount this invoice gave", NOT "it gave none". Guessing from today's
+    // ladder is the one thing that would be wrong.
+    volumePercent: l.volume_discount_percent ?? l.volumePercent ?? null,
+    volumeSaving: l.volume_saving_excl_gst ?? l.volumeSaving ?? null,
+    volumeQuantity: l.volume_quantity ?? l.volumeQuantity ?? null,
   })) : [blankLine()];
   d.freight = num(rec.freight_excl_gst ?? rec.freight ?? 0);
   if (rec.footer) d.footer = { ...d.footer, ...rec.footer };
@@ -445,6 +493,15 @@ function buildPayload(d) {
       // the client never saw a cost.
       supplier_cost_excl_gst: costOrNull(l.supplierCost),
       cost_source: l.costSource || 'auto',
+      // The volume discount we actually applied, as the backend told us it. The
+      // invoice PRINTS this, so it has to survive a reload — but there are no
+      // columns for it yet (BF-043) and unknown keys are ignored, exactly like
+      // `delivery` and `preview_totals` were before their columns existed. The
+      // customer's copy is safe meanwhile: syncStoredPdf() uploads the rendered
+      // PDF at save, so the document they receive always carries the note.
+      volume_discount_percent: l.volumePercent ?? null,
+      volume_saving_excl_gst: l.volumeSaving ?? null,
+      volume_quantity: l.volumeQuantity ?? null,
     })),
     freight_excl_gst: round2(num(d.freight)),
     footer: d.footer,
@@ -531,6 +588,7 @@ export default {
     _draft = null;
     _editorRefs = null;
     _fillSource = null;
+    resetQuoteState();         // also cancels the pending debounced quote
   },
 };
 
@@ -995,10 +1053,19 @@ function maybeOpenFromQuickOrder() {
   if (pre.order_date) d.order_date = String(pre.order_date).slice(0, 10);
   if (pre.customer) d.customer = { ...d.customer, ...pre.customer };
   if (pre.lines && pre.lines.length) {
+    // The RECEIVING half of the same whitelist — see buildQuickOrderPrefill.
+    // Both ends must name a field or it is dropped in transit.
     d.lines = pre.lines.map((l) => ({
       code: l.code || '', description: l.description || '', qty: num(l.qty ?? 1), unitCost: round2(num(l.unitCost ?? 0)),
       supplierCost: costOrNull(l.supplierCost),
       costSource: l.costSource || 'auto',
+      // The counter already agreed this price with the customer standing there.
+      // It is authored, not a suggestion — the ladder may offer a different
+      // number here but must never quietly substitute one.
+      priceSource: PRICE_MANUAL,
+      volumePercent: l.volumePercent ?? null,
+      volumeSaving: l.volumeSaving ?? null,
+      volumeQuantity: l.volumeQuantity ?? null,
     }));
   }
   d.source_quick_order_id = pre.source_quick_order_id;
@@ -1011,6 +1078,9 @@ function maybeOpenFromQuickOrder() {
 function openEditor(draft) {
   _draft = draft;
   _fillSource = null;
+  // The quote describes ONE draft. Carrying any of it into the next editor would
+  // put the previous invoice's badges and courier selection on this one.
+  resetQuoteState();
   const token = ++_editorToken;
   const footer = `
     <span class="inv-sent-hint" id="inv-sent-hint">${sentHintHtml(draft)}</span>
@@ -1024,7 +1094,7 @@ function openEditor(draft) {
     width: 'min(1180px, 96vw)',
     body: editorBodyHtml(draft),
     footer,
-    onClose: () => { if (token === _editorToken) { _editorToken++; _draft = null; _editorRefs = null; } },
+    onClose: () => { if (token === _editorToken) { _editorToken++; _draft = null; _editorRefs = null; resetQuoteState(); } },
   });
   if (!drawer) return;
   _editorRefs = { drawer };
@@ -1070,6 +1140,155 @@ async function prefillNextNumber(token) {
   refreshPreview();   // preview header shows the suggested number
 }
 
+// =========================================================================
+//  Quote — courier options + the per-line volume ladder
+// =========================================================================
+//
+// One read-only call answers both. It is advisory in every direction: it may
+// fill a price the operator has not touched and it may offer one they have, but
+// it can never overwrite their work, and a quote that fails leaves the draft
+// exactly as they left it. Decision logic lives in utils/invoice-quote.js so it
+// is testable without a DOM; this half is just plumbing and paint.
+
+/**
+ * Drop every trace of the previous draft's quote.
+ *
+ * `_quoteSeq` is bumped rather than zeroed so a reply still in flight for the
+ * OLD draft can never be mistaken for the new one's.
+ */
+function resetQuoteState() {
+  clearTimeout(_quoteDebounce);
+  _quoteDebounce = null;
+  _quoteSeq++;
+  _quote = null;
+  _quoteStatus = 'idle';
+  _volumeOffers = [];
+  _freightChoice = null;
+}
+
+/** Debounced re-quote. Safe to call from any edit handler. */
+function scheduleQuote() {
+  clearTimeout(_quoteDebounce);
+  _quoteDebounce = setTimeout(() => { requestQuote(); }, QUOTE_DEBOUNCE_MS);
+}
+
+/**
+ * Fetch a quote and fold it into the draft.
+ *
+ * TWO guards, both load-bearing:
+ *   • `_editorToken` — the drawer can close mid-flight (ERR-045). Nothing may be
+ *     written to a draft that is no longer on screen.
+ *   • `_quoteSeq` — replies can land out of order, and an older one carries an
+ *     older quantity. Only the newest is allowed to touch anything. (The
+ *     autocomplete component guards the same way; API.request() cannot be
+ *     aborted, because it overwrites any signal a caller passes.)
+ */
+async function requestQuote() {
+  const token = _editorToken;
+  const seq = ++_quoteSeq;
+  const req = quoteRequestBody(_draft);
+  if (!req) return;   // nothing typed yet — a quote would say nothing
+
+  if (req.truncated > 0) {
+    // Never silently. 200 lines on one invoice is not a real scenario, but a
+    // truncated quote that says nothing looks exactly like a correct one.
+    warn(`quote covers the first ${MAX_QUOTE_LINES} lines; ${req.truncated} were not priced`);
+  }
+
+  if (_quoteStatus !== 'ready') { _quoteStatus = 'loading'; renderShippingRow(); }
+
+  const res = await AdminAPI.quoteInvoice(req.body);
+  if (!editorAlive(token) || seq !== _quoteSeq) return;
+
+  if (!res.ok) {
+    // Keep the last good quote — a rate limit or a blip must not blank the
+    // dropdown, and it must not clear a price we already filled.
+    _quoteStatus = res.code === 'RATE_LIMITED' ? 'limited' : 'unavailable';
+    renderShippingRow();
+    return;
+  }
+
+  const quote = normalizeQuote(res.data);
+  if (!quote) { _quoteStatus = 'unavailable'; renderShippingRow(); return; }
+
+  _quote = quote;
+  _quoteStatus = 'ready';
+  applyQuote(quote);
+}
+
+/** Fold a fresh quote into the lines and the shipping row. */
+function applyQuote(quote) {
+  const { lines, offers, changed } = applyQuoteToLines(_draft.lines, quote);
+  _volumeOffers = offers;
+  if (changed) {
+    _draft.lines = lines;
+    renderLines();
+    refreshPreview();
+  } else {
+    // Prices unchanged, but an offer badge may have appeared or gone.
+    renderLines();
+  }
+  reconcileShipping(quote);
+}
+
+/**
+ * Keep the freight field honest as the goods total moves.
+ *
+ * The one case that must be LOUD: free shipping was selected and the order has
+ * since fallen below the threshold. Doing nothing leaves $0 in the freight box
+ * and a courier parcel is invoiced at nothing — a silent partial state, which is
+ * precisely the failure mode this codebase has paid for repeatedly. So it falls
+ * back to the suggested option, writes the real fee, and says so.
+ *
+ * The reverse (free has BECOME available) is only ever offered, never applied:
+ * the operator may be charging freight deliberately.
+ */
+function reconcileShipping(quote) {
+  const lost = freeShippingLost(_freightChoice, quote.shipping);
+  if (lost.lost && lost.fallbackOption) {
+    _freightChoice = lost.fallbackKey;
+    setFreightValue(lost.fallbackOption.freightExclGst);
+    Toast.warning(`Free shipping no longer applies — this order is under $${num(quote.shipping.freeShippingThreshold) || 100}. Freight set to ${lost.fallbackOption.label}.`);
+    refreshPreview();
+  } else if (_freightChoice == null && quote.shipping.hasOptions && !num(_draft.freight)) {
+    // A brand-new draft with an untouched $0 freight box: adopt the backend's
+    // suggestion so the common case needs no clicks at all. An operator who has
+    // typed anything at all has a non-null _freightChoice by now and is not
+    // touched here.
+    const suggested = (quote.shipping.options || []).find((o) => o.key === quote.shipping.suggestedKey);
+    if (suggested && suggested.freightExclGst > 0) {
+      _freightChoice = suggested.key;
+      setFreightValue(suggested.freightExclGst);
+      refreshPreview();
+    } else if (suggested) {
+      _freightChoice = suggested.key;
+    }
+  }
+  renderShippingRow();
+}
+
+/**
+ * The operator picked a courier option. Writing its `freight_excl_gst` into the
+ * existing freight field is the entire integration — nothing else changes, and
+ * the save path never learns this dropdown exists.
+ */
+function onFreightOptionPick(key) {
+  _freightChoice = key || null;
+  if (key === FREIGHT_CUSTOM) { renderShippingRow(); return; }
+  const opt = (_quote?.shipping.options || []).find((o) => o.key === key);
+  if (!opt) { renderShippingRow(); return; }
+  setFreightValue(opt.freightExclGst);
+  renderShippingRow();
+  refreshPreview();
+}
+
+/** Write a freight figure into the draft AND the input the operator can see. */
+function setFreightValue(exGst) {
+  _draft.freight = round2(num(exGst));
+  const input = _editorRefs?.drawer.body.querySelector('[data-field="freight"]');
+  if (input) input.value = String(_draft.freight);
+}
+
 function bindEditorBody(drawer) {
   const form = drawer.body.querySelector('.invoice-editor__form');
   form.addEventListener('input', onFormInput);
@@ -1078,6 +1297,11 @@ function bindEditorBody(drawer) {
   renderLines();
   attachTopAutocompletes();
   refreshPreview();
+  renderShippingRow();
+  // First quote on open: populates the courier dropdown, and prices any line the
+  // draft arrived with (fill-from-order, fill-from-quick-order) — those are all
+  // 'manual', so it can only ever offer, never rewrite.
+  scheduleQuote();
 }
 
 // Replace the body in-place (used after an auto-fill that touches many fields).
@@ -1106,6 +1330,13 @@ function onFormInput(e) {
       const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
       if (host) host.outerHTML = businessLinkHtml(_draft);
     }
+    // A hand-typed freight figure wins over any courier option. Don't fight the
+    // operator — just relabel the dropdown "Custom" so it stops claiming to
+    // describe a number it no longer set.
+    if (t.dataset.field === 'freight') {
+      _freightChoice = FREIGHT_CUSTOM;
+      renderShippingRow();
+    }
     // Keep the (non-overridden) due date live as the order date changes.
     if (t.dataset.field === 'order_date' && !_draft.payment_due) {
       const due = _editorRefs.drawer?.body?.querySelector('#inv-due-date');
@@ -1121,7 +1352,20 @@ function onFormInput(e) {
       // NB t.value is the raw string — costOrNull downstream is what turns '' into
       // null rather than the 0 that Number('') would give us.
       if (f === 'supplierCost') _draft.lines[i].costSource = t.value === '' ? 'auto' : 'manual';
+      // Typing a PRICE does the same for the sell side, and additionally drops
+      // any volume claim: the number is now theirs, so "−6% off" beside it would
+      // describe a discount we did not give. The ladder becomes an offer.
+      if (f === 'unitCost') {
+        _draft.lines[i].priceSource = PRICE_MANUAL;
+        _draft.lines[i] = clearVolume(_draft.lines[i]);
+      }
+      // Code and quantity both change what the ladder says; price changes what
+      // the free-shipping goods total is. All three are worth a re-quote.
+      if (f === 'code' || f === 'qty' || f === 'unitCost') scheduleQuote();
     }
+  } else if (t.matches('[data-freight-option]')) {
+    onFreightOptionPick(t.value);
+    return;
   } else { return; }
   // Clear the error highlight on the field as soon as the user edits it.
   t.classList.remove('admin-input--error', 'admin-select--error');
@@ -1132,12 +1376,36 @@ function onFormInput(e) {
 function onFormClick(e) {
   const act = e.target.closest('[data-form-action]')?.dataset.formAction;
   if (!act) return;
-  if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshPreview(); }
+  if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshPreview(); scheduleQuote(); }
   else if (act === 'remove-line') {
     const i = +e.target.closest('[data-line]').dataset.line;
     _draft.lines.splice(i, 1);
     if (!_draft.lines.length) _draft.lines.push(blankLine());
+    // Positions shift, so every cached answer is now about the wrong row. Drop
+    // them rather than re-index — a badge on the wrong line is worse than none.
+    _quote = null; _volumeOffers = [];
+    renderLines(); refreshPreview(); scheduleQuote();
+  } else if (act === 'apply-volume') {
+    // The ONE path by which a hand-edited price is replaced: the operator asked.
+    const i = +e.target.closest('[data-line]').dataset.line;
+    const offer = _volumeOffers.find((o) => o.position === i);
+    if (!offer || !_draft.lines[i]) return;
+    _draft.lines[i] = {
+      ..._draft.lines[i],
+      unitCost: offer.badge.unitPrice,
+      priceSource: PRICE_AUTO,
+      volumePercent: offer.badge.percent,
+      volumeSaving: offer.badge.lineSaving,
+      volumeQuantity: num(_draft.lines[i].qty),
+    };
+    _volumeOffers = _volumeOffers.filter((o) => o.position !== i);
     renderLines(); refreshPreview();
+  } else if (act === 'apply-free-shipping') {
+    const free = (_quote?.shipping.options || []).find((o) => o.key === 'free');
+    if (!free) return;
+    _freightChoice = 'free';
+    setFreightValue(free.freightExclGst);
+    renderShippingRow(); refreshPreview();
   } else if (act === 'link-business') {
     // Only ever reached by an explicit click on the suggestion. Nothing in
     // suggestedBusinessAccount() assigns — see businessLinkHtml().
@@ -1701,9 +1969,12 @@ function editorBodyHtml(d) {
         ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price, can be typed over, and <strong>never appears on the invoice, the preview, the PDF or the customer’s email</strong>. It exists so invoiced sales carry a real COGS into your profit figures.</p>` : ''}
         <div id="inv-cogs"></div>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
-        <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight — 0 shows as “Free”${gstSub(GST_EXCL)}</span>
-          <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
-        </label>
+        <div class="inv-freight" id="inv-freight">
+          <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight — 0 shows as “Free”${gstSub(GST_EXCL)}</span>
+            <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
+          </label>
+          <div class="inv-freight__pick" id="inv-freight-pick"></div>
+        </div>
       </section>
 
       <section class="inv-section">
@@ -1723,6 +1994,102 @@ function editorBodyHtml(d) {
   </div>`;
 }
 
+/**
+ * The strip under one line row: what the volume ladder did, or is offering.
+ *
+ * It is a full-width child of the `.inv-line` grid (`grid-column: 1/-1`), NOT a
+ * seventh cell — that grid is shared verbatim with the Quick Order editor and a
+ * seventh column would misalign every one of its rows.
+ *
+ * Three things it can say, in priority order:
+ *   1. we applied a volume price (and what it was before);
+ *   2. a volume price exists but the operator authored this one, so it is
+ *      offered as a button and never taken;
+ *   3. the product is inactive — worth a quiet flag when invoicing it.
+ * An unresolved code says NOTHING here: the operator is very likely mid-SKU, and
+ * the real gate is verifyLineCodes() at save.
+ */
+function lineQuoteNote(l, i) {
+  const bits = [];
+
+  const pct = Number(l.volumePercent);
+  if (Number.isFinite(pct) && pct > 0) {
+    const was = num(l.volumeSaving) > 0 && num(l.qty) > 0
+      ? round2(num(l.unitCost) + num(l.volumeSaving) / num(l.qty))
+      : null;
+    const saving = num(l.volumeSaving) > 0 ? ` · customer saves ${money(l.volumeSaving)}` : '';
+    bits.push(`<span class="inv-vol inv-vol--applied">Volume &minus;${esc(formatVolumePercent(pct))}${was ? ` (was ${esc(money(was))})` : ''}${esc(saving)}</span>`);
+  } else {
+    const offer = _volumeOffers.find((o) => o.position === i);
+    if (offer) {
+      bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="apply-volume" data-line="${i}">Apply volume price ${esc(money(offer.badge.unitPrice))} (&minus;${esc(offer.badge.percentText)})</button>`);
+    }
+  }
+
+  const ql = quoteLineAt(i);
+  if (ql && ql.resolved && !ql.isActive) {
+    bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
+  }
+
+  if (!bits.length) return '';
+  return `<div class="inv-line__note">${bits.join('')}</div>`;
+}
+
+/** The quote's answer for one draft-line index, if we have one. */
+function quoteLineAt(i) {
+  return (_quote?.lines || []).find((l) => l.position === i) || null;
+}
+
+/**
+ * The courier picker beside the freight box.
+ *
+ * The freight INPUT stays exactly as it was — same `data-field="freight"`, same
+ * save path, still typeable. This dropdown only writes into it. That is the
+ * whole integration, and it is why no schema changed.
+ *
+ * Every state says what it is. An empty or missing dropdown would read as "there
+ * are no shipping options", so when the rates cannot be read the row says so and
+ * points at the input the operator can always fall back to.
+ */
+function renderShippingRow() {
+  const host = _editorRefs?.drawer.body.querySelector('#inv-freight-pick');
+  if (!host) return;
+
+  if (_quoteStatus === 'loading' && !_quote) {
+    host.innerHTML = `<span class="inv-freight__note">Checking courier rates…</span>`;
+    return;
+  }
+  if (!_quote || !_quote.shipping.hasOptions) {
+    const why = _quoteStatus === 'limited'
+      ? 'Rate limit reached — courier rates will refresh shortly.'
+      : 'Courier rates unavailable — type the freight manually.';
+    host.innerHTML = `<span class="inv-freight__note inv-freight__note--warn">${esc(why)}</span>`;
+    return;
+  }
+
+  const shipping = _quote.shipping;
+  const sel = resolveShippingSelection(shipping, { choice: _freightChoice, freight: _draft.freight });
+  const opts = shipping.options.map((o) => {
+    const fee = o.freightExclGst > 0 ? ` — ${money(o.freightExclGst)}` : '';
+    return `<option value="${escA(o.key)}"${o.key === sel.key ? ' selected' : ''}>${esc(o.label + fee)}</option>`;
+  }).join('');
+  // "Custom" is only ever offered, never a real rate — it exists so a typed
+  // number has an honest label instead of silently showing someone else's.
+  const custom = `<option value="${FREIGHT_CUSTOM}"${sel.isCustom ? ' selected' : ''}>Custom — typed above</option>`;
+
+  const weight = parcelWeightNote(_quote);
+  const offerFree = freeShippingAvailable(_freightChoice, shipping);
+
+  host.innerHTML = `
+    <label class="inv-field inv-field--freightpick">
+      <span class="inv-field__label">Courier rate${gstSub(GST_EXCL)}</span>
+      <select class="admin-select" data-freight-option>${opts}${custom}</select>
+    </label>
+    ${weight ? `<span class="inv-freight__note">${esc(weight)}</span>` : ''}
+    ${offerFree ? `<button type="button" class="inv-freight__free" data-form-action="apply-free-shipping">This order qualifies for free shipping — apply</button>` : ''}
+    ${_quoteStatus === 'limited' ? `<span class="inv-freight__note inv-freight__note--warn">Rates may be a moment out of date (rate limit).</span>` : ''}`;
+}
+
 function renderLines() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
   if (!host) return;
@@ -1740,9 +2107,10 @@ function renderLines() {
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
-      <input class="admin-input" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
+      <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
       ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
+      ${lineQuoteNote(l, i)}
     </div>`;
   }).join('');
   // Product autocomplete (storefront-style, image dropdown) on both the code +
@@ -1773,8 +2141,16 @@ function renderLines() {
           unitCost: ex,
           supplierCost: keepManual ? prev.supplierCost : productCostExGst(p),
           costSource: keepManual ? 'manual' : 'auto',
+          // A freshly picked product is ours to price, so the quote may replace
+          // this figure. `ex` (retail ÷ 1.15) stays as the value shown until the
+          // quote lands — it is the correct qty-1 price and it means the row is
+          // never blank or stale while a request is in flight. Deleting it in
+          // favour of "wait for the server" would be removing a working fallback,
+          // which is a behaviour change and not a cleanup (ERR-158).
+          priceSource: PRICE_AUTO,
+          volumePercent: null, volumeSaving: null, volumeQuantity: null,
         };
-        renderLines(); refreshPreview();
+        renderLines(); refreshPreview(); scheduleQuote();
       },
     }));
   });
@@ -1883,6 +2259,12 @@ async function loadFromOrder(orderId) {
     // — the supplier's price may have moved since.
     supplierCost: costOrNull(it.supplier_cost_snapshot ?? it.cost_price),
     costSource: 'auto',
+    // Same reasoning on the SELL side, and it matters more: this is what the
+    // customer was actually charged. Re-pricing it from today's volume ladder
+    // would produce an invoice that disagrees with the order it came from.
+    // 'manual' means the quote may offer a volume price but can never take it.
+    priceSource: PRICE_MANUAL,
+    volumePercent: null, volumeSaving: null, volumeQuantity: null,
   }));
   if (!_draft.lines.length) _draft.lines = [blankLine()];
   // Order shipping_fee is GST-INCLUSIVE — convert to ex-GST for the freight field.
@@ -1988,18 +2370,23 @@ function renderPreview(d) {
   const t = computeTotals(d);
   const meta = invoiceMeta(d);
   const parties = invoiceParties(d);
-  // invoiceDocRows yields exactly [code, description, qty, lineTotal] — the ONLY
-  // projection the customer-facing document may use. The supplier cost cannot
-  // leak here because this renderer no longer touches the line objects at all.
-  const rows = invoiceDocRows(d, { money })
-    .map(([code, description, qty, lineTotal]) => `<tr>
+  // invoiceDocRows yields [code, description, qty, lineTotal, bulkNote] — the
+  // ONLY projection the customer-facing document may use. The supplier cost
+  // cannot leak here because this renderer no longer touches the line objects at
+  // all. `bulkNote` is a SUB-LINE inside the description cell, deliberately not a
+  // fifth column: a fifth column is how our margin would reach a customer.
+  const rows = invoiceDocRows(d, { money, note: lineDocNote })
+    .map(([code, description, qty, lineTotal, bulkNote]) => `<tr>
       <td class="inv-doc__code">${esc(code)}</td>
-      <td>${esc(description)}</td>
+      <td>${esc(description)}${bulkNote ? `<span class="inv-doc__line-note">${esc(bulkNote)}</span>` : ''}</td>
       <td class="inv-doc__num">${esc(qty)}</td>
       <td class="inv-doc__cost">${esc(lineTotal)}</td>
     </tr>`).join('') || `<tr><td colspan="4" class="inv-doc__empty">Add a line item…</td></tr>`;
 
   const freightCell = t.freight > 0 ? money(t.freight) : 'Free';
+  // Presentational ONLY — never a totals row. The unit prices already carry the
+  // discount, so a "less bulk discount" line would subtract it a second time.
+  const bulkSaved = computeInvoiceVolumeSavings(d);
 
   // From sits left; Bill To sits right with Deliver To stacked beneath it.
   const partyBlock = (p) => p ? `<div class="inv-doc__party">
@@ -2037,6 +2424,7 @@ function renderPreview(d) {
       <tr><td>GST</td><td>${money(t.gst)}</td></tr>
       <tr class="inv-doc__grand"><td>Total</td><td>${money(t.total)}</td></tr>
     </table>
+    ${bulkSaved > 0 ? `<div class="inv-doc__savings">You saved ${esc(money(bulkSaved))} on this order by buying in bulk.</div>` : ''}
 
     <div class="inv-doc__pay">
       <div class="inv-doc__pay-title">${displayDueDate(d) ? `<div>Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong></div>` : ''}<div>Please make payment to.</div></div>
@@ -2147,9 +2535,17 @@ function buildInvoiceDoc(d) {
 
   // --- Items table ---
   const startY = Math.max(partyBottom + 18, 250);
-  // Same four-column projection as the live preview — see renderPreview. The
-  // supplier cost is structurally unable to reach the PDF: it is not in the tuple.
-  const rows = invoiceDocRows(d, { money });
+  // Same projection as the live preview — see renderPreview. The supplier cost is
+  // structurally unable to reach the PDF: it is not in the tuple.
+  //
+  // The bulk note is the tuple's 5th slot and is folded onto a second LINE of the
+  // description cell, not into a fifth cell. autoTable derives its column count
+  // from the body rows, so a 5-cell row would silently grow the table to five
+  // columns — which is exactly the shape that would one day print our margin.
+  const rows = invoiceDocRows(d, { money, note: lineDocNote })
+    .map(([code, description, qty, lineTotal, bulkNote]) => [
+      code, bulkNote ? `${description}\n${bulkNote}` : description, qty, lineTotal,
+    ]);
   // Fixed column widths keep the layout stable regardless of content length: a
   // long product code or description wraps inside its own column instead of
   // stealing width from the others (which used to squeeze "Description" so hard
@@ -2197,6 +2593,17 @@ function buildInvoiceDoc(d) {
   ty += 6;
   doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ty - 11, valX, ty - 11);
   totRow('Total', money(t.total), { bold: true, size: 14, gap: 16 });
+
+  // --- Bulk savings (presentational; never a totals row) ---
+  // The line prices already carry the discount, so this states what the customer
+  // saved rather than subtracting anything. Right-aligned under the total.
+  const bulkSaved = computeInvoiceVolumeSavings(d);
+  if (bulkSaved > 0) {
+    doc.setFont('times', 'normal'); doc.setFontSize(10.5); doc.setTextColor(70);
+    doc.text(`You saved ${money(bulkSaved)} on this order by buying in bulk.`, valX, ty, { align: 'right' });
+    doc.setTextColor(20);
+    ty += 18;
+  }
 
   // --- Payment block ---
   let py = ty + 24;

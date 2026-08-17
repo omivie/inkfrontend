@@ -3168,6 +3168,46 @@ const AdminAPI = {
     return null;
   },
 
+  /**
+   * Price an in-progress invoice: courier options + the per-line volume ladder.
+   *
+   * READ-ONLY. `POST /api/admin/invoices/quote` writes nothing, so this is safe
+   * to call on every debounced edit; the budget is 60/min per operator, roomier
+   * than the 30/min invoice reads.
+   *
+   * Returns a DISCRIMINATED result rather than the house `null`-on-failure,
+   * because the caller has to tell three outcomes apart and say which one it is:
+   * a real answer, "we hit the rate limit — keep the last quote", and "the rates
+   * are unreadable — type the freight yourself". Collapsing them to null would
+   * paint an empty dropdown, which reads as "there are no shipping options"
+   * (the absence-as-zero shape this codebase keeps being bitten by).
+   *
+   * NB there is no abort path: API.request() builds its own AbortController and
+   * overwrites any signal a caller passes in `fetchOptions`, so a stale in-flight
+   * quote is discarded by the caller's sequence guard instead.
+   *
+   * @param {object} body {line_items:[{product_code,description,quantity,unit_cost_excl_gst?}], delivery?}
+   * @returns {Promise<{ok:true,data:object}|{ok:false,code:string,retryAfter?:number}>}
+   */
+  async quoteInvoice(body) {
+    try {
+      const resp = await window.API.post('/api/admin/invoices/quote', body);
+      if (resp && resp.ok === false) {
+        // 429 / 401 / 403 / 404 / 5xx come back as envelopes, not throws.
+        return { ok: false, code: resp.code || 'ERROR', retryAfter: resp.retry_after ?? null };
+      }
+      const data = resp?.data ?? null;
+      if (!data) return { ok: false, code: 'EMPTY' };
+      return { ok: true, data };
+    } catch (e) {
+      // A plain 400 throws. It is still not worth a toast — the operator is very
+      // likely mid-typing a code — so warn to the debug log and let the caller
+      // keep whatever it last had.
+      adminApiWarn('Invoice quote unavailable', e);
+      return { ok: false, code: e?.code || 'ERROR' };
+    }
+  },
+
   // Backend assigns the next invoice_number in series and returns the
   // authoritative subtotal/gst/total on the saved record.
   async createInvoice(payload) {

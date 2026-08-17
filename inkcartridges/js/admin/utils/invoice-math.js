@@ -203,13 +203,23 @@ export function countsForAnalytics(rec) {
 /**
  * The ONLY row projection the customer-facing document may use.
  *
- * Exactly four fields — code, description, qty, ex-GST line total. The supplier
- * cost is structurally unable to reach the live preview or the PDF because it is
- * not in this tuple and the renderers no longer touch the line objects at all.
- * That is the mechanism, not a promise; tests/admin-invoice-cost-not-on-document
- * .test.js holds it in place.
+ * FOUR PRINTED COLUMNS — code, description, qty, ex-GST line total — plus a
+ * fifth tuple slot carrying a customer-safe note that renders INSIDE the
+ * description cell. The column count is what matters and it has not moved: a
+ * fifth column is how our margin would end up on a customer's invoice, and
+ * tests/admin-invoice-cost-not-on-document.test.js fails if one appears.
+ *
+ * The supplier cost is structurally unable to reach the live preview or the PDF
+ * because it is not in this tuple and the renderers no longer touch the line
+ * objects at all. That is the mechanism, not a promise.
+ *
+ * @param {object} d
+ * @param {{money:Function, note?:Function}} deps `note` maps a line to its
+ *        sub-line string; omit it and the slot is always ''.
+ * @returns {Array<[string,string,string,string,string]>}
  */
-export function invoiceDocRows(d, { money }) {
+export function invoiceDocRows(d, { money, note }) {
+  const noteFor = typeof note === 'function' ? note : () => '';
   return (d?.lines || [])
     // Verbatim from the two renderers this replaces. NB it is deliberately looser
     // than the COGS/payload predicate above: a line carrying only a qty or a price
@@ -221,5 +231,28 @@ export function invoiceDocRows(d, { money }) {
       l.description || '',
       String(num(l.qty)),
       money(lineRevenueExGst(l)),
+      // Customer-safe by construction: read from the two volume fields only,
+      // never from the line object at large.
+      String(noteFor({ volumePercent: l.volumePercent, volumeQuantity: l.volumeQuantity }) || ''),
     ]);
+}
+
+/**
+ * What the customer saved on this invoice by buying in bulk, ex-GST.
+ *
+ * Summed from the per-line savings the BACKEND returned and we stamped onto the
+ * line when we applied its price. It is never re-derived from a retail price we
+ * hold locally: an invoice reopened next month must not have its savings line
+ * recomputed against a ladder that has since moved.
+ *
+ * Returns 0 when no line carries a saving — which is the same answer as "no
+ * discount was given" and is safe to render as nothing. It deliberately does NOT
+ * return null-for-unknown, because the caller's only use is `> 0 ? print : skip`
+ * and an unknown saving prints nothing either way.
+ */
+export function computeInvoiceVolumeSavings(d) {
+  return round2((d?.lines || []).reduce((s, l) => {
+    const v = Number(l?.volumeSaving);
+    return s + (Number.isFinite(v) && v > 0 ? v : 0);
+  }, 0));
 }

@@ -307,17 +307,49 @@ test('invoice-math source: normalizeInvoice references profit_excl_gst', () => {
 });
 
 // ─── 7. The document projection ──────────────────────────────────────────────
-test('invoiceDocRows yields exactly four fields — cost is not among them', () => {
+//
+// Aug 2026: the tuple grew a FIFTH slot carrying the customer-facing bulk-price
+// note. The number of PRINTED COLUMNS did not change — that note renders inside
+// the description cell, and the four-column assertions in
+// admin-invoice-cost-not-on-document.test.js still hold. What matters here is
+// unchanged: nothing derived from the supplier cost may be in the tuple.
+test('invoiceDocRows yields four printed fields plus a bulk note — cost is not among them', () => {
   const rows = invoiceDocRows({
     lines: [{ code: 'X', description: 'Widget', qty: 2, unitCost: 10, supplierCost: 6 }],
   }, { money });
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].length, 4, 'code, description, qty, line total — and nothing else');
-  assert.deepEqual(plain(rows[0]), ['X', 'Widget', '2', '$20.00']);
+  assert.equal(rows[0].length, 5, 'code, description, qty, line total, bulk note — and nothing else');
+  assert.deepEqual(plain(rows[0]), ['X', 'Widget', '2', '$20.00', ''],
+    'with no volume discount the note slot is empty, not absent');
 
   // The unit cost ($6) and the cost line total (2 × 6 = $12) must appear nowhere.
   const flat = JSON.stringify(plain(rows));
   assert.ok(flat.includes('$20.00'), 'the SELL line total must print');
   assert.ok(!flat.includes('$12.00'), 'the COST line total must NOT print');
   assert.ok(!flat.includes('$6.00'), 'the unit cost must NOT print');
+});
+
+test('invoiceDocRows: the note callback only ever sees the two volume fields', () => {
+  // The whole safety property of this projection is that renderers cannot reach
+  // the line object. A `note` callback handed the raw line would hand it back.
+  const seen = [];
+  invoiceDocRows({
+    lines: [{
+      code: 'X', description: 'Widget', qty: 2, unitCost: 10, supplierCost: 6,
+      costSource: 'manual', volumePercent: 6, volumeQuantity: 7, volumeSaving: 3.42,
+    }],
+  }, { money, note: (l) => { seen.push(l); return ''; } });
+  assert.equal(seen.length, 1);
+  assert.deepEqual(Object.keys(seen[0]).sort(), ['volumePercent', 'volumeQuantity'],
+    'the note callback must be given ONLY the volume fields — never the line, which carries our cost');
+});
+
+// The real lineDocNote() is exercised in admin-invoice-quote-aug2026.test.js;
+// here we only pin that the projection carries whatever the note produces.
+test('invoiceDocRows: a discounted line carries its note in the 5th slot', () => {
+  const rows = invoiceDocRows({
+    lines: [{ code: 'X', description: 'Widget', qty: 7, unitCost: 53.53, volumePercent: 6, volumeQuantity: 7 }],
+  }, { money, note: (l) => `Bulk price — ${l.volumePercent}% off at ${l.volumeQuantity}+` });
+  assert.equal(plain(rows[0]).length, 5);
+  assert.equal(plain(rows[0])[4], 'Bulk price — 6% off at 7+');
 });

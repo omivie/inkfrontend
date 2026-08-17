@@ -42,7 +42,7 @@ import {
 
 const MISSING = '—';
 const formatPrice = (v) => (window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`);
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 
 function formatDate(d) {
   if (!d) return MISSING;

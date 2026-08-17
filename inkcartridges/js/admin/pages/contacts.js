@@ -18,7 +18,7 @@ import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 
 const MISSING = '—';
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 // Address is stored as string[] on the wire; edited as a \n-joined textarea.
 const linesToText = (a) => (Array.isArray(a) ? a.join('\n') : (a || ''));
 const textToLines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);

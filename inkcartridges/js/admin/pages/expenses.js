@@ -60,7 +60,7 @@ import AllTab from './expenses-tab-all.js';
 import RecurringTab from './expenses-tab-recurring.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
 const money = (n) => (typeof window.formatPrice === 'function' ? window.formatPrice(Number(n) || 0) : '$' + (Number(n) || 0).toFixed(2));
 const num = (n) => { const v = typeof n === 'string' ? parseFloat(n) : n; return Number.isFinite(v) ? v : 0; };
 const warn = (m, e) => window.DebugLog?.warn?.(`[Expenses] ${m}`, e?.message || e);

@@ -41,6 +41,75 @@ describing the same incident.
 
 ---
 
+## ERR-167 — `window.Security` has never existed, so twelve escaping guards were an off switch — **RESOLVED (2026-08-17)**
+
+**Date**: 2026-08-17
+**Context**: found while mapping the admin invoice editor to add the volume-discount autofill. The
+editor's `escA()` looked defensive. It was not defensive; it was off.
+
+**Root cause.** `js/security.js:10` declares
+
+```js
+const Security = { … };          // and never assigns window.Security
+```
+
+A top-level `const` in a *classic* script creates a global **lexical** binding. It is reachable as a
+bare `Security` from every other classic script and from the admin's ES modules — but it is **not a
+property of `window`**. So `window.Security` is `undefined`, always, everywhere. Twelve call sites
+were written as
+
+```js
+const escH = (s) => (window.Security?.escapeHtml ? Security.escapeHtml(String(s ?? '')) : String(s ?? ''));
+```
+
+and every one of them had taken the fallback branch since the day it was written.
+
+**Severity is not uniform, and the worst one is in the invoice path.**
+`js/admin/components/product-search.js:18` — the product picker used on every invoice and quick-order
+line — had a fallback that returned the string **completely unescaped**, and its output goes straight
+into `innerHTML`:
+
+```js
+<span class="admin-ac__pname">${escH(name)}</span>
+```
+
+Product names are catalogue data, editable in the admin and populated from supplier imports, so this
+was a stored-HTML-injection path into the page the operator builds invoices on. The `escA` variants
+degraded to `.replace(/"/g,'&quot;')`, which is adequate *inside* an attribute and wrong anywhere
+else. `js/ink-finder.js:71` was the benign case — its fallback was a correct escaper, just a
+narrower one than `Security.escapeHtml` (no `/`, no backtick).
+
+**Why it stayed hidden.** The guard reads as good practice, the fallback is plausible, and the
+output looks right for every product name that contains no markup — which is all of them, until one
+does not. Nothing logs. Nothing throws. `js/account-settings-page.js` is the tell: line 9 guarded on
+`window.Security`, and line 11 called `Security.escapeHtml` **bare** — two lines apart, one of them
+wrong, both shipping.
+
+**Fix.** All twelve now reference the binding directly, with no fallback:
+
+```js
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
+```
+
+Files: `js/admin/components/{product-search,autocomplete}.js`,
+`js/admin/pages/{invoices,quick-order,contacts,customers,expenses,business}.js`,
+`js/account-settings-page.js`, `js/ink-finder.js`. Verified `security.js` is `defer`-loaded before
+every consumer on all affected pages.
+
+**Pinned by** `tests/security-escaping-guards-aug2026.test.js` — asserts `security.js` still declares
+a bare const and never touches `window`, that no file anywhere under `inkcartridges/js` branches on
+`window.Security`, and that no escaper helper has a fallback branch at all. Confirmed to fail (3 of
+5 checks) when the old guard is reintroduced.
+
+**Lesson**: the codebase already had this lesson written down, in `pages/invoices.js`, about a
+`typeof AdminAuth` guard that silently deleted an entire column — *"A defensive typeof guard around
+a missing import doesn't harden the feature, it deletes it. Import the thing and let it throw if
+it's absent."* A guard that is always false is not a safety net; it is an off switch nobody can see.
+The general form: **if the fallback branch is the only branch that ever runs, the guard is the bug.**
+Grep for the guarded thing before trusting the guard.
+
+---
+
 ## ERR-166 — The admin's "Delete Products" button calls an endpoint that does not exist — **OPEN (backend, BF-041)** (2026-08-14)
 
 **Date**: 2026-08-14

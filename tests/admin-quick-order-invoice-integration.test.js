@@ -105,7 +105,32 @@ test('lines carry code/description/qty, sell price → unitCost, and cost fields
         code: 'CTN258XLKCMY', description: 'Canon ink', qty: 2,
         unitCost: 40,           // quick-order unitPrice (ex-GST sell) → invoice unitCost (ex-GST sell)
         supplierCost: 18, costSource: 'manual',   // OUR cost survives the bridge untouched
+        // The volume ladder (Aug 2026). Present-and-null on an undiscounted line
+        // rather than absent: this map is a whitelist, and a field that is only
+        // sometimes named is a field that is sometimes silently dropped.
+        volumePercent: null, volumeSaving: null, volumeQuantity: null,
     });
+});
+
+test('a bulk-priced line carries its discount across the bridge (ERR-150 shape)', () => {
+    // The bridge line map is a whitelist. When the public volume ladder shipped,
+    // two whitelists exactly like this one dropped it silently — once a parser
+    // (ERR-150), once a call site (ERR-160). A quick order converted to an invoice
+    // is the moment it would matter most: the counter quotes a bulk price, and the
+    // invoice must print the same discount rather than re-deriving one.
+    const d = {
+        id: 'qo1',
+        lines: [{
+            code: 'GLC73BK', description: 'Brother LC73BK', qty: 7, unitPrice: 53.53,
+            supplierCost: 20, costSource: 'auto',
+            volumePercent: 6, volumeSaving: 23.94, volumeQuantity: 7,
+        }],
+    };
+    const line = buildQuickOrderPrefill(d).lines[0];
+    assert.equal(line.volumePercent, 6, 'the discount % must survive the bridge');
+    assert.equal(line.volumeSaving, 23.94, 'the line saving must survive the bridge');
+    assert.equal(line.volumeQuantity, 7, 'the qualifying quantity must survive the bridge');
+    assert.equal(line.unitCost, 53.53, 'and the discounted price it describes');
 });
 
 test('a description-only line (no code) is preserved — freight/labour survive', () => {

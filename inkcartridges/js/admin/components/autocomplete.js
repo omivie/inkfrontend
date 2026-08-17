@@ -57,8 +57,8 @@ function nearestScrollParent(el) {
   return null;
 }
 
-const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
-const escH = (s) => (window.Security?.escapeHtml ? Security.escapeHtml(String(s ?? '')) : String(s ?? ''));
+const escA = (s) => Security.escapeAttr(String(s ?? ''));
+const escH = (s) => Security.escapeHtml(String(s ?? ''));
 
 let _acSeq = 0;
 

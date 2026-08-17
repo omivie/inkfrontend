@@ -6,7 +6,11 @@
 
         const notification = document.createElement('div');
         notification.className = `settings-notification settings-notification--${type}`;
-        const safeMsg = (window.Security && Security.escapeHtml) ? Security.escapeHtml(message) : message;
+        // `Security` is a bare top-level const in security.js — a global LEXICAL
+        // binding, never a property of window. The old `window.Security && …`
+        // guard was therefore always false and this message went in unescaped
+        // (ERR-167). The very next line has always called it bare and works.
+        const safeMsg = Security.escapeHtml(message);
         const actionHtml = action
             ? `<button type="button" data-action="custom" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.5);color:white;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">${Security.escapeHtml(action.label)}</button>`
             : '';

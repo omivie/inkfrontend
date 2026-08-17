@@ -49,6 +49,13 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
  * this stays the single owner of the prefill shape without duplicating that helper.
  * `unitPrice` (the quick order's ex-GST sell price) maps to the invoice's
  * `unitCost` (also the ex-GST sell price — see the naming note in utils/invoice-math.js).
+ *
+ * ⚠️ THE LINE MAP BELOW IS A WHITELIST. Every field not named here is discarded.
+ * That is how the public volume ladder went missing twice in Aug 2026 — once at a
+ * parser of exactly this shape (ERR-150) and once at an un-enrolled call site
+ * (ERR-160). If you add a field to a line, add it here too, or it will vanish at
+ * the one moment it matters most: a bulk sale being turned into its invoice.
+ * tests/admin-invoice-quote-aug2026.test.js fails if the volume fields go missing.
  */
 export function buildQuickOrderPrefill(draft) {
   const d = draft || {};
@@ -71,6 +78,12 @@ export function buildQuickOrderPrefill(draft) {
       unitCost: round2(num(l.unitPrice)),
       supplierCost: l.supplierCost ?? null,
       costSource: l.costSource || 'auto',
+      // The volume discount this line was actually priced at. Carried so the
+      // invoice prints the same bulk note the counter quoted — and so it is not
+      // silently re-derived from a ladder that may have moved since.
+      volumePercent: l.volumePercent ?? null,
+      volumeSaving: l.volumeSaving ?? null,
+      volumeQuantity: l.volumeQuantity ?? null,
     })),
   };
 }
