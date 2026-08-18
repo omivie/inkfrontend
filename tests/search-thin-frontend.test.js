@@ -324,6 +324,17 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     // — measures the open drawer's top and bounds its max-height to the viewport
     // so the brands grid can't fall below the fold — ~25 lines incl. doc comment
     // and a resize listener, lifting the ceiling to 750.
-    assert.ok(lines <= 750,
-        `main.js is ${lines} lines; expected ≤750. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    // The mobile admin entry (Aug 2026, ERR-172) added ensureNavItem to
+    // initAdminHeaderLink — the header shortcut is hidden below 1100px
+    // (ERR-148), so a verified admin on a phone had no route to /admin; the
+    // same reveal now also injects an "Admin Centre" row into the nav drawer
+    // — ~30 lines incl. doc comment, lifting the ceiling to 780.
+    //
+    // This ceiling is a tripwire for RE-GROWN SEARCH LOGIC, not a general
+    // budget: raise it only for a documented header/nav feature like the ones
+    // above, and never for anything that touches the search dropdown. A
+    // feature with its own geometry belongs in its own file (see landing.js /
+    // window.InkFinderScroll, ERR-137), not here.
+    assert.ok(lines <= 780,
+        `main.js is ${lines} lines; expected ≤780. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

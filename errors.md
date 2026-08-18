@@ -41,6 +41,59 @@ describing the same incident.
 
 ---
 
+## ERR-172 — The Admin shortcut was `display:none` below 1100px, so an admin on a phone had no way into /admin but typing the URL — **RESOLVED (2026-08-18)**
+
+**Date**: 2026-08-18
+**Context**: owner reported "the admin centre button isn't available on phone UI".
+
+**Root cause.** Not a bug — a deliberate trade-off that was never finished. The header shortcut is
+injected into `.header-actions` by `main.js#initAdminHeaderLink()`, and `layout.css` carries a base
+`.header-actions__item--admin { display: none }` that MODE D (`@media (min-width: 1100px)`) reverses.
+The measurement behind it is real and still holds (ERR-148): below 1100px the cluster is icon-only
+and every item holds its 48px `--tap-min` floor, so a fifth item measures 240px + gaps against a
+~251px right track at 768px — it drives the cluster into the centred wordmark and, at 390px, wraps
+the brand row outright. The four customer-facing items are not negotiable, so the owner-only one was
+the one that went.
+
+The half that was never built was the replacement. The CSS comment says "admins on a narrow viewport
+can still type /admin", and that was accepted as the whole answer for six weeks. Typing a URL is not
+an entry point; on a phone it is the least reachable action on the device. So the shortcut wasn't
+broken, it was **absent with a rationale attached** — which is exactly the failure mode the
+fail-soft rule names: the trade-off was recorded in a CSS comment and nowhere the user could see.
+
+**Fix.** The same verified reveal now injects a second surface. `ensureNavItem()` (inside
+`initAdminHeaderLink`, called from `ensureLink()`) appends an "Admin Centre" row to `#nav-menu`, the
+mobile drawer — a vertical list, so it costs zero horizontal budget and the 1100px measurement is
+untouched. `removeLink()` drops both nodes, so sign-out / role revocation clears the menu row too.
+
+**The two surfaces are mutually exclusive by CSS, and that is the invariant to keep**: the drawer row
+is `display:none` inside the same MODE D block that reveals the header shortcut. Exactly one Admin
+entry at every width — never two, and never none. At ≥1100px the drawer has become the horizontal
+five-link nav row and is already at its measured limit; a sixth link is precisely what clips (the
+same measurement that set the 1100px gate in the first place).
+
+Two details worth keeping: the row is JS-injected like its sibling, so no page ships `href="/admin"`
+in static markup (the Jul 2026 Merchant Center rule — and `#nav-menu` lives *inside* `<header>`, so
+the existing static-markup assertions already cover it); and the label is tinted
+`--color-primary-light`, not `--color-primary`, because the drawer sits on `--steel-900` where
+`#267FB5` measures **4.1:1** — under AA for a small uppercase label. The light tint clears ~14:1 and
+still reads as the privileged colour the Business/Admin pair share.
+
+**Verified.** Playwright at 390/1099/1200/1440px: at 390 the row renders last in the drawer, 48px
+tall, fully inside the drawer's scroll bound, while `#header-admin-link` computes `display:none`; at
+1099 the same; at 1200 the row is `none` and the header shortcut is `flex`, with the nav row not
+clipping (`scrollWidth === clientWidth`); at 1440 MODE E's window-edge pin is unchanged. Stubbing
+`Auth.isAuthenticated → false` and re-running removes both nodes. `tests/admin-header-link-may2026.test.js`
++4 (15/15), full suite 4001 green, `npm run build` restamped `main.js` + `layout.css`.
+
+**Lesson.** A constraint that removes a feature owes a replacement on the surface it removed it from,
+not a note in a comment explaining why the user can't have it. "They can still type the URL" is the
+same shape as absence-as-zero: it reads as a decision in the source and as a missing button on the
+device. When a measurement says an element can't fit *there*, ask where else it fits — the drawer had
+room the whole time.
+
+---
+
 ## ERR-171 — Loading an expense preset silently un-ticked "Already paid", so the one-click path was the only path that booked an unpaid bill — **RESOLVED (2026-08-18)**
 
 **Date**: 2026-08-18

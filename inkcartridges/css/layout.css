@@ -617,6 +617,25 @@
     background-color: transparent;
 }
 
+/* Admin entry in the MOBILE DRAWER (<1100px). JS-injected by
+   main.js#initAdminHeaderLink for server-verified admins only — same reveal,
+   same MC rule (no page ships href="/admin" in static markup).
+
+   WHY IT EXISTS: the header cluster's Admin shortcut is desktop-only, because
+   five icon-only items at the 48px tap floor do not fit the right grid track
+   below 1100px (see .header-actions__item--admin above). Hiding it there left
+   an admin on a phone with no way into /admin but typing the URL. The drawer
+   is a vertical list, so it costs no horizontal budget at all.
+
+   The colour is --color-primary-LIGHT, not --color-primary: the drawer sits on
+   --steel-900, where #267FB5 measures 4.1:1 against it — under WCAG AA for
+   this small uppercase label. The light tint clears 14:1 and still reads as
+   the privileged colour family the Business/Admin pair share. */
+.nav-menu__item--admin .nav-menu__link {
+    color: var(--color-primary-light);
+    font-weight: var(--font-weight-bold);
+}
+
 /* Dropdown arrow */
 .nav-menu__arrow {
     font-size: var(--font-size-xs);
@@ -894,6 +913,14 @@
        Above 1360px it leaves the flow entirely (MODE E). */
     .header-actions__item--admin {
         display: flex;
+    }
+
+    /* ...and the drawer's Admin row goes away in the same breath, so an admin
+       never sees two. The drawer is a horizontal five-link row at this width
+       and is already at its measured limit — a sixth link is exactly what
+       clips (this is the measurement that set the 1100px gate). */
+    .nav-menu__item--admin {
+        display: none;
     }
 
     .nav-toggle {

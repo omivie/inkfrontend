@@ -136,6 +136,10 @@ function initActiveNavLink() {
  *
  * Guests and signed-in non-admins trigger no extra network request beyond
  * the single verify call (guests skip even that).
+ *
+ * TWO SURFACES, one reveal: the header shortcut (>=1100px) and an "Admin
+ * Centre" row in the mobile nav drawer (<1100px), because the cluster cannot
+ * afford a fifth icon on a phone. See ensureNavItem() below.
  */
 function initAdminHeaderLink() {
     if (typeof Auth === 'undefined') return;
@@ -146,6 +150,7 @@ function initAdminHeaderLink() {
     // existing node on subsequent calls. Kept out of static markup so the
     // /admin route is never advertised in public page source.
     function ensureLink() {
+        ensureNavItem();
         var existing = document.getElementById('header-admin-link');
         if (existing) return existing;
         var actions = document.querySelector('.header-actions');
@@ -164,9 +169,34 @@ function initAdminHeaderLink() {
         return a;
     }
 
+    // MOBILE ENTRY POINT. The header shortcut is desktop-only: below 1100px the
+    // action cluster is icon-only and a fifth 48px item does not fit the right
+    // grid track, so `.header-actions__item--admin` is `display: none` there
+    // (ERR-148). That left an admin on a phone with no route to /admin except
+    // typing the URL. The same verified reveal therefore also drops an entry
+    // into the mobile nav drawer, a vertical list with room to spare.
+    //
+    // Exactly ONE of the two shows at any width: the drawer entry hides at
+    // >=1100px, where the cluster's shortcut appears and the drawer becomes the
+    // horizontal nav row (already at its five-link width limit — the same
+    // measurement that set the 1100px gate). Both are injected here, so the
+    // pair cannot drift apart or double up.
+    function ensureNavItem() {
+        if (document.getElementById('nav-admin-item')) return;
+        var menu = document.getElementById('nav-menu');
+        if (!menu) return;
+        var li = document.createElement('li');
+        li.id = 'nav-admin-item';
+        li.className = 'nav-menu__item nav-menu__item--admin';
+        li.innerHTML = '<a href="/admin" class="nav-menu__link">Admin Centre</a>';
+        menu.appendChild(li);
+    }
+
     function removeLink() {
-        var el = document.getElementById('header-admin-link');
-        if (el && el.parentNode) el.parentNode.removeChild(el);
+        ['header-admin-link', 'nav-admin-item'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+        });
     }
 
     function readHint() {

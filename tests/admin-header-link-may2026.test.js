@@ -177,6 +177,67 @@ test('initAdminHeaderLink() re-evaluates on auth state changes (sign-in / sign-o
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MOBILE (<1100px) — the drawer entry, added Aug 2026
+//
+// The header shortcut is desktop-only: below 1100px the action cluster is
+// icon-only and a fifth 48px item does not fit the right grid track (ERR-148),
+// so `.header-actions__item--admin` is display:none there. For months that
+// meant an admin on a phone had NO route to /admin but typing the URL. The
+// same verified reveal now also injects an "Admin Centre" row into the mobile
+// nav drawer, which is a vertical list and costs no horizontal budget.
+//
+// The pair must stay mutually exclusive: exactly one Admin entry at every
+// width, never two, never none.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('initAdminHeaderLink() also injects the mobile drawer entry (<1100px has no header shortcut)', () => {
+    const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    assert.ok(body.includes('function ensureNavItem('),
+        'initAdminHeaderLink() must define ensureNavItem() — below 1100px the header cluster hides Admin, so the drawer is the only entry point on a phone');
+    assert.ok(/getElementById\((['"])nav-menu\1\)/.test(body),
+        'ensureNavItem() must append into #nav-menu — the mobile drawer');
+    assert.ok(/nav-menu__item--admin/.test(body),
+        'the injected drawer row must carry .nav-menu__item--admin — that class is what hides it again at >=1100px, where the header shortcut takes over');
+    assert.ok(/nav-admin-item/.test(body),
+        'the drawer row needs the nav-admin-item id so the reveal is idempotent and the sign-out path can find it');
+});
+
+test('the drawer entry is created by the SAME reveal as the header shortcut', () => {
+    // One reveal, two surfaces. If ensureNavItem() were called from anywhere
+    // but ensureLink(), a future change to the gate would move one and not the
+    // other — an unverified account keeping an /admin row in its menu.
+    const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    const ensure = body.slice(body.indexOf('function ensureLink('));
+    assert.ok(ensure.slice(0, ensure.indexOf('\n    }')).includes('ensureNavItem()'),
+        'ensureLink() must call ensureNavItem() so both surfaces appear behind the one API.verifyAdmin() gate');
+});
+
+test('sign-out removes BOTH surfaces, not just the header shortcut', () => {
+    const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    const remove = body.slice(body.indexOf('function removeLink('));
+    const removeBody = remove.slice(0, remove.indexOf('\n    }') + 6);
+    assert.ok(removeBody.includes('header-admin-link') && removeBody.includes('nav-admin-item'),
+        'removeLink() must drop the drawer row as well as the header link — otherwise a revoked admin (or a signed-out browser) keeps an /admin row in its menu');
+});
+
+test('layout.css shows exactly one Admin entry at every width', () => {
+    // The two gates are complementary by construction:
+    //   <1100px  header shortcut display:none  (base rule) + drawer row visible
+    //   >=1100px header shortcut display:flex  (MODE D)    + drawer row hidden
+    assert.ok(LAYOUT_CSS.includes('.nav-menu__item--admin'),
+        'layout.css must style the drawer entry');
+    const modeD = LAYOUT_CSS.slice(LAYOUT_CSS.indexOf('@media (min-width: 1100px) {'));
+    const modeDBlock = modeD.slice(0, modeD.indexOf('\n}\n'));
+    assert.match(modeDBlock, /\.header-actions__item--admin\s*\{[^}]*display:\s*flex/,
+        'MODE D (>=1100px) must reveal the header shortcut');
+    assert.match(modeDBlock, /\.nav-menu__item--admin\s*\{[^}]*display:\s*none/,
+        'MODE D (>=1100px) must hide the drawer row — otherwise an admin sees TWO Admin entries, and the horizontal nav row (already at its measured five-link limit) gains a sixth link and clips');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // layout.css — the --admin modifier styling still ships
 // ─────────────────────────────────────────────────────────────────────────────
 
