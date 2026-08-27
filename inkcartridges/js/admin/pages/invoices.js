@@ -37,6 +37,9 @@ import {
   freeShippingAvailable, parcelWeightNote,
 } from '../utils/invoice-quote.js';
 import { marginBadge, formatProfitDollars } from '../utils/profitability.js';
+import {
+  ordersFrom, searchParties, orderToParty, partyEmptyText, orderEmptyText,
+} from '../utils/party-search.js';
 import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 
 const GST_RATE = 0.15;
@@ -1969,7 +1972,7 @@ function editorBodyHtml(d) {
         <div class="inv-section__title">Start from</div>
         <div class="inv-grid-2">
           <label class="inv-field"><span class="inv-field__label">Existing order</span>
-            <div class="admin-ac"><input class="admin-input" id="inv-order-search" type="search" placeholder="Search order # / email to auto-fill…" autocomplete="off"></div>
+            <div class="admin-ac"><input class="admin-input" id="inv-order-search" type="search" placeholder="Search order # or customer name…" autocomplete="off"></div>
           </label>
           <label class="inv-field"><span class="inv-field__label">Fill details from</span>
             <div class="admin-ac"><input class="admin-input" id="inv-party-search" type="search" placeholder="Search a contact or customer…" autocomplete="off"></div>
@@ -2294,37 +2297,52 @@ function attachTopAutocompletes() {
   const body = _editorRefs?.drawer.body;
   if (!body) return;
   const orderInput = body.querySelector('#inv-order-search');
+  // `getOrders` hands back the endpoint's `data`, and /api/admin/orders sends a
+  // BARE ARRAY — reading `.orders` off it returned [] for every query ever typed,
+  // valid order numbers included (ERR-176). Normalise, like every other caller.
+  let orderFetchFailed = false;
   if (orderInput) attachAutocomplete(orderInput, {
     fetch: async (q) => {
       const data = await AdminAPI.getOrders({ search: q }, 1, 8);
-      return data?.orders || data?.items || [];
+      orderFetchFailed = data == null;
+      return ordersFrom(data);
     },
-    render: (o) => `<span class="admin-ac__code">${esc(o.order_number || o.id || '')}</span> ${esc(o.customer_name || o.customer_email || '')} <span class="admin-ac__meta">· ${money(o.total_amount ?? o.total ?? 0)}</span>`,
+    emptyText: (q) => orderEmptyText(q, orderFetchFailed),
+    render: (o) => `<span class="admin-ac__code">${esc(o.order_number || o.id || '')}</span> ${esc(o.customer_name || o.customer_email || o.guest_email || '')} <span class="admin-ac__meta">· ${money(o.total_amount ?? o.total ?? 0)}</span>`,
     onPick: (o) => loadFromOrder(o.id || o.order_id),
   });
-  // Unified "Fill details from…" picker — Contacts first, then Customers, in one
-  // sectioned dropdown (mirrors the storefront Compatible/Genuine split).
+  // Unified "Fill details from…" picker — Contacts, then Customers, then Orders,
+  // in one sectioned dropdown (mirrors the storefront Compatible/Genuine split).
+  // Orders are in there because a GUEST checkout has no contact and no account
+  // row: searching the other two for them is "not looked", not "not found".
   const partyInput = body.querySelector('#inv-party-search');
+  let partyFailed = [];
   if (partyInput) attachAutocomplete(partyInput, {
     fetch: async (q) => {
-      const [cts, cus] = await Promise.all([
-        AdminAPI.listContacts({ search: q }, 1, 6),
-        AdminAPI.getCustomers({ search: q }, 1, 6),
-      ]);
-      const contacts = (Array.isArray(cts) ? cts : (cts?.contacts || cts?.items || []))
-        .map((x) => ({ ...x, __type: 'contact' }));
-      const customers = (cus?.customers || cus?.items || [])
-        .map((x) => ({ ...x, __type: 'customer' }));
-      const sections = [];
-      if (contacts.length) sections.push({ title: 'Contacts', items: contacts });
-      if (customers.length) sections.push({ title: 'Customers', items: customers });
+      const { sections, failed } = await searchParties(q, AdminAPI);
+      partyFailed = failed;
       return sections;
     },
-    render: (it) => it.__type === 'contact'
-      ? `<span class="admin-ac__code">${esc(it.label || it.bill_to?.name || 'Contact')}</span> <span class="admin-ac__meta">${esc(it.bill_to?.company || it.bill_to?.email || '')}</span>`
-      : `${esc(it.full_name || `${it.first_name || ''} ${it.last_name || ''}`.trim() || '—')} <span class="admin-ac__meta">· ${esc(it.email || '')}</span>`,
-    onPick: (it) => { if (it.__type === 'contact') loadFromContact(it); else loadFromCustomer(it); },
+    emptyText: (q) => partyEmptyText(q, partyFailed),
+    render: (it) => partyRowHtml(it),
+    onPick: (it) => {
+      if (it.__type === 'contact') loadFromContact(it);
+      else if (it.__type === 'order') loadFromOrderDetails(it);
+      else loadFromCustomer(it);
+    },
   });
+}
+
+/** One row of the "Fill details from…" dropdown, per source. */
+function partyRowHtml(it) {
+  if (it.__type === 'contact') {
+    return `<span class="admin-ac__code">${esc(it.label || it.bill_to?.name || 'Contact')}</span> <span class="admin-ac__meta">${esc(it.bill_to?.company || it.bill_to?.email || '')}</span>`;
+  }
+  if (it.__type === 'order') {
+    const p = orderToParty(it);
+    return `<span class="admin-ac__code">${esc(p.orderNumber)}</span> ${esc(p.name || p.email || '—')} <span class="admin-ac__meta">· details only</span>`;
+  }
+  return `${esc(it.full_name || `${it.first_name || ''} ${it.last_name || ''}`.trim() || '—')} <span class="admin-ac__meta">· ${esc(it.email || '')}</span>`;
 }
 
 // ---- auto-fill sources --------------------------------------------------
@@ -2335,19 +2353,16 @@ async function loadFromOrder(orderId) {
   if (!editorAlive(token)) return;
   if (!order) { Toast.error('Could not load that order.'); return; }
 
-  const addr = order.shipping_address || {};
+  // ONE order→party mapper, shared with the "Fill details from…" Orders section
+  // and Quick Order (utils/party-search.js) — a guest row carries the address as
+  // flat shipping_* columns and the contact details in guest_email/guest_phone.
+  const party = orderToParty(order);
   _draft.source_order_id = order.id || orderId;
   // Order date reflects when the order was actually placed (used in the email line).
-  _draft.order_date = (order.created_at || order.placed_at || '').slice(0, 10) || _draft.order_date;
+  _draft.order_date = party.orderDate || _draft.order_date;
   _draft.customer = {
-    attn: order.customer_name || addr.recipient_name || '',
-    name: order.customer_name || addr.recipient_name || '',
-    company: '',
-    address: [addr.address_line1 || order.shipping_address_line1, addr.address_line2 || order.shipping_address_line2,
-      [(addr.city || order.shipping_city || ''), (addr.region || order.shipping_region || ''), (addr.postal_code || order.shipping_postal_code || '')].filter(Boolean).join(', '),
-      addr.country || order.shipping_country || ''].filter(Boolean).join('\n'),
-    phone: addr.phone || order.shipping_phone || '',
-    email: order.customer_email || order.guest_email || '',
+    attn: party.attn, name: party.name, company: party.company,
+    address: party.address, phone: party.phone, email: party.email,
   };
   _draft.lines = (order.items || []).map((it) => ({
     code: it.sku || '',
@@ -2374,6 +2389,26 @@ async function loadFromOrder(orderId) {
   _fillSource = { type: 'order', label: order.order_number || String(orderId) };
   rebuildEditor();
   Toast.success(`Filled from order ${order.order_number || ''}`.trim());
+}
+
+/**
+ * Fill the bill-to block from an order and NOTHING else — no line items, no
+ * freight, no `source_order_id`. This is the "Fill details from…" path: it
+ * answers "invoice this person again", where importing the old order's goods
+ * would be wrong. Importing the goods is what the "Existing order" picker does,
+ * and the toast says which one just happened so the two can never be confused.
+ */
+function loadFromOrderDetails(order) {
+  if (!order) return;
+  const party = orderToParty(order);
+  _draft.source_order_id = null;
+  _draft.customer = {
+    attn: party.attn, name: party.name, company: party.company,
+    address: party.address, phone: party.phone, email: party.email,
+  };
+  _fillSource = { type: 'order details', label: party.orderNumber, email: party.email };
+  rebuildEditor();
+  Toast.success(`Filled customer details from order ${party.orderNumber} — line items not imported`.trim());
 }
 
 // Fill the non-goods fields from a saved Contact (bill-to + deliver-to + note).
@@ -2442,7 +2477,7 @@ async function loadFromCustomer(c) {
   _draft.customer.phone = c.phone || _draft.customer.phone;
   const od = await AdminAPI.getOrders({ user_id: c.id }, 1, 1);
   if (!editorAlive(token)) return;
-  const order = od?.orders?.[0];
+  const order = ordersFrom(od)[0];   // bare-array envelope — ERR-176
   const addr = order?.shipping_address;
   if (addr) {
     _draft.customer.address = [addr.address_line1, addr.address_line2,

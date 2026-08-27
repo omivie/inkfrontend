@@ -34,6 +34,7 @@ import { costOrNull } from '../utils/invoice-math.js';
 import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
 import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
 import { buildQuickOrderPrefill } from '../utils/quick-order-bridge.js';
+import { searchParties, orderToParty, partyEmptyText } from '../utils/party-search.js';
 
 const GST_RATE = 0.15;
 const MISSING = '—';
@@ -638,34 +639,44 @@ function refreshTotals() {
     <div class="qo-totals__row qo-totals__row--total"><span>Total (incl. GST)</span><span>${money(t.total)}</span></div>`;
 }
 
-// Unified "look up" picker — Contacts first, then Customers, in one sectioned
-// dropdown (mirrors the Invoices editor's "Fill details from…" picker).
+// Unified "look up" picker — Contacts, then Customers, then Orders, in one
+// sectioned dropdown. Shares ONE search with the Invoices editor's "Fill details
+// from…" picker (utils/party-search.js): these two were byte-identical copies,
+// which is how they came to share a four-month blind spot for guest checkouts
+// (ERR-176). A guest has no contact row and no account row — only an order.
 function attachPartyPicker() {
   const body = _editorRefs?.drawer.body;
   if (!body) return;
   const input = body.querySelector('#qo-party-search');
   if (!input) return;
+  let partyFailed = [];
   const h = attachAutocomplete(input, {
     fetch: async (q) => {
-      const [cts, cus] = await Promise.all([
-        AdminAPI.listContacts({ search: q }, 1, 6),
-        AdminAPI.getCustomers({ search: q }, 1, 6),
-      ]);
-      const contacts = (Array.isArray(cts) ? cts : (cts?.contacts || cts?.items || []))
-        .map((x) => ({ ...x, __type: 'contact' }));
-      const customers = (cus?.customers || cus?.items || [])
-        .map((x) => ({ ...x, __type: 'customer' }));
-      const sections = [];
-      if (contacts.length) sections.push({ title: 'Contacts', items: contacts });
-      if (customers.length) sections.push({ title: 'Customers', items: customers });
+      const { sections, failed } = await searchParties(q, AdminAPI);
+      partyFailed = failed;
       return sections;
     },
-    render: (it) => it.__type === 'contact'
-      ? `<span class="admin-ac__code">${esc(it.label || it.bill_to?.name || 'Contact')}</span> <span class="admin-ac__meta">${esc(it.bill_to?.company || it.bill_to?.email || '')}</span>`
-      : `${esc(it.full_name || `${it.first_name || ''} ${it.last_name || ''}`.trim() || '—')} <span class="admin-ac__meta">· ${esc(it.email || '')}</span>`,
-    onPick: (it) => { if (it.__type === 'contact') fillFromContact(it); else fillFromCustomer(it); },
+    emptyText: (q) => partyEmptyText(q, partyFailed),
+    render: (it) => partyRowHtml(it),
+    onPick: (it) => {
+      if (it.__type === 'contact') fillFromContact(it);
+      else if (it.__type === 'order') fillFromOrderDetails(it);
+      else fillFromCustomer(it);
+    },
   });
   _acHandles.push(h);
+}
+
+/** One row of the party dropdown, per source. */
+function partyRowHtml(it) {
+  if (it.__type === 'contact') {
+    return `<span class="admin-ac__code">${esc(it.label || it.bill_to?.name || 'Contact')}</span> <span class="admin-ac__meta">${esc(it.bill_to?.company || it.bill_to?.email || '')}</span>`;
+  }
+  if (it.__type === 'order') {
+    const p = orderToParty(it);
+    return `<span class="admin-ac__code">${esc(p.orderNumber)}</span> ${esc(p.name || p.email || '—')} <span class="admin-ac__meta">· details only</span>`;
+  }
+  return `${esc(it.full_name || `${it.first_name || ''} ${it.last_name || ''}`.trim() || '—')} <span class="admin-ac__meta">· ${esc(it.email || '')}</span>`;
 }
 
 function fillFromContact(c) {
@@ -705,6 +716,29 @@ function fillFromCustomer(c) {
   _fillSource = { type: 'customer', label: name };
   rebuildEditor();
   Toast.success(`Filled from customer ${name}`.trim());
+}
+
+/**
+ * Fill the customer block from a past order and nothing else — no line items.
+ * The order is a source of NAME AND ADDRESS here, not of goods; neither
+ * `customer_id` nor `contact_id` is set, because a guest order proves neither.
+ */
+function fillFromOrderDetails(order) {
+  if (!order) return;
+  const p = orderToParty(order);
+  _draft.customer_id = null;
+  _draft.contact_id = null;
+  _draft.customer = {
+    name: p.name,
+    company: p.company,
+    phone: p.phone,
+    email: p.email,
+    address: p.address,
+  };
+  _draft.save_contact = false;
+  _fillSource = { type: 'order details', label: p.orderNumber };
+  rebuildEditor();
+  Toast.success(`Filled customer details from order ${p.orderNumber} — line items not imported`.trim());
 }
 
 // ---- validation + save --------------------------------------------------

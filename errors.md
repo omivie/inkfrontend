@@ -41,6 +41,71 @@ describing the same incident.
 
 ---
 
+## ERR-176 — The New Invoice pickers could not find a paying customer: one had never returned a row, the other never looked where he was — **RESOLVED (2026-08-28)**
+
+- **Date**: 2026-08-28 · **Context**: Invoicing a customer normally starts from their order. Order
+  `20260819000002` (Michael Wright, $922.99, sitting open in the Orders modal) could not be reached
+  from **either** box at the top of the New Invoice editor: "Fill details from…" said *No matches*
+  and "Existing order" found nothing either. Two independent causes, plus a third that only
+  appeared once the first was fixed.
+
+- **Root cause 1 — the order picker had never returned a row, for any query.**
+  `GET /api/admin/orders` answers `{ok, data:[ …rows… ], meta}` — **`data` is a bare ARRAY** —
+  and `AdminAPI.getOrders` hands `resp.data` straight back. The picker read
+  `data?.orders || data?.items || []` off that array (`pages/invoices.js`), which is `[]` for
+  every input ever typed, **a valid order number included**. Every other caller in the repo
+  already normalised the shape (`pages/orders.js`, `pages/refunds.js`, `pages/customers.js`,
+  dashboard's `firstArray`); this one call site and `loadFromCustomer`'s `od?.orders?.[0]` legacy
+  address scrape were the two that didn't, so both were silently dead. Nothing logged, nothing
+  threw: an unread envelope and an empty result look identical from the outside.
+
+- **Root cause 2 — the party picker searched two of the three places a customer can exist.**
+  Contacts (~9.4k rows) + Customers (33 rows), never Orders. Michael Wright is a **guest checkout**
+  (`user_id: null`, details in `guest_email` / `guest_phone`): no account row, no contact row. He
+  exists only as an order, so "No matches" was reporting **"not looked" as "not found"**.
+
+- **Root cause 3 — found only by driving the real page: an order row is not a section, but it
+  looked like one.** `components/autocomplete.js` decided flat-list-vs-sections by sniffing
+  `Array.isArray(res[0].items)` — and an order row **carries `items`** (its line items). With the
+  envelope fixed, the flat array of orders was read as sections and the dropdown rendered the first
+  order's LINE ITEMS as pickable orders: one row reading `57ec187b-…-6f4a6c3ec947 · $0.00`. The
+  duck-type had been harmless only because the array never reached the renderer. Sections are now
+  required to look like sections all the way down — **every** element with a string `title` **and**
+  an `items` array.
+
+- **Two limits measured on the way, now stated instead of implied**:
+  - `customers?search=` cannot match a multi-word name (`Mark Leask` → 0 rows, `Mark` → 1;
+    first/last are separate columns). `searchParties` widens a multi-token query to its longest
+    token for **Customers only** and re-filters on every token — Contacts and Orders both match
+    multi-word server-side, measured, so they are left alone.
+  - The order box's placeholder still promised **email**, which `AdminAPI.getOrders` routes to
+    `customer_email=` — 0 rows for every real address (BF-046, unchanged here on purpose: refunds
+    and Orders share that branch). The placeholder now offers order # / customer name, and an
+    `@`-shaped query gets a message naming the limit instead of a bare "no matches". The request
+    still goes out unchanged, so a backend fix needs no frontend change.
+
+- **Fix**: new `js/admin/utils/party-search.js` owns ONE lookup for both surfaces —
+  `ordersFrom`/`contactsFrom`/`customersFrom` envelope normalisers (the three endpoints do **not**
+  share a shape), `searchParties(q, api)` returning Contacts / Customers / **Orders (incl. guest
+  checkouts)** sections, and `orderToParty(order)` mapping an order to bill-to fields (flat
+  `shipping_*` columns AND a `shipping_address` object AND the guest fallbacks). Picking an order
+  there calls `loadFromOrderDetails` — details only: **no line items, no freight, no
+  `source_order_id`** — and the toast says so, because importing the goods is what the separate
+  "Existing order" picker does. Quick Order's byte-identical copy of the picker now calls the same
+  search (that duplication is how the two came to share one blind spot), with a test pinning that
+  neither page may re-grow its own contacts+customers fetch.
+  `searchParties` returns `{sections, failed}`: a source that could not be asked is named in the
+  empty state rather than counted as a miss.
+
+- **Verified**: full suite **4101 pass / 0 fail** (15 new in
+  `tests/admin-invoice-party-picker-aug2026.test.js`; the June contacts test now asserts the
+  Contacts+Customers invariant where the search moved to). New read-only probe
+  `npm run probe:invoice-pickers` — 10 hard checks green — which **imports the shipped module and
+  drives it against the live API**, so it proves the code the admin actually runs reaches a guest
+  order, and soft-notes the two backend limits above. Both pickers then driven in a real browser:
+  the order box lists `20260819000002 Michael Wright · $922.99`, the email query explains itself,
+  and the party box surfaces the same order under its own section.
+
 ## ERR-175 — The Orders page could not say when a customer's invoice was last sent, and Resend Invoice recorded nothing at all — **RESOLVED (frontend) / OPEN (backend, BF-046)** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner needs to answer "when did this customer's invoice

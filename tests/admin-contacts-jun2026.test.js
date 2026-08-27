@@ -40,6 +40,11 @@ const api          = READ(ADMIN('api.js'));
 const invoices     = READ(ADMIN('pages/invoices.js'));
 const customers    = READ(ADMIN('pages/customers.js'));
 const contacts     = READ(ADMIN('pages/contacts.js'));
+// Aug 2026 (ERR-176): the picker's fetch moved out of invoices.js into a shared
+// module, so the Invoices editor and Quick Order search the same sources. The
+// June invariant is unchanged — Contacts AND Customers are both searched — it is
+// just asserted where the search now lives.
+const partySearch  = READ(ADMIN('utils/party-search.js'));
 
 test('shared autocomplete: items are type="button" (Enter-key invariant)', () => {
   assert.match(autocomplete, /class="admin-ac__item"[^`]*type="button"|type="button"[^`]*class="admin-ac__item"/);
@@ -84,12 +89,13 @@ test('invoices.js: imports the shared autocomplete (no private copy)', () => {
   assert.ok(!/function attachAutocomplete\b/.test(invoices), 'local attachAutocomplete should be removed');
 });
 
-test('invoices.js: unified picker fetches contacts AND customers', () => {
+test('unified picker fetches contacts AND customers (now via party-search.js)', () => {
   assert.match(invoices, /inv-party-search/);
-  assert.match(invoices, /listContacts\(/);
-  assert.match(invoices, /getCustomers\(/);
-  assert.match(invoices, /title:\s*'Contacts'/);
-  assert.match(invoices, /title:\s*'Customers'/);
+  assert.match(invoices, /searchParties\(/);
+  assert.match(partySearch, /listContacts\(/);
+  assert.match(partySearch, /getCustomers\(/);
+  assert.match(partySearch, /title:\s*'Contacts'/);
+  assert.match(partySearch, /title:\s*'Customers'/);
 });
 
 test('invoices.js: has loadFromContact filling bill-to + deliver-to', () => {

@@ -17,6 +17,7 @@
     "probe:order-discount": "node scripts/probe-order-discount.mjs",
     "probe:orders-search": "node scripts/probe-orders-search.mjs",
     "probe:invoice-quote": "node scripts/probe-invoice-quote.mjs",
+    "probe:invoice-pickers": "node scripts/probe-invoice-pickers.mjs",
     "probe:invoice-sent": "node scripts/probe-invoice-sent.mjs",
     "verify:business": "node scripts/verify-business-centre.mjs",
     "sweep:b2b": "node scripts/sweep-business-pricing.mjs",

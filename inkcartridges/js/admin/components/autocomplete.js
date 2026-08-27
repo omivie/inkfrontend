@@ -12,14 +12,15 @@
  *     render: (item) => 'html',          // caller escapes its own dynamic text
  *     onPick: (item) => { ... },
  *     minChars: 2, debounce: 250,
- *     emptyText: 'No matches',
+ *     emptyText: 'No matches' | (q) => 'No matches',   // string OR query-aware
  *   });
  *   ac.destroy();   // remove listeners + menu (call on drawer/page teardown)
  *
  * A `fetch` that returns section objects ({ title, items }) renders a grouped
  * menu with section headers (used by the invoice "Fill details from…" picker to
- * split Contacts from Customers, mirroring the storefront Compatible/Genuine
- * split). Keyboard nav treats the flattened item list as one cycle.
+ * split Contacts from Customers from Orders, mirroring the storefront
+ * Compatible/Genuine split). Keyboard nav treats the flattened item list as one
+ * cycle.
  *
  * POSITIONING (ERR-107, Jul 2026) — the menu is PORTALLED to <body> and placed
  * with `position: fixed` against the input's measured rect. It used to be an
@@ -70,6 +71,9 @@ export function attachAutocomplete(input, opts) {
     onPick,
     minChars = 2,
     debounce = 250,
+    // String, or `(query) => string` when the reason a search came back empty
+    // depends on what was typed (an email in the order picker can never match)
+    // or on whether a source answered at all. ERR-176.
     emptyText = 'No matches',
     menuClass = '',        // extra class(es) on the dropdown menu (e.g. a wider product variant)
     // Pull the input into view on focus. Opt-in: worth it for a field at the
@@ -127,7 +131,16 @@ export function attachAutocomplete(input, opts) {
   let reqSeq = 0;          // guards against out-of-order fetches
   let open = false;
 
-  const isSectioned = (res) => Array.isArray(res) && res.length > 0 && res[0] && typeof res[0] === 'object' && Array.isArray(res[0].items);
+  /**
+   * Sections vs a flat list. This used to sniff `Array.isArray(res[0].items)`
+   * alone — and an ORDER row carries `items` (its line items), so a flat array of
+   * orders was read as sections and the dropdown rendered the first order's LINE
+   * ITEMS as if they were pickable orders: a row with a UUID and $0.00 (ERR-176).
+   * A section must now look like a section all the way down — EVERY element with
+   * a string `title` AND an `items` array — which no data row of ours does.
+   */
+  const isSectioned = (res) => Array.isArray(res) && res.length > 0
+    && res.every((s) => s && typeof s === 'object' && typeof s.title === 'string' && Array.isArray(s.items));
 
   /**
    * Place the fixed menu against the input, flipping up and shrinking to fit.
@@ -218,7 +231,7 @@ export function attachAutocomplete(input, opts) {
     show();
   }
 
-  function renderResults(res) {
+  function renderResults(res, q) {
     flat = [];
     let html = '';
     const pushItem = (item) => {
@@ -235,7 +248,10 @@ export function attachAutocomplete(input, opts) {
     } else {
       (res || []).forEach(pushItem);
     }
-    if (!flat.length) { renderMessage(emptyText); return; }
+    if (!flat.length) {
+      renderMessage(typeof emptyText === 'function' ? emptyText(q) : emptyText);
+      return;
+    }
     menu.innerHTML = html;
     show();
   }
@@ -272,7 +288,7 @@ export function attachAutocomplete(input, opts) {
       return;
     }
     if (seq !== reqSeq) return;          // a newer keystroke already fired
-    renderResults(res);
+    renderResults(res, q);
   }
 
   const onInput = () => {
