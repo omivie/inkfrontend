@@ -4862,6 +4862,22 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-sent-hint__btn:hover { color: var(--text); }
 .inv-sent-hint__btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
 
+/* ---- Orders list: "Invoice sent" cell -------------------------------------
+   Four states that must never be mistaken for one another. "Not recorded" and
+   "Can't check" in particular are different facts — one is an absence we
+   established, the other is an absence we failed to establish — so they get
+   different colours as well as different words. */
+.order-sent { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.order-sent--yes { color: var(--success); font-weight: 600; }
+.order-sent--none, .order-sent--pending { color: var(--text-muted); }
+/* Deliberately NOT muted: a lookup we could not complete has to catch the eye,
+   otherwise it reads as a quiet "nothing here" — the exact confusion this
+   column exists to prevent. Same treatment as .order-profit--failed. */
+.order-sent--failed { color: var(--yellow-text); font-weight: 600; }
+/* --success is tuned for the dark deck; it under-contrasts on the light one
+   (the same fix .inv-sent needed below). */
+.admin[data-theme="light"] .order-sent--yes { color: #15803d; }
+
 /* Send history modal — every recorded send of one invoice, newest first. */
 .admin-modal--invoice-history { max-width: 520px; }
 .inv-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

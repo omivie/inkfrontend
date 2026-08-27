@@ -12,6 +12,12 @@ import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 // Supplier/Origin rendering is shared with the Products page — see utils/sourcing.js.
 // A second copy of the origin vocabulary is how the two surfaces would drift apart.
 import { originBadge, supplierCell } from '../utils/sourcing.js';
+// Invoice-send vocabulary — the same module AdminAPI writes through, so the
+// reader and the writer cannot disagree about what a send record looks like.
+import {
+  SENT_STATE, resolveSentInfo, newestSendEvent,
+  isInvoiceSendEvent, invoiceSendNoteText,
+} from '../utils/order-invoice-sent.js';
 // Deletability is a SERVER answer, per order, per caller — never a status rule
 // re-implemented here. utils/order-deletability.js owns the whole vocabulary:
 // which door, why not, what the confirm dialog says, how a purge response reads.
@@ -83,6 +89,7 @@ function forgetOrderCache(id) {
   if (!id) return;
   _seenOrders.delete(id);
   forgetProfit(id);
+  forgetInvoiceSent(id);
 }
 
 /**
@@ -291,6 +298,10 @@ let _container = null;
 let _table = null;
 let _page = 1;
 let _search = '';
+// Module-scoped, not a closure inside renderOrdersTab(), so destroyOrdersTab() can
+// actually cancel it. A pending keystroke that fires after a tab switch would call
+// loadOrders() against a torn-down _table (ERR-045 family).
+let _searchDebounce = null;
 let _sort = 'created_at';
 let _sortDir = 'desc';
 let _activeModal = null;
@@ -318,6 +329,181 @@ function formatDateTime(d) {
       hour: '2-digit', minute: '2-digit',
     });
   } catch { return MISSING; }
+}
+
+/**
+ * ============================================================================
+ * "Last invoice sent" — when this order's invoice email last went out
+ * ============================================================================
+ *
+ * WHAT WE ACTUALLY KNOW, and what we deliberately do not:
+ *
+ *   public.invoices.emailed_at   the server's own record. Wins whenever present.
+ *                                Today it is NULL on every row — the column
+ *                                exists but the backend never stamps it, including
+ *                                for the automatic email sent at checkout. See
+ *                                readfirst/order-invoice-emailed-at-backend-brief-aug2026.md
+ *                                (BF-046). The moment that lands, every row here
+ *                                fills in with NO frontend change.
+ *   order_events note + sentinel every resend fired from this page. All we can
+ *                                observe ourselves.
+ *
+ * THE ORDER DATE IS NOT A SEND DATE. `created_at` / `paid_at` / `invoice_date`
+ * are all within seconds of purchase and it is tempting to show one of them as
+ * "sent". They are not evidence that any email left the building. An order with
+ * no send on record reads "Not recorded", which is the truth, and is NOT the
+ * same cell as one whose lookup failed — see SENT_STATE.FAILED. Collapsing those
+ * two is the absence-as-zero family this repo keeps re-learning
+ * (ERR-063/068/073/075/076/149/150).
+ */
+const _sentCache = new Map();   // orderId -> resolveSentInfo(...) result
+let _sentAbort = null;
+
+function forgetInvoiceSent(id) {
+  if (id) _sentCache.delete(id);
+}
+
+/** Short cell date — "27 Aug". Full timestamp lives in the tooltip. */
+function formatSentShort(d) {
+  if (!d) return MISSING;
+  try {
+    return new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
+  } catch { return MISSING; }
+}
+
+const SENT_TIP = Object.freeze({
+  [SENT_STATE.NOT_RECORDED]:
+    'No invoice send recorded for this order. That does NOT mean none was sent \u2014 '
+    + 'the invoice email sent automatically at checkout is not yet recorded by the backend, '
+    + 'so only resends fired from this page appear here.',
+  [SENT_STATE.NO_INVOICE]:
+    'No invoice record exists for this order, so there is nothing that could have been emailed.',
+  [SENT_STATE.FAILED]:
+    'Invoice-send lookup failed \u2014 reload to retry. This is NOT "never sent": we could not check.',
+});
+
+/**
+ * One renderer for the first paint and the async patch, so a cell cannot look
+ * different depending on which path produced it (same rule as profitCellHtml).
+ */
+function sentCellHtml(row, info) {
+  const id = esc(row.id);
+  const open = (cls, title) =>
+    `<span class="order-sent${cls ? ' ' + cls : ''}" data-order-sent="${id}" title="${esc(title)}">`;
+
+  if (!info || info.state === SENT_STATE.PENDING) {
+    return `${open('order-sent--pending', 'Checking when this invoice was last sent\u2026')}\u00b7</span>`;
+  }
+
+  if (info.state === SENT_STATE.SENT) {
+    const who = info.source === 'server'
+      ? 'Recorded by the backend when the email was sent.'
+      : 'Recorded when this invoice was resent from the admin Orders page.';
+    const tip = `Invoice last sent ${formatDateTime(info.at)}. ${who}`
+      + (info.invoiceNumber ? ` Invoice ${info.invoiceNumber}.` : '');
+    return `${open('order-sent--yes', tip)}${formatSentShort(info.at)}</span>`;
+  }
+
+  // FAILED is styled apart from the two "we looked and found nothing" states on
+  // purpose — an operator must never read a broken lookup as "never invoiced".
+  const cls = info.state === SENT_STATE.FAILED ? 'order-sent--failed' : 'order-sent--none';
+  const label = info.state === SENT_STATE.NOT_RECORDED ? 'Not recorded' : MISSING;
+  return `${open(cls, SENT_TIP[info.state] || '')}${label}</span>`;
+}
+
+/**
+ * The modal's "Invoice sent" value — the same four states as the column, spelled
+ * out at full length because there is room for a sentence here.
+ */
+function modalSentValue(info) {
+  if (!info || info.state === SENT_STATE.PENDING) {
+    return `<span class="admin-text-muted">Checking\u2026</span>`;
+  }
+  if (info.state === SENT_STATE.SENT) {
+    const who = info.source === 'server'
+      ? 'recorded by the backend'
+      : 'recorded when resent from this page';
+    return `${esc(formatDateTime(info.at))}`
+      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 ${esc(who)}</span>`;
+  }
+  if (info.state === SENT_STATE.FAILED) {
+    return `<span class="order-sent--failed" title="${esc(SENT_TIP[SENT_STATE.FAILED])}">Can\u2019t check</span>`
+      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 reload to retry \u2014 this is not \u201Cnever sent\u201D</span>`;
+  }
+  if (info.state === SENT_STATE.NO_INVOICE) {
+    return `<span class="admin-text-muted">${MISSING} no invoice record for this order</span>`;
+  }
+  return `<span class="admin-text-muted">Not recorded</span>`
+    + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 the checkout email isn\u2019t stamped yet, `
+    + `so this means no record \u2014 not that nothing was sent</span>`;
+}
+
+/**
+ * Swap one cell in place — never setData, which would drop row focus.
+ *
+ * `info` is passed EXPLICITLY rather than always re-read from the cache, because
+ * the FAILED state is deliberately not cached (so a reload retries, as its
+ * tooltip promises). Reading the cache here would find nothing for exactly those
+ * rows and repaint them as "Checking…" — a spinner that never resolves, which
+ * hides a failed lookup even better than "Not recorded" would.
+ */
+function patchSentCell(row, info = _sentCache.get(row?.id)) {
+  if (!_table?.container || !row?.id) return;
+  const cell = _table.container.querySelector(`[data-order-sent="${CSS.escape(String(row.id))}"]`);
+  if (cell) cell.outerHTML = sentCellHtml(row, info);
+}
+
+/**
+ * Fill in the Invoice-sent column for the rows now on screen.
+ *
+ * TWO requests for the whole page, not two per row: both reads are batched
+ * `in.(...)` queries. Called AFTER _table.setData and never awaited before it,
+ * so the table paints immediately (first-paint rule, ERR-121).
+ */
+async function hydrateInvoiceSent(rows) {
+  _sentAbort?.abort();
+  _sentAbort = null;
+  if (!Array.isArray(rows) || !rows.length) return;
+
+  const ctrl = new AbortController();
+  _sentAbort = ctrl;
+
+  const todo = [];
+  for (const row of rows) {
+    if (_sentCache.has(row.id)) { patchSentCell(row); continue; }
+    todo.push(row);
+  }
+  if (!todo.length) return;
+
+  const ids = todo.map(r => r.id);
+  let invoices, events;
+  try {
+    [invoices, events] = await Promise.all([
+      AdminAPI.getOrderInvoicesByOrderIds(ids, ctrl.signal),
+      AdminAPI.getInvoiceSendEventsByOrderIds(ids, ctrl.signal),
+    ]);
+  } catch (e) {
+    if (ctrl.signal.aborted || e?.name === 'AbortError') return;
+    // A whole-batch failure is still a FAILED cell, never a silent blank.
+    invoices = { byOrderId: new Map(), failed: true };
+    events = { byOrderId: new Map(), failed: true };
+  }
+  if (ctrl.signal.aborted || !_table) return;
+
+  for (const row of todo) {
+    const key = String(row.id);
+    const info = resolveSentInfo({
+      invoice: invoices.byOrderId.get(key) || null,
+      event: events.byOrderId.get(key) || null,
+      invoiceFailed: invoices.failed,
+      eventFailed: events.failed,
+    });
+    // A failed lookup is NOT cached — otherwise a single blip would pin every
+    // row to "lookup failed" until the tab is destroyed, and reloading would
+    // not retry as the tooltip promises.
+    if (info.state !== SENT_STATE.FAILED) _sentCache.set(row.id, info);
+    patchSentCell(row, info);
+  }
 }
 
 const COLUMNS = [
@@ -369,6 +555,17 @@ const COLUMNS = [
     align: 'right',
   },
   {
+    // NOT sortable: the send date is not on the list payload at all (it is
+    // hydrated after paint from two batched lookups), so a header click could
+    // only sort the 20 rows already fetched while looking like a full sort.
+    //
+    // NO `gst:` SLOT. Blank there means "GST basis undocumented" for a money
+    // column (utils/gst-basis.js) — this is a date, and borrowing that slot
+    // would put it in the money vocabulary it has nothing to do with.
+    key: '_invoice_sent', label: 'Invoice sent',
+    render: (r) => sentCellHtml(r, _sentCache.get(r.id)),
+  },
+  {
     // Owner-only — filtered out of the column list for everyone else, exactly
     // like the modal's Cost/Profit columns. NOT sortable: the backend's sort enum
     // is only newest|oldest|total-high|total-low (api.js) and silently falls back
@@ -391,12 +588,48 @@ const COLUMNS = [
   },
 ];
 
+/**
+ * Does this query look like an email address? Mirrors the branch in
+ * AdminAPI.getOrders that routes an '@' query to `customer_email=` — a param the
+ * backend answers with zero rows for every real address (probe:orders-search).
+ * Used only to explain the empty result, never to block the request: if the
+ * backend gains email search the query still goes out and still works, and the
+ * message simply stops being reached.
+ */
+function looksLikeEmail(q) {
+  return String(q || '').includes('@');
+}
+
 // Read a query param from the SPA hash, e.g. "#orders?focus=2026..." → "2026...".
 function getHashParam(key) {
   const hash = window.location.hash || '';
   const qIndex = hash.indexOf('?');
   if (qIndex === -1) return null;
   return new URLSearchParams(hash.slice(qIndex + 1)).get(key);
+}
+
+/**
+ * Merge a patch into the SPA hash query, leaving every key we don't own alone —
+ * the same carry-through contract FilterState._writeToURL honours for keys outside
+ * its _OWN_KEYS (period/granularity/from/to/brands/suppliers/statuses/categories).
+ * `q` is not one of those, so the two writers coexist: changing a date chip keeps
+ * the search, and typing a search keeps the date chip.
+ *
+ * Empty deletes the key so a cleared box leaves a clean "#orders" behind, and
+ * replaceState keeps every keystroke out of the browser's back history.
+ */
+function writeHashParams(patch) {
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  const qIndex = hash.indexOf('?');
+  const base = qIndex === -1 ? hash : hash.slice(0, qIndex);
+  const params = new URLSearchParams(qIndex === -1 ? '' : hash.slice(qIndex + 1));
+  for (const [k, v] of Object.entries(patch)) {
+    if (v == null || v === '') params.delete(k);
+    else params.set(k, v);
+  }
+  const qs = params.toString();
+  const next = `#${base || 'orders'}${qs ? '?' + qs : ''}`;
+  if (window.location.hash !== next) history.replaceState(null, '', next);
 }
 
 // Open the order drawer for a specific order number once the list has loaded.
@@ -446,10 +679,22 @@ async function loadOrders() {
     window.DebugLog?.warn?.('[orders] GET /api/admin/orders returned no deletable/delete_method fields — '
       + 'falling back to the legacy cancelled-only rule. The hard purge is unreachable until the backend sends them.');
   }
+  // "No orders found" is true but unhelpful when a search is active, and actively
+  // misleading for an email query: email is NOT searchable on this endpoint
+  // (measured — see npm run probe:orders-search), so an address always returns
+  // zero and a bare "no orders found" would read as "this customer has no orders".
+  // Name the query, and name the reason when we know it.
+  _table.config.emptyMessage = _search
+    ? (looksLikeEmail(_search)
+      ? `No match for "${_search}" — orders can't be searched by email address`
+      : `No orders match "${_search}"`)
+    : 'No orders found';
   _table.setData(rows, pagination);
   // Deliberately NOT awaited: the table must paint from the list payload alone,
   // and the per-row cost fetches fill the Profit column in behind it (ERR-121).
   hydrateProfits(rows);
+  // Same rule, and two batched lookups for the whole page rather than per row.
+  hydrateInvoiceSent(rows);
 }
 
 // ---- Bulk bar ----
@@ -820,10 +1065,13 @@ async function openOrderModal(order) {
   modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
 
   // Fetch full data
-  const [fullOrder, events, breakdown] = await Promise.all([
+  const [fullOrder, events, breakdown, invoiceLookup] = await Promise.all([
     AdminAPI.getOrder(order.id),
     AdminAPI.getOrderEvents(order.id),
     AdminAPI.getOrderBreakdown(order.id),
+    // The order payload carries no send date of its own — it lives on the
+    // order-derived invoice row (public.invoices.emailed_at).
+    AdminAPI.getOrderInvoicesByOrderIds([order.id]),
   ]);
   if (_activeModal !== modal) return; // closed during fetch
 
@@ -848,10 +1096,25 @@ async function openOrderModal(order) {
   modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
 
   // Build single-page content
-  buildOrderModalContent(modal, o, events || [], breakdown, { detailLoadFailed, deleteRight });
+  // Resolved once, here, and handed down — so the Dates row, the button hint and
+  // the list cell behind the modal cannot disagree about the same order.
+  const sentInfo = resolveSentInfo({
+    invoice: invoiceLookup?.byOrderId?.get(String(order.id)) || null,
+    event: newestSendEvent(events),
+    invoiceFailed: !!invoiceLookup?.failed,
+    // getOrderEvents returns null on failure. Without this, a failed history load
+    // would render "Not recorded" — asserting an absence we never established.
+    eventFailed: events === null,
+  });
+  if (sentInfo.state !== SENT_STATE.FAILED) _sentCache.set(order.id, sentInfo);
+  patchSentCell(order, sentInfo);
+
+  // `events` is passed THROUGH, null and all — see the timeline's null branch.
+  // `events || []` here is what made a failed history look like an empty one.
+  buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed, deleteRight, sentInfo });
 }
 
-function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false, deleteRight = null } = {}) {
+function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false, deleteRight = null, sentInfo = null } = {}) {
   // Never fall back to a status rule here. An absent right is an UNRESOLVED
   // right, and unresolved fails closed with a reason of its own.
   const right = deleteRight || orderDeleteRight(o);
@@ -886,6 +1149,10 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   if (o.delivered_at) datesRows += omRow('Delivered', formatDate(o.delivered_at));
   if (o.completed_at) datesRows += omRow('Completed', formatDate(o.completed_at));
   if (o.cancelled_at) datesRows += omRow('Cancelled', formatDate(o.cancelled_at));
+  // Always rendered, including when nothing is on record — an absent row would
+  // read as "this order has no invoice", which is a different claim entirely.
+  datesRows += `<div class="om-meta-row"><span>Invoice sent</span>`
+    + `<span data-om-sent>${modalSentValue(sentInfo)}</span></div>`;
 
   // Shipping address — shown inline as middle meta column
   const addr = o.shipping_address || {};
@@ -1197,17 +1464,38 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
 
   // Timeline section (conditional)
   let timelineHtml = '';
-  if (events.length) {
+  if (events === null) {
+    // A HISTORY WE COULDN'T LOAD IS NOT AN EMPTY HISTORY.
+    // AdminAPI.getOrderEvents returns null on failure and [] when the order
+    // genuinely has no events; the old `events || []` at the call site collapsed
+    // the two, so a failed load rendered as "this order has nothing recorded" —
+    // indistinguishable from a clean one, and now load-bearing because the
+    // invoice-send record lives in this list (ERR-063/068/073 family).
+    timelineHtml += `<div class="om-section-title">Timeline</div>`;
+    timelineHtml += `<div class="om-profit-unknown">
+      <div class="om-profit-unknown__title">Couldn\u2019t load this order\u2019s history</div>
+      <div class="om-profit-unknown__text">This is a read error, not proof that nothing
+        happened \u2014 don\u2019t read it as an empty history. Reload to retry.</div>
+    </div>`;
+  } else if (events.length) {
     timelineHtml += `<div class="om-section-title">Timeline</div>`;
     timelineHtml += `<div class="admin-timeline">`;
     for (const ev of events) {
-      const dotClass = ev.type === 'status_change' ? 'cyan'
+      const isSend = isInvoiceSendEvent(ev);
+      const dotClass = isSend ? 'success'
+        : ev.type === 'status_change' ? 'cyan'
         : (ev.type === 'refund_created' || ev.type === 'refund') ? 'magenta' : 'yellow';
+      // An invoice send is stored as a `note` (the backend validates type against
+      // exactly [note]), so the raw type would read "note" for the one entry an
+      // owner is most likely to be looking for. Label it by what it IS.
+      const label = isSend ? 'Invoice email sent' : (ev.type || 'Event');
       timelineHtml += `<div class="admin-timeline__item">
         <div class="admin-timeline__dot admin-timeline__dot--${dotClass}"></div>
         <div class="admin-timeline__time">${formatDateTime(ev.created_at)}</div>
-        <div class="admin-timeline__text"><strong>${esc(ev.type || 'Event')}</strong>`;
-      if (ev.payload?.note) timelineHtml += ` \u2014 ${esc(ev.payload.note)}`;
+        <div class="admin-timeline__text"><strong>${esc(label)}</strong>`;
+      // The sentinel prefix is machine punctuation, not something to show a human.
+      const noteText = isSend ? invoiceSendNoteText(ev) : (ev.payload?.note || '');
+      if (noteText) timelineHtml += ` \u2014 ${esc(noteText)}`;
       if (ev.payload?.status) timelineHtml += ` \u2192 ${statusBadge(ev.payload.status)}`;
       timelineHtml += `</div></div>`;
     }
@@ -1255,15 +1543,51 @@ function bindModalActions(modal, order, deleteRight = null) {
     btn.disabled = true;
     const originalText = btn.innerHTML;
     btn.innerHTML = 'Sending\u2026';
+    // ORDERING IS THE CONTRACT. The send happens first and alone; the record is
+    // written only once it has RESOLVED. A stamp written next to the attempt
+    // (or optimistically before it) would date an email that never left
+    // — the same rule tests/admin-invoice-sent-indicator.test.js pins for the
+    // Invoices page, and the reason this write sits outside the try below.
+    let sent = false;
     try {
       await AdminAPI.resendInvoice(order.id);
-      Toast.success('Invoice email resent');
+      sent = true;
     } catch (err) {
       Toast.error(`Failed: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalText;
     }
+
+    if (sent) {
+      let recordedAt = null;
+      try {
+        recordedAt = await AdminAPI.recordInvoiceSend(order.id);
+      } catch (err) {
+        DebugLog.warn('[orders] invoice send recorded failed:', err?.message);
+      }
+
+      if (recordedAt) {
+        Toast.success('Invoice email resent — recorded on this order.');
+        // Repaint from the record we just wrote rather than reloading the page:
+        // loadOrders() would refetch everything and drop the bulk selection.
+        const info = resolveSentInfo({
+          invoice: null,
+          event: { created_at: recordedAt, payload: { kind: 'invoice_sent' } },
+        });
+        _sentCache.set(order.id, info);
+        const listRow = lookupOrder(order.id);
+        if (listRow) patchSentCell(listRow);
+        const dateCell = modal.querySelector('[data-om-sent]');
+        if (dateCell) dateCell.innerHTML = modalSentValue(info);
+      } else {
+        // The email DID go out. Saying only "sent" while the column still reads
+        // "Not recorded" would teach the owner to distrust the column; saying
+        // "failed" would be a lie about the email. Both facts, one message.
+        Toast.warning('Invoice email resent, but the send date could not be recorded '
+          + '— this order may still read “Not recorded”.');
+      }
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = originalText;
   });
 
   // Same vocabulary as the button that rendered it, so the two cannot disagree.
@@ -1677,9 +2001,20 @@ async function renderOrdersTab(container) {
   // Header
   const header = document.createElement('div');
   header.className = 'admin-page-header';
+  // The placeholder promises exactly what the backend delivers: customer name and
+  // order number, both verified case-insensitive substring matches that compose with
+  // the Status chip (npm run probe:orders-search). It deliberately does NOT say
+  // "email" — that returns zero rows for every address on this endpoint.
   header.innerHTML = `
     <h1>Orders</h1>
     <div class="admin-page-header__actions">
+      <div class="admin-search">
+        <span class="admin-search__icon">${icon('search', 14, 14)}</span>
+        <input class="admin-input" type="search" id="order-search"
+               placeholder="Search customer name or order #…"
+               autocomplete="off" aria-label="Search orders by customer name or order number"
+               value="${Security.escapeAttr(_search)}">
+      </div>
       <button class="admin-btn admin-btn--primary" id="create-order-btn">${icon('plus', 14, 14)} New Order</button>
       ${exportDropdown('export-orders')}
     </div>
@@ -1712,6 +2047,25 @@ async function renderOrdersTab(container) {
     if (order) showStatusModal(order);
   });
 
+  // 300ms matches every other server-side admin search (Customers, Products,
+  // Invoices, Quick Order). Each settled keystroke is a fresh server query — the
+  // table is paged 20-at-a-time, so filtering _table.data in memory would search
+  // 20-of-N rows while looking like it searched all of them.
+  const searchInput = header.querySelector('#order-search');
+  searchInput.addEventListener('input', () => {
+    clearTimeout(_searchDebounce);
+    const value = searchInput.value;
+    _searchDebounce = setTimeout(() => {
+      _searchDebounce = null;
+      const next = value.trim();
+      if (next === _search) return;
+      _search = next;
+      _page = 1;
+      writeHashParams({ q: _search });
+      loadOrders();
+    }, 300);
+  });
+
   header.querySelector('#create-order-btn').addEventListener('click', openCreateOrderDrawer);
   bindExportDropdown(header, 'export-orders', handleExport);
 
@@ -1719,12 +2073,20 @@ async function renderOrdersTab(container) {
 }
 
 function destroyOrdersTab() {
+  // A keystroke still sitting in the debounce would fire loadOrders() after the
+  // table is gone — cancel it here, not just in destroy(), because switching to
+  // the Refunds tab tears the table down while the page itself stays mounted.
+  clearTimeout(_searchDebounce);
+  _searchDebounce = null;
   // Cancel any in-flight profit fetches — that is precisely what AdminAPI.getOrder
   // takes a signal for. Leaving them running would spend the 60/min limiter on a
   // page the admin has already left.
   _profitAbort?.abort();
   _profitAbort = null;
   _profitCache.clear();
+  _sentAbort?.abort();
+  _sentAbort = null;
+  _sentCache.clear();
   // _seenOrders now caches a PERMISSION answer, computed for this admin's role.
   // Keeping it for the lifetime of the session is both a leak and a staleness
   // hazard; _table.destroy() has already discarded the selection it served.
@@ -1793,8 +2155,13 @@ export default {
     // Deep-link: #orders?focus=<order_number> seeds the search and auto-opens
     // the order drawer. The Tracking Requests page routes here so an admin can
     // add a tracking number (which auto-fulfils the request + emails the customer).
+    // `focus` wins over `q`: it is a one-shot deep-link that also auto-opens the
+    // drawer. Either way _search now reaches the visible input below — before this
+    // page had a search box, a focus= arrival silently showed a one-row list with
+    // nothing on screen explaining why it was filtered.
     const focusOrder = getHashParam('focus');
     if (focusOrder) _search = focusOrder;
+    else _search = getHashParam('q') || '';
 
     FilterState.setVisibleFilters(['statuses']);
 
@@ -1831,6 +2198,8 @@ export default {
     if (_subTabModule?.destroy) _subTabModule.destroy();
     _subTabModule = null;
     _container = null;
+    clearTimeout(_searchDebounce);
+    _searchDebounce = null;
     _search = '';
     _page = 1;
     _activeTab = 'orders';
@@ -1846,6 +2215,10 @@ export default {
   },
 
   onSearch(query) {
+    // Drop any keystroke still in flight — otherwise it lands 300ms later and
+    // silently replaces the query we were just asked to run.
+    clearTimeout(_searchDebounce);
+    _searchDebounce = null;
     _search = query;
     _page = 1;
     if (_activeTab === 'orders') {

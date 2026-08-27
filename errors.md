@@ -41,6 +41,90 @@ describing the same incident.
 
 ---
 
+## ERR-175 — The Orders page could not say when a customer's invoice was last sent, and Resend Invoice recorded nothing at all — **RESOLVED (frontend) / OPEN (backend, BF-046)** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner needs to answer "when did this customer's invoice
+  last go out?" — the first thing you check when a customer says they never received one. The
+  Orders page had no answer anywhere, and its **Resend Invoice** button
+  (`pages/orders.js`) fired `POST /api/admin/orders/:id/resend-invoice`, toasted, and
+  **persisted nothing**: no record, no row repaint, and the response value discarded. Press it
+  five times and the page looked exactly as it did before the first press.
+
+- **Root cause (three layers, found by probing production, not by reading source)**:
+  1. **The order payload has no send field at all.** Dumping the live keys of
+     `GET /api/admin/orders` rows and `GET /api/admin/orders/:id` shows nothing resembling
+     `emailed_at` / `invoice_sent_at`. There was nothing to render.
+  2. **The field exists one table over, and nothing writes it.** `public.invoices` holds one row
+     per order (`order_id`, `invoice_number` `INV-2026-0128`, `invoice_date`, **`emailed_at`**),
+     created within seconds of purchase. `emailed_at` is **NULL on all 126 rows** — including for
+     the invoice email the backend sends automatically at checkout. The column shipped; the write
+     never did. Same shape as "mig 137 never landed" (ERR-170).
+  3. **The obvious place to record a resend was closed.** `POST /api/admin/orders/:id/events`
+     validates `type` against **exactly `[note]`** — a POST with `type: "invoice_sent"` returns
+     `400 VALIDATION_FAILED`, `"type" must be [note]`. Discovered by probing, not assumed.
+
+- **The trap that shaped the whole design**: `invoice_date`, `created_at` and `paid_at` all sit
+  within seconds of one another, so any of them renders as a completely plausible "sent" date —
+  and none is evidence that an email left the building. Showing one would have manufactured a
+  record. **The resolver never reads them** (pinned by a test that feeds all four with
+  `emailed_at: null` and demands `NOT_RECORDED`), and there is no backfill.
+
+- **Fix**: new `js/admin/utils/order-invoice-sent.js` owns one vocabulary for the four surfaces
+  that ask the question — a **five-state** resolver, because the ways to have no date are not one
+  fact: `PENDING` / `SENT` / `NOT_RECORDED` / `NO_INVOICE` / `FAILED`. Precedence mirrors
+  `sentInfo()` on the Invoices page: **server field wins**, our own record is the fallback. The
+  rule that matters is that **an absence is only reportable when every source actually answered** —
+  a hit still reports when the other source failed, but nothing-found while a source failed is
+  `FAILED`, never `NOT_RECORDED`.
+  - Data: `AdminAPI.getOrderInvoicesByOrderIds` / `getInvoiceSendEventsByOrderIds` — **two batched
+    `in.(…)` reads for a whole page**, not two per row, over the existing `supabaseREST` helper.
+    Both return `{ byOrderId, failed }`: the partial-ness is in the **return value**, so a caller
+    cannot mistake "no row" for "couldn't look".
+  - Write: `AdminAPI.recordInvoiceSend` writes `type: 'note'` with `payload.kind = 'invoice_sent'`
+    **and** an `[invoice-sent]` sentinel in the note text — the text because it is the only payload
+    field every existing row uses, and so the only one proven to survive; `kind` is read first so a
+    real event type needs no reader change.
+  - Surfaces: a non-sortable, non-owner-gated `Invoice sent` column (hydrated after paint, ERR-121);
+    an **unconditional** row in the modal's Dates block (absence is the fact); and a Timeline entry
+    that reads "Invoice email sent" with the sentinel stripped, rather than the literal word "note".
+  - Resend: the record is written **outside** the send's `try`, gated on `if (sent)` — so a failed
+    send can never stamp a date. Three outcomes, three messages: recorded → success; **sent but not
+    recorded → `Toast.warning`** naming both facts; send failed → error. The cell only flips green
+    when the record actually landed, so the column can't promise something the next load retracts.
+
+- **Fixed alongside (latent, pre-existing)**: `AdminAPI.getOrderEvents` returns **`null` on failure**
+  and `[]` when an order genuinely has no history; `buildOrderModalContent(modal, o, events || [], …)`
+  collapsed the two, so **a failed history load rendered as "this order has no history"** — a clean
+  empty state over a read error. Now passed through as `null` with its own loud branch. This became
+  load-bearing the moment the send record started living in that list.
+
+- **Caught only in the browser (and now pinned)**: `FAILED` is deliberately NOT cached, so a reload
+  retries as its tooltip promises — but `patchSentCell` re-read the cache, found nothing for exactly
+  those rows, and repainted them as "Checking…". A **spinner that never resolves hides a failed
+  lookup even better than a wrong answer would**. The state is now handed to the repaint explicitly
+  rather than looked up. Every unit test passed while this was live; only driving the real page with
+  the two Supabase reads stubbed to 500 exposed it.
+
+- **Verified**: full suite **4067 pass / 0 fail** (44 new in
+  `tests/admin-order-invoice-sent-aug2026.test.js`). New read-only probe
+  `npm run probe:invoice-sent` — 9 hard checks green; it confirms live that the frontend's exact
+  five-column select works, that the four `admin_invoices` columns are correctly **400** on
+  `public.invoices`, and reports the headline number: **0 of 126 invoices carry a send stamp**.
+  `APP_VERSION` bumped to `2026.08.28-order-invoice-sent`.
+
+- **Backend (open, BF-046…049)**: `readfirst/order-invoice-emailed-at-backend-brief-aug2026.md`.
+  §1 asks for `emailed_at` to be stamped on the automatic checkout send — the root fix; everything
+  else is reporting. It also asks the blunt question first: `emailed_at` being null on all 126 rows
+  is equally consistent with "the backend sends and forgets to stamp" and "**it never sends at
+  all**". If it is the latter, customers are not receiving invoices, which matters far more than
+  this column.
+
+- **Lesson**: when a feature's field already exists in the schema, that is not evidence anything
+  writes it — **count the non-null rows before designing against it** (0 of 126 here). And when the
+  observable truth is genuinely absent, the honest UI is a *distinguishable* blank: "Not recorded"
+  and "Can't check" are different claims about the world, and a feature that renders them
+  identically has quietly asserted an absence it never established.
+
 ## ERR-173 — The Orders page had a search that nothing could reach, and an email query that could only ever return nothing — **RESOLVED (2026-08-28)**
 
 **Date**: 2026-08-28

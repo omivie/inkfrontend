@@ -5,6 +5,9 @@
 import { PRODUCT_TYPE_TO_SHOP_CATEGORY } from './utils/product-codes.js';
 import { normalisePurgeResult } from './utils/order-deletability.js';
 import { BusinessAccountRegistry } from './utils/business-accounts.js';
+// One vocabulary for "when was this order's invoice sent", shared with
+// pages/orders.js — see the module header for why it is not defined twice.
+import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './utils/order-invoice-sent.js';
 
 // Direct RPC via Supabase REST — avoids creating a second GoTrueClient
 async function rpc(fnName, params = {}, signal = null) {
@@ -2989,6 +2992,125 @@ const AdminAPI = {
     const resp = await window.API.post(`/api/admin/orders/${orderId}/resend-invoice`, {});
     if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Resend failed');
     return resp?.data ?? null;
+  },
+
+  // =========================================================================
+  // Admin — "Last invoice sent" for an order
+  // -------------------------------------------------------------------------
+  // TWO SEPARATE INVOICE SYSTEMS EXIST. Do not conflate them:
+  //
+  //   public.invoices    ONE row per ORDER (order_id, invoice_number "INV-2026-0128",
+  //                      invoice_date, emailed_at). Auto-created at checkout. This is
+  //                      what `resendInvoice` above emails, and the only one the
+  //                      Orders page may read.
+  //   admin_invoices     the standalone Invoicing page (/api/admin/invoices, integer
+  //                      invoice_number, its own emailed_at/email_count). NOT this.
+  //
+  // Reading the wrong table shows a send date from an unrelated document.
+  // =========================================================================
+
+  // Columns verified against the live schema 2026-08-28. Selecting a column that
+  // isn't there is a hard 400, so this list is deliberately short and checked —
+  // `npm run probe:invoice-sent` re-checks it against production.
+  ORDER_INVOICE_COLUMNS: 'id,order_id,invoice_number,invoice_date,emailed_at',
+
+  /**
+   * Order-derived invoice rows for a page of orders, in ONE request per 50 ids.
+   *
+   * Returns { byOrderId: Map, failed: boolean } — the partial-ness is in the
+   * RETURN VALUE, not just a console warning. A caller must be able to tell
+   * "this order has no invoice row" apart from "we could not look it up";
+   * collapsing those two into an empty map is the absence-as-zero bug this repo
+   * has now shipped seven times (ERR-063/068/073/075/076/149/150).
+   */
+  async getOrderInvoicesByOrderIds(orderIds, signal = null) {
+    const ids = [...new Set((orderIds || []).filter(Boolean).map(String))];
+    const byOrderId = new Map();
+    if (!ids.length) return { byOrderId, failed: false };
+
+    let failed = false;
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const list = chunk.map(id => `"${id}"`).join(',');
+      try {
+        const rows = await supabaseREST(
+          'GET',
+          `invoices?select=${this.ORDER_INVOICE_COLUMNS}&order_id=in.(${encodeURIComponent(list)})`,
+          null,
+          signal,
+        );
+        for (const row of (rows || [])) {
+          if (row?.order_id) byOrderId.set(String(row.order_id), row);
+        }
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e;
+        adminApiWarn('Failed to load order invoices', e);
+        failed = true;   // LOUD: the caller renders a distinct "lookup failed" state
+      }
+    }
+    return { byOrderId, failed };
+  },
+
+  /**
+   * Invoice-send records WE wrote, for a page of orders, in one request.
+   *
+   * The backend's event endpoint only accepts type "note" (probed 2026-08-28:
+   * POST with type "invoice_sent" → 400 `"type" must be [note]`), so a send is
+   * stored as a note carrying the INVOICE_SENT_MARK sentinel. See recordInvoiceSend.
+   */
+  async getInvoiceSendEventsByOrderIds(orderIds, signal = null) {
+    const ids = [...new Set((orderIds || []).filter(Boolean).map(String))];
+    const byOrderId = new Map();
+    if (!ids.length) return { byOrderId, failed: false };
+
+    let failed = false;
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const list = chunk.map(id => `"${id}"`).join(',');
+      try {
+        const rows = await supabaseREST(
+          'GET',
+          `order_events?select=order_id,type,payload,created_at`
+            + `&order_id=in.(${encodeURIComponent(list)})`
+            + `&type=eq.note&order=created_at.desc`,
+          null,
+          signal,
+        );
+        for (const row of (rows || [])) {
+          if (!isInvoiceSendEvent(row)) continue;
+          const key = String(row.order_id);
+          // Rows arrive newest-first, so the first hit per order is the latest send.
+          if (!byOrderId.has(key)) byOrderId.set(key, row);
+        }
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e;
+        adminApiWarn('Failed to load invoice send history', e);
+        failed = true;
+      }
+    }
+    return { byOrderId, failed };
+  },
+
+  /**
+   * Record that an order's invoice email was just sent.
+   *
+   * Called ONLY after resendInvoice() resolves — never before, and never
+   * optimistically. Throws on failure so the caller can tell the operator the
+   * send happened but the date did not stick; a silent failure here shows a
+   * green "sent" toast above a row that still reads "Not recorded".
+   */
+  async recordInvoiceSend(orderId, when = null) {
+    const at = when || new Date().toISOString();
+    const resp = await window.API.post(`/api/admin/orders/${orderId}/events`, {
+      // type MUST be "note" — the backend validates against exactly [note].
+      type: 'note',
+      // The sentinel lives in the note TEXT because that is the only payload
+      // field proven to survive the round trip; `kind`/`at` are a convenience
+      // for any future reader and are not relied on.
+      payload: { kind: INVOICE_SENT_KIND, at, note: `${INVOICE_SENT_MARK} Invoice email sent from the admin Orders page.` },
+    });
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not record the send');
+    return at;
   },
 
   // =========================================================================
