@@ -41,6 +41,153 @@ describing the same incident.
 
 ---
 
+## ERR-173 — The Orders page had a search that nothing could reach, and an email query that could only ever return nothing — **RESOLVED (2026-08-28)**
+
+**Date**: 2026-08-28
+**Context**: owner asked for "the ability to filter by name using a search bar" on `/admin#orders`. The
+request read like a green-field feature. It was not: every part of the search except the input already
+existed, and two of those parts were broken in ways nothing on screen could reveal.
+
+**Root cause — three layers, all silent.**
+
+1. **The box was never rendered.** `pages/orders.js` declared `let _search = ''` and sent it on every
+   `AdminAPI.getOrders()` call, and the module exported `onSearch(query)` which synced
+   `document.getElementById('order-search')`. That element had never existed in the SPA, and `onSearch`
+   itself had no caller anywhere in the repo — the global admin search box it was written for had been
+   removed at some point and took the only entry point with it. The same dead shape as ERR-167's
+   `window.Security?.x` guards: the code reads as a working feature and executes as nothing.
+   (`customers.js` and `products.js` still carry the identical dead `onSearch`; they at least render
+   their own inputs, so only Orders was fully unreachable.)
+
+2. **A `focus=` arrival filtered the list with nothing on screen saying so.** The one writer of
+   `_search` was the `#orders?focus=<order_number>` deep-link from Tracking Requests. With no input to
+   render the value into, an admin following that link saw a one-row Orders list and no indication it
+   was filtered — indistinguishable from "the store has one order". Absence-as-zero, on the surface
+   that is supposed to be the whole order book.
+
+3. **Email search was a guaranteed-empty dead end.** `AdminAPI.getOrders` routes any query containing
+   `@` to `customer_email=` instead of `search=`. Measured against production (`npm run
+   probe:orders-search`, read-only): `customer_email=<any real address>` returns **0 rows** for every
+   address in the table and **400s** when the row's `customer_email` is null; `search=<full address>`
+   and `search=<local part>` both return 0 as well. Email is simply not searchable on this endpoint.
+   The one apparent hit — `search=sean` returning a row for `sean@riderstudio.co.nz` — is a match on
+   the **name** Sean Fleet, which is exactly the false confirmation that would have shipped the feature
+   with an email promise in its placeholder.
+
+**What the backend actually supports** (measured, not assumed): `search=` matches customer **name** and
+**order number**, case-insensitively, as a **substring** (`search=ichi` → 3 Richie rows; `search=20260827`
+→ 3 rows), and it **composes** with `status=` and the date range rather than overriding them. That is a
+good filter — it just had no UI and one false promise attached.
+
+**Fix.** Rendered the input into `.admin-page-header__actions` using the shared `.admin-search` wrapper
+that already existed in `css/admin.css` (no new CSS), with `id="order-search"` — the id `onSearch()` had
+been reaching for all along, so that method stopped being dead on arrival. 300ms debounce matching
+Customers/Products/Invoices/Quick Order, but with the timer **module-scoped** so `destroyOrdersTab()` can
+cancel it: switching to the Refunds tab tears down `_table` while the page stays mounted, and a keystroke
+landing 300ms later would have called `loadOrders()` against a dead table (ERR-045 family; Customers and
+Products both still leak a closure timer here). The query round-trips through the hash as `?q=`, merged
+via a local `writeHashParams()` that preserves keys it does not own — the mirror of
+`FilterState._writeToURL`'s `_OWN_KEYS` carry-through, so a date chip and a search no longer clobber each
+other. `focus=` still wins over `q=`, and now renders into the visible box, which is what closes layer 2.
+
+**The placeholder is load-bearing.** It says "Search customer name or order #…" and deliberately does
+**not** say email, because the backend cannot do it. An email-shaped query still goes out (if the backend
+ever gains email search it starts working with no code change) but the empty state names the reason —
+`No match for "bob@example.com" — orders can't be searched by email address` — rather than the default
+"No orders found", which on a customer search reads as the very different and false claim *this customer
+has no orders*.
+
+**Not fixed, deliberately.** The `@` → `customer_email=` branch in `AdminAPI.getOrders` is also behind
+the Invoices editor's "Search order # / **email** to auto-fill…" box (`invoices.js:1896`, fed by
+`getOrders({search:q})` at 2291) and refunds' order lookup. Changing it is a wider blast radius than this
+request, and the visible outcome is identical either way (0 rows). Logged as a backend ask instead —
+`customer_email=` returning 0 for every valid address is a broken param, not a frontend concern.
+
+**Verified.** `npm run probe:orders-search` — new, read-only, 7 checks green with the email limit
+recorded as an explicit note; it fails loudly if `search=` ever starts being ignored (the ERR-151 shape:
+a nonsense token must return **fewer** rows than the unfiltered baseline, not the same 50).
+`tests/admin-orders-search-aug2026.test.js` +14, including a pin that the placeholder never regains the
+word "email" and that the hostile `?q=` case stays attribute-escaped. Full suite **4041 tests, 4022 pass,
+0 fail**. A stale 10-day-old `.playwright-mcp/` directory was tripping `no-ghost-files` and was cleared.
+
+**Lesson.** Dead plumbing is worse than missing plumbing: `_search`, `onSearch` and a `getOrders` param
+all read as a finished feature during review, and the only thing that would have revealed the truth was
+looking for the element the id pointed at. And when the backend contract behind a UI promise is
+unverifiable from the repo, probe it before writing the UI — the probe here cost one script and caught a
+promise ("search by email") that would have shipped as a box that silently returns nothing for every
+address an operator typed. A green result from a *related* query (`search=sean`) is not evidence for the
+query you actually mean.
+
+---
+
+## ERR-174 — Invoicing freight as a line item would have been charged TWICE: the courier-rate autofill fires on top of it — **RESOLVED (2026-08-28)**
+
+**Date**: 2026-08-28
+**Context**: owner asked for a way to invoice a shipping charge on its own, with no product —
+"allow international freight for this", not just NZ zones. Found while building it, before it
+could reach a customer.
+
+**What the operator would have seen.** Click "Add shipping charge", type $150, fill the customer
+in, save. The invoice totals $157.00 + GST, not $150.00 + GST. The extra $7.00 never appears in
+the line items — it lands in the `Freight` box, which prints as one word in the totals block, and
+nobody re-reads the totals of an invoice they just typed.
+
+**Root cause.** `reconcileShipping()` (`pages/invoices.js`) has a convenience branch:
+
+```js
+} else if (_freightChoice == null && quote.shipping.hasOptions && !num(_draft.freight)) {
+  // A brand-new draft with an untouched $0 freight box: adopt the backend's suggestion
+```
+
+It is correct for the case it was written for — a normal product invoice needs a courier rate and
+should not need clicks to get one. But it reads "$0 freight + no option chosen" as *"the operator
+hasn't decided yet"*, when on a freight-line invoice it means **"the operator has already decided,
+somewhere else on the form"**. The quote is debounced, so it lands a second or two AFTER the
+amount is typed: the autofill silently overwrites a deliberate $0 with a courier rate.
+
+**Fix.** Adding a shipping line is itself the statement of freight intent, so it takes the choice
+out of `null`:
+
+```js
+function suppressFreightAutofill() {
+  if (_freightChoice == null) _freightChoice = FREIGHT_CUSTOM;
+}
+```
+
+`FREIGHT_CUSTOM` is already what a hand-typed freight figure sets, and `renderShippingRow()`
+already renders it as "Custom — typed above", so no new state and no new branch. An operator who
+had already picked a courier keeps it — `== null` is the whole guard.
+
+**Lesson.** An autofill's trigger is a GUESS ABOUT INTENT, and every new way to express that
+intent invalidates the guess. `_freightChoice == null` meant "undecided" only while the freight
+box was the single place freight could be entered. Adding a second surface for the same quantity
+silently widened what "undecided" covered. **When you add a second way to say something, go and
+re-read everything that infers meaning from the first one's absence.** Same family as ERR-150/160
+(a feature that vanished at a whitelist parser and again at a call site).
+
+**Verified live** (2026-08-28, localhost:3000 against the production API): one click on a fresh
+draft → freight box held at `0` and the dropdown read "Custom — typed above" through a full quote
+round-trip; document rendered Sub Total $150.00 / Freight Free / GST $22.50 / Total $172.50; saved
+as #3275, reopened intact, PDF confirmed four columns; test invoice deleted afterwards.
+Pinned by `tests/admin-invoice-shipping-line-aug2026.test.js` §1 (5 assertions).
+
+**Also found, NOT fixed here** (logged as BF-046): the invoice LIST reports a freight line at
+**100% margin**. The stored line correctly keeps `supplier_cost_excl_gst: null`, but the list
+endpoint collapses that unknown to `cost_excl_gst: 0` / `profit_excl_gst: 150`, and
+`normalizeInvoice` prefers server summary fields BY PRESENCE — so the frontend cannot honestly
+override it. Mitigated at the source instead: a shipping row's "Our Cost" box now reads
+`courier cost`, not `auto`, because nothing auto-fills a line with no product behind it.
+
+**Observed once, not reproduced** (pre-existing, untouched): a `TypeError: Cannot read properties
+of null (reading 'lines')` ×3 during a Playwright run that closed the drawer mid-autocomplete.
+The quote path's `editorAlive(token)` guard is sound and the drawer's `onClose` bumps the token,
+nulls `_draft` and `_editorRefs` atomically. The unguarded read is most likely
+`attachProductAutocomplete`'s `onPick` (`invoices.js`, `const prev = _draft.lines[i] || {}`),
+which touches `_draft` with no `editorAlive` check. Not in scope for this change; worth a guard
+next time that file is open. See `project_admin_async_after_destroy_guard_jun2026`.
+
+---
+
 ## ERR-172 — The Admin shortcut was `display:none` below 1100px, so an admin on a phone had no way into /admin but typing the URL — **RESOLVED (2026-08-18)**
 
 **Date**: 2026-08-18

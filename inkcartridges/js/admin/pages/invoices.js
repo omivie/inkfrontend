@@ -305,6 +305,32 @@ const blankLine = () => ({
   priceSource: PRICE_AUTO, volumePercent: null, volumeSaving: null, volumeQuantity: null,
 });
 
+// A freight / labour / one-off line: description-only BY DESIGN. An empty
+// product_code is legal on an invoice line and always has been — it is how the
+// backend and this editor have modelled non-catalogue charges since ERR-071 —
+// so a shipping charge needs no new field, no new endpoint and no payload key.
+//
+// `kind` is SESSION-ONLY editor state, deliberately absent from buildPayload:
+// that key set is walked by setStatusViaFullUpdate() and diffed by
+// documentDrift(), so a new key there would change what the Paid toggle's
+// full-record PUT writes. Same reasoning that keeps _freightChoice out. The
+// consequence is that reopening a saved invoice renders this as an ordinary
+// description-only line; the amount, the description and the customer's PDF are
+// all intact. Do NOT re-derive `kind` from the description text — an operator
+// who rewrote it to "Air freight — Sydney" would stop matching, and guessing
+// the marker back is the re-derivation trap BF-043 warns about.
+//
+// priceSource is MANUAL from birth: freight is an authored figure, and the
+// volume ladder must never re-price it (applyQuoteToLines).
+const SHIPPING_DESCRIPTION = 'Freight & delivery';
+
+const shippingLine = () => ({
+  ...blankLine(),
+  kind: 'shipping',
+  description: SHIPPING_DESCRIPTION,
+  priceSource: PRICE_MANUAL,
+});
+
 function freshDraft() {
   const L = window.LegalConfig || {};
   const inv = L.invoice || {};
@@ -1289,6 +1315,26 @@ function setFreightValue(exGst) {
   if (input) input.value = String(_draft.freight);
 }
 
+/**
+ * Stop reconcileShipping() auto-adopting a courier rate on top of a freight LINE.
+ *
+ * That branch exists for the common case — a brand-new draft whose $0 freight box
+ * nobody has touched adopts the backend's suggested rate so the operator needs no
+ * clicks. On an invoice that bills freight AS A LINE ITEM it is a double charge:
+ * the quote returns a moment after the row is added and silently drops e.g. $7.00
+ * into the freight box beside the $150 already typed, and the only place it shows
+ * is the totals block (ERR-174).
+ *
+ * Adding a shipping line IS the operator stating their freight intent, so the
+ * choice stops being null. FREIGHT_CUSTOM is the same value a hand-typed freight
+ * figure sets (onFormInput) and renderShippingRow already reads it as
+ * "Custom — typed above". An operator who had already picked a courier option
+ * keeps it — they asked for that one.
+ */
+function suppressFreightAutofill() {
+  if (_freightChoice == null) _freightChoice = FREIGHT_CUSTOM;
+}
+
 function bindEditorBody(drawer) {
   const form = drawer.body.querySelector('.invoice-editor__form');
   form.addEventListener('input', onFormInput);
@@ -1373,10 +1419,40 @@ function onFormInput(e) {
   refreshPreview();
 }
 
+/**
+ * "Add shipping charge" — bill freight with no product behind it.
+ *
+ * A pristine default row is a placeholder, not content, so a brand-new invoice
+ * gets its single blank line REPLACED rather than appended to: one click on a
+ * fresh draft is a complete shipping-only invoice, needing only the amount.
+ *
+ * Focus lands on the amount, not the description: the description is already
+ * filled and the figure is the one thing that must be typed.
+ */
+function addShippingLine() {
+  const only = _draft.lines.length === 1 ? _draft.lines[0] : null;
+  const pristine = !!only && !(only.code || '').trim() && !(only.description || '').trim()
+    && !num(only.unitCost);
+
+  if (pristine) _draft.lines[0] = shippingLine();
+  else _draft.lines.push(shippingLine());
+  const i = _draft.lines.length - 1;
+
+  suppressFreightAutofill();
+  renderLines();
+  refreshPreview();
+  scheduleQuote();
+
+  const amount = _editorRefs?.drawer.body
+    .querySelector(`[data-line="${i}"][data-lfield="unitCost"]`);
+  if (amount) { amount.focus(); amount.select?.(); }
+}
+
 function onFormClick(e) {
   const act = e.target.closest('[data-form-action]')?.dataset.formAction;
   if (!act) return;
   if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshPreview(); scheduleQuote(); }
+  else if (act === 'add-shipping') { addShippingLine(); }
   else if (act === 'remove-line') {
     const i = +e.target.closest('[data-line]').dataset.line;
     _draft.lines.splice(i, 1);
@@ -1968,7 +2044,10 @@ function editorBodyHtml(d) {
         <div id="inv-lines"></div>
         ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price, can be typed over, and <strong>never appears on the invoice, the preview, the PDF or the customer’s email</strong>. It exists so invoiced sales carry a real COGS into your profit figures.</p>` : ''}
         <div id="inv-cogs"></div>
-        <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
+        <div class="inv-lines-actions">
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-shipping" title="Bill for freight without a product \u2014 NZ or international">${icon('plus', 13, 13)} Add shipping charge</button>
+        </div>
         <div class="inv-freight" id="inv-freight">
           <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight — 0 shows as “Free”${gstSub(GST_EXCL)}</span>
             <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
@@ -2097,15 +2176,34 @@ function renderLines() {
   host.innerHTML = (_draft.lines || []).map((l, i) => {
     const manual = l.costSource === 'manual';
     // Empty value + "auto" placeholder is how "we don't know this cost" reads.
+    //
+    // On a shipping line "auto" would be a lie: there is no product behind it, so
+    // the backend's cost snapshot finds nothing and the cost stays UNKNOWN. Say
+    // what actually belongs there instead. It matters — the invoice LIST reports
+    // an unknown cost as $0, which prints a freight invoice at 100% margin
+    // (BF-046), and the operator typing the courier's charge here is the one
+    // thing that makes that number true.
+    const shipCost = l.kind === 'shipping';
     const costCell = showCost ? `
       <input class="admin-input inv-line__cost${manual ? ' inv-line__cost--manual' : ''}"
              type="number" step="0.01" min="0" data-line="${i}" data-lfield="supplierCost"
-             value="${escA(l.supplierCost ?? '')}" placeholder="auto"
-             title="${manual ? 'Manual override' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
+             value="${escA(l.supplierCost ?? '')}" placeholder="${shipCost ? 'courier cost' : 'auto'}"
+             title="${manual ? 'Manual override' : shipCost ? 'What the courier charged US for this freight — nothing auto-fills it, and leaving it blank reports this invoice at 100% margin' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
+    // A shipping line has no product behind it, so its code box is READ-ONLY.
+    // That is protective, not cosmetic: a typed `FREIGHT` is not a real
+    // products.sku, so verifyLineCodes() would refuse the save. It stays in the
+    // DOM either way — markInvoiceErrors and unresolvedLineErrors select on it.
+    const ship = l.kind === 'shipping';
+    const codeCell = ship
+      ? `<input class="admin-input inv-line__code--none" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="— no product —" readonly tabindex="-1" title="A shipping charge carries no product code — the description is what prints." autocomplete="off">`
+      : `<div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>`;
+    const descCell = ship
+      ? `<input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="What the freight is for" title="Free text — name any destination, NZ or international" autocomplete="off">`
+      : `<div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>`;
     return `
-    <div class="inv-line${showCost ? '' : ' inv-line--nocost'}" data-line="${i}">
-      <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>
-      <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>
+    <div class="inv-line${showCost ? '' : ' inv-line--nocost'}${ship ? ' inv-line--shipping' : ''}" data-line="${i}">
+      ${codeCell}
+      ${descCell}
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
       <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
       ${costCell}
@@ -2114,7 +2212,9 @@ function renderLines() {
     </div>`;
   }).join('');
   // Product autocomplete (storefront-style, image dropdown) on both the code +
-  // description inputs of every line.
+  // description inputs of every PRODUCT line. A shipping row is deliberately
+  // excluded — it renders neither input inside `.inv-ac`, so typing
+  // "International freight — Australia" never opens a product dropdown.
   host.querySelectorAll('.inv-line').forEach((row) => {
     const i = +row.dataset.line;
     row.querySelectorAll('.inv-ac > input').forEach((input) => attachProductAutocomplete(input, {

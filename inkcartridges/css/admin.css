@@ -4926,6 +4926,21 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-line .admin-input { width: 100%; }
 .inv-line__rm { padding: 6px; }
 
+/* "Add line" + "Add shipping charge" sit side by side under the rows. */
+.inv-lines-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* A shipping / freight line: description-only by design, so its code cell is a
+   read-only placeholder rather than a product picker. Tinted the way the
+   internal cost box is, for the same reason — it reads as "not a product". */
+.inv-line--shipping .inv-line__code--none {
+  background: var(--surface-2, #f6f7f9);
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: default;
+  text-align: center;
+  font-size: 12px;
+}
+
 /* Our Cost — internal supplier cost. Tinted so it reads as "not part of the
    document", and given a distinct border once manually overridden. */
 .inv-line__cost {
