@@ -81,29 +81,71 @@ export function newestSendEvent(events) {
   return newest;
 }
 
+/** Every invoice-send record in an event list, newest first. */
+export function allSendEvents(events) {
+  if (!Array.isArray(events)) return [];
+  return events
+    .filter(ev => isInvoiceSendEvent(ev) && ev?.created_at)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
 /**
- * Resolve one order's send state.
+ * Two timestamps close enough to be the same send.
+ *
+ * The moment BF-047 lands, the backend will stamp `invoices.emailed_at` on the
+ * very resend we also record ourselves. Without this the one send would be
+ * listed twice, and the count — the number this feature exists to show — would
+ * double.
+ */
+const SAME_SEND_MS = 2000;
+
+/**
+ * Resolve one order's send state, and the full list of sends behind it.
  *
  * Server record beats our own — the same "SERVER FIELD WINS" rule sentInfo()
  * follows on the Invoices page, so the two surfaces answer the same question the
  * same way. And "we found nothing" never outranks "we could not look": a hit is
  * reportable even when the other source failed, but an ABSENCE is only
  * reportable when every source actually answered.
+ *
+ * `count` IS A FLOOR, NEVER A TOTAL. The invoice emailed automatically at
+ * checkout is recorded nowhere (`emailed_at` is NULL on every row — BF-046), so
+ * the only sends we can see are the ones this admin fired. Every surface that
+ * shows the number must say "recorded sends", never "sent N times".
  */
-export function resolveSentInfo({ invoice, event, invoiceFailed = false, eventFailed = false } = {}) {
+export function resolveSentInfo({
+  invoice, events, event, invoiceFailed = false, eventFailed = false, truncated = false,
+} = {}) {
   const invoiceNumber = invoice?.invoice_number || null;
 
-  const serverAt = invoice?.emailed_at || null;
-  if (serverAt) return { state: SENT_STATE.SENT, at: serverAt, source: 'server', invoiceNumber };
+  // `event` (singular) is still accepted so a caller holding one record — the
+  // resend path, which has just written exactly one — needs no list of its own.
+  const list = Array.isArray(events) ? allSendEvents(events) : (event ? [event] : []);
 
-  if (event?.created_at) {
-    return { state: SENT_STATE.SENT, at: event.created_at, source: 'admin', invoiceNumber };
+  const sends = [];
+  const serverAt = invoice?.emailed_at || null;
+  // The server stamp goes in FIRST so it wins attribution against an event at
+  // the same instant — the dedupe below keeps whichever is already in the list.
+  if (serverAt) sends.push({ at: serverAt, source: 'server' });
+  for (const ev of list) {
+    const at = ev.created_at;
+    if (sends.some(s => Math.abs(new Date(s.at) - new Date(at)) < SAME_SEND_MS)) continue;
+    sends.push({ at, source: 'admin' });
+  }
+  sends.sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  if (sends.length) {
+    return {
+      state: SENT_STATE.SENT,
+      at: sends[0].at,
+      source: sends[0].source,
+      invoiceNumber, sends, count: sends.length, truncated,
+    };
   }
 
   // Nothing found — but "nothing found" only means something if we managed to look.
-  if (invoiceFailed || eventFailed) {
-    return { state: SENT_STATE.FAILED, at: null, source: null, invoiceNumber };
-  }
-  if (!invoice) return { state: SENT_STATE.NO_INVOICE, at: null, source: null, invoiceNumber };
-  return { state: SENT_STATE.NOT_RECORDED, at: null, source: null, invoiceNumber };
+  const none = { at: null, source: null, invoiceNumber, sends: [], count: 0, truncated };
+  if (invoiceFailed || eventFailed) return { state: SENT_STATE.FAILED, ...none };
+  if (!invoice) return { state: SENT_STATE.NO_INVOICE, ...none };
+  return { state: SENT_STATE.NOT_RECORDED, ...none };
 }

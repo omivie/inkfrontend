@@ -3014,6 +3014,11 @@ const AdminAPI = {
   // `npm run probe:invoice-sent` re-checks it against production.
   ORDER_INVOICE_COLUMNS: 'id,order_id,invoice_number,invoice_date,emailed_at',
 
+  // Upper bound on one page's note-event scan. Generous: 20 orders would have to
+  // carry 500 notes between them to reach it. Hitting it sets `truncated`, which
+  // the UI must surface rather than quietly under-count.
+  SEND_EVENT_SCAN_LIMIT: 500,
+
   /**
    * Order-derived invoice rows for a page of orders, in ONE request per 50 ids.
    *
@@ -3061,9 +3066,10 @@ const AdminAPI = {
   async getInvoiceSendEventsByOrderIds(orderIds, signal = null) {
     const ids = [...new Set((orderIds || []).filter(Boolean).map(String))];
     const byOrderId = new Map();
-    if (!ids.length) return { byOrderId, failed: false };
+    if (!ids.length) return { byOrderId, failed: false, truncated: false };
 
     let failed = false;
+    let truncated = false;
     for (let i = 0; i < ids.length; i += 50) {
       const chunk = ids.slice(i, i + 50);
       const list = chunk.map(id => `"${id}"`).join(',');
@@ -3072,15 +3078,22 @@ const AdminAPI = {
           'GET',
           `order_events?select=order_id,type,payload,created_at`
             + `&order_id=in.(${encodeURIComponent(list)})`
-            + `&type=eq.note&order=created_at.desc`,
+            + `&type=eq.note&order=created_at.desc`
+            + `&limit=${this.SEND_EVENT_SCAN_LIMIT}`,
           null,
           signal,
         );
+        // A cap that is silently hit turns "3 recorded sends" into a number the
+        // operator reads as complete when it isn't. Say so instead.
+        if ((rows || []).length >= this.SEND_EVENT_SCAN_LIMIT) truncated = true;
         for (const row of (rows || [])) {
           if (!isInvoiceSendEvent(row)) continue;
           const key = String(row.order_id);
-          // Rows arrive newest-first, so the first hit per order is the latest send.
-          if (!byOrderId.has(key)) byOrderId.set(key, row);
+          // EVERY send, not just the newest — the list IS the feature. Rows
+          // arrive created_at.desc, so each order's array is newest-first free.
+          const bucket = byOrderId.get(key);
+          if (bucket) bucket.push(row);
+          else byOrderId.set(key, [row]);
         }
       } catch (e) {
         if (e?.name === 'AbortError') throw e;
@@ -3088,7 +3101,7 @@ const AdminAPI = {
         failed = true;
       }
     }
-    return { byOrderId, failed };
+    return { byOrderId, failed, truncated };
   },
 
   /**
@@ -3100,17 +3113,26 @@ const AdminAPI = {
    * green "sent" toast above a row that still reads "Not recorded".
    */
   async recordInvoiceSend(orderId, when = null) {
-    const at = when || new Date().toISOString();
     const resp = await window.API.post(`/api/admin/orders/${orderId}/events`, {
       // type MUST be "note" — the backend validates against exactly [note].
       type: 'note',
-      // The sentinel lives in the note TEXT because that is the only payload
-      // field proven to survive the round trip; `kind`/`at` are a convenience
-      // for any future reader and are not relied on.
-      payload: { kind: INVOICE_SENT_KIND, at, note: `${INVOICE_SENT_MARK} Invoice email sent from the admin Orders page.` },
+      // THE BACKEND STORES `note` AND NOTHING ELSE. Read back on 2026-08-28, a
+      // record written as {kind, at, note} came back as {note} alone: the extra
+      // keys were silently dropped. That is why the sentinel lives in the note
+      // TEXT — it is the only field proven to survive.
+      //
+      // `kind` is still written: it costs nothing and is read FIRST, so the day
+      // the backend preserves payloads (or grows a real event type) no reader
+      // changes. `at` is deliberately NOT written — a timestamp that never
+      // arrives is worse than no timestamp, and a send's time is always the
+      // event row's own `created_at`, which is the SERVER's clock rather than
+      // whatever the admin's laptop thinks the time is.
+      payload: { kind: INVOICE_SENT_KIND, note: `${INVOICE_SENT_MARK} Invoice email sent from the admin Orders page.` },
     });
     if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not record the send');
-    return at;
+    // The caller repaints from this, so return the same clock the reader will
+    // use on the next load: the server's, when it tells us, else our own.
+    return resp?.data?.created_at || resp?.data?.event?.created_at || when || new Date().toISOString();
   },
 
   // =========================================================================

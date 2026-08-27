@@ -106,6 +106,66 @@ describing the same incident.
   the order box lists `20260819000002 Michael Wright · $922.99`, the email query explains itself,
   and the party box surfaces the same order under its own section.
 
+## ERR-177 — The Invoice sent column kept only the newest send and threw the rest away, and a resend would have reset its own count to 1 — **RESOLVED** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: ERR-175 shipped an **Invoice sent** column that answers "when
+  did this customer's invoice last go out?". The owner needed the fuller question: **every** time it
+  went out, not just the last. The history was already being written — each resend appends its own
+  `order_events` row — and then discarded at read time.
+
+- **Root cause**: two deliberate "keep the newest" narrowings, one of which was about to become a
+  visible lie. `getInvoiceSendEventsByOrderIds` collapsed each order's events with
+  `if (!byOrderId.has(key)) byOrderId.set(key, row)`, and `newestSendEvent()` took the max — so the
+  list column, the detail row and the resend path all saw exactly one send. Nothing was lost in the
+  database; it was dropped on the way to the screen.
+
+- **The finding that shaped it**: reading the live record back showed **the backend stores `note`
+  and nothing else**. `recordInvoiceSend` wrote `payload: {kind, at, note}`; what came back was
+  `{note}` alone — `kind` and `at` were silently dropped. Two consequences: the `[invoice-sent]`
+  sentinel **in the note text** is the only thing identifying a send (the `payload.kind` branch is
+  dead in practice, and kept only so it works the day the backend preserves payloads), and a send's
+  time must always be the row's own `created_at` — the **server's** clock — never `payload.at`.
+  The writer now stops sending `at` rather than writing a field it knows is discarded.
+
+- **Fix**: `resolveSentInfo` takes `events` (plural) and returns `sends[]` + `count` alongside the
+  existing state, merging the server `emailed_at` stamp with every recorded event, **deduped within
+  2s** — because once BF-047 lands the backend will stamp the same resend we record ourselves, and
+  one send would otherwise read as two. `at` is the newest send; the server still wins attribution
+  at equal instants. The batched reader keeps an array per order and reports **`truncated`** when
+  its 500-row scan fills, so a capped read can never quietly under-count.
+  - Cell: `28 Aug ×3`, and now a **`<button>`** opening a send-history panel. `×N` only past one
+    send (printing `×1` would invent a fact). `DataTable`'s row-click guard already skips
+    `closest('button, a, input')` (`components/table.js:235`), so the click cannot also open the
+    order behind it — verified in the browser, not assumed.
+  - Panel: pure `renderOrderSendHistory`, rendered **from cache with no fetch** — which is why it
+    carries none of the Invoices page's `_historyToken` machinery; there is no async response that
+    could land in a stale modal. Reuses the existing `.inv-hist__*` CSS unchanged.
+  - Detail row gains "2 recorded sends" opening the same panel, bound **delegated on the modal**
+    because a successful resend replaces that cell's `innerHTML`.
+
+- **The bug this was most likely to ship with**: the resend path rebuilt the state from the single
+  send it had just written, which would have **reset the count to 1 on every resend** — the column
+  contradicting itself immediately after the second send, correcting only on reload. It now merges
+  into the cached `sends` list. Exercised for real in the browser with `window.API.post` stubbed on
+  the two POST paths, so the true merge ran without sending a customer an email or writing a row:
+  `28 Aug` → `28 Aug ×2`, both sends listed newest-first.
+
+- **Counts are a FLOOR, never a total.** `emailed_at` is still NULL on all 126 invoices (BF-046), so
+  the invoice emailed automatically at checkout is recorded nowhere. Every surface says "recorded
+  sends", never "sent N times", and the panel states in as many words that earlier unrecorded sends
+  may exist. Same discipline as ERR-175's "Not recorded" vs "Can't check".
+
+- **Verified**: full suite **4100 pass / 0 fail** (62 in the invoice-sent file, up from 44).
+  `npm run probe:invoice-sent` 9/9. Browser-driven end to end: single send has no `×N`; panel lists
+  it with the caveat; the stubbed resend appends to `×2` with both rows; a failed lookup still shows
+  the yellow "can't check" and renders no button at all. `APP_VERSION` was already bumped by a
+  concurrent session (`2026.08.28-invoice-party-pickers`), which covers every page module.
+
+- **Lesson**: "keep the newest" is a lossy read, and the loss is invisible until someone asks for the
+  history that was there all along — **prefer collapsing at the point of display, not at the point of
+  read**. And when a write's round-trip is never read back, silently-dropped fields go unnoticed:
+  `{kind, at, note}` had been going in and `{note}` coming out since the day it shipped.
+
 ## ERR-175 — The Orders page could not say when a customer's invoice was last sent, and Resend Invoice recorded nothing at all — **RESOLVED (frontend) / OPEN (backend, BF-046)** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner needs to answer "when did this customer's invoice

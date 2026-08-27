@@ -4877,6 +4877,25 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 /* --success is tuned for the dark deck; it under-contrasts on the light one
    (the same fix .inv-sent needed below). */
 .admin[data-theme="light"] .order-sent--yes { color: #15803d; }
+/* The SENT state is a <button> (it opens the send history), so it needs the
+   button chrome stripped back to what the spans beside it look like — same
+   treatment .inv-sent needed above. */
+button.order-sent {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit;
+  cursor: pointer; border-radius: 4px;
+}
+button.order-sent:hover { text-decoration: underline; }
+button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+/* Send count, only rendered past one send. */
+.order-sent__times { color: var(--text-muted); font-weight: 500; }
+/* "3 recorded sends" in the order modal's Dates block. */
+.om-sent-more {
+  background: none; border: 0; padding: 0; font: inherit; font-weight: 400;
+  color: var(--text-muted); cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.om-sent-more:hover { color: var(--text); }
+.om-sent-more:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
 
 /* Send history modal — every recorded send of one invoice, newest first. */
 .admin-modal--invoice-history { max-width: 520px; }

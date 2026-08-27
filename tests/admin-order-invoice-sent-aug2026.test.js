@@ -88,24 +88,79 @@ function slice(src, startNeedle, endNeedle) {
 // ---------------------------------------------------------------------------
 test('resolveSentInfo — the state machine', async (t) => {
 
-  await t.test('a server stamp is a send, and wins attribution', () => {
+  await t.test('a server stamp is a send', () => {
     const info = resolveSentInfo({
       invoice: { emailed_at: '2026-08-20T02:00:00Z', invoice_number: 'INV-2026-0100' },
-      event: { created_at: '2026-08-21T02:00:00Z', payload: { kind: INVOICE_SENT_KIND } },
+      events: [],
     });
     assert.equal(info.state, SENT_STATE.SENT);
     assert.equal(info.source, 'server');
     assert.equal(info.at, '2026-08-20T02:00:00Z');
     assert.equal(info.invoiceNumber, 'INV-2026-0100');
+    assert.equal(info.count, 1);
+  });
+
+  await t.test('a later resend is the LATEST send, and both are kept', () => {
+    const info = resolveSentInfo({
+      invoice: { emailed_at: '2026-08-20T02:00:00Z', invoice_number: 'INV-2026-0100' },
+      events: [{ created_at: '2026-08-21T02:00:00Z', payload: { kind: INVOICE_SENT_KIND } }],
+    });
+    assert.equal(info.count, 2);
+    assert.equal(info.at, '2026-08-21T02:00:00Z', 'the newest send is the headline date');
+    assert.deepEqual([...info.sends.map(x => x.source)], ['admin', 'server'], 'newest first');
+  });
+
+  // Once BF-047 lands the backend will stamp emailed_at on the same resend we
+  // record ourselves. Without the dedupe, one send would read as two and the
+  // count — the whole point of this feature — would double.
+  await t.test('a server stamp and our record of the SAME send collapse to one', () => {
+    const info = resolveSentInfo({
+      invoice: { emailed_at: '2026-08-20T02:00:00Z' },
+      events: [{ created_at: '2026-08-20T02:00:01Z', payload: { kind: INVOICE_SENT_KIND } }],
+    });
+    assert.equal(info.count, 1, 'one send, not two');
+    assert.equal(info.source, 'server', 'the server stamp wins attribution at the same instant');
   });
 
   await t.test('our own record answers when the server has none', () => {
     const info = resolveSentInfo({
       invoice: { emailed_at: null, invoice_number: 'INV-1' },
-      event: { created_at: '2026-08-21T02:00:00Z', payload: { kind: INVOICE_SENT_KIND } },
+      events: [{ created_at: '2026-08-21T02:00:00Z', payload: { kind: INVOICE_SENT_KIND } }],
     });
     assert.equal(info.state, SENT_STATE.SENT);
     assert.equal(info.source, 'admin');
+    assert.equal(info.count, 1);
+  });
+
+  await t.test('every recorded send is kept, newest first', () => {
+    const info = resolveSentInfo({
+      invoice: { emailed_at: null },
+      events: [
+        { created_at: '2026-08-10T00:00:00Z', payload: { kind: INVOICE_SENT_KIND } },
+        { created_at: '2026-08-28T00:00:00Z', payload: { kind: INVOICE_SENT_KIND } },
+        { created_at: '2026-08-19T00:00:00Z', payload: { kind: INVOICE_SENT_KIND } },
+        { created_at: '2026-08-01T00:00:00Z', payload: { note: 'an unrelated note' } },
+      ],
+    });
+    assert.equal(info.count, 3, 'the unrelated note is not a send');
+    assert.equal(info.sends.length, info.count, 'count IS the list length');
+    assert.deepEqual([...info.sends.map(x => x.at)], [
+      '2026-08-28T00:00:00Z', '2026-08-19T00:00:00Z', '2026-08-10T00:00:00Z',
+    ]);
+  });
+
+  // The backend stores `note` and nothing else — a record written as
+  // {kind, at, note} came back as {note} alone (read live 2026-08-28). A reader
+  // that trusted payload.at would get undefined for every send.
+  await t.test('a send is timed by created_at, never by payload.at', () => {
+    const info = resolveSentInfo({
+      invoice: { emailed_at: null },
+      events: [{
+        created_at: '2026-08-28T05:00:00Z',
+        payload: { note: '[invoice-sent] x', at: '2020-01-01T00:00:00Z' },
+      }],
+    });
+    assert.equal(info.at, '2026-08-28T05:00:00Z');
   });
 
   await t.test('both sources answered and neither had anything → NOT_RECORDED', () => {
@@ -152,6 +207,18 @@ test('resolveSentInfo — the state machine', async (t) => {
     });
     assert.equal(info.state, SENT_STATE.NOT_RECORDED);
     assert.equal(info.at, null);
+  });
+
+  await t.test('every no-send state reports an empty list and a zero count', () => {
+    for (const args of [
+      { invoice: { emailed_at: null }, events: [] },                    // NOT_RECORDED
+      { invoice: null, events: [] },                                    // NO_INVOICE
+      { invoice: null, events: [], invoiceFailed: true },               // FAILED
+    ]) {
+      const info = resolveSentInfo(args);
+      assert.deepEqual([...info.sends], []);
+      assert.equal(info.count, 0);
+    }
   });
 });
 
@@ -321,6 +388,98 @@ test('the three surfaces', async (t) => {
     const tl = slice(ordersSrc, 'const isSend = isInvoiceSendEvent(ev)', 'timelineHtml += `</div></div>`');
     assert.match(tl, /Invoice email sent/);
     assert.match(tl, /invoiceSendNoteText\(ev\)/, 'the sentinel must be stripped');
+  });
+});
+
+// ---------------------------------------------------------------------------
+test('the send history', async (t) => {
+
+  await t.test('the count renders only past one send', () => {
+    const cell = slice(ordersSrc, 'function sentCellHtml', 'function renderOrderSendHistory');
+    assert.match(cell, /n > 1 \?/, '×1 over a single send states a fact we would be inventing');
+    assert.match(cell, /order-sent__times/);
+  });
+
+  await t.test('the SENT cell is a button; the other states are not', () => {
+    const cell = slice(ordersSrc, 'function sentCellHtml', 'function renderOrderSendHistory');
+    assert.match(cell, /<button type="button" class="order-sent order-sent--yes"/);
+    assert.match(cell, /data-action="sent-history"/);
+    // The three no-send states share the `open()` span helper — nothing to open.
+    const tail = cell.slice(cell.indexOf('// FAILED is styled apart'));
+    assert.doesNotMatch(tail, /<button/);
+  });
+
+  await t.test('the button gets its chrome stripped and a focus ring', () => {
+    assert.match(cssSrc, /button\.order-sent\s*\{[^}]*background:\s*none/);
+    assert.match(cssSrc, /button\.order-sent:focus-visible/);
+    assert.match(cssSrc, /\.order-sent__times\s*\{/);
+  });
+
+  // "3 recorded sends" is a floor, not a total: the checkout email is recorded
+  // nowhere, so claiming a total would assert something never established.
+  await t.test('the copy says "recorded sends", never "sent N times"', () => {
+    const cell = slice(ordersSrc, 'function sentCellHtml', 'function renderOrderSendHistory');
+    assert.match(cell, /recorded send/);
+    assert.doesNotMatch(ordersSrc, /sent \$\{[^}]*\} times/);
+  });
+
+  await t.test('a failed read never renders as "no sends"', () => {
+    const fn = slice(ordersSrc, 'function renderOrderSendHistory', 'function openOrderSendHistory');
+    assert.match(fn, /SENT_STATE\.FAILED/);
+    assert.match(fn, /not proof that nothing went out/);
+    // The error branch must come BEFORE the empty branch, or a FAILED lookup
+    // with an empty list would fall through and read as "never sent".
+    assert.ok(fn.indexOf('inv-hist__error') < fn.indexOf('inv-hist__empty'));
+  });
+
+  await t.test('the panel always names the unrecorded checkout email', () => {
+    const fn = slice(ordersSrc, 'function renderOrderSendHistory', 'function openOrderSendHistory');
+    assert.match(fn, /automatically at checkout/);
+    // The caveat rides both the populated list and the empty state.
+    assert.equal((fn.match(/\$\{caveat\}/g) || []).length, 2);
+  });
+
+  await t.test('a truncated scan is surfaced, never silently under-counted', () => {
+    const fn = slice(ordersSrc, 'function renderOrderSendHistory', 'function openOrderSendHistory');
+    assert.match(fn, /info\.truncated/);
+    assert.match(fn, /may be incomplete/);
+  });
+
+  await t.test('the panel renders from cache — no fetch, so no stale-modal guard', () => {
+    const fn = slice(ordersSrc, 'function openOrderSendHistory', '\n}');
+    assert.doesNotMatch(fn, /await|AdminAPI\./, 'info.sends is already in hand');
+  });
+
+  await t.test('the batch reader keeps every send and reports truncation', () => {
+    const fn = slice(apiSrc, 'async getInvoiceSendEventsByOrderIds', 'async recordInvoiceSend');
+    assert.match(fn, /bucket\.push\(row\)/, 'an array per order, not the first hit');
+    assert.doesNotMatch(fn, /if \(!byOrderId\.has\(key\)\) byOrderId\.set/);
+    assert.match(fn, /truncated = true/);
+    assert.match(fn, /return \{ byOrderId, failed, truncated \}/);
+  });
+
+  // Rebuilding from the one new send would reset the count to 1 on every
+  // resend — the column would contradict itself until the next reload.
+  await t.test('a resend APPENDS to the send list rather than replacing it', () => {
+    const handler = slice(
+      ordersSrc,
+      "modal.querySelector('[data-action=\"resend-invoice\"]')",
+      '// Same vocabulary as the button');
+    assert.match(handler, /_sentCache\.get\(order\.id\)/, 'the prior state is read back');
+    assert.match(handler, /\.\.\.\(prior\?\.sends \|\| \[\]\)/, 'and spread into the new one');
+  });
+
+  await t.test('the writer no longer sends a field the backend discards', () => {
+    const fn = slice(apiSrc, 'async recordInvoiceSend', '\n  },');
+    assert.doesNotMatch(fn, /payload: \{ kind: INVOICE_SENT_KIND, at,/);
+    assert.match(fn, /stores `note` AND NOTHING ELSE/i, 'and says why, so nobody re-adds them');
+  });
+
+  await t.test('the detail panel opens the same panel as the list', () => {
+    assert.match(ordersSrc, /data-action="om-sent-history"/);
+    // Delegated on the modal: a resend replaces the cell's innerHTML, which
+    // would discard a listener bound to the button itself.
+    assert.match(ordersSrc, /modal\.addEventListener\('click'[\s\S]{0,220}om-sent-history/);
   });
 });
 

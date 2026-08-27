@@ -15,7 +15,7 @@ import { originBadge, supplierCell } from '../utils/sourcing.js';
 // Invoice-send vocabulary — the same module AdminAPI writes through, so the
 // reader and the writer cannot disagree about what a send record looks like.
 import {
-  SENT_STATE, resolveSentInfo, newestSendEvent,
+  SENT_STATE, resolveSentInfo,
   isInvoiceSendEvent, invoiceSendNoteText,
 } from '../utils/order-invoice-sent.js';
 // Deletability is a SERVER answer, per order, per caller — never a status rule
@@ -396,19 +396,92 @@ function sentCellHtml(row, info) {
   }
 
   if (info.state === SENT_STATE.SENT) {
-    const who = info.source === 'server'
-      ? 'Recorded by the backend when the email was sent.'
-      : 'Recorded when this invoice was resent from the admin Orders page.';
-    const tip = `Invoice last sent ${formatDateTime(info.at)}. ${who}`
-      + (info.invoiceNumber ? ` Invoice ${info.invoiceNumber}.` : '');
-    return `${open('order-sent--yes', tip)}${formatSentShort(info.at)}</span>`;
+    const n = info.count || 1;
+    // "recorded sends", never "sent N times". The checkout email is recorded
+    // nowhere (BF-046), so this number is a FLOOR — there may be earlier sends
+    // we cannot see, and the history panel says so in as many words.
+    const tip = `Invoice last sent ${formatDateTime(info.at)}.`
+      + ` ${n} recorded send${n === 1 ? '' : 's'}${info.truncated ? ' or more' : ''}.`
+      + (info.invoiceNumber ? ` Invoice ${info.invoiceNumber}.` : '')
+      + ' Click for the full history.';
+    // \u00d7N only past one send: printing "\u00d71" over a single send states a
+    // fact we would be inventing (same rule as the Invoices page's .inv-sent).
+    const times = n > 1 ? `<span class="order-sent__times">\u00d7${esc(n)}</span>` : '';
+    // A <button>, not a <span>: it opens the history, it is keyboard-reachable,
+    // and DataTable's row-click guard skips `closest('button, a, input')` — so
+    // this click cannot also open the order behind it (components/table.js).
+    return `<button type="button" class="order-sent order-sent--yes" data-order-sent="${id}"`
+      + ` data-action="sent-history" title="${esc(tip)}">`
+      + `${formatSentShort(info.at)}${times}</button>`;
   }
 
   // FAILED is styled apart from the two "we looked and found nothing" states on
   // purpose — an operator must never read a broken lookup as "never invoiced".
+  // These stay inert spans: there is no history behind them to open.
   const cls = info.state === SENT_STATE.FAILED ? 'order-sent--failed' : 'order-sent--none';
   const label = info.state === SENT_STATE.NOT_RECORDED ? 'Not recorded' : MISSING;
   return `${open(cls, SENT_TIP[info.state] || '')}${label}</span>`;
+}
+
+/**
+ * The send history panel — every send we have a record of, newest first.
+ *
+ * Pure, so the three branches can be exercised directly in tests (the same
+ * reason renderSentHistory on the Invoices page is pure). It needs no fetch:
+ * `info.sends` is already in hand from the page's batched read, which is also
+ * why this carries none of the Invoices version's _historyToken machinery —
+ * there is no async response that could land in a stale modal.
+ */
+function renderOrderSendHistory(info, orderNumber) {
+  // ALWAYS shown. Until BF-046 lands this is unconditionally true, and it is the
+  // difference between "this invoice went out once" and "we have one record of
+  // it going out" — which is all we can honestly claim.
+  const caveat = `<p class="inv-hist__note">Only sends recorded here are listed. The invoice emailed
+    automatically at checkout isn\u2019t recorded yet, so there may have been earlier sends we can\u2019t
+    see.</p>`;
+
+  if (info?.state === SENT_STATE.FAILED) {
+    return `<div class="inv-hist__error">
+        <p><strong>Couldn\u2019t load this order\u2019s send history.</strong></p>
+        <p>This is a read error, not proof that nothing went out \u2014 don\u2019t read it as a clean
+           history. Close this and reload to retry.</p>
+      </div>`;
+  }
+
+  const sends = info?.sends || [];
+  if (!sends.length) {
+    return `<div class="inv-hist__empty">
+        <p><strong>No invoice send recorded for this order.</strong></p>
+      </div>${caveat}`;
+  }
+
+  const items = sends.map((s) => {
+    const who = s.source === 'server'
+      ? 'recorded by the backend when the email was sent'
+      : 'resent from the admin Orders page';
+    return `<li class="inv-hist__row">
+        <div class="inv-hist__when">${esc(formatDateTime(s.at))}</div>
+        <div class="inv-hist__subject">${esc(who)}</div>
+      </li>`;
+  }).join('');
+
+  const cut = info.truncated
+    ? `<p class="inv-hist__note">There were more events than this page reads in one go, so this
+       list may be incomplete.</p>`
+    : '';
+  return `<ul class="inv-hist">${items}</ul>${caveat}${cut}`;
+}
+
+/** Open the send history for one order. Renders from cache — no fetch. */
+function openOrderSendHistory(order, info) {
+  const modal = Modal.open({
+    title: `Invoice send history \u2014 ${order?.order_number || order?.id?.slice(0, 8) || 'order'}`,
+    className: 'admin-modal--invoice-history',
+    body: renderOrderSendHistory(info, order?.order_number),
+    footer: `<button class="admin-btn admin-btn--ghost" data-action="close">Close</button>`,
+  });
+  if (!modal) return;
+  modal.footer.querySelector('[data-action="close"]')?.addEventListener('click', () => Modal.close());
 }
 
 /**
@@ -420,11 +493,17 @@ function modalSentValue(info) {
     return `<span class="admin-text-muted">Checking\u2026</span>`;
   }
   if (info.state === SENT_STATE.SENT) {
+    const n = info.count || 1;
     const who = info.source === 'server'
       ? 'recorded by the backend'
       : 'recorded when resent from this page';
+    // "recorded sends", not "sent N times" — the checkout email is recorded
+    // nowhere, so this is a floor. The button opens the same history panel the
+    // list column does, so the two surfaces cannot tell different stories.
     return `${esc(formatDateTime(info.at))}`
-      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 ${esc(who)}</span>`;
+      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 ${esc(who)}</span>`
+      + ` <button type="button" class="om-sent-more" data-action="om-sent-history">`
+      + `${esc(n)} recorded send${n === 1 ? '' : 's'}${info.truncated ? '+' : ''}</button>`;
   }
   if (info.state === SENT_STATE.FAILED) {
     return `<span class="order-sent--failed" title="${esc(SENT_TIP[SENT_STATE.FAILED])}">Can\u2019t check</span>`
@@ -486,7 +565,7 @@ async function hydrateInvoiceSent(rows) {
     if (ctrl.signal.aborted || e?.name === 'AbortError') return;
     // A whole-batch failure is still a FAILED cell, never a silent blank.
     invoices = { byOrderId: new Map(), failed: true };
-    events = { byOrderId: new Map(), failed: true };
+    events = { byOrderId: new Map(), failed: true, truncated: false };
   }
   if (ctrl.signal.aborted || !_table) return;
 
@@ -494,9 +573,10 @@ async function hydrateInvoiceSent(rows) {
     const key = String(row.id);
     const info = resolveSentInfo({
       invoice: invoices.byOrderId.get(key) || null,
-      event: events.byOrderId.get(key) || null,
+      events: events.byOrderId.get(key) || [],
       invoiceFailed: invoices.failed,
       eventFailed: events.failed,
+      truncated: !!events.truncated,
     });
     // A failed lookup is NOT cached — otherwise a single blip would pin every
     // row to "lookup failed" until the tab is destroyed, and reloading would
@@ -1100,7 +1180,9 @@ async function openOrderModal(order) {
   // the list cell behind the modal cannot disagree about the same order.
   const sentInfo = resolveSentInfo({
     invoice: invoiceLookup?.byOrderId?.get(String(order.id)) || null,
-    event: newestSendEvent(events),
+    // The whole list, not newestSendEvent(): the Dates row shows a count and
+    // opens the same history panel the list column does.
+    events: Array.isArray(events) ? events : [],
     invoiceFailed: !!invoiceLookup?.failed,
     // getOrderEvents returns null on failure. Without this, a failed history load
     // would render "Not recorded" — asserting an absence we never established.
@@ -1534,6 +1616,13 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
 }
 
 function bindModalActions(modal, order, deleteRight = null) {
+  // Delegated, not bound to the button itself: a successful resend replaces the
+  // [data-om-sent] cell's innerHTML, which would discard a direct listener.
+  modal.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-action="om-sent-history"]')) return;
+    openOrderSendHistory(order, _sentCache.get(order.id));
+  });
+
   modal.querySelector('[data-action="update-status"]')?.addEventListener('click', () => showStatusModal(order));
   modal.querySelector('[data-action="add-note"]')?.addEventListener('click', () => showNoteModal(order));
   modal.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => showRefundModal(order));
@@ -1566,15 +1655,30 @@ function bindModalActions(modal, order, deleteRight = null) {
 
       if (recordedAt) {
         Toast.success('Invoice email resent — recorded on this order.');
-        // Repaint from the record we just wrote rather than reloading the page:
-        // loadOrders() would refetch everything and drop the bulk selection.
+        // APPEND, NEVER REPLACE. Rebuilding the state from this one send alone
+        // would reset the count to 1 on every resend — the column would say
+        // "1 recorded send" immediately after the second one, and only a reload
+        // would put it right. That is the one way this feature silently breaks
+        // the number it exists to show.
+        const prior = _sentCache.get(order.id);
         const info = resolveSentInfo({
           invoice: null,
-          event: { created_at: recordedAt, payload: { kind: 'invoice_sent' } },
+          events: [
+            { created_at: recordedAt, payload: { kind: 'invoice_sent' } },
+            // The cache holds resolved {at, source} entries, not raw rows — map
+            // them back to the event shape resolveSentInfo reads.
+            ...(prior?.sends || []).map(sn => ({
+              created_at: sn.at, payload: { kind: 'invoice_sent' },
+            })),
+          ],
+          truncated: !!prior?.truncated,
         });
+        // Carry the invoice number across: this rebuild has no invoice row of
+        // its own, and dropping it would blank the tooltip until the next load.
+        if (prior?.invoiceNumber) info.invoiceNumber = prior.invoiceNumber;
         _sentCache.set(order.id, info);
         const listRow = lookupOrder(order.id);
-        if (listRow) patchSentCell(listRow);
+        if (listRow) patchSentCell(listRow, info);
         const dateCell = modal.querySelector('[data-om-sent]');
         if (dateCell) dateCell.innerHTML = modalSentValue(info);
       } else {
@@ -2045,6 +2149,19 @@ async function renderOrdersTab(container) {
     const orderId = btn.dataset.orderId;
     const order = (_table.data || []).find(r => r.id === orderId);
     if (order) showStatusModal(order);
+  });
+
+  // The Invoice sent cell opens its send history. DataTable's row-click guard
+  // already skips `closest('button, a, input')` (components/table.js:235), so
+  // this cannot also open the order behind it — but stopPropagation keeps that
+  // true even if the guard ever changes.
+  tableContainer.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="sent-history"]');
+    if (!btn) return;
+    e.stopPropagation();
+    const orderId = btn.dataset.orderSent;
+    const order = (_table.data || []).find(r => String(r.id) === String(orderId));
+    if (order) openOrderSendHistory(order, _sentCache.get(order.id));
   });
 
   // 300ms matches every other server-side admin search (Customers, Products,
