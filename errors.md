@@ -41,6 +41,91 @@ describing the same incident.
 
 ---
 
+## ERR-181 — An invoice could not carry a credit line, and the row that *could* printed without ever being validated — **RESOLVED (frontend)** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner asked to "allow negative values when I enter
+  manually since they aren't allowed at the moment. It's just to show that the customer has
+  already paid for one product and is getting another at a discounted price." That is a CREDIT
+  LINE — its own row on the customer's document, rather than a quietly reduced price on the goods
+  line with the reason lost.
+
+- **The blocker was not the one it looked like.** `min="0"` on the Unit Price input is **inert**:
+  the invoice editor is a `<div>`, not a `<form>`, nothing in `js/admin/` calls `checkValidity()`
+  or `reportValidity()`, and `admin.css` carries no `:invalid` rule for `.admin-input`. `min` only
+  shapes the spinner arrows — `t.value` has always returned `"-40"` and `onFormInput` has always
+  written it into the draft. The real gate was one clause in `validateInvoice`,
+  `if (!(num(l.unitCost) > 0))`, which every write path funnels through (`ensureInvoiceValid`
+  gates Save, Email and Download). **It reported a refused negative with the same words an empty
+  box gets — "unit cost required" — so a rejected figure was indistinguishable from a missing one.**
+
+- **A live bug found on the way in.** `validateInvoice`'s phantom-row filter tested
+  `num(l.unitCost) > 0`, while `invoiceDocRows()` — the single row projection shared by the live
+  preview and the PDF — tests plain truthiness, and `num(-50)` is **truthy**. So a row whose only
+  content was a negative amount **printed on the customer's invoice and landed in
+  `preview_totals`**, while the validator skipped it and `realLines()` kept it out of
+  `line_items`: the document the customer receives and the invoice on the server differing by the
+  credit amount. It was unreachable only because the price could not be typed, and this feature
+  would have made it routine. The two predicates are now pinned EQUAL by a test that enumerates
+  candidate rows and asserts `printed === validated`.
+
+- **Second bug, same family.** `min="0"` on the Freight box is inert for the same reason, and both
+  document renderers print `t.freight > 0 ? money(t.freight) : 'Free'` — so a negative freight
+  rendered on the customer's invoice as **"Free"** while still pulling that money out of the
+  total. Now refused.
+
+- **Fix (frontend).** The price rule became "a number of either sign" (`isPricedAmount` — blank
+  and non-numeric are the only wrong answers; **$0 is now legal too**, an authored zero being a
+  decision and an empty box an unfinished row). The `started` filter moved from `> 0` to `!== 0`.
+  A new whole-document guard refuses a **total below $0** — an invoice that owes the customer
+  money is a credit note — while **$0 stays legal**, since "you already paid for all of it" is the
+  point of the feature. New `lineSupplierCost()` in `utils/invoice-math.js` says **a credit line
+  has no goods behind it, so its cost is a KNOWN $0**; note the direction, because ERR-068's
+  failure was reading an ABSENCE as zero and this reads a **SIGN** as zero, leaving `costOrNull`'s
+  "an empty box is UNKNOWN" untouched for product lines (re-pinned to prove it). It is routed
+  through `lineCostExGst`, `normalizeInvoice` and `buildPayload` so the editor's margin bar and
+  the figure the backend stores cannot disagree.
+
+- **Three silent wrong numbers caught in review, before shipping.** (a) Keying `lineSupplierCost`
+  on "is there a cost here" rather than `cost_source === 'manual'` would let a *picked* product's
+  auto-filled $30 cost stand against −$100 of revenue. (b) Reading only `unitCost` and not the
+  saved `unit_cost_excl_gst` would make every reopened credit line read as cost-UNKNOWN,
+  collapsing the invoice list's Profit column to "—" and reporting "nobody costed this", which is
+  false. (c) `applyQuoteToLines` still pushed a **volume OFFER** onto a credit line built on a
+  real product — one click on "Apply volume price $53.53" would turn "−$99.00 already paid" into a
+  **+$53.53 charge** with a volume claim stamped on it.
+
+- **The backend refuses it — measured, not assumed.** `POST /api/admin/invoices/quote` validates
+  `unit_cost_excl_gst` as `must be greater than or equal to 0` and returns **400 over the whole
+  request** for one negative line (`npm run probe:invoice-quote` §6d, added here). So
+  `quoteRequestBody` keeps omitting negatives: a 400 would take down the courier dropdown and the
+  free-shipping banner for every line, and `requestQuote` deliberately KEEPS the last good quote
+  on failure, so it would freeze them displaying **stale pre-credit numbers**. The omission is
+  therefore stated in the freight row — "Credit lines are not counted in the goods total above" —
+  because an omission that changes a free-shipping decision must never be silent. The probe pins
+  the refusal and **fires when it lifts**, since a probe that always fails is a probe nobody runs.
+  Tracked as BF-050 with `readfirst/invoice-credit-line-backend-handoff-aug2026.md`.
+
+- **The save path was not probed**: that needs a write, and the owner chose to ship without a test
+  invoice. If `POST /api/admin/invoices` shares the schema, Save fails — so `saveErrorMessage` now
+  translates that exact Joi string into plain English naming BF-050, rather than echoing
+  `"line_items[1].unit_cost_excl_gst" must be greater than or equal to 0` at the operator.
+
+- **Verified**: 36 new tests in `tests/admin-invoice-negative-line-aug2026.test.js`; full suite
+  4229 pass / 0 fail; `npm run probe:invoice-quote` 15/15; and driven in a real browser against
+  the live API — `-40` accepted with no `min`, credit styling and the "0.00 — credit" cost
+  placeholder applied live *while typing* (no re-render, per ERR-179), Internal margin
+  `Cost of goods $54.00 · Gross profit $5.00 · 8.5%`, document rows `Ink Cartridge 1 $99.00` and
+  `Already paid — invoice 3271 1 -$40.00`, Sub Total $59.00, GST $8.85, Total $67.85.
+
+- **Lesson**: an attribute that looks like a guard may be enforcing nothing — `min="0"` on three
+  inputs was cosmetic, because the form was never a `<form>`. Grep for what actually reads a
+  constraint before believing it. And when two predicates both decide "is this row real", one for
+  the customer's document and one for validation, they are the same question and belong in one
+  test: while they disagreed, the invoice the customer received and the one on the server differed
+  by the credit.
+
+---
+
 ## ERR-180 — The Invoices SENT column could not show a resend of the one kind of invoice most likely to need one — **RESOLVED** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner asked whether the SENT column on the admin

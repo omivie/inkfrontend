@@ -345,6 +345,49 @@ async function run(token) {
       + `86.90 ex → ${underIncl} incl · not eligible`);
   }
 
+  // ── 6d. A NEGATIVE line price is REJECTED — and the editor knows it ───────
+  // The invoice editor can carry a CREDIT LINE — "you already paid for the first
+  // cartridge, this one comes off" — as its own negative-priced row. The honest
+  // thing would be to send it, so the free-shipping threshold is judged on what
+  // the customer actually pays. We cannot: this endpoint validates
+  // unit_cost_excl_gst as `must be greater than or equal to 0` and 400s the
+  // WHOLE request over one such line, which would take the courier dropdown and
+  // the free-shipping banner down for every line on the invoice — and, because
+  // requestQuote deliberately keeps the last good `_quote` on failure, it would
+  // do so while still showing the stale pre-credit numbers.
+  //
+  // So quoteRequestBody omits negative prices and the freight row SAYS the goods
+  // total excludes them. This check pins that constraint rather than wishing it
+  // away — and it is written to fire when the backend GAINS the ability, because
+  // that is the day the omission and its warning should be deleted. BF-050.
+  const credit = await quote(token, {
+    line_items: [
+      { product_code: '', description: 'Goods', quantity: 1, unit_cost_excl_gst: 200.00 },
+      { product_code: '', description: 'Already paid \u2014 credit', quantity: 1, unit_cost_excl_gst: -150.00 },
+    ],
+  });
+  if (credit.status === 400) {
+    const detail = credit.json?.error?.details?.[0]?.message || credit.json?.error?.message || '';
+    ok('6d. a credit line is still refused by the endpoint (known, worked around)',
+      `HTTP 400 \u2014 ${detail}`);
+  } else if (credit.status === 200) {
+    const goods = credit.data?.shipping?.goods_total_incl_gst;
+    const reduced = goods != null && Math.abs(goods - 57.50) <= 0.02;
+    bad('6d. THE BACKEND NOW ACCEPTS A CREDIT LINE \u2014 this is good news, act on it',
+      `HTTP 200, goods_total_incl_gst=${goods}. `
+      + (reduced
+        ? 'The credit REDUCED the goods total (200.00 ex \u2212 150.00 ex = 57.50 incl), so the '
+          + 'threshold can now be judged on what the customer actually pays. Remove the '
+          + '`price >= 0` guard in utils/invoice-quote.js quoteRequestBody, drop the '
+          + 'CREDIT_NOT_IN_THRESHOLD warning from renderShippingRow, and close BF-050.'
+        : 'But the goods total is not 57.50 \u2014 the line was accepted and then FLOORED or '
+          + 'dropped, which is worse than refusing it: free shipping would be decided on the '
+          + 'pre-discount total with nothing to show for it. Keep the guard; re-open BF-050.'));
+  } else {
+    bad('6d. a credit line gets a decisive answer',
+      `expected HTTP 400 (the documented refusal) or 200, got ${credit.status}: ${JSON.stringify(credit.json)}`);
+  }
+
   // ── 7. A garbage code is a 200, not a 400 ────────────────────────────────
   // This one matters more than it looks: the editor re-quotes on every keystroke,
   // so a half-typed SKU hits this path constantly. A 400 here would mean an error

@@ -63,6 +63,17 @@ export function withLinePrice(line, value) {
 /** A line the operator has actually put something in. */
 const hasContent = (l) => !!(str(l?.code) || str(l?.description));
 
+/**
+ * Is any line a CREDIT — priced below zero?
+ *
+ * Only meaningful for a hand-authored price: the ladder never returns a negative
+ * one. The caller is the freight row, which must warn that the goods total the
+ * free-shipping banner is quoting does NOT include these lines (see the guard in
+ * quoteRequestBody). A silent omission here reads as a wrong threshold.
+ */
+export const hasCreditLine = (lines) =>
+  (Array.isArray(lines) ? lines : []).some((l) => linePrice(l) < 0);
+
 // =========================================================================
 //  Request
 // =========================================================================
@@ -163,6 +174,14 @@ export function quoteRequestBody(draft) {
     };
     if (l?.priceSource === PRICE_MANUAL) {
       const price = linePrice(l);
+      // A CREDIT LINE CANNOT BE QUOTED. The endpoint validates this field as
+      // `must be greater than or equal to 0` and 400s the WHOLE request over one
+      // bad line — measured live, `npm run probe:invoice-quote` §6d. So a
+      // negative price is left out rather than sent: losing the discount from
+      // the free-shipping basis costs one wrong threshold decision, whereas a
+      // 400 would freeze the courier dropdown and the banner for every line on
+      // the invoice. `hasCreditLine` below exists so the editor can SAY that,
+      // instead of the omission being silent. BF-050 tracks the backend fix.
       if (price >= 0) item.unit_cost_excl_gst = round2(price);
     }
     return item;
@@ -381,7 +400,13 @@ export function applyQuoteToLines(lines, quote) {
     if (line.priceSource === PRICE_MANUAL) {
       // Hand-edited: never overwrite. Offer the volume price instead, and only
       // when it would actually change the number in the box.
-      if (badge && round2(linePrice(line)) !== round2(badge.unitPrice)) {
+      //
+      // NEVER on a CREDIT line. A credit built on a real product still resolves,
+      // so the ladder still has a price for it — and the offer button writes
+      // that price straight in (applyVolumeOffer), turning "−$99.00 already
+      // paid" into a "+$53.53" charge and stamping a volume claim on it. One
+      // click, no confirmation, and the number it replaced is gone.
+      if (badge && linePrice(line) >= 0 && round2(linePrice(line)) !== round2(badge.unitPrice)) {
         offers.push({ position: i, badge });
       }
       // The badge on a hand-edited line would be a claim about a price we did

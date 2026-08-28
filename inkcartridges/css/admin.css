@@ -5035,6 +5035,15 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 /* A hand-authored price, marked the same way a manual cost is — so "we filled
    this" and "you filled this" are told apart at a glance. */
 .inv-line__price--manual { border-color: var(--accent, #2f6fed); font-weight: 600; }
+/* A CREDIT LINE — a price below zero, money coming off. Deliberately loud: the
+   difference between 99 and -99 is one character, and this row reduces what the
+   customer is billed. Wins over --manual (a credit is always hand-authored). */
+.inv-line__price--credit {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+  font-weight: 600;
+  background: rgba(239, 68, 68, 0.06);
+}
 
 /* Internal margin readout under the line items (owner-only, form side only). */
 .inv-cogs {

@@ -49,6 +49,45 @@ export function costOrNull(v) {
 }
 
 /**
+ * What one line actually cost US, with the CREDIT-LINE rule applied.
+ *
+ * costOrNull() above says an empty cost box means UNKNOWN, and for a product
+ * line that is exactly right — nobody has costed it yet. But a line priced BELOW
+ * zero is not a product. It is money coming off ("you already paid for the first
+ * one"), there is nothing behind it to have bought, and so our cost is a KNOWN
+ * $0.
+ *
+ * Note which way round this is. ERR-068's failure mode was reading an ABSENCE as
+ * zero; this reads a SIGN as zero, and only that sign — a blank box on a
+ * positively-priced line still comes back null, unknown, exactly as before. A
+ * cost the operator typed always wins, in either direction.
+ *
+ * Every surface that asks "what did this line cost us" must come through here,
+ * or the editor's margin bar and the figure we send the backend will disagree
+ * about the same invoice. It reads BOTH shapes — editor draft and saved record —
+ * for the same reason normalizeInvoice does.
+ *
+ * qty is applied by the caller (lineCostExGst), so a credit line of any quantity
+ * still costs 0.
+ */
+export function lineSupplierCost(l) {
+  const stored = costOrNull(l?.supplier_cost_excl_gst ?? l?.supplierCost);
+  // A cost the OPERATOR typed wins over everything — including this rule. Note
+  // the test is `cost_source`, not "is there a number here": a cost the product
+  // picker auto-filled is not a claim about a credit line. Get that wrong and
+  // picking product A and then typing -100 over its price books A's real $30
+  // cost against negative revenue — a silent understatement that also reaches
+  // the backend as this invoice's COGS.
+  if ((l?.cost_source ?? l?.costSource) === 'manual' && stored != null) return stored;
+  // Read the SAVED key first. A record off the backend spells the sell price
+  // `unit_cost_excl_gst`; missing it here would leave every reopened credit line
+  // reading as cost-unknown, which collapses the whole invoice's Profit column
+  // to "—" and reports "nobody costed this" when we know exactly what it cost.
+  if (num(l?.unit_cost_excl_gst ?? l?.unitCost ?? l?.unitPrice) < 0) return 0;
+  return stored;
+}
+
+/**
  * Like costOrNull, but a profit may legitimately be NEGATIVE (a loss). Same
  * UNKNOWN-≠-0 discipline: '' / null / non-numeric → null (unknown); any finite
  * number, including a negative, → itself. Used for the backend's precomputed
@@ -65,7 +104,7 @@ export const lineRevenueExGst = (l) => num(l?.qty) * num(l?.unitCost ?? l?.unitP
 
 /** Ex-GST cost for one line, or null when the cost is unknown. */
 export function lineCostExGst(l) {
-  const c = costOrNull(l?.supplierCost);
+  const c = lineSupplierCost(l);
   return c == null ? null : num(l?.qty) * c;
 }
 
@@ -123,13 +162,23 @@ export function computeInvoiceProfit(d) {
 export function normalizeInvoice(recOrDraft) {
   const r = recOrDraft || {};
   const raw = r.line_items || r.lines || [];
-  const lines = raw.map((l) => ({
-    code: l.product_code ?? l.code ?? '',
-    description: l.description ?? '',
-    qty: num(l.quantity ?? l.qty ?? 0),
-    unitCost: num(l.unit_cost_excl_gst ?? l.unitCost ?? l.unitPrice ?? 0),
-    supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
-  }));
+  const lines = raw.map((l) => {
+    const unitCost = num(l.unit_cost_excl_gst ?? l.unitCost ?? l.unitPrice ?? 0);
+    return {
+      code: l.product_code ?? l.code ?? '',
+      description: l.description ?? '',
+      qty: num(l.quantity ?? l.qty ?? 0),
+      unitCost,
+      // Through lineSupplierCost, not costOrNull: a saved invoice reopened next
+      // month, and the analytics overlay reading the same record, must cost its
+      // credit lines the way the editor did when it was written.
+      supplierCost: lineSupplierCost({
+        unitCost,
+        supplierCost: l.supplier_cost_excl_gst ?? l.supplierCost,
+        costSource: l.cost_source ?? l.costSource,
+      }),
+    };
+  });
   const d = { lines, freight: num(r.freight_excl_gst ?? r.freight ?? 0) };
   const totals = computeInvoiceTotals(d);
   const cogs = computeInvoiceCogs(d);

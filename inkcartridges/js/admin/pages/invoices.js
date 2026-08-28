@@ -28,7 +28,7 @@ import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../com
 import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
 import { parseQuickOrderPrefill, flipTargetFrom } from '../utils/quick-order-bridge.js';
 import {
-  costOrNull, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
+  costOrNull, lineSupplierCost, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
   normalizeInvoice, invoiceDocRows, computeInvoiceVolumeSavings,
 } from '../utils/invoice-math.js';
 import {
@@ -36,6 +36,7 @@ import {
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume, lineDocNote,
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
   freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
+  hasCreditLine,
   FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR,
 } from '../utils/invoice-quote.js';
 import { patchQuotedLineRows } from '../utils/line-row-patch.js';
@@ -646,7 +647,7 @@ function buildPayload(d) {
       // OUR cost — internal, never printed. null tells the backend to snapshot
       // products.cost_price itself at save time, so COGS stays right even when
       // the client never saw a cost.
-      supplier_cost_excl_gst: costOrNull(l.supplierCost),
+      supplier_cost_excl_gst: lineSupplierCost(l),
       cost_source: l.costSource || 'auto',
       // The volume discount we actually applied, as the backend told us it. The
       // invoice PRINTS this, so it has to survive a reload — but there are no
@@ -1631,6 +1632,23 @@ function setPath(obj, path, val) {
   o[parts[parts.length - 1]] = val;
 }
 
+/**
+ * Keep a row's credit-line signals true while the operator types.
+ *
+ * Two of them: the price box goes red-ish so a stray minus reads as deliberate,
+ * and the Our Cost placeholder switches to "0.00 — credit", which is the visible
+ * half of lineSupplierCost()'s rule that a credit line has no goods behind it.
+ * Both are set from renderLines() on a full paint; this is the live path. The
+ * margin bar needs no nudge here — onFormInput ends in refreshPreview(), and
+ * paintPreview() repaints it for exactly this reason.
+ */
+function markCreditRow(priceEl, i) {
+  const credit = num(_draft.lines[i]?.unitCost) < 0;
+  priceEl.classList.toggle('inv-line__price--credit', credit);
+  const cost = priceEl.closest('.inv-line')?.querySelector('[data-lfield="supplierCost"]');
+  if (cost) cost.placeholder = credit ? '0.00 \u2014 credit' : (_draft.lines[i]?.kind === 'shipping' ? 'courier cost' : 'auto');
+}
+
 function onFormInput(e) {
   const t = e.target;
   if (t.dataset.field) {
@@ -1672,6 +1690,11 @@ function onFormInput(e) {
       if (f === 'unitCost') {
         _draft.lines[i].priceSource = PRICE_MANUAL;
         _draft.lines[i] = clearVolume(_draft.lines[i]);
+        // Repaint the two things the row says about a credit line. Deliberately
+        // by TOUCHING the existing nodes rather than calling renderLines(): the
+        // operator is typing in one of them, and re-rendering the grid under the
+        // caret is precisely ERR-179. Nothing here writes a .value.
+        markCreditRow(t, i);
       }
       // Code and quantity both change what the ladder says; price changes what
       // the free-shipping goods total is. All three are worth a re-quote.
@@ -1872,7 +1895,8 @@ function openEmailDialog(d) {
 //   { field: 'customer.name', msg }        — a top-level/nested data-field input
 //   { line: i, lfield: 'qty', msg }         — a line-item input
 // Essentials only: a customer name + at least one *complete* line item (code or
-// description, AND qty > 0, AND unit cost > 0). Fully-blank phantom rows are ignored.
+// description, AND qty > 0, AND a unit price that is a NUMBER — of either sign,
+// see isPricedAmount). Fully-blank phantom rows are ignored.
 function validateInvoice(d) {
   const errs = [];
   if (!d) return errs;
@@ -1883,10 +1907,18 @@ function validateInvoice(d) {
   if (!(d.order_date || '').trim())
     errs.push({ field: 'order_date', msg: 'Date order placed is required' });
 
+  // A ROW WITH SOMETHING IN IT. The price clause is `!== 0`, never `> 0`: a
+  // credit line's whole content may be its negative amount, and this predicate
+  // has to agree with invoiceDocRows()' filter (utils/invoice-math.js), which
+  // tests plain truthiness and therefore already PRINTS such a row. While the
+  // two disagreed, a negative-only row went on the customer's document and into
+  // preview_totals while being skipped here and dropped from line_items by
+  // realLines() — unreachable only because the price could not be typed.
+  // tests/admin-invoice-negative-line-aug2026.test.js pins them equal.
   const started = (d.lines || [])
     .map((l, i) => ({ l, i }))
     .filter(({ l }) => (l.code || '').trim() || (l.description || '').trim()
-      || num(l.qty) > 0 || num(l.unitCost) > 0);   // ignore fully-blank phantom rows
+      || num(l.qty) > 0 || num(l.unitCost) !== 0);   // ignore fully-blank phantom rows
 
   if (!started.length) {
     errs.push({ line: 0, lfield: 'code', msg: 'Add at least one line item' });
@@ -1894,11 +1926,50 @@ function validateInvoice(d) {
     started.forEach(({ l, i }) => {
       if (!((l.code || '').trim() || (l.description || '').trim()))
         errs.push({ line: i, lfield: 'code', msg: `Line ${i + 1}: code or description required` });
-      if (!(num(l.qty) > 0))      errs.push({ line: i, lfield: 'qty',      msg: `Line ${i + 1}: quantity required` });
-      if (!(num(l.unitCost) > 0)) errs.push({ line: i, lfield: 'unitCost', msg: `Line ${i + 1}: unit cost required` });
+      if (!(num(l.qty) > 0))  errs.push({ line: i, lfield: 'qty', msg: `Line ${i + 1}: quantity required` });
+      // A PRICE IS A NUMBER, OF EITHER SIGN. This used to demand `> 0`, which
+      // made a credit line impossible and reported it as "required" — the same
+      // message an empty box gets, so the operator could not tell the figure had
+      // been refused rather than missed. Blank and non-numeric are what is
+      // actually wrong; 0 and negatives are both legitimate amounts.
+      if (!isPricedAmount(l.unitCost))
+        errs.push({ line: i, lfield: 'unitCost', msg: `Line ${i + 1}: unit price required` });
+    });
+  }
+
+  // Freight has no sign either, and `min="0"` on its box does not enforce one —
+  // the editor is a <div>, not a <form>, so nothing ever calls checkValidity().
+  // A negative freight prints on the customer's invoice as "Free" (both
+  // renderPreview and buildInvoiceDoc test `t.freight > 0`) while still pulling
+  // that money out of the total. Catch it here, where the sign is the subject.
+  if (num(d.freight) < 0)
+    errs.push({ field: 'freight', msg: 'Freight cannot be negative — use a credit line for money off' });
+
+  // AN INVOICE THAT OWES THE CUSTOMER MONEY IS A CREDIT NOTE, NOT AN INVOICE.
+  // Credit lines are meant to bring a total DOWN, not through the floor. $0 is
+  // deliberately still legal — "you already paid for all of it" is the whole
+  // point of the feature — so this fires only below zero, and it points at the
+  // first credit line, which is the box that has to change.
+  const total = computeTotals(d).total;
+  if (total < 0) {
+    const firstCredit = (d.lines || []).findIndex((l) => num(l.unitCost) < 0);
+    errs.push({
+      line: firstCredit === -1 ? 0 : firstCredit,
+      lfield: 'unitCost',
+      msg: `The credit lines exceed the charges — this invoice totals ${money(total)}`,
     });
   }
   return errs;
+}
+
+/**
+ * Has a price actually been entered? Blank and non-numeric are the only answers
+ * that are "no". NB the shape matters: blankLine() seeds `unitCost: 0` as a
+ * NUMBER, so a falsiness test here would flag every fresh row.
+ */
+function isPricedAmount(v) {
+  const raw = String(v ?? '').trim();
+  return raw !== '' && Number.isFinite(Number(raw));
 }
 
 function clearInvoiceErrors() {
@@ -2109,7 +2180,21 @@ function saveErrorMessage(err) {
     : (Array.isArray(err?.details?.errors) ? err.details.errors : []);
   for (const d of list) add(typeof d === 'string' ? d : (d?.message || d?.reason || ''));
 
-  return parts.length ? parts.join(' — ')
+  // A CREDIT LINE THE SERVER WON'T TAKE. The sibling /quote endpoint validates
+  // unit_cost_excl_gst as `>= 0` and refuses a negative outright (measured —
+  // probe §6d); the save schema is very likely the same, and its raw Joi string
+  // ("line_items[1].unit_cost_excl_gst" must be greater than or equal to 0) is
+  // not something an operator can act on. Say what happened and what to do. If
+  // this message never appears, the save path accepts credit lines and BF-050
+  // is only about the quote — delete this branch then, not before.
+  const joined = parts.join(' — ');
+  if (/unit_cost_excl_gst[\s\S]{0,80}greater than or equal to 0/i.test(joined)) {
+    return 'The invoice service will not accept a credit line yet — it rejects any price below $0 (BF-050). '
+      + 'The rest of the invoice is fine: take the discount off the product line instead, or leave this open '
+      + 'until the backend lifts that rule.';
+  }
+
+  return parts.length ? joined
     : 'Could not save this invoice, and the server didn’t say why. Try again — if it keeps failing, check the customer name and every line’s product code.';
 }
 
@@ -2422,6 +2507,8 @@ function quoteLineAt(i) {
  * are no shipping options", so when the rates cannot be read the row says so and
  * points at the input the operator can always fall back to.
  */
+const CREDIT_NOT_IN_THRESHOLD = 'Credit lines are not counted in the goods total above \u2014 check the free-shipping call yourself.';
+
 function renderShippingRow() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-freight-pick');
   if (!host) return;
@@ -2470,6 +2557,12 @@ function renderShippingRow() {
     ? `This order qualifies for free shipping (${money(goodsIncl)} incl GST) — apply`
     : 'This order qualifies for free shipping — apply';
   const gap = freeShippingGapNote(shipping);
+  // The goods total quoted beside these controls DOES NOT include credit lines:
+  // the endpoint validates unit_cost_excl_gst as >= 0 and 400s the whole request
+  // over one negative figure, so quoteRequestBody leaves them out (probe §6d).
+  // An omission that changes a free-shipping decision has to be said out loud,
+  // not discovered — this is the same rule that ERR-063/149 were about.
+  const credited = hasCreditLine(_draft?.lines);
 
   host.innerHTML = `
     <label class="inv-field inv-field--freightpick">
@@ -2477,6 +2570,7 @@ function renderShippingRow() {
       <select class="admin-select" data-freight-option>${opts}${custom}</select>
     </label>
     ${weight ? `<span class="inv-freight__note">${esc(weight)}</span>` : ''}
+    ${credited ? `<span class="inv-freight__note inv-freight__note--warn">${esc(CREDIT_NOT_IN_THRESHOLD)}</span>` : ''}
     ${!offerFree && gap ? `<span class="inv-freight__note">${esc(gap)}</span>` : ''}
     ${offerFree ? `<button type="button" class="inv-freight__free" data-form-action="apply-free-shipping">${esc(qualifyLabel)}</button>` : ''}
     ${_quoteStatus === 'limited' ? `<span class="inv-freight__note inv-freight__note--warn">Rates may be a moment out of date (rate limit).</span>` : ''}`;
@@ -2505,7 +2599,7 @@ function renderLines() {
     const costCell = showCost ? `
       <input class="admin-input inv-line__cost${manual ? ' inv-line__cost--manual' : ''}"
              type="number" step="0.01" min="0" data-line="${i}" data-lfield="supplierCost"
-             value="${escA(l.supplierCost ?? '')}" placeholder="${shipCost ? 'courier cost' : 'auto'}"
+             value="${escA(l.supplierCost ?? '')}" placeholder="${num(l.unitCost) < 0 ? '0.00 \u2014 credit' : (shipCost ? 'courier cost' : 'auto')}"
              title="${manual ? 'Manual override' : shipCost ? 'What the courier charged US for this freight — nothing auto-fills it, and leaving it blank reports this invoice at 100% margin' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
     // A shipping line has no product behind it, so its code box is READ-ONLY.
     // That is protective, not cosmetic: a typed `FREIGHT` is not a real
@@ -2523,7 +2617,7 @@ function renderLines() {
       ${codeCell}
       ${descCell}
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
-      <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
+      <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}${num(l.unitCost) < 0 ? ' inv-line__price--credit' : ''}" type="number" step="0.01" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}" title="A NEGATIVE price is a credit line — money off, printed as its own row on the customer&#39;s invoice.">
       ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
       ${lineQuoteNote(l, i)}
@@ -2597,6 +2691,19 @@ function renderCogsPanel() {
       <span class="inv-cogs__label">Internal margin</span>
       <span class="inv-cogs__val">—</span>
       <span class="inv-cogs__note">${n ? `${n} line${n === 1 ? '' : 's'} missing a cost` : 'add a line item'}</span>
+    </div>`;
+    return;
+  }
+  // Costs ARE known, but computeOrderProfit refuses a revenue of zero or less
+  // (profitability.js), so `profit` is null and the ordinary bar would render
+  // "Cost of goods $X · Gross profit —" — which reads as "we don't know the
+  // cost" when the real answer is that there is no sale value to take a margin
+  // on. Credit lines are how an invoice reaches that state, so say it plainly.
+  if (profit == null) {
+    host.innerHTML = `<div class="inv-cogs inv-cogs--unknown">
+      <span class="inv-cogs__label">Internal margin</span>
+      <span class="inv-cogs__val">&mdash;</span>
+      <span class="inv-cogs__note">Cost of goods ${esc(money(costExGst))} &middot; nothing to measure a margin on &mdash; the credits cancel the charges</span>
     </div>`;
     return;
   }

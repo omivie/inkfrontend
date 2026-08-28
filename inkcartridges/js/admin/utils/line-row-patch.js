@@ -44,6 +44,11 @@ import { linePrice, PRICE_MANUAL } from './invoice-quote.js';
 // already reads the value through the same pair.
 const PRICE_SELECTOR = '[data-lfield="unitCost"], [data-lfield="unitPrice"]';
 const MANUAL_CLASS = 'inv-line__price--manual';
+// A price below zero is a CREDIT line. Kept in sync here as well as in each
+// page's renderLines(), so the affordance survives a quote reply — the same
+// reason MANUAL_CLASS is toggled above. Styled once in admin.css, which serves
+// both editors, so Quick Order gets it for free.
+const CREDIT_CLASS = 'inv-line__price--credit';
 
 /**
  * Fold a fresh quote into an already-rendered line grid.
@@ -75,6 +80,7 @@ export function patchQuotedLineRows(host, lines, { noteHtml } = {}) {
       // The class still updates: it changes no selection and steals no focus.
       if (price !== active) price.value = String(linePrice(line));
       price.classList.toggle(MANUAL_CLASS, line.priceSource === PRICE_MANUAL);
+      price.classList.toggle(CREDIT_CLASS, linePrice(line) < 0);
     }
 
     // The note strip is the LAST child of the row and is absent when there is

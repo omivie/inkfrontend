@@ -134,6 +134,13 @@ function makeSandbox() {
     isNaN, parseInt, parseFloat, Error, TypeError, Promise,
     // Module-level imports referenced inside the span.
     costOrNull: (v) => (v == null || v === '' ? null : Number(v)),
+    // A credit line (price < 0) costs us a known 0; otherwise the stored cost.
+    lineSupplierCost: (l) => {
+      const c = l?.supplierCost;
+      if (l?.costSource === 'manual' && c != null && c !== '') return Number(c);
+      if (Number(l?.unitCost ?? 0) < 0) return 0;
+      return c == null || c === '' ? null : Number(c);
+    },
     computeInvoiceTotals: () => ({ subtotal: 0, gst: 0, total: 0 }),
     computeInvoiceCogs: () => ({}), computeInvoiceProfit: () => ({}),
     normalizeInvoice: (x) => x, invoiceDocRows: () => [],
