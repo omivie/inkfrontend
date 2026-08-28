@@ -345,47 +345,71 @@ async function run(token) {
       + `86.90 ex → ${underIncl} incl · not eligible`);
   }
 
-  // ── 6d. A NEGATIVE line price is REJECTED — and the editor knows it ───────
-  // The invoice editor can carry a CREDIT LINE — "you already paid for the first
-  // cartridge, this one comes off" — as its own negative-priced row. The honest
-  // thing would be to send it, so the free-shipping threshold is judged on what
-  // the customer actually pays. We cannot: this endpoint validates
-  // unit_cost_excl_gst as `must be greater than or equal to 0` and 400s the
-  // WHOLE request over one such line, which would take the courier dropdown and
-  // the free-shipping banner down for every line on the invoice — and, because
-  // requestQuote deliberately keeps the last good `_quote` on failure, it would
-  // do so while still showing the stale pre-credit numbers.
+  // ── 6d. A CREDIT LINE REDUCES THE GOODS TOTAL ────────────────────────────
+  // The free-shipping threshold is judged on `goods_total_incl_gst`, so a credit
+  // the customer is receiving has to come off it or the invoice qualifies for
+  // free shipping on money nobody is paying.
   //
-  // So quoteRequestBody omits negative prices and the freight row SAYS the goods
-  // total excludes them. This check pins that constraint rather than wishing it
-  // away — and it is written to fire when the backend GAINS the ability, because
-  // that is the day the omission and its warning should be deleted. BF-050.
+  // This check has been round the houses, and the history is why it is worth
+  // keeping: `unit_cost_excl_gst` used to be validated `>= 0` and one negative
+  // line 400'd the WHOLE request, so the editor omitted credit lines and said so
+  // on screen. BF-050 lifted the floor on 2026-08-29 (price AND quantity), and
+  // the editor now sends them. If this ever starts failing, that regressed — and
+  // the omission plus its warning would have to come back with it.
+  //
+  // $200.00 ex less $150.00 ex is $50.00 ex = $57.50 incl, well under the
+  // threshold, so a floored or dropped credit shows up as BOTH a wrong goods
+  // total and a wrong eligibility, and the message says which.
   const credit = await quote(token, {
     line_items: [
       { product_code: '', description: 'Goods', quantity: 1, unit_cost_excl_gst: 200.00 },
       { product_code: '', description: 'Already paid \u2014 credit', quantity: 1, unit_cost_excl_gst: -150.00 },
     ],
   });
-  if (credit.status === 400) {
+  if (credit.status !== 200) {
     const detail = credit.json?.error?.details?.[0]?.message || credit.json?.error?.message || '';
-    ok('6d. a credit line is still refused by the endpoint (known, worked around)',
-      `HTTP 400 \u2014 ${detail}`);
-  } else if (credit.status === 200) {
-    const goods = credit.data?.shipping?.goods_total_incl_gst;
-    const reduced = goods != null && Math.abs(goods - 57.50) <= 0.02;
-    bad('6d. THE BACKEND NOW ACCEPTS A CREDIT LINE \u2014 this is good news, act on it',
-      `HTTP 200, goods_total_incl_gst=${goods}. `
-      + (reduced
-        ? 'The credit REDUCED the goods total (200.00 ex \u2212 150.00 ex = 57.50 incl), so the '
-          + 'threshold can now be judged on what the customer actually pays. Remove the '
-          + '`price >= 0` guard in utils/invoice-quote.js quoteRequestBody, drop the '
-          + 'CREDIT_NOT_IN_THRESHOLD warning from renderShippingRow, and close BF-050.'
-        : 'But the goods total is not 57.50 \u2014 the line was accepted and then FLOORED or '
-          + 'dropped, which is worse than refusing it: free shipping would be decided on the '
-          + 'pre-discount total with nothing to show for it. Keep the guard; re-open BF-050.'));
+    bad('6d. a credit line is accepted and reduces the goods total',
+      `HTTP ${credit.status}: ${detail}. The endpoint is refusing a negative price again — BF-050 has `
+      + 'REGRESSED. Until it is back, utils/invoice-quote.js quoteRequestBody must go back to omitting '
+      + 'negative prices (one 400 freezes the courier dropdown and the free-shipping banner for the '
+      + 'whole invoice, showing stale pre-credit numbers), and the editor must say on screen that the '
+      + 'threshold ignores credit lines.');
   } else {
-    bad('6d. a credit line gets a decisive answer',
-      `expected HTTP 400 (the documented refusal) or 200, got ${credit.status}: ${JSON.stringify(credit.json)}`);
+    const goods = credit.data?.shipping?.goods_total_incl_gst;
+    if (goods == null) {
+      bad('6d. the credit quote reports a goods total', `goods_total_incl_gst was ${goods}`);
+    } else if (Math.abs(goods - 57.50) > 0.02) {
+      bad('6d. a credit line REDUCES the goods total',
+        `sent 200.00 ex and -150.00 ex, expected ~57.50 incl, got ${goods}. `
+        + (Math.abs(goods - 230.00) <= 0.02
+          ? 'That is 200.00 ex grossed up — the credit was FLOORED AT 0 or dropped, so free shipping '
+            + 'is being decided on the pre-discount total.'
+          : 'The basis has moved; do not trust the freight autofill until this is understood.'));
+    } else if (credit.data?.shipping?.free_shipping_eligible !== false) {
+      bad('6d. a credited invoice under the threshold does NOT get free shipping',
+        `goods ${goods} incl but free_shipping_eligible=${credit.data?.shipping?.free_shipping_eligible}`);
+    } else {
+      ok('6d. a credit line is accepted and reduces the goods total',
+        `200.00 ex \u2212 150.00 ex \u2192 ${goods} incl \u00b7 not eligible \u00b7 suggested `
+        + `${credit.data?.shipping?.suggested_key}`);
+    }
+  }
+
+  // ── 6e. A NEGATIVE QUANTITY (a return) is accepted too ────────────────────
+  // BF-050 dropped the floor on quantity as well, which is the shape that keeps
+  // a RETURN's margin honest: it reverses revenue and COGS together. Worth its
+  // own check because the editor now offers it and nothing else here would
+  // notice the floor coming back on this field alone.
+  const ret = await quote(token, {
+    line_items: [{ product_code: '', description: 'Returned toner', quantity: -1, unit_cost_excl_gst: 60.00 }],
+  });
+  if (ret.status !== 200) {
+    bad('6e. a negative quantity is accepted',
+      `HTTP ${ret.status}: ${ret.json?.error?.details?.[0]?.message || ''}. The editor lets an operator `
+      + 'type one, so this floor coming back would surface as a save failure.');
+  } else {
+    ok('6e. a negative quantity (a return) is accepted',
+      `-1 \u00d7 60.00 ex \u2192 goods ${ret.data?.shipping?.goods_total_incl_gst} incl`);
   }
 
   // ── 7. A garbage code is a 200, not a 400 ────────────────────────────────

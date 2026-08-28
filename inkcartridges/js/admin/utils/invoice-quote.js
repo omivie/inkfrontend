@@ -63,16 +63,6 @@ export function withLinePrice(line, value) {
 /** A line the operator has actually put something in. */
 const hasContent = (l) => !!(str(l?.code) || str(l?.description));
 
-/**
- * Is any line a CREDIT — priced below zero?
- *
- * Only meaningful for a hand-authored price: the ladder never returns a negative
- * one. The caller is the freight row, which must warn that the goods total the
- * free-shipping banner is quoting does NOT include these lines (see the guard in
- * quoteRequestBody). A silent omission here reads as a wrong threshold.
- */
-export const hasCreditLine = (lines) =>
-  (Array.isArray(lines) ? lines : []).some((l) => linePrice(l) < 0);
 
 // =========================================================================
 //  Request
@@ -173,16 +163,20 @@ export function quoteRequestBody(draft) {
       quantity: num(l?.qty),
     };
     if (l?.priceSource === PRICE_MANUAL) {
-      const price = linePrice(l);
-      // A CREDIT LINE CANNOT BE QUOTED. The endpoint validates this field as
-      // `must be greater than or equal to 0` and 400s the WHOLE request over one
-      // bad line — measured live, `npm run probe:invoice-quote` §6d. So a
-      // negative price is left out rather than sent: losing the discount from
-      // the free-shipping basis costs one wrong threshold decision, whereas a
-      // 400 would freeze the courier dropdown and the banner for every line on
-      // the invoice. `hasCreditLine` below exists so the editor can SAY that,
-      // instead of the omission being silent. BF-050 tracks the backend fix.
-      if (price >= 0) item.unit_cost_excl_gst = round2(price);
+      // A CREDIT LINE IS QUOTED LIKE ANY OTHER, since BF-050 (verified live
+      // 2026-08-29): the endpoint accepts a negative price and SUBTRACTS it from
+      // `goods_total_incl_gst`, so the free-shipping threshold is finally judged
+      // on what the customer actually pays. This used to omit negatives, because
+      // one of them 400'd the whole request and would have frozen the courier
+      // dropdown showing stale pre-credit numbers.
+      //
+      // ONE SHARP EDGE, and it is deliberate on the backend's side: a typed `0`
+      // is read as "not priced yet" and falls back to the ladder, NOT as a real
+      // $0. That is right for us — the editor sends 0 for every row the operator
+      // has not got to, and honouring it would zero the goods total and hide
+      // free shipping on every half-filled invoice. It affects only the freight
+      // suggestion; what gets SAVED is unaffected.
+      item.unit_cost_excl_gst = round2(linePrice(l));
     }
     return item;
   });

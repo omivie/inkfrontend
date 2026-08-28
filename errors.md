@@ -41,6 +41,70 @@ describing the same incident.
 
 ---
 
+## ERR-184 — BF-050 landed: credit lines save, and the workarounds came out — **RESOLVED** (2026-08-29)
+
+- **Date**: 2026-08-29 · **Context**: The backend dev lifted the `>= 0` floor and sent
+  `invoice-negative-zero-lines-backend-response-aug2026.md`. Verified against the deployed API
+  before touching anything (commit `0c32a65`), then every workaround built around the old
+  constraint was removed.
+
+- **What is true now**, measured rather than taken on trust: a negative `unit_cost_excl_gst`, a
+  negative `quantity`, a zero of either, a negative `supplier_cost_excl_gst` and a negative
+  `freight_excl_gst` are all accepted on create, update and `/quote`; a credit **subtracts** from
+  `goods_total_incl_gst`, so the free-shipping threshold is finally judged on what the customer
+  pays; and `supplier_cost_excl_gst: 0` still round-trips as `0`, so the Paid toggle keeps working
+  on a credit-bearing invoice.
+
+- **Removed** — every one of these existed only because of the old floor, and a workaround that
+  outlives its cause reads as a live limitation to the next person: the `price >= 0` guard in
+  `quoteRequestBody`; `hasCreditLine` and the "Credit lines are not counted in the goods total"
+  warning in the freight row; `validateInvoice`'s block on a credit row; and `saveErrorMessage`'s
+  translation of the 400, whose own comment said "delete this branch when BF-050 lands, not
+  before". The row note stopped saying a credit "can't be saved on its own" and now offers folding
+  it into a discount as a **choice** about how the document reads.
+
+- **Two claims in the response did not hold, and one is worth keeping.** §1 ask 3 says the backend
+  accepts a negative-total document, deliberately unguarded so a **pure credit note** stays
+  issuable. It does not: exactly $0 saves, one cent below returns **500 `Failed to create
+  invoice`**. Isolated it properly first — negative prices, quantities and freight are all fine on
+  their own, so it is the document total alone. Logged as BF-052. It blocks nobody, because
+  `validateInvoice` already refuses a below-zero total — which is the guard the same response asked
+  us to keep — but that guard is now the only thing between the operator and an opaque 500, and its
+  test says so.
+
+- **The negative-QUANTITY return model is real and correct.** Proved on a live invoice: 2 sold at
+  $100 (cost $70) with one taken back reports `cost_excl_gst: 70`, `profit_excl_gst: 30` — revenue
+  and COGS reversed together. Booking the same credit as `1 × -$100` would have subtracted the
+  revenue while still adding $70 of cost. The editor's price box already sends `supplier_cost: 0`
+  for a negative-price line, which is exactly what avoids the auto-snapshot trap the response warns
+  about in §3.
+
+- **Also fixed, and it was ours**: both document renderers tested `t.freight > 0`, so a negative
+  freight printed as **"Free"** while still taking that money off the total. That render bug was
+  the real reason negative freight was refused client-side; only zero is "Free" now, and the
+  refusal went with it.
+
+- **Owner action outstanding**: `sql/migrations/138_shadow_order_skip_non_positive_lines.sql` must
+  be applied by hand in the Supabase SQL editor. Until then a credit line carrying a **resolvable
+  product code** materialises in the shadow order as a `1 × SKU @ $0.00` sale, inflating
+  product-level rankings and COGS for a product that came back. Description-only credit lines are
+  unaffected either way, and that is what the editor sends.
+
+- **Verified**: full suite **4286 pass / 0 fail**; `npm run probe:invoice-quote` **16/16** with §6d
+  flipped back to "accepted and reduces the goods total" and a new §6e for negative quantities; the
+  backend's own §7 acceptance list run against production; and the exemplar driven through the real
+  editor — `$99.00` and `-$40.00` printing as two rows, `59.00 / 8.85 / 67.85`, saved and read back
+  verbatim, with the freight row correctly reporting "$32.15 more for free shipping" off the
+  post-credit total. Every test invoice deleted.
+
+- **Lesson**: when a constraint is lifted, the workarounds are not optional cleanup — each one is a
+  statement to the operator about what the system can do, and leaving them in keeps a limitation
+  alive after it is gone. And verify the lift rather than the letter: two of the five claims in
+  this response were wrong, and the one that mattered was only found by testing what the document
+  did, not what a field accepted.
+
+---
+
 ## ERR-183 — The credit line I shipped could not be saved; discounts now come off the line — **RESOLVED** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner tried to save an invoice with a −$40.00 credit row

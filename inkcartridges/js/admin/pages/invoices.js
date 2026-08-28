@@ -37,7 +37,6 @@ import {
   hasManualDiscount, clearDiscount,
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
   freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
-  hasCreditLine,
   FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR,
 } from '../utils/invoice-quote.js';
 import { patchQuotedLineRows } from '../utils/line-row-patch.js';
@@ -2214,7 +2213,15 @@ function validateInvoice(d) {
     started.forEach(({ l, i }) => {
       if (!((l.code || '').trim() || (l.description || '').trim()))
         errs.push({ line: i, lfield: 'code', msg: `Line ${i + 1}: code or description required` });
-      if (!(num(l.qty) > 0))  errs.push({ line: i, lfield: 'qty', msg: `Line ${i + 1}: quantity required` });
+      // A QUANTITY MAY BE NEGATIVE — that is how a RETURN is modelled, and it is
+      // the only shape that keeps the margin honest. computeInvoiceProfit
+      // multiplies cost by quantity, so `-1 × $60 sell, $40 cost` reverses
+      // revenue AND cost together and moves profit by the original $20 margin.
+      // Booking the same credit as `1 × -$60` would subtract the revenue while
+      // still ADDING $40 of cost, reporting a $100 loss on a $60 refund.
+      // Zero stays refused: a line that moves nothing is an unfinished row.
+      if (!isPricedAmount(l.qty) || num(l.qty) === 0)
+        errs.push({ line: i, lfield: 'qty', msg: `Line ${i + 1}: quantity required` });
       // A PRICE IS A NUMBER, OF EITHER SIGN. This used to demand `> 0`, which
       // made a credit line impossible and reported it as "required" — the same
       // message an empty box gets, so the operator could not tell the figure had
@@ -2224,32 +2231,6 @@ function validateInvoice(d) {
         errs.push({ line: i, lfield: 'unitCost', msg: `Line ${i + 1}: unit price required` });
     });
   }
-
-  // Freight has no sign either, and `min="0"` on its box does not enforce one —
-  // the editor is a <div>, not a <form>, so nothing ever calls checkValidity().
-  // A negative freight prints on the customer's invoice as "Free" (both
-  // renderPreview and buildInvoiceDoc test `t.freight > 0`) while still pulling
-  // that money out of the total. Catch it here, where the sign is the subject.
-  if (num(d.freight) < 0)
-    errs.push({ field: 'freight', msg: 'Freight cannot be negative — use a line discount for money off' });
-
-  // A CREDIT ROW NEVER REACHES THE SERVER. Measured, not assumed: POST
-  // /api/admin/invoices floors unit_cost_excl_gst AND quantity at zero, and
-  // ignores line_total_excl_gst and any discount key — the totals are recomputed
-  // from qty × price, so nothing can pull one down (BF-050). Blocking it HERE,
-  // naming the one-click fix, is the difference between a dead end and a
-  // next step; saveErrorMessage's translation of the raw 400 stays only as a
-  // backstop for the paths this cannot see.
-  (d.lines || []).forEach((l, i) => {
-    if (num(l.unitCost) >= 0) return;
-    errs.push({
-      line: i,
-      lfield: 'unitCost',
-      msg: i > 0
-        ? `Line ${i + 1} is a credit of ${money(Math.abs(num(l.unitCost) * (num(l.qty) || 1)))} — use “Apply to the line above” on that row, or make the price positive`
-        : `Line ${i + 1} is a credit, and there is no line above it to take it off. Move it below the line it discounts.`,
-    });
-  });
 
   // AN INVOICE THAT OWES THE CUSTOMER MONEY IS A CREDIT NOTE, NOT AN INVOICE.
   // Credit lines are meant to bring a total DOWN, not through the floor. $0 is
@@ -2534,22 +2515,11 @@ function saveErrorMessage(err) {
     : (Array.isArray(err?.details?.errors) ? err.details.errors : []);
   for (const d of list) add(typeof d === 'string' ? d : (d?.message || d?.reason || ''));
 
-  // A CREDIT LINE THE SERVER WON'T TAKE. CONFIRMED BY A WRITE, not inferred
-  // (2026-08-28): POST /api/admin/invoices returns 400 VALIDATION_FAILED on
-  // `line_items[N].unit_cost_excl_gst must be greater than or equal to 0`, the
-  // same rule /quote enforces (probe §6d). A control run proved it is the SIGN
-  // and nothing else — the identical payload with +40 in place of -40 created
-  // invoice #3276, which was then deleted. That raw Joi string is not something
-  // an operator can act on, so say what happened and what to do instead. Delete
-  // this branch when BF-050 lands, not before.
-  const joined = parts.join(' — ');
-  if (/unit_cost_excl_gst[\s\S]{0,80}greater than or equal to 0/i.test(joined)) {
-    return 'The invoice service will not accept a credit line yet — it rejects any price below $0 (BF-050). '
-      + 'The rest of the invoice is fine: take the discount off the product line instead, or leave this open '
-      + 'until the backend lifts that rule.';
-  }
-
-  return parts.length ? joined
+  // (The BF-050 translation that used to live here is gone: the invoice service
+  // accepts negative and zero prices as of 2026-08-29, so the 400 it explained
+  // can no longer happen. Its comment said "delete this branch when BF-050
+  // lands, not before" — this is that.)
+  return parts.length ? parts.join(' — ')
     : 'Could not save this invoice, and the server didn’t say why. Try again — if it keeps failing, check the customer name and every line’s product code.';
 }
 
@@ -3036,18 +3006,15 @@ function lineQuoteNote(l, i) {
     bits.push(`<span class="inv-vol inv-vol--muted">Custom item — no volume price, and not counted in the parcel weight</span>`);
   }
 
-  // A CREDIT ROW CANNOT BE SAVED, so say so here rather than at Save, and give
-  // it somewhere to go. The invoice service floors both the price and the
-  // quantity at zero and ignores any discount key, so there is no arrangement of
-  // this row that survives a POST (BF-050) — folding it into the line above is
-  // the same money expressed as a discount, which does.
-  if (num(l.unitCost) < 0) {
-    bits.push(`<span class="inv-vol inv-vol--warn">A credit row can’t be saved on its own</span>`);
-    if (i > 0) {
-      bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="fold-credit" data-line="${i}">Apply ${esc(money(Math.abs(num(l.unitCost) * (num(l.qty) || 1))))} to the line above</button>`);
-    } else {
-      bits.push(`<span class="inv-vol inv-vol--muted">Move it below the line it discounts, then apply it</span>`);
-    }
+  // A CREDIT ROW SAVES ON ITS OWN since BF-050 — it prints as its own line and
+  // the invoice service subtracts it, which is the shape the operator asked for
+  // and the one the backend's own guidance recommends for an "already paid"
+  // credit. So this is now an OFFER, not a rescue: folding it into the line
+  // above is the same money said as a discount on one row instead of two.
+  // Neither is wrong; the operator picks how the document should read.
+  if (num(l.unitCost) < 0 && i > 0) {
+    bits.push(`<span class="inv-vol inv-vol--muted">Credit line — prints as its own row</span>`);
+    bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="fold-credit" data-line="${i}">Or take ${esc(money(Math.abs(num(l.unitCost) * (num(l.qty) || 1))))} off the line above</button>`);
   }
 
   if (!bits.length) return '';
@@ -3070,8 +3037,6 @@ function quoteLineAt(i) {
  * are no shipping options", so when the rates cannot be read the row says so and
  * points at the input the operator can always fall back to.
  */
-const CREDIT_NOT_IN_THRESHOLD = 'Credit lines are not counted in the goods total above \u2014 check the free-shipping call yourself.';
-
 function renderShippingRow() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-freight-pick');
   if (!host) return;
@@ -3120,12 +3085,6 @@ function renderShippingRow() {
     ? `This order qualifies for free shipping (${money(goodsIncl)} incl GST) — apply`
     : 'This order qualifies for free shipping — apply';
   const gap = freeShippingGapNote(shipping);
-  // The goods total quoted beside these controls DOES NOT include credit lines:
-  // the endpoint validates unit_cost_excl_gst as >= 0 and 400s the whole request
-  // over one negative figure, so quoteRequestBody leaves them out (probe §6d).
-  // An omission that changes a free-shipping decision has to be said out loud,
-  // not discovered — this is the same rule that ERR-063/149 were about.
-  const credited = hasCreditLine(_draft?.lines);
 
   host.innerHTML = `
     <label class="inv-field inv-field--freightpick">
@@ -3133,7 +3092,6 @@ function renderShippingRow() {
       <select class="admin-select" data-freight-option>${opts}${custom}</select>
     </label>
     ${weight ? `<span class="inv-freight__note">${esc(weight)}</span>` : ''}
-    ${credited ? `<span class="inv-freight__note inv-freight__note--warn">${esc(CREDIT_NOT_IN_THRESHOLD)}</span>` : ''}
     ${!offerFree && gap ? `<span class="inv-freight__note">${esc(gap)}</span>` : ''}
     ${offerFree ? `<button type="button" class="inv-freight__free" data-form-action="apply-free-shipping">${esc(qualifyLabel)}</button>` : ''}
     ${_quoteStatus === 'limited' ? `<span class="inv-freight__note inv-freight__note--warn">Rates may be a moment out of date (rate limit).</span>` : ''}`;
@@ -3192,7 +3150,7 @@ function renderLines() {
     <div class="inv-line${showCost ? '' : ' inv-line--nocost'}${ship ? ' inv-line--shipping' : ''}${custom ? ' inv-line--custom' : ''}" data-line="${i}">
       ${codeCell}
       ${descCell}
-      <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
+      <input class="admin-input${num(l.qty) < 0 ? ' inv-line__price--credit' : ''}" type="number" step="1" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}" title="A NEGATIVE quantity is a RETURN — it reverses this line's revenue AND its cost together, so the margin stays honest.">
       <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}${num(l.unitCost) < 0 ? ' inv-line__price--credit' : ''}" type="number" step="0.01" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}" title="A NEGATIVE price is a credit line — money off, printed as its own row on the customer&#39;s invoice.">
       ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
@@ -3557,7 +3515,12 @@ function renderPreview(d) {
       <td class="inv-doc__cost">${esc(lineTotal)}</td>
     </tr>`).join('') || `<tr><td colspan="4" class="inv-doc__empty">Add a line item…</td></tr>`;
 
-  const freightCell = t.freight > 0 ? money(t.freight) : 'Free';
+  // `=== 0`, not `> 0`. Only a freight of ZERO is "Free" — a NEGATIVE freight is a
+  // freight credit, and printing it as "Free" said the customer paid nothing for
+  // delivery while quietly taking that money off the total. That render bug was
+  // the real reason negative freight was refused at all; it is fixed here, so
+  // the refusal could go (BF-050 lifted the server's floor at the same time).
+  const freightCell = t.freight === 0 ? 'Free' : money(t.freight);
   // Presentational ONLY — never a totals row. The unit prices already carry the
   // discount, so a "less bulk discount" line would subtract it a second time.
   const bulkSaved = computeInvoiceVolumeSavings(d);
@@ -3762,7 +3725,8 @@ function buildInvoiceDoc(d) {
     ty += opts.gap || 16;
   };
   totRow('Sub Total', money(t.subtotal));
-  totRow('Freight', t.freight > 0 ? money(t.freight) : 'Free');
+  totRow('Freight', t.freight === 0 ? 'Free' : money(t.freight));   // see renderPreview — a negative is a credit, not "Free"
+
   totRow('GST', money(t.gst));
   ty += 6;
   doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ty - 11, valX, ty - 11);

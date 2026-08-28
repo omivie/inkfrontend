@@ -241,12 +241,27 @@ test('§3 a credit bigger than the line above is refused', () => {
   assert.match(warnings[0], /bigger than the line above/);
 });
 
-test('§3 the offer appears on the row, with the amount on the button', () => {
+test('§3 folding is now an OFFER, not a rescue', () => {
+  // Since BF-050 a credit row saves on its own and prints as its own line, so
+  // the row must stop claiming otherwise. Folding it into the line above is the
+  // same money said as a discount on one row instead of two — a choice about how
+  // the document reads, which is the operator's to make.
   const body = fnBody(INVOICES, 'function lineQuoteNote(');
-  assert.match(body, /num\(l\.unitCost\) < 0/);
+  assert.match(body, /num\(l\.unitCost\) < 0 && i > 0/);
   assert.match(body, /data-form-action="fold-credit"/);
-  assert.match(body, /can’t be saved on its own/, 'say it here, not at Save');
-  assert.match(body, /Move it below the line it discounts/, 'and say what to do when there is no line above');
+  assert.match(body, /prints as its own row/, 'state what it does now, not what it was once blocked from');
+  assert.doesNotMatch(body, /can’t be saved/, 'that limitation is gone — repeating it would be a lie');
+});
+
+test('§3 the credit row and the discount are the same money, two documents', () => {
+  const asCredit = { lines: [GOODS(), { code: '', description: 'Already paid', qty: 1, unitCost: -40 }], freight: 0 };
+  const asDiscount = { lines: [{ ...GOODS(), unitCost: 59, discountSaving: 40, discountNote: 'Already paid' }], freight: 0 };
+  assert.equal(computeInvoiceTotals(asCredit).total, computeInvoiceTotals(asDiscount).total,
+    'the customer pays the same either way — only how the document reads differs');
+  assert.equal(computeInvoiceTotals(asCredit).total, 67.85);
+  // Two printed rows vs one with a sub-line.
+  assert.equal(invoiceDocRows(asCredit, { money, note: lineDocNote }).length, 2);
+  assert.equal(invoiceDocRows(asDiscount, { money, note: lineDocNote }).length, 1);
 });
 
 // ─── 4. The customer's document ──────────────────────────────────────────────
@@ -402,5 +417,5 @@ test('§8 APP_VERSION was bumped', () => {
   const app = fs.readFileSync(path.join(ADMIN, 'app.js'), 'utf8');
   const m = app.match(/const APP_VERSION = '([^']+)'/);
   assert.ok(m);
-  assert.notEqual(m[1], '2026.08.28-invoice-custom-item');
+  assert.notEqual(m[1], '2026.08.28-invoice-line-discount');
 });

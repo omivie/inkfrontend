@@ -75,7 +75,7 @@ for (const f of ['profitability.js', 'invoice-math.js', 'invoice-quote.js']) {
 const {
   costOrNull, lineSupplierCost, lineCostExGst, computeInvoiceTotals, computeInvoiceCogs,
   computeInvoiceProfit, normalizeInvoice, invoiceDocRows,
-  quoteRequestBody, applyQuoteToLines, hasCreditLine, PRICE_MANUAL,
+  quoteRequestBody, applyQuoteToLines, PRICE_MANUAL,
 } = sandbox;
 
 // Values built inside the vm realm carry that realm's prototypes, so deepEqual
@@ -135,28 +135,43 @@ const priceErrs = (d) => validateInvoice(d).filter((e) => e.lfield === 'unitCost
 
 // ─── 1. The price rule ───────────────────────────────────────────────────────
 
-test('§1 a NEGATIVE unit price is TYPEABLE, but cannot be saved on its own', () => {
-  // THIS TEST INVERTED, and the inversion is the point. The editor still accepts
-  // the keystrokes — that is the operator's natural gesture and it is preserved
-  // — but a standalone credit row can never reach the server: POST
-  // /api/admin/invoices floors BOTH unit_cost_excl_gst and quantity at zero and
-  // ignores line_total_excl_gst and any discount key, recomputing every total
-  // from qty × price (measured; BF-050). So there is no arrangement of this row
-  // that survives, and the honest place to say so is here, one click from the
-  // fix — not at Save, and never as a raw 400.
+test('§1 a NEGATIVE unit price SAVES — BF-050 lifted the floor', () => {
+  // This assertion has now been true, then false, then true again, and the
+  // history is the point. It was the feature (ERR-181); then the invoice service
+  // was found to refuse it on every route, so the editor blocked it with a
+  // one-click way out (ERR-183); then the backend lifted `>= 0` on price AND
+  // quantity and made a credit SUBTRACT from the quote (verified live
+  // 2026-08-29). A credit row is now a first-class line that prints as its own
+  // row — which is what the owner asked for on day one.
   const d = draftWith([GOODS, { code: '', description: 'Already paid — invoice 3271', qty: 1, unitCost: -40 }]);
-  const errs = validateInvoice(d).filter((e) => e.line === 1 && e.lfield === 'unitCost');
-  assert.equal(errs.length, 1, 'a credit row must be caught before the server sees it');
-  assert.match(errs[0].msg, /Apply to the line above/,
-    'name the one-click fix — a block with no next step is where the operator got stuck');
-  assert.match(errs[0].msg, /\$40\.00/, 'state the money, so it is obvious which row is meant');
+  assert.deepEqual(plain(validateInvoice(d)), [], 'nothing may block a credit line now');
+  assert.equal(computeInvoiceTotals(d).total, 67.85, '99 − 40 = 59, +15% GST');
 });
 
-test('§1 a credit on the FIRST line says what to do instead — there is nothing above it', () => {
+test('§1 a credit needs no line above it — a pure credit note is a real document', () => {
+  // The backend deliberately did NOT add a total >= 0 rule, so that a pure
+  // credit note stays issuable. The editor's own below-zero guard is the only
+  // one, and it fires on the TOTAL, never on a line's position.
   const d = draftWith([{ code: '', description: 'Already paid', qty: 1, unitCost: -40 }, GOODS]);
-  const errs = validateInvoice(d).filter((e) => e.line === 0 && e.lfield === 'unitCost');
+  assert.deepEqual(plain(validateInvoice(d)), [], 'order of lines is the operator’s business');
+});
+
+test('§1 a NEGATIVE quantity is legal — it is how a RETURN is modelled', () => {
+  // The shape that keeps the margin honest: -1 × $60 sell at $40 cost reverses
+  // revenue AND cost together, moving profit by the original $20 margin. Booking
+  // it as 1 × -$60 would subtract the revenue but still ADD the $40 cost and
+  // report a $100 loss on a $60 refund.
+  const ret = { code: 'GTN251BK', description: 'Returned toner', qty: -1, unitCost: 60, supplierCost: 40, costSource: 'manual' };
+  assert.deepEqual(plain(validateInvoice(draftWith([{ ...GOODS, unitCost: 200 }, ret]))), []);
+  assert.equal(computeInvoiceTotals({ lines: [ret], freight: 0 }).subtotal, -60);
+  assert.equal(computeInvoiceCogs({ lines: [ret] }).costExGst, -40, 'the cost reverses too — that is the whole point');
+});
+
+test('§1 a ZERO quantity is still refused — a line that moves nothing is unfinished', () => {
+  const errs = validateInvoice(draftWith([{ ...GOODS, qty: 0 }])).filter((e) => e.lfield === 'qty');
   assert.equal(errs.length, 1);
-  assert.match(errs[0].msg, /Move it below the line it discounts/);
+  assert.deepEqual(plain(validateInvoice(draftWith([{ ...GOODS, qty: -1 }])).filter((e) => e.lfield === 'qty')), [],
+    'but a negative one is not');
 });
 
 test('§1 an authored $0 is accepted; a BLANK box is not', () => {
@@ -264,29 +279,34 @@ test('§4 a $0 invoice is LEGAL — "you already paid for all of it"', () => {
   assert.equal(computeInvoiceTotals(d).total, 0);
 });
 
-test('§4 the below-zero guard still exists for any route that could reach it', () => {
-  // A discount can no longer drive a line under zero (applyLineDiscount refuses
-  // one bigger than the line), so this is now a backstop rather than the primary
-  // gate. It stays: an invoice that owes the customer money is a credit note,
-  // and the day BF-050 lands and credit rows save, it becomes load-bearing again.
+test('§4 the below-zero guard is the ONLY guard, and it is load-bearing', () => {
+  // Now the single most important rule in this file. The backend deliberately
+  // did NOT add a total >= 0 check ("validateInvoice in the editor stays the
+  // guard, and it is the only one — please keep it") — but measured on
+  // 2026-08-29, a negative-total invoice does not merely pass, it **500s**:
+  // `Failed to create invoice`, with nothing an operator could act on. Exactly
+  // $0 saves fine; one cent below does not. BF-052.
+  //
+  // So this guard is the only thing standing between the operator and an opaque
+  // server error. Do not relax it until that 500 is a 201 or a 400.
   const below = draftWith([{ ...GOODS, unitCost: -0.01 }]);
   assert.equal(validateInvoice(below).filter((e) => /exceed the charges/.test(e.msg)).length, 1);
   assert.equal(validateInvoice(draftWith([GOODS])).length, 0, 'and never fires on an ordinary invoice');
 });
 
-test('§4 a NEGATIVE freight is refused — it would print as "Free"', () => {
-  // min="0" on that box is inert (the editor is a <div>, not a <form>), and both
-  // document renderers test `t.freight > 0`, so -20 prints as "Free" while still
-  // pulling $20 out of the total.
-  const errs = validateInvoice(draftWith([GOODS], { freight: -20 }));
-  assert.equal(errs.filter((e) => e.field === 'freight').length, 1);
-  assert.match(errs.find((e) => e.field === 'freight').msg, /line discount/,
-    'it used to advise "use a credit line", which is no longer something that saves');
-  assert.deepEqual(plain(validateInvoice(draftWith([GOODS], { freight: 0 }))), [], '0 freight is "Free" and always was');
+test('§4 a NEGATIVE freight is a freight CREDIT, and prints as one', () => {
+  // It used to be refused, and the stated reason was never the sign — it was
+  // that both renderers tested `t.freight > 0`, so -20 printed as "Free" while
+  // still taking $20 off the total. Fix the render and the refusal has no
+  // grounds left; BF-050 lifted the server's floor in the same week.
+  assert.deepEqual(plain(validateInvoice(draftWith([GOODS], { freight: -20 }))), []);
   for (const r of ['renderPreview(', 'buildInvoiceDoc(']) {
-    assert.match(fnBody(INVOICES, `function ${r}`), /t\.freight > 0 \?/,
-      'if this stops being the test, the freight guard above needs revisiting');
+    const body = fnBody(INVOICES, `function ${r}`);
+    assert.match(body, /t\.freight === 0 \? 'Free' : money\(t\.freight\)/,
+      'ONLY zero is Free — a negative must print as the credit it is');
+    assert.doesNotMatch(body, /t\.freight > 0 \? money/, 'the old test that hid a credit');
   }
+  assert.equal(computeInvoiceTotals(draftWith([GOODS], { freight: -20 })).subtotal, 99);
 });
 
 // ─── 5. A credit line's cost is a KNOWN zero ─────────────────────────────────
@@ -360,10 +380,10 @@ test('§5 buildPayload ships the negative price and the derived $0 cost', () => 
 
 // ─── 6. The backend will not quote a credit ──────────────────────────────────
 
-test('§6 a negative manual price is left OUT of the quote body', () => {
-  // Measured, not assumed: the endpoint validates this field as >= 0 and 400s
-  // the WHOLE request over one bad line (probe §6d). Sending it would freeze the
-  // courier dropdown and the free-shipping banner for every line on the invoice.
+test('§6 a negative manual price IS sent to the quote, so the threshold is honest', () => {
+  // The omission is gone. Verified live 2026-08-29: the endpoint accepts the
+  // negative and SUBTRACTS it from goods_total_incl_gst, so free shipping is
+  // finally judged on what the customer actually pays.
   const { body } = quoteRequestBody({
     lines: [
       { code: 'IC', description: 'Ink', qty: 1, unitCost: 99, priceSource: PRICE_MANUAL },
@@ -371,8 +391,8 @@ test('§6 a negative manual price is left OUT of the quote body', () => {
     ],
   });
   assert.equal(body.line_items[0].unit_cost_excl_gst, 99);
-  assert.ok(!('unit_cost_excl_gst' in body.line_items[1]), 'a credit line carries no price');
-  assert.equal(body.line_items.length, 2, 'but it keeps its SLOT — positions index the request 1:1');
+  assert.equal(body.line_items[1].unit_cost_excl_gst, -40, 'the credit must reach the goods total');
+  assert.equal(body.line_items.length, 2, 'and every line keeps its SLOT — positions index the request 1:1');
 });
 
 test('§6 the probe is what proves that, and it is still there', () => {
@@ -380,15 +400,13 @@ test('§6 the probe is what proves that, and it is still there', () => {
   assert.match(PROBE, /unit_cost_excl_gst: -150\.00/);
 });
 
-test('§6 the omission is SAID OUT LOUD in the freight row', () => {
-  // An omission that changes a free-shipping decision must never be silent —
-  // the goods total beside the courier picker excludes credit lines.
-  assert.equal(hasCreditLine([{ unitCost: 99 }, { unitCost: -1 }]), true);
-  assert.equal(hasCreditLine([{ unitCost: 99 }, { unitCost: 0 }]), false);
-  const row = fnBody(INVOICES, 'function renderShippingRow(');
-  assert.match(row, /hasCreditLine\(_draft\?\.lines\)/);
-  assert.match(row, /CREDIT_NOT_IN_THRESHOLD/);
-  assert.match(INVOICES, /const CREDIT_NOT_IN_THRESHOLD = '[^']*not counted[^']*'/);
+test('§6 the warning about that omission is GONE, because the omission is', () => {
+  // Kept as a test rather than simply deleted: a warning that outlives the thing
+  // it warned about is worse than none, because the operator starts pricing
+  // around a limitation that no longer exists.
+  assert.doesNotMatch(INVOICES, /CREDIT_NOT_IN_THRESHOLD/);
+  assert.doesNotMatch(INVOICES, /hasCreditLine/);
+  assert.doesNotMatch(fnBody(INVOICES, 'function renderShippingRow('), /not counted/);
 });
 
 test('§6 the volume ladder never OFFERS to overwrite a credit line', () => {
@@ -415,34 +433,29 @@ test('§6 the volume ladder never OFFERS to overwrite a credit line', () => {
 });
 function normalizeQuoteFor(q) { return sandbox.normalizeQuote(q); }
 
-test('§6 a backend refusal is translated, not echoed as raw Joi', () => {
-  // The user chose to ship without a write test, so the FIRST person to learn
-  // whether the save path shares the quote schema is the operator. That has to
-  // arrive as a sentence they can act on.
+test('§6 the BF-050 translation is gone — the 400 it explained cannot happen', () => {
+  // Its own comment said "delete this branch when BF-050 lands, not before".
+  // A translation for an impossible error is dead code that reads as a live
+  // limitation to the next person who finds it.
   const body = fnBody(INVOICES, 'function saveErrorMessage(');
-  assert.match(body, /unit_cost_excl_gst[\s\S]{0,90}greater than or equal to 0/,
-    'match the exact Joi wording the sibling endpoint returns');
-  assert.match(body, /BF-050/, 'name the ticket so the message is chaseable');
+  assert.doesNotMatch(body, /greater than or equal to 0/);
+  assert.doesNotMatch(body, /will not accept a credit line/);
+  // Real failures still report themselves verbatim.
   const fn = new vm.Script(`(function () { ${body}\n return saveErrorMessage; })()`).runInContext(ctx);
-  const msg = fn({
-    message: 'Validation failed',
-    details: [{ field: 'line_items.1.unit_cost_excl_gst', message: '"line_items[1].unit_cost_excl_gst" must be greater than or equal to 0' }],
-  });
-  assert.match(msg, /credit line/i);
-  assert.doesNotMatch(msg, /Joi|line_items\[1\]/, 'the operator never sees the raw field path');
-  // An unrelated failure still reports itself verbatim.
   assert.match(fn({ message: 'Customer name is required' }), /Customer name is required/);
+  assert.match(fn({ message: 'Validation failed', details: [{ message: 'something else entirely' }] }),
+    /something else entirely/);
 });
 
 // ─── 7. The operator can see it ──────────────────────────────────────────────
 
-test('§7 the price box no longer carries min="0", but qty and Our Cost still do', () => {
+test('§7 neither the price nor the qty box is floored; Our Cost still is', () => {
   const row = fnBody(INVOICES, 'function renderLines(');
   const price = row.match(/<input[^>]*data-lfield="unitCost"[^>]*>/)[0];
   assert.doesNotMatch(price, /min="0"/, 'a credit line cannot be typed into a box floored at 0');
   assert.match(price, /step="0\.01"/);
-  assert.match(row.match(/<input[^>]*data-lfield="qty"[^>]*>/)[0], /min="0"/,
-    'a negative QUANTITY is still not a thing');
+  assert.doesNotMatch(row.match(/<input[^>]*data-lfield="qty"[^>]*>/)[0], /min="0"/,
+    'a negative QUANTITY is a RETURN — the box must not floor it');
   assert.match(row.match(/<input[^>]*data-lfield="supplierCost"[^>]*>/s)[0], /min="0"/,
     'nor is a negative cost-to-us — costOrNull says so too');
 });
