@@ -105,10 +105,16 @@ describing the same incident.
   the refusal and **fires when it lifts**, since a probe that always fails is a probe nobody runs.
   Tracked as BF-050 with `readfirst/invoice-credit-line-backend-handoff-aug2026.md`.
 
-- **The save path was not probed**: that needs a write, and the owner chose to ship without a test
-  invoice. If `POST /api/admin/invoices` shares the schema, Save fails — so `saveErrorMessage` now
-  translates that exact Joi string into plain English naming BF-050, rather than echoing
-  `"line_items[1].unit_cost_excl_gst" must be greater than or equal to 0` at the operator.
+- **The save path enforces the identical rule — confirmed by write.** `POST /api/admin/invoices`
+  returns the same 400 with the same `details[0]`. The CONTROL is what makes that conclusive: the
+  byte-identical payload with `+40` in place of `-40` created invoice **#3276**, which deleted
+  cleanly (`DELETE` → 200 `{deleted:true}`, then `GET` → 404) — so it is the SIGN being refused,
+  not the payload shape, and `DELETE /api/admin/invoices/:id` is live now (it 404'd in Jun 2026).
+  The control also settled the open risk: `supplier_cost_excl_gst: 0` round-trips as **`0`**, not
+  `null`, so `documentDrift()` stays quiet and the Paid toggle is safe on a credit-bearing invoice.
+  `saveErrorMessage` translates that Joi string into plain English naming BF-050 rather than
+  echoing `"line_items[1].unit_cost_excl_gst" must be greater than or equal to 0` at the
+  operator — verified against the verbatim live response.
 
 - **Verified**: 36 new tests in `tests/admin-invoice-negative-line-aug2026.test.js`; full suite
   4229 pass / 0 fail; `npm run probe:invoice-quote` 15/15; and driven in a real browser against

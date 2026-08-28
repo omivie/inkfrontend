@@ -32,9 +32,12 @@ negative line:
   "message":"\"line_items[1].unit_cost_excl_gst\" must be greater than or equal to 0"}]}}
 ```
 
-`POST` / `PUT /api/admin/invoices` was **not** probed — that needs a write, and
-the owner chose not to create a test invoice. If it shares the schema (likely),
-Save fails the same way.
+**`POST /api/admin/invoices` enforces the identical rule** — confirmed by write
+on 2026-08-28, same 400 and same `details[0]`. A control run proved it is the
+SIGN and nothing else: the byte-identical payload with `+40` in place of `-40`
+created invoice **#3276**, which was then deleted (`DELETE` → 200
+`{deleted:true}`, subsequent `GET` → 404). So the editor is complete and the
+only thing between the owner and a credit line is this validator.
 
 ## Asks
 
@@ -53,12 +56,14 @@ Save fails the same way.
    what decides free shipping. Until then the frontend omits credit lines from
    the quote body and warns the operator on screen that the threshold ignores
    them — a real wrong-decision risk we are papering over, not fixing.
-5. **`supplier_cost_excl_gst: 0` must round-trip as `0`, not `null`.** The
-   frontend sends a known `0` for a credit line (there are no goods behind it, so
-   the cost is known, not unknown — see `lineSupplierCost` in
-   `js/admin/utils/invoice-math.js`). If the server answers `null`,
-   `documentDrift()` sees the round-trip disagree and the **Paid toggle refuses
-   to work on every invoice that has a credit line**, blaming `line_items`.
+5. **Keep `supplier_cost_excl_gst: 0` round-tripping as `0`, not `null`.**
+   Already correct today — the control invoice stored and returned `0` with
+   `cost_source: "auto"`. Recorded because it matters: the frontend sends a known
+   `0` for a credit line (no goods behind it, so the cost is known, not unknown —
+   `lineSupplierCost` in `js/admin/utils/invoice-math.js`), and if that ever came
+   back as `null`, `documentDrift()` would see the round-trip disagree and the
+   **Paid toggle would refuse to work on every invoice with a credit line**,
+   blaming `line_items`. Nothing to do — just don't normalise it away.
 
 ## What ships regardless
 
@@ -67,7 +72,9 @@ The frontend is live now and degrades honestly:
 - a negative price is typeable, styled as a credit, and printed on the document;
 - the credit line's cost is a known `$0`, so the internal margin still computes;
 - the freight row says the free-shipping goods total excludes credit lines;
-- if the save path does reject it, the operator gets a plain-English message
-  naming BF-050 instead of a raw Joi string.
+- the save refusal reaches the operator as a plain-English message naming BF-050,
+  not as `"line_items[1].unit_cost_excl_gst" must be greater than or equal to 0`.
+
+Lift the rule and the feature switches on with no frontend change.
 
 Delete this file once consumed — see `project_backend_handoff_folder_may2026`.

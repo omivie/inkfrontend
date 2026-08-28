@@ -2180,13 +2180,14 @@ function saveErrorMessage(err) {
     : (Array.isArray(err?.details?.errors) ? err.details.errors : []);
   for (const d of list) add(typeof d === 'string' ? d : (d?.message || d?.reason || ''));
 
-  // A CREDIT LINE THE SERVER WON'T TAKE. The sibling /quote endpoint validates
-  // unit_cost_excl_gst as `>= 0` and refuses a negative outright (measured —
-  // probe §6d); the save schema is very likely the same, and its raw Joi string
-  // ("line_items[1].unit_cost_excl_gst" must be greater than or equal to 0) is
-  // not something an operator can act on. Say what happened and what to do. If
-  // this message never appears, the save path accepts credit lines and BF-050
-  // is only about the quote — delete this branch then, not before.
+  // A CREDIT LINE THE SERVER WON'T TAKE. CONFIRMED BY A WRITE, not inferred
+  // (2026-08-28): POST /api/admin/invoices returns 400 VALIDATION_FAILED on
+  // `line_items[N].unit_cost_excl_gst must be greater than or equal to 0`, the
+  // same rule /quote enforces (probe §6d). A control run proved it is the SIGN
+  // and nothing else — the identical payload with +40 in place of -40 created
+  // invoice #3276, which was then deleted. That raw Joi string is not something
+  // an operator can act on, so say what happened and what to do instead. Delete
+  // this branch when BF-050 lands, not before.
   const joined = parts.join(' — ');
   if (/unit_cost_excl_gst[\s\S]{0,80}greater than or equal to 0/i.test(joined)) {
     return 'The invoice service will not accept a credit line yet — it rejects any price below $0 (BF-050). '
