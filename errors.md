@@ -41,6 +41,165 @@ describing the same incident.
 
 ---
 
+## ERR-179 — Typing a product code was impossible: the quote reply rebuilt the grid and destroyed the input under the caret — **RESOLVED** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner reported that while typing into the Product Code
+  box of the New Invoice editor, "the screen keeps refreshing or something and I get kicked out of
+  the box and can't type anymore or see the dropdown." Screenshot showed a line with `lc` typed and
+  no dropdown.
+
+- **NOT a refresh.** Nothing on that page refreshes. Swept for it explicitly: no `setInterval`, no
+  SWR poller, no autosave, no `visibilitychange`, no `window` focus listener anywhere in
+  `js/admin/` that can fire while the drawer is open. The only two intervals in the admin are
+  Control Center's 60s top-bar and cc-profit's reprice poll, neither mounted here. Believing the
+  report's own words would have sent us hunting a timer that does not exist.
+
+- **Cause**: the volume/freight quote. A keystroke in `code`, `qty` or `unitCost` arms
+  `scheduleQuote()` (400ms, `invoices.js`), the reply lands in `applyQuote()`, and that called
+  `renderLines()` — which is `host.innerHTML = lines.map(...)`. It replaced **every `<input>` in
+  the grid, including the focused one**. So ~400ms after each pause, plus a round-trip, the node
+  under the caret was discarded and rebuilt. Typing at a human pace re-armed it continuously.
+  The `else` branch made it worse: it re-rendered even when `changed` was false, purely to repaint
+  a badge.
+
+- **The file already knew.** `renderLines()`'s `onPick` handler blurs the input first, with the
+  comment "renderLines() below destroys the focused input". That mitigation was applied to the
+  click-to-pick path and never to the quote reply — the one path that arrives unbidden.
+
+- **Second fault, a leak.** Autocomplete menus are portalled to `<body>` (ERR-107), so they do not
+  die with the row that owned their input; only `destroy()` removes them, and `blur` never fires
+  for a node removed from the DOM, so the component's own hide-on-blur never ran either.
+  `invoices.js` discarded every handle `attachProductAutocomplete()` returned and tore down nothing
+  on close, so **every** re-render stranded two menus per product line in `<body>` permanently —
+  and one that happened to be open when its row was wiped stayed on screen, unclosable. That is the
+  "can't see the dropdown" half of the report.
+
+- **Fix**: an async reply **patches cells, it does not re-render the container the operator is
+  standing in** — the same ruling already recorded for the Orders profit column. New
+  `utils/line-row-patch.js` (`patchQuotedLineRows`), shared by both editors. It is safe because of
+  how narrow a quote is: `applyQuoteToLines` never adds, removes or reorders a row and never
+  touches `code`, `description`, `qty`, `supplierCost`, `costSource` or `kind`. Price and badge are
+  the entire surface, and both are cells.
+
+- **Two guards, both tested by mutation**:
+  1. **Never write the box under the caret** — `document.activeElement`, the rule `js/cart.js:2312`
+     already applies to the cart quantity field. Extended to `setFreightValue()`, which had the
+     same fault on the freight input, and to `renderShippingRow()`, which rebuilt the courier
+     `<select>` out from under a keyboard user. The shipping row **defers and repaints on
+     focusout** — a postponed render, not a skipped one.
+  2. **A row-count mismatch returns `false`** and the caller does the full render. A patch that
+     silently covered half a grid would describe the wrong lines.
+
+- **Same bug, second surface**: `quick-order.js` had it verbatim (`renderLines()` unconditionally
+  after a quote). It *did* keep `_acHandles` but in ONE list shared with the party picker, so
+  draining on re-render would have destroyed that picker — which is why it never drained at all.
+  Both editors now keep **two registers**: line handles die with the grid, top-level pickers with
+  the drawer.
+
+- **Also**: `refreshPreview()` ran on every keystroke and rebuilt the whole invoice document plus
+  the COGS panel. It steals no focus (neither host holds an input) but it is the visible flicker
+  that made the editor feel like it was reloading. Now coalesced to one paint per frame, cancelled
+  on close.
+
+- **Verified**: 24 new source assertions in `tests/admin-invoice-line-focus-aug2026.test.js`
+  (mutation-tested — reintroducing the `renderLines()` call, dropping the `activeElement` guard, or
+  moving the handle drain after the wipe each fail it), plus a real-Chromium run of
+  `patchQuotedLineRows` against a fixture grid confirming **the caret stays at offset 1 between the
+  `l` and the `c`** while prices and badges update around it. Full suite 4149 pass / 0 fail.
+
+- **Tooling note**: `node --check inkcartridges/js/<file>.js`, the syntax gate named in MEMORY.md,
+  **exits 0 even on a genuine syntax error** — Node 24 treats these ES modules as CommonJS because
+  the package is not `"type": "module"`. Copy to a `.mjs` first. A green check there was proving
+  nothing.
+
+---
+
+## ERR-178 — An invoice that qualified for free shipping was still billed for a courier: our own guess had been recorded as the operator's decision — **RESOLVED** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner raised a test invoice — one line at **$99.00 ex
+  GST**, freight **$6.09**, total **$120.85**. The order qualifies for free shipping ($99.00 ex is
+  **$113.85 incl**, over the $100 threshold), so it should have totalled **$113.85**. Their reading
+  was that the threshold was being applied to the pre-GST figure.
+
+- **The reported cause was NOT the cause, and checking that first mattered.** The threshold
+  comparison is the BACKEND's, on `goods_total_incl_gst`, and it was correct. Measured read-only
+  against production before writing a line of code:
+
+  | typed (ex GST) | `goods_total_incl_gst` | `free_shipping_eligible` | `suggested_key` |
+  |---|---|---|---|
+  | $99.00 | 113.85 | ✅ true | `free` |
+  | $87.00 | 100.05 | ✅ true | `free` |
+  | $86.90 | 99.94 | ❌ false | `north-island:urban` |
+
+  The frontend performs no threshold comparison anywhere — `freeShippingAvailable()` reads the
+  backend's boolean verbatim. The green **"This order qualifies for free shipping — apply"** badge
+  in the owner's screenshot was the CORRECT answer sitting beside the WRONG freight. Had the fix
+  been made where the report pointed, it would have moved a correct comparison.
+
+- **Actual root cause — WHEN freight is decided, and WHOSE decision it is recorded as.**
+  `reconcileShipping()` adopted the backend's suggested courier rate the first time a quote returned
+  with an empty freight box, and recorded it as `_freightChoice = suggested.key` — **the same field
+  that means "the operator picked this"**. A quote fires on a line's **code or description alone**
+  (`hasContent` is not about price) behind a 400 ms debounce, so the first quote of nearly every
+  session lands with a goods total of **$0**: typing `99` passes through `9`, and an unrecognised
+  code like the owner's `lc` never resolves a price at all. At $0 the backend correctly suggests a
+  courier zone. From that moment `_freightChoice` was non-null, every later quote skipped the branch,
+  and crossing $100 could only ever raise the small nudge button. **Reproduced exactly**: replaying
+  the old branch over the owner's sequence yields freight $6.09 and a total of $120.85.
+
+- **The same conflation had a second, older victim.** `resetQuoteState()` clears `_freightChoice` to
+  `null`, and `draftFromInvoice`/`loadFromOrder` load an authored freight of **$0** for a record that
+  **shipped free** — which is byte-identical to a blank draft. The first quote then dropped a courier
+  rate onto an invoice that had shipped free. Same silent-overcharge family as ERR-174.
+
+- **Fix — name the owner of the figure.** New `FREIGHT_OWNER_NONE|AUTO|OPERATOR` vocabulary and a
+  pure `planFreightAutofill()` in `utils/invoice-quote.js`; `_freightOwner` in `pages/invoices.js`,
+  session-only for exactly the reason `_freightChoice` is (`buildPayload`'s key set is walked by
+  `setStatusViaFullUpdate` and diffed by `documentDrift`). **While the number is OURS it follows the
+  quote** — crossing the threshold sets freight to $0 and toasts *"Free shipping now applies —
+  $113.85 incl GST is over the $100 threshold"*. **The moment it is THEIRS we never touch it again**:
+  picking from the dropdown, typing in the box, clicking "apply", billing freight as a LINE (the
+  ERR-174 guard now disarms both halves), or opening a saved invoice / filling from an order all
+  claim it, and they keep the offer-only nudge — they may be charging freight on purpose.
+
+- **Made the basis legible.** `goodsTotalInclGst` and `freeShippingThreshold` were parsed by
+  `normalizeQuote` and read by **nothing**. The row now prints *"…qualifies for free shipping
+  ($113.85 incl GST) — apply"* and, below the threshold, *"$6.15 more (incl GST) for free shipping"*.
+  The freight box and courier dropdown beside them are labelled ex-GST; **a row that mixed two bases
+  without naming either is what made correct behaviour read as a GST bug.**
+
+- **Two storefront threshold defects fixed alongside** (found while tracing, both pre-existing):
+  `checkout-page.js` hard-coded `subtotal >= 100 ? 0 : 9.95` in its no-`Shipping` fallback — it
+  bypassed the configurable threshold and quoted **$9.95, a fee in no rate table we have ever
+  charged** (urban is $7.00 incl GST); now Config-driven, sourced from the cheapest loaded urban
+  tier, and it logs that the calculator is missing. `legal-config.js` read
+  `Config.FREE_SHIPPING_THRESHOLD`, **a property that does not exist** (it is
+  `Config.settings.FREE_SHIPPING_THRESHOLD`), so the `$100` on `/shipping` and `/about` could never
+  follow the API setting — and reading the right property eagerly would still have been too early,
+  since the file evaluates before `Config.loadSettings()` resolves. Now a lazy getter, verified to
+  track a changed setting. *Still literal in static page copy across nine HTML files — a threshold
+  change is a copy change there.*
+
+- **Verified**: full suite **4125 pass / 0 fail** (24 new in
+  `tests/admin-invoice-free-shipping-autofill-aug2026.test.js`; the ERR-174 shape guard rewritten
+  from a regex on the old inline condition to the behaviour it was really defending).
+  `npm run probe:invoice-quote` **14/14**, including a new check 6c that straddles the boundary **in
+  the gap between the two bases** — $87.00 ex ($100.05 incl) eligible, $86.90 ex ($99.94 incl) not —
+  because checks 4 and 6 sat hundreds of dollars either side of $100 and would still pass if the
+  backend switched to an ex-GST basis tomorrow. Then driven in a real browser: typed `lc`, watched
+  freight auto-fill to **$6.09** at goods $0, typed `9` (held at $6.09), typed `99` → freight **0**,
+  dropdown **"Free shipping (order over $100)"**, the toast naming **$113.85 incl GST**, and the
+  document reading **Sub Total $99.00 · Freight Free · GST $14.85 · Total $113.85**. Then picked
+  Auckland (Urban) by hand and re-quoted: freight held at **$6.09** with the nudge reading
+  *"…qualifies for free shipping ($227.70 incl GST) — apply"*.
+
+- **Lesson**: **an autofill recorded in the same field that means "the operator chose this" can never
+  be revised** — presence was standing in for provenance, and the two diverge the moment a guess is
+  made early. Related: the guess here was made *before the number it depends on existed*, because the
+  trigger for re-pricing (a code or description) is not the input being priced. And: when a report
+  names a cause, measure that cause first — the reported GST basis was correct, and the bug was one
+  layer over.
+
 ## ERR-176 — The New Invoice pickers could not find a paying customer: one had never returned a row, the other never looked where he was — **RESOLVED (2026-08-28)**
 
 - **Date**: 2026-08-28 · **Context**: Invoicing a customer normally starts from their order. Order

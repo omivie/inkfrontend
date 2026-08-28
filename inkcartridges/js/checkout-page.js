@@ -466,7 +466,27 @@
                 this.totals.shipping = result.fee;
                 this._shippingResult = result;
             } else {
-                this.totals.shipping = this.totals.subtotal >= 100 ? 0 : 9.95;
+                // Last resort: the Shipping calculator itself failed to load. The
+                // old form of this line hard-coded `>= 100 ? 0 : 9.95`, which got
+                // BOTH halves wrong — it bypassed the configurable threshold, and
+                // $9.95 is a fee that appears in no rate table we have ever
+                // charged (urban is $7.00 incl GST; see js/shipping.js FEES and
+                // LegalConfig.shippingZones). Quoting a customer a number we do
+                // not charge is the silent-partial shape, so take the threshold
+                // from Config, take the fee from the loaded rates when they are
+                // there, and SAY that the calculator is missing.
+                const threshold = (typeof Config !== 'undefined' && Config.getSetting)
+                    ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100)
+                    : 100;
+                // Cheapest URBAN tier of the default zone — tiers arrive in whatever
+                // order the API returned them, so [0] could be a rural or heavy row.
+                const tiers = Config?.settings?.shipping?.zones?.['north-island']?.tiers || [];
+                const urbanFees = tiers
+                    .filter(t => t.delivery_type === 'urban' && Number(t.fee) > 0)
+                    .map(t => Number(t.fee));
+                const flatFee = urbanFees.length ? Math.min(...urbanFees) : 7.00;
+                DebugLog.warn('Shipping module unavailable — using a flat fallback rate', { threshold, flatFee });
+                this.totals.shipping = this.totals.subtotal >= threshold ? 0 : flatFee;
                 this._shippingResult = null;
             }
         },

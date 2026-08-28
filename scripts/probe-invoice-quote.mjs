@@ -295,6 +295,56 @@ async function run(token) {
     ok('6b. the delivery hint steers suggested_key', `→ ${suggested}`);
   }
 
+  // ── 6c. THE THRESHOLD IS JUDGED ON THE GST-INCLUSIVE GOODS TOTAL ─────────
+  // ERR-178. The owner asked whether free shipping was being decided on the
+  // pre-GST figure, after an invoice of $99.00 ex GST ($113.85 incl) was billed
+  // for a courier. It was not — but nothing pinned that, because checks 4 and 6
+  // above sit hundreds of dollars either side of $100 and would still pass if
+  // the backend switched to comparing the EX-GST total tomorrow.
+  //
+  // This pair straddles the boundary in the gap between the two bases: $87.00 ex
+  // is $100.05 incl (eligible) and $86.90 ex is $99.94 incl (not). On an ex-GST
+  // basis BOTH are under $100 and both would come back ineligible — which is
+  // exactly the regression the owner suspected, and the one that would silently
+  // add freight to every invoice between $87 and $100 ex GST.
+  //
+  // A description-only line with a typed price is used so the figure under test
+  // is the one sent, not a catalogue price that moves (check 8b already pins
+  // that a typed price on such a line reaches the goods total).
+  const priced = async (exGst) => {
+    const r = await quote(token, {
+      line_items: [{ product_code: '', description: 'ERR-178 basis probe', quantity: 1, unit_cost_excl_gst: exGst }],
+    });
+    return r.data?.shipping || {};
+  };
+  const justOver = await priced(87.00);
+  const justUnder = await priced(86.90);
+  const overIncl = justOver.goods_total_incl_gst;
+  const underIncl = justUnder.goods_total_incl_gst;
+
+  if (overIncl == null || underIncl == null) {
+    bad('6c. the goods total is reported so the basis can be checked',
+      `goods_total_incl_gst was ${overIncl} / ${underIncl}`);
+  } else if (Math.abs(overIncl - 100.05) > 0.02 || Math.abs(underIncl - 99.94) > 0.02) {
+    bad('6c. goods_total_incl_gst grosses the typed EX-GST price up by 15%',
+      `sent 87.00 ex and 86.90 ex, got ${overIncl} and ${underIncl} incl — expected ~100.05 `
+      + 'and ~99.94. If these echo the ex-GST figures the field has changed basis and the '
+      + "editor's freight autofill is now deciding on the wrong number.");
+  } else if (justOver.free_shipping_eligible !== true) {
+    bad('6c. $87.00 ex GST ($100.05 incl) QUALIFIES for free shipping',
+      `free_shipping_eligible=${justOver.free_shipping_eligible}, suggested_key=`
+      + `${justOver.suggested_key}. The threshold has moved to the EX-GST total — every `
+      + 'invoice between $87 and $100 ex GST is now being charged freight it should not be.');
+  } else if (justUnder.free_shipping_eligible !== false) {
+    bad('6c. $86.90 ex GST ($99.94 incl) does NOT qualify',
+      `free_shipping_eligible=${justUnder.free_shipping_eligible} — the threshold is being `
+      + 'applied to something other than the incl-GST goods total.');
+  } else {
+    ok('6c. the threshold is judged INCL GST, either side of the boundary',
+      `87.00 ex → ${overIncl} incl · eligible · suggested ${justOver.suggested_key}   |   `
+      + `86.90 ex → ${underIncl} incl · not eligible`);
+  }
+
   // ── 7. A garbage code is a 200, not a 400 ────────────────────────────────
   // This one matters more than it looks: the editor re-quotes on every keystroke,
   // so a half-typed SKU hits this path constantly. A 400 here would mean an error

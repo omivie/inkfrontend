@@ -17,9 +17,20 @@
 (function (root) {
     'use strict';
 
-    var FREE_SHIPPING_THRESHOLD = (
-        typeof Config !== 'undefined' && Config.FREE_SHIPPING_THRESHOLD
-    ) || 100;
+    // Read LAZILY, and from the right place. This used to be a `var` initialised
+    // at IIFE load time from `Config.FREE_SHIPPING_THRESHOLD` — a property that
+    // does not exist (the value lives at `Config.settings.FREE_SHIPPING_THRESHOLD`,
+    // reachable via Config.getSetting). So it always fell through to the literal
+    // 100 below, and the "$100" printed on /shipping and /about could never follow
+    // a change to the API setting. Reading the correct property eagerly would not
+    // have fixed it either: this file is evaluated before Config.loadSettings()
+    // resolves. A getter defers the read to bind time (legal-page.js), which is
+    // after the settings have landed.
+    function freeShippingThreshold() {
+        return (typeof Config !== 'undefined' && typeof Config.getSetting === 'function')
+            ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100)
+            : 100;
+    }
 
     var LegalConfig = {
         // ─── Identity ─────────────────────────────────────────────────────
@@ -119,7 +130,7 @@
         // stays in lock-step with the calculator. Update both together.
         currency:               'NZD',
         currencySymbol:         '$',
-        freeShippingThreshold:  FREE_SHIPPING_THRESHOLD,
+        get freeShippingThreshold() { return freeShippingThreshold(); },
         carriers:               ['NZ Post', 'Aramex (CourierPost network)'],
         handlingTime:           'Auckland metro orders placed before 2:00pm NZT on a business day are dispatched same-day. Orders placed after 2:00pm, on weekends, or on NZ public holidays dispatch the next working day. Outside Auckland metro, dispatch is the next working day after order placement.',
         shippingZones: [

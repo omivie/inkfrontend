@@ -152,6 +152,12 @@ function makeSandbox() {
     resolveShippingSelection: () => ({ key: 'custom', option: null, isCustom: true, available: false }),
     freeShippingLost: () => ({ lost: false }), freeShippingAvailable: () => false,
     parcelWeightNote: () => '',
+    // Freight ownership (ERR-178). The module-global block this sandbox evaluates
+    // initialises _freightOwner from FREIGHT_OWNER_NONE, so the constant must
+    // exist here or every test in this file dies before it starts.
+    FREIGHT_OWNER_NONE: 'none', FREIGHT_OWNER_AUTO: 'auto', FREIGHT_OWNER_OPERATOR: 'operator',
+    planFreightAutofill: () => ({ apply: false, key: null, option: null, owner: 'none', announce: null }),
+    freeShippingGapNote: () => '',
     AdminAuth: { isOwner: () => true },
     AdminAPI,
     Toast: {

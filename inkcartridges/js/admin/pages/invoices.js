@@ -34,8 +34,10 @@ import {
   PRICE_AUTO, PRICE_MANUAL, FREIGHT_CUSTOM, MAX_QUOTE_LINES,
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume, lineDocNote,
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
-  freeShippingAvailable, parcelWeightNote,
+  freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
+  FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR,
 } from '../utils/invoice-quote.js';
+import { patchQuotedLineRows } from '../utils/line-row-patch.js';
 import { marginBadge, formatProfitDollars } from '../utils/profitability.js';
 import {
   ordersFrom, searchParties, orderToParty, partyEmptyText, orderEmptyText,
@@ -279,6 +281,39 @@ let _volumeOffers = [];       // [{position, badge}] — hand-edited lines with 
 // so a new key there would change the paid-toggle's full-record PUT. The freight
 // NUMBER is the durable record; the option is a label for it.
 let _freightChoice = null;
+// WHO wrote the number in the freight box — see the FREIGHT_OWNER_* block in
+// invoice-quote.js for why presence was never enough (ERR-178). Session-only for
+// exactly the same reason as _freightChoice: it must not reach buildPayload.
+let _freightOwner = FREIGHT_OWNER_NONE;
+
+// ── Autocomplete handles ────────────────────────────────────────────────────
+// The dropdown menus are portalled to <body> (ERR-107), so they do NOT go away
+// with the drawer or with the row that owned the input — only destroy() removes
+// them. Nothing here tracked them, so every renderLines() stranded two menus per
+// product line in <body> permanently, and one that happened to be OPEN when its
+// row was rebuilt stayed on screen with no way to close: `blur` never fires for
+// a node removed from the DOM, so the component's own hide-on-blur never ran.
+//
+// Two registers, because they have different lifetimes. Line handles die with
+// every re-render of the grid; the top-level pickers live as long as the drawer.
+// Draining the wrong one is how you destroy the "Fill details from…" picker on
+// the operator's first keystroke in a line.
+// A renderShippingRow() that was postponed because the courier <select> had
+// focus. Cleared by resetQuoteState() so it cannot survive into the next editor.
+let _shippingRowDirty = false;
+
+let _acLineHandles = [];   // per-line product autocompletes — drained by renderLines()
+let _acTopHandles = [];    // #inv-order-search / #inv-party-search — drained on close
+
+function destroyHandles(list) {
+  list.forEach((h) => { try { h?.destroy?.(); } catch (_) { /* already gone */ } });
+  list.length = 0;
+}
+
+function teardownAutocompletes() {
+  destroyHandles(_acLineHandles);
+  destroyHandles(_acTopHandles);
+}
 
 const QUOTE_DEBOUNCE_MS = 400;   // brief suggests 300–500ms; budget is 60/min
 
@@ -1110,6 +1145,14 @@ function openEditor(draft) {
   // The quote describes ONE draft. Carrying any of it into the next editor would
   // put the previous invoice's badges and courier selection on this one.
   resetQuoteState();
+  // A SAVED invoice's freight is authored data, so it is the operator's and the
+  // quote may not revise it. The value that makes this load-bearing is ZERO: an
+  // invoice that shipped free reopens as freight 0 with no courier choice, which
+  // is byte-identical to a blank draft — and a blank draft is exactly what the
+  // autofill exists to fill in (ERR-178). draft.id is the only thing that tells
+  // the two apart. Quick Order and "Fill details from…" open genuinely new drafts
+  // and are deliberately left unowned.
+  if (draft.id) _freightOwner = FREIGHT_OWNER_OPERATOR;
   const token = ++_editorToken;
   const footer = `
     <span class="inv-sent-hint" id="inv-sent-hint">${sentHintHtml(draft)}</span>
@@ -1123,7 +1166,7 @@ function openEditor(draft) {
     width: 'min(1180px, 96vw)',
     body: editorBodyHtml(draft),
     footer,
-    onClose: () => { if (token === _editorToken) { _editorToken++; _draft = null; _editorRefs = null; resetQuoteState(); } },
+    onClose: () => { if (token === _editorToken) { _editorToken++; teardownAutocompletes(); cancelPreviewFrame(); _draft = null; _editorRefs = null; resetQuoteState(); } },
   });
   if (!drawer) return;
   _editorRefs = { drawer };
@@ -1193,6 +1236,8 @@ function resetQuoteState() {
   _quoteStatus = 'idle';
   _volumeOffers = [];
   _freightChoice = null;
+  _freightOwner = FREIGHT_OWNER_NONE;
+  _shippingRowDirty = false;
 }
 
 /** Debounced re-quote. Safe to call from any edit handler. */
@@ -1245,53 +1290,100 @@ async function requestQuote() {
   applyQuote(quote);
 }
 
-/** Fold a fresh quote into the lines and the shipping row. */
+/**
+ * Fold a fresh quote into the lines and the shipping row.
+ *
+ * PATCHES, never re-renders (ERR-179). This is the one path into the line grid
+ * that the operator did not ask for: it is armed by a keystroke and lands 400ms
+ * plus a round-trip later, which is squarely in the middle of the next word they
+ * are typing. `renderLines()` here replaced every <input> in the grid, so the box
+ * under the caret was destroyed and the product dropdown anchored to it orphaned
+ * — the "screen keeps refreshing" that made the Product Code field unusable.
+ *
+ * A quote is safe to fold in this way because of how narrow it is: see
+ * applyQuoteToLines(), which never adds, removes or reorders a row and never
+ * touches code, description, qty, supplierCost, costSource or kind. Price and
+ * badge are the whole surface, and both are cells.
+ *
+ * The `changed` distinction survives because it still decides whether the
+ * customer-facing preview and the margin readout need repainting — an offer
+ * badge appearing changes what the OPERATOR is offered, not what the invoice
+ * says. patchQuotedLineRows() returning false means the DOM and the draft
+ * disagree about how many rows exist, which no cell-write can repair: fall back
+ * to the full render rather than leave half a grid describing the wrong lines.
+ */
 function applyQuote(quote) {
   const { lines, offers, changed } = applyQuoteToLines(_draft.lines, quote);
   _volumeOffers = offers;
-  if (changed) {
-    _draft.lines = lines;
-    renderLines();
-    refreshPreview();
-  } else {
-    // Prices unchanged, but an offer badge may have appeared or gone.
-    renderLines();
-  }
+  if (changed) _draft.lines = lines;
+
+  const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
+  const patched = patchQuotedLineRows(host, _draft.lines, { noteHtml: lineQuoteNote });
+  if (!patched) renderLines();
+
+  // The margin readout reads every line's price, so it moves whenever one does —
+  // renderLines() used to carry it in for free, and a patch has to say so.
+  if (changed) refreshPreview();
+  else renderCogsPanel();
+
   reconcileShipping(quote);
 }
 
 /**
  * Keep the freight field honest as the goods total moves.
  *
- * The one case that must be LOUD: free shipping was selected and the order has
- * since fallen below the threshold. Doing nothing leaves $0 in the freight box
- * and a courier parcel is invoiced at nothing — a silent partial state, which is
- * precisely the failure mode this codebase has paid for repeatedly. So it falls
- * back to the suggested option, writes the real fee, and says so.
+ * The one case that must be LOUD in BOTH directions: freight and the threshold
+ * disagree. Free was selected and the order has since fallen below it — doing
+ * nothing leaves $0 in the box and a courier parcel is invoiced at nothing. Or
+ * the order has just crossed it and the freight showing is a rate WE guessed
+ * before the price existed — doing nothing bills a customer for shipping they
+ * qualified out of (ERR-178). Both write the real figure and say so.
  *
- * The reverse (free has BECOME available) is only ever offered, never applied:
- * the operator may be charging freight deliberately.
+ * What is never touched is a freight figure the OPERATOR authored — picked,
+ * typed, loaded from an order or invoice, or billed as a shipping line. For them
+ * free shipping becoming available is still only ever OFFERED
+ * (freeShippingAvailable → the "apply" button): they may be charging freight
+ * deliberately, and overwriting their number to be helpful is how you lose their
+ * trust in every other autofill on the page. Ownership is the whole distinction;
+ * see the FREIGHT_OWNER_* block in invoice-quote.js.
  */
 function reconcileShipping(quote) {
   const lost = freeShippingLost(_freightChoice, quote.shipping);
   if (lost.lost && lost.fallbackOption) {
+    // Deliberately ahead of ownership: an operator who chose free shipping on an
+    // order that no longer qualifies still must not ship a parcel billed at $0.
+    // Ownership is left exactly as it was — ours stays revisable, theirs keeps
+    // the offer-only path if the order climbs back over the threshold.
     _freightChoice = lost.fallbackKey;
     setFreightValue(lost.fallbackOption.freightExclGst);
     Toast.warning(`Free shipping no longer applies — this order is under $${num(quote.shipping.freeShippingThreshold) || 100}. Freight set to ${lost.fallbackOption.label}.`);
     refreshPreview();
-  } else if (_freightChoice == null && quote.shipping.hasOptions && !num(_draft.freight)) {
-    // A brand-new draft with an untouched $0 freight box: adopt the backend's
-    // suggestion so the common case needs no clicks at all. An operator who has
-    // typed anything at all has a non-null _freightChoice by now and is not
-    // touched here.
-    const suggested = (quote.shipping.options || []).find((o) => o.key === quote.shipping.suggestedKey);
-    if (suggested && suggested.freightExclGst > 0) {
-      _freightChoice = suggested.key;
-      setFreightValue(suggested.freightExclGst);
-      refreshPreview();
-    } else if (suggested) {
-      _freightChoice = suggested.key;
+    renderShippingRow();
+    return;
+  }
+
+  const plan = planFreightAutofill(quote.shipping, {
+    owner: _freightOwner,
+    choice: _freightChoice,
+    freight: _draft.freight,
+  });
+  if (plan.apply) {
+    _freightChoice = plan.key;
+    _freightOwner = plan.owner;
+    setFreightValue(plan.option.freightExclGst);
+    if (plan.announce === 'free') {
+      // The figure is named because the threshold is judged on the GST-INCLUSIVE
+      // goods total while the freight box beside it is ex-GST. "$113.85 incl GST"
+      // is the answer to the question this behaviour otherwise provokes.
+      const goods = num(quote.shipping.goodsTotalInclGst);
+      const threshold = num(quote.shipping.freeShippingThreshold) || 100;
+      Toast.success(goods > 0
+        ? `Free shipping now applies — $${goods.toFixed(2)} incl GST is over the $${threshold} threshold. Freight set to $0.00.`
+        : `Free shipping now applies. Freight set to $0.00.`);
+    } else if (plan.announce === 'courier') {
+      Toast.warning(`Free shipping no longer applies — freight set to ${plan.option.label}.`);
     }
+    refreshPreview();
   }
   renderShippingRow();
 }
@@ -1303,6 +1395,7 @@ function reconcileShipping(quote) {
  */
 function onFreightOptionPick(key) {
   _freightChoice = key || null;
+  _freightOwner = FREIGHT_OWNER_OPERATOR;   // they chose; we never revise it again
   if (key === FREIGHT_CUSTOM) { renderShippingRow(); return; }
   const opt = (_quote?.shipping.options || []).find((o) => o.key === key);
   if (!opt) { renderShippingRow(); return; }
@@ -1311,11 +1404,24 @@ function onFreightOptionPick(key) {
   refreshPreview();
 }
 
-/** Write a freight figure into the draft AND the input the operator can see. */
+/**
+ * Write a freight figure into the draft AND the input the operator can see.
+ *
+ * The draft is written unconditionally — that figure is the durable record and a
+ * quote reply is entitled to it. The BOX is not written while the caret is in it
+ * (ERR-179): reconcileShipping() runs off an async reply, so without this it
+ * rewrites the number mid-keystroke, and typing `12.50` over an adopted `7.00`
+ * fights the autofill character by character. Same rule the storefront cart
+ * applies to its quantity field (js/cart.js:2312, js/cart-page.js:600).
+ *
+ * Nothing is lost by skipping the paint: the operator is looking at the box, and
+ * their next keystroke sets `_freightOwner` to OPERATOR, which stops the autofill
+ * revising it again anyway.
+ */
 function setFreightValue(exGst) {
   _draft.freight = round2(num(exGst));
   const input = _editorRefs?.drawer.body.querySelector('[data-field="freight"]');
-  if (input) input.value = String(_draft.freight);
+  if (input && input !== document.activeElement) input.value = String(_draft.freight);
 }
 
 /**
@@ -1336,6 +1442,11 @@ function setFreightValue(exGst) {
  */
 function suppressFreightAutofill() {
   if (_freightChoice == null) _freightChoice = FREIGHT_CUSTOM;
+  // Billing freight as a LINE is the operator stating their freight intent just
+  // as firmly as typing in the box, so the figure stops being ours to revise.
+  // Without this, ERR-178's re-adoption would reintroduce ERR-174's double charge
+  // the moment the order crossed the threshold in either direction.
+  _freightOwner = FREIGHT_OWNER_OPERATOR;
 }
 
 function bindEditorBody(drawer) {
@@ -1343,6 +1454,7 @@ function bindEditorBody(drawer) {
   form.addEventListener('input', onFormInput);
   form.addEventListener('change', onFormInput);
   form.addEventListener('click', onFormClick);
+  form.addEventListener('focusout', onFormFocusOut);
   renderLines();
   attachTopAutocompletes();
   refreshPreview();
@@ -1356,6 +1468,10 @@ function bindEditorBody(drawer) {
 // Replace the body in-place (used after an auto-fill that touches many fields).
 function rebuildEditor() {
   if (!_editorRefs) return;
+  // setBody() drops the whole form, inputs and all. Their portalled menus would
+  // outlive it (ERR-179) — attachTopAutocompletes() drains its own register, so
+  // only the line handles need doing here.
+  destroyHandles(_acLineHandles);
   _editorRefs.drawer.setBody(editorBodyHtml(_draft));
   bindEditorBody(_editorRefs.drawer);
 }
@@ -1384,6 +1500,7 @@ function onFormInput(e) {
     // describe a number it no longer set.
     if (t.dataset.field === 'freight') {
       _freightChoice = FREIGHT_CUSTOM;
+      _freightOwner = FREIGHT_OWNER_OPERATOR;
       renderShippingRow();
     }
     // Keep the (non-overridden) due date live as the order date changes.
@@ -1451,6 +1568,23 @@ function addShippingLine() {
   if (amount) { amount.focus(); amount.select?.(); }
 }
 
+/**
+ * Pay off a render that was postponed to keep focus (ERR-179).
+ *
+ * renderShippingRow() declines to rebuild the courier <select> while that select
+ * has focus. This is the other half of that bargain: the moment focus leaves,
+ * the row is painted with whatever the last quote decided. Without it the flag
+ * would be a silent skip, and the row could sit indefinitely showing a rate the
+ * quote had already withdrawn.
+ */
+function onFormFocusOut(e) {
+  if (!_shippingRowDirty) return;
+  if (!e.target?.matches?.('[data-freight-option]')) return;
+  // Focus has not landed yet at focusout time; renderShippingRow reads
+  // document.activeElement and would defer all over again.
+  setTimeout(() => { if (_editorRefs && _shippingRowDirty) renderShippingRow(); }, 0);
+}
+
 function onFormClick(e) {
   const act = e.target.closest('[data-form-action]')?.dataset.formAction;
   if (!act) return;
@@ -1483,6 +1617,7 @@ function onFormClick(e) {
     const free = (_quote?.shipping.options || []).find((o) => o.key === 'free');
     if (!free) return;
     _freightChoice = 'free';
+    _freightOwner = FREIGHT_OWNER_OPERATOR;
     setFreightValue(free.freightExclGst);
     renderShippingRow(); refreshPreview();
   } else if (act === 'link-business') {
@@ -2137,6 +2272,17 @@ function renderShippingRow() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-freight-pick');
   if (!host) return;
 
+  // A quote can land while the operator is inside the courier dropdown — arrowing
+  // through options with the keyboard, or having just picked one. Replacing the
+  // <select> under them closes it and drops focus, the same ERR-179 fault as the
+  // line grid. Defer, and paint on their next focusout: this is a POSTPONED
+  // render, not a skipped one — onFormFocusOut below runs exactly this function.
+  // Guarded on the select alone, never the whole row: the "apply free shipping"
+  // button lives here too and must repaint the instant it is clicked.
+  const active = document.activeElement;
+  if (active && active.matches?.('[data-freight-option]')) { _shippingRowDirty = true; return; }
+  _shippingRowDirty = false;
+
   if (_quoteStatus === 'loading' && !_quote) {
     host.innerHTML = `<span class="inv-freight__note">Checking courier rates…</span>`;
     return;
@@ -2161,6 +2307,15 @@ function renderShippingRow() {
 
   const weight = parcelWeightNote(_quote);
   const offerFree = freeShippingAvailable(_freightChoice, shipping);
+  // Name the basis, both ways. The threshold is judged on the GST-INCLUSIVE goods
+  // total; the freight box and the dropdown immediately beside these strings are
+  // labelled ex-GST. A row that mixes two bases without naming either is what made
+  // correct behaviour read as a GST bug (ERR-178), so the figure is printed.
+  const goodsIncl = shipping.goodsTotalInclGst;
+  const qualifyLabel = goodsIncl != null
+    ? `This order qualifies for free shipping (${money(goodsIncl)} incl GST) — apply`
+    : 'This order qualifies for free shipping — apply';
+  const gap = freeShippingGapNote(shipping);
 
   host.innerHTML = `
     <label class="inv-field inv-field--freightpick">
@@ -2168,13 +2323,19 @@ function renderShippingRow() {
       <select class="admin-select" data-freight-option>${opts}${custom}</select>
     </label>
     ${weight ? `<span class="inv-freight__note">${esc(weight)}</span>` : ''}
-    ${offerFree ? `<button type="button" class="inv-freight__free" data-form-action="apply-free-shipping">This order qualifies for free shipping — apply</button>` : ''}
+    ${!offerFree && gap ? `<span class="inv-freight__note">${esc(gap)}</span>` : ''}
+    ${offerFree ? `<button type="button" class="inv-freight__free" data-form-action="apply-free-shipping">${esc(qualifyLabel)}</button>` : ''}
     ${_quoteStatus === 'limited' ? `<span class="inv-freight__note inv-freight__note--warn">Rates may be a moment out of date (rate limit).</span>` : ''}`;
 }
 
 function renderLines() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
   if (!host) return;
+  // Destroy the outgoing rows' autocompletes BEFORE their inputs are wiped. Their
+  // menus are <body> children (ERR-107), so nothing else removes them — this is
+  // what stops a rebuild stranding two orphaned dropdowns per line, one of which
+  // may still be open and unclosable (ERR-179).
+  destroyHandles(_acLineHandles);
   const showCost = canSeeCost();
   host.innerHTML = (_draft.lines || []).map((l, i) => {
     const manual = l.costSource === 'manual';
@@ -2220,7 +2381,7 @@ function renderLines() {
   // "International freight — Australia" never opens a product dropdown.
   host.querySelectorAll('.inv-line').forEach((row) => {
     const i = +row.dataset.line;
-    row.querySelectorAll('.inv-ac > input').forEach((input) => attachProductAutocomplete(input, {
+    row.querySelectorAll('.inv-ac > input').forEach((input) => _acLineHandles.push(attachProductAutocomplete(input, {
       onPick: (p) => {
         // Blur the field FIRST so its pending `change` (carrying the typed query,
         // e.g. "lc") flushes now and can't clobber the picked product afterwards:
@@ -2255,7 +2416,7 @@ function renderLines() {
         };
         renderLines(); refreshPreview(); scheduleQuote();
       },
-    }));
+    })));
   });
   renderCogsPanel();
 }
@@ -2296,12 +2457,15 @@ function renderCogsPanel() {
 function attachTopAutocompletes() {
   const body = _editorRefs?.drawer.body;
   if (!body) return;
+  // rebuildEditor() calls this again on the same open drawer, so the previous
+  // pair must go or their <body> menus are stranded.
+  destroyHandles(_acTopHandles);
   const orderInput = body.querySelector('#inv-order-search');
   // `getOrders` hands back the endpoint's `data`, and /api/admin/orders sends a
   // BARE ARRAY — reading `.orders` off it returned [] for every query ever typed,
   // valid order numbers included (ERR-176). Normalise, like every other caller.
   let orderFetchFailed = false;
-  if (orderInput) attachAutocomplete(orderInput, {
+  if (orderInput) _acTopHandles.push(attachAutocomplete(orderInput, {
     fetch: async (q) => {
       const data = await AdminAPI.getOrders({ search: q }, 1, 8);
       orderFetchFailed = data == null;
@@ -2310,14 +2474,14 @@ function attachTopAutocompletes() {
     emptyText: (q) => orderEmptyText(q, orderFetchFailed),
     render: (o) => `<span class="admin-ac__code">${esc(o.order_number || o.id || '')}</span> ${esc(o.customer_name || o.customer_email || o.guest_email || '')} <span class="admin-ac__meta">· ${money(o.total_amount ?? o.total ?? 0)}</span>`,
     onPick: (o) => loadFromOrder(o.id || o.order_id),
-  });
+  }));
   // Unified "Fill details from…" picker — Contacts, then Customers, then Orders,
   // in one sectioned dropdown (mirrors the storefront Compatible/Genuine split).
   // Orders are in there because a GUEST checkout has no contact and no account
   // row: searching the other two for them is "not looked", not "not found".
   const partyInput = body.querySelector('#inv-party-search');
   let partyFailed = [];
-  if (partyInput) attachAutocomplete(partyInput, {
+  if (partyInput) _acTopHandles.push(attachAutocomplete(partyInput, {
     fetch: async (q) => {
       const { sections, failed } = await searchParties(q, AdminAPI);
       partyFailed = failed;
@@ -2330,7 +2494,7 @@ function attachTopAutocompletes() {
       else if (it.__type === 'order') loadFromOrderDetails(it);
       else loadFromCustomer(it);
     },
-  });
+  }));
 }
 
 /** One row of the "Fill details from…" dropdown, per source. */
@@ -2385,6 +2549,12 @@ async function loadFromOrder(orderId) {
   // Order shipping_fee is GST-INCLUSIVE — convert to ex-GST for the freight field.
   const shipIncl = num(breakdown?.shipping_fee ?? order.shipping_fee ?? 0);
   _draft.freight = shipIncl > 0 ? round2(shipIncl / (1 + GST_RATE)) : 0;
+  // What the customer was actually charged for freight is authored data, and an
+  // authored ZERO is the case that bites: an order that SHIPPED FREE arrives here
+  // as freight 0 with no choice recorded, which is indistinguishable from a blank
+  // draft — so the first quote used to drop a courier rate onto it. _freightChoice
+  // stays null so resolveShippingSelection can still label a $0 box "Free".
+  _freightOwner = FREIGHT_OWNER_OPERATOR;
 
   _fillSource = { type: 'order', label: order.order_number || String(orderId) };
   rebuildEditor();
@@ -2492,11 +2662,41 @@ async function loadFromCustomer(c) {
 // =========================================================================
 //  Live preview
 // =========================================================================
+/**
+ * Repaint the customer-facing preview and the margin readout — at most once per
+ * frame (ERR-179).
+ *
+ * This runs from onFormInput, so it fired on EVERY keystroke in every field and
+ * rebuilt the entire invoice document plus the COGS panel each time. It never
+ * stole focus — neither host holds an input — but it is the visible flicker that
+ * made the editor feel like it was reloading under the operator.
+ *
+ * Coalescing is safe because nothing reads these two nodes back: they are paint,
+ * and the figures printed on the saved invoice come from the server. A caller
+ * that needs the DOM synchronously does not exist, and if one ever does it should
+ * call paintPreview() rather than take the coalescer out.
+ */
+let _previewFrame = null;
+
 function refreshPreview() {
+  if (_previewFrame != null) return;
+  _previewFrame = requestAnimationFrame(() => { _previewFrame = null; paintPreview(); });
+}
+
+function cancelPreviewFrame() {
+  if (_previewFrame == null) return;
+  cancelAnimationFrame(_previewFrame);
+  _previewFrame = null;
+}
+
+function paintPreview() {
+  // The drawer can close between the frame being asked for and it running
+  // (ERR-045) — _draft is null by then and renderPreview would throw on it.
+  if (!_editorRefs || !_draft) return;
   // The internal margin readout depends on qty, price, cost AND freight, so it
   // refreshes wherever the preview does rather than enumerating fields.
   renderCogsPanel();
-  const host = _editorRefs?.drawer.body.querySelector('#inv-preview');
+  const host = _editorRefs.drawer.body.querySelector('#inv-preview');
   if (!host) return;
   host.innerHTML = renderPreview(_draft);
 }

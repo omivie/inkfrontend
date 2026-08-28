@@ -89,7 +89,8 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const { computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit, invoiceDocRows } = MATH;
 const { PRICE_MANUAL, PRICE_AUTO, FREIGHT_CUSTOM, applyQuoteToLines, parcelWeightNote,
-  quoteRequestBody, freeShippingLost } = QUOTE;
+  quoteRequestBody, freeShippingLost, planFreightAutofill,
+  FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR } = QUOTE;
 
 // Comments explain; only code counts when asserting that something is WIRED.
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -142,9 +143,43 @@ test('§1 the add-shipping handler calls it BEFORE anything re-quotes', () => {
 });
 
 test('§1 the autofill branch it defends against is still shaped the way we think', () => {
-  const body = fnBody(CODE, 'function reconcileShipping(');
-  assert.match(body, /_freightChoice\s*==\s*null\s*&&\s*quote\.shipping\.hasOptions\s*&&\s*!num\(_draft\.freight\)/,
-    'if this condition is rewritten, re-check that suppressFreightAutofill still disarms it');
+  // The condition moved out of reconcileShipping and into planFreightAutofill
+  // when ERR-178 split "who wrote this freight figure" out of _freightChoice.
+  // Pin the behaviour rather than the old inline expression: an untouched draft
+  // still adopts, and the disarmed state still does not.
+  const shipping = {
+    hasOptions: true,
+    options: [{ key: 'auckland:urban', label: 'Auckland urban', freightExclGst: 6.09 }],
+    suggestedKey: 'auckland:urban', freeShippingThreshold: 100, freeShippingEligible: false,
+    goodsTotalInclGst: 172.50,
+  };
+  const untouched = planFreightAutofill(shipping, {
+    owner: FREIGHT_OWNER_NONE, choice: null, freight: 0,
+  });
+  assert.equal(untouched.apply, true, 'the common case must still need no clicks');
+
+  const disarmed = planFreightAutofill(shipping, {
+    owner: FREIGHT_OWNER_OPERATOR, choice: FREIGHT_CUSTOM, freight: 0,
+  });
+  assert.equal(disarmed.apply, false,
+    'this is the ERR-174 double charge: a $150 freight LINE plus a $6.09 courier rate');
+
+  // And ERR-178's re-adoption must not sneak past the same guard.
+  const overThreshold = planFreightAutofill({ ...shipping,
+    options: [{ key: 'free', label: 'Free shipping', freightExclGst: 0 }, ...shipping.options],
+    suggestedKey: 'free', freeShippingEligible: true,
+  }, { owner: FREIGHT_OWNER_OPERATOR, choice: FREIGHT_CUSTOM, freight: 0 });
+  assert.equal(overThreshold.apply, false,
+    'crossing the free-shipping threshold must not reopen the hole from the other side');
+});
+
+test('§1 suppressFreightAutofill disarms BOTH halves of the guard', () => {
+  // _freightChoice alone is no longer enough: planFreightAutofill keys off
+  // ownership, so a shipping line that only set the choice would still be
+  // revisable the moment the goods total crossed the threshold.
+  const body = fnBody(CODE, 'function suppressFreightAutofill()');
+  assert.match(body, /_freightChoice == null.*FREIGHT_CUSTOM/s);
+  assert.match(body, /_freightOwner = FREIGHT_OWNER_OPERATOR/);
 });
 
 test('§1 FREIGHT_CUSTOM does not trip the free-shipping-lost fallback', () => {

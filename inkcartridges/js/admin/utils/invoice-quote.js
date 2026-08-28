@@ -450,6 +450,28 @@ export function lineDocNote(line) {
 export const FREIGHT_CUSTOM = 'custom';
 
 /**
+ * WHO last wrote the number in the freight box.
+ *
+ * `_freightChoice` used to carry this meaning as well as "which option should the
+ * dropdown show", and conflating the two was ERR-178: the very first quote of a
+ * session fires on a code or description ALONE (`hasContent` below is not about
+ * price), so it routinely lands with a goods total of $0 or a half-typed one —
+ * typing `99` passes through `9`. The backend correctly suggests a courier rate
+ * for that total, we adopted it, and we recorded it in the field that means "the
+ * operator chose this". Every later quote then skipped the adopt branch, so an
+ * order that crossed the free-shipping threshold could only ever be offered a
+ * nudge, and a qualifying invoice went out with freight on it.
+ *
+ * The distinction the code actually needs is provenance, not presence:
+ *   - OUR number follows the quote, including down to $0, and says so out loud.
+ *   - THEIRS is never touched — they may be charging freight on purpose, which is
+ *     why `freeShippingAvailable()` below still only ever offers.
+ */
+export const FREIGHT_OWNER_NONE = 'none';         // blank draft; nobody has written freight
+export const FREIGHT_OWNER_AUTO = 'auto';         // we adopted the backend's suggestion
+export const FREIGHT_OWNER_OPERATOR = 'operator'; // picked, typed, loaded, or billed as a line
+
+/**
  * Work out which shipping option the dropdown should be showing.
  *
  * `choice` is the operator's explicit pick this session (null when they have not
@@ -528,6 +550,76 @@ export function freeShippingAvailable(choice, shipping) {
   const free = (shipping.options || []).find((o) => o.key === 'free');
   if (!free) return false;
   return shipping.freeShippingEligible === true;
+}
+
+/**
+ * What should the freight box hold after this quote, given who last wrote it?
+ *
+ * This is the ERR-178 fix and the counterpart to `freeShippingAvailable()` above:
+ * that function answers "may we OFFER free shipping", this one answers "may we
+ * APPLY the backend's current suggestion". The two differ on exactly one input —
+ * ownership — and nothing else about the offer path changes.
+ *
+ * Rules, in order:
+ *   1. No options ⇒ nothing to say. A quote that could not price freight must not
+ *      silently zero it (`hasOptions` is the absent-vs-empty distinction).
+ *   2. OPERATOR-owned ⇒ never apply. Their number stands; they get the nudge.
+ *   3. AUTO-owned ⇒ re-adopt whenever `suggestedKey` has moved. Crossing the
+ *      threshold is the case that matters: `free` arrives and the courier rate WE
+ *      guessed at $0 goods is withdrawn.
+ *   4. Unowned + an untouched $0 box ⇒ first adoption, which is the pre-ERR-178
+ *      behaviour unchanged, except that it now returns AUTO rather than passing
+ *      itself off as an operator pick.
+ *
+ * `announce` names a crossing, not merely a change: it is null when one paid zone
+ * replaces another (a delivery-address edit re-quoting from Auckland to rural,
+ * say), because the freight box is on screen and re-labelling it is not news. It
+ * is set when money changed hands direction — free arrived, or free was withdrawn
+ * — which the caller must surface visibly (feedback_fail_soft_must_be_loud).
+ *
+ * @returns {{apply:boolean, key:string|null, option:object|null,
+ *            owner:string, announce:null|'free'|'courier'}}
+ */
+export function planFreightAutofill(shipping, { owner = FREIGHT_OWNER_NONE, choice = null, freight = 0 } = {}) {
+  const none = { apply: false, key: null, option: null, owner, announce: null };
+  if (!shipping?.hasOptions) return none;
+
+  const options = shipping.options || [];
+  if (!options.length) return none;
+  if (owner === FREIGHT_OWNER_OPERATOR) return none;
+
+  const suggested = options.find((o) => o.key === shipping.suggestedKey) || null;
+  if (!suggested) return none;
+
+  if (owner === FREIGHT_OWNER_AUTO) {
+    if (suggested.key === choice) return none;
+    const announce = suggested.key === 'free' ? 'free' : (choice === 'free' ? 'courier' : null);
+    return { apply: true, key: suggested.key, option: suggested, owner: FREIGHT_OWNER_AUTO, announce };
+  }
+
+  // FREIGHT_OWNER_NONE — only ever onto an untouched empty box.
+  if (round2(num(freight)) !== 0) return none;
+  return { apply: true, key: suggested.key, option: suggested, owner: FREIGHT_OWNER_AUTO, announce: null };
+}
+
+/**
+ * "$6.15 more (incl GST) for free shipping", or '' when we cannot say.
+ *
+ * `goodsTotalInclGst` and `freeShippingThreshold` were parsed by `normalizeQuote`
+ * and read by nothing until ERR-178. Printing the figure is the whole point: the
+ * freight box and the courier dropdown beside this note are labelled ex-GST while
+ * the threshold is judged on the GST-INCLUSIVE goods total, and a row that mixes
+ * two bases without naming either is what made correct behaviour read as a GST
+ * bug. Returns '' rather than a guess when either number is absent.
+ */
+export function freeShippingGapNote(shipping) {
+  const goods = shipping?.goodsTotalInclGst;
+  const threshold = shipping?.freeShippingThreshold;
+  if (goods == null || threshold == null || !(threshold > 0)) return '';
+  if (shipping.freeShippingEligible === true) return '';
+  const gap = round2(threshold - goods);
+  if (!(gap > 0)) return '';
+  return `$${gap.toFixed(2)} more (incl GST) for free shipping`;
 }
 
 /**

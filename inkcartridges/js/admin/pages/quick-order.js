@@ -33,6 +33,7 @@ import {
 import { costOrNull } from '../utils/invoice-math.js';
 import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
 import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
+import { patchQuotedLineRows } from '../utils/line-row-patch.js';
 import { buildQuickOrderPrefill } from '../utils/quick-order-bridge.js';
 import { searchParties, orderToParty, partyEmptyText } from '../utils/party-search.js';
 
@@ -83,7 +84,13 @@ let _draft = null;
 let _editorRefs = null;      // { drawer }
 let _editorToken = 0;
 let _fillSource = null;      // { type, label }
-let _acHandles = [];         // attachAutocomplete handles to destroy on rebuild/teardown
+// Autocomplete handles, in two registers because they have two lifetimes: the
+// per-line product pickers die with every re-render of the grid, the party picker
+// lives as long as the drawer. One shared list meant renderLines() could not drain
+// without also destroying the party picker, so it never drained at all and every
+// re-render stranded two portalled menus in <body> (ERR-179).
+let _acLineHandles = [];     // per-line product autocompletes — drained by renderLines()
+let _acTopHandles = [];      // #qo-party-search — drained on rebuild/teardown
 const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 
 // ── Volume-ladder quote (POST /api/admin/invoices/quote) ─────────────────────
@@ -323,9 +330,14 @@ function openEditor(draft) {
   bindEditorBody(drawer);
 }
 
+function destroyHandles(list) {
+  list.forEach((h) => { try { h?.destroy?.(); } catch (_) { /* already gone */ } });
+  list.length = 0;
+}
+
 function teardownAutocompletes() {
-  _acHandles.forEach((h) => { try { h.destroy(); } catch (_) { /* noop */ } });
-  _acHandles = [];
+  destroyHandles(_acLineHandles);
+  destroyHandles(_acTopHandles);
 }
 
 // =========================================================================
@@ -368,7 +380,16 @@ async function requestQuote() {
   const { lines, offers, changed } = applyQuoteToLines(_draft.lines, quote);
   _volumeOffers = offers;
   if (changed) _draft.lines = lines;
-  renderLines();
+
+  // PATCH, never re-render (ERR-179). This reply is armed by a keystroke and
+  // lands 400ms plus a round-trip later — mid-word. renderLines() here replaced
+  // every <input> in the grid, destroying the one under the caret and orphaning
+  // its product dropdown. A quote only ever moves a price and a badge, and both
+  // are cells; false means the DOM and the draft disagree on row count, which no
+  // cell-write can repair, so fall back to the full render.
+  const host = _editorRefs?.drawer.body.querySelector('#qo-lines');
+  if (!patchQuotedLineRows(host, _draft.lines, { noteHtml: lineQuoteNote })) renderLines();
+
   if (changed) refreshTotals();
 }
 
@@ -573,6 +594,9 @@ function editorBodyHtml(d) {
 function renderLines() {
   const host = _editorRefs?.drawer.body.querySelector('#qo-lines');
   if (!host) return;
+  // Destroy the outgoing rows' autocompletes before their inputs are wiped —
+  // their menus are <body> children (ERR-107) and nothing else removes them.
+  destroyHandles(_acLineHandles);
   const showCost = canSeeCost();
   host.innerHTML = (_draft.lines || []).map((l, i) => {
     const manual = l.costSource === 'manual';
@@ -624,7 +648,7 @@ function renderLines() {
           renderLines(); refreshTotals(); scheduleQuote();
         },
       });
-      _acHandles.push(h);
+      _acLineHandles.push(h);
     });
   });
 }
@@ -664,7 +688,7 @@ function attachPartyPicker() {
       else fillFromCustomer(it);
     },
   });
-  _acHandles.push(h);
+  _acTopHandles.push(h);
 }
 
 /** One row of the party dropdown, per source. */
