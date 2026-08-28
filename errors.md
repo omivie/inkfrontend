@@ -112,6 +112,21 @@ describing the same incident.
   `Cost of goods $120.00 · Gross profit $60.00 · 33.3%`. A real SKU typed on the next line still
   resolved and priced normally.
 
+- **Confirmed by write, and cleaned up.** A test invoice carrying
+  `product_code: ''` + `product_ref: 'REFURB-01'` **saved (201)** with its line, description and
+  supplier cost all stored, and read back with the ref **dropped** — so the custom-item feature
+  works end to end today and only the reference fails to persist. Deleted afterwards
+  (`DELETE` → 200, `GET` → 404); no number left consumed.
+
+- **The browser found a second flaw the tests could not.** The standing warning was rendered into
+  the editor body, and `saveInvoice()` closes the drawer on success — so on the one path the
+  operator uses most, it was painted into a body about to be thrown away and never seen. The flag
+  is now read BEFORE `Drawer.close()` (whose `onClose` runs `resetQuoteState()` and clears it) and
+  carried in the save toast; the standing note still serves Download PDF and Email, which auto-save
+  without closing. Verified live: the toast reads "Invoice 3276 saved. Your refs print on this
+  invoice and on the PDF the customer receives, but the invoice service isn't storing them yet
+  (BF-051) — reopen this invoice and that column will be blank."
+
 - **Lesson**: when one input is refused, ask what the field MEANS before asking whether the rule
   can be relaxed. This box was doing two unrelated jobs — backend identity and customer-facing
   display — and the request that looked like "remove a safety check" was really "these were never

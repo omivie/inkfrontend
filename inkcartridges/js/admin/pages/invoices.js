@@ -2401,7 +2401,16 @@ async function saveInvoice() {
   try {
     const saved = await persistDraft();
     if (saved) {
-      Toast.success(`Invoice ${_draft.invoice_number || ''} saved.`.replace('  ', ' '));
+      const num = _draft.invoice_number || '';
+      // The standing #inv-ref-warn note is the right surface for the paths that
+      // KEEP the drawer open (Download PDF and Email both auto-save through
+      // persistDraft without closing). This path closes it, so the note would be
+      // rendered into a body that is about to be thrown away — the operator
+      // would never see it. Read the flag BEFORE Drawer.close(), whose onClose
+      // runs resetQuoteState() and clears it, and say it in the toast instead.
+      const refsLost = _refNotStored;
+      if (refsLost) Toast.warning(`Invoice ${num} saved. ${REF_NOT_STORED}`.replace('  ', ' '));
+      else Toast.success(`Invoice ${num} saved.`.replace('  ', ' '));
       Drawer.close();
       loadData();
     } else {

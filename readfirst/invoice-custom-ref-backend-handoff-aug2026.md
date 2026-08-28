@@ -55,9 +55,18 @@ purely a string we hand you and would like back.
 
 ## What happens until then
 
+**Confirmed by write, 2026-08-28.** A test invoice with
+`product_code: ''` + `product_ref: 'REFURB-01'` **saved fine (201)** — the line,
+its description and its supplier cost all stored — and read back with the ref
+**dropped**: the echoed keys were `product_code, description, quantity,
+unit_cost_excl_gst, line_total_excl_gst, supplier_cost_excl_gst, cost_source`.
+Then deleted (`DELETE` → 200 `{deleted:true}`, `GET` → 404). So the custom-item
+feature works end to end today; only the reference fails to persist.
+
 The frontend sends it now and **measures whether it came back** rather than
 assuming (`refEchoMissing` in `js/admin/pages/invoices.js`). While the key is
-absent from the echo, the editor shows a standing warning:
+absent from the echo, the operator is told — in the save toast, and as a standing
+note in the editor on the paths that keep it open:
 
 > Your refs print on this invoice and on the PDF the customer receives, but the
 > invoice service isn't storing them yet (BF-051) — reopen this invoice and that

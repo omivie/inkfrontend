@@ -331,6 +331,24 @@ test('§6 the warning is a standing note on the form, not a toast', () => {
 
 // ─── 7. Reopening a saved invoice ────────────────────────────────────────────
 
+test('§6 the Save path says it in the TOAST, because it closes the drawer', () => {
+  // Caught in the browser: the standing note is rendered into the editor body,
+  // and saveInvoice() closes the drawer on success — so on the one path the
+  // operator uses most, the warning was painted into a body about to be thrown
+  // away and never seen. The note still serves Download PDF and Email, which
+  // auto-save through persistDraft WITHOUT closing.
+  const body = fnBody(INVOICES, 'async function saveInvoice(');
+  // Comments in this very function mention Drawer.close(); compare CODE only.
+  const code = body.replace(/\/\/[^\n]*/g, '');
+  assert.match(code, /const refsLost = _refNotStored;/,
+    'read the flag BEFORE Drawer.close() — its onClose runs resetQuoteState(), which clears it');
+  assert.ok(code.indexOf('const refsLost') < code.indexOf('Drawer.close()'),
+    'reading it after the close would always see false');
+  assert.match(body, /if \(refsLost\) Toast\.warning\(/);
+  assert.match(body, /REF_NOT_STORED/, 'the same sentence, not a second copy of it');
+  assert.match(body, /else Toast\.success\(/, 'an ordinary save still reads as a plain success');
+});
+
 test('§7 a stored ref restores the custom line — read, never guessed', () => {
   const body = fnBody(INVOICES, 'function draftFromInvoice(');
   assert.match(body, /ref: l\.product_ref \?\? l\.ref \?\? ''/);
