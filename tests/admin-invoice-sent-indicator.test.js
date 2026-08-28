@@ -48,6 +48,7 @@ const ROOT = path.resolve(__dirname, '..');
 const READ = (rel) => fs.readFileSync(path.join(ROOT, 'inkcartridges', rel), 'utf8');
 
 const INVOICES_SRC = READ('js/admin/pages/invoices.js');
+const SHARED_SRC = READ('js/admin/utils/send-history.js');
 const APP_SRC = READ('js/admin/app.js');
 const CSS_SRC = READ('css/admin.css');
 const SHELL_SRC = READ('html/admin/index.html');
@@ -83,11 +84,16 @@ function loadHelpers({ throwOnStorage = false } = {}) {
     Number,
     Object,
     String,
+    Array,
     isNaN,
     parseInt,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${prelude}\n;this.__api = { readSentMap, writeSent, sentInfo, sentShort, sentTitle, SENT_CAP };`, ctx);
+  // The prelude imports the send-count vocabulary both admin pages share
+  // (mergeSends / recordedSendsPhrase). The slice drops the import line, so the
+  // module has to be evaluated into the same context first.
+  vm.runInContext(SHARED_SRC.replace(/^\s*export\s+/gm, ''), ctx, { filename: 'send-history.js' });
+  vm.runInContext(`${prelude}\n;this.__api = { readSentMap, writeSent, sentInfo, sentShort, sentTitle, SENT_CAP, mergeSends, recordedSendsPhrase };`, ctx);
   return { ...ctx.__api, store };
 }
 
@@ -101,17 +107,80 @@ test('sentInfo() returns null for an invoice that has never been emailed', () =>
   assert.equal(sentInfo(null), null);
 });
 
-test('sentInfo() prefers the server fields over any local record', () => {
-  const { sentInfo, writeSent } = loadHelpers();
-  writeSent('inv-1', 'local@example.com');
+test('sentInfo() reports the server record when it is the only one', () => {
+  const { sentInfo } = loadHelpers();
   const info = sentInfo({
     id: 'inv-1',
     emailed_at: '2026-07-08T02:15:00Z',
     emailed_to: 'server@example.com',
     email_count: 3,
   });
-  assert.equal(info.at, '2026-07-08T02:15:00Z', 'server timestamp wins');
-  assert.equal(info.to, 'server@example.com', 'server recipient wins');
+  assert.equal(info.at, '2026-07-08T02:15:00Z');
+  assert.equal(info.to, 'server@example.com');
+  assert.equal(info.count, 3);
+  assert.equal(info.source, 'server');
+});
+
+// Aug 2026: both sources are read ALWAYS. The old shape returned the server
+// record and stopped, so a send this browser had just made could not raise the
+// number — writeSent incremented a count nothing read (ERR-177's finding,
+// applied here). The headline date is the NEWEST send, whoever recorded it.
+test('sentInfo() surfaces a local send made AFTER the server stamp', () => {
+  const { sentInfo, writeSent } = loadHelpers();
+  writeSent('inv-1', 'local@example.com');       // stamped "now", i.e. later
+  const info = sentInfo({
+    id: 'inv-1',
+    emailed_at: '2026-07-08T02:15:00Z',
+    emailed_to: 'server@example.com',
+    email_count: 1,
+  });
+  assert.equal(info.source, 'local', 'the newest send is the headline, not the server one');
+  assert.equal(info.to, 'local@example.com');
+  assert.equal(info.count, 2, 'two sends on record — the server has not caught up yet');
+  assert.equal(info.sends.length, 2, 'both are kept for the history panel');
+});
+
+// The server stamp and our own record of the SAME send must collapse, or the
+// number this column exists to show doubles on every resend.
+test('sentInfo() collapses a server stamp and our record of the same send', () => {
+  const { sentInfo, store } = loadHelpers();
+  const at = new Date().toISOString();
+  store.set('inv_emailed_v2', JSON.stringify({
+    'inv-1': { sends: [{ at, to: 'ian@mcgrath.co.nz' }], recorded: 1 },
+  }));
+  const info = sentInfo({ id: 'inv-1', emailed_at: at, email_count: 1 });
+  assert.equal(info.sends.length, 1, 'one send, not two');
+  assert.equal(info.source, 'server', 'the server wins attribution at the same instant');
+  assert.equal(info.count, 1);
+});
+
+// THE CASE THE OLD CELL COULD NOT SHOW. An invoice emailed before the send log
+// existed comes back `emailed_at: <a real date>` with `email_count: 0`. Resend
+// it and the server says 1 — so `count > 1` stayed false and the cell rendered
+// IDENTICALLY before and after the resend. `recorded` carries the earlier send
+// across, because the server cannot count it for us.
+test('sentInfo() counts a resend of a LEGACY invoice the server cannot count', () => {
+  const { sentInfo, writeSent } = loadHelpers();
+  const legacy = { id: 'inv-9', emailed_at: '2026-07-27T02:10:07Z', email_count: 0 };
+
+  const before = sentInfo(legacy);
+  assert.equal(before.count, 1, 'a bare emailed_at is one send we know of');
+  assert.equal(before.floor, true, 'email_count 0 means UNKNOWN, so the number is a floor');
+
+  writeSent(legacy.id, 'x@y.co.nz', before.count);
+  // The list refetch now reports the resend the backend DID log.
+  const after = sentInfo({ ...legacy, emailed_at: new Date().toISOString(), email_count: 1 });
+  assert.equal(after.count, 2, 'the pre-log send is not erased by the resend');
+  assert.equal(after.floor, true);
+});
+
+// A server count can only ever RAISE the number, never lower it. A stale list
+// response (or a replication lag on the refetch that follows a send) must not
+// retract a send this browser can prove it made.
+test('sentInfo() never lets a server count lower a locally-recorded one', () => {
+  const { sentInfo, writeSent } = loadHelpers();
+  writeSent('inv-3', 'a@b.co', 2);      // prior floor 2, so 3 recorded
+  const info = sentInfo({ id: 'inv-3', emailed_at: '2026-08-01T00:00:00Z', email_count: 1 });
   assert.equal(info.count, 3);
 });
 
@@ -177,15 +246,25 @@ test('sentShort() renders a compact day + month, and tolerates junk', () => {
   assert.equal(sentShort('not-a-date'), '');
 });
 
-test('sentTitle() names the recipient, the full date, and only pluralises past one send', () => {
+// "N recorded sends", NEVER "sent N times" — the same wording the Orders column
+// uses, defined once in utils/send-history.js. The count is a floor on both
+// pages: sends before July 2026 were never logged individually.
+test('sentTitle() names the recipient, the full date, and counts RECORDED sends', () => {
   const { sentTitle } = loadHelpers();
   const once = sentTitle({ at: '2026-07-08T02:15:00Z', to: 'ian@mcgrath.co.nz', count: 1 });
-  assert.match(once, /Emailed to ian@mcgrath\.co\.nz on 8th July 2026 · click for the send log$/);
+  assert.match(once, /^Last emailed to ian@mcgrath\.co\.nz on 8th July 2026 · 1 recorded send · click for the send log$/);
   assert.doesNotMatch(once, /sent 1 times/, 'a single send must not read "sent 1 times"');
 
   assert.match(sentTitle({ at: '2026-07-08T02:15:00Z', to: '', count: 4 }),
-    /^Emailed on 8th July 2026 · sent 4 times · click for the send log$/,
+    /^Last emailed on 8th July 2026 · 4 recorded sends · click for the send log$/,
     'no recipient => no dangling "to"');
+
+  assert.match(sentTitle({ at: '2026-07-08T02:15:00Z', to: '', count: 2, floor: true }),
+    /· 2 recorded sends or more ·/,
+    'a known-incomplete record says so rather than stating a total');
+
+  assert.doesNotMatch(INVOICES_SRC, /sent \$\{[^}]*\} times/,
+    'the "sent N times" phrasing must not come back — a count here is a floor');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

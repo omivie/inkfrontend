@@ -41,6 +41,78 @@ describing the same incident.
 
 ---
 
+## ERR-180 — The Invoices SENT column could not show a resend of the one kind of invoice most likely to need one — **RESOLVED** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner asked whether the SENT column on the admin
+  Invoices page shows that an invoice was *resent*, and counts the resends the way the Orders page
+  now does (ERR-177). It half did. The answer took a live read to establish, and the live read is
+  what found the bug.
+
+- **What was already there**: the column has rendered a green check, a short date, and `×N` past
+  one send since July 2026 (ERR-131), with a send-history modal behind a real server log
+  (`GET /api/admin/invoices/:id/emails` — recipient, subject, delivery status, time). That is a
+  *richer* record than Orders, which has to reconstruct sends from note sentinels on
+  `order_events`. Nothing about it looked broken.
+
+- **Why nothing looked broken**: `npm run probe:invoice-sent` (extended in this fix) reports
+  **`email_count` is 0 or 1 on all 13 invoices — not one has ever been sent twice**. So `×N` had
+  never rendered in production, not once. A counter nobody has seen fire is a counter nobody has
+  seen fail.
+
+- **The bug**: **5 of the 13 invoices carry a real `emailed_at` next to `email_count: 0`** (3267,
+  3266, 3265, 3264, 3263 — sends that predate the log table). Resend one of those and the backend
+  logs it, so `email_count` goes 0 → 1, `info.count > 1` stays false, and **the cell renders
+  identically before and after the resend**. The one column whose job is to show a resend could
+  not show it on the rows most likely to get one — an old unpaid invoice being chased.
+
+- **The cause, and it is a repeat**: `sentInfo()` returned the server record and STOPPED —
+  ```js
+  const at = rec.emailed_at || rec.last_emailed_at;
+  if (at) { return { at, ..., count: num(rec.email_count) || 0, source: 'server' }; }
+  const local = readSentMap()[rec.id];      // unreachable for any stamped row
+  ```
+  So the localStorage backstop was dead code for every invoice the server had ever stamped, while
+  `writeSent()` faithfully incremented a local `count` that nothing read. That is **exactly** the
+  ERR-177 finding, unapplied one page over: **collapse at the point of DISPLAY, not at the point of
+  READ.** Same family as ERR-167 — *if the fallback is the only branch that ever runs the guard is
+  the bug*, inverted: if the fallback is the branch that NEVER runs, it is not a fallback.
+
+- **The fix**:
+  - `utils/send-history.js` (new) holds what both admin pages must agree on: `SAME_SEND_MS`,
+    `mergeSends()` and `recordedSendsPhrase()`. `utils/order-invoice-sent.js` now imports the first
+    two instead of keeping its own copies — one dedupe rule, not two that drift.
+  - `sentInfo()` reads **both** sources, always, and returns `{at, to, source, sends[], count,
+    floor}`. `count` is `max(email_count, locally recorded, sends.length)` — **a floor, never a
+    total** — and `floor` is set whenever we know of sends we cannot enumerate.
+  - The backstop became `inv_emailed_v2`: a LIST of sends plus a monotonic tally, migrated from v1
+    on read (v1 is never written back, so a rollback still finds its data).
+  - **The resend path hands `writeSent()` the count the cell claimed BEFORE the send.** That single
+    argument is what carries a pre-log send across a resend the server cannot count for us, and
+    what stops the tally rebuilding itself to 1 (ERR-177's near-miss, on this page).
+  - Copy: `· sent 4 times` → `· 4 recorded sends`, `· or more` when it is a floor. Two pages on one
+    admin must not describe one fact in two vocabularies (ERR-120/129/143). `—` now reads "No send
+    on record", not "Not emailed yet" — the list row and this browser are all we asked.
+  - The history panel lists a send this browser recorded that the log has not caught up on,
+    labelled as such, and **stops** listing it the moment the log does — and shows those records
+    inside the read-error branch as a floor, never promoted into a clean history.
+
+- **Verified**: `node --test tests/*.test.js` (4213, 0 fail), including the 62 untouched Orders
+  subtests proving the shared-module extraction changed nothing there. New
+  `tests/admin-invoice-send-count-aug2026.test.js` (39) pins the legacy-resend case, the 2s dedupe,
+  the v1→v2 migration, the append-not-rebuild rule, and the two pages' wording against each other.
+  `npm run probe:invoice-sent` green, now reporting the `email_count` distribution and the legacy
+  count as measured facts. Confirmed in the running admin at `localhost:3000/admin#invoices`:
+  invoice 3267 seeded with the exact record one resend writes reads **`28 Aug ×2` · "2 recorded
+  sends or more"**, survives a reload, and its history panel labels the local record and states the
+  floor. No email was sent to any customer to test a counter.
+
+- **Lesson**: **a counter that has never once incremented in production has never been tested.**
+  `×N` had shipped a month earlier, had a passing unit test, and was unreachable in the case that
+  mattered. Counting the live rows is what turned "it already does that" into a bug report — the
+  same discipline as *count the non-null rows before designing against a column* (ERR-175).
+
+---
+
 ## ERR-179 — Typing a product code was impossible: the quote reply rebuilt the grid and destroyed the input under the caret — **RESOLVED** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner reported that while typing into the Product Code

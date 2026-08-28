@@ -65,6 +65,7 @@ const ROOT = path.resolve(__dirname, '..');
 const READ = (rel) => fs.readFileSync(path.join(ROOT, 'inkcartridges', rel), 'utf8');
 
 const INVOICES_SRC = READ('js/admin/pages/invoices.js');
+const SHARED_SRC = READ('js/admin/utils/send-history.js');
 const ADMIN_API_SRC = READ('js/admin/api.js');
 const API_SRC = READ('js/api.js');
 const APP_SRC = READ('js/admin/app.js');
@@ -95,11 +96,15 @@ function loadHelpers() {
       getItem: (k) => (store.has(k) ? store.get(k) : null),
       setItem: (k, v) => store.set(k, String(v)),
     },
-    console, Date, Math, JSON, Number, Object, String, isNaN, parseInt,
+    console, Date, Math, JSON, Number, Object, String, Array, isNaN, parseInt,
   };
   vm.createContext(ctx);
-  vm.runInContext(`${prelude}\n;this.__api = { sentInfo, sentShort, sentTitle, sentDateTime, writeSent, formatInvoiceDate };`, ctx);
-  return ctx.__api;
+  // The prelude imports the send-count vocabulary both admin pages share
+  // (mergeSends / recordedSendsPhrase). The slice drops the import line, so the
+  // module has to be evaluated into the same context first.
+  vm.runInContext(SHARED_SRC.replace(/^\s*export\s+/gm, ''), ctx, { filename: 'send-history.js' });
+  vm.runInContext(`${prelude}\n;this.__api = { sentInfo, sentShort, sentTitle, sentDateTime, writeSent, formatInvoiceDate, mergeSends, recordedSendsPhrase };`, ctx);
+  return { ...ctx.__api, store };
 }
 
 /** Extract a top-level function body by brace matching (house idiom). */
@@ -119,14 +124,23 @@ function extractFunction(src, signature) {
  * esc() / formatInvoiceDate() / sentDateTime(), which are injected here.
  */
 function loadRenderSentHistory() {
-  const { sentDateTime, formatInvoiceDate } = loadHelpers();
+  const { sentDateTime, formatInvoiceDate, mergeSends, recordedSendsPhrase } = loadHelpers();
   const esc = (s) => String(s ?? '').replace(/[&<>"'/`]/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;', '/': '&#x2F;', '`': '&#96;',
   }[c]));
+  // Its two helpers and the shared caveat come along, so the branches run for
+  // real rather than against a re-typed copy.
+  const helpers = [
+    extractFunction(INVOICES_SRC, 'function unloggedLocalSends('),
+    extractFunction(INVOICES_SRC, 'function localSendRow('),
+    INVOICES_SRC.slice(INVOICES_SRC.indexOf('const HIST_CAVEAT ='),
+                       INVOICES_SRC.indexOf('function renderSentHistory(')),
+    extractFunction(INVOICES_SRC, 'function renderSentHistory('),
+  ].join('\n');
   return new Function(
-    'esc', 'sentDateTime', 'formatInvoiceDate',
-    `${extractFunction(INVOICES_SRC, 'function renderSentHistory(')}; return renderSentHistory;`,
-  )(esc, sentDateTime, formatInvoiceDate);
+    'esc', 'sentDateTime', 'formatInvoiceDate', 'mergeSends', 'recordedSendsPhrase',
+    `${helpers}; return renderSentHistory;`,
+  )(esc, sentDateTime, formatInvoiceDate, mergeSends, recordedSendsPhrase);
 }
 
 /** The body of a named function, for source-level assertions. */
@@ -257,21 +271,42 @@ test('§5 emailed_at wins over the legacy alias when both are present', () => {
   assert.equal(info.at, '2026-07-08T00:00:00Z');
 });
 
-test('§5 a server email_count of 0 stays 0 — it means UNKNOWN, not one send', () => {
+test('§5 a server email_count of 0 is a FLOOR, not a total — and never "sent 1 times"', () => {
   const { sentInfo, sentTitle } = loadHelpers();
   // The handoff: "Legacy invoices emailed before this feature have emailed_at
   // set but email_count: 0 — still render the date (just no count)."
+  //
+  // Aug 2026 keeps that meaning and states it instead of staying silent: 0
+  // means "we don't know how many", so the info reports the one send we can
+  // prove and marks the number a floor. What must never happen is the count
+  // being presented as a TOTAL — that is what invents a fact about a legacy send.
   const info = sentInfo({ id: 'a', emailed_at: '2026-07-08T04:23:22.379Z', email_count: 0 });
-  assert.equal(info.count, 0, 'must NOT be coerced to 1 — that invents a fact about a legacy send');
+  assert.equal(info.count, 1, 'the one send we can see');
+  assert.equal(info.floor, true, 'email_count 0 means UNKNOWN — there may be more');
   assert.ok(info.at, 'the date still renders');
-  assert.doesNotMatch(sentTitle(info), /sent \d+ times/, 'no count phrase when the count is unknown');
+  assert.doesNotMatch(sentTitle(info), /sent \d+ times/, 'never phrased as a total');
+  assert.match(sentTitle(info), /1 recorded send or more/, 'the floor is said out loud');
 });
 
-test('§5 the server row wins over a local record; a local record only fills a gap', () => {
+// Aug 2026: BOTH sources are read, always. The old shape returned the server
+// record and stopped, which left the local branch unreachable for any row the
+// server had stamped — so a resend this browser had just made could not move
+// the count. Server attribution still wins for the SAME send; what changed is
+// that a local record of a DIFFERENT send is no longer discarded.
+test('§5 the server wins attribution, but a local record is never discarded', () => {
   const { sentInfo, writeSent } = loadHelpers();
+  const at = new Date().toISOString();
+
   writeSent('inv-1', 'local@example.com');
-  assert.equal(sentInfo({ id: 'inv-1', emailed_at: '2026-07-08T00:00:00Z' }).source, 'server');
-  assert.equal(sentInfo({ id: 'inv-1' }).source, 'local', 'the backstop shows only when the server says nothing');
+  const same = sentInfo({ id: 'inv-1', emailed_at: at, email_count: 1 });
+  assert.equal(same.source, 'server', 'one send, attributed to the server');
+  assert.equal(same.sends.length, 1, 'the same send is not listed twice');
+
+  const later = sentInfo({ id: 'inv-1', emailed_at: '2026-07-08T00:00:00Z', email_count: 1 });
+  assert.equal(later.source, 'local', 'a local send after the server stamp is the newest');
+  assert.equal(later.count, 2, 'and it raises the count the server has not caught up on');
+
+  assert.equal(sentInfo({ id: 'inv-1' }).source, 'local', 'the backstop still answers alone');
   assert.equal(sentInfo({ id: 'never-sent' }), null);
 });
 
@@ -428,7 +463,9 @@ test('§9 a failed read renders an error with a retry, and never says "not sent"
 test('§9 a genuinely empty log says so, and offers the send action', () => {
   const html = loadRenderSentHistory()({ count: 0, emails: [] }, null);
   assert.match(html, /inv-hist__empty/);
-  assert.match(html, /hasn’t been emailed yet/);
+  // "No send on record", not "hasn't been emailed": the log and this browser are
+  // the only things we asked. Same distinction the Orders panel draws.
+  assert.match(html, /No send on record/);
   assert.doesNotMatch(html, /inv-hist__error/, 'empty is not an error');
 });
 
@@ -436,7 +473,7 @@ test('§9 a legacy send (date known, no logged rows) is its own third branch', (
   const html = loadRenderSentHistory()({ count: 0, emails: [] }, { at: '2026-07-08T04:23:22.379Z', to: '', count: 0 });
   assert.match(html, /8th July 2026/, 'the date we DO know is shown');
   assert.match(html, /weren’t logged individually/, 'and the reason there is no detail is explained');
-  assert.doesNotMatch(html, /hasn’t been emailed yet/,
+  assert.doesNotMatch(html, /No send on record/,
     'an invoice with a real emailed_at must never read as never-sent');
 });
 
@@ -496,7 +533,43 @@ test('§9 unlogged earlier sends are declared rather than silently dropped', () 
     count: 5,
     emails: [{ recipient_email: 'a@b.co', subject: 'x', status: 'sent', sent_at: '2026-07-08T04:23:22.379Z' }],
   }, null);
-  assert.match(html, /Earlier sends aren’t logged/, 'count > rows must be owned up to, not hidden');
+  assert.match(html, /5 recorded sends in total/, 'count > rows must be owned up to, not hidden');
+  assert.match(html, /only the 1 above has per-send detail/);
+  // And the caveat that the number is itself a floor is on EVERY populated panel.
+  assert.match(html, /weren’t logged individually/);
+});
+
+// Aug 2026 — a send this browser recorded that the server log has not caught up
+// on is listed, labelled, and NOT duplicated once the log does catch up.
+test('§9 a locally-recorded send shows only while the log is behind', () => {
+  const render = loadRenderSentHistory();
+  const local = { at: '2026-08-28T05:00:00.000Z', to: 'x@y.co.nz', source: 'local' };
+
+  const behind = render({ count: 1, emails: [
+    { recipient_email: 'a@b.co', subject: 'x', status: 'sent', sent_at: '2026-07-08T04:23:22.379Z' },
+  ] }, { at: local.at, count: 2, floor: false, sends: [local] });
+  assert.equal((behind.match(/inv-hist__row/g) || []).length, 2, 'both sends listed');
+  assert.match(behind, /recorded on this browser/, 'and the local one says where it came from');
+
+  const caughtUp = render({ count: 2, emails: [
+    { recipient_email: 'x@y.co.nz', subject: 'x', status: 'sent', sent_at: local.at },
+    { recipient_email: 'a@b.co', subject: 'x', status: 'sent', sent_at: '2026-07-08T04:23:22.379Z' },
+  ] }, { at: local.at, count: 2, floor: false, sends: [local] });
+  assert.equal((caughtUp.match(/inv-hist__row/g) || []).length, 2, 'not three — the log now has it');
+  assert.doesNotMatch(caughtUp, /recorded on this browser/);
+});
+
+// A read error with local records behind it shows them as a FLOOR, inside the
+// error — never promoted into a clean history (that is how an invoice gets
+// double-sent). See feedback_fail_soft_must_be_loud.
+test('§9 a failed read still shows what this browser recorded, as a floor', () => {
+  const html = loadRenderSentHistory()(null, {
+    at: '2026-08-28T05:00:00.000Z', count: 1, sends: [{ at: '2026-08-28T05:00:00.000Z', to: 'x@y.co.nz', source: 'local' }],
+  });
+  assert.match(html, /inv-hist__error/, 'the error branch still comes first');
+  assert.match(html, /Couldn’t load the send history/);
+  assert.match(html, /recorded on this browser/);
+  assert.match(html, /There may be others/, 'never presented as the whole story');
 });
 
 test('§9 a send with no timestamp says so instead of rendering an empty line', () => {

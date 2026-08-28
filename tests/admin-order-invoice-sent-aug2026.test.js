@@ -42,6 +42,10 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '..');
 const ADMIN = path.join(ROOT, 'inkcartridges', 'js', 'admin');
 const UTIL = path.join(ADMIN, 'utils', 'order-invoice-sent.js');
+// order-invoice-sent.js imports the send-count vocabulary both admin pages share
+// (SAME_SEND_MS / mergeSends). The stripEsm loader drops import statements, so
+// the dependency has to be evaluated into the same context first.
+const SHARED = path.join(ADMIN, 'utils', 'send-history.js');
 const ORDERS_PAGE = path.join(ADMIN, 'pages', 'orders.js');
 const API = path.join(ADMIN, 'api.js');
 const APP = path.join(ADMIN, 'app.js');
@@ -68,6 +72,7 @@ function stripEsm(src) {
 const sandbox = { console, Math, Number, Object, Array, String, Boolean, JSON, Error, RegExp, Date };
 sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
+vm.runInContext(stripEsm(fs.readFileSync(SHARED, 'utf8')), ctx, { filename: 'send-history.js' });
 vm.runInContext(stripEsm(fs.readFileSync(UTIL, 'utf8')), ctx, { filename: 'order-invoice-sent.js' });
 
 const {

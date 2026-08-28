@@ -31,6 +31,8 @@
  * repo has now shipped seven times (ERR-063/068/073/075/076/149/150).
  */
 
+import { mergeSends } from './send-history.js';
+
 export const SENT_STATE = Object.freeze({
   PENDING: 'pending',              // we have not asked yet
   SENT: 'sent',                    // a send is on record
@@ -90,16 +92,6 @@ export function allSendEvents(events) {
 }
 
 /**
- * Two timestamps close enough to be the same send.
- *
- * The moment BF-047 lands, the backend will stamp `invoices.emailed_at` on the
- * very resend we also record ourselves. Without this the one send would be
- * listed twice, and the count — the number this feature exists to show — would
- * double.
- */
-const SAME_SEND_MS = 2000;
-
-/**
  * Resolve one order's send state, and the full list of sends behind it.
  *
  * Server record beats our own — the same "SERVER FIELD WINS" rule sentInfo()
@@ -122,17 +114,15 @@ export function resolveSentInfo({
   // resend path, which has just written exactly one — needs no list of its own.
   const list = Array.isArray(events) ? allSendEvents(events) : (event ? [event] : []);
 
-  const sends = [];
   const serverAt = invoice?.emailed_at || null;
   // The server stamp goes in FIRST so it wins attribution against an event at
-  // the same instant — the dedupe below keeps whichever is already in the list.
-  if (serverAt) sends.push({ at: serverAt, source: 'server' });
-  for (const ev of list) {
-    const at = ev.created_at;
-    if (sends.some(s => Math.abs(new Date(s.at) - new Date(at)) < SAME_SEND_MS)) continue;
-    sends.push({ at, source: 'admin' });
-  }
-  sends.sort((a, b) => new Date(b.at) - new Date(a.at));
+  // the same instant — mergeSends keeps whichever is already in the list, and
+  // collapses anything within SAME_SEND_MS of it. Both constants live in
+  // utils/send-history.js so the Invoicing page cannot drift from this one.
+  const sends = mergeSends([
+    ...(serverAt ? [{ at: serverAt, source: 'server' }] : []),
+    ...list.map(ev => ({ at: ev.created_at, source: 'admin' })),
+  ]);
 
   if (sends.length) {
     return {

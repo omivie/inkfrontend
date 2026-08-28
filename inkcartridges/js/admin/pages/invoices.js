@@ -18,6 +18,7 @@
  * until then we fall back to client-side jsPDF (already loaded in the shell).
  */
 import { AdminAuth, AdminAPI, icon, esc } from '../app.js';
+import { mergeSends, recordedSendsPhrase } from '../utils/send-history.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
@@ -100,29 +101,93 @@ function orderDateShort(iso) {
 
 // ---- "emailed" record ---------------------------------------------------
 // The backend owns the send history and returns `emailed_at` + `email_count` on
-// every list row. This localStorage map stays as a BACKSTOP only: it records a
-// send made from this browser so the marker is right the instant the send
-// resolves, and so a row never reads "never emailed" just because one list
-// response came back without the fields. A local record is per-browser: it says
-// a send was recorded on THIS machine, not that no send happened on another one.
-const SENT_KEY = 'inv_emailed_v1';
+// every list row, with the per-send detail behind GET /invoices/:id/emails. This
+// localStorage map stays as a BACKSTOP only: it records a send made from this
+// browser so the marker is right the instant the send resolves, and so a row
+// never reads "never emailed" just because one list response came back without
+// the fields. A local record is per-browser: it says a send was recorded on THIS
+// machine, not that no send happened on another one.
+//
+// v2 (Aug 2026) stores a LIST of sends plus a monotonic tally, where v1 stored
+// one timestamp and a count. Two reasons:
+//   - the list lets the history panel show a send the server log has not caught
+//     up on yet, deduped against the logged rows;
+//   - the tally is what makes ×N right on a LEGACY row. An invoice emailed
+//     before the log table existed comes back `emailed_at: <a real date>` with
+//     `email_count: 0`, so after one resend the server says 1 — understating a
+//     send we can prove happened. `recorded` is seeded from what the cell knew
+//     BEFORE the send and only ever grows (see writeSent's `priorCount`).
+// v1 is migrated on read and never written back; its `count` seeds `recorded`.
+const SENT_KEY = 'inv_emailed_v2';
+const SENT_KEY_V1 = 'inv_emailed_v1';
 const SENT_CAP = 200;
+// Per invoice. The tally survives the trim, so capping the list loses detail in
+// the history panel, never the count.
+const SENT_SENDS_CAP = 20;
 
-function readSentMap() {
+function parseStored(key) {
   try {
-    const m = JSON.parse(localStorage.getItem(SENT_KEY));
+    const m = JSON.parse(localStorage.getItem(key));
     return (m && typeof m === 'object') ? m : {};
   } catch { return {}; }
 }
 
-function writeSent(id, to) {
+/** v1 `{at, to, count}` -> v2 `{sends:[{at,to}], recorded}`. */
+function upgradeV1(entry) {
+  if (!entry?.at) return null;
+  return { sends: [{ at: entry.at, to: entry.to || '' }], recorded: Math.max(1, num(entry.count) || 0) };
+}
+
+// Every access is try/caught inside parseStored: a browser with storage blocked
+// must degrade to "no local record", never throw through the table renderer.
+function readSentMap() {
+  const v2 = parseStored(SENT_KEY);
+  const out = {};
+  for (const [id, e] of Object.entries(parseStored(SENT_KEY_V1))) {
+    const up = upgradeV1(e);
+    if (up) out[id] = up;
+  }
+  for (const [id, e] of Object.entries(v2)) {
+    if (!e || typeof e !== 'object') continue;
+    out[id] = {
+      sends: Array.isArray(e.sends) ? e.sends.filter(s => s?.at) : [],
+      // A v2 entry wins outright, but never below what v1 already claimed —
+      // the tally is a floor and a migration must not lower it.
+      recorded: Math.max(num(e.recorded) || 0, out[id]?.recorded || 0),
+    };
+  }
+  return out;
+}
+
+/** Newest `at` on a local entry, for the map-level trim. '' when it has none. */
+function newestLocalAt(entry) {
+  return (entry?.sends || []).reduce((a, s) => (String(s.at) > a ? String(s.at) : a), '');
+}
+
+/**
+ * Record a send made from this browser. APPENDS — it must never rebuild the
+ * entry from the one send it just wrote, or the tally it exists to protect
+ * resets to 1 on every resend (that is exactly how ERR-177 broke on Orders).
+ *
+ * `priorCount` is what the cell claimed BEFORE this send — including the "1"
+ * a legacy row gets from a bare `emailed_at`. Passing it is what carries an
+ * unlogged send across the resend that would otherwise erase it.
+ */
+function writeSent(id, to, priorCount = 0) {
   if (!id) return;
   try {
     const map = readSentMap();
-    map[id] = { at: new Date().toISOString(), to: to || '', count: (map[id]?.count || 0) + 1 };
+    const prev = map[id] || { sends: [], recorded: 0 };
+    const sends = [...prev.sends, { at: new Date().toISOString(), to: to || '' }]
+      .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+      .slice(0, SENT_SENDS_CAP);
+    map[id] = {
+      sends,
+      recorded: Math.max(prev.recorded + 1, (num(priorCount) || 0) + 1, sends.length),
+    };
     const keys = Object.keys(map);
     if (keys.length > SENT_CAP) {
-      keys.sort((a, b) => String(map[a].at).localeCompare(String(map[b].at)))
+      keys.sort((a, b) => newestLocalAt(map[a]).localeCompare(newestLocalAt(map[b])))
         .slice(0, keys.length - SENT_CAP)
         .forEach((k) => { delete map[k]; });
     }
@@ -130,26 +195,51 @@ function writeSent(id, to) {
   } catch (err) { warn('could not record the send locally', err); }
 }
 
-// Server wins when present; the local map is only consulted when the row carries
-// no server timestamp at all. null = never emailed, as far as we know.
+// BOTH sources are read, ALWAYS. The old shape returned the server record and
+// stopped, leaving the local branch unreachable for any row the server had
+// stamped — so a resend this browser had just made could not raise the number,
+// and writeSent incremented a count nothing read. That is the ERR-177 finding
+// applied here: collapse at the point of DISPLAY, not at the point of READ.
 //
 // ERR-131: the field is `emailed_at`. `last_emailed_at`/`last_emailed_to` were the
 // names agreed in the Jul-10 handoff and the backend shipped different ones, so
 // this read matched nothing for three weeks and every row fell through to the
 // per-browser cache. Both spellings are read now — the alias costs one `||`.
 //
-// `count` is NOT defaulted to 1. An invoice emailed before the send log existed
-// comes back with a real `emailed_at` and `email_count: 0`, and "0" there means
-// "we don't know how many", not "zero sends" — so the count phrase is suppressed
-// rather than invented (see sentTitle).
+// `count` IS A FLOOR, NEVER A TOTAL, and `email_count: 0` is why. An invoice
+// emailed before the send log existed comes back with a real `emailed_at` and
+// `email_count: 0`, and "0" there means "we don't know how many", not "zero
+// sends" — so it is never coerced to 1 as a total; it sets `floor` instead, and
+// every surface says "recorded sends", never "sent N times".
+//
+// The count is a `max()` over every tally we hold, not `sends.length` alone.
+// `emailed_at` reports only the LATEST send, so the timestamps we can list are
+// always fewer than the sends that happened, and `email_count` / `recorded` are
+// the only things that know about the rest.
+//
+// `sends.length` is safe in that max only because writeSent is always handed the
+// count the cell claimed BEFORE the send: `recorded` therefore already covers
+// every send a server stamp could be a duplicate of, so a local record skewed
+// more than SAME_SEND_MS from its server twin cannot push the number past it.
 function sentInfo(rec) {
   if (!rec) return null;
-  const at = rec.emailed_at || rec.last_emailed_at;
-  if (at) {
-    return { at, to: rec.emailed_to || rec.last_emailed_to || '', count: num(rec.email_count) || 0, source: 'server' };
-  }
-  const local = readSentMap()[rec.id];
-  return local?.at ? { ...local, source: 'local' } : null;
+  const serverAt = rec.emailed_at || rec.last_emailed_at || null;
+  const serverTo = rec.emailed_to || rec.last_emailed_to || '';
+  const serverCount = num(rec.email_count) || 0;
+  const local = readSentMap()[rec.id] || null;
+
+  const sends = mergeSends([
+    ...(serverAt ? [{ at: serverAt, to: serverTo, source: 'server' }] : []),
+    ...(local?.sends || []).map(s => ({ at: s.at, to: s.to || '', source: 'local' })),
+  ]);
+  if (!sends.length) return null;
+
+  const recorded = num(local?.recorded) || 0;
+  const count = Math.max(serverCount, recorded, sends.length);
+  // We know of sends we cannot enumerate when the server has a date but no
+  // count (pre-log), or when either tally outruns the timestamps we hold.
+  const floor = (!!serverAt && serverCount === 0) || count > sends.length;
+  return { at: sends[0].at, to: sends[0].to || serverTo, source: sends[0].source, sends, count, floor };
 }
 
 const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
@@ -171,11 +261,12 @@ function sentDateTime(iso) {
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${formatInvoiceDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)} · ${h}:${mm} ${h24 < 12 ? 'am' : 'pm'}`;
 }
+// "recorded sends", never "sent N times" — the number is a floor (see sentInfo),
+// and the phrasing is the one utils/send-history.js defines for both admin pages.
 function sentTitle(info) {
   const who = info.to ? ` to ${info.to}` : '';
-  // count 0 = unknown (a legacy send that predates the log), so say nothing.
-  const times = info.count > 1 ? ` · sent ${info.count} times` : '';
-  return `Emailed${who} on ${formatInvoiceDate(String(info.at).slice(0, 10))}${times} · click for the send log`;
+  const times = ` · ${recordedSendsPhrase(info.count, { floor: info.floor })}`;
+  return `Last emailed${who} on ${formatInvoiceDate(String(info.at).slice(0, 10))}${times} · click for the send log`;
 }
 
 // The "Date order placed" line always shows on the invoice. Until the operator
@@ -700,10 +791,16 @@ const COLUMNS = [
       const info = sentInfo(r);
       const attrs = `data-row-action="sent-history" data-id="${escA(r.id)}" data-num="${escA(r.invoice_number)}"`;
       if (!info) {
-        return `<button type="button" class="inv-sent__none" ${attrs} title="Not emailed yet — click for the send log">—</button>`;
+        // "No send on record", not "not emailed": the list row and this browser
+        // are the only things we asked. Same distinction the Orders column draws
+        // between NOT_RECORDED and "never sent".
+        return `<button type="button" class="inv-sent__none" ${attrs} title="No send on record for this invoice — click for the send log">—</button>`;
       }
-      // ×N only past one send: a legacy row reports count 0 (unknown), and
-      // printing "×0" or "×1" over it would be inventing a fact.
+      // ×N only past one send: printing "×1" over a single send states a fact we
+      // would be inventing. `info.count` now also rises on a LEGACY row (a real
+      // `emailed_at` with `email_count: 0`) the moment this browser resends it —
+      // the case where the old server-only count left the cell unchanged by a
+      // resend, which is the whole point of this column.
       const times = info.count > 1 ? `<span class="inv-sent__times">×${esc(info.count)}</span>` : '';
       return `<button type="button" class="inv-sent" ${attrs} title="${escA(sentTitle(info))}">${icon('check', 13, 13)}${esc(sentShort(info.at))}${times}</button>`;
     },
@@ -1041,24 +1138,70 @@ function openSentHistory(id, invoiceNumber, row) {
 // "no sends" — that mistake is how an operator double-sends an invoice. An empty
 // list with a known emailed_at is the third, distinct case: the send predates the
 // log table, so the date is real but the per-send detail was never captured.
+//
+// `fallbackInfo` is a sentInfo() record, so it carries this browser's own send
+// records in `sends`. Those are shown only where they ADD something the server
+// log does not already have — a send made seconds ago that the log has not
+// caught up on, or any send at all when the log could not be read. Showing them
+// alongside a complete log would list one send twice.
+
+/** Local records the server log has not accounted for, newest first. */
+function unloggedLocalSends(payload, fallbackInfo) {
+  const localOnly = (fallbackInfo?.sends || []).filter(s => s.source === 'local');
+  if (!localOnly.length) return [];
+  const rows = payload?.emails || [];
+  // The log is complete when it accounts for at least as many sends as we do;
+  // then our copies are duplicates and add nothing.
+  if (payload && (payload.count || rows.length) >= (fallbackInfo?.count || 0)) return [];
+  // Belt and braces: never list one within SAME_SEND_MS of a logged row.
+  return mergeSends([...rows.map(e => ({ at: e.sent_at, source: 'server' })), ...localOnly])
+    .filter(x => x.source === 'local');
+}
+
+/** A send this browser recorded — no recipient/subject/status, we never logged them. */
+function localSendRow(s) {
+  return `<li class="inv-hist__row">
+      <div class="inv-hist__when">${esc(sentDateTime(s.at) || 'Date unknown')}</div>
+      <div class="inv-hist__to">${esc(s.to || 'Recipient not recorded')}</div>
+      <div class="inv-hist__subject">recorded on this browser — not yet in the server log</div>
+    </li>`;
+}
+
+// Counts are a FLOOR: sends before July 2026 predate the log table entirely, so
+// "no more rows" is never "no more sends". Same caveat, same words, as the
+// Orders send-history panel.
+const HIST_CAVEAT = `<p class="inv-hist__note">Only sends we have a record of are listed.
+  Sends made before July 2026 weren’t logged individually, so there may have been earlier
+  ones we can’t see.</p>`;
+
 function renderSentHistory(payload, fallbackInfo) {
   if (payload === null) {
+    // A read error may still have local records behind it. They are shown as a
+    // FLOOR inside the error, never promoted into a clean history.
+    const local = (fallbackInfo?.sends || []).filter(s => s.source === 'local');
+    const mine = local.length
+      ? `<ul class="inv-hist">${local.map(localSendRow).join('')}</ul>
+         <p class="inv-hist__note">The ${esc(local.length)} above ${local.length === 1 ? 'is a send' : 'are sends'}
+         recorded on this browser. There may be others.</p>`
+      : '';
     return `<div class="inv-hist__error">
         <p><strong>Couldn’t load the send history.</strong></p>
         <p>This is a read error, not proof that nothing went out — don’t read it as a clean history.</p>
         <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="retry-history">Try again</button>
-      </div>`;
+      </div>${mine}`;
   }
 
   const rows = payload.emails || [];
-  if (!rows.length) {
+  const extraLocal = unloggedLocalSends(payload, fallbackInfo);
+
+  if (!rows.length && !extraLocal.length) {
     if (fallbackInfo?.at) {
       return `<div class="inv-hist__empty">
           <p><strong>Emailed ${esc(formatInvoiceDate(String(fallbackInfo.at).slice(0, 10)))}.</strong></p>
           <p>Sends made before July 2026 weren’t logged individually, so there’s no per-send detail for this one.</p>
         </div>`;
     }
-    return `<div class="inv-hist__empty"><p><strong>This invoice hasn’t been emailed yet.</strong></p>
+    return `<div class="inv-hist__empty"><p><strong>No send on record for this invoice.</strong></p>
         <p>Use “Send again” below to email the PDF to the customer.</p></div>`;
   }
 
@@ -1073,13 +1216,18 @@ function renderSentHistory(payload, fallbackInfo) {
         <div class="inv-hist__to">${esc(e.recipient_email || 'Recipient not recorded')}</div>
         ${e.subject ? `<div class="inv-hist__subject">“${esc(e.subject)}”</div>` : ''}
       </li>`;
-  }).join('');
+  });
 
-  // count can exceed the logged rows when earlier sends predate the log table.
-  const extra = payload.count > rows.length
-    ? `<p class="inv-hist__note">Earlier sends aren’t logged individually — only the ${esc(rows.length)} above were recorded.</p>`
+  // Local-only rows go on top: they are the most recent by construction (the
+  // log has not caught up on them yet).
+  const list = [...extraLocal.map(localSendRow), ...items].join('');
+  const total = Math.max(fallbackInfo?.count || 0, payload.count || 0, rows.length + extraLocal.length);
+  const shown = rows.length + extraLocal.length;
+  const gap = total > shown
+    ? `<p class="inv-hist__note">${esc(recordedSendsPhrase(total, { floor: !!fallbackInfo?.floor }))} in total —
+       only the ${esc(shown)} above ${shown === 1 ? 'has' : 'have'} per-send detail.</p>`
     : '';
-  return `<ul class="inv-hist">${items}</ul>${extra}`;
+  return `<ul class="inv-hist">${list}</ul>${gap}${HIST_CAVEAT}`;
 }
 
 // The backend echoes supplier_cost_excl_gst on GET /invoices/:id (verified live,
@@ -1700,8 +1848,14 @@ function openEmailDialog(d) {
     const sendBtn = modal.footer.querySelector('[data-action="send"]');
     sendBtn.disabled = true;
     try {
+      // What the cell claimed BEFORE this send. Read now, not after, and passed
+      // in so writeSent APPENDS to it: rebuilding the record from the one send
+      // just made resets the tally to 1 on every resend (ERR-177), and on a
+      // legacy row — a real `emailed_at` with `email_count: 0` — it would erase
+      // the earlier send the server cannot count for us.
+      const priorCount = sentInfo(d)?.count || 0;
       await AdminAPI.emailInvoice(d.id, { to, subject: subj, body: msg });
-      writeSent(d.id, to);          // only on success — a failed send leaves the row unmarked
+      writeSent(d.id, to, priorCount);  // only on success — a failed send leaves the row unmarked
       Toast.success('Invoice emailed to customer.');
       Modal.close();
       refreshSentHint();            // editor footer, when the drawer is open behind the modal

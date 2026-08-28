@@ -26,6 +26,10 @@
  *   - **how many invoices carry a send stamp** — the single number the backend
  *     brief is asking to move. 0 today; when it climbs, the handoff has landed
  *     and the Supabase read here can eventually be retired.
+ *   - and, for the OTHER invoice system, whether any admin_invoice has ever been
+ *     sent more than once. The Invoicing page's ×N marker had never rendered in
+ *     production, which is exactly the condition under which a counter can be
+ *     wrong for a month without anyone noticing.
  *
  * ── READ-ONLY. ──────────────────────────────────────────────────────────────
  * Every request is a GET. There is no --record / --update-baseline mode and this
@@ -55,6 +59,8 @@ const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const FE_COLUMNS = 'id,order_id,invoice_number,invoice_date,emailed_at';
 /** admin_invoices columns that are NOT on public.invoices — selecting one 400s. */
 const FOREIGN_COLUMNS = ['emailed_to', 'email_count', 'last_emailed_at', 'status'];
+
+const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
 
 let pass = 0;
 const failures = [];
@@ -213,11 +219,69 @@ async function main() {
         }
     }
 
-    // ---- 6. the one thing this probe refuses to do -------------------------
-    console.log('\n\x1b[1m6. Not checked here\x1b[0m');
+    // ---- 6. the OTHER invoice system: the Invoicing page's SENT column -----
+    //
+    // admin_invoices is a DIFFERENT table with a DIFFERENT send record, and the
+    // Invoicing page's SENT column reads it. It is checked here rather than in a
+    // probe of its own because the one mistake worth catching is confusing the
+    // two, and that is easiest to see side by side.
+    //
+    // The table is not readable over PostgREST at all (RLS: 0 rows to an admin
+    // JWT, and emailed_at/email_count are not even columns of what that name
+    // resolves to) — the fields come off the API's list response instead. So the
+    // check is: does /api/admin/invoices still carry them, and has any invoice
+    // ever actually been sent more than once? A ×N that has never once rendered
+    // in production is a feature nobody has seen work.
+    console.log('\n\x1b[1m6. The OTHER system: admin_invoices (the Invoicing page)\x1b[0m');
+    {
+        const r = await fetch(`${BASE}/api/admin/invoices?page=1&limit=100`, { headers: H });
+        const body = await r.json().catch(() => null);
+        const rows = body?.data?.invoices || (Array.isArray(body?.data) ? body.data : []);
+        if (r.status !== 200 || !Array.isArray(rows) || !rows.length) {
+            soft('/api/admin/invoices sampled', `status ${r.status} — could not sample the SENT column's source`);
+        } else {
+            const miss = ['emailed_at', 'email_count'].filter(k => !(k in rows[0]));
+            if (miss.length) {
+                bad('the list row still carries emailed_at + email_count',
+                    `absent: ${miss.join(', ')} — the SENT column would go blank for every invoice`);
+            } else {
+                ok(`/api/admin/invoices rows carry emailed_at + email_count (${rows.length} sampled)`);
+            }
+            const stamped = rows.filter(x => x.emailed_at).length;
+            const counted = rows.filter(x => num(x.email_count) > 0).length;
+            const resent = rows.filter(x => num(x.email_count) > 1).length;
+            // A real emailed_at next to email_count 0 is a send that predates the
+            // log table. The frontend treats that as "at least one, count
+            // unknown" — a FLOOR — rather than zero. If this number is ever 0,
+            // the legacy branch is dead code and can go.
+            const legacy = rows.filter(x => x.emailed_at && num(x.email_count) === 0).length;
+            console.log(`      \x1b[1m${stamped}\x1b[0m of ${rows.length} sent · ${counted} with a logged count `
+                        + `· \x1b[1m${legacy}\x1b[0m legacy (a date but email_count 0)`);
+            console.log(`      invoices sent MORE THAN ONCE: \x1b[1m${resent}\x1b[0m`);
+            if (!resent) {
+                soft('an invoice has been sent more than once',
+                     'still 0 — the SENT column\'s ×N has never rendered in production. '
+                     + 'Not a fault: nothing has been resent yet. Worth re-reading the day it is.');
+            } else {
+                ok(`${resent} invoice(s) carry email_count > 1 — the ×N marker has live data`);
+            }
+            if (legacy) {
+                soft(`${legacy} invoice(s) have a send date with email_count 0`,
+                     'sends that predate the log table. The frontend reports these as a FLOOR '
+                     + '("1 recorded send or more") and carries them across a resend, which the '
+                     + 'server count alone cannot do — see tests/admin-invoice-send-count-aug2026.test.js');
+            }
+        }
+    }
+
+    // ---- 7. the one thing this probe refuses to do -------------------------
+    console.log('\n\x1b[1m7. Not checked here\x1b[0m');
     skip('POST /api/admin/orders/:id/resend-invoice response shape',
          'exercising it would send a real invoice email to a real customer. '
          + 'Verify by hand from the admin UI against a test order.');
+    skip('POST /api/admin/invoices/:id/email (the Invoicing page\'s send)',
+         'same reason — it emails a real customer. The send COUNT is unit-tested '
+         + 'instead: tests/admin-invoice-send-count-aug2026.test.js');
 
     // ---- summary -----------------------------------------------------------
     console.log(`\n${'─'.repeat(72)}`);
