@@ -329,19 +329,31 @@ test('invoiceDocRows yields four printed fields plus a bulk note — cost is not
   assert.ok(!flat.includes('$6.00'), 'the unit cost must NOT print');
 });
 
-test('invoiceDocRows: the note callback only ever sees the two volume fields', () => {
+test('invoiceDocRows: the note callback only ever sees printable discount fields', () => {
   // The whole safety property of this projection is that renderers cannot reach
   // the line object. A `note` callback handed the raw line would hand it back.
+  //
+  // The list grows as new PRINTABLE things appear (the manual discount joined
+  // the volume pair), so it is pinned two ways: exactly what is passed, AND —
+  // the part that actually matters — that nothing resembling a cost is in it.
+  // Widen the first assertion when you add a field you would print; if you ever
+  // have to touch the second, the change is wrong.
   const seen = [];
   invoiceDocRows({
     lines: [{
       code: 'X', description: 'Widget', qty: 2, unitCost: 10, supplierCost: 6,
       costSource: 'manual', volumePercent: 6, volumeQuantity: 7, volumeSaving: 3.42,
+      discountSaving: 4, discountNote: 'already paid on invoice 3271',
     }],
   }, { money, note: (l) => { seen.push(l); return ''; } });
   assert.equal(seen.length, 1);
-  assert.deepEqual(Object.keys(seen[0]).sort(), ['volumePercent', 'volumeQuantity'],
-    'the note callback must be given ONLY the volume fields — never the line, which carries our cost');
+  assert.deepEqual(Object.keys(seen[0]).sort(),
+    ['discountNote', 'discountSaving', 'volumePercent', 'volumeQuantity'],
+    'the note callback must be given a built object — never the line, which carries our cost');
+  for (const k of Object.keys(seen[0])) {
+    assert.doesNotMatch(k, /cost|supplier|margin|profit/i,
+      `${k} must never be reachable from a document renderer`);
+  }
 });
 
 // The real lineDocNote() is exercised in admin-invoice-quote-aug2026.test.js;

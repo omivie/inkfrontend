@@ -401,16 +401,24 @@ export function applyQuoteToLines(lines, quote) {
       // Hand-edited: never overwrite. Offer the volume price instead, and only
       // when it would actually change the number in the box.
       //
-      // NEVER on a CREDIT line. A credit built on a real product still resolves,
-      // so the ladder still has a price for it — and the offer button writes
-      // that price straight in (applyVolumeOffer), turning "−$99.00 already
-      // paid" into a "+$53.53" charge and stamping a volume claim on it. One
-      // click, no confirmation, and the number it replaced is gone.
-      if (badge && linePrice(line) >= 0 && round2(linePrice(line)) !== round2(badge.unitPrice)) {
+      // NEVER on a CREDIT line, and never on a DISCOUNTED one. Either still
+      // resolves, so the ladder still has a price for it — and the offer button
+      // writes that price straight in, turning "−$99.00 already paid" into a
+      // "+$53.53" charge, or silently undoing the $40 the operator just took off
+      // a line and stamping a volume claim over it. One click, no confirmation,
+      // and the number it replaced is gone.
+      //
+      // NB the sign test alone stopped covering this the moment discounts
+      // existed: a discounted line is manual AND positive, so it would sail
+      // through. The discount check is not redundant with it.
+      if (badge && linePrice(line) >= 0 && !hasManualDiscount(line)
+          && round2(linePrice(line)) !== round2(badge.unitPrice)) {
         offers.push({ position: i, badge });
       }
       // The badge on a hand-edited line would be a claim about a price we did
-      // not set, so it goes.
+      // not set, so it goes. `discountSaving` is deliberately NOT touched here:
+      // that one describes what the OPERATOR did, not what the ladder offered,
+      // and a quote reply has no standing to withdraw it.
       if (line.volumePercent != null || line.volumeSaving != null) {
         changed = true;
         return clearVolume(line);
@@ -460,11 +468,36 @@ export function clearVolume(line) {
  * (Business.breakLabel) so the counter and the website say the same thing.
  */
 export function lineDocNote(line) {
+  // A discount the OPERATOR gave, in their own words. Takes precedence: it is
+  // the more specific statement, and the two never co-exist in practice (giving
+  // a manual discount clears any ladder claim, which would otherwise describe a
+  // price we no longer set).
+  //
+  // Plain text only — esc()'d into the preview and written straight into jsPDF's
+  // WinAnsi font, so an ASCII hyphen and an em dash are safe and U+2212 is not.
+  const saved = Number(line?.discountSaving);
+  if (Number.isFinite(saved) && saved > 0) {
+    const why = String(line?.discountNote || '').trim();
+    const amount = `$${saved.toFixed(2)} off`;
+    return why ? `${amount} — ${why}` : amount;
+  }
+
   const pct = Number(line?.volumePercent);
   if (!Number.isFinite(pct) || pct <= 0) return '';
   const qty = Number(line?.volumeQuantity);
   const at = Number.isFinite(qty) && qty > 0 ? ` at ${qty}+` : '';
   return `Bulk price — ${formatVolumePercent(pct)} off${at}`;
+}
+
+/** Has the operator taken money off this line by hand? */
+export const hasManualDiscount = (l) => {
+  const v = Number(l?.discountSaving);
+  return Number.isFinite(v) && v > 0;
+};
+
+/** Strip a manual discount claim from a line without touching its price. */
+export function clearDiscount(line) {
+  return { ...line, discountSaving: null, discountNote: '' };
 }
 
 // =========================================================================

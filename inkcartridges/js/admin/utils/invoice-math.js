@@ -285,9 +285,17 @@ export function invoiceDocRows(d, { money, note }) {
       l.description || '',
       String(num(l.qty)),
       money(lineRevenueExGst(l)),
-      // Customer-safe by construction: read from the two volume fields only,
-      // never from the line object at large.
-      String(noteFor({ volumePercent: l.volumePercent, volumeQuantity: l.volumeQuantity }) || ''),
+      // Customer-safe BY CONSTRUCTION: a freshly-built object carrying only the
+      // discount fields, never the line itself. That is the mechanism which makes
+      // it structurally impossible for our supplier cost to reach a customer's
+      // invoice — widen this list only with fields you would print, and never
+      // replace it with `l`. Pinned by admin-invoice-cost-math.test.js.
+      String(noteFor({
+        volumePercent: l.volumePercent,
+        volumeQuantity: l.volumeQuantity,
+        discountSaving: l.discountSaving,
+        discountNote: l.discountNote,
+      }) || ''),
     ]);
 }
 

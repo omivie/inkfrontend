@@ -5035,6 +5035,32 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 /* A hand-authored price, marked the same way a manual cost is — so "we filled
    this" and "you filled this" are told apart at a glance. */
 .inv-line__price--manual { border-color: var(--accent, #2f6fed); font-weight: 600; }
+/* The DISCOUNT sub-row. Its own element ABOVE .inv-line__note, never inside it:
+   patchQuotedLineRows replaces the note wholesale on every quote reply, which
+   would destroy an input under the caret (ERR-179), and it appends a new note at
+   the end — so this has to come first for the order to survive both paths. */
+.inv-line__disc {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px;
+  margin: -2px 0 4px; padding-left: 2px;
+}
+.inv-disc__add {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  font-size: 11.5px; color: var(--text-muted, #6b7280); text-decoration: underline dotted;
+}
+.inv-disc__add:hover { color: var(--accent, #2f6fed); }
+.inv-disc__f { display: flex; flex-direction: column; gap: 2px; }
+.inv-disc__f > span { font-size: 10.5px; color: var(--text-muted, #6b7280); }
+.inv-disc__f .admin-input { height: 30px; font-size: 12.5px; }
+.inv-disc__amt { width: 110px; }
+.inv-disc__f--why { flex: 1 1 240px; min-width: 0; }
+.inv-disc__why { font-size: 11.5px; font-style: italic; color: var(--text-muted, #6b7280); }
+.inv-disc__undo {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  font-size: 11.5px; color: var(--text-muted, #6b7280); text-decoration: underline;
+}
+.inv-disc__undo:hover { color: var(--danger, #ef4444); }
+
 /* A CUSTOM ITEM's reference box, in the Product Code column. It is NOT a SKU box
    — it takes any text and is never matched against the catalogue — so it must
    not look like the picker-backed one beside it. */

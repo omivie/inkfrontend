@@ -77,7 +77,12 @@ function fnBody(src, signature) {
 
 /** Rebuild the pure page-level predicates and run them for real. */
 function loadPagePure() {
+  // The real declaration, not a stub: the whole point of the echo tests is that
+  // the list of display-only keys is the one the payload actually uses.
+  const keys = INVOICES.match(/const DISPLAY_ONLY_KEYS = \[[^\]]*\];/);
+  assert.ok(keys, 'DISPLAY_ONLY_KEYS must exist — refEchoMissing is driven by it');
   const src = [
+    keys[0],
     fnBody(INVOICES, 'function validateInvoice('),
     fnBody(INVOICES, 'function isPricedAmount('),
     fnBody(INVOICES, 'const realLines ='),

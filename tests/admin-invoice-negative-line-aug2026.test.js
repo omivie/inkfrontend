@@ -135,9 +135,28 @@ const priceErrs = (d) => validateInvoice(d).filter((e) => e.lfield === 'unitCost
 
 // ─── 1. The price rule ───────────────────────────────────────────────────────
 
-test('§1 a NEGATIVE unit price is accepted — this is the whole feature', () => {
+test('§1 a NEGATIVE unit price is TYPEABLE, but cannot be saved on its own', () => {
+  // THIS TEST INVERTED, and the inversion is the point. The editor still accepts
+  // the keystrokes — that is the operator's natural gesture and it is preserved
+  // — but a standalone credit row can never reach the server: POST
+  // /api/admin/invoices floors BOTH unit_cost_excl_gst and quantity at zero and
+  // ignores line_total_excl_gst and any discount key, recomputing every total
+  // from qty × price (measured; BF-050). So there is no arrangement of this row
+  // that survives, and the honest place to say so is here, one click from the
+  // fix — not at Save, and never as a raw 400.
   const d = draftWith([GOODS, { code: '', description: 'Already paid — invoice 3271', qty: 1, unitCost: -40 }]);
-  assert.deepEqual(plain(validateInvoice(d)), [], 'a credit line must not block the save');
+  const errs = validateInvoice(d).filter((e) => e.line === 1 && e.lfield === 'unitCost');
+  assert.equal(errs.length, 1, 'a credit row must be caught before the server sees it');
+  assert.match(errs[0].msg, /Apply to the line above/,
+    'name the one-click fix — a block with no next step is where the operator got stuck');
+  assert.match(errs[0].msg, /\$40\.00/, 'state the money, so it is obvious which row is meant');
+});
+
+test('§1 a credit on the FIRST line says what to do instead — there is nothing above it', () => {
+  const d = draftWith([{ code: '', description: 'Already paid', qty: 1, unitCost: -40 }, GOODS]);
+  const errs = validateInvoice(d).filter((e) => e.line === 0 && e.lfield === 'unitCost');
+  assert.equal(errs.length, 1);
+  assert.match(errs[0].msg, /Move it below the line it discounts/);
 });
 
 test('§1 an authored $0 is accepted; a BLANK box is not', () => {
@@ -237,15 +256,22 @@ test('§4 credits that exceed the charges are refused — that is a credit note'
 });
 
 test('§4 a $0 invoice is LEGAL — "you already paid for all of it"', () => {
-  const d = draftWith([GOODS, { code: '', description: 'Already paid', qty: 1, unitCost: -99 }]);
+  // Reached through a DISCOUNT now rather than a credit row, because that is the
+  // shape the invoice service will store: the price is already net, and nothing
+  // anywhere is negative. The outcome the owner asked for is unchanged.
+  const d = draftWith([{ ...GOODS, unitCost: 0, discountSaving: 99, discountNote: 'already paid' }]);
   assert.deepEqual(plain(validateInvoice(d)), [], '$0.00 is the point of the feature, not an error');
+  assert.equal(computeInvoiceTotals(d).total, 0);
 });
 
-test('§4 the guard fires just below zero, not at it', () => {
-  const at = draftWith([{ ...GOODS, unitCost: 99 }, { code: '', description: 'c', qty: 1, unitCost: -99 }]);
-  const below = draftWith([{ ...GOODS, unitCost: 99 }, { code: '', description: 'c', qty: 1, unitCost: -99.01 }]);
-  assert.equal(validateInvoice(at).length, 0);
+test('§4 the below-zero guard still exists for any route that could reach it', () => {
+  // A discount can no longer drive a line under zero (applyLineDiscount refuses
+  // one bigger than the line), so this is now a backstop rather than the primary
+  // gate. It stays: an invoice that owes the customer money is a credit note,
+  // and the day BF-050 lands and credit rows save, it becomes load-bearing again.
+  const below = draftWith([{ ...GOODS, unitCost: -0.01 }]);
   assert.equal(validateInvoice(below).filter((e) => /exceed the charges/.test(e.msg)).length, 1);
+  assert.equal(validateInvoice(draftWith([GOODS])).length, 0, 'and never fires on an ordinary invoice');
 });
 
 test('§4 a NEGATIVE freight is refused — it would print as "Free"', () => {
@@ -254,6 +280,8 @@ test('§4 a NEGATIVE freight is refused — it would print as "Free"', () => {
   // pulling $20 out of the total.
   const errs = validateInvoice(draftWith([GOODS], { freight: -20 }));
   assert.equal(errs.filter((e) => e.field === 'freight').length, 1);
+  assert.match(errs.find((e) => e.field === 'freight').msg, /line discount/,
+    'it used to advise "use a credit line", which is no longer something that saves');
   assert.deepEqual(plain(validateInvoice(draftWith([GOODS], { freight: 0 }))), [], '0 freight is "Free" and always was');
   for (const r of ['renderPreview(', 'buildInvoiceDoc(']) {
     assert.match(fnBody(INVOICES, `function ${r}`), /t\.freight > 0 \?/,
@@ -367,8 +395,14 @@ test('§6 the volume ladder never OFFERS to overwrite a credit line', () => {
   // A credit built on a real product still resolves, so the ladder still prices
   // it — and the offer button writes that price straight in. One click would
   // turn "−$99.00 already paid" into a "+$53.53" charge.
+  // position 0 pairs with draft index 0. This said `position: 1` until the
+  // discount work, which meant the quote line matched NO draft line, no badge
+  // was ever produced, and the assertion below passed whether or not the guard
+  // existed. A test that cannot fail is not a test — always prove the fixture
+  // reaches the code (the sibling test in admin-invoice-discount-aug2026 keeps a
+  // positive control for exactly that reason).
   const quote = {
-    lines: [{ position: 1, resolved: true, unit_excl_gst: 56.95, quantity: 7,
+    lines: [{ position: 0, resolved: true, unit_excl_gst: 56.95, quantity: 7,
       volume: { unit_excl_gst: 53.53, effective_percent: 6, discount_percent: 6, line_saving_excl_gst: 23.94 } }],
     shipping: { options: [], goods_total_incl_gst: 0 },
   };

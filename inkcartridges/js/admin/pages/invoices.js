@@ -34,6 +34,7 @@ import {
 import {
   PRICE_AUTO, PRICE_MANUAL, FREIGHT_CUSTOM, MAX_QUOTE_LINES,
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume, lineDocNote,
+  hasManualDiscount, clearDiscount,
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
   freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
   hasCreditLine,
@@ -437,6 +438,13 @@ const blankLine = () => ({
   // ever fills it. See customLine() below for why it is not `code`.
   ref: '',
   priceSource: PRICE_AUTO, volumePercent: null, volumeSaving: null, volumeQuantity: null,
+  // A discount the OPERATOR gave, as opposed to the volume trio above, which is
+  // one the ladder gave. Both are display-only — `unitCost` is already the net
+  // price either way — but they must be SEPARATE fields, because typing in the
+  // price box clears the volume trio (onFormInput) and so does the next quote
+  // reply (applyQuoteToLines' MANUAL branch). A discount kept there would be
+  // erased by the very keystroke that created it.
+  discountSaving: null, discountNote: '',
 });
 
 // A freight / labour / one-off line: description-only BY DESIGN. An empty
@@ -722,6 +730,13 @@ function buildPayload(d) {
       volume_discount_percent: l.volumePercent ?? null,
       volume_saving_excl_gst: l.volumeSaving ?? null,
       volume_quantity: l.volumeQuantity ?? null,
+      // The discount the OPERATOR gave, and why. Display-only in exactly the
+      // same sense as the three above — `unit_cost_excl_gst` already carries the
+      // money — and dropped for the same reason: no column yet. What is lost on
+      // a reload is the EXPLANATION, never the price. refEchoMissing() below
+      // measures whether that happened rather than assuming it.
+      discount_saving_excl_gst: l.discountSaving ?? null,
+      discount_note: (l.discountNote || '').trim() || null,
     })),
     freight_excl_gst: round2(num(d.freight)),
     footer: d.footer,
@@ -1766,7 +1781,12 @@ function onFormInput(e) {
       // describe a discount we did not give. The ladder becomes an offer.
       if (f === 'unitCost') {
         _draft.lines[i].priceSource = PRICE_MANUAL;
-        _draft.lines[i] = clearVolume(_draft.lines[i]);
+        // Both claims describe a price we are no longer the author of. The
+        // volume badge goes for the reason it always has; the manual discount
+        // goes because "$40.00 off" is a statement about a number the operator
+        // has just replaced, and re-deriving it from the new one would be
+        // inventing a discount nobody gave.
+        _draft.lines[i] = clearDiscount(clearVolume(_draft.lines[i]));
         // Repaint the two things the row says about a credit line. Deliberately
         // by TOUCHING the existing nodes rather than calling renderLines(): the
         // operator is typing in one of them, and re-rendering the grid under the
@@ -1845,6 +1865,120 @@ function makeLineCustom(i) {
   focusLineField(i, (l.description || '').trim() ? 'ref' : 'description');
 }
 
+/**
+ * The discount actions. Every one of them ends with the price box holding the
+ * NET figure and `discountSaving` describing what came off — the same shape the
+ * volume ladder leaves behind, so the document, the payload and the totals need
+ * no special case anywhere.
+ */
+function setDiscountOpen(i, open) {
+  const l = _draft.lines[i];
+  if (!l) return;
+  l.discountOpen = open;
+  renderLines();
+  if (open) {
+    const amt = _editorRefs?.drawer.body.querySelector(`[data-disc-amt="${i}"]`);
+    if (amt) { amt.focus(); amt.select?.(); }
+  }
+}
+
+function applyLineDiscount(i) {
+  const body = _editorRefs?.drawer.body;
+  const l = _draft.lines[i];
+  if (!l || !body) return;
+  const amount = round2(num(body.querySelector(`[data-disc-amt="${i}"]`)?.value));
+  const why = String(body.querySelector(`[data-disc-why="${i}"]`)?.value || '').trim();
+  const qty = num(l.qty) || 1;
+  const gross = round2(num(l.unitCost) * qty);
+
+  if (!(amount > 0)) { Toast.warning('Enter how much to take off this line.'); return; }
+  // A DISCOUNT MAY NOT EXCEED THE LINE. Past that it stops being a discount and
+  // becomes a credit — which is the thing the invoice service will not store at
+  // all (BF-050), so letting it through here would only move the failure to Save.
+  if (amount > gross) {
+    Toast.warning(`That is more than this line is worth (${money(gross)} excl. GST). Reduce it, or split the credit across lines.`);
+    return;
+  }
+
+  // round2 ONCE, here, into the price the backend will be given. The saving is
+  // then re-derived from what the price actually became, so what prints is the
+  // money that was really taken off — never the typed figure that a rounded
+  // unit price could not quite deliver.
+  const netUnit = round2(num(l.unitCost) - amount / qty);
+  const effective = round2((num(l.unitCost) - netUnit) * qty);
+
+  _draft.lines[i] = clearVolume({
+    ...l,
+    unitCost: netUnit,
+    priceSource: PRICE_MANUAL,   // ours now; the ladder must never re-price it
+    discountSaving: effective,
+    discountNote: why,
+    discountOpen: false,
+  });
+  renderLines();
+  refreshPreview();
+  scheduleQuote();
+}
+
+/** Put the price back. The saving says exactly how much to add. */
+function undoLineDiscount(i) {
+  const l = _draft.lines[i];
+  if (!l) return;
+  const qty = num(l.qty) || 1;
+  _draft.lines[i] = clearDiscount({
+    ...l,
+    unitCost: round2(num(l.unitCost) + num(l.discountSaving) / qty),
+    discountOpen: false,
+  });
+  renderLines();
+  refreshPreview();
+  scheduleQuote();
+}
+
+/**
+ * "Apply to the line above" — the way out of a credit row that cannot be saved.
+ *
+ * A standalone negative line is refused by the invoice service outright (both
+ * the price and the quantity are floored at zero, and a `line_total` or
+ * `discount` key is ignored — measured, BF-050). Rather than leave the operator
+ * at a dead end, fold it: the line above drops by the credit's value, inherits
+ * its description as the reason, and the credit row goes.
+ *
+ * The recorded saving is what the price ACTUALLY moved by, not the credit's face
+ * value — a rounded unit price on a multi-quantity line can differ by a cent, and
+ * the note has to state the money that really came off.
+ */
+function foldCreditIntoPrevious(i) {
+  const credit = _draft.lines[i];
+  const target = _draft.lines[i - 1];
+  if (!credit || !target) return;
+  const creditValue = round2(Math.abs(num(credit.unitCost) * (num(credit.qty) || 1)));
+  const tQty = num(target.qty) || 1;
+  const gross = round2(num(target.unitCost) * tQty);
+  if (creditValue > gross) {
+    Toast.warning(`That credit (${money(creditValue)}) is bigger than the line above (${money(gross)} excl. GST). Reduce it, or split it across lines.`);
+    return;
+  }
+  const netUnit = round2(num(target.unitCost) - creditValue / tQty);
+  const effective = round2((num(target.unitCost) - netUnit) * tQty);
+
+  _draft.lines[i - 1] = clearVolume({
+    ...target,
+    unitCost: netUnit,
+    priceSource: PRICE_MANUAL,
+    discountSaving: round2(num(target.discountSaving) + effective),
+    discountNote: (credit.description || '').trim() || target.discountNote || '',
+    discountOpen: false,
+  });
+  _draft.lines.splice(i, 1);
+  if (!_draft.lines.length) _draft.lines.push(blankLine());
+  // Positions shifted, so every cached answer is about the wrong row now.
+  _quote = null; _volumeOffers = [];
+  renderLines();
+  refreshPreview();
+  scheduleQuote();
+}
+
 /** Put the caret in one line's field after a re-render. */
 function focusLineField(i, lfield) {
   const el = _editorRefs?.drawer.body.querySelector(`[data-line="${i}"][data-lfield="${lfield}"]`);
@@ -1907,6 +2041,11 @@ function onFormClick(e) {
   else if (act === 'add-shipping') { addShippingLine(); }
   else if (act === 'add-custom') { addCustomLine(); }
   else if (act === 'make-custom') { makeLineCustom(+e.target.closest('[data-line]').dataset.line); }
+  else if (act === 'open-discount') { setDiscountOpen(+e.target.closest('[data-line]').dataset.line, true); }
+  else if (act === 'close-discount') { setDiscountOpen(+e.target.closest('[data-line]').dataset.line, false); }
+  else if (act === 'apply-discount') { applyLineDiscount(+e.target.closest('[data-line]').dataset.line); }
+  else if (act === 'undo-discount') { undoLineDiscount(+e.target.closest('[data-line]').dataset.line); }
+  else if (act === 'fold-credit') { foldCreditIntoPrevious(+e.target.closest('[data-line]').dataset.line); }
   else if (act === 'remove-line') {
     const i = +e.target.closest('[data-line]').dataset.line;
     _draft.lines.splice(i, 1);
@@ -2092,7 +2231,25 @@ function validateInvoice(d) {
   // renderPreview and buildInvoiceDoc test `t.freight > 0`) while still pulling
   // that money out of the total. Catch it here, where the sign is the subject.
   if (num(d.freight) < 0)
-    errs.push({ field: 'freight', msg: 'Freight cannot be negative — use a credit line for money off' });
+    errs.push({ field: 'freight', msg: 'Freight cannot be negative — use a line discount for money off' });
+
+  // A CREDIT ROW NEVER REACHES THE SERVER. Measured, not assumed: POST
+  // /api/admin/invoices floors unit_cost_excl_gst AND quantity at zero, and
+  // ignores line_total_excl_gst and any discount key — the totals are recomputed
+  // from qty × price, so nothing can pull one down (BF-050). Blocking it HERE,
+  // naming the one-click fix, is the difference between a dead end and a
+  // next step; saveErrorMessage's translation of the raw 400 stays only as a
+  // backstop for the paths this cannot see.
+  (d.lines || []).forEach((l, i) => {
+    if (num(l.unitCost) >= 0) return;
+    errs.push({
+      line: i,
+      lfield: 'unitCost',
+      msg: i > 0
+        ? `Line ${i + 1} is a credit of ${money(Math.abs(num(l.unitCost) * (num(l.qty) || 1)))} — use “Apply to the line above” on that row, or make the price positive`
+        : `Line ${i + 1} is a credit, and there is no line above it to take it off. Move it below the line it discounts.`,
+    });
+  });
 
   // AN INVOICE THAT OWES THE CUSTOMER MONEY IS A CREDIT NOTE, NOT AN INVOICE.
   // Credit lines are meant to bring a total DOWN, not through the floor. $0 is
@@ -2263,12 +2420,16 @@ async function persistDraft() {
  * false and the warning stops appearing with no code change. Nothing to
  * remember to remove. BF-051.
  */
+const DISPLAY_ONLY_KEYS = ['product_ref', 'discount_note'];
+
 function refEchoMissing(payload, saved) {
-  const sent = (payload?.line_items || []).some((li) => li.product_ref);
-  if (!sent) return false;
   const back = saved?.line_items ?? saved?.invoice?.line_items;
   if (!Array.isArray(back) || !back.length) return false;   // nothing echoed — can't tell
-  return !back.some((li) => li && Object.prototype.hasOwnProperty.call(li, 'product_ref'));
+  return DISPLAY_ONLY_KEYS.some((key) => {
+    const sent = (payload?.line_items || []).some((li) => li[key]);
+    if (!sent) return false;
+    return !back.some((li) => li && Object.prototype.hasOwnProperty.call(li, key));
+  });
 }
 
 function noteRefEcho(payload, saved) {
@@ -2689,9 +2850,9 @@ function costPlaceholder(l) {
 const _codeChecks = new Map();
 // Set by noteRefEcho() when a save proves the backend dropped product_ref.
 let _refNotStored = false;
-const REF_NOT_STORED = 'Your refs print on this invoice and on the PDF the customer receives, '
-  + 'but the invoice service isn’t storing them yet (BF-051) — reopen this invoice and that '
-  + 'column will be blank.';
+const REF_NOT_STORED = 'Your own text on these lines — the refs and the discount reasons — prints '
+  + 'on this invoice and on the PDF the customer receives, but the invoice service isn’t storing it '
+  + 'yet (BF-051). The prices are saved correctly; only the wording is lost if you reopen this invoice.';
 let _codeCheckTimer = null;
 const _codeCheckQueue = new Set();
 
@@ -2777,6 +2938,47 @@ function repaintLineNotes() {
 }
 
 /**
+ * The DISCOUNT sub-row: money the operator takes off this line by hand.
+ *
+ * WHY IT IS ITS OWN ELEMENT, ABOVE THE NOTE STRIP. patchQuotedLineRows replaces
+ * `.inv-line__note` wholesale on every quote reply, so an input living inside it
+ * would be destroyed under the operator's caret — ERR-179, again. It also
+ * APPENDS a note that did not exist before, so this row has to come FIRST or the
+ * two would swap places between a full render and a patch.
+ *
+ * The discount is APPLIED, never held as a second source of truth: pressing
+ * Apply writes the net figure into `unitCost` (exactly what the volume ladder's
+ * own "Apply volume price" button does) and records what it did for display.
+ * That is what keeps the customer's document and the stored invoice identical —
+ * there is only ever one price, and `unit_cost_excl_gst` is already it.
+ */
+function lineDiscountRow(l, i) {
+  const applied = hasManualDiscount(l);
+  if (!applied && !l.discountOpen) {
+    return `<div class="inv-line__disc">
+      <button type="button" class="inv-disc__add" data-form-action="open-discount" data-line="${i}">+ Discount</button>
+    </div>`;
+  }
+  if (applied) {
+    // Reconstruct what it was, the way lineQuoteNote does for a volume badge.
+    const was = num(l.qty) > 0 ? round2(num(l.unitCost) + num(l.discountSaving) / num(l.qty)) : null;
+    return `<div class="inv-line__disc inv-line__disc--applied">
+      <span class="inv-vol inv-vol--applied">Discount &minus;${esc(money(l.discountSaving))}${was ? ` (was ${esc(money(was))} each)` : ''}</span>
+      ${l.discountNote ? `<span class="inv-disc__why">${esc(l.discountNote)}</span>` : ''}
+      <button type="button" class="inv-disc__undo" data-form-action="undo-discount" data-line="${i}" title="Put the price back">Remove</button>
+    </div>`;
+  }
+  return `<div class="inv-line__disc inv-line__disc--editing">
+    <label class="inv-disc__f"><span>Discount (excl. GST)</span>
+      <input class="admin-input inv-disc__amt" type="number" step="0.01" min="0" data-disc-amt="${i}" placeholder="0.00"></label>
+    <label class="inv-disc__f inv-disc__f--why"><span>Reason — prints on the invoice</span>
+      <input class="admin-input" data-disc-why="${i}" placeholder="e.g. already paid on invoice 3271" autocomplete="off"></label>
+    <button type="button" class="admin-btn admin-btn--sm" data-form-action="apply-discount" data-line="${i}">Apply</button>
+    <button type="button" class="inv-disc__undo" data-form-action="close-discount" data-line="${i}">Cancel</button>
+  </div>`;
+}
+
+/**
  * The strip under one line row: what the volume ladder did, or is offering.
  *
  * It is a full-width child of the `.inv-line` grid (`grid-column: 1/-1`), NOT a
@@ -2832,6 +3034,20 @@ function lineQuoteNote(l, i) {
 
   if (isCustomLine(l)) {
     bits.push(`<span class="inv-vol inv-vol--muted">Custom item — no volume price, and not counted in the parcel weight</span>`);
+  }
+
+  // A CREDIT ROW CANNOT BE SAVED, so say so here rather than at Save, and give
+  // it somewhere to go. The invoice service floors both the price and the
+  // quantity at zero and ignores any discount key, so there is no arrangement of
+  // this row that survives a POST (BF-050) — folding it into the line above is
+  // the same money expressed as a discount, which does.
+  if (num(l.unitCost) < 0) {
+    bits.push(`<span class="inv-vol inv-vol--warn">A credit row can’t be saved on its own</span>`);
+    if (i > 0) {
+      bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="fold-credit" data-line="${i}">Apply ${esc(money(Math.abs(num(l.unitCost) * (num(l.qty) || 1))))} to the line above</button>`);
+    } else {
+      bits.push(`<span class="inv-vol inv-vol--muted">Move it below the line it discounts, then apply it</span>`);
+    }
   }
 
   if (!bits.length) return '';
@@ -2980,6 +3196,7 @@ function renderLines() {
       <input class="admin-input${l.priceSource === PRICE_MANUAL ? ' inv-line__price--manual' : ''}${num(l.unitCost) < 0 ? ' inv-line__price--credit' : ''}" type="number" step="0.01" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}" title="A NEGATIVE price is a credit line — money off, printed as its own row on the customer&#39;s invoice.">
       ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
+      ${lineDiscountRow(l, i)}
       ${lineQuoteNote(l, i)}
     </div>`;
   }).join('');

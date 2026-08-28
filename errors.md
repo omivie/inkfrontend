@@ -41,6 +41,83 @@ describing the same incident.
 
 ---
 
+## ERR-183 — The credit line I shipped could not be saved; discounts now come off the line — **RESOLVED** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner tried to save an invoice with a −$40.00 credit row
+  and was refused by the message ERR-181 had installed for exactly that case. The feature had
+  shipped looking complete and could not reach the end of its own happy path.
+
+- **My error, and where it was.** ERR-181's probe covered `POST /invoices/quote` and proved the
+  quote endpoint refuses a negative price. I inferred the save path from that, wrote a translated
+  error message for it, and shipped. What I did not do was ask whether the feature could be
+  expressed AT ALL on a saved invoice — a question the probe I had already written was one case
+  short of answering.
+
+- **It cannot, by any route.** Probed against production:
+
+  | shape | result |
+  |---|---|
+  | negative `unit_cost_excl_gst` | **400** — `must be greater than or equal to 0` |
+  | negative `quantity` | **400** — `must be greater than or equal to 0` |
+  | negative `line_total_excl_gst` | 200, **ignored** — goods total recomputed as `46` |
+  | a `discount_excl_gst` key | 200, **ignored** — undiscounted goods total `113.85` |
+
+  Every total is recomputed as `quantity × unit_cost_excl_gst` and both factors are floored at
+  zero. A standalone credit row cannot exist on a saved invoice until BF-050 lands. No frontend
+  arrangement changes that, and one that made the printed document disagree with the stored record
+  would be worse than the bug.
+
+- **Fix — the discount comes off the line it applies to**, which is the shape the service already
+  stores, and is what the volume ladder has always done: write the net figure into `unitCost` and
+  keep a display-only record of what came off. `discountSaving` + `discountNote` print as a
+  sub-line under the description (the 5th slot of `invoiceDocRows`, already rendered by both the
+  preview and the PDF). Totals, `buildPayload` and COGS needed no change at all, because
+  `unit_cost_excl_gst` was already the net price.
+
+- **The invariant the design rests on, and now a test**: for every line, what the document prints
+  equals `quantity × what the payload sends`. The discount is rounded ONCE, into the price — never
+  divided out at payload time, which is how a cent of drift between the customer's copy and the
+  stored invoice would have got in. The recorded saving is then re-derived from what the price
+  actually became, so a qty-3 line discounted by $10 reports the $9.99 that genuinely came off.
+
+- **The typed credit row still works** — it is now an input gesture rather than a dead end. A
+  negative line offers "Apply $40.00 to the line above", which folds it into a discount, inherits
+  its description as the reason, and leaves the total untouched to the cent. `validateInvoice`
+  blocks a leftover credit row naming that button, so the backend's 400 is never reached; the
+  ERR-181 translation stays only as a backstop.
+
+- **Three traps the exploration caught before they shipped.** (a) The discount could not reuse
+  `volumePercent`/`volumeSaving`/`volumeQuantity`: `onFormInput` wipes that trio on every price
+  keystroke and `applyQuoteToLines` wipes it again on the next quote, so a discount stored there
+  would be erased by the keystroke that created it. (b) The `linePrice >= 0` guard that stops the
+  volume ladder offering to overwrite a credit line stopped covering anything the moment discounts
+  existed — a discounted line is manual AND positive, so "Apply volume price" reappeared and one
+  click would silently undo the operator's discount. (c) `invoiceDocRows` hands its note callback a
+  built object, never the line, so our supplier cost is structurally unable to reach a customer's
+  invoice; widening that whitelist is the only way a new printable field gets through, and the test
+  now also asserts nothing cost-shaped is ever in it.
+
+- **A test of mine was passing for the wrong reason.** ERR-181's "the volume ladder never OFFERS to
+  overwrite a credit line" used a quote fixture with `position: 1` against a draft line at index 0.
+  The quote line matched no draft line, no badge was ever produced, and the assertion would have
+  passed whether or not the guard existed. Found only because the discount version of the same test
+  added a positive control. Both fixtures fixed, and the control kept.
+
+- **Verified**: 25 new tests in `tests/admin-invoice-discount-aug2026.test.js`; full suite
+  **4283 pass / 0 fail**; and proved end to end against production — an invoice with a discounted
+  line **saved (201)** and read back `unit_cost_excl_gst: 59`, `line_total_excl_gst: 59`,
+  `total_incl_gst: 67.85`, exactly the figures the document printed, then deleted (`DELETE` → 200).
+  A side benefit visible in the browser: the discounted price now reaches the free-shipping
+  calculation and correctly withdrew free shipping, which a credit row never could.
+
+- **Lesson**: a probe that proves an endpoint rejects something is not the same as proving the
+  feature can be expressed. Before shipping, ask what the *complete* successful path looks like and
+  verify that, not just the error you expect to handle. And when a constraint turns out to be
+  absolute, the answer is usually to change the shape of the data rather than to keep pushing on
+  the constraint.
+
+---
+
 ## ERR-182 — A custom product code was impossible, and the only way to find out was to be refused at Save — **RESOLVED (frontend)** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner asked whether products with a custom SKU can be
