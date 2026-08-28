@@ -41,6 +41,85 @@ describing the same incident.
 
 ---
 
+## ERR-182 — A custom product code was impossible, and the only way to find out was to be refused at Save — **RESOLVED (frontend)** (2026-08-28)
+
+- **Date**: 2026-08-28 · **Context**: The owner asked whether products with a custom SKU can be
+  added, and said they should be able to "enter anything within the invoice custom and it should
+  work."
+
+- **Two questions were tangled in one input box, with different answers.** Invoicing a
+  NON-CATALOGUE item already worked — leave Product Code blank, type a description; that is how
+  freight and labour lines have worked since ERR-071, and a control invoice saved last session
+  with `product_code: ''` on every line proves it. What was blocked was typing text INTO the code
+  box, and that is blocked by the API as well as the UI: `POST /api/admin/invoices` returns
+  `400 VALIDATION_FAILED` with `details.unresolved` for a code that is not a real `products.sku`.
+
+- **The block is load-bearing and stays.** The backend matches an invoice's line items **by SKU**
+  when it materialises the shadow order, so a code that matches nothing drops the line and leaves
+  a **paid order with zero line items** — ERR-071, invoices #3263/#3264 — which also resurfaces as
+  a "no items recorded" DANGER card on the dashboard. Removing the gate was never an option.
+
+- **The real defect was discoverability, not the rule.** The only way to learn that the box would
+  not take your text was to fill in the entire invoice and be refused at Save. The escape hatch
+  existed and was even written into the error ("or clear the code to keep it as a free-text
+  line"), but it arrived at the worst possible moment and read as a rejection rather than an
+  option.
+
+- **Fix — split the two jobs the box was doing.** `code` (→ `product_code`) is the catalogue
+  identity: a real SKU or empty, unchanged, still gated. `ref` (→ `product_ref`) is the operator's
+  own reference: free text, never resolved, printed in the Product Code column by
+  `invoiceDocRows()`. A custom line ships `product_code: ''`, so **nothing new can reach the SKU
+  matcher** — which is why `utils/line-codes.js` needed no functional change and
+  `admin-invoice-sku-integrity.test.js` still passes unmodified. Shipped with it: an **"Add custom
+  item"** button mirroring "Add shipping charge"; the catalogue asked on **focusout** rather than
+  at save, so an unknown code says so immediately and offers **"Keep as a custom item"** — one
+  click, which MOVES the typed text into `ref` instead of asking the operator to delete it; and a
+  cost box that says **"needs a cost"** rather than "auto", because nothing auto-fills a line with
+  no product behind it and a blank cost prints the invoice at 100% margin on the list (BF-047).
+
+- **Fail-soft, in both directions.** `resolveSkus` returns `null` when the catalogue is
+  unreachable, which is "we could not ask" and not "not a SKU" — nothing is recorded and nothing
+  is shown, so an outage of ours never accuses a perfectly good code. And the answers are keyed by
+  the CODE STRING, never by row index: rows are added, removed and reordered, and an answer pinned
+  to position 2 would end up describing whatever moved into position 2.
+
+- **The storage gap is MEASURED, not assumed.** A live read showed line items carry exactly seven
+  keys and no room for a reference, and unknown keys are dropped silently. Rather than hope, the
+  editor compares what it sent against the echo (`refEchoMissing`) and shows a standing warning
+  naming BF-051 when the key comes back missing. The check is by key PRESENCE, so a
+  present-but-null ref reads as "column exists, empty" — meaning the warning **stops appearing on
+  its own** the day the column ships, with no code change and nothing to remember to remove.
+
+- **Caught in the browser, not by a test**: `markCreditRow` carried its own second copy of the
+  cost-placeholder rules, so typing a price on a custom line silently reset the box from "needs a
+  cost" back to "auto" — the right answer overwritten by a stale copy of the same question. Both
+  now go through `costPlaceholder()`, pinned by a test that fails if any cost placeholder is set
+  anywhere else.
+
+- **Three source-pin tests had frozen an implementation rather than a rule** and were rewritten to
+  say what they meant: `resetQuoteState` clearing a flag (was pinned as "that assignment is the
+  last statement"), a freight line's cost placeholder (was pinned as the literal ternary, now the
+  answer), and — the important one — "draftFromInvoice must not re-derive `kind`", which banned
+  the word rather than the practice. A custom line IS restored from `product_ref`, and reading a
+  stored field is the opposite of guessing a marker from prose the operator can rewrite. The test
+  now pins that distinction.
+
+- **Verified**: 26 new tests in `tests/admin-invoice-custom-item-aug2026.test.js`; full suite
+  **4255 pass / 0 fail**; and driven in a real browser — typing `REFURB-01` into the code box
+  answered "'REFURB-01' isn't a catalogue SKU · Keep as a custom item" on the row within seconds,
+  one click moved it to the ref box, and the document printed
+  `REFURB-01 · Refurbished drum unit · 1 · $180.00` with the internal margin reading
+  `Cost of goods $120.00 · Gross profit $60.00 · 33.3%`. A real SKU typed on the next line still
+  resolved and priced normally.
+
+- **Lesson**: when one input is refused, ask what the field MEANS before asking whether the rule
+  can be relaxed. This box was doing two unrelated jobs — backend identity and customer-facing
+  display — and the request that looked like "remove a safety check" was really "these were never
+  the same field." Splitting them delivered the feature and left the ERR-071 guard completely
+  untouched.
+
+---
+
 ## ERR-181 — An invoice could not carry a credit line, and the row that *could* printed without ever being validated — **RESOLVED (frontend)** (2026-08-28)
 
 - **Date**: 2026-08-28 · **Context**: The owner asked to "allow negative values when I enter

@@ -20,6 +20,10 @@
  *   1. AN EMPTY CODE IS LEGAL. "Code or description" is how freight, labour and
  *      one-off lines are modelled (validateInvoice in pages/invoices.js). A line
  *      with no code is never an error — only a NON-EMPTY code that doesn't resolve.
+ *      A CUSTOM ITEM is this rule, not an exception to it: its `code` is empty
+ *      and the operator's own text lives in `ref`, a different field that this
+ *      module never looks at and that never becomes a product_code. That is why
+ *      "type anything" is safe — nothing new can reach the SKU matcher.
  *
  *   2. NEVER GUESS. `CTN258` is a prefix of both `CTN258BK` and `CTN258XLKCMY`.
  *      Auto-picking one would invoice the WRONG PRODUCT — worse than the bug we

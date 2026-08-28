@@ -432,6 +432,10 @@ const QUOTE_DEBOUNCE_MS = 400;   // brief suggests 300–500ms; budget is 60/min
 //                 applyQuoteToLines): we never claim a discount we did not give.
 const blankLine = () => ({
   code: '', description: '', qty: 1, unitCost: 0, supplierCost: null, costSource: 'auto',
+  // `ref` is the operator's OWN reference — what prints in the Product Code
+  // column. Always present so every line has the same shape; only a custom line
+  // ever fills it. See customLine() below for why it is not `code`.
+  ref: '',
   priceSource: PRICE_AUTO, volumePercent: null, volumeSaving: null, volumeQuantity: null,
 });
 
@@ -460,6 +464,46 @@ const shippingLine = () => ({
   description: SHIPPING_DESCRIPTION,
   priceSource: PRICE_MANUAL,
 });
+
+/**
+ * A CUSTOM ITEM: something real that isn't in the catalogue — a refurbished
+ * unit, a machine sourced in for one customer, a service.
+ *
+ * The whole design is one separation. That single box on a product row is doing
+ * two unrelated jobs, and conflating them is why "type your own code" looked
+ * impossible:
+ *
+ *   code (→ product_code)  WHICH CATALOGUE PRODUCT THIS IS. A real products.sku
+ *                          or empty, never anything else. The backend matches
+ *                          line items by SKU when it materialises the shadow
+ *                          order, and a code that matches nothing DROPS THE LINE
+ *                          — ERR-071, invoices #3263/#3264, paid orders with no
+ *                          line items. It also 400s the save outright now.
+ *   ref  (→ product_ref)   WHAT THE CUSTOMER SEES in the Product Code column.
+ *                          Free text, ours, never resolved against anything.
+ *
+ * So a custom line carries `code: ''` — the same empty product_code freight
+ * lines have used since ERR-071 — and prints its `ref` instead
+ * (invoiceDocRows). Nothing new can reach the SKU matcher.
+ *
+ * Like `kind:'shipping'`, `kind` itself is SESSION-ONLY and never in
+ * buildPayload. Unlike shipping, this one is recoverable on reopen WITHOUT
+ * guessing: `ref` is a real stored field, so a line that comes back carrying a
+ * product_ref IS a custom item. That is reading a value, not re-deriving a
+ * marker from prose the operator might rewrite (the BF-043 trap).
+ *
+ * priceSource MANUAL from birth: a custom item's price is authored, and the
+ * volume ladder must never re-price it.
+ */
+const customLine = () => ({
+  ...blankLine(),
+  kind: 'custom',
+  ref: '',
+  priceSource: PRICE_MANUAL,
+});
+
+/** Is this line a custom (non-catalogue) item? */
+const isCustomLine = (l) => l?.kind === 'custom';
 
 function freshDraft() {
   const L = window.LegalConfig || {};
@@ -538,6 +582,12 @@ function draftFromInvoice(rec) {
     unitCost: num(l.unit_cost_excl_gst ?? l.unitCost ?? 0),
     // Absent (backend hasn't shipped the column yet) => unknown, not 0.
     supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
+    // `kind` is session-only, but a custom item is RECOVERABLE without guessing:
+    // product_ref is a real stored field, so a line that comes back carrying one
+    // IS a custom item. Reading a value is not the re-derive-a-marker-from-prose
+    // trap BF-043 warns about — that would be sniffing the description text.
+    ref: l.product_ref ?? l.ref ?? '',
+    ...((l.product_ref ?? l.ref) ? { kind: 'custom' } : {}),
     costSource: l.cost_source || l.costSource || 'auto',
     // A SAVED price is operator-authored, full stop. Re-pricing it from today's
     // ladder would silently rewrite what a customer was already invoiced — so
@@ -565,7 +615,11 @@ const computeTotals = (d) => computeInvoiceTotals(d);
 // A line counts only if it has a product code or description. A content-less
 // default row (just qty=1) is dropped so we never POST a phantom blank line —
 // the backend would otherwise accept it and create a $0 line.
-const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || (l.description || '').trim());
+// A line the operator has actually put something in. `ref` counts: a custom item
+// identified only by the operator's own reference is a real line, and leaving it
+// out here would drop it from line_items while invoiceDocRows still PRINTED it —
+// the document and the stored invoice disagreeing, which is the ERR-181 shape.
+const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || (l.description || '').trim() || (l.ref || '').trim());
 
 // The optional "Deliver to" block is only surfaced (preview/PDF) when the operator
 // actually entered something in it.
@@ -640,7 +694,17 @@ function buildPayload(d) {
     // it persists/renders this on the server-side PDF.
     delivery: hasDelivery(d) ? { ...d.delivery, address: lines(d.delivery.address) } : null,
     line_items: realLines(d).map((l) => ({
+      // WHICH CATALOGUE PRODUCT THIS IS — a real products.sku or ''. Never the
+      // operator's own reference: the backend matches line items by SKU when it
+      // materialises the shadow order, and a code that matches nothing drops the
+      // line (ERR-071). `ref` below is the free-text half, and keeping them in
+      // separate fields is the whole safety argument for custom items.
       product_code: l.code,
+      // WHAT THE CUSTOMER SEES in the Product Code column. Opaque to the
+      // backend — never resolved, never validated. No column for it yet, so it
+      // is dropped on save until BF-051 lands; refEchoMissing() below detects
+      // exactly that and says so rather than letting it vanish quietly.
+      product_ref: (l.ref || '').trim() || null,
       description: l.description,
       quantity: num(l.qty),
       unit_cost_excl_gst: round2(num(l.unitCost)),          // SELL price — printed on the invoice
@@ -1387,6 +1451,13 @@ function resetQuoteState() {
   _freightChoice = null;
   _freightOwner = FREIGHT_OWNER_NONE;
   _shippingRowDirty = false;
+  // A statement about the LAST invoice's save, so it must not survive onto the
+  // next one. (`_codeChecks` deliberately DOES survive — "is this string a SKU"
+  // is a fact about the catalogue, not about a draft, so the answer is still
+  // true on the next invoice and re-asking would be wasted.)
+  _refNotStored = false;
+  clearTimeout(_codeCheckTimer);
+  _codeCheckQueue.clear();
 }
 
 /** Debounced re-quote. Safe to call from any edit handler. */
@@ -1608,6 +1679,7 @@ function bindEditorBody(drawer) {
   attachTopAutocompletes();
   refreshPreview();
   renderShippingRow();
+  renderRefWarning();   // survives a rebuildEditor() — the fact is about the save, not the DOM
   // First quote on open: populates the courier dropdown, and prices any line the
   // draft arrived with (fill-from-order, fill-from-quick-order) — those are all
   // 'manual', so it can only ever offer, never rewrite.
@@ -1645,8 +1717,13 @@ function setPath(obj, path, val) {
 function markCreditRow(priceEl, i) {
   const credit = num(_draft.lines[i]?.unitCost) < 0;
   priceEl.classList.toggle('inv-line__price--credit', credit);
+  // Through costPlaceholder(), never a second copy of its rules. This line used
+  // to carry its own two-case version, and the moment a third case existed
+  // (a custom item) it started overwriting the right answer with a stale one:
+  // typing a price on a custom line reset its cost box from "needs a cost" back
+  // to "auto". One question, one function.
   const cost = priceEl.closest('.inv-line')?.querySelector('[data-lfield="supplierCost"]');
-  if (cost) cost.placeholder = credit ? '0.00 \u2014 credit' : (_draft.lines[i]?.kind === 'shipping' ? 'courier cost' : 'auto');
+  if (cost) cost.placeholder = costPlaceholder(_draft.lines[i]);
 }
 
 function onFormInput(e) {
@@ -1711,6 +1788,70 @@ function onFormInput(e) {
 }
 
 /**
+ * "Add custom item" — invoice something that isn't in the catalogue.
+ *
+ * Mirrors addShippingLine() deliberately, including replacing a pristine default
+ * row rather than appending to it: one click on a fresh draft is a complete
+ * custom-item invoice, needing only the words and the figure.
+ *
+ * Focus lands on the DESCRIPTION, not the reference: the description is what
+ * identifies the item to the customer and is the only part that must be filled.
+ * The reference is optional — a custom line with no ref simply prints a blank
+ * code column, exactly like a freight line always has.
+ */
+function addCustomLine() {
+  const only = _draft.lines.length === 1 ? _draft.lines[0] : null;
+  const pristine = !!only && !(only.code || '').trim() && !(only.description || '').trim()
+    && !(only.ref || '').trim() && !num(only.unitCost);
+
+  if (pristine) _draft.lines[0] = customLine();
+  else _draft.lines.push(customLine());
+  const i = _draft.lines.length - 1;
+
+  renderLines();
+  refreshPreview();
+  focusLineField(i, 'description');
+}
+
+/**
+ * "Keep as a custom item" — the way out of a code that isn't a SKU.
+ *
+ * Before this existed the only exit was the last clause of skuLineMsg ("or clear
+ * the code to keep it as a free-text line"), which the operator met at SAVE,
+ * after filling in the whole invoice, as an error. The text they typed was
+ * something they meant; the only thing wrong with it was WHICH FIELD it was in.
+ * So move it rather than ask them to delete it: the typed code becomes the
+ * line's `ref`, `code` is cleared, and the row is a custom item.
+ *
+ * The price becomes MANUAL because nothing can quote a non-catalogue item, and
+ * any volume claim goes with it — a badge here would describe a ladder that was
+ * never consulted.
+ */
+function makeLineCustom(i) {
+  const l = _draft.lines[i];
+  if (!l) return;
+  const typed = (l.code || '').trim();
+  _draft.lines[i] = clearVolume({
+    ...l,
+    kind: 'custom',
+    ref: (l.ref || '').trim() || typed,
+    code: '',
+    priceSource: PRICE_MANUAL,
+  });
+  if (typed) _codeChecks.delete(typed.toLowerCase());
+  renderLines();
+  refreshPreview();
+  scheduleQuote();
+  focusLineField(i, (l.description || '').trim() ? 'ref' : 'description');
+}
+
+/** Put the caret in one line's field after a re-render. */
+function focusLineField(i, lfield) {
+  const el = _editorRefs?.drawer.body.querySelector(`[data-line="${i}"][data-lfield="${lfield}"]`);
+  if (el) { el.focus(); el.select?.(); }
+}
+
+/**
  * "Add shipping charge" — bill freight with no product behind it.
  *
  * A pristine default row is a placeholder, not content, so a brand-new invoice
@@ -1749,6 +1890,9 @@ function addShippingLine() {
  * quote had already withdrawn.
  */
 function onFormFocusOut(e) {
+  // A finished code is a code worth checking. focusout, not input: mid-typing,
+  // "CTN2" is not a wrong SKU, it is an unfinished one.
+  if (e.target?.dataset?.lfield === 'code') scheduleCodeCheck(e.target.value);
   if (!_shippingRowDirty) return;
   if (!e.target?.matches?.('[data-freight-option]')) return;
   // Focus has not landed yet at focusout time; renderShippingRow reads
@@ -1761,6 +1905,8 @@ function onFormClick(e) {
   if (!act) return;
   if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshPreview(); scheduleQuote(); }
   else if (act === 'add-shipping') { addShippingLine(); }
+  else if (act === 'add-custom') { addCustomLine(); }
+  else if (act === 'make-custom') { makeLineCustom(+e.target.closest('[data-line]').dataset.line); }
   else if (act === 'remove-line') {
     const i = +e.target.closest('[data-line]').dataset.line;
     _draft.lines.splice(i, 1);
@@ -1910,14 +2056,17 @@ function validateInvoice(d) {
   // A ROW WITH SOMETHING IN IT. The price clause is `!== 0`, never `> 0`: a
   // credit line's whole content may be its negative amount, and this predicate
   // has to agree with invoiceDocRows()' filter (utils/invoice-math.js), which
-  // tests plain truthiness and therefore already PRINTS such a row. While the
+  // tests plain truthiness and therefore already PRINTS such a row. `ref` is in
+  // the set for the same reason: a custom item carries no code, so its reference
+  // is the thing that makes the row real. All three predicates — this one,
+  // realLines() and invoiceDocRows() — must answer the same question. While the
   // two disagreed, a negative-only row went on the customer's document and into
   // preview_totals while being skipped here and dropped from line_items by
   // realLines() — unreachable only because the price could not be typed.
   // tests/admin-invoice-negative-line-aug2026.test.js pins them equal.
   const started = (d.lines || [])
     .map((l, i) => ({ l, i }))
-    .filter(({ l }) => (l.code || '').trim() || (l.description || '').trim()
+    .filter(({ l }) => (l.code || '').trim() || (l.description || '').trim() || (l.ref || '').trim()
       || num(l.qty) > 0 || num(l.unitCost) !== 0);   // ignore fully-blank phantom rows
 
   if (!started.length) {
@@ -2084,6 +2233,7 @@ async function persistDraft() {
     if (saved.invoice_number) _draft.invoice_number = saved.invoice_number;
     const st = serverTotals(saved);
     if (st) _draft._serverTotals = st;
+    noteRefEcho(payload, saved);
     // Push the rendered PDF up so the backend serves/emails the same document.
     try { await syncStoredPdf(); }
     // POST /:id/pdf is live (probed 401, 2026-07-31); this stays non-fatal because
@@ -2094,6 +2244,49 @@ async function persistDraft() {
     await flipSourceQuickOrder();
   }
   return saved;
+}
+
+/**
+ * Did the invoice service keep the operator's own references?
+ *
+ * `product_ref` has no column yet (live read of saved invoices, 2026-08-28: line
+ * items carry exactly product_code, description, quantity, unit_cost_excl_gst,
+ * line_total_excl_gst, supplier_cost_excl_gst, cost_source). Unknown keys are
+ * dropped silently, which is the precedent `delivery` and the volume fields
+ * already live with — but those are figures we can re-derive, and this is text
+ * the operator TYPED. Losing it without saying so would mean reopening the
+ * invoice next month and finding the code column blank, with no clue why.
+ *
+ * So: MEASURE, don't assume. Compare what we sent against what came back. This
+ * is the same UNKNOWN-≠-absent discipline used everywhere else here, and it
+ * SELF-HEALS — the day the column ships, the echo carries the key, this returns
+ * false and the warning stops appearing with no code change. Nothing to
+ * remember to remove. BF-051.
+ */
+function refEchoMissing(payload, saved) {
+  const sent = (payload?.line_items || []).some((li) => li.product_ref);
+  if (!sent) return false;
+  const back = saved?.line_items ?? saved?.invoice?.line_items;
+  if (!Array.isArray(back) || !back.length) return false;   // nothing echoed — can't tell
+  return !back.some((li) => li && Object.prototype.hasOwnProperty.call(li, 'product_ref'));
+}
+
+function noteRefEcho(payload, saved) {
+  _refNotStored = refEchoMissing(payload, saved);
+  renderRefWarning();
+}
+
+/**
+ * The warning lives on the FORM side, beside the line items it is about — not as
+ * a toast. A toast is gone in four seconds; this is a standing fact about the
+ * invoice the operator is looking at.
+ */
+function renderRefWarning() {
+  const host = _editorRefs?.drawer.body.querySelector('#inv-ref-warn');
+  if (!host) return;
+  host.innerHTML = _refNotStored
+    ? `<div class="inv-refwarn">${esc(REF_NOT_STORED)}</div>`
+    : '';
 }
 
 /**
@@ -2422,8 +2615,10 @@ function editorBodyHtml(d) {
         <div id="inv-lines"></div>
         ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price, can be typed over, and <strong>never appears on the invoice, the preview, the PDF or the customer’s email</strong>. It exists so invoiced sales carry a real COGS into your profit figures.</p>` : ''}
         <div id="inv-cogs"></div>
+        <div id="inv-ref-warn"></div>
         <div class="inv-lines-actions">
           <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-custom" title="Invoice something that isn't in the catalogue \u2014 a refurbished unit, a one-off machine, a service. You give it your own reference.">${icon('plus', 13, 13)} Add custom item</button>
           <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-shipping" title="Bill for freight without a product \u2014 NZ or international">${icon('plus', 13, 13)} Add shipping charge</button>
         </div>
         <div class="inv-freight" id="inv-freight">
@@ -2452,6 +2647,127 @@ function editorBodyHtml(d) {
 }
 
 /**
+ * What the "Our Cost" box says when it is empty.
+ *
+ * An empty box plus an "auto" placeholder is how "we don't know this cost yet"
+ * reads on a catalogue line — something WILL fill it. On a line with no product
+ * behind it, "auto" is a lie: nothing auto-fills, the backend's cost snapshot
+ * finds nothing, and the cost stays UNKNOWN. It matters beyond tidiness — the
+ * invoice LIST reports an unknown cost as $0, which prints the invoice at 100%
+ * margin (BF-047), and the operator typing the real figure here is the one
+ * thing that makes that number true. So each kind of line asks for what it
+ * actually needs.
+ */
+function costPlaceholder(l) {
+  if (num(l?.unitCost) < 0) return '0.00 \u2014 credit';   // a credit has no goods behind it
+  if (l?.kind === 'shipping') return 'courier cost';
+  if (isCustomLine(l)) return 'needs a cost';
+  return 'auto';
+}
+
+/**
+ * Codes we have already asked the catalogue about.
+ *
+ * Map<lowercased code, boolean> — true = a real products.sku, false = not one.
+ * Keyed by the CODE, never by the row index: rows are added, removed and
+ * reordered, and an answer pinned to position 2 would end up describing whatever
+ * moved into position 2. Keying by the string also means the same code typed on
+ * two lines costs one lookup, and re-typing a code we have seen costs none.
+ *
+ * A code the catalogue could not be ASKED about (resolveSkus → null, our own
+ * outage) is deliberately never recorded — see checkLineCode.
+ */
+const _codeChecks = new Map();
+// Set by noteRefEcho() when a save proves the backend dropped product_ref.
+let _refNotStored = false;
+const REF_NOT_STORED = 'Your refs print on this invoice and on the PDF the customer receives, '
+  + 'but the invoice service isn’t storing them yet (BF-051) — reopen this invoice and that '
+  + 'column will be blank.';
+let _codeCheckTimer = null;
+const _codeCheckQueue = new Set();
+
+/**
+ * Has this line's typed code been shown NOT to be a SKU?
+ *
+ * Three-state on purpose, and the third state is the important one: `undefined`
+ * means "not asked yet, or we could not ask", and must render nothing. Only a
+ * recorded `false` is a real no. Collapsing unknown into false would flag every
+ * code the instant it was typed, and flag all of them during an outage of ours.
+ */
+function codeIsKnownBad(l) {
+  const code = (l?.code || '').trim();
+  if (!code || isCustomLine(l)) return false;
+  return _codeChecks.get(code.toLowerCase()) === false;
+}
+
+/**
+ * Ask the catalogue about the codes the operator has finished typing.
+ *
+ * Batched through one animation-frame-ish debounce so tabbing down a freshly
+ * filled-in invoice is one request, not one per row. Uses the SAME resolveSkus()
+ * the save gate uses, so the answer here and the answer at save can never
+ * disagree — this is the same question, asked earlier.
+ *
+ * FAIL-SOFT, EXACTLY AS AT SAVE: resolveSkus returns null when the catalogue is
+ * unreachable, which is "we could not ask" and NOT "not a SKU". Nothing is
+ * recorded and nothing is shown; an outage of ours must never accuse the
+ * operator's perfectly good code of being wrong.
+ */
+function scheduleCodeCheck(code) {
+  const c = (code || '').trim();
+  if (!c || _codeChecks.has(c.toLowerCase())) return;
+  _codeCheckQueue.add(c);
+  clearTimeout(_codeCheckTimer);
+  _codeCheckTimer = setTimeout(runCodeChecks, 250);
+}
+
+async function runCodeChecks() {
+  const token = _editorToken;
+  const want = [..._codeCheckQueue];
+  _codeCheckQueue.clear();
+  if (!want.length) return;
+  const resolved = await resolveSkus(want);
+  if (!editorAlive(token)) return;              // drawer closed mid-lookup (ERR-045)
+  if (!resolved) return;                        // could not ask — record nothing
+  for (const c of want) {
+    const hit = resolved.get(c.toLowerCase());
+    _codeChecks.set(c.toLowerCase(), !!hit);
+    // Snap to the catalogue's spelling now rather than at save, so what the
+    // operator sees is what ships. Never touches the box they are typing in.
+    if (hit) {
+      _draft?.lines?.forEach((l) => {
+        if ((l.code || '').trim().toLowerCase() === c.toLowerCase()) l.code = hit;
+      });
+    }
+  }
+  repaintLineNotes();
+}
+
+/**
+ * Repaint every row's note strip in place.
+ *
+ * NOT renderLines(): the operator has just tabbed out of a code box and is
+ * almost certainly typing in the next one. Rebuilding the grid would destroy the
+ * input under their caret — ERR-179, the exact fault this editor already paid
+ * for once. Only the note element is replaced, and it holds no focusable state
+ * worth preserving.
+ */
+function repaintLineNotes() {
+  const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
+  if (!host) return;
+  host.querySelectorAll('.inv-line').forEach((row) => {
+    const i = +row.dataset.line;
+    const l = _draft?.lines?.[i];
+    if (!l) return;
+    const html = lineQuoteNote(l, i);
+    const existing = row.querySelector('.inv-line__note');
+    if (!html) { existing?.remove(); return; }
+    if (existing) existing.outerHTML = html;
+    else row.insertAdjacentHTML('beforeend', html);
+  });
+}
+
+/**
  * The strip under one line row: what the volume ladder did, or is offering.
  *
  * It is a full-width child of the `.inv-line` grid (`grid-column: 1/-1`), NOT a
@@ -2462,9 +2778,18 @@ function editorBodyHtml(d) {
  *   1. we applied a volume price (and what it was before);
  *   2. a volume price exists but the operator authored this one, so it is
  *      offered as a button and never taken;
- *   3. the product is inactive — worth a quiet flag when invoicing it.
- * An unresolved code says NOTHING here: the operator is very likely mid-SKU, and
- * the real gate is verifyLineCodes() at save.
+ *   3. the product is inactive — worth a quiet flag when invoicing it;
+ *   4. the typed code is NOT a SKU, with the way out attached;
+ *   5. this is a custom item, so the ladder was never consulted.
+ *
+ * (4) is answered from `_codeChecks`, which is only ever populated once the
+ * operator LEAVES the box. Mid-typing it says nothing — an operator three
+ * characters into a SKU does not need to be told it isn't one yet. What changed
+ * is that they no longer find out at SAVE, after filling in the whole invoice.
+ *
+ * (5) matters because silence is ambiguous. A custom line gets no volume price
+ * and contributes no weight to the courier quote, and "no badge" reads exactly
+ * like "no discount was available" unless you say which it is.
  */
 function lineQuoteNote(l, i) {
   const bits = [];
@@ -2486,6 +2811,18 @@ function lineQuoteNote(l, i) {
   const ql = quoteLineAt(i);
   if (ql && ql.resolved && !ql.isActive) {
     bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
+  }
+
+  // The code was typed, we asked the catalogue, and the answer was no. Offer the
+  // fix rather than only the complaint: the text is something the operator
+  // meant, and the only thing wrong with it is which FIELD it is in.
+  if (codeIsKnownBad(l)) {
+    bits.push(`<span class="inv-vol inv-vol--warn">“${esc((l.code || '').trim())}” isn’t a catalogue SKU</span>`);
+    bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="make-custom" data-line="${i}">Keep as a custom item</button>`);
+  }
+
+  if (isCustomLine(l)) {
+    bits.push(`<span class="inv-vol inv-vol--muted">Custom item — no volume price, and not counted in the parcel weight</span>`);
   }
 
   if (!bits.length) return '';
@@ -2600,21 +2937,34 @@ function renderLines() {
     const costCell = showCost ? `
       <input class="admin-input inv-line__cost${manual ? ' inv-line__cost--manual' : ''}"
              type="number" step="0.01" min="0" data-line="${i}" data-lfield="supplierCost"
-             value="${escA(l.supplierCost ?? '')}" placeholder="${num(l.unitCost) < 0 ? '0.00 \u2014 credit' : (shipCost ? 'courier cost' : 'auto')}"
-             title="${manual ? 'Manual override' : shipCost ? 'What the courier charged US for this freight — nothing auto-fills it, and leaving it blank reports this invoice at 100% margin' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
+             value="${escA(l.supplierCost ?? '')}" placeholder="${costPlaceholder(l)}"
+             title="${manual ? 'Manual override' : shipCost ? 'What the courier charged US for this freight — nothing auto-fills it, and leaving it blank reports this invoice at 100% margin' : isCustomLine(l) ? 'What this item cost US — there is no catalogue product behind it, so nothing auto-fills, and leaving it blank reports this invoice at 100% margin' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
     // A shipping line has no product behind it, so its code box is READ-ONLY.
     // That is protective, not cosmetic: a typed `FREIGHT` is not a real
     // products.sku, so verifyLineCodes() would refuse the save. It stays in the
     // DOM either way — markInvoiceErrors and unresolvedLineErrors select on it.
     const ship = l.kind === 'shipping';
+    const custom = isCustomLine(l);
+    // THREE shapes for one cell, because the box means three different things:
+    //   shipping — no product and no reference. READ-ONLY, protective not
+    //     cosmetic: a typed `FREIGHT` is not a products.sku and would be refused.
+    //   custom   — the operator's OWN reference (data-lfield="ref"). Free text,
+    //     never resolved, never sent as product_code. This is the box that makes
+    //     "type anything" true, and it is a DIFFERENT FIELD, which is the entire
+    //     reason it is safe.
+    //   product  — a real SKU, with the catalogue picker attached (.inv-ac).
+    // All three keep data-line/data-lfield: markInvoiceErrors and
+    // unresolvedLineErrors select on them.
     const codeCell = ship
       ? `<input class="admin-input inv-line__code--none" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="— no product —" readonly tabindex="-1" title="A shipping charge carries no product code — the description is what prints." autocomplete="off">`
-      : `<div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>`;
-    const descCell = ship
-      ? `<input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="What the freight is for" title="Free text — name any destination, NZ or international" autocomplete="off">`
+      : custom
+        ? `<input class="admin-input inv-line__ref" data-line="${i}" data-lfield="ref" value="${escA(l.ref || '')}" placeholder="Your ref" title="Your own reference — anything you like. It prints in the Product Code column of the customer's invoice and is never matched against the catalogue." autocomplete="off">`
+        : `<div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>`;
+    const descCell = (ship || custom)
+      ? `<input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="${ship ? 'What the freight is for' : 'What you are selling'}" title="${ship ? 'Free text — name any destination, NZ or international' : 'Free text — this is what identifies the item on the invoice'}" autocomplete="off">`
       : `<div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>`;
     return `
-    <div class="inv-line${showCost ? '' : ' inv-line--nocost'}${ship ? ' inv-line--shipping' : ''}" data-line="${i}">
+    <div class="inv-line${showCost ? '' : ' inv-line--nocost'}${ship ? ' inv-line--shipping' : ''}${custom ? ' inv-line--custom' : ''}" data-line="${i}">
       ${codeCell}
       ${descCell}
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
@@ -2625,9 +2975,10 @@ function renderLines() {
     </div>`;
   }).join('');
   // Product autocomplete (storefront-style, image dropdown) on both the code +
-  // description inputs of every PRODUCT line. A shipping row is deliberately
-  // excluded — it renders neither input inside `.inv-ac`, so typing
-  // "International freight — Australia" never opens a product dropdown.
+  // description inputs of every PRODUCT line. Shipping and CUSTOM rows are
+  // deliberately excluded — neither renders its inputs inside `.inv-ac`, so
+  // typing "International freight — Australia" or "Refurbished drum unit" never
+  // opens a product dropdown offering to turn it into a catalogue line.
   host.querySelectorAll('.inv-line').forEach((row) => {
     const i = +row.dataset.line;
     row.querySelectorAll('.inv-ac > input').forEach((input) => _acLineHandles.push(attachProductAutocomplete(input, {

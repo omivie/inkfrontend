@@ -5035,6 +5035,33 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 /* A hand-authored price, marked the same way a manual cost is — so "we filled
    this" and "you filled this" are told apart at a glance. */
 .inv-line__price--manual { border-color: var(--accent, #2f6fed); font-weight: 600; }
+/* A CUSTOM ITEM's reference box, in the Product Code column. It is NOT a SKU box
+   — it takes any text and is never matched against the catalogue — so it must
+   not look like the picker-backed one beside it. */
+.inv-line__ref {
+  font-style: italic;
+  border-style: dashed;
+}
+.inv-line__ref::placeholder { font-style: normal; }
+/* Nothing auto-fills a custom item's cost, and a blank one reports the invoice at
+   100% margin on the list (BF-047). Ask for it rather than sit there saying "auto". */
+.inv-line--custom .inv-line__cost:placeholder-shown {
+  border-color: var(--warning, #d97706);
+  background: rgba(217, 119, 6, 0.06);
+}
+.inv-vol--muted { color: var(--text-muted, #6b7280); background: transparent; }
+/* Standing fact about the invoice on screen, not a toast — see refEchoMissing. */
+.inv-refwarn {
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--warning, #d97706);
+  background: rgba(217, 119, 6, 0.08);
+  color: var(--text, #111827);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* A CREDIT LINE — a price below zero, money coming off. Deliberately loud: the
    difference between 99 and -99 is one character, and this row reduces what the
    customer is billed. Wins over --manual (a credit is always hand-authored). */

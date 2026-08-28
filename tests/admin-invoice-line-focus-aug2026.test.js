@@ -246,7 +246,11 @@ test('the deferred shipping row is actually paid off — a skip is not a pass', 
   assert.match(body, /_shippingRowDirty/);
   assert.match(body, /renderShippingRow\(\)/,
     'focusout must run the render that was postponed');
-  assert.match(INVOICES, /_shippingRowDirty\s*=\s*false;\s*\n?\s*\}/,
+  // Pinned as the INVARIANT (resetQuoteState clears the flag), not as "the
+  // assignment is the last statement in the function" — that shape broke the
+  // moment another field was added to the same reset, which is a change to
+  // neither the flag nor its meaning.
+  assert.match(fnBody(INVOICES, 'resetQuoteState'), /_shippingRowDirty\s*=\s*false;/,
     'resetQuoteState must clear the flag so it cannot survive into the next editor');
 });
 

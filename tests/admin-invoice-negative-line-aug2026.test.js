@@ -423,7 +423,10 @@ test('§7 the affordance keeps up with typing, WITHOUT re-rendering the row', ()
   // touches the existing nodes and writes no .value.
   const body = fnBody(INVOICES, 'function markCreditRow(');
   assert.match(body, /classList\.toggle\('inv-line__price--credit'/);
-  assert.match(body, /placeholder = credit/);
+  // The placeholder is kept in sync — pinned as THAT, not as the expression that
+  // produces it. It has since moved into costPlaceholder(), which owns all four
+  // cases; markCreditRow holding its own copy is exactly the bug ERR-182 found.
+  assert.match(body, /\.placeholder = costPlaceholder\(/);
   assert.doesNotMatch(body, /\.value\s*=/, 'never write a value into a box the operator is typing in');
   assert.match(fnBody(INVOICES, 'function onFormInput('), /markCreditRow\(t, i\)/);
 });

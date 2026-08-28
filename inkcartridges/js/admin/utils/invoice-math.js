@@ -265,7 +265,8 @@ export function countsForAnalytics(rec) {
  * @param {object} d
  * @param {{money:Function, note?:Function}} deps `note` maps a line to its
  *        sub-line string; omit it and the slot is always ''.
- * @returns {Array<[string,string,string,string,string]>}
+ * @returns {Array<[string,string,string,string,string]>} `[printedCode,
+ *        description, qty, lineTotal, note]` — printedCode is `ref || code`.
  */
 export function invoiceDocRows(d, { money, note }) {
   const noteFor = typeof note === 'function' ? note : () => '';
@@ -274,9 +275,13 @@ export function invoiceDocRows(d, { money, note }) {
     // than the COGS/payload predicate above: a line carrying only a qty or a price
     // still prints. Preserved as-is — a refactor is the wrong place to change what
     // the customer sees.
-    .filter((l) => l?.code || l?.description || num(l?.qty) || num(l?.unitCost))
+    .filter((l) => l?.code || l?.ref || l?.description || num(l?.qty) || num(l?.unitCost))
     .map((l) => [
-      l.code || '',
+      // THE PRINTED CODE, which is not the same thing as the catalogue identity.
+      // `ref` is the operator's own reference on a custom (non-catalogue) item;
+      // `code` is a real products.sku. The customer's column shows whichever the
+      // operator authored, and the backend's SKU matching only ever sees `code`.
+      l.ref || l.code || '',
       l.description || '',
       String(num(l.qty)),
       money(lineRevenueExGst(l)),

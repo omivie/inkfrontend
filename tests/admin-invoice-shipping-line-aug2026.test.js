@@ -244,10 +244,25 @@ test('§3 line_items is still an explicit whitelist, not a spread', () => {
     'spreading the line would leak `kind` — and every future editor-only field — to the backend');
 });
 
-test('§3 draftFromInvoice does not re-derive `kind`', () => {
+test('§3 draftFromInvoice never re-derives `kind` from the DESCRIPTION', () => {
+  // The rule is not "the word kind may not appear here" — it is that the marker
+  // must never be GUESSED from prose the operator is free to rewrite ("Freight &
+  // delivery" → "Air freight — Sydney" and the guess stops matching). That is the
+  // BF-043 trap.
+  //
+  // A custom item is restored from `product_ref`, which is a real stored FIELD,
+  // not a sniff of the description — reading a value the backend gave us is the
+  // opposite of guessing. So the pin is on the source of the inference.
   const body = fnBody(CODE, 'function draftFromInvoice(');
-  assert.doesNotMatch(body, /kind:/,
-    'guessing the marker back from a description the operator rewrote is the BF-043 trap');
+  const kindLines = body.split('\n').filter((ln) => /\bkind:/.test(ln));
+  for (const ln of kindLines) {
+    assert.doesNotMatch(ln, /description/i,
+      `kind must never be inferred from the description text — found: ${ln.trim()}`);
+    assert.match(ln, /product_ref|\bref\b/,
+      `kind may only be restored from a stored field — found: ${ln.trim()}`);
+  }
+  assert.doesNotMatch(body, /SHIPPING_DESCRIPTION/,
+    'a shipping line is deliberately NOT recoverable — matching its description back is the trap');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,10 +332,17 @@ test('§5 the cost box asks for the courier cost instead of promising "auto"', (
   // 100.0% margin. normalizeInvoice prefers those server fields BY PRESENCE, so
   // the frontend cannot honestly override them — BF-046. What it CAN do is stop
   // telling the operator a freight cost auto-fills, because nothing fills it.
+  // Pinned as the ANSWER, not as the expression that produces it: the branch has
+  // since moved into costPlaceholder() and grown two more cases (a credit line,
+  // a custom item), none of which changes what a freight line must say.
   const body = fnBody(CODE, 'function renderLines(');
   assert.match(body, /const shipCost = l\.kind === 'shipping'/);
-  assert.match(body, /shipCost \? 'courier cost' : 'auto'/,
+  const ph = fnBody(CODE, 'function costPlaceholder(');
+  assert.match(ph, /'shipping'\) return 'courier cost'/,
     '"auto" on a freight line promises a snapshot that finds no product and never happens');
+  assert.match(ph, /return 'auto'/, 'a catalogue line still says auto — something really does fill it');
+  assert.match(body, /placeholder="\$\{costPlaceholder\(l\)\}"/,
+    'the cost box must actually use it');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
