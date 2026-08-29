@@ -2250,37 +2250,27 @@ function validateInvoice(d) {
     });
   }
 
-  // THE ONLY MONEY THIS EDITOR STILL REFUSES, AND IT IS NOT OUR RULE.
+  // NO MONEY REFUSAL LIVES HERE ANY MORE, AND NONE SHOULD BE ADDED BACK.
   //
-  // A document that owes the customer money is a credit note, and it ought to be
-  // issuable. The backend's BF-050 reply said it was — "the backend accepts a
-  // negative-total document… so validateInvoice in the editor stays the guard,
-  // and it is the only one. Please keep it." Measured against production on
-  // 2026-08-29, it is not: exactly $0.00 saves (201), one cent below returns
-  // **500 `Failed to create invoice`**, with nothing in it an operator could act
-  // on. Negative prices, negative quantities and negative freight are each fine
-  // on their own — it is the document total alone. BF-052, and
-  // readfirst/invoice-negative-total-backend-handoff-aug2026.md is the ask.
+  // A document that owes the customer money is a credit note, and it is now
+  // issuable end to end. The below-zero guard that stood here was never our
+  // policy — it existed only because a negative total 500'd server-side (BF-052,
+  // measured 2026-08-29). That is fixed: migration 139 scoped the underlying
+  // `orders.positive_amounts` CHECK to real web orders, so an invoice-channel
+  // document may carry a negative subtotal, GST and total. Re-verified against
+  // production on 2026-08-30 by putting the exact refused document through the
+  // real create RPC — it saves. Invoice 3276 (-$41.49) is live proof.
   //
-  // So this guard is the only thing standing between the operator and an opaque
-  // server error. DO NOT RELAX IT until that 500 is a 201 or a 400 — and when it
-  // is, delete the whole block rather than softening the message. $0 stays
-  // legal: "you already paid for all of it" is the point of the feature.
+  // Its own comment set the condition for its removal — "delete the whole block
+  // rather than softening the message" once the 500 became a 201 — and this is
+  // that. Do not re-add a `total >= 0` check: it would block the one document the
+  // feature exists to produce.
   //
-  // The message says whose limit it is and names the shape that DOES work today,
-  // because a refusal the operator cannot route around is just a wall. It points
-  // at the first credit line, which is the box that has to change.
-  const total = computeTotals(d).total;
-  if (total < 0) {
-    const firstCredit = (d.lines || []).findIndex((l) => num(l.unitCost) < 0);
-    errs.push({
-      line: firstCredit === -1 ? 0 : firstCredit,
-      lfield: 'unitCost',
-      msg: `This invoice totals ${money(total)}. The invoice service cannot store a document below `
-        + `$0.00 yet — it fails with a server error (BF-052). Bring it to $0.00 or above, or book `
-        + `the credit as a return instead: the original product code with a negative quantity.`,
-    });
-  }
+  // The 201 was measured here before this block came out, not taken on trust:
+  // POSTing the exact refused document (one `1 × -36.08` line, no freight) to
+  // /api/admin/invoices returned **201** and stored it UNFLOORED — subtotal
+  // -36.08, GST -5.41, total -41.49, line_total -36.08 — then deleted cleanly.
+  // Full record and method: ERR-186 in errors.md.
   return errs;
 }
 

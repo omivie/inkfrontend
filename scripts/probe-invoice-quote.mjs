@@ -27,11 +27,13 @@
  * Every probe below sends line items for products that already exist and asks for
  * a price. Nothing is created, nothing is invoiced, nothing is emailed.
  *
- * WHAT IS DELIBERATELY *NOT* PROBED HERE: BF-052, the 500 on a below-zero invoice
- * TOTAL. Proving that needs a POST /api/admin/invoices — a WRITE — and this script
- * has no write path by design (see above). It is measured by hand instead, and the
- * repro is in readfirst/invoice-negative-total-backend-handoff-aug2026.md. Do not
- * be tempted to add it: a probe that creates invoices is a probe nobody dares run.
+ * WHAT IS DELIBERATELY *NOT* PROBED HERE: a below-zero invoice TOTAL. Proving
+ * anything about it needs a POST /api/admin/invoices — a WRITE — and this script
+ * has no write path by design (see above). It is measured by hand instead. That
+ * was BF-052, the 500 on a below-zero total; it CLOSED on 2026-08-30 and the
+ * editor's guard came out with it — the measurement, the method and the repro are
+ * recorded in ERR-186 in errors.md. Do not be tempted to add it here: a probe that
+ * creates invoices is a probe nobody dares run.
  *
  * USAGE
  *   npm run probe:invoice-quote            # human-readable

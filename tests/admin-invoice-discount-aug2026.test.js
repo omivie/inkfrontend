@@ -19,8 +19,9 @@
  * "the discount comes off the line" remains the shape the service stores, and it
  * is the shape that reaches the free-shipping calculation. What is gone is the
  * NECESSITY, and with it the two caps that used to refuse a discount larger than
- * its line — see §2 and §3. Only the document TOTAL is still refused, and that
- * refusal lives in validateInvoice, not here (BF-052).
+ * its line — see §2 and §3. Nothing about the AMOUNT is refused anywhere now: the
+ * below-zero document total was the last one, and it came out of validateInvoice
+ * on 2026-08-30 when the server started accepting it (BF-052, ERR-186).
  *
  * THE INVARIANT THIS WHOLE DESIGN RESTS ON, pinned in §1: for every line,
  *

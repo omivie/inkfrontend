@@ -41,6 +41,28 @@ describing the same incident.
 
 ---
 
+## ERR-186 — The below-zero guard outlived the 500 it was guarding — **RESOLVED** (2026-08-30)
+
+- **Date**: 2026-08-30 · **Context**: The backend dev sent a patch (`invoice-below-zero-guard-FE-remove-guard.patch`) deleting `validateInvoice`'s below-zero total guard, on the grounds that BF-052 was fixed — "migration 139 scoped the underlying `orders.positive_amounts` CHECK to real web orders" — and citing invoice 3276 (`-$41.49`) as live proof. The guard's own comment had set the condition for its removal in advance: *"DO NOT RELAX IT until that 500 is a 201 or a 400 — and when it is, delete the whole block rather than softening the message."* This is that, but only after the 201 was measured here.
+
+- **The cited proof was real and proved the wrong thing.** A read-only `GET /api/admin/invoices` found exactly one negative-total document on production, and it was the one named: invoice **3276**, subtotal `-36.08`, GST `-5.41`, total `-41.49` — the owner's ERR-185 screenshot, stored. That settles that the database will *hold* a below-zero document, so the CHECK constraint really is scoped. But its `created_at` is **2026-08-28**, a day *before* the fix the patch describes, which makes the likeliest history "created positive, later **updated** negative". An UPDATE exercises the constraint; it does not exercise **create** — and create is the whole of what the guard stood in front of, because a credit note written from scratch is a `POST`. **A citation is not a measurement: the row was genuine, and it was evidence for a different claim than the one being made.**
+
+- **So the create path was measured directly, and it passes.** `POST /api/admin/invoices` with the exact refused document (one `1 × -36.08` line, freight 0) returned **201** — not the 500 of two days earlier — and stored it **unfloored**: `subtotal_excl_gst: -36.08`, `gst_amount: -5.41`, `total_incl_gst: -41.49`, `line_total_excl_gst: -36.08`. Then deleted cleanly (`DELETE` → 200 `{deleted:true}`, `GET` → 404), as ERR-183's control did. BF-052 is genuinely closed, and the guard came out. `$0.00` stays legal, as it always was.
+
+- **Note what could NOT be verified, so it is not mistaken for verified.** `sql/migrations/` does not exist in this repo; `positive_amounts`, `139_` and any mention of an `orders` CHECK constraint appear **nowhere** in it. Migration 139 lives in the backend repo and is unverifiable from here. The measured 201 stands in for it — which is the right way round: *the behaviour is the claim, and the migration is only an explanation of it.*
+
+- **The patch was correct in substance and incomplete in bookkeeping.** Its code change was right, its `APP_VERSION` bump was necessary (pages load via `` import(`./pages/${name}.js?v=${APP_VERSION}`) ``, so without it live browsers keep the cached build and the guard survives the deploy), and inverting the §4 tests rather than deleting them was the right instinct — the new one asserts the block is **gone from source**, not merely softened. Three things it left: its tombstone comment pointed at `ink_backend/docs/…`, **a path in the backend repo that no reader of this one can open** (now ERR-186 here); `npm run build` was not run, and without restamping the admin HTML the browser never re-fetches `app.js` itself, so the bumped `APP_VERSION` never takes effect — *the exact failure its own note warned about, one level up*; and five records still asserting BF-052 was open.
+
+- **Cleared, because a workaround that outlives its cause reads as a live limitation** (ERR-184/185's lesson, third time): the `…negative-line…test.js` header still said "WHAT IS STILL REFUSED IS THE DOCUMENT TOTAL"; `probe-invoice-quote.mjs`'s header still described an open 500; `admin-invoice-discount-aug2026.test.js` still cited it; the handoff's acceptance checklist was unticked; and the BF-052 todo was open. **One coupling to watch**: `…negative-line…test.js` §6 asserts the *probe's source* names where the below-zero case is measured instead — the probe has no write path by design, so its silence would otherwise read as coverage. That assertion was repointed at ERR-186 alongside the probe header, not deleted; the pairing is the point.
+
+- **Still open, and deliberately left open**: the invoice **LIST** floors a negative `supplier_cost_excl_gst` while the **detail** endpoint stores it — visible on the very invoice used as evidence here (`cost_excl_gst: 0` on the list row). Same money, two surfaces, silent disagreement; ERR-068 one endpoint over. It was filed inside the BF-052 handoff and is now the only thing left of it.
+
+- **Verified**: full suite **4309 tests, 4289 pass, 1 fail** — the one failure is `no-ghost-files.test.js` flagging a local `.DS_Store`, pre-existing and unrelated (identical before the change). `tests/admin-invoice-negative-line-aug2026.test.js` **43/43**. `npm run probe:invoice-quote` green. The live create-and-delete above. And the credit note driven through the real editor.
+
+- **Lesson**: removing a guard needs the same standard of proof that installing it did — a measured server response, not a report of one. The patch's evidence was truthful and its conclusion was right, and it still would not have justified the removal on its own, because the artifact it pointed at answered a neighbouring question. **When a fix is dated after the proof it cites, the proof is about something else.**
+
+---
+
 ## ERR-185 — Four refusals on the invoice editor, three of them ours, one of them silent — **RESOLVED (frontend)** (2026-08-29)
 
 - **Date**: 2026-08-29 · **Context**: The owner sent a screenshot of invoice 3276 — one
@@ -49,7 +71,7 @@ describing the same incident.
   work. Most of that had landed the day before (ERR-184 / BF-050). What was left was four
   refusals, and only one of them belonged to the server.
 
-- **The one that is not ours, and stays.** A below-zero invoice TOTAL. Exactly `$0.00` saves;
+- **The one that is not ours, and stays** — *superseded 2026-08-30: it did not stay. The server started accepting a below-zero total and the guard was deleted; see **ERR-186**. Everything below describes why it stood while it stood.* A below-zero invoice TOTAL. Exactly `$0.00` saves;
   one cent below returns **500 `Failed to create invoice`** (BF-052, measured 2026-08-29). The
   guard in `validateInvoice` is the only thing between the operator and an opaque crash, so it
   keeps standing — but its message was rewritten, because it was reading as a rule of ours about

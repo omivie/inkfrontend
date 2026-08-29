@@ -33,12 +33,14 @@
  *      quoteRequestBody sends negatives, and the "excluded from the threshold"
  *      warning is gone with the constraint that caused it.
  *
- *   5. WHAT IS STILL REFUSED IS THE DOCUMENT TOTAL, AND IT IS NOT OUR RULE.
- *      Exactly $0.00 saves (201); one cent below returns 500 `Failed to create
- *      invoice` (BF-052, handoff at
- *      readfirst/invoice-negative-total-backend-handoff-aug2026.md). The guard in
- *      validateInvoice is the only thing between the operator and that 500, so it
- *      stays — and §4 below is where that is written down.
+ *   5. NOTHING IS REFUSED ON AMOUNT ANY MORE — A BELOW-ZERO TOTAL INCLUDED.
+ *      A below-zero document used to return 500 `Failed to create invoice`
+ *      (BF-052), and validateInvoice guarded it so the operator met a refusal
+ *      instead of an opaque crash. That closed on 2026-08-30 and the guard came
+ *      out with it (ERR-186): the exact refused document POSTs 201 and stores
+ *      UNFLOORED (subtotal -36.08, GST -5.41, total -41.49). §4 below is now the
+ *      record that the editor must NOT refuse it — inverted, not deleted, because
+ *      the behaviour is still worth pinning, the other way round.
  *
  *   6. A COST THE OPERATOR TYPED IS THEIRS, SIGN INCLUDED. manualCostOrNull
  *      reads the box; costOrNull still refuses a negative for DERIVED costs, and
@@ -315,23 +317,16 @@ test('§3 a total that rounds to nothing is $0.00, never -$0.00', () => {
   assert.equal(computeInvoiceTotals({ lines: [{ qty: 1, unitCost: -10 }], freight: 0 }).total, -11.5);
 });
 
-// ─── 4. An invoice may not go below zero ─────────────────────────────────────
+// ─── 4. An invoice MAY go below zero — it is a credit note ───────────────────
 
-test('§4 a below-zero total is refused, and the message says WHOSE limit it is', () => {
-  const errs = validateInvoice(draftWith([GOODS, { code: '', description: 'Credit', qty: 1, unitCost: -200 }]));
-  const neg = errs.filter((e) => /below \$0\.00/.test(e.msg));
-  assert.equal(neg.length, 1);
-  assert.equal(neg[0].line, 1, 'it points at the credit line, which is the box that must change');
-  assert.equal(neg[0].lfield, 'unitCost');
-  // Three things the operator needs and cannot get anywhere else: the number, who
-  // is refusing it, and what to do instead. A refusal with no route around it is
-  // just a wall — and this one is not our policy, so it must not read as one.
-  assert.match(neg[0].msg, /116\.15/, 'the total it actually computed');
-  assert.match(neg[0].msg, /invoice service|server error/, 'that the SERVER is the one refusing');
-  assert.match(neg[0].msg, /BF-052/, 'the ticket, so it can be chased');
-  assert.match(neg[0].msg, /negative quantity/, 'the shape that DOES work today');
-  assert.doesNotMatch(neg[0].msg, /exceed the charges/,
-    'the old wording read as a rule of ours about credit lines');
+test('§4 a below-zero total is ACCEPTED — a credit note is a document, not an error', () => {
+  // The exact draft that used to be refused. BF-052 is closed: migration 139
+  // scoped the server's `orders.positive_amounts` CHECK to real web orders, so an
+  // invoice-channel document may go negative. Verified end to end 2026-08-30.
+  const d = draftWith([GOODS, { code: '', description: 'Credit', qty: 1, unitCost: -200 }]);
+  assert.deepEqual(plain(validateInvoice(d)), [],
+    'the editor must not refuse the one document the credit feature exists to produce');
+  assert.equal(computeInvoiceTotals(d).total, -116.15, 'and the total is genuinely below zero');
 });
 
 test('§4 a $0 invoice is LEGAL — "you already paid for all of it"', () => {
@@ -343,28 +338,23 @@ test('§4 a $0 invoice is LEGAL — "you already paid for all of it"', () => {
   assert.equal(computeInvoiceTotals(d).total, 0);
 });
 
-test('§4 the below-zero guard is the ONLY guard, and it is load-bearing', () => {
-  // Now the single most important rule in this file. The backend deliberately
-  // did NOT add a total >= 0 check ("validateInvoice in the editor stays the
-  // guard, and it is the only one — please keep it") — but measured on
-  // 2026-08-29, a negative-total invoice does not merely pass, it **500s**:
-  // `Failed to create invoice`, with nothing an operator could act on. Exactly
-  // $0 saves fine; one cent below does not. BF-052.
-  //
-  // So this guard is the only thing standing between the operator and an opaque
-  // server error. Do not relax it until that 500 is a 201 or a 400 — the ask is
-  // readfirst/invoice-negative-total-backend-handoff-aug2026.md, and when it
-  // lands, DELETE the block rather than softening the message.
-  //
-  // It is also, now, the LAST money refusal in this editor. Zero quantities,
-  // zero prices, negative prices, negative quantities, negative freight and a
-  // negative typed cost are all accepted; if a second one ever reappears beside
-  // this, it needs the same standard of proof — a measured server refusal.
-  const below = draftWith([{ ...GOODS, unitCost: -0.01 }]);
-  assert.equal(validateInvoice(below).filter((e) => /below \$0\.00/.test(e.msg)).length, 1);
-  assert.equal(validateInvoice(draftWith([GOODS])).length, 0, 'and never fires on an ordinary invoice');
-  assert.match(INVOICES, /readfirst\/invoice-negative-total-backend-handoff-aug2026\.md/,
-    'the source says where the ask lives, so the guard can be removed by whoever sees it land');
+test('§4 there is NO money refusal left in this editor, at any sign', () => {
+  // Now the single most important rule in this file, inverted. Every money value
+  // is typeable: zero quantities, zero prices, negative prices, negative
+  // quantities, negative freight, a negative typed cost — and now a negative
+  // DOCUMENT TOTAL. If a refusal ever reappears here it needs the same standard of
+  // proof the last one was held to: a MEASURED server refusal, not a policy
+  // opinion. The last one outlived its 500 by a day and blocked a real credit note
+  // (invoice 3276) after the server had started accepting it.
+  const oneCentBelow = draftWith([{ ...GOODS, unitCost: -0.01 }]);
+  assert.deepEqual(plain(validateInvoice(oneCentBelow)), [], 'one cent below zero is legal');
+  assert.equal(validateInvoice(draftWith([GOODS])).length, 0, 'and an ordinary invoice is untouched');
+
+  // The guard is GONE from the source, not merely softened — a re-added
+  // `total < 0` check would reintroduce the bug wholesale.
+  assert.doesNotMatch(INVOICES, /if \(total < 0\)/, 'no below-zero refusal may return');
+  assert.doesNotMatch(INVOICES, /cannot store a document below/,
+    'and no operator-facing message may still cite the fixed server error');
 });
 
 test('§4 a NEGATIVE freight is a freight CREDIT, and prints as one', () => {
@@ -521,9 +511,11 @@ test('§6 the probe is what proves that, and it is still there', () => {
   // line the document says is free, and free shipping would be decided on it.
   assert.match(PROBE, /6f\./, 'and the ZERO-quantity case');
   assert.match(PROBE, /quantity: 0, unit_cost_excl_gst: 80\.00/);
-  // BF-052 is deliberately absent: proving a 500 on a below-zero TOTAL needs a
-  // POST /api/admin/invoices, and this probe has no write path by design.
-  assert.match(PROBE, /readfirst\/invoice-negative-total-backend-handoff-aug2026\.md/,
+  // The below-zero TOTAL is deliberately absent: proving anything about it needs
+  // a POST /api/admin/invoices, and this probe has no write path by design. It
+  // was measured by hand instead (BF-052, closed 2026-08-30), so the probe has to
+  // keep SAYING where — otherwise its silence reads as coverage.
+  assert.match(PROBE, /ERR-186 in errors\.md/,
     'the probe says where that one is measured instead, so its absence is not read as coverage');
 });
 
