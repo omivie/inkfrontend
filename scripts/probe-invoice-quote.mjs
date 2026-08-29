@@ -27,6 +27,12 @@
  * Every probe below sends line items for products that already exist and asks for
  * a price. Nothing is created, nothing is invoiced, nothing is emailed.
  *
+ * WHAT IS DELIBERATELY *NOT* PROBED HERE: BF-052, the 500 on a below-zero invoice
+ * TOTAL. Proving that needs a POST /api/admin/invoices — a WRITE — and this script
+ * has no write path by design (see above). It is measured by hand instead, and the
+ * repro is in readfirst/invoice-negative-total-backend-handoff-aug2026.md. Do not
+ * be tempted to add it: a probe that creates invoices is a probe nobody dares run.
+ *
  * USAGE
  *   npm run probe:invoice-quote            # human-readable
  *   npm run probe:invoice-quote -- --json  # machine-readable
@@ -410,6 +416,41 @@ async function run(token) {
   } else {
     ok('6e. a negative quantity (a return) is accepted',
       `-1 \u00d7 60.00 ex \u2192 goods ${ret.data?.shipping?.goods_total_incl_gst} incl`);
+  }
+
+  // ── 6f. A ZERO QUANTITY is accepted, and contributes nothing ─────────────
+  // The editor stopped refusing `qty: 0` on 2026-08-29 — it was our rule alone,
+  // and it reported a refused figure with the same words a blank box gets. A
+  // zero-quantity line is a row the customer should READ but not be charged for.
+  // Two claims here, and the second is the one worth measuring: that it is
+  // ACCEPTED, and that it adds NOTHING to the goods total. A backend that quietly
+  // read 0 as "unspecified" and substituted 1 would charge for it, and the only
+  // symptom would be a free-shipping decision made on money nobody owes.
+  const zeroQty = await quote(token, {
+    line_items: [
+      { product_code: '', description: 'Goods', quantity: 1, unit_cost_excl_gst: 100.00 },
+      { product_code: '', description: 'Backordered \u2014 not charged', quantity: 0, unit_cost_excl_gst: 80.00 },
+    ],
+  });
+  if (zeroQty.status !== 200) {
+    bad('6f. a zero quantity is accepted',
+      `HTTP ${zeroQty.status}: ${zeroQty.json?.error?.details?.[0]?.message || ''}. validateInvoice no `
+      + 'longer refuses qty 0, so this floor coming back surfaces as an unexplained save failure.');
+  } else {
+    const goods = zeroQty.data?.shipping?.goods_total_incl_gst;
+    if (goods == null) {
+      bad('6f. the zero-quantity quote reports a goods total', `goods_total_incl_gst was ${goods}`);
+    } else if (Math.abs(goods - 115.00) > 0.02) {
+      bad('6f. a zero-quantity line contributes NOTHING to the goods total',
+        `sent 1 \u00d7 100.00 ex and 0 \u00d7 80.00 ex, expected ~115.00 incl, got ${goods}. `
+        + (Math.abs(goods - 207.00) <= 0.02
+          ? 'That is both lines at qty 1 \u2014 a quantity of 0 is being read as "unspecified" and '
+            + 'substituted, so the customer is charged for a line the document says is free.'
+          : 'The basis has moved; do not trust the freight autofill until this is understood.'));
+    } else {
+      ok('6f. a zero-quantity line is accepted and adds nothing',
+        `1 \u00d7 100.00 ex + 0 \u00d7 80.00 ex \u2192 ${goods} incl`);
+    }
   }
 
   // ── 7. A garbage code is a 200, not a 400 ────────────────────────────────

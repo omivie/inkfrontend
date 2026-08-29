@@ -26,11 +26,23 @@
  *      ABSENCE as zero. costOrNull's "empty box = UNKNOWN" invariant is
  *      untouched for product lines and is re-pinned below to prove it.
  *
- *   4. THE BACKEND WILL NOT QUOTE A CREDIT. `unit_cost_excl_gst` is validated
- *      server-side as `>= 0` and one negative 400s the whole request
- *      (npm run probe:invoice-quote §6d), so quoteRequestBody omits it — and the
- *      freight row has to SAY the goods total excludes it, because an omission
- *      that changes a free-shipping decision must never be silent.
+ *   4. THE BACKEND QUOTES AND STORES A CREDIT — since BF-050, 2026-08-29.
+ *      `unit_cost_excl_gst`, `quantity`, `supplier_cost_excl_gst` and
+ *      `freight_excl_gst` all take any sign and zero, on create, update and
+ *      /quote, and a credit SUBTRACTS from goods_total_incl_gst (probe §6d/§6e).
+ *      quoteRequestBody sends negatives, and the "excluded from the threshold"
+ *      warning is gone with the constraint that caused it.
+ *
+ *   5. WHAT IS STILL REFUSED IS THE DOCUMENT TOTAL, AND IT IS NOT OUR RULE.
+ *      Exactly $0.00 saves (201); one cent below returns 500 `Failed to create
+ *      invoice` (BF-052, handoff at
+ *      readfirst/invoice-negative-total-backend-handoff-aug2026.md). The guard in
+ *      validateInvoice is the only thing between the operator and that 500, so it
+ *      stays — and §4 below is where that is written down.
+ *
+ *   6. A COST THE OPERATOR TYPED IS THEIRS, SIGN INCLUDED. manualCostOrNull
+ *      reads the box; costOrNull still refuses a negative for DERIVED costs, and
+ *      that split is re-pinned below so neither half drifts into the other.
  *
  * Run with: node --test tests/admin-invoice-negative-line-aug2026.test.js
  */
@@ -73,7 +85,7 @@ for (const f of ['profitability.js', 'invoice-math.js', 'invoice-quote.js']) {
   vm.runInContext(`(function () {\n${src}\n})()`, ctx, { filename: f });
 }
 const {
-  costOrNull, lineSupplierCost, lineCostExGst, computeInvoiceTotals, computeInvoiceCogs,
+  costOrNull, manualCostOrNull, lineSupplierCost, lineCostExGst, computeInvoiceTotals, computeInvoiceCogs,
   computeInvoiceProfit, normalizeInvoice, invoiceDocRows,
   quoteRequestBody, applyQuoteToLines, PRICE_MANUAL,
 } = sandbox;
@@ -167,11 +179,40 @@ test('§1 a NEGATIVE quantity is legal — it is how a RETURN is modelled', () =
   assert.equal(computeInvoiceCogs({ lines: [ret] }).costExGst, -40, 'the cost reverses too — that is the whole point');
 });
 
-test('§1 a ZERO quantity is still refused — a line that moves nothing is unfinished', () => {
-  const errs = validateInvoice(draftWith([{ ...GOODS, qty: 0 }])).filter((e) => e.lfield === 'qty');
-  assert.equal(errs.length, 1);
-  assert.deepEqual(plain(validateInvoice(draftWith([{ ...GOODS, qty: -1 }])).filter((e) => e.lfield === 'qty')), [],
-    'but a negative one is not');
+test('§1 a QUANTITY is a number of either sign, and ZERO is one of them', () => {
+  // Zero used to be refused, and it was OUR rule alone: the invoice service takes
+  // `quantity: 0` (BF-050, verified live 2026-08-29). It is a real shape — a line
+  // the customer should READ but not be charged for. Worse, the refusal said
+  // "quantity required", the same words a blank box gets, so a rejected figure
+  // was indistinguishable from a missing one; that is the exact defect ERR-181
+  // fixed on the price box, recurring one column over.
+  const qtyErrs = (d) => validateInvoice(d).filter((e) => e.lfield === 'qty');
+  assert.deepEqual(plain(qtyErrs(draftWith([{ ...GOODS, qty: 0 }]))), [], 'zero is accepted');
+  assert.deepEqual(plain(qtyErrs(draftWith([{ ...GOODS, qty: '0' }]))), [], 'and as a string');
+  assert.deepEqual(plain(qtyErrs(draftWith([{ ...GOODS, qty: -1 }]))), [], 'so is a negative');
+  // THE POSITIVE CONTROL. Without it this test would pass just as well against a
+  // validateInvoice with no quantity rule at all — which is how ERR-181's guard
+  // test passed for the wrong reason. Blank and non-numeric are still refused.
+  for (const bad of ['', '   ', 'abc', null, undefined]) {
+    assert.equal(qtyErrs(draftWith([{ ...GOODS, qty: bad }])).length, 1, `${bad} must still be refused`);
+  }
+});
+
+test('§1 a ZERO-quantity row still PRINTS what it validates — the three predicates agree', () => {
+  // The row is only real because of its description; a qty of 0 is falsy in both
+  // invoiceDocRows' filter and validateInvoice's `started` filter, so a row whose
+  // ONLY content is a zero quantity stays an ignored phantom in both. That
+  // agreement is the invariant this suite exists to protect.
+  const d = draftWith([{ code: '', description: 'Backordered — not charged', qty: 0, unitCost: 0 }]);
+  assert.deepEqual(plain(validateInvoice(d)), [], 'a described $0 × 0 line is a complete row');
+  const rows = invoiceDocRows(d, { money: (n) => `$${Number(n).toFixed(2)}` });
+  assert.equal(rows.length, 1, 'and it prints');
+  assert.equal(rows[0][2], '0');
+  assert.equal(rows[0][3], '$0.00');
+  const phantom = draftWith([{ code: '', description: '', qty: 0, unitCost: 0 }]);
+  assert.equal(invoiceDocRows(phantom, { money: String }).length, 0, 'an empty row still prints nothing');
+  assert.equal(validateInvoice(phantom).filter((e) => /at least one line item/.test(e.msg)).length, 1,
+    'and is still not a line item');
 });
 
 test('§1 an authored $0 is accepted; a BLANK box is not', () => {
@@ -259,15 +300,38 @@ test('§3 qty multiplies a credit like any other line', () => {
   assert.equal(computeInvoiceTotals({ lines: [{ qty: 3, unitCost: -10 }] }).subtotal, -30);
 });
 
+test('§3 a total that rounds to nothing is $0.00, never -$0.00', () => {
+  // NEGATIVE ZERO IS A REAL RENDERING BUG, not a pedantry: Math.round(-0.33) is
+  // -0, and Intl formats that as "-$0.00" — a minus sign on a customer's invoice
+  // for a line worth nothing. It became reachable the day the "a discount may not
+  // exceed its line" cap came out ($100 off a 3 × $33.33 line lands a third of a
+  // cent below zero), so round2 normalises it at the source.
+  const t = computeInvoiceTotals({ lines: [{ qty: 1, unitCost: -0.001 }], freight: 0 });
+  for (const [k, v] of Object.entries(t)) {
+    assert.ok(!Object.is(v, -0), `${k} came back as -0, which prints as "-$0.00"`);
+  }
+  assert.equal(new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(t.total), '$0.00');
+  // The control: a real negative is still negative, and still prints as one.
+  assert.equal(computeInvoiceTotals({ lines: [{ qty: 1, unitCost: -10 }], freight: 0 }).total, -11.5);
+});
+
 // ─── 4. An invoice may not go below zero ─────────────────────────────────────
 
-test('§4 credits that exceed the charges are refused — that is a credit note', () => {
+test('§4 a below-zero total is refused, and the message says WHOSE limit it is', () => {
   const errs = validateInvoice(draftWith([GOODS, { code: '', description: 'Credit', qty: 1, unitCost: -200 }]));
-  const neg = errs.filter((e) => /exceed the charges/.test(e.msg));
+  const neg = errs.filter((e) => /below \$0\.00/.test(e.msg));
   assert.equal(neg.length, 1);
   assert.equal(neg[0].line, 1, 'it points at the credit line, which is the box that must change');
   assert.equal(neg[0].lfield, 'unitCost');
-  assert.match(neg[0].msg, /-\$?/, 'the message states the total it computed');
+  // Three things the operator needs and cannot get anywhere else: the number, who
+  // is refusing it, and what to do instead. A refusal with no route around it is
+  // just a wall — and this one is not our policy, so it must not read as one.
+  assert.match(neg[0].msg, /116\.15/, 'the total it actually computed');
+  assert.match(neg[0].msg, /invoice service|server error/, 'that the SERVER is the one refusing');
+  assert.match(neg[0].msg, /BF-052/, 'the ticket, so it can be chased');
+  assert.match(neg[0].msg, /negative quantity/, 'the shape that DOES work today');
+  assert.doesNotMatch(neg[0].msg, /exceed the charges/,
+    'the old wording read as a rule of ours about credit lines');
 });
 
 test('§4 a $0 invoice is LEGAL — "you already paid for all of it"', () => {
@@ -288,10 +352,19 @@ test('§4 the below-zero guard is the ONLY guard, and it is load-bearing', () =>
   // $0 saves fine; one cent below does not. BF-052.
   //
   // So this guard is the only thing standing between the operator and an opaque
-  // server error. Do not relax it until that 500 is a 201 or a 400.
+  // server error. Do not relax it until that 500 is a 201 or a 400 — the ask is
+  // readfirst/invoice-negative-total-backend-handoff-aug2026.md, and when it
+  // lands, DELETE the block rather than softening the message.
+  //
+  // It is also, now, the LAST money refusal in this editor. Zero quantities,
+  // zero prices, negative prices, negative quantities, negative freight and a
+  // negative typed cost are all accepted; if a second one ever reappears beside
+  // this, it needs the same standard of proof — a measured server refusal.
   const below = draftWith([{ ...GOODS, unitCost: -0.01 }]);
-  assert.equal(validateInvoice(below).filter((e) => /exceed the charges/.test(e.msg)).length, 1);
+  assert.equal(validateInvoice(below).filter((e) => /below \$0\.00/.test(e.msg)).length, 1);
   assert.equal(validateInvoice(draftWith([GOODS])).length, 0, 'and never fires on an ordinary invoice');
+  assert.match(INVOICES, /readfirst\/invoice-negative-total-backend-handoff-aug2026\.md/,
+    'the source says where the ask lives, so the guard can be removed by whoever sees it land');
 });
 
 test('§4 a NEGATIVE freight is a freight CREDIT, and prints as one', () => {
@@ -316,7 +389,49 @@ test('§5 costOrNull is UNTOUCHED — an empty box on a product line is still UN
   // this one keeps its meaning.
   assert.equal(costOrNull(''), null);
   assert.equal(costOrNull(0), 0);
-  assert.equal(costOrNull(-1), null, 'a negative supplier cost is still not a thing');
+  // THE CONTROL for the manualCostOrNull split below. costOrNull reads costs we
+  // DERIVED — a catalogue cost_price, an order's supplier_cost_snapshot, the
+  // backend's cost_excl_gst — and none of those may be negative; one that is is a
+  // corrupt reading, not a claim. If this line ever needs relaxing, the split
+  // has collapsed and ERR-068's domain has been widened by accident.
+  assert.equal(costOrNull(-1), null, 'a DERIVED cost below zero is corruption, not a value');
+});
+
+test('§5 manualCostOrNull keeps a TYPED cost, sign and all — it used to vanish', () => {
+  // The silent one. The operator typed -5 into Our Cost; costOrNull read it as
+  // null, so the box emptied on reopen, the Profit column fell back to "—", and
+  // NOTHING anywhere said the figure had been discarded. A value the operator
+  // authored is theirs: refuse it out loud or keep it, never swallow it. The
+  // service accepts a negative supplier_cost_excl_gst (BF-050, live 2026-08-29).
+  assert.equal(manualCostOrNull(-5), -5);
+  assert.equal(manualCostOrNull(0), 0);
+  assert.equal(manualCostOrNull('-5.50'), -5.5);
+  // Blank is still UNKNOWN — this widens the SIGN, never ERR-068's absence rule.
+  assert.equal(manualCostOrNull(''), null);
+  assert.equal(manualCostOrNull(null), null);
+  assert.equal(manualCostOrNull(undefined), null);
+  assert.equal(manualCostOrNull('abc'), null);
+});
+
+test('§5 a typed negative cost survives lineSupplierCost, the payload and a reopen', () => {
+  const typed = { unitCost: 99, supplierCost: -5, costSource: 'manual' };
+  assert.equal(lineSupplierCost(typed), -5, 'the editor and the payload read the same number');
+  assert.equal(lineCostExGst({ ...typed, qty: 3 }), -15, 'and quantity multiplies it like any cost');
+  // A record off the backend spells it the other way; the same answer must come
+  // back, or the margin bar disagrees with itself across a save.
+  assert.equal(lineSupplierCost({ unit_cost_excl_gst: 99, supplier_cost_excl_gst: -5, cost_source: 'manual' }), -5);
+  const rec = normalizeInvoice({
+    line_items: [{ product_code: 'IC', description: 'Ink', quantity: 1, unit_cost_excl_gst: 99,
+      supplier_cost_excl_gst: -5, cost_source: 'manual' }],
+  });
+  assert.equal(rec.lines[0].supplierCost, -5, 'a reopened invoice still knows what it cost');
+  assert.equal(rec.lines[0].costSource, 'manual',
+    'the PROVENANCE rides along — without it computeInvoiceCogs re-reads the same '
+    + 'number as though nobody typed it and reports the cost UNKNOWN (ERR-178 shape)');
+  assert.equal(rec.allCostsKnown, true, 'and it is KNOWN, not "—"');
+  // THE CONTROL: an AUTO cost below zero is still refused, so this widened the
+  // typed box and nothing else.
+  assert.equal(lineSupplierCost({ unitCost: 99, supplierCost: -5, costSource: 'auto' }), null);
 });
 
 test('§5 a blank cost on a CREDIT line is a known $0, not unknown', () => {
@@ -398,6 +513,18 @@ test('§6 a negative manual price IS sent to the quote, so the threshold is hone
 test('§6 the probe is what proves that, and it is still there', () => {
   assert.match(PROBE, /6d\./, 'the negative-price case must survive in the probe');
   assert.match(PROBE, /unit_cost_excl_gst: -150\.00/);
+  assert.match(PROBE, /6e\./, 'and the negative-QUANTITY case');
+  assert.match(PROBE, /quantity: -1/);
+  // Zero quantity is now typeable, so the live claim behind it needs a probe of
+  // its own. What is measured is not just "accepted" but "contributes nothing" —
+  // a backend reading 0 as "unspecified" and substituting 1 would charge for a
+  // line the document says is free, and free shipping would be decided on it.
+  assert.match(PROBE, /6f\./, 'and the ZERO-quantity case');
+  assert.match(PROBE, /quantity: 0, unit_cost_excl_gst: 80\.00/);
+  // BF-052 is deliberately absent: proving a 500 on a below-zero TOTAL needs a
+  // POST /api/admin/invoices, and this probe has no write path by design.
+  assert.match(PROBE, /readfirst\/invoice-negative-total-backend-handoff-aug2026\.md/,
+    'the probe says where that one is measured instead, so its absence is not read as coverage');
 });
 
 test('§6 the warning about that omission is GONE, because the omission is', () => {
@@ -449,15 +576,27 @@ test('§6 the BF-050 translation is gone — the 400 it explained cannot happen'
 
 // ─── 7. The operator can see it ──────────────────────────────────────────────
 
-test('§7 neither the price nor the qty box is floored; Our Cost still is', () => {
+test('§7 NO money box in this editor is floored any more', () => {
+  // `min="0"` never enforced anything here — the editor is a <div>, not a <form>,
+  // nothing in js/admin/ calls checkValidity(), and admin.css has no :invalid
+  // rule. All it ever did was shape the spinner arrows and TELL the operator a
+  // limit existed. Every one of these was residue of a server refusal that has
+  // since been lifted, and residue reads as a live limitation (ERR-184).
   const row = fnBody(INVOICES, 'function renderLines(');
   const price = row.match(/<input[^>]*data-lfield="unitCost"[^>]*>/)[0];
   assert.doesNotMatch(price, /min="0"/, 'a credit line cannot be typed into a box floored at 0');
   assert.match(price, /step="0\.01"/);
   assert.doesNotMatch(row.match(/<input[^>]*data-lfield="qty"[^>]*>/)[0], /min="0"/,
     'a negative QUANTITY is a RETURN — the box must not floor it');
-  assert.match(row.match(/<input[^>]*data-lfield="supplierCost"[^>]*>/s)[0], /min="0"/,
-    'nor is a negative cost-to-us — costOrNull says so too');
+  assert.doesNotMatch(row.match(/<input[^>]*data-lfield="supplierCost"[^>]*>/s)[0], /min="0"/,
+    'a cost the operator types is theirs, sign included — manualCostOrNull reads it');
+  assert.doesNotMatch(INVOICES.match(/<input[^>]*data-field="freight"[^>]*>/s)[0], /min="0"/,
+    'negative freight is a freight CREDIT and has printed as one since ERR-184');
+  // THE CONTROL, and the reason this is not just "delete every min": the discount
+  // box is still floored, because it is backed by a real check in
+  // applyLineDiscount and it means "how much to take OFF".
+  assert.match(INVOICES.match(/<input[^>]*data-disc-amt[^>]*>/s)[0], /min="0"/,
+    'the discount amount is a magnitude, not a signed price');
 });
 
 test('§7 a credit price is styled distinctly — one character separates 99 from -99', () => {
@@ -527,6 +666,6 @@ test('§10 APP_VERSION was bumped', () => {
   const app = fs.readFileSync(path.join(ADMIN, 'app.js'), 'utf8');
   const m = app.match(/const APP_VERSION = '([^']+)'/);
   assert.ok(m, 'APP_VERSION cache-busts every admin page module');
-  assert.notEqual(m[1], '2026.08.28-invoice-send-count',
+  assert.notEqual(m[1], '2026.08.29-invoice-credit-lines-live',
     'page modules import with ?v=APP_VERSION; a stale token leaves live browsers on the old build');
 });

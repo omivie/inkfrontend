@@ -34,7 +34,9 @@
  */
 
 const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// Never returns -0: Math.round(-0.33) is -0 and Intl formats it "-$0.00" on a
+// customer's invoice. See the full note in utils/invoice-math.js.
+const round2 = (n) => (Math.round((Number(n) || 0) * 100) || 0) / 100;
 const str = (s) => String(s ?? '').trim();
 
 /** The endpoint accepts 1–200 line items. */

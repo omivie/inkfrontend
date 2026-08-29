@@ -28,7 +28,7 @@ import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../com
 import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
 import { parseQuickOrderPrefill, flipTargetFrom } from '../utils/quick-order-bridge.js';
 import {
-  costOrNull, lineSupplierCost, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
+  costOrNull, manualCostOrNull, lineSupplierCost, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
   normalizeInvoice, invoiceDocRows, computeInvoiceVolumeSavings,
 } from '../utils/invoice-math.js';
 import {
@@ -63,7 +63,9 @@ const canSeeCost = () => AdminAuth.isOwner();
 const escA = (s) => Security.escapeAttr(String(s ?? ''));
 const money = (n) => (typeof window.formatPrice === 'function' ? window.formatPrice(Number(n) || 0) : '$' + (Number(n) || 0).toFixed(2));
 const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// Never returns -0: Math.round(-0.33) is -0 and Intl formats it "-$0.00" on a
+// customer's invoice. See the full note in utils/invoice-math.js.
+const round2 = (n) => (Math.round((Number(n) || 0) * 100) || 0) / 100;
 const warn = (m, e) => window.DebugLog?.warn?.(`[Invoices] ${m}`, e?.message || e);
 
 function todayInputValue() {
@@ -587,8 +589,14 @@ function draftFromInvoice(rec) {
     description: l.description ?? '',
     qty: num(l.quantity ?? l.qty ?? 1),
     unitCost: num(l.unit_cost_excl_gst ?? l.unitCost ?? 0),
-    // Absent (backend hasn't shipped the column yet) => unknown, not 0.
-    supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
+    // Absent (backend hasn't shipped the column yet) => unknown, not 0. Read
+    // through the MANUAL reader when the record says the operator typed it, or a
+    // saved negative cost empties its own box on reopen and the Profit column
+    // silently collapses to "—" — the value would exist on the server and
+    // nowhere on screen.
+    supplierCost: (l.cost_source || l.costSource) === 'manual'
+      ? manualCostOrNull(l.supplier_cost_excl_gst ?? l.supplierCost)
+      : costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
     // `kind` is session-only, but a custom item is RECOVERABLE without guessing:
     // product_ref is a real stored field, so a line that comes back carrying one
     // IS a custom item. Reading a value is not the re-derive-a-marker-from-prose
@@ -1348,7 +1356,7 @@ function maybeOpenFromQuickOrder() {
     // Both ends must name a field or it is dropped in transit.
     d.lines = pre.lines.map((l) => ({
       code: l.code || '', description: l.description || '', qty: num(l.qty ?? 1), unitCost: round2(num(l.unitCost ?? 0)),
-      supplierCost: costOrNull(l.supplierCost),
+      supplierCost: l.costSource === 'manual' ? manualCostOrNull(l.supplierCost) : costOrNull(l.supplierCost),
       costSource: l.costSource || 'auto',
       // The counter already agreed this price with the customer standing there.
       // It is authored, not a suggestion — the ladder may offer a different
@@ -1888,16 +1896,17 @@ function applyLineDiscount(i) {
   const amount = round2(num(body.querySelector(`[data-disc-amt="${i}"]`)?.value));
   const why = String(body.querySelector(`[data-disc-why="${i}"]`)?.value || '').trim();
   const qty = num(l.qty) || 1;
-  const gross = round2(num(l.unitCost) * qty);
 
+  // Still the one refusal here, and it is about the BOX, not the money: this
+  // field is labelled "how much to take off", so a blank, a zero or a negative in
+  // it is a mistype, not a credit. Typing the price directly is one field away.
   if (!(amount > 0)) { Toast.warning('Enter how much to take off this line.'); return; }
-  // A DISCOUNT MAY NOT EXCEED THE LINE. Past that it stops being a discount and
-  // becomes a credit — which is the thing the invoice service will not store at
-  // all (BF-050), so letting it through here would only move the failure to Save.
-  if (amount > gross) {
-    Toast.warning(`That is more than this line is worth (${money(gross)} excl. GST). Reduce it, or split the credit across lines.`);
-    return;
-  }
+  // A DISCOUNT LARGER THAN THE LINE USED TO BE REFUSED HERE, and the stated
+  // reason was that it produces a negative price "which is the thing the invoice
+  // service will not store at all (BF-050)". BF-050 landed on 2026-08-29: a
+  // negative unit price saves, prints and quotes. The cap was a workaround that
+  // outlived its cause, and left standing it read as a live limitation (ERR-184).
+  // $150 off a $100 line is now exactly what it says — a $50 credit on that row.
 
   // round2 ONCE, here, into the price the backend will be given. The saving is
   // then re-derived from what the price actually became, so what prints is the
@@ -1937,11 +1946,11 @@ function undoLineDiscount(i) {
 /**
  * "Apply to the line above" — the way out of a credit row that cannot be saved.
  *
- * A standalone negative line is refused by the invoice service outright (both
- * the price and the quantity are floored at zero, and a `line_total` or
- * `discount` key is ignored — measured, BF-050). Rather than leave the operator
- * at a dead end, fold it: the line above drops by the credit's value, inherits
- * its description as the reason, and the credit row goes.
+ * A standalone negative line SAVES perfectly well since BF-050 (2026-08-29), so
+ * this is an OFFER about how the document reads, never a rescue: keep the credit
+ * as its own row and the customer sees what came off, or fold it and the line
+ * above drops by the credit's value, inherits its description as the reason, and
+ * the credit row goes.
  *
  * The recorded saving is what the price ACTUALLY moved by, not the credit's face
  * value — a rounded unit price on a multi-quantity line can differ by a cent, and
@@ -1953,11 +1962,9 @@ function foldCreditIntoPrevious(i) {
   if (!credit || !target) return;
   const creditValue = round2(Math.abs(num(credit.unitCost) * (num(credit.qty) || 1)));
   const tQty = num(target.qty) || 1;
-  const gross = round2(num(target.unitCost) * tQty);
-  if (creditValue > gross) {
-    Toast.warning(`That credit (${money(creditValue)}) is bigger than the line above (${money(gross)} excl. GST). Reduce it, or split it across lines.`);
-    return;
-  }
+  // No cap on creditValue vs the line above: folding a bigger credit simply
+  // leaves that row negative, which is a legal, printable, storable line. The old
+  // refusal here was the BF-050 workaround's twin — see applyLineDiscount.
   const netUnit = round2(num(target.unitCost) - creditValue / tQty);
   const effective = round2((num(target.unitCost) - netUnit) * tQty);
 
@@ -2179,8 +2186,10 @@ function openEmailDialog(d) {
 //   { field: 'customer.name', msg }        — a top-level/nested data-field input
 //   { line: i, lfield: 'qty', msg }         — a line-item input
 // Essentials only: a customer name + at least one *complete* line item (code or
-// description, AND qty > 0, AND a unit price that is a NUMBER — of either sign,
-// see isPricedAmount). Fully-blank phantom rows are ignored.
+// description, AND a quantity, AND a unit price — both NUMBERS, of either sign
+// and either of them zero; see isPricedAmount). Fully-blank phantom rows are
+// ignored. The only money rule left is the invoice TOTAL, and it belongs to the
+// server, not to us — see the block at the bottom.
 function validateInvoice(d) {
   const errs = [];
   if (!d) return errs;
@@ -2213,14 +2222,23 @@ function validateInvoice(d) {
     started.forEach(({ l, i }) => {
       if (!((l.code || '').trim() || (l.description || '').trim()))
         errs.push({ line: i, lfield: 'code', msg: `Line ${i + 1}: code or description required` });
-      // A QUANTITY MAY BE NEGATIVE — that is how a RETURN is modelled, and it is
-      // the only shape that keeps the margin honest. computeInvoiceProfit
-      // multiplies cost by quantity, so `-1 × $60 sell, $40 cost` reverses
-      // revenue AND cost together and moves profit by the original $20 margin.
-      // Booking the same credit as `1 × -$60` would subtract the revenue while
-      // still ADDING $40 of cost, reporting a $100 loss on a $60 refund.
-      // Zero stays refused: a line that moves nothing is an unfinished row.
-      if (!isPricedAmount(l.qty) || num(l.qty) === 0)
+      // A QUANTITY IS A NUMBER, OF EITHER SIGN, AND ZERO IS ONE OF THEM.
+      // Negative is how a RETURN is modelled, and it is the only shape that keeps
+      // the margin honest. computeInvoiceProfit multiplies cost by quantity, so
+      // `-1 × $60 sell, $40 cost` reverses revenue AND cost together and moves
+      // profit by the original $20 margin. Booking the same credit as `1 × -$60`
+      // would subtract the revenue while still ADDING $40 of cost, reporting a
+      // $100 loss on a $60 refund.
+      //
+      // Zero used to be refused here, and it was OUR rule alone — the invoice
+      // service accepts `quantity: 0` (BF-050, verified live 2026-08-29). It is a
+      // real shape: a line the customer should READ but not be charged for, such
+      // as a backordered item listed at $0.00. Worse, the refusal reported it as
+      // "quantity required" — the same words a blank box gets, so the operator
+      // could not tell a figure had been refused rather than missed, which is the
+      // exact failure ERR-181 fixed on the price box one line below. Blank and
+      // non-numeric are what is actually wrong.
+      if (!isPricedAmount(l.qty))
         errs.push({ line: i, lfield: 'qty', msg: `Line ${i + 1}: quantity required` });
       // A PRICE IS A NUMBER, OF EITHER SIGN. This used to demand `> 0`, which
       // made a credit line impossible and reported it as "required" — the same
@@ -2232,18 +2250,35 @@ function validateInvoice(d) {
     });
   }
 
-  // AN INVOICE THAT OWES THE CUSTOMER MONEY IS A CREDIT NOTE, NOT AN INVOICE.
-  // Credit lines are meant to bring a total DOWN, not through the floor. $0 is
-  // deliberately still legal — "you already paid for all of it" is the whole
-  // point of the feature — so this fires only below zero, and it points at the
-  // first credit line, which is the box that has to change.
+  // THE ONLY MONEY THIS EDITOR STILL REFUSES, AND IT IS NOT OUR RULE.
+  //
+  // A document that owes the customer money is a credit note, and it ought to be
+  // issuable. The backend's BF-050 reply said it was — "the backend accepts a
+  // negative-total document… so validateInvoice in the editor stays the guard,
+  // and it is the only one. Please keep it." Measured against production on
+  // 2026-08-29, it is not: exactly $0.00 saves (201), one cent below returns
+  // **500 `Failed to create invoice`**, with nothing in it an operator could act
+  // on. Negative prices, negative quantities and negative freight are each fine
+  // on their own — it is the document total alone. BF-052, and
+  // readfirst/invoice-negative-total-backend-handoff-aug2026.md is the ask.
+  //
+  // So this guard is the only thing standing between the operator and an opaque
+  // server error. DO NOT RELAX IT until that 500 is a 201 or a 400 — and when it
+  // is, delete the whole block rather than softening the message. $0 stays
+  // legal: "you already paid for all of it" is the point of the feature.
+  //
+  // The message says whose limit it is and names the shape that DOES work today,
+  // because a refusal the operator cannot route around is just a wall. It points
+  // at the first credit line, which is the box that has to change.
   const total = computeTotals(d).total;
   if (total < 0) {
     const firstCredit = (d.lines || []).findIndex((l) => num(l.unitCost) < 0);
     errs.push({
       line: firstCredit === -1 ? 0 : firstCredit,
       lfield: 'unitCost',
-      msg: `The credit lines exceed the charges — this invoice totals ${money(total)}`,
+      msg: `This invoice totals ${money(total)}. The invoice service cannot store a document below `
+        + `$0.00 yet — it fails with a server error (BF-052). Bring it to $0.00 or above, or book `
+        + `the credit as a return instead: the original product code with a negative quantity.`,
     });
   }
   return errs;
@@ -2763,7 +2798,7 @@ function editorBodyHtml(d) {
         </div>
         <div class="inv-freight" id="inv-freight">
           <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight — 0 shows as “Free”${gstSub(GST_EXCL)}</span>
-            <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
+            <input class="admin-input" type="number" step="0.01" data-field="freight" value="${escA(d.freight)}">
           </label>
           <div class="inv-freight__pick" id="inv-freight-pick"></div>
         </div>
@@ -3119,7 +3154,7 @@ function renderLines() {
     const shipCost = l.kind === 'shipping';
     const costCell = showCost ? `
       <input class="admin-input inv-line__cost${manual ? ' inv-line__cost--manual' : ''}"
-             type="number" step="0.01" min="0" data-line="${i}" data-lfield="supplierCost"
+             type="number" step="0.01" data-line="${i}" data-lfield="supplierCost"
              value="${escA(l.supplierCost ?? '')}" placeholder="${costPlaceholder(l)}"
              title="${manual ? 'Manual override' : shipCost ? 'What the courier charged US for this freight — nothing auto-fills it, and leaving it blank reports this invoice at 100% margin' : isCustomLine(l) ? 'What this item cost US — there is no catalogue product behind it, so nothing auto-fills, and leaving it blank reports this invoice at 100% margin' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
     // A shipping line has no product behind it, so its code box is READ-ONLY.
@@ -3180,7 +3215,7 @@ function renderLines() {
         // product's own cost — the override was scoped to the old SKU, and
         // silently carrying it across would quietly misprice the new line.
         const keepManual = prev.costSource === 'manual'
-          && costOrNull(prev.supplierCost) != null
+          && manualCostOrNull(prev.supplierCost) != null
           && prev.code === sku;
         _draft.lines[i] = {
           code: sku,

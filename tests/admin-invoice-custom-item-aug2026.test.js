@@ -179,8 +179,15 @@ test('§3 ref counts as content for VALIDATION, SAVING and PRINTING alike', () =
   for (const l of rows) {
     const printed = invoiceDocRows({ lines: [l] }, { money: String }).length === 1;
     const saved = realLines({ lines: [l] }).length === 1;
-    const validated = validateInvoice(draftWith([{ code: 'X', description: 'goods', qty: 1, unitCost: 9 }, l]))
-      .some((e) => e.line === 1);
+    // "Did the validator CONSIDER this row?" — which is the question — is not the
+    // same as "did it complain about it", and until zero quantities became legal
+    // the two happened to coincide, because every considered row here was also
+    // incomplete. A `qty` of 'x' is the tripwire: non-numeric is refused for any
+    // row the validator looks at, and it is invisible to the other two
+    // predicates (num('x') is 0, exactly like the 0 already there), so the row's
+    // identity fields stay the only thing being tested.
+    const validated = validateInvoice(draftWith([{ code: 'X', description: 'goods', qty: 1, unitCost: 9 },
+      { ...l, qty: 'x' }])).some((e) => e.line === 1);
     assert.equal(printed, saved,
       `row ${JSON.stringify(l)}: printed=${printed} saved=${saved} — the document and the stored invoice must contain the same rows`);
     assert.equal(printed, validated,

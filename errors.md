@@ -41,6 +41,100 @@ describing the same incident.
 
 ---
 
+## ERR-185 — Four refusals on the invoice editor, three of them ours, one of them silent — **RESOLVED (frontend)** (2026-08-29)
+
+- **Date**: 2026-08-29 · **Context**: The owner sent a screenshot of invoice 3276 — one
+  `-$36.08` credit line, the editor refusing to save with *"The credit lines exceed the charges —
+  this invoice totals -$41.49"* — and asked to be able to type any value on an invoice and have it
+  work. Most of that had landed the day before (ERR-184 / BF-050). What was left was four
+  refusals, and only one of them belonged to the server.
+
+- **The one that is not ours, and stays.** A below-zero invoice TOTAL. Exactly `$0.00` saves;
+  one cent below returns **500 `Failed to create invoice`** (BF-052, measured 2026-08-29). The
+  guard in `validateInvoice` is the only thing between the operator and an opaque crash, so it
+  keeps standing — but its message was rewritten, because it was reading as a rule of ours about
+  credit lines when it is a server limit. It now states the total, says the invoice **service**
+  cannot store it, names BF-052, and names the shape that DOES work today: the original product
+  code with a **negative quantity**, which reverses revenue and COGS together. *A refusal the
+  operator cannot route around is just a wall.* The ask is
+  `readfirst/invoice-negative-total-backend-handoff-aug2026.md`, and both the source comment and
+  the test point at it so whoever sees it land can delete the block rather than soften it.
+
+- **The silent one, which was the worst.** Typing a negative into "Our Cost" **vanished**.
+  `costOrNull` answers "is this a plausible cost?" with `n >= 0 ? n : null`, so a typed `-5` became
+  `null` — the box emptied on reopen, the Profit column fell back to "—", and nothing anywhere
+  said a figure had been discarded. The fix is not to widen `costOrNull`: that function reads costs
+  we DERIVED (catalogue `cost_price`, an order's `supplier_cost_snapshot`, the backend's
+  `cost_excl_gst`) and a negative there is corruption, not a claim. A new `manualCostOrNull` answers
+  the different question — *did a human put a number in this box?* — and `lineSupplierCost` picks
+  between them on `cost_source`. ERR-068's absence-is-never-zero rule is untouched in both, and
+  `costOrNull(-1) === null` is re-pinned as the control proving the split happened rather than the
+  guard being deleted. *A value the operator authored is theirs: refuse it out loud or keep it,
+  never swallow it.*
+
+- **And that fix had a second half I nearly missed.** `normalizeInvoice` built its line objects
+  without `costSource`, so a typed negative survived the first read and was then re-read further
+  down (`computeInvoiceCogs` → `lineCostExGst` → `lineSupplierCost`) as though nobody had typed it —
+  reporting the cost UNKNOWN on an invoice that knew exactly what it cost. Caught only because the
+  new test asserted `allCostsKnown`, not just the number. Same shape as ERR-178: **presence
+  standing in for provenance**. The provenance now rides along.
+
+- **A zero quantity was refused, and it was our rule alone** — the service takes `quantity: 0`
+  (now measured live, probe §6f: `1 × 100.00 ex + 0 × 80.00 ex → 115.00 incl`, so a zero-quantity
+  row contributes nothing rather than being read as "unspecified" and substituted). Worse, the
+  refusal said **"quantity required"** — the same words a blank box gets, so a rejected figure was
+  indistinguishable from a missed one. That is precisely the defect ERR-181 fixed on the price box,
+  recurring one column over. Blank and non-numeric are what is actually wrong.
+
+- **Four `min="0"`-shaped leftovers, all residue of refusals already lifted.** `min="0"` on the
+  freight and Our Cost boxes (inert — the editor is a `<div>`, nothing calls `checkValidity()`,
+  `admin.css` has no `:invalid` rule; all it ever did was shape the spinner arrows and *tell the
+  operator a limit existed*), plus the two caps refusing a discount larger than its line and a fold
+  larger than the line above. Both caps named BF-050 as their reason in their own comments. **A
+  workaround that outlives its cause reads as a live limitation** — ERR-184's lesson, one file
+  over, one day later. The discount box keeps its `min="0"`, because that one is backed by a real
+  check and means "how much to take OFF"; kept as an assertion so this is not read as "delete every
+  min".
+
+- **Lifting a cap exposed a real rendering bug.** `$100` off a `3 × $33.33` line lands the unit
+  price a third of a cent below zero; `Math.round(-0.33)` is **`-0`**, and `Intl` formats that as
+  **`-$0.00`** — a minus sign on a customer's invoice for a line worth nothing. Unreachable while
+  the cap stood. `round2` now normalises it in all three copies. *Every cap you remove hands the
+  arithmetic inputs it has never had.*
+
+- **A test was reimplementing the code it tested.** `admin-invoice-discount-aug2026.test.js` kept a
+  local `round2` that had drifted from the page's, which is how the `-0` stayed invisible while
+  both were "passing". It now LIFTS the shipped one out of the source. Related: the custom-item
+  suite's printed-vs-validated equality used "did the validator complain" as a proxy for "did the
+  validator look" — the two coincided only because every considered row there was also incomplete,
+  and a legal zero-quantity row broke the coincidence. It uses an explicit tripwire now.
+
+- **Driving it through the real editor found a bug neither the tests nor the probe could.** An
+  invoice carrying a zero-quantity line and a typed `-12.34` cost was created, read back and
+  deleted. The line items round-trip perfectly (`quantity: 0` → `line_total_excl_gst: 0`;
+  `supplier_cost_excl_gst: -12.34` with `cost_source: "manual"`; `freight_excl_gst: -20`), and the
+  reopened editor reads `-$12.34 · 112.3%`. But `GET /api/admin/invoices` — the LIST — returns
+  `cost_excl_gst: 0, profit_excl_gst: 100` for that same invoice: **the rollup floors the negative
+  cost while the detail endpoint stores it.** So the list says `$100.00 · 100.0%` and opening the
+  row says `-$12.34 · 112.3%`, with nothing to notice it. Added to the handoff as part of BF-052.
+  *A negative and an absence are two different things, and neither of them is zero* — ERR-068 one
+  endpoint over. **The tests were green and the probe was 17/17; only the round trip through the
+  product showed it**, which is the argument for that last verification step, not a formality.
+
+- **Verified**: full suite **4290 pass / 0 fail**; `npm run probe:invoice-quote` **17/17** with the
+  new §6e/§6f pins; the live probe confirming the zero-quantity claim rather than taking the
+  backend's word for it; and the end-to-end run above, with the test invoice deleted (`DELETE` →
+  `{deleted:true}`, subsequent `GET` → gone). BF-052 is deliberately NOT probed — proving it needs
+  a `POST /api/admin/invoices`, and that probe has no write path by design; the header says so, so
+  its absence is not mistaken for coverage.
+
+- **Lesson**: when an owner says "let me change anything", the answer is an audit of every refusal,
+  not a fix for the one on screen — and each refusal has to be sorted into *theirs*, *ours*, and
+  *ours but obsolete*. The dangerous category is none of those three: it is the refusal that does
+  not announce itself at all.
+
+---
+
 ## ERR-184 — BF-050 landed: credit lines save, and the workarounds came out — **RESOLVED** (2026-08-29)
 
 - **Date**: 2026-08-29 · **Context**: The backend dev lifted the `>= 0` floor and sent

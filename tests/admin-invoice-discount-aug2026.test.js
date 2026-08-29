@@ -3,17 +3,24 @@
  * =============================================================================
  *
  * The owner typed a −$40.00 credit row and could not save it. Not a bug in the
- * editor: the invoice service refuses every route to a lower total. Measured
- * against production, 2026-08-28:
+ * editor: the invoice service refused every route to a lower total. Measured
+ * against production, 2026-08-28 — **HISTORIC, this is the PRE-BF-050 contract**:
  *
  *   negative unit_cost_excl_gst  → 400, "must be greater than or equal to 0"
  *   negative quantity            → 400, "must be greater than or equal to 0"
  *   negative line_total_excl_gst → 200, IGNORED (goods total recomputed)
  *   a discount_excl_gst key      → 200, IGNORED (undiscounted goods total)
  *
- * Every total is recomputed as quantity × unit_cost_excl_gst, and both factors
- * are floored at zero. So a standalone credit row cannot exist on a saved
- * invoice, and the discount has to come off the line it applies to.
+ * Every total was recomputed as quantity × unit_cost_excl_gst with both factors
+ * floored at zero, so a standalone credit row could not exist on a saved invoice.
+ *
+ * **BF-050 LIFTED THAT FLOOR ON 2026-08-29** — a credit row now saves, prints and
+ * quotes on its own. The table above is kept because the REASONING still holds:
+ * "the discount comes off the line" remains the shape the service stores, and it
+ * is the shape that reaches the free-shipping calculation. What is gone is the
+ * NECESSITY, and with it the two caps that used to refuse a discount larger than
+ * its line — see §2 and §3. Only the document TOTAL is still refused, and that
+ * refusal lives in validateInvoice, not here (BF-052).
  *
  * THE INVARIANT THIS WHOLE DESIGN RESTS ON, pinned in §1: for every line,
  *
@@ -61,7 +68,11 @@ const {
 } = sandbox;
 
 const plain = (x) => JSON.parse(JSON.stringify(x));
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// THE SHIPPED round2, LIFTED from the page rather than reimplemented here. A
+// local copy is how a harness ends up agreeing with itself instead of with the
+// code: this one had drifted from invoices.js and was quietly hiding a -0, which
+// Intl prints as "-$0.00" on a customer's invoice.
+const round2 = new vm.Script(`(${/^const round2 = (.+);$/m.exec(INVOICES)[1]})`).runInContext(ctx);
 const money = (n) => `$${Number(n).toFixed(2)}`;
 
 function fnBody(src, signature) {
@@ -140,7 +151,11 @@ test('§1 what prints equals quantity × what the payload sends, to the cent', (
     // that the money agrees, not that two floats are bit-identical.
     assert.equal(round2(lineRevenueExGst(l)), round2(qty * sent),
       `qty ${qty} @ ${price} less ${amount}: printed ${round2(lineRevenueExGst(l))} vs backend ${round2(qty * sent)}`);
-    assert.ok(sent >= 0, 'and nothing is ever negative — the one thing the server refuses');
+    // Deliberately NOT `sent >= 0` any more: since BF-050 a below-zero line price
+    // is legal, and $100 off a 3 × $33.33 line is exactly how you reach one. What
+    // must never appear is a NEGATIVE ZERO, which Intl renders as "-$0.00" on the
+    // customer's copy — round2 normalises it (utils/invoice-math.js).
+    assert.ok(!Object.is(sent, -0), 'a rounded price must never be -0, or the invoice prints "-$0.00"');
   }
 });
 
@@ -169,17 +184,19 @@ test('§2 a discount nets the price and records why', () => {
   assert.equal(computeInvoiceTotals(draft).total, 67.85, '59 + 15% GST');
 });
 
-test('§2 a discount bigger than the line is refused, not clamped', () => {
-  // Past the line's value it stops being a discount and becomes a credit — the
-  // thing the service will not store at all. Clamping would hide that; letting
-  // it through would only move the failure to Save.
+test('§2 a discount BIGGER than the line applies — the cap outlived its cause', () => {
+  // It used to be refused, and the stated reason was that it "becomes a credit —
+  // the thing the invoice service will not store at all (BF-050)". BF-050 landed
+  // on 2026-08-29: a negative unit price saves, prints and quotes. The cap was a
+  // workaround for a constraint that no longer exists, and left standing it read
+  // to the operator as a live limitation (ERR-184's lesson, one file over).
   const draft = { lines: [GOODS()] };
-  const { applyLineDiscount, warnings } = loadActions(draft, { 0: { amount: 150, why: '' } });
+  const { applyLineDiscount, warnings } = loadActions(draft, { 0: { amount: 150, why: 'returned' } });
   applyLineDiscount(0);
-  assert.equal(draft.lines[0].unitCost, 99, 'the price is untouched');
-  assert.equal(draft.lines[0].discountSaving, null);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /more than this line is worth/);
+  assert.equal(draft.lines[0].unitCost, -51, '$150 off a $99 line is a $51 credit on that row');
+  assert.equal(draft.lines[0].discountSaving, 150);
+  assert.deepEqual(warnings, [], 'and nothing is refused');
+  assert.equal(computeInvoiceTotals(draft).subtotal, -51);
 });
 
 test('§2 a discount equal to the whole line is allowed — that is a free item', () => {
@@ -232,13 +249,16 @@ test('§3 folding adds to a discount already on the line', () => {
   assert.equal(draft.lines[0].discountSaving, 19, 'the savings accumulate');
 });
 
-test('§3 a credit bigger than the line above is refused', () => {
+test('§3 a credit bigger than the line above folds too — same cap, same cause', () => {
+  // applyLineDiscount's twin. Folding a larger credit simply leaves the row
+  // above negative, which is a legal, printable, storable line.
   const draft = { lines: [GOODS(), { code: '', description: 'too big', qty: 1, unitCost: -200 }] };
   const { foldCreditIntoPrevious, warnings } = loadActions(draft);
   foldCreditIntoPrevious(1);
-  assert.equal(draft.lines.length, 2, 'nothing is folded');
-  assert.equal(draft.lines[0].unitCost, 99);
-  assert.match(warnings[0], /bigger than the line above/);
+  assert.equal(draft.lines.length, 1, 'the credit row is consumed');
+  assert.equal(draft.lines[0].unitCost, -101, '99 − 200');
+  assert.equal(draft.lines[0].discountNote, 'too big', 'the reason comes across');
+  assert.deepEqual(warnings, []);
 });
 
 test('§3 folding is now an OFFER, not a rescue', () => {

@@ -26,7 +26,31 @@
 import { computeOrderProfit, NO_PAYMENT_FEES, GST_RATE } from './profitability.js';
 
 const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+/**
+ * Round to cents, and NEVER return -0.
+ *
+ * Math.round(-0.33) is -0, and Intl formats that as "-$0.00" — a minus sign on a
+ * customer's invoice for a line that is worth nothing. It became reachable the
+ * day the "a discount may not exceed its line" cap came out: $100 off a
+ * 3 × $33.33 line lands the unit price a third of a cent below zero. `|| 0` on
+ * the rounded cents normalises it, because -0 is falsy and +0 is what we want.
+ */
+const round2 = (n) => (Math.round((Number(n) || 0) * 100) || 0) / 100;
+
+/**
+ * "Is there a number here at all?" — the primitive the three readers below share.
+ *
+ * Blank, null/undefined and non-numeric are the only answers that are UNKNOWN.
+ * Every finite number, INCLUDING a negative and including 0, is a real value.
+ * The three exported wrappers differ only in which signs they will accept, and
+ * they exist as separate names because they answer three different questions;
+ * do not collapse them back into one.
+ */
+function finiteOrNull(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 /**
  * THE INVARIANT OF THIS FEATURE: an empty cost box means UNKNOWN, not $0.
@@ -40,12 +64,38 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
  *   costOrNull('')    → null   (unknown)
  *   costOrNull(0)     → 0      (genuinely free — a known zero)
  *   costOrNull('abc') → null
- *   costOrNull(-1)    → null   (a negative cost is not a thing)
+ *   costOrNull(-1)    → null   (an AUTO cost is never negative)
+ *
+ * THE NEGATIVE CASE IS NOT A CLAMP, IT IS A DOMAIN. This function reads costs we
+ * DERIVED — a catalogue `cost_price`, an order's `supplier_cost_snapshot`, the
+ * backend's `cost_excl_gst`. None of those may be below zero, and one that is is
+ * a corrupt reading, not a claim. A cost the OPERATOR typed is a different
+ * question with a different answer: see manualCostOrNull. ERR-068's rule —
+ * absence is never zero — is unchanged in both.
  */
 export function costOrNull(v) {
-  if (v === '' || v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const n = finiteOrNull(v);
+  return n != null && n >= 0 ? n : null;
+}
+
+/**
+ * A cost the OPERATOR TYPED, of either sign. Blank is still UNKNOWN.
+ *
+ * Separate from costOrNull because it answers a different question — not "is
+ * this a plausible cost?" but "did a human put a number in this box?". The
+ * invoice service accepts a negative `supplier_cost_excl_gst` (BF-050, verified
+ * live 2026-08-29), and until this existed a typed negative was read as null and
+ * VANISHED: the box emptied on reopen, the margin bar fell back to "—", and
+ * nothing anywhere said the figure had been discarded. A value the operator
+ * authored is theirs; refuse it out loud or keep it, never swallow it.
+ *
+ *   manualCostOrNull('')    → null   (unknown — the box is empty)
+ *   manualCostOrNull(0)     → 0
+ *   manualCostOrNull(-5)    → -5     (a rebate, a supplier credit — their call)
+ *   manualCostOrNull('abc') → null
+ */
+export function manualCostOrNull(v) {
+  return finiteOrNull(v);
 }
 
 /**
@@ -71,20 +121,26 @@ export function costOrNull(v) {
  * still costs 0.
  */
 export function lineSupplierCost(l) {
-  const stored = costOrNull(l?.supplier_cost_excl_gst ?? l?.supplierCost);
-  // A cost the OPERATOR typed wins over everything — including this rule. Note
-  // the test is `cost_source`, not "is there a number here": a cost the product
-  // picker auto-filled is not a claim about a credit line. Get that wrong and
-  // picking product A and then typing -100 over its price books A's real $30
-  // cost against negative revenue — a silent understatement that also reaches
-  // the backend as this invoice's COGS.
-  if ((l?.cost_source ?? l?.costSource) === 'manual' && stored != null) return stored;
+  const raw = l?.supplier_cost_excl_gst ?? l?.supplierCost;
+  // A cost the OPERATOR typed wins over everything — including this rule, and
+  // INCLUDING ITS SIGN, which is why it is read through manualCostOrNull rather
+  // than costOrNull. Note the test is `cost_source`, not "is there a number
+  // here": a cost the product picker auto-filled is not a claim about a credit
+  // line. Get that wrong and picking product A and then typing -100 over its
+  // price books A's real $30 cost against negative revenue — a silent
+  // understatement that also reaches the backend as this invoice's COGS.
+  if ((l?.cost_source ?? l?.costSource) === 'manual') {
+    const typed = manualCostOrNull(raw);
+    if (typed != null) return typed;
+  }
   // Read the SAVED key first. A record off the backend spells the sell price
   // `unit_cost_excl_gst`; missing it here would leave every reopened credit line
   // reading as cost-unknown, which collapses the whole invoice's Profit column
   // to "—" and reports "nobody costed this" when we know exactly what it cost.
   if (num(l?.unit_cost_excl_gst ?? l?.unitCost ?? l?.unitPrice) < 0) return 0;
-  return stored;
+  // An AUTO cost — catalogue, order snapshot, backend echo — stays non-negative:
+  // a below-zero reading there is corruption, not an operator's claim.
+  return costOrNull(raw);
 }
 
 /**
@@ -94,9 +150,7 @@ export function lineSupplierCost(l) {
  * profit_excl_gst, where costOrNull would wrongly null a real loss.
  */
 export function profitOrNull(v) {
-  if (v === '' || v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  return finiteOrNull(v);
 }
 
 /** Ex-GST revenue for one line: qty × sell price. */
@@ -164,18 +218,27 @@ export function normalizeInvoice(recOrDraft) {
   const raw = r.line_items || r.lines || [];
   const lines = raw.map((l) => {
     const unitCost = num(l.unit_cost_excl_gst ?? l.unitCost ?? l.unitPrice ?? 0);
+    // CARRY THE PROVENANCE, not just the number. lineSupplierCost answers
+    // differently depending on WHO put the figure there — a cost the operator
+    // typed is kept sign and all, a derived one is not — so a normalized line
+    // that dropped `costSource` would be re-read further down (computeInvoiceCogs
+    // → lineCostExGst → lineSupplierCost) as though nobody had typed it, and a
+    // typed negative would come back UNKNOWN. Same failure mode as ERR-178:
+    // presence standing in for provenance.
+    const costSource = l.cost_source ?? l.costSource ?? 'auto';
     return {
       code: l.product_code ?? l.code ?? '',
       description: l.description ?? '',
       qty: num(l.quantity ?? l.qty ?? 0),
       unitCost,
+      costSource,
       // Through lineSupplierCost, not costOrNull: a saved invoice reopened next
       // month, and the analytics overlay reading the same record, must cost its
       // credit lines the way the editor did when it was written.
       supplierCost: lineSupplierCost({
         unitCost,
         supplierCost: l.supplier_cost_excl_gst ?? l.supplierCost,
-        costSource: l.cost_source ?? l.costSource,
+        costSource,
       }),
     };
   });
