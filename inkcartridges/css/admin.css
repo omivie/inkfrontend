@@ -5994,3 +5994,267 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .admin-code-preview--ok   { border-color: var(--success); background: var(--success-dim); }
 .admin-code-preview--warn { border-color: var(--yellow);  background: var(--yellow-dim); }
 .admin-code-preview--info { border-color: var(--cyan);    background: var(--cyan-dim); }
+
+/* ===========================================================================
+   Supplier Prices — which supplier is cheapest, and how old that price is
+   (pages/supplier-prices.js, ERR-190)
+
+   Reuses .admin-page-header, .admin-tabs/.admin-tab, .admin-table/.admin-table-wrap,
+   .admin-pagination, .admin-search, .admin-select/.admin-input, .admin-btn,
+   .admin-badge, .admin-card, .admin-empty, .admin-loader, .admin-toast__undo,
+   .filter-chip and .admin-form-group unchanged — nothing here restyles them.
+
+   What is genuinely new is everything that carries AGE. This page's whole job is
+   that a price and the date it was quoted are one fact, not two, so the age lives
+   in the cell beside the money rather than in a tooltip, and "stale" has a colour
+   everywhere it appears: the feed pill, the price cell, the saving, and the
+   drawer's verdict. --yellow is the stale tone throughout; it is a caution, not
+   an error, because a stale cheap price is still worth acting on — by phoning the
+   supplier rather than by ordering.
+   =========================================================================== */
+
+/* ---- .admin-page-title / .admin-page-subtitle — also never defined ----
+
+   Found the same way as .filter-chip below. Six admin pages emit
+   `<h1 class="admin-page-title">` and three emit `<p class="admin-page-subtitle">`;
+   neither selector existed. The h1 has looked right by accident all along —
+   `.admin-page-header h1` above styles it by element — but the subtitle has been
+   an unstyled paragraph on every page that uses it, rendering at full body size
+   directly under the title it is supposed to sit beneath.
+
+   .admin-page-title repeats the h1 rules exactly, so it is a no-op for the
+   existing pages and simply means the class now works on its own. */
+.admin-page-title {
+  font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em;
+}
+.admin-page-subtitle {
+  margin: 4px 0 0; font-size: 13px; color: var(--text-muted); line-height: 1.5;
+}
+
+/* ---- .filter-chip — a shared toggle pill that had never been defined ----
+
+   pages/price-monitor.js has emitted `.filter-chip` for two filter toggles since
+   it shipped, and this class existed NOWHERE in the stylesheet: both of its
+   chips have been rendering as bare unstyled text that still reads as
+   deliberate. Supplier Prices copied the pattern and inherited the bug, which is
+   how it was noticed. Defining it here fixes both pages at once and adds no JS.
+
+   Both active conventions are honoured on purpose: price-monitor toggles
+   `.filter-chip--active`, supplier-prices toggles `.active`. Supporting the two
+   is a two-line selector; renaming one page's convention is a behaviour change
+   to a page this work was not asked to touch. */
+.filter-chip {
+  padding: 5px 12px; font-size: 12px; font-weight: 500; font-family: inherit;
+  background: var(--input-bg); color: var(--text-secondary);
+  border: 1px solid var(--input-border); border-radius: 20px;
+  cursor: pointer; white-space: nowrap; transition: all 0.12s var(--ease);
+}
+.filter-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.filter-chip.active,
+.filter-chip--active {
+  background: var(--cyan); border-color: var(--cyan); color: #fff; font-weight: 600;
+}
+
+.admin-sp-scope {
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
+  margin: -8px 0 16px; max-width: 78ch;
+}
+
+/* ---- Feed freshness strip ---- */
+.admin-sp-feeds { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.admin-sp-feed {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 12px; border-radius: 20px;
+  background: var(--surface); border: 1px solid var(--border);
+  font-size: 12px; white-space: nowrap;
+}
+.admin-sp-feed__name { font-weight: 600; color: var(--text); }
+.admin-sp-feed__age { color: var(--text-secondary); }
+.admin-sp-feed__count { color: var(--text-muted); font-size: 11px; }
+.admin-sp-feed--stale {
+  border-color: var(--yellow); background: var(--yellow-dim);
+}
+.admin-sp-feed--stale .admin-sp-feed__age { color: var(--yellow-text); font-weight: 600; }
+.admin-sp-feeds__note {
+  flex-basis: 100%; font-size: 11px; color: var(--text-muted);
+  line-height: 1.5; max-width: 78ch;
+}
+.admin-sp-feeds__empty { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+
+/* ---- The split headline ----
+   Two figures side by side, never one. A single blended number here would be the
+   most misleading thing on the page: measured 2026-08-31, 130 of the 131 rows
+   showing a "switch and save" rested on a 193-day-old price. */
+.admin-sp-honesty {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); padding: 16px 18px; margin-bottom: 16px;
+}
+.admin-sp-honesty__figures { display: flex; flex-wrap: wrap; gap: 28px; }
+.admin-sp-honesty__figure { display: flex; flex-direction: column; gap: 2px; max-width: 34ch; }
+.admin-sp-honesty__amount {
+  font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.admin-sp-honesty__figure--fresh .admin-sp-honesty__amount { color: var(--success); }
+.admin-sp-honesty__figure--stale .admin-sp-honesty__amount { color: var(--yellow-text); }
+.admin-sp-honesty__caption { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+.admin-sp-honesty__notes {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12.5px; color: var(--text-secondary);
+}
+.admin-sp-honesty__basis {
+  margin-top: 10px; font-size: 11px; color: var(--text-muted);
+  line-height: 1.5; max-width: 78ch;
+}
+.admin-sp-honesty__line { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.admin-sp-honesty__line--stale { color: var(--yellow-text); margin-top: 4px; }
+
+/* ---- "This list is incomplete" ----
+   A short set must not look like a whole set. Danger tone, because unlike a stale
+   price this one means the numbers on screen are not the numbers. */
+.admin-sp-partial {
+  display: flex; gap: 10px; align-items: flex-start;
+  border: 1px solid var(--danger); background: var(--danger-dim);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px;
+  font-size: 12.5px; line-height: 1.5;
+}
+.admin-sp-partial svg { flex-shrink: 0; margin-top: 2px; color: var(--danger); }
+
+.admin-sp-blurb {
+  font-size: 12px; color: var(--text-muted);
+  margin: -8px 0 12px; max-width: 82ch; line-height: 1.5;
+}
+.admin-sp-tabcount { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+.admin-sp-filters { margin-bottom: 12px; }
+.admin-sp-minsaving { width: 120px; }
+
+/* ---- A supplier price cell: money on top, age underneath ---- */
+.admin-sp-cell { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.admin-sp-cell__money { font-variant-numeric: tabular-nums; }
+.admin-sp-cell__age { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.admin-sp-cell--cheapest .admin-sp-cell__money { font-weight: 700; color: var(--success); }
+.admin-sp-cell--stale .admin-sp-cell__age { color: var(--yellow-text); font-weight: 600; }
+/* The absent case. This renders an em-dash and never a zero: a supplier that does
+   not quote a product has no price, and $0.00 would read as the cheapest one. */
+.admin-sp-cell--absent { color: var(--text-muted); }
+
+.admin-sp-saving { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.admin-sp-saving__amount { font-weight: 600; font-variant-numeric: tabular-nums; }
+.admin-sp-saving__pct { font-size: 10.5px; color: var(--text-muted); }
+.admin-sp-saving__warn {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--yellow-text); white-space: nowrap;
+}
+.admin-sp-saving--stale .admin-sp-saving__amount { color: var(--yellow-text); }
+.admin-sp-wepay--beatable { color: var(--text); font-weight: 600; }
+/* The grid grows a column per supplier, so let it scroll rather than crush the
+   Product column — .admin-table-wrap already provides the overflow container. */
+.admin-sp-table { min-width: 900px; }
+.admin-sp-sub { font-size: 11px; color: var(--text-muted); }
+.admin-sp-colour { color: var(--text-secondary); }
+
+/* ---- Review queue ---- */
+.admin-sp-review__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 8px;
+}
+.admin-sp-review__chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.admin-sp-review__toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-secondary); cursor: pointer;
+}
+.admin-sp-review__intro {
+  font-size: 12.5px; color: var(--text-secondary);
+  line-height: 1.5; max-width: 84ch; margin-bottom: 12px;
+}
+.admin-sp-review__list { display: flex; flex-direction: column; gap: 6px; }
+
+.admin-sp-reason {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: var(--input-bg); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.admin-sp-reason--actionable {
+  background: var(--cyan-dim); color: var(--cyan-text); border-color: var(--cyan);
+}
+.admin-sp-reason__count { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.admin-sp-reason__label { letter-spacing: 0.01em; }
+
+.admin-sp-offer {
+  display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  gap: 14px; align-items: start;
+  padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface);
+}
+.admin-sp-offer--actionable { border-left: 3px solid var(--cyan); }
+.admin-sp-offer__main { min-width: 0; }
+.admin-sp-offer__sku { font-weight: 600; }
+.admin-sp-offer__meta { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+/* The contradiction that caused the ambiguity, spelled out. Both live ambiguous
+   rows say "Black" on a code ending in M — showing that is what turns an
+   unexplained refusal into a decision the operator can actually make. */
+.admin-sp-offer__conflict {
+  margin-top: 6px; font-size: 11.5px; line-height: 1.5;
+  color: var(--yellow-text); max-width: 62ch;
+}
+.admin-sp-offer__facts { font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 2px; }
+.admin-sp-offer__age { font-size: 11px; color: var(--text-muted); }
+.admin-sp-offer__action { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+.admin-sp-offer__reason { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.admin-sp-offer__cta { display: flex; align-items: center; }
+
+/* ---- Map modal ---- */
+.admin-sp-modal { max-width: 560px; }
+.admin-sp-map__offer {
+  padding: 10px 12px; border-radius: var(--radius);
+  background: var(--input-bg); border: 1px solid var(--border); margin-bottom: 16px;
+}
+.admin-sp-map__sku { font-size: 14px; font-weight: 700; }
+.admin-sp-map__meta { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+.admin-sp-map__permanence {
+  margin-top: 4px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--cyan-dim); border: 1px solid var(--cyan);
+  font-size: 12px; line-height: 1.5; color: var(--text-secondary);
+}
+
+/* ---- Per-product drawer ---- */
+.admin-sp-drawer__name { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.admin-sp-drawer__facts {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-muted); margin: 6px 0 16px;
+}
+.admin-sp-drawer__verdict {
+  padding: 12px 14px; border-radius: var(--radius);
+  font-size: 13px; line-height: 1.55; margin-bottom: 18px; max-width: 80ch;
+  border: 1px solid var(--border); background: var(--surface);
+}
+.admin-sp-drawer__verdict--good { border-color: var(--success); background: var(--success-dim); }
+.admin-sp-drawer__verdict--warn { border-color: var(--yellow); background: var(--yellow-dim); }
+.admin-sp-drawer__cheapest td { background: var(--success-dim); }
+.admin-sp-drawer__money {
+  display: flex; gap: 28px; flex-wrap: wrap; margin: 18px 0 12px;
+}
+.admin-sp-drawer__money > div { display: flex; flex-direction: column; gap: 2px; }
+.admin-sp-drawer__money span { font-size: 11px; color: var(--text-muted); }
+.admin-sp-drawer__money strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.admin-sp-drawer__note {
+  font-size: 11.5px; color: var(--text-muted); line-height: 1.55; max-width: 78ch;
+}
+
+/* ---- Import panel ---- */
+.admin-sp-import { margin-top: 24px; padding: 12px 16px; }
+.admin-sp-import > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.admin-sp-import__body { padding-top: 10px; max-width: 84ch; }
+.admin-sp-import__body p { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); margin: 0 0 10px; }
+.admin-sp-import__blocked {
+  padding: 10px 12px; border-radius: var(--radius);
+  background: var(--yellow-dim); border: 1px solid var(--yellow);
+}
+
+@media (max-width: 900px) {
+  .admin-sp-offer { grid-template-columns: 1fr; gap: 8px; }
+  .admin-sp-honesty__figures { gap: 16px; }
+}

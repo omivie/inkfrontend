@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.08.31-invoice-type-sizes';
+const APP_VERSION = '2026.08.31-catalogue-pathway-actions';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -100,6 +100,9 @@ const NAV_ITEMS = [
   { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
   { key: 'product-codes', label: 'Product Codes', icon: 'products', ownerOnly: true },
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
+  // What we PAY, next to what competitors CHARGE. Owner-only because it renders
+  // supplier cost on every row, and the endpoints behind it are super_admin.
+  { key: 'supplier-prices', label: 'Supplier Prices', icon: 'suppliers', ownerOnly: true },
   { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
 
   { section: 'Data Operations' },
