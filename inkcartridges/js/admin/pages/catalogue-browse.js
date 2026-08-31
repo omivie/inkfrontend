@@ -51,7 +51,7 @@ import { Modal } from '../components/modal.js';
 import { paginate, pagerHtml, categoryLabel, isValidProductCode } from '../utils/product-codes.js';
 import { productTypeLabel } from '../utils/product-types.js';
 import {
-  SHOP_CATEGORIES, brandVisibleOnShop, typesForCategory, isManualCodeType,
+  SHOP_CATEGORIES, brandShopVisibility, typesForCategory, isManualCodeType,
 } from '../utils/catalogue-pathway.js';
 
 const PER_PAGE = 60;
@@ -70,6 +70,7 @@ let _codeEntry = null;            // { code, count, aliases[] }
 let _page = 0;
 let _filter = '';
 let _loadToken = 0;               // guards a slow load from painting over a newer one
+let _brandsAfterWrite = null;     // rows echoed by the brands manager; authoritative over a cached read
 
 function resetState() {
   _level = 'brands';
@@ -198,23 +199,45 @@ function render() {
  * pages — collapsing them into one grid here would misrepresent both.
  */
 async function renderBrands(host, token) {
-  const [brands, ribbonBrands] = await Promise.all([
-    AdminAPI.getBrands(),
+  // After a brand write the 5-minute SWR entry behind getBrands() still holds the
+  // old list, and a fresh fetch could be served from the CDN with the pre-write
+  // row anyway. So we do not re-read: the manager hands us the rows it just
+  // wrote, echoed by the server, and those win until the caches catch up.
+  const [fetched, ribbonBrands] = await Promise.all([
+    _brandsAfterWrite ? Promise.resolve(_brandsAfterWrite) : AdminAPI.getBrands(),
     AdminAPI.getAdminRibbonBrands().catch(() => null),
   ]);
+  const brands = fetched;
   if (token !== _loadToken) return;
 
   if (!Array.isArray(brands)) throw new Error('The brand list could not be read from /api/brands.');
 
   // A brand /api/brands returns but /shop refuses to render is invisible with
   // no error anywhere. Surface it here rather than leaving it to be noticed.
-  const visible = brands.filter(b => brandVisibleOnShop(b.slug));
-  const hidden  = brands.filter(b => !brandVisibleOnShop(b.slug));
+  //
+  // THREE buckets, not two: `show_on_shop` absent is not the same claim as
+  // `show_on_shop: false`, and folding an unknown into "hidden" would state as
+  // fact something we never read.
+  const visible = [];
+  const hidden = [];
+  const unknown = [];
+  for (const b of brands) {
+    const v = brandShopVisibility(b).visible;
+    if (v === true) visible.push(b);
+    else if (v === false) hidden.push(b);
+    else unknown.push(b);
+  }
+  visible.sort((a, b) => {
+    const ao = Number.isFinite(a.sort_order) ? a.sort_order : Number.MAX_SAFE_INTEGER;
+    const bo = Number.isFinite(b.sort_order) ? b.sort_order : Number.MAX_SAFE_INTEGER;
+    return ao !== bo ? ao - bo : String(a.name || '').localeCompare(String(b.name || ''));
+  });
 
   const tile = (b, shown) => `
     <button type="button" class="admin-cb-tile${shown ? '' : ' admin-cb-tile--muted'}"
             data-cb-brand="${esc(b.slug || '')}" data-cb-brand-name="${esc(b.name || b.slug || '')}"
-            data-cb-brand-id="${esc(String(b.id ?? ''))}">
+            data-cb-brand-id="${esc(String(b.id ?? ''))}"
+            data-cb-shown="${b.show_on_shop === true ? 'yes' : b.show_on_shop === false ? 'no' : 'unknown'}">
       <span class="admin-cb-tile__name">${esc(b.name || b.slug || '')}</span>
       ${shown ? '' : `<span class="admin-cb-tile__warn">not shown on /shop</span>`}
     </button>`;
@@ -227,17 +250,28 @@ async function renderBrands(host, token) {
     </button>`;
 
   host.innerHTML = `
-    <h3 class="admin-cb-h">Cartridge &amp; toner brands</h3>
+    <div class="admin-cb-headrow">
+      <h3 class="admin-cb-h">Cartridge &amp; toner brands</h3>
+      <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-cb-manage-brands>Manage brands</button>
+    </div>
     <div class="admin-cb-grid">${visible.map(b => tile(b, true)).join('') || emptyState('No brands', 'The brand list came back empty.')}</div>
 
     ${hidden.length ? `
       <h3 class="admin-cb-h admin-cb-h--warn">${hidden.length} brand${hidden.length === 1 ? '' : 's'} not on /shop</h3>
       <p class="admin-cb-note">These exist in the catalogue and appear in search and on their
-        product pages, but <strong>render no tile on /shop</strong>: the shop filters the brand
-        list against a hardcoded allowlist (<code>preferredOrder</code> in
-        <code>js/shop-page.js</code>). Adding one there also needs a logo entry in
-        <code>brandInfo</code>. You can still add products to them here.</p>
+        product pages, but <strong>render no tile on /shop</strong> because their
+        <code>show_on_shop</code> is off. Most are typewriter/ribbon brands reached through
+        <a href="/ribbons" class="admin-cb-link">/ribbons</a>, which is correct for them.
+        You can still add products to any of them here.</p>
       <div class="admin-cb-grid">${hidden.map(b => tile(b, false)).join('')}</div>
+    ` : ''}
+
+    ${unknown.length ? `
+      <h3 class="admin-cb-h admin-cb-h--warn">${unknown.length} brand${unknown.length === 1 ? '' : 's'} we could not check</h3>
+      <p class="admin-cb-note">Their rows came back without a <code>show_on_shop</code> field, so
+        whether they render a /shop tile was <strong>not determined</strong> — this is "we did not
+        look", not "they are hidden".</p>
+      <div class="admin-cb-grid">${unknown.map(b => tile(b, false)).join('')}</div>
     ` : ''}
 
     <h3 class="admin-cb-h">Typewriter &amp; ribbon brands</h3>
@@ -251,6 +285,8 @@ async function renderBrands(host, token) {
     }</div>
   `;
 
+  host.querySelector('[data-cb-manage-brands]')?.addEventListener('click', () => openBrandsManager());
+
   host.querySelectorAll('[data-cb-brand]').forEach(btn => {
     btn.addEventListener('click', () => goTo('categories', {
       brand: {
@@ -258,6 +294,11 @@ async function renderBrands(host, token) {
         name: btn.dataset.cbBrandName,
         id: btn.dataset.cbBrandId || null,
         kind: 'cartridge',
+        // Carried from the row we already read, so the reachability check one
+        // level down answers from data rather than re-deriving it — and can
+        // still distinguish "hidden" from "we never saw the field".
+        showOnShop: btn.dataset.cbShown === 'yes' ? true
+          : btn.dataset.cbShown === 'no' ? false : null,
       },
     }));
   });
@@ -432,8 +473,10 @@ async function renderCodes(host, token) {
       <span style="flex:1 1 auto"></span>
       <button class="admin-btn admin-btn--sm" id="cb-new-code">+ New code</button>
       <button class="admin-btn admin-btn--ghost admin-btn--sm" id="cb-check-reach">Check for unreachable products</button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="cb-codeless">Products with no code</button>
     </div>
     <div id="cb-reach"></div>
+    <div id="cb-codeless-out"></div>
     ${model.total
       ? `<div class="admin-pc-grid" style="max-height:none">${
           model.items.map(c => `
@@ -487,6 +530,7 @@ async function renderCodes(host, token) {
   host.querySelector('#cb-add-here')?.addEventListener('click', () => addProductHere(null));
   host.querySelector('#cb-new-code')?.addEventListener('click', () => promptNewCode(collapsed));
   host.querySelector('#cb-check-reach')?.addEventListener('click', (e) => runReachabilityCheck(host, e.currentTarget));
+  host.querySelector('#cb-codeless')?.addEventListener('click', (e) => listCodelessProducts(host, e.currentTarget));
 }
 
 /**
@@ -655,7 +699,7 @@ async function runReachabilityCheck(host, btn) {
       if (!brandKnown && (has(p, 'brand_id') || has(p, 'brand') || has(p, 'brands'))) {
         return 'no brand assigned';
       }
-      if (!brandVisibleOnShop(_brand.slug)) return `brand "${_brand.slug}" renders no tile on /shop`;
+      if (_brand?.showOnShop === false) return `brand "${_brand.slug}" has show_on_shop off — it renders no tile on /shop`;
       if (has(p, 'product_type') && !p.product_type) return 'no product_type set';
       return 'in the catalogue but no /shop chip serves it \u2014 check its SKU against the codes above';
     };
@@ -775,6 +819,113 @@ async function renderProducts(host, token) {
  * code — the product still gets its brand and category, and its code comes from
  * whatever SKU is typed. That is the honest shape: we know two of the three.
  */
+/**
+ * Open the Brands manager over this level.
+ *
+ * Lazy-imported rather than imported at module load, and mounted in place rather
+ * than routed to: brands are already listed here, so a separate nav page would be
+ * a SECOND surface over the same table — the shape that let two normalisers drift
+ * apart in ERR-061, and the reason "+ New code" hands membership editing off to
+ * #product-codes instead of rebuilding it.
+ */
+async function openBrandsManager() {
+  const level = document.getElementById('cb-level');
+  if (!level) return;
+  try {
+    const mod = await import('./brands.js');
+    level.innerHTML = `
+      <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-cb-brands-back>← Back to brands</button>
+      <div id="cb-brands-host" style="margin-top:12px"></div>`;
+    level.querySelector('[data-cb-brands-back]')?.addEventListener('click', () => { _level = 'brands'; render(); });
+    await mod.default.init(level.querySelector('#cb-brands-host'), {
+      // The grid's membership just changed, so the level behind this is stale.
+      onChanged: (rows) => { _brandsAfterWrite = Array.isArray(rows) ? rows : null; },
+    });
+  } catch (e) {
+    Toast.error('The brands manager could not be opened.');
+  }
+}
+
+/**
+ * List the products in this brand+category that derive NO code.
+ *
+ * These are the rows that can never appear under any chip, so a customer walking
+ * brand → category → code cannot reach them however long they look. The probe
+ * counts them (`no code derivable`, 75 live on 2026-08-31) but counting them in a
+ * terminal does not help the person who can actually fix one — and the fix is a
+ * merchandising judgement, not a parse: for an Epson UltraChrome ink the identity
+ * genuinely IS the volume (26ml / 50ml / 80ml are different products at different
+ * prices), which is why the extractor's metric skip refuses to invent a chip.
+ *
+ * So they are listed here, beside the "+ New code" affordance that files them,
+ * the same way the brand level lists the brands that render no /shop tile.
+ *
+ * MEASURED, never hardcoded. The backend's note quotes 18; the probe counts 75 in
+ * this catalogue, and the two are counting different populations (theirs excludes
+ * label tape). A number typed into a UI is stale the day after it is typed.
+ */
+async function listCodelessProducts(host, btn) {
+  const out = host.querySelector('#cb-codeless-out');
+  if (!out) return;
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  try {
+    const types = typesForCategory(_category);
+    const rows = [];
+    for (const type of types) {
+      const page = await AdminAPI.getProducts(
+        { brand_id: _brand.id, product_type: type, is_active: 'true' }, 1, 200);
+      const list = Array.isArray(page?.products) ? page.products : (Array.isArray(page) ? page : []);
+      rows.push(...list);
+    }
+
+    // The admin list does NOT project series_codes, so a missing key here means
+    // "not asked for", not "has no code" — reading absence as failure is how an
+    // earlier version of this check called 195 of Brother's 200 ink products
+    // broken (ERR-187). Derive client-side, exactly as the storefront does.
+    const derive = (p) => {
+      const probe = { sku: p.sku || '', name: p.name || '', series_codes: [] };
+      try { window.API?._enrichSeriesCodes?.(probe); } catch (_) { /* advisory */ }
+      return (probe.series_codes || []).filter(Boolean);
+    };
+    const codeless = rows.filter(p => !derive(p).length);
+
+    if (!rows.length) {
+      out.innerHTML = `<div class="admin-cb-note">Nothing came back for ${esc(_brand.name)} ·
+        ${esc(categoryLabel(_category))}, so this was <strong>not checked</strong>.</div>`;
+      return;
+    }
+    if (!codeless.length) {
+      out.innerHTML = `<div class="admin-cb-note">All ${rows.length} active products here derive a code.</div>`;
+      return;
+    }
+    out.innerHTML = `
+      <div class="admin-cb-note admin-cb-note--warn">
+        <strong>${codeless.length} of ${rows.length} active products derive no code.</strong>
+        They appear in search and on their own pages, but under no chip — so nobody
+        walking the catalogue reaches them. File one under a code with
+        <em>+ New code → tag existing products</em>, or leave it: for some (Epson
+        UltraChrome volumes, fuser and waste units) a chip may not be the right surface.
+      </div>
+      <table class="admin-table admin-cb-codeless">
+        <thead><tr><th>SKU</th><th>Name</th><th>MPN</th><th>Stock</th></tr></thead>
+        <tbody>${codeless.slice(0, 100).map(p => `
+          <tr><td><code>${esc(p.sku || '')}</code></td>
+              <td>${esc(String(p.name || '').slice(0, 70))}</td>
+              <td>${esc(p.manufacturer_part_number || '—')}</td>
+              <td>${p.stock_quantity == null ? '—' : esc(String(p.stock_quantity))}</td></tr>`).join('')}
+        </tbody>
+      </table>
+      ${codeless.length > 100 ? `<div class="admin-cb-note">…and ${codeless.length - 100} more.</div>` : ''}`;
+  } catch (e) {
+    // "Could not look" is its own state, never "nothing found".
+    out.innerHTML = `<div class="admin-cb-note admin-cb-note--warn">This could not be checked
+      (${esc(e.message || 'the request failed')}). That is not the same as finding nothing.</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
 function addProductHere(code) {
   if (!_hooks.onAddProduct) {
     Toast.error('The product editor is not available from here.');

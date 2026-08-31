@@ -97,7 +97,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  SHOP_BRAND_ALLOWLIST, CATEGORY_PRODUCT_TYPES_FALLBACK, categoryForType,
+  brandShopVisibility, CATEGORY_PRODUCT_TYPES_FALLBACK, categoryForType,
 } from '../inkcartridges/js/admin/utils/catalogue-pathway.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +107,7 @@ const SITE = path.join(ROOT, 'inkcartridges');
 const ARGS = process.argv.slice(2);
 const HAS = (f) => ARGS.includes(f);
 const JSON_OUT = HAS('--json');
+const FAST = HAS('--fast');
 const BRAND_LIMIT = (() => {
   const i = ARGS.indexOf('--limit');
   return i >= 0 ? Math.max(1, parseInt(ARGS[i + 1], 10) || 0) : 0;
@@ -119,7 +120,24 @@ const MIN_PLAUSIBLE_PRODUCTS = 500; // a short catalogue means we did not look
 const MAX_ATTEMPTS = 4;             // per request, for 429 back-off
 const RATE_LIMIT_BACKOFF_MS = 20000;
 
+/**
+ * Pace between requests. This sweep is ~90 sequential GETs, and on 2026-08-31 the
+ * backend reported that running it flat-out reliably 502s their whole instance —
+ * health endpoint included — for several minutes. ERR-188, the same day's outage,
+ * is that failure seen from this side.
+ *
+ * The delay lives inside get() rather than in the walk loops on purpose: in get()
+ * no caller can forget it, whereas in a loop the next person who adds a walk
+ * reintroduces the outage. Same shape and default as sweep-business-pricing.mjs's
+ * CHUNK_DELAY_MS, which exists for the same reason against the same API.
+ *
+ * --fast drops it to zero for a local API_BASE. Never use it against production.
+ */
+const REQUEST_DELAY_MS = FAST ? 0 : Number(process.env.PROBE_DELAY_MS || 650);
+const SERVER_ERROR_BACKOFF_MS = 15000;
+
 let SHIPPED = null;   // { API, SeriesCodes } — set by loadShipped() in main()
+const BRAND_ROWS = new Map();  // slug → /api/brands row, filled once in main()
 
 const say = (...a) => { if (!JSON_OUT) console.log(...a); };
 const rule = (ch = '─') => say(ch.repeat(78));
@@ -156,10 +174,20 @@ async function get(pathAndQuery) {
   // than letting it surface as either a finding or a failed run. Same shape as
   // audit-product-types.mjs, which walks the same endpoint.
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (REQUEST_DELAY_MS) await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
     const res = await fetch(url, { headers: { accept: 'application/json' } });
     if (res.status === 429 && attempt < MAX_ATTEMPTS - 1) {
       say(`     (rate limited, waiting ${RATE_LIMIT_BACKOFF_MS / 1000}s…)`);
       await new Promise(r => setTimeout(r, RATE_LIMIT_BACKOFF_MS));
+      continue;
+    }
+    // A 5xx is the instance falling over, not an answer about the catalogue —
+    // same reasoning as the 429 above. Backing off here is what lets a wobbling
+    // backend finish the sweep instead of turning one bad moment into a
+    // scope-wide unreachable finding (ERR-187: a flake is not a finding).
+    if (res.status >= 500 && attempt < MAX_ATTEMPTS - 1) {
+      say(`     (HTTP ${res.status}, waiting ${SERVER_ERROR_BACKOFF_MS / 1000}s…)`);
+      await new Promise(r => setTimeout(r, SERVER_ERROR_BACKOFF_MS));
       continue;
     }
     if (!res.ok) throw new Error(`GET ${pathAndQuery} → HTTP ${res.status}`);
@@ -264,25 +292,42 @@ function codesFor(product) {
 /**
  * Walk the whole public catalogue, one page at a time.
  *
- * Returns the rows AND what the API claimed the total was, because those two
- * numbers do not agree. `audit:types` has reported the same gap since
- * 2026-08-03: the walk reaches `has_next=false` short of `meta.total`, so some
- * rows are counted by the API and never served by it. A product living only in
- * that gap cannot be checked here, and this probe says so rather than implying
- * it looked at everything.
+ * Returns the rows, what the API claimed the total was, and how many rows the API
+ * says it dropped from the pages it served.
+ *
+ * The total and the walk do not agree, and since 2026-08-31 we know why rather than
+ * merely that: `total` is counted BEFORE the per-page pack guard and dedup run, so a
+ * page can legitimately return fewer rows than the total implies. Resetting `total`
+ * would break pagination, so the backend emits `meta.removed_from_page` instead and
+ * the gap reconciles exactly:
+ *
+ *     sum(returned) + sum(removed_from_page) === total
+ *
+ * We check that identity rather than restating the gap as a mystery. If it holds, the
+ * catalogue is fully accounted for and nothing is hiding in the difference. If it does
+ * NOT hold, the leftover is real unexplained shrinkage and is reported as such.
  */
 async function loadCatalogue() {
   const products = [];
   let claimedTotal = null;
+  let removedFromPage = 0;
+  let sawRemovedKey = false;
   for (let page = 1; page <= MAX_PAGES; page++) {
     const body = await get(`/api/products?page=${page}&limit=${PAGE_LIMIT}`);
     const batch = body?.data?.products || [];
     products.push(...batch);
     const meta = body?.meta || {};
     if (claimedTotal == null && typeof meta.total === 'number') claimedTotal = meta.total;
+    // Count the KEY, not a truthy value — a page that legitimately removed nothing
+    // reports 0, and an endpoint that never gained the field also reads 0. Those two
+    // demand opposite conclusions, so they must not collapse into one number.
+    if (Object.prototype.hasOwnProperty.call(meta, 'removed_from_page')) {
+      sawRemovedKey = true;
+      removedFromPage += Number(meta.removed_from_page) || 0;
+    }
     if (!batch.length || meta.has_next === false) break;
   }
-  return { products, claimedTotal };
+  return { products, claimedTotal, removedFromPage, sawRemovedKey };
 }
 
 /**
@@ -316,7 +361,15 @@ async function loadServedSkus(brandSlug, category) {
         if (body?.ok === false) return page === 1 ? 'no-such-scope' : served;
         const list = body?.data?.products || [];
         for (const p of list) if (p.sku) served.add(String(p.sku).toUpperCase());
-        if (!list.length || body?.meta?.has_next === false) break;
+        // ONLY an empty page ends this walk. Two measured reasons:
+        //   1. /api/shop emits no `meta`, so the `has_next === false` test that used
+        //      to sit here could never fire — it was dead code reading undefined.
+        //   2. A SHORT page is normal here and must not end it. The pack guard and
+        //      dedup drop rows per page (that is what /api/products reports as
+        //      `removed_from_page`), so `list.length < limit` would truncate the walk
+        //      and invent "not served" findings for everything past the cut — ERR-134,
+        //      and the same false-positive class this probe was wrong about four times.
+        if (!list.length) break;
       }
       return served;
     } catch (e) {
@@ -334,6 +387,11 @@ async function main() {
   say('  CATALOGUE PATHWAY PROBE — is every product reachable on /shop?');
   rule('═');
   say(`  MODE: \x1b[1mREAD-ONLY\x1b[0m (no write path, no baseline file, no credentials)`);
+  // State the pace on every run, next to the mode. A sweep that quietly went
+  // flat-out is the one that takes the backend down (ERR-188), so "how fast did
+  // this run" must be as visible as "did it write anything".
+  say(`  PACE: \x1b[1m${REQUEST_DELAY_MS ? REQUEST_DELAY_MS + 'ms between requests' : 'NO DELAY (--fast)'}\x1b[0m`
+    + `${REQUEST_DELAY_MS ? '' : ' \x1b[31m← never use this against production\x1b[0m'}`);
   say(`  API : ${API_BASE}`);
   say('');
 
@@ -344,9 +402,9 @@ async function main() {
 
   say('');
   say('2. Reading the public catalogue');
-  let products, claimedTotal;
+  let products, claimedTotal, removedFromPage, sawRemovedKey;
   try {
-    ({ products, claimedTotal } = await loadCatalogue());
+    ({ products, claimedTotal, removedFromPage, sawRemovedKey } = await loadCatalogue());
   } catch (e) {
     cannotRun(`the catalogue could not be read — ${e.message}`);
   }
@@ -355,12 +413,49 @@ async function main() {
       + 'A short catalogue is an unanswered question, not a clean run.');
   }
   ok('catalogue read', `${products.length} active products`);
-  if (typeof claimedTotal === 'number' && claimedTotal > products.length) {
-    note(`the API claims ${claimedTotal} products but served ${products.length} — `
-      + `${claimedTotal - products.length} row(s) are counted and never returned `
-      + '(known backend condition, same one audit:types reports). Anything living only '
-      + 'in that gap was NOT checked by this run.');
+
+  // The brand grid's membership is a column now, so it has to be READ. There is
+  // no other source: inferring it would put a frontend guess in front of a
+  // backend fact, which is the whole reason the allowlist was removed.
+  try {
+    const body = await get('/api/brands');
+    const rows = Array.isArray(body?.data) ? body.data : [];
+    if (!rows.length) cannotRun('/api/brands returned no rows — brand visibility cannot be checked.');
+    for (const b of rows) if (b && b.slug) BRAND_ROWS.set(String(b.slug).toLowerCase(), b);
+    ok('brand rows read', `${BRAND_ROWS.size} brands, ${rows.filter(b => b.show_on_shop === true).length} on the /shop grid`);
+  } catch (e) {
+    cannotRun(`/api/brands could not be read (${e.message}) — brand visibility is a facet, not a guess.`);
   }
+  if (typeof claimedTotal === 'number' && claimedTotal > products.length) {
+    const gap = claimedTotal - products.length;
+    if (!sawRemovedKey) {
+      note(`the API claims ${claimedTotal} products but served ${products.length} — `
+        + `${gap} row(s) are counted and never returned, and no page carried a `
+        + '`meta.removed_from_page` key to explain them. Anything living only in that '
+        + 'gap was NOT checked by this run.');
+    } else if (removedFromPage === gap) {
+      ok('catalogue total reconciles',
+        `${products.length} returned + ${removedFromPage} removed_from_page = ${claimedTotal}`);
+    } else {
+      note(`the API claims ${claimedTotal} products, served ${products.length} and `
+        + `reported ${removedFromPage} removed from pages — which leaves `
+        + `${gap - removedFromPage} row(s) unaccounted for. The reconciliation the backend `
+        + 'documents does NOT close, so some rows are still counted and never served. '
+        + 'Anything living only in that remainder was NOT checked by this run.');
+    }
+  } else if (sawRemovedKey && removedFromPage > 0) {
+    note(`${removedFromPage} row(s) were removed from their pages by the pack guard/dedup, `
+      + 'and the walk still reached the claimed total.');
+  }
+
+  // /api/shop cannot be reconciled the same way, and saying so is the point.
+  // The backend's note says both /shop and /products emit `meta.removed_from_page`.
+  // Measured 2026-08-31: /api/shop returns { products, series, counts, facets } and
+  // NO meta object at all, so there is no total and no removal count to check there.
+  // An unverifiable claim reported as verified is the exact failure this probe exists
+  // to avoid, so the gap is stated rather than quietly skipped.
+  note('/api/shop exposes no `meta`, so the returned+removed=total identity is checked '
+    + 'on /api/products only — the served-SKU diff below is what covers /shop.');
 
   // ── 3. Is series_codes still projected? ──────────────────────────────────
   //
@@ -406,8 +501,20 @@ async function main() {
     // different universe with different storage. Reporting Olivetti's
     // correction tape as unreachable because "olivetti" is missing from a
     // cartridge-brand allowlist would be measuring it against the wrong route.
-    if (!isRibbon && !SHOP_BRAND_ALLOWLIST.includes(slug)) {
-      failFor('brand_on_shop', p, `brand "${slug}" renders no tile on /shop`);
+    if (!isRibbon) {
+      // Read the brand's OWN row. This used to compare the slug against a
+      // hardcoded allowlist copied from shop-page.js; since 2026-08-31 /shop
+      // filters on `brands.show_on_shop`, so the allowlist would have been a
+      // frontend opinion about a backend fact. An absent row is reported as
+      // UNMEASURED, never as hidden — a product is only called unreachable on
+      // evidence we actually read.
+      const vis = brandShopVisibility(BRAND_ROWS.get(slug));
+      if (vis.visible === false) {
+        failFor('brand_on_shop', p, `brand "${slug}" has show_on_shop = false — it renders no tile`);
+      } else if (vis.visible === null) {
+        failFor('brand_visibility_unknown', p,
+          `brand "${slug}" is not in /api/brands, so its /shop tile was NOT checked`);
+      }
     }
     const category = categoryForType(type);
     if (!category) { failFor('product_type', p, `product_type "${type}" maps to no /shop category`); continue; }
@@ -492,7 +599,8 @@ async function main() {
 
   const FACET_LABEL = {
     brand_id:          'no brand assigned',
-    brand_on_shop:     'brand not on /shop (preferredOrder allowlist)',
+    brand_on_shop:     'brand has show_on_shop = false — renders no /shop tile',
+    brand_visibility_unknown: 'brand missing from /api/brands — /shop tile NOT checked',
     product_type:      'product_type missing or unmapped',
     code:              'no code derivable from the SKU',
     not_served:        'in the catalogue, but /shop does not serve it',

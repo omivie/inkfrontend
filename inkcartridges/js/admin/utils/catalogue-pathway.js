@@ -21,8 +21,9 @@
  * This is the fact the whole feature is shaped around, and it is worth stating
  * where someone editing the pathway will read it:
  *
- *   brand     a real `brands` row — but /shop additionally hard-filters the
- *             brand list against a hardcoded allowlist (see SHOP_BRAND_ALLOWLIST)
+ *   brand     a real `brands` row — and since Aug 2026 whether /shop renders a
+ *             tile for it is a column on that row (`show_on_shop`, `sort_order`),
+ *             not a hardcoded allowlist in the frontend. See brandShopVisibility.
  *   category  not stored. A fixed map over `product_type`, which is a backend
  *             Postgres enum the frontend can never extend (ERR-162…166)
  *   code      not stored. DERIVED from sku/name by API._enrichSeriesCodes at
@@ -43,28 +44,48 @@ import { PRODUCT_TYPE_TO_SHOP_CATEGORY, SHOP_CATEGORIES } from './product-codes.
 import { RIBBON_PRODUCT_TYPES } from './product-types.js';
 
 /**
- * The brand slugs /shop will actually render a tile for.
+ * Whether a brand renders a tile on /shop — a THREE-STATE answer.
  *
- * ⚠ THIS IS A MIRROR, NOT A SOURCE. The real list is `preferredOrder` inside
- * `renderBrands()` in js/shop-page.js, where it is applied as a FILTER (not a
- * sort): `sorted.filter(b => preferredOrder.includes(b.slug))`. A brand that
- * exists in `brands` and comes back from `/api/brands` but is absent from that
- * array appears in search, on its PDP and in the admin — and renders **no tile
- * on /shop**, with no error anywhere.
+ * ── What this replaced ──────────────────────────────────────────────────────
  *
- * We mirror it here so the Browse tab can SAY so on the brand that is missing,
- * instead of the admin discovering it by noticing an absence months later.
- * `tests/catalogue-pathway-aug2026.test.js` asserts this copy still equals the
- * shop-page array — if that test fails, the two have drifted and this one is
- * the stale half.
+ * Until 2026-08-31 this module carried `SHOP_BRAND_ALLOWLIST`, a hand-maintained
+ * copy of a `preferredOrder` array inside `renderBrands()` in js/shop-page.js,
+ * which that function applied as a FILTER rather than a sort. A brand present in
+ * the database and returned by `/api/brands` but absent from that array appeared
+ * in search, on its PDP and in the admin, and rendered **no tile on /shop**, with
+ * no error anywhere. Seventeen brands were in that state. Two hardcoded lists
+ * pinned to each other by a test is not a source of truth; it is two stale halves
+ * waiting to disagree.
  *
- * The durable fix is a `brands.show_on_shop` column so the grid comes from
- * data; see catalogue-pathway-backend-brief-aug2026.md §2.
+ * The backend now owns it: `brands.show_on_shop` (plus `sort_order`), and
+ * shop-page.js filters on exactly that. So the question this module answers is no
+ * longer "is the slug in our list" but "what does this brand's own row say".
+ *
+ * ── Why three states and not a boolean ──────────────────────────────────────
+ *
+ * Because "we were not given the row" and "the row says no" are different facts
+ * that demand opposite responses, and collapsing them is the mistake this whole
+ * area keeps making. Reporting an unknown as `false` would file a product as
+ * UNREACHABLE on the strength of a field we never read — the could-not-look
+ * mistake with the sign flipped, which is exactly how one bad request once became
+ * "662 products unreachable" (ERR-187). Reporting it as `true` would hide real
+ * misses. So it returns `null`, and callers route that to their own "unmeasured"
+ * vocabulary.
+ *
+ * `=== true` on purpose: an ABSENT field is not visible-by-default.
+ *
+ * Pure and network-free — the CALLER supplies the row. That is what keeps the
+ * probe able to decide without an extra request per brand.
+ *
+ * @param {object} brandRow a row from /api/brands
+ * @returns {{visible: (boolean|null), source: ('row'|'unknown')}}
  */
-export const SHOP_BRAND_ALLOWLIST = [
-  'brother', 'canon', 'epson', 'hp', 'samsung',
-  'lexmark', 'oki', 'fuji-xerox', 'kyocera', 'dymo',
-];
+export function brandShopVisibility(brandRow) {
+  const v = brandRow && typeof brandRow === 'object' ? brandRow.show_on_shop : undefined;
+  if (v === true) return { visible: true, source: 'row' };
+  if (v === false) return { visible: false, source: 'row' };
+  return { visible: null, source: 'unknown' };
+}
 
 /**
  * Fallback category→types map, used ONLY when `window.API` is absent (the probe
@@ -120,10 +141,7 @@ export function defaultTypeForCategory(category) {
   return typesForCategory(category)[0] || '';
 }
 
-/** True when a brand slug will render a tile on /shop. See SHOP_BRAND_ALLOWLIST. */
-export function brandVisibleOnShop(slug) {
-  return SHOP_BRAND_ALLOWLIST.includes(String(slug || '').toLowerCase());
-}
+
 
 /** True when this product type's codes are owner-assigned only (never derived). */
 export function isManualCodeType(productType) {
@@ -310,7 +328,7 @@ export function mergeCodeIntoEffective(effective, code) {
  *
  * @returns {{reachable:boolean, failures:Array<{facet:string, detail:string}>}}
  */
-export function reachabilityFacets(product, { overrideCodes = null, brandSlug = null } = {}) {
+export function reachabilityFacets(product, { overrideCodes = null, brandSlug = null, brandRow = null } = {}) {
   const failures = [];
   const p = product || {};
 
@@ -324,11 +342,22 @@ export function reachabilityFacets(product, { overrideCodes = null, brandSlug = 
   const slug = brandSlug || p.brand?.slug || p.brand_slug || '';
   if (!p.brand_id && !slug) {
     failures.push({ facet: 'brand_id', detail: 'no brand assigned' });
-  } else if (slug && !brandVisibleOnShop(slug)) {
-    failures.push({
-      facet: 'brand_on_shop',
-      detail: `brand "${slug}" is not in /shop's preferredOrder allowlist — it renders no tile`,
-    });
+  } else if (slug) {
+    // `brandRow` is supplied by the caller (the probe fetches /api/brands once;
+    // the Browse tab already has the list). Its ABSENCE is not a "no" — a product
+    // is only reported unreachable on a brand row we actually read.
+    const vis = brandShopVisibility(brandRow);
+    if (vis.visible === false) {
+      failures.push({
+        facet: 'brand_on_shop',
+        detail: `brand "${slug}" has show_on_shop = false — it renders no tile on /shop`,
+      });
+    } else if (vis.visible === null) {
+      failures.push({
+        facet: 'brand_visibility_unknown',
+        detail: `brand "${slug}" — no brand row was supplied, so whether it renders a /shop tile was NOT checked`,
+      });
+    }
   }
 
   // 3. Product type — set, and mapped to a /shop category. An unmapped type has

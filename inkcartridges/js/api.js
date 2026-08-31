@@ -398,8 +398,19 @@ const API = {
                 }
 
                 // Not found — caller may show "Couldn't find that product/order"
+                //
+                // `code` stays the generic 'NOT_FOUND' on purpose: fourteen call sites
+                // compare against that literal, and the 403 branch's "specific code
+                // wins" shape cannot be copied here without silently changing all of
+                // them. The backend's own code is carried ALONGSIDE as `server_code`
+                // so a caller that wants the specific reason can have it — additive,
+                // so nothing that reads `code` can break. This is what lets the
+                // product delete path distinguish PRODUCT_NOT_FOUND ("already gone")
+                // from a route that has vanished (ERR-166 was the latter for months).
                 if (response.status === 404 || errorCode === 'NOT_FOUND') {
-                    return withRid({ ok: false, error: errorMsg, code: 'NOT_FOUND' });
+                    const env = { ok: false, error: errorMsg, code: 'NOT_FOUND' };
+                    if (errorCode && errorCode !== 'NOT_FOUND') env.server_code = errorCode;
+                    return withRid(env);
                 }
 
                 // 5xx — return a structured envelope so callers can show a friendly
@@ -3122,7 +3133,29 @@ const API = {
      * @param {string} productId - Product UUID
      */
     async deleteProduct(productId) {
-        return this.delete(`/api/admin/products/${productId}`);
+        return this.delete(`/api/admin/products/${encodeURIComponent(productId)}`);
+    },
+
+    /**
+     * Delete many products in one call (admin — super_admin/owner only).
+     *
+     * Measured contract, 2026-08-31: at least 1 and at most 500 ids; the response is
+     * `{dry_run, requested, deleted_count, failed_count, deleted:[{id,sku}],
+     * failed:[{id,sku,code,reason}]}` and reports PER ROW, so a mixed selection
+     * deletes what it can and names what it could not.
+     *
+     * `dry_run: true` changes nothing and returns the same shape — which is what lets
+     * the UI show the operator exactly which rows will be refused BEFORE anything
+     * irreversible happens.
+     *
+     * @param {string[]} productIds
+     * @param {{dryRun?: boolean}} [options]
+     */
+    async deleteProductsBulk(productIds, options = {}) {
+        return this.post('/api/admin/products/bulk-delete', {
+            product_ids: productIds,
+            dry_run: !!options.dryRun,
+        });
     },
 
     /**

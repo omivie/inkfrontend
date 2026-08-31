@@ -10431,32 +10431,16 @@ a.account-review-card__product:focus-visible {
     animation: brandTileIn 0.3s ease-out both;
 }
 
-.shop-brands-panel .drilldown-box--brand {
-    animation: brandTileIn 0.3s ease-out both;
-}
-
-/* Cartridge tiles staggered at 30ms intervals */
-.shop-section-card .drilldown-box--brand:nth-child(1) { animation-delay: 0ms; }
-.shop-section-card .drilldown-box--brand:nth-child(2) { animation-delay: 30ms; }
-.shop-section-card .drilldown-box--brand:nth-child(3) { animation-delay: 60ms; }
-.shop-section-card .drilldown-box--brand:nth-child(4) { animation-delay: 90ms; }
-.shop-section-card .drilldown-box--brand:nth-child(5) { animation-delay: 120ms; }
-.shop-section-card .drilldown-box--brand:nth-child(6) { animation-delay: 150ms; }
-.shop-section-card .drilldown-box--brand:nth-child(7) { animation-delay: 180ms; }
-.shop-section-card .drilldown-box--brand:nth-child(8) { animation-delay: 210ms; }
-.shop-section-card .drilldown-box--brand:nth-child(9) { animation-delay: 240ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(1) { animation-delay: 0ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(2) { animation-delay: 30ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(3) { animation-delay: 60ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(4) { animation-delay: 90ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(5) { animation-delay: 120ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(6) { animation-delay: 150ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(7) { animation-delay: 180ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(8) { animation-delay: 210ms; }
-.brand-section--cartridges .drilldown-box--brand:nth-child(9) { animation-delay: 240ms; }
+/* Cartridge tile stagger is set INLINE by renderBrands() as
+   `box.style.animationDelay`, exactly as renderRibbonBrands() does one function
+   below. It used to live here as twenty :nth-child rules that stopped at 9 — so
+   the tenth tile (Dymo) always animated with no delay, and a brand grid that is
+   now data-driven could never have been staggered correctly from a fixed list.
+   Ten of those twenty rules were dead anyway: `.brand-section--cartridges` and
+   `.shop-brands-panel` appear nowhere in the HTML or JS.
+   One mechanism, unbounded, matching its sibling. */
 
 @media (prefers-reduced-motion: reduce) {
-    .shop-brands-panel .drilldown-box--brand,
     .shop-section-card .drilldown-box--brand,
     .shop-section-card .drilldown-box--ribbon {
         animation: none;
@@ -10986,6 +10970,14 @@ a.account-review-card__product:focus-visible {
 .drilldown-box__logo {
     max-width: 100%;
     height: auto;
+    /* The per-slug rules below tune the ten brands we shipped with. Any OTHER
+       brand — and since Aug 2026 the shop grid is driven by `show_on_shop` from
+       /api/brands, so the owner can add one without touching this file — matches
+       none of them and would fall through to `height: auto`, rendering at the
+       image's natural size. Brother's logo is 3461x809. In a 56px-min-height box
+       that is not a smaller mistake than a broken image, it is a broken page.
+       This cap is what makes "adding a brand is one admin write" true. */
+    max-height: 30px;
     object-fit: contain;
     transition: transform var(--transition-normal);
 }

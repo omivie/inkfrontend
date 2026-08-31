@@ -16,10 +16,15 @@
  *
  * What this file pins, in order of how badly it would hurt to lose:
  *
- *   1. THE TWO MIRRORED CONSTANTS. `SHOP_BRAND_ALLOWLIST` mirrors
- *      shop-page.js's `preferredOrder`, and `CATEGORY_PRODUCT_TYPES_FALLBACK`
- *      mirrors api.js's `_CATEGORY_PRODUCT_TYPES`. Both are copies, and a copy
- *      nobody checks is a copy that drifts. These two tests are the check.
+ *   1. THE BRAND GRID IS DATA, NOT A LIST IN THE FRONTEND. Until 2026-08-31
+ *      `SHOP_BRAND_ALLOWLIST` here mirrored a `preferredOrder` array inside
+ *      shop-page.js's renderBrands(), and a test pinned the two equal. Two
+ *      hardcoded copies pinned to each other is not a source of truth — and
+ *      seventeen live brands rendered no /shop tile because of it. Both are
+ *      gone; `brands.show_on_shop` decides. What is pinned now is the ABSENCE
+ *      of any such allowlist, in both files, so it cannot creep back.
+ *      `CATEGORY_PRODUCT_TYPES_FALLBACK` is still a genuine mirror of api.js's
+ *      `_CATEGORY_PRODUCT_TYPES` and is still checked.
  *   2. THE OVERRIDE TRAP. `needsCodeOverride` must stay FALSE when the SKU
  *      already derives the code. Writing an override materialises a product
  *      into `product_codes`, and from then on its derived codes are ignored
@@ -63,22 +68,61 @@ test.before(async () => {
   M = await import('../inkcartridges/js/admin/utils/catalogue-pathway.js');
 });
 
-// ── 1. The mirrored constants ────────────────────────────────────────────────
+// ── 1. The brand grid comes from data ────────────────────────────────────────
 
-test('SHOP_BRAND_ALLOWLIST still equals shop-page.js preferredOrder', () => {
-  // This is a MIRROR of a hardcoded filter inside renderBrands(). The shop
-  // applies it as `sorted.filter(b => preferredOrder.includes(b.slug))` — a
-  // brand missing from it renders no tile, with no error anywhere. The admin
-  // tells the operator which brands those are, and it can only do that while
-  // the two lists agree. If this fails, the shop-page array is the source and
-  // catalogue-pathway.js is the stale half.
-  const m = shopPageJs.match(/const\s+preferredOrder\s*=\s*\[([^\]]+)\]/);
-  assert.ok(m, 'shop-page.js must still declare a preferredOrder array');
-  const live = m[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+test('shop-page.js no longer filters the brand grid through a slug allowlist', () => {
+  // The regression this replaces: `renderBrands()` applied a hardcoded ten-slug
+  // array as a FILTER, so a brand in the database but not in the array rendered
+  // no tile with no error anywhere. Seventeen brands were in that state.
+  const start = shopPageJs.indexOf('renderBrands(brands) {');
+  assert.notEqual(start, -1, 'renderBrands must still exist');
+  const body = shopPageJs.slice(start, shopPageJs.indexOf('_loadBrandCounts', start));
 
-  assert.deepEqual([...M.SHOP_BRAND_ALLOWLIST].sort(), [...live].sort(),
-    'SHOP_BRAND_ALLOWLIST has drifted from shop-page.js preferredOrder — '
-    + 'the admin would report the wrong brands as hidden from /shop');
+  assert.doesNotMatch(body, /const\s+preferredOrder\s*=/,
+    'the hardcoded preferredOrder array must not come back — it filtered the database');
+  assert.match(body, /show_on_shop === true/,
+    'membership must be read from the brand row, and an ABSENT field must not read as visible');
+  assert.match(body, /sort_order/, 'order must come from the row, not a local ranking');
+
+  // Positive control: this matcher can fail, so its absence above means something.
+  assert.match("const preferredOrder = ['brother']", /const\s+preferredOrder\s*=/,
+    'positive control — the preferredOrder matcher works');
+});
+
+test('catalogue-pathway.js exports no brand allowlist', () => {
+  assert.doesNotMatch(pathwayJs, /SHOP_BRAND_ALLOWLIST\s*=/,
+    'the mirrored allowlist must stay deleted — it was a frontend opinion about a backend fact');
+  assert.equal(M.SHOP_BRAND_ALLOWLIST, undefined, 'nothing may still import it');
+  assert.equal(typeof M.brandShopVisibility, 'function', 'visibility is answered from the row now');
+});
+
+test('brand visibility is THREE-state — unknown is never reported as hidden', () => {
+  // The distinction that matters: "the row says no" and "we were never given the
+  // row" are different facts. Collapsing them would file a product as unreachable
+  // on the strength of a field nobody read — the could-not-look mistake with the
+  // sign flipped, which once turned one bad request into "662 unreachable".
+  assert.deepEqual(M.brandShopVisibility({ show_on_shop: true }), { visible: true, source: 'row' });
+  assert.deepEqual(M.brandShopVisibility({ show_on_shop: false }), { visible: false, source: 'row' });
+  for (const row of [{}, null, undefined, { show_on_shop: null }, { show_on_shop: 'yes' }, { show_on_shop: 1 }]) {
+    assert.equal(M.brandShopVisibility(row).visible, null,
+      `${JSON.stringify(row)} is not an answer and must not be reported as one`);
+  }
+});
+
+test('reachabilityFacets reports unknown visibility as its own facet, not as unreachable', () => {
+  const product = { sku: 'CLC133BK', name: 'x', brand_id: 'b1', product_type: 'ink_cartridge', series_codes: ['LC133'] };
+  const facets = (opts) => M.reachabilityFacets(product, opts).failures.map(f => f.facet);
+
+  const unknown = facets({ brandSlug: 'brother' });
+  assert.ok(unknown.includes('brand_visibility_unknown'),
+    'with no brand row supplied, visibility is UNMEASURED and must say so by name');
+  assert.ok(!unknown.includes('brand_on_shop'),
+    'an unread field must never be reported as "renders no tile"');
+
+  assert.ok(facets({ brandSlug: 'brother', brandRow: { show_on_shop: false } }).includes('brand_on_shop'),
+    'a row that says false IS a finding');
+  assert.ok(!facets({ brandSlug: 'brother', brandRow: { show_on_shop: true } }).some(f => f.startsWith('brand_')),
+    'a visible brand raises no brand facet');
 });
 
 test('CATEGORY_PRODUCT_TYPES_FALLBACK still equals API._CATEGORY_PRODUCT_TYPES', () => {
@@ -144,12 +188,12 @@ test('defaultTypeForCategory is the enum-order primary, not a live count', () =>
   assert.equal(M.defaultTypeForCategory(''), '');
 });
 
-test('brandVisibleOnShop is case-insensitive and rejects unknowns', () => {
-  assert.equal(M.brandVisibleOnShop('brother'), true);
-  assert.equal(M.brandVisibleOnShop('BROTHER'), true);
-  assert.equal(M.brandVisibleOnShop('olivetti'), false);
-  assert.equal(M.brandVisibleOnShop(''), false);
-  assert.equal(M.brandVisibleOnShop(null), false);
+test('brandVisibleOnShop is gone — a slug alone can no longer answer', () => {
+  // Deliberately removed rather than reimplemented. A slug carries no visibility;
+  // only the brand's row does. Keeping a slug-shaped function would invite exactly
+  // the hardcoded list that this change deleted.
+  assert.equal(M.brandVisibleOnShop, undefined,
+    'a slug-only visibility function must not come back');
 });
 
 // ── 3. Codes: normalisation, derivation, the override trap ───────────────────
@@ -292,9 +336,13 @@ test('reachabilityFacets names each way a product goes invisible', () => {
       sku: 'CLC3339BK', name: 'x', product_type: 'ink_cartridge',
       brand_id: 'b1', brand: { slug: 'brother' }, is_active: true, series_codes: ['LC3339'],
     };
-    assert.equal(M.reachabilityFacets(good).reachable, true);
+    // Visibility is a property of the brand ROW now, so the caller supplies it.
+    // Omitting it is no longer "visible by default" — it is "not checked", which
+    // is why every case here passes one.
+    const SHOWN = { show_on_shop: true };
+    assert.equal(M.reachabilityFacets(good, { brandRow: SHOWN }).reachable, true);
 
-    const facetsOf = (p) => M.reachabilityFacets(p).failures.map(f => f.facet);
+    const facetsOf = (p, row = SHOWN) => M.reachabilityFacets(p, { brandRow: row }).failures.map(f => f.facet);
 
     assert.deepEqual(facetsOf({ ...good, is_active: false }), ['is_active']);
     assert.deepEqual(facetsOf({ ...good, brand_id: null, brand: null }), ['brand_id']);
@@ -302,12 +350,12 @@ test('reachabilityFacets names each way a product goes invisible', () => {
     assert.deepEqual(facetsOf({ ...good, product_type: 'not_a_type' }), ['product_type']);
 
     // The invisible one: the brand exists but /shop renders no tile for it.
-    assert.deepEqual(facetsOf({ ...good, brand: { slug: 'olivetti' } }), ['brand_on_shop']);
+    assert.deepEqual(facetsOf({ ...good, brand: { slug: 'olivetti' } }, { show_on_shop: false }), ['brand_on_shop']);
 
     // A code can come from any of three places; absent all three, no chip.
     const codeless = { ...good, sku: '???', series_codes: [] };
-    assert.ok(M.reachabilityFacets(codeless).failures.some(f => f.facet === 'code'));
-    assert.equal(M.reachabilityFacets(codeless, { overrideCodes: ['LC3339'] }).reachable, true,
+    assert.ok(M.reachabilityFacets(codeless, { brandRow: SHOWN }).failures.some(f => f.facet === 'code'));
+    assert.equal(M.reachabilityFacets(codeless, { overrideCodes: ['LC3339'], brandRow: SHOWN }).reachable, true,
       'a product_codes override is a valid third source');
   }, (p) => { if (String(p.sku).includes('LC3339')) p.series_codes = ['LC3339']; });
 });

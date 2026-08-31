@@ -85,6 +85,17 @@ const UPDATE_BASELINE = ARGS.has('--update-baseline');
 const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
 const PAGE_LIMIT = 200;
 
+/**
+ * Pace between catalogue pages.
+ *
+ * This walks ~21 pages of /api/products back to back. On 2026-08-31 the backend
+ * reported that hammering that endpoint reliably 502s their whole instance —
+ * health endpoint included — for several minutes (ERR-188 is that outage from
+ * this side). Same constant, same reason, in every script that walks it.
+ */
+const REQUEST_DELAY_MS = Number(process.env.PROBE_DELAY_MS || 650);
+
+
 const say = (...a) => { if (!JSON_OUT) console.log(...a); };
 const rule = (ch = '─') => say(ch.repeat(74));
 
@@ -293,11 +304,14 @@ async function collectCatalog() {
     const rows = [];
     let page = 1;
     let meta = null;
+    let removedFromPage = 0;
+    let sawRemovedKey = false;
     let endedCleanly = false;
     let guard = 0;
 
     for (;;) {
         if (++guard > 200) throw new Error('catalog walk exceeded 200 pages — refusing to loop');
+        if (page > 1) await sleep(REQUEST_DELAY_MS);
         const body = await getJsonWithBackoff(`${API_BASE}/api/products?page=${page}&limit=${PAGE_LIMIT}`);
         if (!body || body.ok === false) {
             throw new Error(`catalog page ${page} failed: ${JSON.stringify(body && body.error)}`);
@@ -306,6 +320,16 @@ async function collectCatalog() {
         const items = data.products || data.items || (Array.isArray(data) ? data : []);
         // Pagination lives in the envelope's `meta`, NOT in `data.pagination`.
         meta = body.meta || data.pagination || {};
+        // `total` is counted BEFORE the per-page pack guard and dedup run, so a page
+        // can legitimately return fewer rows than the total implies. Since 2026-08-31
+        // the API reports how many it dropped and the gap reconciles exactly:
+        //     sum(returned) + sum(removed_from_page) === total
+        // Count the KEY, not a truthy value — a page that removed nothing reports 0,
+        // and an endpoint without the field also reads 0.
+        if (Object.prototype.hasOwnProperty.call(meta, 'removed_from_page')) {
+            sawRemovedKey = true;
+            removedFromPage += Number(meta.removed_from_page) || 0;
+        }
         rows.push(...items.filter(p => p && typeof p.sku === 'string' && p.sku.trim()));
         say(`  page ${page}: +${items.length} (running ${rows.length}${meta.total ? '/' + meta.total : ''})`);
 
@@ -323,9 +347,14 @@ async function collectCatalog() {
     // becomes a finding in its own right and the sweep continues over what it
     // could actually read — partial-ness reported in the RESULT, never
     // swallowed (ERR-139).
-    if (typeof meta.total === 'number' && rows.length !== meta.total) {
+    if (typeof meta.total === 'number' && rows.length !== meta.total
+        && sawRemovedKey && removedFromPage === Math.abs(meta.total - rows.length)) {
+        // Fully explained, so it is no longer a finding. A solved gap still reported
+        // as an open one makes a fixed thing read as a live limitation (ERR-184/186).
+        say(`  meta.total claims ${meta.total}; ${rows.length} returned + ${removedFromPage} removed_from_page reconciles exactly.`);
+    } else if (typeof meta.total === 'number' && rows.length !== meta.total) {
         fail('L0-catalogue-count-mismatch', `${API_BASE}/api/products`,
-            `walked every page to has_next=false and collected ${rows.length} products, but meta.total claims ${meta.total} — ${Math.abs(meta.total - rows.length)} row(s) are counted by the API but never served by it. Everything below was checked against the ${rows.length} rows that ARE reachable; any product in the gap is unaudited AND invisible to the storefront.`);
+            `walked every page to has_next=false and collected ${rows.length} products, but meta.total claims ${meta.total} — ${Math.abs(meta.total - rows.length)} row(s) are counted by the API but never served by it${sawRemovedKey ? `, of which meta.removed_from_page explains only ${removedFromPage}` : ' and no page reported a meta.removed_from_page to explain them'}. Everything below was checked against the ${rows.length} rows that ARE reachable; any product in the gap is unaudited AND invisible to the storefront.`);
     }
     return rows;
 }

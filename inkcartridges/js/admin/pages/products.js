@@ -14,6 +14,12 @@ import {
   PRODUCT_TYPE_OPTIONS, RIBBON_PRODUCT_TYPES, productTypeLabel, productTypeNoun,
   typeFilterGroup, typeFilterOptions,
 } from '../utils/product-types.js';
+import {
+  canDeleteProducts, deleteBlockedReason, normaliseBulkDeleteResult,
+  productDeleteFailureCopy, offersDeactivate, isAlreadyGone,
+  summariseDeleteOutcome, nothingWasDeleted,
+} from '../utils/product-deletability.js';
+import { SUPPLIER_LABELS, PACK_PACK_TYPES } from '../utils/sourcing.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
 import {
   typesForCategory, defaultTypeForCategory, previewCodeForSku,
@@ -925,6 +931,9 @@ async function openProductDrawer(product) {
         </button>
         <div class="admin-product-modal__title">${esc(product.name || product.sku || 'Product')}</div>
         <div class="admin-product-modal__actions">
+          ${canDeleteProducts(AdminAuth.role)
+            ? `<button class="admin-btn admin-btn--ghost admin-btn--sm admin-btn--danger-text" data-action="delete-product" title="Delete this product permanently">Delete</button>`
+            : ''}
           <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="cancel">Cancel</button>
           <button class="admin-btn admin-btn--primary admin-btn--sm" data-action="save">${icon('orders', 14, 14)} Save Changes</button>
         </div>
@@ -1139,7 +1148,7 @@ function openCreateProductModal(context = null) {
         <div class="admin-product-modal__sidebar" id="pm-sidebar">
           <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:140px;background:var(--surface-hover);border-radius:var(--radius);color:var(--text-muted)">
             ${icon('products', 36, 36)}
-            <span style="font-size:12px">Images can be added after creation</span>
+            <span style="font-size:12px">Images are added in the next step — this product opens for editing as soon as it saves</span>
           </div>
         </div>
         <div class="admin-product-modal__main">
@@ -1218,7 +1227,7 @@ function openCreateProductModal(context = null) {
     </div>
     <div class="admin-form-row">
       ${formGroup('Color', buildColorSelect('edit-color', empty.color))}
-      ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], empty.source))}
+      ${formGroup('Source', buildSelect('edit-source', PRODUCT_SOURCE_OPTIONS, empty.source))}
     </div>
   `;
 
@@ -1235,6 +1244,7 @@ function openCreateProductModal(context = null) {
       ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" placeholder="0.00">`)}
       <div class="admin-form-group"></div>
     </div>
+    ${sourcingFieldsHtml(formGroup)}
     <div class="admin-form-row">
       ${formGroup('Active', toggleHtml('edit-active', true))}
       <div class="admin-form-group"></div>
@@ -1407,7 +1417,14 @@ function openCreateProductModal(context = null) {
       color: val('edit-color') || null,
       source: val('edit-source') || null,
       retail_price: retailPrice,
-      compare_at_price: parseFloat(val('edit-compare-price')) || null,
+      // `compare_price` is the COLUMN and the canonical key. The admin sent
+      // `compare_at_price` on both verbs while every read selected
+      // `compare_price`; the backend accepts either and canonical wins, but the
+      // storefront reads only `compare_price` (products.js, shop-page.js,
+      // product-detail-page.js), so writing the alias meant writing a name the
+      // shop never looks at and relying on a server-side mapping to save us.
+      compare_price: parseFloat(val('edit-compare-price')) || null,
+      ...sourcingPayload(val),
       weight_kg: parseFloat(val('edit-weight')) || null,
       is_active: chk('edit-active'),
       description_html: modal._descEditor?.getValue() || null,
@@ -1430,8 +1447,27 @@ function openCreateProductModal(context = null) {
       const codeNote = await landProductUnderCode(newProduct, ctx, { sku, name, productType: data.product_type });
       closeCreate();
       invalidateDiagCache();
-      Toast.success(codeNote ? `Product created \u2014 ${codeNote}` : 'Product created');
+      Toast.success(codeNote ? `Product created \u2014 ${codeNote}. Opening it so you can add images.`
+        : 'Product created. Opening it so you can add images.');
       loadProducts();
+      // ── Why this reopen STAYS ──────────────────────────────────────────────
+      //
+      // It was described in the backend brief as a workaround for POST not
+      // accepting supplier/supplier_sku/pack_type/category. That cause is gone —
+      // those fields now save on create, measured — but the reopen was doing more
+      // than that, and deleting it because a different gap closed would remove a
+      // real affordance.
+      //
+      // The drawer is the ONLY place that can set images, product codes,
+      // compatibility, FAQ and related products. Images in particular cannot move
+      // to the create form: `image_url` is not writable on create (measured — it
+      // echoes back null), because images live in `product_images` and are written
+      // by the upload endpoint, which needs a product id that does not exist until
+      // this call returns. So a newly created product still has a required second
+      // step, and without this it would vanish into a list of four thousand.
+      //
+      // What changed is that it is no longer SILENT: the toast now says why the
+      // drawer opened, so it reads as the next step rather than as a glitch.
       if (newProduct?.id) openProductDrawer(newProduct);
     } catch (e) {
       showProductWriteError(modal, 'Create failed', e);
@@ -1519,7 +1555,7 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
     <div class="admin-form-row">
       ${formGroup('Color', buildColorSelect('edit-color', full.color), 'color')}
-      ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], full.source), 'source')}
+      ${formGroup('Source', buildSelect('edit-source', PRODUCT_SOURCE_OPTIONS, full.source), 'source')}
     </div>
   `;
 
@@ -1527,7 +1563,7 @@ function buildProductModalTabs(modal, full, isOwner) {
   let pricingHtml = `
     <div class="admin-form-row">
       ${formGroup('Retail Price', `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}">`, 'retail_price')}
-      ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_at_price || full.compare_price || ''}">`, 'compare_at_price')}
+      ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_price ?? full.compare_at_price ?? ''}">`, 'compare_price')}
     </div>
     ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`, 'cost_price') : ''}
     ${isOwner ? `
@@ -1544,11 +1580,17 @@ function buildProductModalTabs(modal, full, isOwner) {
   `;
 
   // Inventory panel
+  //
+  // The sourcing fields are here on BOTH forms deliberately. They became settable
+  // on create in Aug 2026; offering them only there would mean a value you can set
+  // once and never correct — and `PUT` merges, so a form that omits them cannot
+  // fix a typo. What you can set, you must be able to change.
   let inventoryHtml = `
     <div class="admin-form-row">
       ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`, 'weight_kg')}
       <div class="admin-form-group"></div>
     </div>
+    ${sourcingFieldsHtml(formGroup, full)}
     <div class="admin-form-row">
       ${formGroup('Active', toggleHtml('edit-active', full.is_active !== false), 'is_active')}
       <div class="admin-form-group"></div>
@@ -2979,6 +3021,24 @@ function formGroup(label, inputHtml, overrideField) {
   return `<div class="admin-form-group"><label>${esc(label)}</label>${inputHtml}</div>`;
 }
 
+/**
+ * The `source` values the API will actually accept.
+ *
+ * Measured 2026-08-31: `POST`/`PUT /api/admin/products` validate `source` against
+ * exactly `[genuine, compatible]` and reject anything else with a hard 400. Both
+ * dropdowns offered a third option, `remanufactured`, which could therefore never
+ * be saved — the operator picked a legitimate-looking value and the save failed.
+ * Same family as the six `product_type` vocabularies (ERR-162…166): a menu is a
+ * promise, and offering a value the server refuses is the ship-it-invisible bug
+ * with the failure moved to the moment of use.
+ *
+ * NOTE this is the OFFERED list only. `buildSelect` keeps its "(legacy)" branch,
+ * so a row already holding an out-of-enum value (e.g. the carry-over ribbon rows
+ * with source='ribbon') still shows and preserves it rather than being silently
+ * rewritten to the first option. Do not remove that branch to "tidy" this.
+ */
+const PRODUCT_SOURCE_OPTIONS = ['genuine', 'compatible'];
+
 function buildSelect(id, options, selected) {
   // Preserve legacy values: if `selected` is not in `options`, append it as a
   // ("legacy") option pre-selected. Without this, the browser silently auto-
@@ -3747,6 +3807,17 @@ function bindProductModalActions(modal, product) {
   // Cancel
   modal.querySelector('[data-action="cancel"]')?.addEventListener('click', closeProductModal);
 
+  // Single-product delete. Goes through the SAME pipeline as the bulk bar —
+  // dry run, per-row confirm, honest reporting — so the two surfaces can never
+  // drift into different gating (ERR-119/120 was exactly that drift).
+  modal.querySelector('[data-action="delete-product"]')?.addEventListener('click', async () => {
+    const label = () => product.sku || product.name || String(product.id);
+    await runProductDelete([String(product.id)], label, {
+      reloadAfter: false,
+      onDeleted: () => { closeProductModal(); loadProducts(); },
+    });
+  });
+
   // Save
   modal.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
     const val = (id) => modal.querySelector(`#${id}`)?.value?.trim() ?? '';
@@ -3764,7 +3835,8 @@ function bindProductModalActions(modal, product) {
       color: val('edit-color'),
       source: val('edit-source'),
       retail_price: numVal('edit-retail-price'),
-      compare_at_price: numVal('edit-compare-price'),
+      compare_price: numVal('edit-compare-price'),
+      ...sourcingPayload(val),
       is_active: chk('edit-active'),
       description_html: modal._descEditor?.getValue() || null,
       compatible_devices_html: modal._compatEditor?.getValue() || null,
@@ -4325,19 +4397,28 @@ function updateBulkBar(selected) {
     _bulkBar.className = 'admin-bulk-bar';
     document.body.appendChild(_bulkBar);
   }
+  // Deleting is owner-only (the endpoints are super_admin). Show the button
+  // disabled with the reason rather than hiding it: a missing control tells the
+  // operator nothing, and hiding it is how "products cannot be deleted" stayed
+  // invisible for months.
+  const canDelete = canDeleteProducts(AdminAuth.role);
   _bulkBar.innerHTML = `
     <span class="admin-bulk-bar__count">${count} selected</span>
     <div class="admin-bulk-bar__actions">
       <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="deactivate">Deactivate</button>
       <button class="admin-btn admin-btn--sm admin-btn--primary" data-bulk="activate">Activate</button>
       <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
-      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>
+      ${canDelete
+        ? '<button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>'
+        : `<button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete" disabled title="${esc(deleteBlockedReason(AdminAuth.role) || '')}">Delete</button>`}
       <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
     </div>
   `;
   _bulkBar.querySelector('[data-bulk="deactivate"]').addEventListener('click', () => bulkSetActive(false));
   _bulkBar.querySelector('[data-bulk="activate"]').addEventListener('click', () => bulkSetActive(true));
-  _bulkBar.querySelector('[data-bulk="delete"]').addEventListener('click', () => bulkDelete());
+  // A disabled button still receives no click, but bind through the same gate
+  // anyway — the affordance and the action must never disagree about who may act.
+  if (canDelete) _bulkBar.querySelector('[data-bulk="delete"]')?.addEventListener('click', () => bulkDelete());
   _bulkBar.querySelector('[data-bulk="clear"]').addEventListener('click', () => {
     if (_table) _table.clearSelection();
     updateBulkBar(new Set());
@@ -4356,83 +4437,367 @@ async function bulkSetActive(activate) {
     message: `This will ${action} ${count} product${count > 1 ? 's' : ''}. Proceed?`,
     confirmLabel: `${activate ? 'Activate' : 'Deactivate'} ${count}`,
     confirmClass: activate ? 'admin-btn--primary' : 'admin-btn--danger',
-    onConfirm: async () => {
-      const ids = [...selected];
-      let done = 0;
-      let failed = 0;
-      Toast.info(`${activate ? 'Activating' : 'Deactivating'} ${count} products\u2026`);
-      // Build update payloads — backend requires retail_price
-      const payloads = ids.map(id => {
-        const row = _table.data.find(r => String(r.id) === id);
-        return {
-          id,
-          data: {
-            is_active: activate,
-            retail_price: row?.retail_price ?? 0,
-          },
-        };
-      });
-      // Process in batches of 5
-      for (let i = 0; i < payloads.length; i += 5) {
-        const batch = payloads.slice(i, i + 5);
-        const results = await Promise.allSettled(
-          batch.map(p => AdminAPI.updateProduct(p.id, p.data))
-        );
-        for (const r of results) {
-          if (r.status === 'fulfilled') done++;
-          else failed++;
-        }
-      }
-      if (_table) _table.clearSelection();
-      updateBulkBar(new Set());
-      if (failed > 0) {
-        Toast.error(`${done} ${action}d, ${failed} failed`);
-      } else {
-        Toast.success(`${done} product${done > 1 ? 's' : ''} ${action}d`);
-      }
-      loadProducts();
-    },
+    onConfirm: async () => { await bulkSetActiveFor([...selected], activate); },
   });
+}
+
+/**
+ * Set is_active on a set of products.
+ *
+ * Split out of bulkSetActive so the "Deactivate instead" affordance offered when a
+ * delete is refused reuses this ONE write path rather than reimplementing it.
+ *
+ * ── The $0 trap ────────────────────────────────────────────────────────────
+ *
+ * The backend requires `retail_price` on every product update, so this payload has
+ * to resend it. The original expression was `row?.retail_price ?? 0` — safe only
+ * because every id came from `_table.getSelected()`, i.e. always a loaded row.
+ * The moment an id arrives from anywhere else (the drawer's single delete, a
+ * refusal list after the table reloaded) `row` is undefined and that `?? 0` would
+ * DEACTIVATE THE PRODUCT AND SET ITS PRICE TO ZERO — silently, with a success
+ * toast, on a row the operator was trying to protect from deletion.
+ *
+ * So the price is looked up when it isn't already known, and a product whose price
+ * we cannot establish is REFUSED rather than written with a guess. A missing input
+ * is not a zero (ERR-063/068/073/075/076/149/150).
+ */
+async function bulkSetActiveFor(ids, activate) {
+  const list = [...new Set((ids || []).map(String))].filter(Boolean);
+  if (!list.length) return;
+
+  const action = activate ? 'activate' : 'deactivate';
+  Toast.info(`${activate ? 'Activating' : 'Deactivating'} ${list.length} product${list.length > 1 ? 's' : ''}…`);
+
+  const payloads = [];
+  const unpriced = [];
+  for (const id of list) {
+    const row = _table?.data?.find(r => String(r.id) === id);
+    let price = row?.retail_price;
+    if (price == null) {
+      // Not on screen — ask for it rather than assuming. getProduct swallows its
+      // own errors and returns null, so an unreadable product lands in `unpriced`.
+      const full = await AdminAPI.getProduct(id);
+      price = full?.retail_price;
+    }
+    if (price == null) { unpriced.push(id); continue; }
+    payloads.push({ id, data: { is_active: activate, retail_price: price } });
+  }
+
+  let done = 0;
+  let failed = 0;
+  for (let i = 0; i < payloads.length; i += 5) {
+    const batch = payloads.slice(i, i + 5);
+    // `updateProduct` DOES throw on an `{ok:false}` envelope, which is the only
+    // reason counting settled promises is correct here. `deleteProduct` did not,
+    // and that is precisely how the delete path came to report success on every
+    // failure. If you copy this loop, check that its call throws.
+    const results = await Promise.allSettled(batch.map(p => AdminAPI.updateProduct(p.id, p.data)));
+    for (const r of results) { if (r.status === 'fulfilled') done++; else failed++; }
+  }
+
+  if (_table) _table.clearSelection();
+  updateBulkBar(new Set());
+
+  const problems = [];
+  if (failed) problems.push(`${failed} failed`);
+  if (unpriced.length) problems.push(`${unpriced.length} skipped (could not read their price — not changed)`);
+  if (problems.length) Toast.error(`${done} ${action}d · ${problems.join(' · ')}`);
+  else Toast.success(`${done} product${done > 1 ? 's' : ''} ${action}d`);
+
+  loadProducts();
+}
+
+/**
+ * Delete products, honestly.
+ *
+ * ── What this replaced, and why the replacement looks like this ─────────────
+ *
+ * The previous version fired `AdminAPI.deleteProduct` per id inside
+ * `Promise.allSettled` and counted every `fulfilled` as a deletion. Because
+ * `API.request()` RETURNS an `{ok:false}` envelope for 404/409 rather than
+ * throwing, every failure settled as fulfilled and the toast reported success.
+ * It said "N products deleted" against a route that did not exist (ERR-166).
+ *
+ * So: never count promises. Count what the SERVER says it deleted, per row.
+ *
+ * ── Dry run first ──────────────────────────────────────────────────────────
+ *
+ * The endpoint refuses any product that appears on a customer order. Finding that
+ * out AFTER destroying the rest of a selection is not good enough, so we ask
+ * first, show the operator exactly which rows will be refused and why, and never
+ * send an id the dry run already said would fail (ERR-120's rule).
+ *
+ * A dry run is a PREDICTION, not a promise — an order placed between the two calls
+ * flips a row — so the real response is re-reconciled and its own `failed[]` is
+ * still rendered.
+ */
+/**
+ * The sourcing/identity fields, shared by the create modal and the edit drawer.
+ *
+ * These are the fields `POST /api/admin/products` began accepting on 2026-08-31.
+ * Before that they existed on the table and on `PUT` but were silently STRIPPED by
+ * the backend validator on both verbs — so the create form could not set them and
+ * editing one on an existing product was a no-op that returned 200.
+ *
+ * Measured after the fix: supplier, supplier_sku, pack_type, category, barcode and
+ * manufacturer_part_number all round-trip on create AND update.
+ *
+ * `image_url` is deliberately NOT here. The backend's note lists it as newly
+ * accepted; measured, it is not — sent on create it comes back `null`, because
+ * images live in `product_images` and are written by the upload endpoint. Offering
+ * a box that silently discards what you type is the bug this whole change is about.
+ *
+ * `supplier` is a SELECT over SUPPLIER_LABELS, not free text: the column holds a
+ * slug and the Origin column derives from it (utils/sourcing.js). A typed value
+ * would break that derivation silently.
+ */
+function sourcingFieldsHtml(formGroup, product = null) {
+  const p = product || {};
+  const supplierOptions = ['<option value="">— not recorded —</option>']
+    .concat(Object.entries(SUPPLIER_LABELS).map(([slug, label]) =>
+      `<option value="${esc(slug)}"${p.supplier === slug ? ' selected' : ''}>${esc(label)}</option>`))
+    .join('');
+  const packOptions = ['single'].concat(PACK_PACK_TYPES)
+    .map(v => `<option value="${esc(v)}"${p.pack_type === v ? ' selected' : ''}>${esc(v.replace(/_/g, ' '))}</option>`)
+    .join('');
+  return `
+    <div class="admin-form-row">
+      ${formGroup('Supplier', `<select class="admin-select" id="edit-supplier">${supplierOptions}</select>`, 'supplier')}
+      ${formGroup('Supplier SKU', `<input class="admin-input" id="edit-supplier-sku" value="${esc(p.supplier_sku || '')}" placeholder="their code for it">`, 'supplier_sku')}
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Pack type', `<select class="admin-select" id="edit-pack-type">${packOptions}</select>`, 'pack_type')}
+      ${formGroup('Barcode', `<input class="admin-input" id="edit-barcode" value="${esc(p.barcode || '')}" placeholder="EAN / UPC">`, 'barcode')}
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Manufacturer part number', `<input class="admin-input" id="edit-mpn" value="${esc(p.manufacturer_part_number || '')}" placeholder="OEM part number">`, 'manufacturer_part_number')}
+      <div class="admin-form-group"></div>
+    </div>`;
+}
+
+/**
+ * Read the sourcing fields back out of a form into a payload fragment.
+ * One reader for one writer — a second copy is how two surfaces disagree.
+ */
+function sourcingPayload(val) {
+  return {
+    supplier: val('edit-supplier') || null,
+    supplier_sku: val('edit-supplier-sku') || null,
+    pack_type: val('edit-pack-type') || null,
+    barcode: val('edit-barcode') || null,
+    manufacturer_part_number: val('edit-mpn') || null,
+  };
 }
 
 async function bulkDelete() {
   if (!_table) return;
   const selected = _table.getSelected();
-  const count = selected.size;
-  if (count === 0) return;
+  if (selected.size === 0) return;
 
-  Modal.confirm({
-    title: 'Delete Products',
-    message: `This will permanently delete ${count} product${count > 1 ? 's' : ''}. This action cannot be undone. Proceed?`,
-    confirmLabel: `Delete ${count}`,
-    confirmClass: 'admin-btn--danger',
-    onConfirm: async () => {
-      const ids = [...selected];
-      let done = 0;
-      let failed = 0;
-      Toast.info(`Deleting ${count} product${count > 1 ? 's' : ''}\u2026`);
-      // Process in batches of 5
-      for (let i = 0; i < ids.length; i += 5) {
-        const batch = ids.slice(i, i + 5);
-        const results = await Promise.allSettled(
-          batch.map(id => AdminAPI.deleteProduct(id))
-        );
-        for (const r of results) {
-          if (r.status === 'fulfilled') done++;
-          else failed++;
-        }
-      }
-      if (_table) _table.clearSelection();
-      updateBulkBar(new Set());
-      if (failed > 0) {
-        Toast.error(`${done} deleted, ${failed} failed`);
-      } else {
-        invalidateDiagCache();
-        Toast.success(`${done} product${done > 1 ? 's' : ''} deleted`);
-      }
-      loadProducts();
-    },
+  // Owner gate. The endpoints are super_admin-only; AdminAccess.ROLE_MAP already
+  // maps that to 'owner', so there is one vocabulary. Imported, never
+  // `typeof`-guarded — a guard whose fallback is the only branch that runs is an
+  // off switch (ERR-167), and here it would fail OPEN on an irreversible action.
+  if (!canDeleteProducts(AdminAuth.role)) {
+    Toast.error(deleteBlockedReason(AdminAuth.role));
+    return;
+  }
+
+  const ids = [...selected];
+  // Capture labels BEFORE anything reloads the table — loadProducts() swaps
+  // _table.data out, and a deleted row would then print as a bare UUID.
+  const labelById = new Map();
+  for (const id of ids) {
+    const row = _table.data.find(r => String(r.id) === String(id));
+    labelById.set(String(id), row?.sku || row?.name || String(id));
+  }
+  const label = (id, sku) => sku || labelById.get(String(id)) || String(id);
+
+  await runProductDelete(ids, label, { reloadAfter: true });
+}
+
+/**
+ * The shared delete pipeline: dry run → confirm → delete → report.
+ * Used by both the bulk bar and the single-product drawer button, so the two can
+ * never drift into different gating. Asymmetric single-vs-bulk rules are exactly
+ * the bug ERR-119/120 already paid for.
+ */
+async function runProductDelete(ids, label, { reloadAfter = true, onDeleted = null } = {}) {
+  let plan;
+  try {
+    Toast.info('Checking with the server…');
+    const raw = await AdminAPI.deleteProductsBulk(ids, { dryRun: true });
+    plan = normaliseBulkDeleteResult(ids, raw);
+  } catch (e) {
+    Toast.error(`Could not check: ${e.message}`);
+    return;
+  }
+
+  // A dry run that could not account for a row is not permission to delete it.
+  const willDelete = plan.deleted.map(d => d.id);
+  const willRefuse = plan.failed;
+  const unknown = plan.unaccounted;
+
+  if (!willDelete.length) {
+    showDeletePlanBlocked(willRefuse, unknown, label);
+    return;
+  }
+
+  const confirmed = await confirmProductDelete(willDelete, willRefuse, unknown, label);
+  if (!confirmed) return;
+
+  let result;
+  try {
+    const raw = await AdminAPI.deleteProductsBulk(willDelete, { dryRun: false });
+    result = normaliseBulkDeleteResult(willDelete, raw);
+  } catch (e) {
+    Toast.error(`Delete failed: ${e.message}`);
+    return;
+  }
+
+  // Anything destroyed invalidates the diagnostics cache — including a partial
+  // success. Putting this on the all-succeeded branch (as the old code did) left
+  // stale diagnostics behind after every mixed result.
+  if (!nothingWasDeleted(result)) invalidateDiagCache();
+
+  showDeleteResults(result, willRefuse, label);
+
+  if (_table && reloadAfter) { _table.clearSelection(); updateBulkBar(new Set()); }
+  if (result.deleted.length && typeof onDeleted === 'function') onDeleted(result);
+  if (reloadAfter) loadProducts();
+}
+
+/** Nothing can be deleted — explain per row instead of a bare refusal. */
+function showDeletePlanBlocked(failed, unknown, label) {
+  const rows = failed.map(f =>
+    `<li><strong>${esc(label(f.id, f.sku))}</strong> — ${esc(productDeleteFailureCopy(f.code, f.reason))}</li>`).join('');
+  const unk = unknown.length
+    ? `<p style="margin:12px 0 0;color:var(--text-secondary)">${esc(String(unknown.length))} product(s) the server did not mention at all. Nothing was deleted for those either.</p>`
+    : '';
+  const deactivatable = failed.filter(f => offersDeactivate(f.code)).map(f => f.id);
+  Modal.open({
+    title: failed.length === 1 ? 'This product cannot be deleted' : 'None of these can be deleted',
+    body: `<ul style="margin:0;padding-left:18px;line-height:1.7">${rows}</ul>${unk}`,
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="cancel">Close</button>
+      ${deactivatable.length ? `<button class="admin-btn admin-btn--primary" data-action="deactivate">Deactivate ${deactivatable.length === 1 ? 'it' : `those ${deactivatable.length}`} instead</button>` : ''}
+    `,
   });
+  const m = document.querySelector('.admin-modal');
+  m?.querySelector('[data-action="cancel"]')?.addEventListener('click', () => Modal.close());
+  m?.querySelector('[data-action="deactivate"]')?.addEventListener('click', () => {
+    Modal.close();
+    deactivateIds(deactivatable);
+  });
+}
+
+/**
+ * The confirm dialog. Deliberately NOT Modal.confirm: that renders its message as
+ * escaped text in a single <p> with nowhere to list per-SKU refusals, and it
+ * swallows exceptions from onConfirm — which would close the dialog silently on a
+ * 403. Same reasoning, and same shape, as confirmDeletePlan() in orders.js.
+ */
+function confirmProductDelete(willDelete, willRefuse, unknown, label) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
+
+    const refusedRows = willRefuse.map(f =>
+      `<li><strong>${esc(label(f.id, f.sku))}</strong> — ${esc(productDeleteFailureCopy(f.code, f.reason))}</li>`).join('');
+    const unknownRows = unknown.map(id =>
+      `<li><strong>${esc(label(id, null))}</strong></li>`).join('');
+
+    const modal = Modal.open({
+      title: willDelete.length === 1 ? 'Delete this product?' : `Delete ${willDelete.length} products?`,
+      body: `
+        <p style="margin:0 0 12px;font-weight:600">Checked with the server first.</p>
+        <p style="margin:0 0 14px;line-height:1.7">
+          ${esc(String(willDelete.length))} product${willDelete.length === 1 ? '' : 's'} will be permanently deleted.
+          This cannot be undone.
+        </p>
+        ${refusedRows ? `<div style="padding:10px 12px;border-radius:6px;background:rgba(180,83,9,.08);margin-bottom:12px">
+          <div style="font-weight:600;margin-bottom:6px;color:var(--warning,#b45309)">Will be refused — not sent</div>
+          <ul style="margin:0;padding-left:18px;color:var(--text-secondary);line-height:1.7">${refusedRows}</ul>
+        </div>` : ''}
+        ${unknownRows ? `<div style="padding:10px 12px;border-radius:6px;background:rgba(100,116,139,.10)">
+          <div style="font-weight:600;margin-bottom:6px">Outcome unknown — not sent</div>
+          <ul style="margin:0;padding-left:18px;color:var(--text-secondary);line-height:1.7">${unknownRows}</ul>
+        </div>` : ''}
+      `,
+      footer: `
+        <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+        <button class="admin-btn admin-btn--danger" data-action="confirm">Delete ${esc(String(willDelete.length))}</button>
+      `,
+      // Backdrop, Escape and the close button all mean no. An unanswered
+      // destructive dialog is never a yes.
+      onClose: () => finish(false),
+    });
+    if (!modal) { finish(false); return; }
+    modal.footer.querySelector('[data-action="cancel"]')?.addEventListener('click', () => { finish(false); Modal.close(); });
+    modal.footer.querySelector('[data-action="confirm"]')?.addEventListener('click', () => { finish(true); Modal.close(); });
+  });
+}
+
+/**
+ * Report the outcome per row, in four buckets that are deliberately not
+ * collapsible into one another. "Unknown" is its own bucket: folding it into
+ * success is the ERR-074 shape, and folding it into failure invites a second
+ * delete of something already gone.
+ */
+function showDeleteResults(result, preRefused, label) {
+  const deleted = result.deleted;
+  // A row the server says was already gone is not a failure — the end state the
+  // operator asked for holds.
+  const gone = result.failed.filter(f => isAlreadyGone(f.code));
+  const refused = result.failed.filter(f => !isAlreadyGone(f.code));
+  const unknown = result.unaccounted;
+  const deactivatable = [...refused, ...preRefused].filter(f => offersDeactivate(f.code));
+
+  if (!refused.length && !unknown.length && !preRefused.length) {
+    Toast.success(summariseDeleteOutcome(result));
+    return;
+  }
+
+  const section = (title, rows, tint) => rows.length ? `
+    <div style="padding:10px 12px;border-radius:6px;background:${tint};margin-bottom:10px">
+      <div style="font-weight:600;margin-bottom:6px">${esc(title)}</div>
+      <ul style="margin:0;padding-left:18px;line-height:1.7;color:var(--text-secondary)">${rows.join('')}</ul>
+    </div>` : '';
+
+  Modal.open({
+    title: 'Delete results',
+    body: [
+      section(`Deleted (${deleted.length})`, deleted.map(d => `<li>${esc(label(d.id, d.sku))}</li>`), 'rgba(22,163,74,.08)'),
+      section(`Already gone (${gone.length})`, gone.map(f => `<li>${esc(label(f.id, f.sku))}</li>`), 'rgba(100,116,139,.10)'),
+      section(`Refused by the server (${refused.length + preRefused.length})`,
+        [...preRefused, ...refused].map(f => `<li><strong>${esc(label(f.id, f.sku))}</strong> — ${esc(productDeleteFailureCopy(f.code, f.reason))}</li>`),
+        'rgba(180,83,9,.08)'),
+      section(`Outcome unknown (${unknown.length})`,
+        unknown.map(id => `<li>${esc(label(id, null))} — the server did not say. Refresh before retrying.</li>`),
+        'rgba(220,38,38,.08)'),
+    ].join(''),
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="close">Close</button>
+      ${deactivatable.length ? `<button class="admin-btn admin-btn--primary" data-action="deactivate">Deactivate ${deactivatable.length} instead</button>` : ''}
+    `,
+  });
+  const m = document.querySelector('.admin-modal');
+  m?.querySelector('[data-action="close"]')?.addEventListener('click', () => Modal.close());
+  m?.querySelector('[data-action="deactivate"]')?.addEventListener('click', () => {
+    Modal.close();
+    deactivateIds(deactivatable.map(f => f.id));
+  });
+}
+
+/**
+ * "Deactivate instead" — the one alternative offered for a product that is on a
+ * customer's order. Routes through the SAME payload builder bulkSetActive uses
+ * (the backend requires retail_price on every update), rather than a second
+ * implementation of the same write.
+ */
+async function deactivateIds(ids) {
+  if (!ids || !ids.length) return;
+  await bulkSetActiveFor(ids, false);
 }
 
 // ---- Tab switching for Products / Printers ----

@@ -259,11 +259,17 @@ test('renderSearchBanners — intent chips render brand/category/source, brand i
     assert.ok(m, 'the intent chip block must exist before the mount guard');
     const seg = m[1];
     assert.match(seg, /intent\.matched_brand_slug/, 'brand chip keys on matched_brand_slug');
-    assert.match(seg, /this\.brandInfo\[brandSlug\]/, 'brand name resolves via brandInfo');
+    // Aug 2026: resolves via brandName(), not the hardcoded brandInfo map. Keying
+    // the chip on that map meant NO chip at all for any brand the map had never
+    // heard of — seventeen of them — even though the backend had matched the brand
+    // and the /shop?brand= link would have worked fine.
+    assert.match(seg, /this\.brandName\(brandSlug\)/, 'brand name resolves via brandName()');
+    assert.doesNotMatch(seg, /this\.brandInfo\[brandSlug\]/,
+        'the hardcoded map must not gate the chip again');
     assert.match(seg, /search-intent-chip--brand[\s\S]*?href="\/shop\?brand=/, 'brand chip links to /shop?brand=');
     assert.match(seg, /intent\.category/, 'category chip keys on intent.category');
     assert.match(seg, /intent\.source\s*===\s*['"]genuine['"]/, 'source chip keys on intent.source');
-    assert.match(seg, /Security\.escapeHtml\(brand\.name\)/, 'brand name must be escaped');
+    assert.match(seg, /Security\.escapeHtml\(brandLabel\)/, 'brand name must be escaped');
 });
 
 test('renderSearchBanners — banner wrapper is only mounted when a notice exists', () => {

@@ -1288,15 +1288,12 @@
                     // Check if navigation changed during fetch
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                    if (response.ok && response.data) {
+                    if (response.ok && Array.isArray(response.data)) {
                         this.cache.brands = response.data;
+                        this._brandsAreOffline = false;
                     } else {
-                        // Fallback to static brands
-                        this.cache.brands = Object.keys(this.brandInfo).map(id => ({
-                            id,
-                            name: this.brandInfo[id].name,
-                            slug: id
-                        }));
+                        this.cache.brands = this._staticBrandFallback();
+                        this._brandsAreOffline = true;
                     }
                 }
 
@@ -1311,18 +1308,105 @@
                 // Check if navigation changed
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                // Fallback to static brands
-                this.cache.brands = Object.keys(this.brandInfo).map(id => ({
-                    id,
-                    name: this.brandInfo[id].name,
-                    slug: id
-                }));
+                this.cache.brands = this._staticBrandFallback();
+                this._brandsAreOffline = true;
                 this.renderBrands(this.cache.brands);
                 await this.renderRibbonBrands();
                 this.elements.levelBrands.hidden = false;
             }
 
             this.showLoading(false);
+        },
+
+        /**
+         * The offline brand list, built from the local `brandInfo` map.
+         *
+         * This fallback is KEPT deliberately. `/api/brands` being unreadable used to
+         * mean an empty shop landing page, and removing a fallback is a behaviour
+         * change rather than cleanup (ERR-158). But it is now marked: `_brandsAreOffline`
+         * makes the degraded state legible to renderBrands instead of letting a
+         * frozen ten-brand list pass for the live grid.
+         *
+         * Note these rows deliberately carry NO `show_on_shop`. They are not a
+         * membership answer — they are the ten brands we happen to ship logos for.
+         */
+        _staticBrandFallback() {
+            return Object.keys(this.brandInfo).map(id => ({
+                id,
+                name: this.brandInfo[id].name,
+                slug: id,
+            }));
+        },
+
+        /**
+         * Display name for a brand slug.
+         *
+         * Resolution order: the API row, then the local map, then a titleised slug.
+         * NEVER the bare slug — eleven call sites used to read
+         * `this.brandInfo[slug]?.name || slug`, so the moment a brand existed that
+         * the hardcoded map had never heard of, the tile said "Ricoh" while the
+         * category heading, the breadcrumb and the SEO title all said "ricoh".
+         * Half the page knowing the name and half not is the failure this replaces.
+         */
+        brandName(slug) {
+            const key = String(slug || '');
+            if (!key) return '';
+            const row = this._brandRow(key);
+            if (row && row.name) return row.name;
+            const info = this.brandInfo[key];
+            if (info && info.name) {
+                // The API answered, and it did not know this brand while our
+                // hardcoded map did. That is drift, and it is the exact way
+                // `brandInfo` would quietly become the source of truth again
+                // (ERR-167: if the fallback is the only branch that ever runs,
+                // the guard IS the bug). Say so once per page load.
+                if (!this._brandsAreOffline && !this._warnedBrandNameDrift) {
+                    this._warnedBrandNameDrift = true;
+                    DebugLog.warn(`[brands] "${key}" resolved from the local brandInfo map, not `
+                        + 'from /api/brands. The hardcoded map and the database disagree.');
+                }
+                return info.name;
+            }
+            return key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        },
+
+        /**
+         * Do we recognise this brand slug at all?
+         *
+         * Consults the LIVE list first and the local map second, for the same
+         * reason brandName() does: `this.brandInfo[slug]` as a membership test
+         * answers "no" for every brand added after this file was last deployed,
+         * which silently disables whatever it gates.
+         */
+        _knowsBrand(slug) {
+            const key = String(slug || '');
+            if (!key) return false;
+            return !!this._brandRow(key) || !!this.brandInfo[key];
+        },
+
+        /** The `/api/brands` row for a slug, or null. */
+        _brandRow(slug) {
+            const list = this.cache.brands;
+            if (!Array.isArray(list)) return null;
+            const key = String(slug || '');
+            return list.find(b => (b.slug || b.id || '') === key) || null;
+        },
+
+        /**
+         * Logo URL for a brand, or '' when it has none.
+         *
+         * `logo_url` first: it is the field named as a URL, and measured 2026-08-31
+         * it is byte-identical to `logo_path` on every row that has either. The
+         * local asset is the last resort so a brand added in the admin renders
+         * immediately, and a brand with no logo at all falls through to '' — which
+         * is what puts it on the text branch rather than rendering a broken image.
+         * Twelve of the twenty-seven live brands have no logo, so that path is
+         * load-bearing, not theoretical.
+         */
+        brandLogo(slug) {
+            const row = this._brandRow(slug);
+            const info = this.brandInfo[String(slug || '')];
+            return (row && (row.logo_url || row.logo_path)) || (info && info.logo) || '';
         },
 
         renderBrands(brands) {
@@ -1348,35 +1432,60 @@
                 if (ribbonsSection) ribbonsSection.hidden = false;
             }
 
-            // Known brands shown first, in preferred order
-            const preferredOrder = ['brother', 'canon', 'epson', 'hp', 'samsung', 'lexmark', 'oki', 'fuji-xerox', 'kyocera', 'dymo'];
+            // WHICH BRANDS APPEAR IS DATA, NOT A LIST IN THIS FILE.
+            //
+            // Until Aug 2026 this filtered /api/brands against a hardcoded
+            // `preferredOrder` array of ten slugs, with logos in a second hardcoded
+            // map. A brand absent from that array appeared in search, in the admin
+            // and on its own product pages, and rendered NO TILE on /shop — with no
+            // error anywhere. Seventeen live brands were in that state and nothing
+            // in the system could say so. The backend now owns the answer:
+            //
+            //   show_on_shop  bool  render a tile
+            //   sort_order    int   the order to render them in
+            //
+            // `=== true` on purpose: an ABSENT field must not read as visible. The
+            // offline fallback rows carry no `show_on_shop` at all, which is exactly
+            // why they are handled separately below rather than filtered here — a
+            // fallback that filters on a field it does not have renders an empty
+            // grid, the worst available failure for a shop landing page.
+            const offline = !!this._brandsAreOffline;
+            const inkBrands = offline
+                ? [...brands]
+                : brands
+                    .filter(b => b.show_on_shop === true)
+                    .sort((a, b) => {
+                        const ao = Number.isFinite(a.sort_order) ? a.sort_order : Number.MAX_SAFE_INTEGER;
+                        const bo = Number.isFinite(b.sort_order) ? b.sort_order : Number.MAX_SAFE_INTEGER;
+                        if (ao !== bo) return ao - bo;
+                        return (a.name || '').localeCompare(b.name || '');
+                    });
 
-            // Sort: preferred (logo) brands first, then remaining API brands alphabetically
-            const sorted = [...brands].sort((a, b) => {
-                const aId = a.slug || a.id || '';
-                const bId = b.slug || b.id || '';
-                const aIdx = preferredOrder.indexOf(aId);
-                const bIdx = preferredOrder.indexOf(bId);
-                if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-                if (aIdx !== -1) return -1;
-                if (bIdx !== -1) return 1;
-                return (a.name || '').localeCompare(b.name || '');
-            });
+            if (offline) {
+                // LOUD, not silent. The customer is looking at a brand list frozen at
+                // the last deploy; anything the owner has added since is missing and
+                // nothing on the page says so. A silent fallback that renders a
+                // plausible page is how the hardcoded allowlist filtered the database
+                // for months without anyone noticing (ERR-158).
+                DebugLog.error('[brands] /api/brands was unreadable — /shop is rendering the '
+                    + `${inkBrands.length}-brand fallback baked into shop-page.js. Brands added `
+                    + 'since this deploy are absent from the grid.');
+            }
 
-            // Only show ink/toner brands — filter out typewriter brands that bleed in from API
-            const inkBrands = sorted.filter(b => preferredOrder.includes(b.slug || b.id || ''));
-
-            inkBrands.forEach(brand => {
+            inkBrands.forEach((brand, i) => {
                 const brandId = brand.slug || brand.id || '';
-                const info = this.brandInfo[brandId];
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--brand';
                 box.dataset.brand = brandId;
-                const logoSrc = brand.logo_path || (info && info.logo);
-                const displayName = (info && info.name) || brand.name || brandId;
+                // Stagger inline, unbounded — the :nth-child rules this replaced
+                // stopped at 9 while the grid rendered 10, and a data-driven grid
+                // has no fixed length to enumerate. Matches renderRibbonBrands().
+                box.style.animationDelay = `${i * 30}ms`;
+                const logoSrc = this.brandLogo(brandId);
+                const displayName = this.brandName(brandId) || brand.name || brandId;
                 const inner = logoSrc
                     ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`
-                    : `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
+                    : `<span class="drilldown-box__name">${Security.escapeHtml(displayName)}</span>`;
                 box.innerHTML = `${inner}<span class="drilldown-box__count" data-count="${Security.escapeAttr(brandId)}" aria-hidden="true"></span>`;
                 box.addEventListener('click', () => categoryPicker
                     ? this.navigateTo('codes', { brand: brandId, category: this.state.category })
@@ -1398,17 +1507,33 @@
             this._loadBrandCounts(inkBrands);
         },
 
+        /**
+         * Per-brand product counts, lazily and in small parallel batches.
+         *
+         * This used to be a strictly sequential `for..of`, which was fine while the
+         * grid was a hardcoded ten. It is not a hardcoded ten any more: the owner
+         * can now flip `show_on_shop` on any of the twenty-seven brands, and this
+         * would then issue twenty-seven SEQUENTIAL round trips on every /shop
+         * landing, each one blocking the next. Batching bounds the wall-clock cost
+         * while the small batch size keeps us from hammering a rate-limiter that is
+         * shared with the rest of the storefront.
+         *
+         * Still fail-quiet per brand on purpose — a missing count is a cosmetic
+         * absence on a tile that already works, not a reason to break the grid.
+         */
         async _loadBrandCounts(brands) {
-            for (const brand of brands) {
-                const brandId = brand.slug || brand.id || '';
-                if (!brandId) continue;
-                try {
-                    const res = await API.getProductCounts({ brand: brandId });
-                    const n = res?.data?.count ?? res?.count;
-                    if (n == null) continue;
-                    const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
-                    if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
-                } catch { /* silent */ }
+            const BATCH = 5;
+            const ids = brands.map(b => b.slug || b.id || '').filter(Boolean);
+            for (let i = 0; i < ids.length; i += BATCH) {
+                await Promise.all(ids.slice(i, i + BATCH).map(async (brandId) => {
+                    try {
+                        const res = await API.getProductCounts({ brand: brandId });
+                        const n = res?.data?.count ?? res?.count;
+                        if (n == null) return;
+                        const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
+                        if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
+                    } catch { /* a missing count is cosmetic */ }
+                }));
             }
         },
 
@@ -1630,7 +1755,7 @@
                 // Get the API category value
                 const categoryConfig = this.categories.find(c => c.id === this.state.category);
                 const apiCategory = categoryConfig?.apiCategory || this.state.category;
-                const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand;
+                const brandName = this.brandName(this.state.brand);
 
                 // Include type filter in cache key to prevent stale results when switching genuine/compatible.
                 // v9 (Jul 2026 truncated-code repair): API._repairTruncatedSeries
@@ -3234,7 +3359,7 @@
                     let detectedBrand = null;
                     if (!isTypeQuery) {
                         const intentBrand = smartData?.intent?.matched_brand_slug;
-                        if (intentBrand && this.brandInfo[intentBrand]) {
+                        if (intentBrand && this._knowsBrand(intentBrand)) {
                             const narrowed = products.filter(p => p.brand?.slug === intentBrand);
                             // Only narrow if the candidate brand actually
                             // dominates the result set (≥40%). Prevents a single
@@ -3264,7 +3389,7 @@
                     }
 
                     // Update section titles
-                    const brandDisplay = detectedBrand ? this.brandInfo[detectedBrand].name + ' ' : '';
+                    const brandDisplay = detectedBrand ? this.brandName(detectedBrand) + ' ' : '';
                     const typeDisplay = isTypeQuery ? searchQuery.charAt(0).toUpperCase() + searchQuery.slice(1).toLowerCase() + ' ' : '';
                     this.elements.compatibleTitleText.textContent = isTypeQuery
                         ? `Compatible ${typeDisplay}Products`
@@ -3530,9 +3655,13 @@
             if (intent) {
                 const chips = [];
                 const brandSlug = intent.matched_brand_slug;
-                const brand = brandSlug && this.brandInfo ? this.brandInfo[brandSlug] : null;
-                if (brand && brand.name) {
-                    chips.push(`<a class="search-intent-chip search-intent-chip--brand" href="/shop?brand=${encodeURIComponent(brandSlug)}">More ${Security.escapeHtml(brand.name)} →</a>`);
+                // Resolve through brandName(), not the hardcoded map: the backend's
+                // matched_brand_slug can name any brand in the database, and keying
+                // this on brandInfo meant no chip at all for the seventeen brands
+                // that map has never contained.
+                const brandLabel = brandSlug ? this.brandName(brandSlug) : '';
+                if (brandLabel) {
+                    chips.push(`<a class="search-intent-chip search-intent-chip--brand" href="/shop?brand=${encodeURIComponent(brandSlug)}">More ${Security.escapeHtml(brandLabel)} →</a>`);
                 }
                 if (intent.category) {
                     const cat = String(intent.category);
@@ -4207,7 +4336,7 @@
 
             // Brand level
             if (this.state.brand) {
-                const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand;
+                const brandName = this.brandName(this.state.brand);
                 const isCurrent = this.state.level === 'categories';
                 const brandItem = this.createBreadcrumbItem(brandName, isCurrent, () => {
                     this.navigateTo('categories', { brand: this.state.brand });
@@ -4265,7 +4394,7 @@
             let pageUrl = shopUrl;
             let pageName = 'Shop Ink Cartridges & Toner NZ';
             if (this.state.brand) {
-                const brandName = this.brandInfo?.[this.state.brand]?.name || this.state.brand;
+                const brandName = this.brandName(this.state.brand);
                 pageUrl = shopUrl + '?brand=' + encodeURIComponent(this.state.brand);
                 pageName = brandName + ' Ink Cartridges';
                 items.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": pageUrl });
@@ -4369,7 +4498,7 @@
         async displayProductInfo(products, { skipPrinters = false } = {}) {
             this.elements.yieldBanner.hidden = true;
 
-            const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand || '';
+            const brandName = this.brandName(this.state.brand) || '';
             // Base label only — each header adds its own "Compatible"/"Original"
             // word, so using the prefixed label here produced "Brother Compatible
             // Compatible Inkjet Cartridges" under ?type= filters (MC audit).
@@ -4384,7 +4513,7 @@
             const brand = this.state.brand;
             const category = this.state.category;
             const code = this.state.code;
-            const brandName = this.brandInfo[brand]?.name || brand || '';
+            const brandName = this.brandName(brand) || '';
             // Keys are the INTERNAL tab ids (see this.categories).
             const categoryLabels = {
                 ink: 'Ink Cartridges', toner: 'Toner Cartridges',
@@ -4443,7 +4572,7 @@
                 case 'printer-model-products': {
                     const printerDisplay = this.state.printerModelDisplay || this.state.printerModel || this.state.printer || '';
                     const pBrandName = this.state.printerBrand
-                        ? (this.brandInfo[this.state.printerBrand]?.name || this.state.printerBrand) : '';
+                        ? this.brandName(this.state.printerBrand) : '';
                     const printerFull = [pBrandName, printerDisplay].filter(Boolean).join(' ');
                     title       = `Compatible Ink for ${printerFull} NZ | InkCartridges.co.nz`;
                     description = `Shop compatible ink cartridges for the ${printerFull}. Free NZ-wide shipping over $100.`;
@@ -4520,7 +4649,7 @@
             if (typeof SeoMeta !== 'undefined') {
                 const printerFull = [
                     this.state.printerBrand
-                        ? (this.brandInfo[this.state.printerBrand]?.name || this.state.printerBrand)
+                        ? this.brandName(this.state.printerBrand)
                         : '',
                     this.state.printerModelDisplay || this.state.printerModel || this.state.printer || '',
                 ].filter(Boolean).join(' ');
@@ -4560,7 +4689,7 @@
                 this.elements.yieldBanner.hidden = true;
 
                 const titles = {
-                    categories: `${this.brandInfo[this.state.brand]?.name || ''} - Select a Category`,
+                    categories: `${this.brandName(this.state.brand) || ''} - Select a Category`,
                     codes: `Select a Product Code`
                 };
 

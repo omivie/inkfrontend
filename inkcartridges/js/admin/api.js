@@ -115,6 +115,14 @@ const BUSINESS_APPLICATION_MAX_PAGES = 10;
  *
  * Never construct a bare Error from an envelope again.
  */
+/**
+ * Ids per bulk-delete call. The server's own cap is 500 (measured); this is well
+ * under it because the catalogue rate-limiter is shared with the storefront and a
+ * 500-id delete that trips it fails halfway through an irreversible operation.
+ * Mirrors CHUNK_SIZE in utils/product-deletability.js.
+ */
+const BULK_DELETE_CHUNK = 100;
+
 function errorFromEnvelope(resp, fallbackMessage) {
   // `resp.error` is a STRING on the envelopes js/api.js builds, but a few admin
   // endpoints pass the backend's `{code, message}` object straight through. Both
@@ -1114,13 +1122,80 @@ const AdminAPI = {
     }
   },
 
+  /**
+   * Delete one product.
+   *
+   * The `resp.ok === false` check is the whole point of this function and it was
+   * MISSING until 2026-08-31 — this was the only product write helper without one
+   * (`createProduct`, `updateProduct` and `updateProductOverrides` all had it).
+   *
+   * `window.API.request()` RETURNS an `{ok:false}` envelope for 404/409/403 instead
+   * of throwing, so without this check the promise RESOLVED on every failure and
+   * `Promise.allSettled` in the bulk path counted it as a deletion. For seventeen
+   * days the button reported "N products deleted" while deleting nothing (ERR-166
+   * documented the dead route; nobody noticed the toast was lying about it).
+   *
+   * DO NOT remove this check to make a caller simpler. Resolving on failure here is
+   * indistinguishable from success at every call site.
+   */
   async deleteProduct(productId) {
     try {
-      return await window.API.deleteProduct(productId);
+      const resp = await window.API.deleteProduct(productId);
+      if (resp && resp.ok === false) throw productWriteError(resp, 'Delete failed');
+      return resp?.data ?? { deleted: true };
     } catch (e) {
       DebugLog.warn('[AdminAPI] deleteProduct failed:', e.message);
       throw e;
     }
+  },
+
+  /**
+   * Delete many products, chunked, reporting per row.
+   *
+   * Returns the RAW merged `{deleted, failed}` payload; `normaliseBulkDeleteResult`
+   * in utils/product-deletability.js turns it into buckets. Two behaviours matter:
+   *
+   *   1. It throws ONLY when nothing was accomplished at all. Once any chunk has
+   *      come back, a later failure degrades into `failed[]` entries rather than
+   *      throwing away the record of what was already IRREVERSIBLY deleted.
+   *   2. Ids are de-duplicated first. A doubled id comes back once, and the caller
+   *      would otherwise read the missing copy as "unaccounted".
+   *
+   * @param {string[]} productIds
+   * @param {{dryRun?: boolean}} [options]
+   */
+  async deleteProductsBulk(productIds, options = {}) {
+    const ids = [...new Set((productIds || []).map(String))].filter(Boolean);
+    const merged = { dry_run: !!options.dryRun, requested: ids.length, deleted: [], failed: [] };
+    if (!ids.length) return merged;
+
+    let anySucceeded = false;
+    let firstError = null;
+
+    for (let i = 0; i < ids.length; i += BULK_DELETE_CHUNK) {
+      const chunk = ids.slice(i, i + BULK_DELETE_CHUNK);
+      try {
+        const resp = await window.API.deleteProductsBulk(chunk, options);
+        if (resp && resp.ok === false) throw productWriteError(resp, 'Bulk delete failed');
+        const data = resp?.data ?? {};
+        anySucceeded = true;
+        if (Array.isArray(data.deleted)) merged.deleted.push(...data.deleted);
+        if (Array.isArray(data.failed)) merged.failed.push(...data.failed);
+      } catch (e) {
+        DebugLog.warn('[AdminAPI] deleteProductsBulk chunk failed:', e.message);
+        if (!firstError) firstError = e;
+        // Record the chunk as refused rather than losing it. Its rows are neither
+        // deleted nor accounted for, and the caller must be able to say which.
+        for (const id of chunk) {
+          merged.failed.push({ id, sku: null, code: e.code || null, reason: e.message || '' });
+        }
+      }
+    }
+
+    // Nothing at all got through — the caller should see the real error, not an
+    // empty result that reads like "you selected nothing".
+    if (!anySucceeded && firstError) throw firstError;
+    return merged;
   },
 
   async deleteProductImage(productId, imageId) {
@@ -1391,6 +1466,40 @@ const AdminAPI = {
   // ---- Suppliers ----
   async getSuppliers() {
     return rpc('get_suppliers');
+  },
+
+  // ---- Brands: write path (owner / super_admin only) ----
+  //
+  // Measured live 2026-08-31, because none of this was in the backend's handover:
+  //   POST   /api/admin/brands            201 -> data.brand   (name + slug REQUIRED)
+  //   PUT    /api/admin/brands/:id        200 -> data.brand   (MERGES; absent keys survive)
+  //   DELETE /api/admin/brands/:id        200 -> {deleted, id, slug}
+  //   PATCH                               404 — does not exist, use PUT
+  //
+  // Writable: name, slug, logo_url, show_on_shop, sort_order.
+  // NOT writable: `logo_path` — it is derived. Sending it echoes back null, which
+  // is why the UI only ever offers logo_url.
+  //
+  // Unknown keys are SILENTLY STRIPPED rather than rejected, so a typo'd field
+  // name would return 200 and change nothing. That is why every write here reads
+  // the row back and the caller compares (see brandEchoMissing in pages/brands.js).
+
+  async createBrand(data) {
+    const resp = await window.API.post('/api/admin/brands', data);
+    if (resp && resp.ok === false) throw productWriteError(resp, 'Could not create the brand');
+    return resp?.data?.brand ?? resp?.data ?? null;
+  },
+
+  async updateBrand(brandId, data) {
+    const resp = await window.API.put(`/api/admin/brands/${encodeURIComponent(brandId)}`, data);
+    if (resp && resp.ok === false) throw productWriteError(resp, 'Could not save the brand');
+    return resp?.data?.brand ?? resp?.data ?? null;
+  },
+
+  async deleteBrand(brandId) {
+    const resp = await window.API.delete(`/api/admin/brands/${encodeURIComponent(brandId)}`);
+    if (resp && resp.ok === false) throw productWriteError(resp, 'Could not delete the brand');
+    return resp?.data ?? null;
   },
 
   // ---- Brands (for filter options) ----
@@ -3773,6 +3882,188 @@ const AdminAPI = {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
+  },
+
+  // =========================================================================
+  // Admin — Supplier price comparison  (pages/supplier-prices.js, ERR-190)
+  //
+  // Every read here pulls EVERY page rather than one, and that is deliberate.
+  //
+  // Measured against production 2026-08-31: `supplier=`, `stale=`,
+  // `exclude_stale=`, `fresh_only=` on /compare and `reason=` on /unmatched are
+  // all DECOYS — accepted, ignored, full result set returned (the ERR-151
+  // family). So the two filters this feature is FOR — "is the cheapest price
+  // current?" and "show me only the ~26 rows that need a decision" — cannot be
+  // asked of the server. Filtering one server page client-side instead would
+  // render an empty tab (both `ambiguous` rows sit past the first page of 50),
+  // which is a filter that silently finds nothing.
+  //
+  // The volume makes it cheap: 172 rows for coverage=multi (1 request at
+  // limit=200), 610 for `all` (4), 345 for unmatched (2). `limit` is capped at
+  // 200 server-side — 201 is a hard 400.
+  //
+  // A page that fails sets `complete: false` and the caller MUST render that.
+  // A short list that looks like a whole list is how a total silently shrinks.
+  // =========================================================================
+  supplierOffers: {
+    /** Server-side max. 201 is a 400, so this is a contract, not a preference. */
+    PAGE_LIMIT: 200,
+    /** Guard against an endless loop if `has_next` were ever wrong. 4 pages covers `all`. */
+    MAX_PAGES: 12,
+
+    _query(params = {}, allowed = []) {
+      const p = new URLSearchParams();
+      for (const key of allowed) {
+        const v = params[key];
+        if (v === undefined || v === null || v === '') continue;
+        p.set(key, String(v));
+      }
+      return p;
+    },
+
+    /**
+     * Every comparison row for these filters, plus the feed-level supplier list.
+     *
+     * @returns {{rows:Array, suppliers:Array, meta:Object|null, pagesFetched:number,
+     *            complete:boolean, expected:number|null}}
+     *   `complete:false` means at least one page did not come back. `rows` is then
+     *   a PARTIAL set and every total derived from it is a floor, not a figure.
+     */
+    async compareAll(params = {}, { isStale } = {}) {
+      const base = this._query(params, [
+        'coverage', 'brand', 'product_type', 'search', 'min_saving', 'sort', 'include_inactive',
+      ]);
+      const rows = [];
+      let suppliers = [];
+      let meta = null;
+      let expected = null;
+      let pagesFetched = 0;
+      let complete = true;
+
+      for (let page = 1; page <= this.MAX_PAGES; page++) {
+        // Between-pages bail-out. See the header note: a caller's AbortSignal is
+        // DROPPED by API.request(), so a `signal` option here would be an off
+        // switch. Stopping before the NEXT request is what we can actually do.
+        if (typeof isStale === 'function' && isStale()) { complete = false; break; }
+        const q = new URLSearchParams(base);
+        q.set('page', String(page));
+        q.set('limit', String(this.PAGE_LIMIT));
+        let resp;
+        try {
+          resp = await window.API.get(`/api/admin/supplier-offers/compare?${q}`);
+        } catch (e) {
+          adminApiWarn('Load supplier comparison', e);
+          complete = false;
+          break;
+        }
+        if (!resp || resp.ok === false || !resp.data) {
+          // A refusal and an outage are both "no answer" here; either way the set
+          // we hold is short, and saying so is the whole job.
+          adminApiWarn('Load supplier comparison', new Error(
+            (resp && (resp.error?.message || resp.error)) || 'no response'));
+          complete = false;
+          break;
+        }
+        pagesFetched++;
+        const batch = Array.isArray(resp.data.comparisons) ? resp.data.comparisons : [];
+        rows.push(...batch);
+        // The feed-freshness list is identical on every page and — measured — is
+        // still populated when `comparisons` is empty, so the header strip
+        // survives a filter that matches nothing.
+        if (Array.isArray(resp.data.suppliers) && resp.data.suppliers.length) {
+          suppliers = resp.data.suppliers;
+        }
+        if (resp.meta) meta = resp.meta;
+        const pg = resp.meta && resp.meta.pagination;
+        if (pg && Number.isFinite(Number(pg.total))) expected = Number(pg.total);
+        if (!pg || !pg.has_next) break;
+        if (page === this.MAX_PAGES) complete = false; // ran out of pages before the server did
+      }
+
+      // The server's own total is the check on our walk. If it says 172 and we
+      // hold 40, `complete` must not stay true just because no request threw.
+      if (complete && expected !== null && rows.length !== expected) complete = false;
+
+      return { rows, suppliers, meta, pagesFetched, complete, expected };
+    },
+
+    /**
+     * Every unmatched supplier line for these filters.
+     *
+     * `meta.by_reason` IS server-computed and — measured — does respect
+     * `supplier=` and `search=`, so it is trustworthy as a count. What it cannot
+     * do is return only those rows; that partition happens client-side, over the
+     * whole set this returns.
+     */
+    async unmatchedAll(params = {}, { isStale } = {}) {
+      const base = this._query(params, ['supplier', 'search']);
+      const rows = [];
+      let meta = null;
+      let expected = null;
+      let pagesFetched = 0;
+      let complete = true;
+
+      for (let page = 1; page <= this.MAX_PAGES; page++) {
+        if (typeof isStale === 'function' && isStale()) { complete = false; break; }
+        const q = new URLSearchParams(base);
+        q.set('page', String(page));
+        q.set('limit', String(this.PAGE_LIMIT));
+        let resp;
+        try {
+          resp = await window.API.get(`/api/admin/supplier-offers/unmatched?${q}`);
+        } catch (e) {
+          adminApiWarn('Load unmatched supplier lines', e);
+          complete = false;
+          break;
+        }
+        if (!resp || resp.ok === false || !resp.data) {
+          adminApiWarn('Load unmatched supplier lines', new Error(
+            (resp && (resp.error?.message || resp.error)) || 'no response'));
+          complete = false;
+          break;
+        }
+        pagesFetched++;
+        const batch = Array.isArray(resp.data.unmatched) ? resp.data.unmatched : [];
+        rows.push(...batch);
+        if (resp.meta) meta = resp.meta;
+        const pg = resp.meta && resp.meta.pagination;
+        if (pg && Number.isFinite(Number(pg.total))) expected = Number(pg.total);
+        if (!pg || !pg.has_next) break;
+        if (page === this.MAX_PAGES) complete = false;
+      }
+
+      if (complete && expected !== null && rows.length !== expected) complete = false;
+
+      return { rows, meta, pagesFetched, complete, expected };
+    },
+
+    /**
+     * Pin a supplier line to a product. Applies immediately and is re-applied on
+     * every future import, so this is a durable write, not a view preference.
+     *
+     * Build the body with `mapPayload()` from utils/supplier-offers.js — it
+     * refuses the both-ids case locally that the server refuses with a 400.
+     */
+    async map(payload) {
+      const resp = await window.API.post('/api/admin/supplier-offers/map', payload);
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not map that supplier line');
+      return resp?.data ?? null;
+    },
+
+    /**
+     * Remove a pin and let automatic matching decide again.
+     *
+     * There is NO endpoint that lists existing mappings (measured 2026-08-31:
+     * GET /map, /mappings, /maps, /map/list are all 404), so the only id the
+     * front-end can ever hold is the one just returned by map(). Undo is
+     * therefore session-scoped by construction — the UI must not imply a
+     * managed list it cannot load.
+     */
+    async unmap(id) {
+      const resp = await window.API.delete(`/api/admin/supplier-offers/map/${encodeURIComponent(id)}`);
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not undo that mapping');
+      return resp?.data ?? null;
     },
   },
 

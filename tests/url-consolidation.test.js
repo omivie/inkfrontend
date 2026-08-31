@@ -336,6 +336,10 @@ function loadShopPageController() {
         var Auth = { isLoggedIn: () => false };
         var Search = {};
         var Security = { escapeHtml: String, escapeAttr: String, sanitizeURL: String };
+        // shop-page.js logs through the global DebugLog (a real window global on
+        // the site — see ERR-156). updateSEO reaches it via brandName(), which
+        // warns when a name resolves from the local map while the API answered.
+        var DebugLog = { warn() {}, error() {}, log() {}, info() {} };
         var ProductColors = {};
         var Products = {};
         var Favourites = { isFavourite: () => false, toggle() {} };

@@ -73,6 +73,17 @@ const JSON_OUT = ARGS.has('--json');
 
 const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
 const PAGE_LIMIT = 200;
+
+/**
+ * Pace between catalogue pages.
+ *
+ * This walks ~21 pages of /api/products back to back. On 2026-08-31 the backend
+ * reported that hammering that endpoint reliably 502s their whole instance —
+ * health endpoint included — for several minutes (ERR-188 is that outage from
+ * this side). Same constant, same reason, in every script that walks it.
+ */
+const REQUEST_DELAY_MS = Number(process.env.PROBE_DELAY_MS || 650);
+
 const MAX_PAGE_ATTEMPTS = 4;
 const RATE_LIMIT_BACKOFF_MS = 20000;
 
@@ -189,12 +200,15 @@ async function collectCatalog() {
     const rows = [];
     let page = 1;
     let meta = null;
+    let removedFromPage = 0;
+    let sawRemovedKey = false;
     let endedCleanly = false;
     let guard = 0;
 
     say(`\nWalking ${API_BASE}/api/products …`);
     for (;;) {
         if (++guard > 200) throw new Error('catalog walk exceeded 200 pages — refusing to loop');
+        if (page > 1) await sleep(REQUEST_DELAY_MS);
         const body = await getJsonWithBackoff(`${API_BASE}/api/products?page=${page}&limit=${PAGE_LIMIT}`);
         if (!body || body.ok === false) {
             throw new Error(`catalog page ${page} failed: ${JSON.stringify(body && body.error)}`);
@@ -202,6 +216,16 @@ async function collectCatalog() {
         const data = body.data || body;
         const items = data.products || data.items || (Array.isArray(data) ? data : []);
         meta = body.meta || data.pagination || {};
+        // The API counts `total` BEFORE its per-page pack guard and dedup run, so a
+        // page can legitimately return fewer rows than the total implies. Since
+        // 2026-08-31 it reports how many it dropped, and the gap reconciles exactly:
+        //     sum(returned) + sum(removed_from_page) === total
+        // Count the KEY, not a truthy value: a page that removed nothing reports 0,
+        // and an endpoint that never gained the field also reads 0.
+        if (Object.prototype.hasOwnProperty.call(meta, 'removed_from_page')) {
+            sawRemovedKey = true;
+            removedFromPage += Number(meta.removed_from_page) || 0;
+        }
         rows.push(...items.filter(p => p && typeof p.sku === 'string' && p.sku.trim()));
         say(`  page ${page}: +${items.length} (running ${rows.length}${meta.total ? '/' + meta.total : ''})`);
 
@@ -215,8 +239,14 @@ async function collectCatalog() {
     // Loud but not fatal: report the shortfall AND keep auditing what is
     // readable. Partial-ness belongs in the result, never swallowed.
     if (typeof meta.total === 'number' && rows.length !== meta.total) {
+        if (sawRemovedKey && removedFromPage === Math.abs(meta.total - rows.length)) {
+            // Fully explained. Reporting a solved gap as an open backend condition
+            // makes a fixed thing read as a live limitation (ERR-184/186).
+            note(`meta.total claims ${meta.total}; ${rows.length} returned + ${removedFromPage} removed_from_page reconciles exactly. Nothing is hiding in the difference.`);
+        } else {
         backendCondition('L0-catalogue-count-mismatch', `${API_BASE}/api/products`,
-            `walked to has_next=false and collected ${rows.length} products, but meta.total claims ${meta.total} — ${Math.abs(meta.total - rows.length)} row(s) are counted by the API but never served by it. Known and reported to the backend 2026-08-03 (the colour audit carries the same finding). Everything below was checked against the ${rows.length} rows that ARE reachable: a type existing ONLY in the gap would look absent here, so "offered but empty" is a weaker claim than usual on this run.`);
+                `walked to has_next=false and collected ${rows.length} products, but meta.total claims ${meta.total} — ${Math.abs(meta.total - rows.length)} row(s) are counted by the API but never served by it. Known and reported to the backend 2026-08-03 (the colour audit carries the same finding). Everything below was checked against the ${rows.length} rows that ARE reachable: a type existing ONLY in the gap would look absent here, so "offered but empty" is a weaker claim than usual on this run.`);
+        }
     }
     return rows;
 }

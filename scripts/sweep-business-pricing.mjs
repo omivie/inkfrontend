@@ -115,6 +115,17 @@ const RATE_LIMIT_BACKOFF_MS = 60000;
 const MAX_CHUNK_ATTEMPTS = 3;
 const PAGE_LIMIT = 200;
 
+/**
+ * Pace between catalogue pages.
+ *
+ * This walks ~21 pages of /api/products back to back. On 2026-08-31 the backend
+ * reported that hammering that endpoint reliably 502s their whole instance —
+ * health endpoint included — for several minutes (ERR-188 is that outage from
+ * this side). Same constant, same reason, in every script that walks it.
+ */
+const REQUEST_DELAY_MS = Number(process.env.PROBE_DELAY_MS || 650);
+
+
 // ──────────────────────────────────────────────────────────────────────────
 // Environment
 // ──────────────────────────────────────────────────────────────────────────
@@ -239,6 +250,7 @@ async function collectCatalog() {
     for (;;) {
         if (++guard > 200) throw new Error('catalog walk exceeded 200 pages — refusing to loop');
         const url = `${API_BASE}/api/products?page=${page}&limit=${PAGE_LIMIT}`;
+        if (page > 1) await sleep(REQUEST_DELAY_MS);
         const { body } = await getJson(url);
         if (!body || body.ok === false) {
             throw new Error(`catalog page ${page} failed: ${JSON.stringify(body && body.error)}`);

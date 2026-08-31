@@ -1032,6 +1032,13 @@
 .admin-btn--primary:hover:not(:disabled) { background: var(--cyan-hover); }
 .admin-btn--danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .admin-btn--danger:hover:not(:disabled) { background: #dc2626; }
+
+/* A destructive action that should NOT read as the primary thing on the row.
+   Used for the product drawer's Delete, which sits beside Save Changes: the
+   colour marks it as dangerous while the ghost weight keeps Save the obvious
+   default. A solid red button next to Save invites the wrong click. */
+.admin-btn--danger-text { color: var(--danger); }
+.admin-btn--danger-text:hover:not(:disabled) { background: rgba(220, 38, 38, .08); border-color: var(--danger); }
 .admin-btn--ghost {
   background: transparent; color: var(--text-secondary); border-color: var(--input-border);
 }
@@ -5880,6 +5887,48 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   background: var(--input-bg);
 }
 .admin-cb-link { color: var(--cyan-text); text-decoration: none; }
+
+/* Codeless-product listing (Browse ▸ codes ▸ "Products with no code"). */
+.admin-cb-note--warn {
+    background: var(--danger-dim, rgba(180, 83, 9, .08));
+    border-left: 3px solid var(--warning, #b45309);
+    padding: 10px 12px;
+    border-radius: 4px;
+}
+.admin-cb-codeless { width: 100%; margin-top: 10px; }
+.admin-cb-codeless code { font-size: 11px; }
+
+/* ── Brands manager (pages/brands.js) ─────────────────────────────────────────
+   Reached from the Browse tab's brand level. Mounted in place rather than routed
+   to, so it inherits the .admin-cb-* surface around it. */
+.admin-cb-headrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.admin-brands__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.admin-brands__table { width: 100%; }
+.admin-brands__logo { width: 76px; }
+/* Bounded for the same reason the storefront tile is: a brand logo is an
+   arbitrary image and some are thousands of pixels tall. */
+.admin-brands__logo img { max-width: 64px; max-height: 24px; object-fit: contain; display: block; }
+.admin-brands__nologo { color: var(--text-muted); font-size: 11px; font-style: italic; }
+.admin-brands__name { font-weight: 600; }
+.admin-brands__slug { color: var(--text-muted); font-size: 11px; }
+.admin-brands__toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.admin-brands__toggle input { cursor: pointer; }
+.admin-brands__order { width: 72px; }
+.admin-brands__order:disabled { opacity: .45; cursor: not-allowed; }
+.admin-brands__actions { white-space: nowrap; text-align: right; }
 .admin-cb-link:hover { text-decoration: underline; }
 
 /* Brand + category tiles. */
