@@ -642,10 +642,21 @@ test('every entry point is behind AdminAuth.isOwner()', () => {
 });
 
 test('super_admin IS the owner role — the gate is not a guess', () => {
-  const auth = codeOnly(read(path.join(ADMIN, 'auth.js')));
-  assert.match(auth, /superadmin: 'owner'/);
-  assert.match(auth, /replace\(\/\[\^a-z\]\/g, ''\)/,
+  // MOVED (Aug 2026, ERR-188): the role map used to sit inline in
+  // js/admin/auth.js. site-guard.js carried a second, differently-spelled copy
+  // ('super_admin' literal vs this one's stripped 'superadmin'), so one endpoint
+  // had two accept-lists. It now lives once, in AdminAccess (js/utils.js), and
+  // auth.js delegates. The assertion is unchanged in substance — it just looks
+  // where the vocabulary actually is now.
+  const utils = codeOnly(read(path.join(INK, 'js', 'utils.js')));
+  assert.match(utils, /superadmin: 'owner'/);
+  assert.match(utils, /replace\(\/\[\^a-z\]\/g, ''\)/,
     "the backend says super_admin; the strip is what turns it into 'superadmin' and then 'owner'");
+
+  // And the gate must still READ that map rather than re-deciding for itself.
+  const auth = codeOnly(read(path.join(ADMIN, 'auth.js')));
+  assert.match(auth, /AdminAccess/,
+    'auth.js must delegate to the shared vocabulary, not grow a third copy');
 });
 
 test('the drawer re-reads the queue after an upgrade instead of trusting its cache', () => {

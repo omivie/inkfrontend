@@ -230,14 +230,31 @@ function initAdminHeaderLink() {
 
             // Authoritative server-side role check.
             if (typeof API === 'undefined' || !API.verifyAdmin) return;
+            if (!window.AdminAccess) {
+                // Read directly, never behind a `?.` fallback — a guard around a
+                // global that isn't there is an off switch (ERR-167). utils.js
+                // loads first on every page that has main.js, so this is a broken deploy.
+                if (typeof DebugLog !== 'undefined') DebugLog.error('[Admin link] AdminAccess missing — utils.js did not load');
+                return;
+            }
             API.verifyAdmin().then(function(res) {
-                var isAdmin = !!(res && res.ok && res.data);
-                if (isAdmin) ensureLink();
-                else removeLink();
-                writeHint(isAdmin && userId ? userId : null);
+                var outcome = window.AdminAccess.classify(res);
+                // A NON-ANSWER MUST NOT RETRACT THE LINK (ERR-188). This used to
+                // read `res.ok && res.data`, which is false for a JSON 5xx or a
+                // 401 envelope too — so a backend hiccup deleted the shortcut and
+                // wiped the hint, and the admin watched their own Admin link
+                // vanish mid-outage. Only an authoritative answer may change it.
+                if (outcome.state === 'unreachable') return;
+                if (outcome.state === 'granted') {
+                    ensureLink();
+                    writeHint(userId || null);
+                    return;
+                }
+                removeLink();
+                writeHint(null);
             }).catch(function() {
-                // Backend unreachable — keep whatever the hint decided.
-                // A stale hint at worst shows a link the /admin page rejects.
+                // The other 5xx shape: a non-JSON gateway page throws out of
+                // API.request(). Same rule — no answer, no change.
             });
         });
     }

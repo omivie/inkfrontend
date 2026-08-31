@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.08.30-invoice-credit-notes';
+const APP_VERSION = '2026.08.31-invoice-type-sizes';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -660,7 +660,66 @@ async function boot() {
 
   } catch (e) {
     DebugLog.error('[Admin] Boot failed:', e);
-    // Auth redirect already handled in AdminAuth.init()
+    // AdminAuth.init() has already navigated away for 'refused' (the server said
+    // no) and 'signed-out' (the session is gone). 'unreachable' deliberately
+    // does NOT navigate — we have no answer, so we owe the operator the reason
+    // on the page they are still looking at rather than a silent bounce to
+    // /account that reads as "you have lost your admin rights" (ERR-188).
+    if (e && e.reason === 'unreachable') renderBackendUnavailable(e);
+  }
+}
+
+/**
+ * The admin equivalent of a 502 page, rendered in place of the boot spinner.
+ *
+ * Deliberately NOT a redirect. The whole defect this fixes is that an outage
+ * and a revoked role produced identical, wordless behaviour; this screen exists
+ * to say which one happened. It reuses the .admin-stub block already used by
+ * the owner-only gate, inside #app-loading (position:fixed, centred) because
+ * the shell has not been rendered — the sidebar needs a role we never got.
+ */
+function renderBackendUnavailable(err) {
+  const loading = document.getElementById('app-loading');
+  if (!loading) return;
+
+  const access = (err && err.access) || {};
+  const status = access.status ? `HTTP ${access.status}` : 'no response';
+
+  // The request id correlates this failure with the backend's own logs. Shown
+  // only when the response carried one — a blank line labelled 'Request ID'
+  // would be worse than no line at all.
+  const rid = access.requestId
+    ? `<div class="admin-stub__text" style="margin-bottom:0;font-size:12px;opacity:.75">Request ID <code>${esc(access.requestId)}</code></div>`
+    : '';
+
+  loading.classList.remove('fade-out');
+  loading.innerHTML = `
+    <div class="admin-stub">
+      <div class="admin-stub__title">Admin Centre unavailable</div>
+      <div class="admin-stub__text">
+        Couldn't reach the backend to verify your access (${esc(status)}) after 3 attempts.
+        This is a server outage, <strong>not</strong> a problem with your account —
+        your admin role is unchanged and nothing needs to be re-granted.
+      </div>
+      <div class="admin-stub__text" style="margin-bottom:16px">
+        The rest of the site is affected too: search, the cart and checkout all
+        use the same API. Check the service status, then try again.
+      </div>
+      <button class="admin-btn admin-btn--primary" id="admin-retry-boot" type="button">Try again</button>
+      ${rid}
+    </div>
+  `;
+
+  const retry = document.getElementById('admin-retry-boot');
+  if (retry) {
+    retry.addEventListener('click', () => {
+      retry.disabled = true;
+      retry.textContent = 'Retrying…';
+      // A full reload rather than re-calling boot(): boot() aborted at its first
+      // await, so nothing is half-rendered, and a reload also re-runs the edge
+      // and session checks that a bare retry would skip.
+      window.location.reload();
+    });
   }
 }
 

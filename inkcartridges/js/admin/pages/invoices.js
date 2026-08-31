@@ -3652,15 +3652,15 @@ function buildInvoiceDoc(d) {
   const text = (s, x, y) => doc.text(String(s ?? ''), x, y);
 
   // --- Header band: title (left) + meta key/values (right) ---
-  doc.setFont('times', 'bold'); doc.setFontSize(24); doc.setTextColor(25);
+  doc.setFont('times', 'bold'); doc.setFontSize(26); doc.setTextColor(25);
   doc.text('TAX INVOICE', M, 72);
   let my = 56;
   invoiceMeta(d).forEach(([k, v]) => {
-    doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.setFont('times', 'normal'); doc.setFontSize(10); doc.setTextColor(140);
     doc.text(k.toUpperCase(), pageW - M - 100, my, { align: 'right' });
-    doc.setFont('times', 'bold'); doc.setFontSize(11); doc.setTextColor(25);
+    doc.setFont('times', 'bold'); doc.setFontSize(12); doc.setTextColor(25);
     doc.text(String(v ?? ''), pageW - M, my, { align: 'right' });
-    my += 16;
+    my += 17.5;
   });
   const headBottom = Math.max(86, my + 2);
   doc.setDrawColor(25); doc.setLineWidth(1.2);
@@ -3676,15 +3676,15 @@ function buildInvoiceDoc(d) {
   // Draw one party block at (x, top); returns the y just below it.
   const drawParty = (p, x, top) => {
     if (!p) return top;
-    doc.setFont('times', 'bold'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.setFont('times', 'bold'); doc.setFontSize(10); doc.setTextColor(140);
     doc.text(p.label.toUpperCase(), x, top);
-    doc.setFont('times', 'bold'); doc.setFontSize(13); doc.setTextColor(25);
-    let yy = top + 17;
-    doc.splitTextToSize(p.name || '', colW).forEach((w) => { doc.text(w, x, yy); yy += 15; });
-    doc.setFont('times', 'normal'); doc.setFontSize(11); doc.setTextColor(45);
+    doc.setFont('times', 'bold'); doc.setFontSize(14.5); doc.setTextColor(25);
+    let yy = top + 19;
+    doc.splitTextToSize(p.name || '', colW).forEach((w) => { doc.text(w, x, yy); yy += 16.5; });
+    doc.setFont('times', 'normal'); doc.setFontSize(12.5); doc.setTextColor(45);
     yy += 2;
     p.lines.forEach((l) => {
-      doc.splitTextToSize(String(l), colW).forEach((w) => { doc.text(w, x, yy); yy += 13.5; });
+      doc.splitTextToSize(String(l), colW).forEach((w) => { doc.text(w, x, yy); yy += 15; });
     });
     return yy;
   };
@@ -3719,13 +3719,13 @@ function buildInvoiceDoc(d) {
     head: [['Product Code', 'Description', 'Number', 'Cost\n(excl. GST)']],
     body: rows.length ? rows : [['', '', '', '']],
     theme: 'plain',
-    styles: { font: 'times', fontSize: 11, cellPadding: { ...padY, left: 0, right: 8 }, overflow: 'linebreak', valign: 'top', textColor: 35 },
-    headStyles: { font: 'times', fontStyle: 'bold', textColor: 90, fontSize: 10 },
+    styles: { font: 'times', fontSize: 12.5, cellPadding: { ...padY, left: 0, right: 8 }, overflow: 'linebreak', valign: 'top', textColor: 35 },
+    headStyles: { font: 'times', fontStyle: 'bold', textColor: 90, fontSize: 11.5 },
     columnStyles: {
-      0: { cellWidth: 116 },
+      0: { cellWidth: 120 },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 52, halign: 'center', cellPadding: { ...padY, left: 6, right: 6 } },
-      3: { cellWidth: 72, halign: 'right', cellPadding: { ...padY, left: 6, right: 0 } },
+      2: { cellWidth: 56, halign: 'center', cellPadding: { ...padY, left: 6, right: 6 } },
+      3: { cellWidth: 80, halign: 'right', cellPadding: { ...padY, left: 6, right: 0 } },
     },
     margin: { left: M, right: M },
     // A single hairline rule under the header row (drawn per head cell so it spans
@@ -3737,48 +3737,89 @@ function buildInvoiceDoc(d) {
     },
   });
 
-  // --- Totals (right aligned) ---
+  // --- Page bounds: the totals and payment block must land on the LAST page ---
+  // This function used to walk its y-cursor upward with no bound check against A4's
+  // 841.89 pt. Measured across 1-60 line items, it wrote past the bottom of the page
+  // at 11-14, 31-34 and 51-55 lines — up to y=1004.6 — and those draws are not
+  // clipped, they are ABSENT: a 12-line invoice reached the customer with no account
+  // number to pay into and no sign-off, silently. ensure() is the one from
+  // js/order-receipt.js:206-212 (don't write a second one); each block reserves its
+  // FULL height in ONE call so a break can never part the Total from the figures it
+  // sums, or the account number from the words telling the customer to pay it.
+  // Raising the type sizes moves that first failure to a shorter invoice, which is
+  // why the guard ships alongside them.
+  //
+  // The setPage() below is INSURANCE, not a measured repair. order-receipt.js also
+  // warns that autoTable paginates while leaving the doc's current page where it
+  // started (so totals land on page 1 under a two-page table) — under
+  // jspdf-autotable 3.8.4 that did not reproduce in any of the 60 cases. Keep it for
+  // a version that behaves as documented, but don't credit it with the fix.
+  doc.setPage(doc.internal.getNumberOfPages());
+  const pageH = doc.internal.pageSize.getHeight();
+  const BOTTOM = pageH - M;
   let ty = (doc.lastAutoTable?.finalY || startY) + 28;
+  const ensure = (h) => { if (ty + h > BOTTOM) { doc.addPage(); ty = M + 24; } };
+
+  // --- Totals (right aligned) ---
   const labelX = pageW - M - 170;
   const valX = pageW - M;
   doc.setTextColor(20);
   const totRow = (label, val, opts = {}) => {
     doc.setFont('times', opts.bold ? 'bold' : 'normal');
-    doc.setFontSize(opts.size || 11);
+    doc.setFontSize(opts.size || 12.5);
     doc.text(label, labelX, ty);
     doc.text(String(val), valX, ty, { align: 'right' });
-    ty += opts.gap || 16;
+    ty += opts.gap || 17.5;
   };
+  // Sub Total / Freight / GST / rule / Total, reserved as one unit — a Total parted
+  // from the figures it sums is worse than a page break in a sensible place.
+  ensure(4 * 17.5 + 6);
   totRow('Sub Total', money(t.subtotal));
   totRow('Freight', t.freight === 0 ? 'Free' : money(t.freight));   // see renderPreview — a negative is a credit, not "Free"
 
   totRow('GST', money(t.gst));
   ty += 6;
   doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ty - 11, valX, ty - 11);
-  totRow('Total', money(t.total), { bold: true, size: 14, gap: 16 });
+  totRow('Total', money(t.total), { bold: true, size: 16, gap: 17.5 });
 
   // --- Bulk savings (presentational; never a totals row) ---
   // The line prices already carry the discount, so this states what the customer
   // saved rather than subtracting anything. Right-aligned under the total.
   const bulkSaved = computeInvoiceVolumeSavings(d);
   if (bulkSaved > 0) {
-    doc.setFont('times', 'normal'); doc.setFontSize(10.5); doc.setTextColor(70);
+    ensure(18);
+    doc.setFont('times', 'normal'); doc.setFontSize(12); doc.setTextColor(70);
     doc.text(`You saved ${money(bulkSaved)} on this order by buying in bulk.`, valX, ty, { align: 'right' });
     doc.setTextColor(20);
     ty += 18;
   }
 
   // --- Payment block ---
-  let py = ty + 24;
+  // Wrapped at the size it is DRAWN at: splitTextToSize measures with the font that
+  // is current when it is called, so the size is set before the split, not after.
   const due = displayDueDate(d);
   doc.setFont('times', 'bold'); doc.setFontSize(12.5);
-  if (due) { text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 16; }
+  const thanksLines = d.footer.thankYou
+    ? doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M)
+    : [];
+  // One reservation for the whole block: the account number must never be split from
+  // "Please make payment to.", and the sign-off must never be orphaned on a page of
+  // its own — this is the block the customer pays us from.
+  const payH = 24 + (due ? 17.5 : 0) + 21 + 16.5
+    + (thanksLines.length ? 32 + thanksLines.length * 14 : 0);
+  ensure(payH);
+  let py = ty + 24;
+  doc.setFontSize(13.5);
+  if (due) { text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 17.5; }
   text('Please make payment to.', M, py);
-  py += 20;
+  py += 21;
   doc.setFont('times', 'normal');
-  text(`a/c Name:`, M, py); doc.setFont('times', 'bold'); text(d.footer.bankName || '', M + 76, py); py += 15;
-  doc.setFont('times', 'normal'); text('a/c Number:', M, py); doc.setFont('times', 'bold'); text(d.footer.bankAcct || '', M + 76, py);
-  if (d.footer.thankYou) { py += 30; doc.setFont('times', 'bold'); doc.setFontSize(10); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
+  text(`a/c Name:`, M, py); doc.setFont('times', 'bold'); text(d.footer.bankName || '', M + 84, py); py += 16.5;
+  doc.setFont('times', 'normal'); text('a/c Number:', M, py); doc.setFont('times', 'bold'); text(d.footer.bankAcct || '', M + 84, py);
+  // The sign-off was the SMALLEST text on the document (10 pt under an 11 pt body) —
+  // the one line addressed to the customer, set smaller than everything above it.
+  // It now matches the body size; keep it there.
+  if (thanksLines.length) { py += 32; doc.setFont('times', 'bold'); doc.setFontSize(12.5); doc.text(thanksLines, M, py); }
 
   return doc;
 }

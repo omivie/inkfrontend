@@ -197,9 +197,31 @@ test('no live code path anywhere still names maintenance_kit', () => {
 test('admin editor modals build from the shared vocabulary, not a hand-written list', () => {
   assert.match(PRODUCTS_SRC, /import \{[\s\S]*?PRODUCT_TYPE_OPTIONS[\s\S]*?\} from '\.\.\/utils\/product-types\.js'/,
     'products.js must import the editor menu');
-  const uses = PRODUCTS_SRC.match(/buildSelect\('edit-type', PRODUCT_TYPE_OPTIONS/g) || [];
+
+  // BOTH modals must still build the type <select>, and neither may hand-write
+  // its options. Aug 2026 (ERR-187): the New Product modal now passes
+  // `typeOptions` rather than PRODUCT_TYPE_OPTIONS directly, because the
+  // catalogue pathway narrows the menu to the types the category being added to
+  // actually contains (walking into "Ink" must not offer toner). That is still
+  // the shared vocabulary — it is a FILTER OF IT, asserted below — so the
+  // enrolment guarantee this test exists for is intact: a new enum member
+  // reaches both menus through PRODUCT_TYPE_OPTIONS and nowhere else.
+  const uses = PRODUCTS_SRC.match(/buildSelect\('edit-type', (\w+)/g) || [];
   assert.equal(uses.length, 2,
-    'BOTH the New Product and Edit modals must build the type <select> from PRODUCT_TYPE_OPTIONS');
+    'BOTH the New Product and Edit modals must build the type <select> via buildSelect');
+  assert.ok(uses.includes("buildSelect('edit-type', PRODUCT_TYPE_OPTIONS"),
+    'the Edit modal must offer the full vocabulary — an existing row can hold any type');
+  assert.ok(uses.includes("buildSelect('edit-type', typeOptions"),
+    'the New modal must offer the pathway-narrowed menu');
+
+  // The narrowing must be derived, never re-declared. A literal here is exactly
+  // how modals #2 and #3 drifted in the first place.
+  assert.match(PRODUCTS_SRC, /const typeOptions = ctxTypes\.length\s*\n?\s*\? PRODUCT_TYPE_OPTIONS\.filter/,
+    'typeOptions must be a filter of PRODUCT_TYPE_OPTIONS');
+  assert.match(PRODUCTS_SRC, /:\s*PRODUCT_TYPE_OPTIONS;/,
+    'with no pathway context the New modal must fall back to the FULL vocabulary, '
+    + 'or a brandless one-off could not be given an unlisted type');
+
   assert.ok(!/value:\s*'ink_cartridge'/.test(PRODUCTS_SRC),
     'a hand-written product-type option array is exactly how modals #2 and #3 drifted — there must be none left in products.js');
 });

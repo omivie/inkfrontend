@@ -329,12 +329,19 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     // (ERR-148), so a verified admin on a phone had no route to /admin; the
     // same reveal now also injects an "Admin Centre" row into the nav drawer
     // — ~30 lines incl. doc comment, lifting the ceiling to 780.
+    // The admin outage/refusal split (Aug 2026, ERR-188) rewrote the verify
+    // callback in initAdminHeaderLink to branch on AdminAccess.classify()
+    // instead of `res.ok && res.data`: a JSON 5xx or 401 envelope does not
+    // throw, so the old test was false for a backend outage as well as for a
+    // real refusal, and a hiccup silently deleted the admin's own Admin link
+    // and wiped the session hint. ~18 lines incl. comments, lifting the
+    // ceiling to 790.
     //
     // This ceiling is a tripwire for RE-GROWN SEARCH LOGIC, not a general
     // budget: raise it only for a documented header/nav feature like the ones
     // above, and never for anything that touches the search dropdown. A
     // feature with its own geometry belongs in its own file (see landing.js /
     // window.InkFinderScroll, ERR-137), not here.
-    assert.ok(lines <= 780,
-        `main.js is ${lines} lines; expected ≤780. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    assert.ok(lines <= 790,
+        `main.js is ${lines} lines; expected ≤790. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

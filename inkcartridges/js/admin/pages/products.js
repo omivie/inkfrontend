@@ -9,12 +9,16 @@ import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js';
 import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
 import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
-import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes, paginate, pagerHtml } from '../utils/product-codes.js';
+import { PRODUCT_TYPE_TO_SHOP_CATEGORY, categoryLabel, describeCodesWriteError, describeScopes, paginate, pagerHtml } from '../utils/product-codes.js';
 import {
   PRODUCT_TYPE_OPTIONS, RIBBON_PRODUCT_TYPES, productTypeLabel, productTypeNoun,
   typeFilterGroup, typeFilterOptions,
 } from '../utils/product-types.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
+import {
+  typesForCategory, defaultTypeForCategory, previewCodeForSku,
+  needsCodeOverride, mergeCodeIntoEffective, normCode,
+} from '../utils/catalogue-pathway.js';
 // Supplier + pack-origin rendering, shared verbatim with the Orders modal's
 // line-items table so the same product reads the same on both pages.
 import {
@@ -1042,10 +1046,81 @@ async function openProductDrawer(product) {
   bindProductModalActions(modal, full);
 }
 
-function openCreateProductModal() {
+/**
+ * Make sure a product created from the pathway actually lands under the code the
+ * operator was standing in.
+ *
+ * Most of the time this does NOTHING, and that is the point.
+ *
+ * `product_codes` is a pure OVERRIDE layer with "manual fully replaces auto"
+ * semantics: a product with ANY row there has its backend-derived `series_codes`
+ * ignored entirely, from then on, forever. So writing an override to a product
+ * whose SKU already derives the right code would take it out of the automatic
+ * system permanently in exchange for nothing — and a later catalogue import that
+ * corrects its derivation would no longer reach it. We write only when the
+ * derivation does not already agree. This is the same divergence check the
+ * drawer's Save uses, which is why seeded-but-untouched products never
+ * materialise into that table either.
+ *
+ * When we do write, we write the product's EFFECTIVE codes plus the new one,
+ * never a bare `[code]`. `setProductCodes` replaces the whole set, so a partial
+ * write silently erases every other chip the product appears under — the most
+ * destructive mistake available here, and a completely silent one.
+ *
+ * Failure is non-fatal and LOUD: the product exists either way, so we report
+ * what did not happen rather than rolling anything back or swallowing it.
+ *
+ * @returns {Promise<string|null>} a phrase for the success toast, or null
+ */
+async function landProductUnderCode(newProduct, ctx, { sku, name, productType }) {
+  if (!ctx?.code || !newProduct?.id) return null;
+  const code = normCode(ctx.code);
+  if (!code) return null;
+
+  if (!needsCodeOverride({ sku, name, productType, expectedCode: code })) {
+    // Its own SKU already puts it there. Leave it in the automatic system.
+    return null;
+  }
+
+  try {
+    // Start from what the product effectively carries. A product created a
+    // moment ago has no override rows, so this is normally its derived set —
+    // but reading rather than assuming is what keeps the merge honest if that
+    // ever stops being true.
+    const existing = await AdminAPI.getProductCodes(newProduct.id);
+    const effective = (existing && existing.length)
+      ? existing
+      : (Array.isArray(newProduct.series_codes) ? newProduct.series_codes : []);
+    await AdminAPI.setProductCodes(newProduct.id, mergeCodeIntoEffective(effective, code));
+    return `filed under ${code}`;
+  } catch (e) {
+    Toast.error(`Product created, but it could not be filed under ${code}: ${describeCodesWriteError(e)}`);
+    return null;
+  }
+}
+
+/**
+ * The New Product form.
+ *
+ * `context` is where the operator was standing in the Browse pathway —
+ * `{ brandId, brandSlug, brandName, category, code, isRibbonBrand }`. With it,
+ * brand and category are facts rather than guesses and the type menu narrows to
+ * the types that category actually contains. Called with no argument it behaves
+ * exactly as it always has, so nothing that reaches it any other way changes.
+ */
+function openCreateProductModal(context = null) {
   if (_activeModal) closeProductModal();
 
   const isOwner = AdminAuth.isOwner();
+  const ctx = context || null;
+  // A category holds SEVERAL types (ink = 2, drums = 7), so walking into one
+  // cannot pick the type — it can only narrow the menu. Offering all 16 from
+  // inside "Ink Cartridges" is how a toner ends up filed under ink.
+  const ctxTypes = ctx?.category ? typesForCategory(ctx.category) : [];
+  const typeOptions = ctxTypes.length
+    ? PRODUCT_TYPE_OPTIONS.filter(o => ctxTypes.includes(o.value))
+    : PRODUCT_TYPE_OPTIONS;
+  const defaultType = ctx?.category ? defaultTypeForCategory(ctx.category) : '';
   const modal = document.createElement('div');
   modal.className = 'admin-product-modal';
   modal.innerHTML = `
@@ -1104,14 +1179,42 @@ function openCreateProductModal() {
     `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${esc(t)}</button>`
   ).join('');
 
+  // Where this product is being added, stated at the top of the form so it is
+  // never ambiguous which chip the SKU is about to join.
+  const ctxTrail = ctx
+    ? [ctx.brandName, ctx.category ? categoryLabel(ctx.category) : '', ctx.code]
+        .filter(Boolean).map(x => esc(x)).join(' <span aria-hidden="true">\u203a</span> ')
+    : '';
+
+  // Brand is LOCKED, not disabled. A disabled <select> submits nothing, so the
+  // payload would carry brand_id: null and the product would land nowhere —
+  // silently, because the field looks filled in. Locked = readonly text plus a
+  // hidden input that still submits, with an explicit Change to unlock.
+  const brandField = ctx && ctx.brandId
+    ? formGroup('Brand', `
+        <div class="admin-locked" id="edit-brand-lock">
+          <input type="hidden" id="edit-brand" value="${esc(String(ctx.brandId))}">
+          <span class="admin-locked__value">${esc(ctx.brandName || ctx.brandSlug || '')}</span>
+          <button type="button" class="admin-locked__change" id="edit-brand-change">Change</button>
+        </div>`)
+    : formGroup('Brand', buildBrandSelect(ctx?.brandId ?? null));
+
   const basicHtml = `
+    ${ctx ? `<div class="admin-cb-context">
+      <span class="admin-cb-context__label">Adding to</span>
+      <span class="admin-cb-context__trail">${ctxTrail}</span>
+    </div>` : ''}
     <div class="admin-form-row">
-      <div class="admin-form-group"><label>SKU<span class="required-star">*</span></label><input class="admin-input" id="edit-sku" placeholder="e.g. LC-3317BK"></div>
+      <div class="admin-form-group">
+        <label>SKU<span class="required-star">*</span></label>
+        <input class="admin-input" id="edit-sku" placeholder="e.g. LC-3317BK">
+        <div class="admin-code-preview" id="edit-code-preview" hidden></div>
+      </div>
       <div class="admin-form-group"><label>Name<span class="required-star">*</span></label><input class="admin-input" id="edit-name" placeholder="Product name"></div>
     </div>
     <div class="admin-form-row">
-      ${formGroup('Brand', buildBrandSelect(null))}
-      ${formGroup('Product Type', buildSelect('edit-type', PRODUCT_TYPE_OPTIONS, empty.product_type))}
+      ${brandField}
+      ${formGroup('Product Type', buildSelect('edit-type', typeOptions, defaultType || empty.product_type))}
     </div>
     <div class="admin-form-row">
       ${formGroup('Color', buildColorSelect('edit-color', empty.color))}
@@ -1183,6 +1286,67 @@ function openCreateProductModal() {
       minHeight: 400,
     });
   }
+
+  // Unlock the brand. The pathway pre-filled it, but a product genuinely
+  // belonging to another brand must not be un-saveable — a lock with no way out
+  // is a dead end, and the operator would go back to a blank form to escape it.
+  modal.querySelector('#edit-brand-change')?.addEventListener('click', () => {
+    const lock = modal.querySelector('#edit-brand-lock');
+    if (!lock) return;
+    lock.outerHTML = buildBrandSelect(ctx?.brandId ?? null);
+  });
+
+  // ---- Live code preview -------------------------------------------------
+  //
+  // The single most useful thing this form does. A product's /shop chip is
+  // DERIVED from its SKU (API._enrichSeriesCodes) — nothing stores it — so a
+  // mistyped SKU does not error, it quietly mints a brand-new one-product chip
+  // that looks like a real series. Nobody notices until a customer doesn't find
+  // the cartridge. Showing the derivation as it is typed makes that visible at
+  // the only moment it is cheap to fix.
+  const previewEl = modal.querySelector('#edit-code-preview');
+  const updateCodePreview = () => {
+    if (!previewEl) return;
+    const sku = modal.querySelector('#edit-sku')?.value?.trim() || '';
+    const name = modal.querySelector('#edit-name')?.value?.trim() || '';
+    const productType = modal.querySelector('#edit-type')?.value || '';
+    const expected = ctx?.code || '';
+
+    if (!sku && !name) { previewEl.hidden = true; return; }
+
+    const { state, derived } = previewCodeForSku({ sku, name, productType, expectedCode: expected });
+    previewEl.hidden = false;
+    previewEl.className = 'admin-code-preview';
+
+    if (state === 'manual') {
+      // Ribbons are owner-manual in every aspect except page design
+      // (ERR-085/086). Deriving a code for one here would reintroduce exactly
+      // the auto-fill that was removed, so we state what we will assign instead.
+      previewEl.classList.add('admin-code-preview--info');
+      previewEl.innerHTML = expected
+        ? `Ribbon codes are never derived from a SKU. This product will be assigned <strong>${esc(expected)}</strong> because of where you added it.`
+        : `Ribbon codes are never derived from a SKU. Assign this product's codes in the Product Codes tab after it is created.`;
+    } else if (state === 'match') {
+      previewEl.classList.add('admin-code-preview--ok');
+      previewEl.innerHTML = `This SKU appears under <strong>${esc(expected)}</strong> \u2014 where you are.`;
+    } else if (state === 'mismatch') {
+      previewEl.classList.add('admin-code-preview--warn');
+      previewEl.innerHTML = `This SKU derives <strong>${esc(derived.join(', '))}</strong>, not <strong>${esc(expected)}</strong>.`
+        + ` Saving files it under ${esc(expected)} anyway, but check the SKU first \u2014 a typo here creates a new chip on /shop.`;
+    } else if (derived.length) {
+      previewEl.classList.add('admin-code-preview--info');
+      previewEl.innerHTML = `This SKU will appear on /shop under <strong>${esc(derived.join(', '))}</strong>.`;
+    } else {
+      previewEl.classList.add('admin-code-preview--warn');
+      previewEl.innerHTML = expected
+        ? `No code can be derived from this SKU. It will be filed under <strong>${esc(expected)}</strong> because of where you added it.`
+        : `No code can be derived from this SKU yet \u2014 this product would not appear under any /shop chip.`;
+    }
+  };
+  modal.querySelector('#edit-sku')?.addEventListener('input', updateCodePreview);
+  modal.querySelector('#edit-name')?.addEventListener('input', updateCodePreview);
+  modal.querySelector('#edit-type')?.addEventListener('change', updateCodePreview);
+  updateCodePreview();
 
   tabsEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.admin-product-modal__tab');
@@ -1263,9 +1427,10 @@ function openCreateProductModal() {
     try {
       const result = await AdminAPI.createProduct(data);
       const newProduct = result?.product ?? result;
+      const codeNote = await landProductUnderCode(newProduct, ctx, { sku, name, productType: data.product_type });
       closeCreate();
       invalidateDiagCache();
-      Toast.success('Product created');
+      Toast.success(codeNote ? `Product created \u2014 ${codeNote}` : 'Product created');
       loadProducts();
       if (newProduct?.id) openProductDrawer(newProduct);
     } catch (e) {
@@ -4292,6 +4457,21 @@ async function switchProductTab(tab) {
   if (tab === 'products') {
     content.innerHTML = '';
     await renderProductsContent(content);
+  } else if (tab === 'browse') {
+    try {
+      const mod = await import('./catalogue-browse.js');
+      _subProductModule = mod.default;
+      content.innerHTML = '';
+      // Hooks rather than imports: catalogue-browse.js must never import back
+      // into this module. A cycle would hand one side a half-initialised
+      // namespace, and it would fail only for whichever loaded second.
+      await _subProductModule.init(content, {
+        onAddProduct: (context) => openCreateProductModal(context),
+        onOpenProduct: (product) => openProductDrawer(product),
+      });
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Browse</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
   } else if (tab === 'printers') {
     try {
       const mod = await import('./printers.js');
@@ -4593,7 +4773,12 @@ async function renderProductsContent(contentEl) {
 
     // Export
     bindExportDropdown(header, 'export-products', handleExport);
-    header.querySelector('#add-product-btn')?.addEventListener('click', () => openCreateProductModal());
+    // Every new product starts from the Browse pathway, never from a blank form.
+  // Walking to brand > category > code means those three are never guessed, and
+  // the products already sitting under that code are on screen before a
+  // near-duplicate is added. openCreateProductModal() still accepts no context
+  // (that is what a brandless one-off would use), but nothing reaches it that way.
+  header.querySelector('#add-product-btn')?.addEventListener('click', () => switchProductTab('browse'));
 
     // Per-admin column visibility picker
     wireColumnPicker(header);
@@ -4670,6 +4855,7 @@ export default {
     tabBar.className = 'admin-tabs';
     tabBar.innerHTML = `
       <button class="admin-tab active" data-prod-tab="products">All Products</button>
+      <button class="admin-tab" data-prod-tab="browse">Browse</button>
       <button class="admin-tab" data-prod-tab="printers">Printers</button>
     `;
     container.appendChild(tabBar);

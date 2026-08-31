@@ -173,17 +173,25 @@ test('ProductColors.OPTIONS — CMY and Tri-Colour are distinct entries with dis
         `Tri-Colour label must signal a single cartridge; got "${tri.label}"`);
 });
 
-test('ProductColors.OPTIONS — Tri-Colour sits between KCMY (packs) and Red (specialty) so multi-colour options group visually', () => {
-    // UX rule: an admin scanning for "tri-colour" options should see CMY
-    // (3-Pack) → KCMY (4-Pack) → Tri-Colour (single) in one neighbourhood,
-    // ahead of the chromatic specialty singles (Red/Blue/Green/etc.).
-    // The storefront sort doesn't depend on dropdown order, but this
-    // grouping is what makes the dropdown legible to the editor.
-    const values = ProductColors.OPTIONS.map(o => o.value);
-    const i = (v) => values.indexOf(v);
-    assert.ok(i('CMY')        < i('KCMY'),       'CMY before KCMY');
-    assert.ok(i('KCMY')       < i('Tri-Colour'), 'KCMY before Tri-Colour (keeps multi-colour cluster contiguous)');
-    assert.ok(i('Tri-Colour') < i('Red'),        'Tri-Colour before Red (multi-colour options precede chromatic specialty)');
+test('ProductColors.OPTIONS — CMY, KCMY and Tri-Colour stay distinguishable by their labels, not by adjacency', () => {
+    // SUPERSEDED ORDERING (Aug 2026, owner's instruction). This test used to
+    // pin CMY → KCMY → Tri-Colour as a contiguous neighbourhood, on the theory
+    // that adjacency is what tells an editor them apart. With 42 entries that
+    // grouping only helped someone who already knew the taxonomy, and finding
+    // any other colour meant scanning the whole list. The dropdown is now
+    // alphabetical (see the next test).
+    //
+    // The real safeguard was never the adjacency — it is the LABELS, which say
+    // in words how many cartridges you get. Those are what this now pins,
+    // because they are what actually prevents a 3-pack being filed as a single.
+    // (That confusion is ERR-141: 13 tri-colour singles were labelled 'Colour'.)
+    const byValue = Object.fromEntries(ProductColors.OPTIONS.map(o => [o.value, o.label]));
+    assert.match(byValue['CMY'], /3-Pack/, 'CMY must say 3-Pack in its label');
+    assert.match(byValue['KCMY'], /4-Pack/, 'KCMY must say 4-Pack in its label');
+    assert.match(byValue['Tri-Colour'], /single cartridge/i,
+        'Tri-Colour must say it is a SINGLE cartridge — it is not a pack');
+    assert.notEqual(byValue['CMY'], byValue['Tri-Colour'],
+        'a 3-pack and a tri-colour single must never read the same');
 });
 
 test('ProductColors — Tri-Colour storefront swatch resolves to the tri-stripe gradient (canonical PascalCase round-trips)', () => {
@@ -202,23 +210,46 @@ test('ProductColors — Tri-Colour storefront swatch resolves to the tri-stripe 
         'getProductStyle({color:"Tri-Colour"}) must render the gradient');
 });
 
-test('ProductColors.OPTIONS opens with K → C → M → Y → CMY → KCMY in that order', () => {
-    // Mirrors ProductSort.COLOR_ORDER tier ordering. The cartridge core
-    // colors must come first so an admin scrolling the dropdown sees
-    // them at the top, and storefront sort + admin selection share an
-    // ordering — there is exactly one canonical sequence.
-    const values = ProductColors.OPTIONS.map(o => o.value);
-    const indexOf = (v) => values.indexOf(v);
+test('ProductColors.OPTIONS is ALPHABETICAL by label', () => {
+    // Aug 2026, owner's instruction: the dropdown is sorted by what the editor
+    // reads. Replaces the semantic K → C → M → Y → packs → specialty order,
+    // which required knowing the taxonomy to use.
+    //
+    // Sorting by LABEL, not value, is deliberate: "CMY (3-Pack …)" files under
+    // C where an editor looks for it.
+    // `Array.from`, not `.map`/spread: OPTIONS is built inside the vm realm, so
+    // its `.map()` returns an array with the VM's Array.prototype, and
+    // deepStrictEqual compares prototypes — two identical string lists would
+    // fail on realm alone. Normalise both into this realm before comparing.
+    //
+    // The comparator mirrors utils.js exactly, and is deliberately NOT
+    // localeCompare: with options that depends on the runtime's ICU data, and a
+    // dropdown whose order depends on where the code runs is not sorted.
+    const labels = Array.from(ProductColors.OPTIONS, o => o.label);
+    const sorted = Array.from(labels).sort((a, b) => {
+        const A = a.toUpperCase();
+        const B = b.toUpperCase();
+        return A < B ? -1 : A > B ? 1 : 0;
+    });
+    assert.deepEqual(labels, sorted,
+        'ProductColors.OPTIONS must be sorted alphabetically by label');
+});
 
-    assert.ok(indexOf('Black')   < indexOf('Cyan'),    'Black must precede Cyan');
-    assert.ok(indexOf('Cyan')    < indexOf('Magenta'), 'Cyan must precede Magenta');
-    assert.ok(indexOf('Magenta') < indexOf('Yellow'),  'Magenta must precede Yellow');
-    assert.ok(indexOf('Yellow')  < indexOf('CMY'),     'Yellow must precede CMY');
-    assert.ok(indexOf('CMY')     < indexOf('KCMY'),    'CMY must precede KCMY');
-
-    // Specialty tier (Red/Blue/Green/Gray/etc.) sits after the cartridge core.
-    assert.ok(indexOf('KCMY') < indexOf('Red'),  'KCMY must precede Red (specialty tier follows core)');
-    assert.ok(indexOf('KCMY') < indexOf('Gray'), 'KCMY must precede Gray (specialty tier follows core)');
+test('the storefront colour sort is NOT the dropdown order', () => {
+    // The load-bearing half of the change above. ProductSort.COLOR_ORDER is
+    // derived from COLOR_RANK — never from OPTIONS — so alphabetising the admin
+    // dropdown cannot touch the customer-facing K → C → M → Y → specialty →
+    // packs order on the shop grid, PDP rails and product cards
+    // (tests/color-display-order.test.js owns that contract).
+    //
+    // If OPTIONS ever becomes the source of the storefront rank, this test is
+    // the one that should stop it.
+    const utilsSrc = fs.readFileSync(
+        path.join(ROOT, 'inkcartridges', 'js', 'utils.js'), 'utf8');
+    assert.match(utilsSrc, /const COLOR_ORDER = \(\(\) => \{[\s\S]{0,400}?Object\.entries\(COLOR_RANK\)/,
+        'COLOR_ORDER must still be derived from COLOR_RANK, not from OPTIONS');
+    assert.ok(!/COLOR_ORDER[\s\S]{0,200}ProductColors\.OPTIONS/.test(utilsSrc),
+        'the storefront rank must never read the admin dropdown list');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

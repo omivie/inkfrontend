@@ -317,9 +317,31 @@ const ProductColors = {
 
     // Canonical color options for admin product editing.
     // Values match the PascalCase strings the backend stores in `products.color`.
-    // Order mirrors ProductSort COLOR_ORDER (K → C → M → Y → CMY → KCMY → specialty).
+    // ALPHABETICAL BY LABEL — that is what the admin dropdown renders, and it is
+    // the ONLY order any caller gets, because the sort is applied to the list
+    // itself (see the .sort() below the literal).
+    //
+    // It used to be grouped semantically (K → C → M → Y → packs → specialty) to
+    // mirror ProductSort.COLOR_ORDER. That grouping only helps someone who
+    // already knows the taxonomy: with 43 entries, finding "Violet" meant
+    // scanning the whole list, and there is no reason an editor should have to
+    // learn a rank order to pick a colour. Changed on the owner's instruction,
+    // Aug 2026.
+    //
+    // **The storefront sort is unaffected.** `ProductSort.COLOR_ORDER` is
+    // derived from COLOR_RANK, not from this list, so K→C→M→Y→specialty→packs
+    // still governs the shop grid, PDP related rails and product cards. The
+    // only other reader, `scripts/audit-colour-vocabulary.mjs`, tests
+    // membership and never order.
+    //
+    // THE LITERAL BELOW STAYS GROUPED BY FAMILY on purpose — it is where the
+    // vocabulary is documented (which blacks exist, which entries are finishes
+    // rather than inks, which are dual-chamber singles). Read it for the
+    // taxonomy; the sort decides what an editor sees.
+    //
     // Single source of truth — admin dropdowns and the dropdown contract test
-    // both bind to this list. Extending it requires no admin/UI change.
+    // both bind to this list. Extending it requires no admin/UI change, and a
+    // new entry lands in the right alphabetical place on its own.
     //
     // Tri-Colour vs CMY: 'CMY' is a 3-Pack of three *separate* cartridges
     // (rank 20 in ProductSort). 'Tri-Colour' is a SINGLE cartridge that
@@ -384,7 +406,20 @@ const ProductColors = {
         { value: 'Black/Colour',  label: 'Black/Colour (black + tri-colour set)' },
         { value: 'Value Pack',    label: 'Value Pack' },
         { value: 'Multipack',     label: 'Multipack' }
-    ],
+    // Sorted by the LABEL, because the label is what the editor reads — so
+    // "CMY (3-Pack …)" files under C, not under whatever its value spells.
+    //
+    // Deliberately NOT localeCompare. With options its result depends on the
+    // runtime's ICU data, so the same list can order differently under a
+    // small-icu Node build or another browser locale — and a dropdown whose
+    // order depends on where the code runs is not a sorted dropdown. An
+    // uppercase code-unit comparison is total, stable and identical everywhere,
+    // which also lets the contract test mirror it exactly.
+    ].sort((a, b) => {
+        const A = a.label.toUpperCase();
+        const B = b.label.toUpperCase();
+        return A < B ? -1 : A > B ? 1 : 0;
+    }),
 
     // Multi-cartridge pack colors — the values the admin "Packs" filter matches.
     // Every entry MUST also exist in OPTIONS above (contract-tested): a value
@@ -2586,6 +2621,149 @@ const CouponSuggestion = {
 };
 if (typeof window !== 'undefined') window.CouponSuggestion = CouponSuggestion;
 
+/**
+ * ADMIN ACCESS
+ * ============
+ * ONE vocabulary for the question "may this person use the admin area?", shared
+ * by the three surfaces that ask it: `js/admin/auth.js` (the /admin gate),
+ * `js/main.js` (the header shortcut) and `js/site-guard.js` (the lockdown
+ * bypass). It lives here because utils.js is the only module loaded by all
+ * three — the admin SPA reads it off `window`, the two classic scripts read it
+ * from the shared global scope.
+ *
+ * WHY IT EXISTS (ERR-188). The backend was down for 22 minutes on 2026-08-31
+ * and the owner could not tell a server outage from having lost their admin
+ * rights, because every failure took the same exit: a silent
+ * `location.href = '/account'`. Three different causes, one indistinguishable
+ * symptom, no message anywhere.
+ *
+ * So the rule is: **refuse only on an authoritative negative.** A 403, or a 200
+ * that grants nothing, is the server answering "no" — that is a refusal. A 502,
+ * a timeout, a rate-limit, a 404 on the route itself, or any error we cannot
+ * read is a NON-ANSWER, and a non-answer must never be rendered as "you are not
+ * an admin". This is the fail-soft-must-be-loud rule applied to authorisation:
+ * absence of a yes is not a no.
+ *
+ * TWO 5xx SHAPES, and missing the second one is what made this subtle.
+ * `API.request()` handles a server error in two different ways depending on the
+ * body it gets back:
+ *   - a NON-JSON 5xx (the Render/Cloudflare HTML gateway page) THROWS, and
+ *   - a JSON 5xx envelope RETURNS `{ ok: false, code, status }` without throwing.
+ * A caller that only wraps the call in try/catch therefore handles the first and
+ * silently mis-reads the second as a refusal. `classify()` takes both — pass the
+ * resolved value as `resp`, or the thrown error as `err` — so neither shape can
+ * be forgotten at a call site.
+ */
+const AdminAccess = {
+    /**
+     * The only recognised roles, mapped to the two privilege levels the UI has.
+     * Keys are normalised (lowercased, non-letters stripped), so the backend's
+     * `super_admin` and a legacy `superadmin` are the same key by construction
+     * rather than by two hand-maintained spellings — which is how admin/auth.js
+     * and site-guard.js had drifted to different accept-lists for one endpoint.
+     */
+    ROLE_MAP: { superadmin: 'owner', owner: 'owner', admin: 'admin' },
+
+    /** Role string → 'owner' | 'admin' | null (unrecognised). */
+    normalizeRole(raw) {
+        const key = String(raw == null ? '' : raw).toLowerCase().replace(/[^a-z]/g, '');
+        return Object.prototype.hasOwnProperty.call(this.ROLE_MAP, key) ? this.ROLE_MAP[key] : null;
+    },
+
+    /**
+     * Highest role granted by a verify payload, or null.
+     *
+     * Reads `role` AND `roles[]`. The live response carries both
+     * (`{"role":"super_admin","roles":["super_admin"]}`); reading only the
+     * scalar would silently drop a future account whose privilege arrives in
+     * the array. `owner` wins over `admin` when both appear.
+     *
+     * `is_admin: true` alone does NOT grant — an unrecognised role is refused,
+     * not waved through, because this build cannot know what it permits.
+     */
+    roleFrom(data) {
+        if (!data || typeof data !== 'object') return null;
+        const candidates = [];
+        if (data.role) candidates.push(data.role);
+        if (Array.isArray(data.roles)) candidates.push.apply(candidates, data.roles);
+        let best = null;
+        for (let i = 0; i < candidates.length; i++) {
+            const role = this.normalizeRole(candidates[i]);
+            if (role === 'owner') return 'owner';
+            if (role === 'admin') best = 'admin';
+        }
+        return best;
+    },
+
+    /**
+     * Classify one `API.verifyAdmin()` outcome into exactly one state.
+     *
+     * Call as `classify(resp)` on resolve, or `classify(null, err)` on throw.
+     *
+     *   'granted'      — the server said yes; `.role` is 'owner' or 'admin'
+     *   'refused'      — the server authoritatively said no (403, or a 200 that
+     *                    grants nothing, or a role this build doesn't recognise)
+     *   'signed-out'   — 401: the session is gone or expired; re-authenticate
+     *   'unreachable'  — NO ANSWER. Never render this as a refusal.
+     *
+     * @returns {{state:string, role:(string|null), status:number,
+     *            requestId:(string|null), message:string}}
+     */
+    classify(resp, err) {
+        const out = (state, extra) => Object.assign(
+            { state: state, role: null, status: 0, requestId: null, message: '' },
+            extra || {}
+        );
+
+        // Thrown: a non-JSON 5xx, a network failure, or an abort. None of these
+        // is the server answering the question, so none of them is a refusal.
+        if (err) {
+            return out('unreachable', {
+                status: Number(err.status) || 0,
+                requestId: err.request_id || null,
+                message: err.message || ''
+            });
+        }
+
+        if (!resp || typeof resp !== 'object') return out('unreachable');
+
+        const status = Number(resp.status) || 0;
+        const code = resp.code || '';
+        const requestId = resp.request_id || null;
+        const message = typeof resp.error === 'string' ? resp.error : '';
+
+        if (code === 'UNAUTHORIZED' || status === 401) {
+            return out('signed-out', { status: status || 401, requestId, message });
+        }
+
+        // Non-answers. NOT_FOUND belongs here and not in 'refused': a 404 on
+        // /api/admin/verify means the route is missing from the deploy, which
+        // is a broken backend, not a statement about this account.
+        if (status >= 500 || code === 'INTERNAL_ERROR' || code === 'RATE_LIMITED'
+            || code === 'NOT_FOUND' || status === 404) {
+            return out('unreachable', { status, requestId, message });
+        }
+
+        if (resp.ok === false) {
+            if (code === 'FORBIDDEN' || status === 403) {
+                return out('refused', { status: status || 403, requestId, message });
+            }
+            // An error we can't read. Ambiguity resolves to 'no answer', never
+            // to 'no' — the whole point of ERR-188.
+            return out('unreachable', { status, requestId, message });
+        }
+
+        // The server answered 200. Whatever it granted (or didn't) is final.
+        const role = this.roleFrom(resp.data);
+        if (!role) return out('refused', { status: status || 200, requestId, message });
+        return out('granted', { role, status: status || 200, requestId });
+    },
+
+    /** True when the state means "we could not get an answer". */
+    isUnreachable(state) { return state === 'unreachable'; }
+};
+if (typeof window !== 'undefined') window.AdminAccess = AdminAccess;
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -2604,6 +2782,7 @@ if (typeof module !== 'undefined' && module.exports) {
         canonicalizeCategory,
         TrustStats,
         DispatchCountdown,
-        CouponSuggestion
+        CouponSuggestion,
+        AdminAccess
     };
 }

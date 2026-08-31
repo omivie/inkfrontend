@@ -56,9 +56,31 @@
           signal: ctrl.signal,
         });
         clearTimeout(t);
-        if (!res.ok) return false;
+        // 401/403 are the server ANSWERING no. Everything else that isn't a
+        // readable 200 is a NON-ANSWER and must return null so the retry below
+        // actually runs. `if (!res.ok) return false` sent a 502 straight to
+        // 'not an admin' — skipping the cold-start retry this function exists
+        // for — which is how a backend outage locked the owner out of their own
+        // site for 22 minutes (ERR-188).
+        if (res.status === 401 || res.status === 403) return false;
+        if (!res.ok) return null;
         const body = await res.json();
-        return body.ok && ['owner', 'admin', 'superadmin', 'super_admin'].includes(body.data?.role);
+        if (!body || body.ok !== true) return null;
+        // Role check, normalised the SAME WAY as AdminAccess.normalizeRole in
+        // js/utils.js — lowercase, non-letters stripped, so 'super_admin' and
+        // 'superadmin' are one key rather than two hand-kept spellings.
+        //
+        // The logic is duplicated rather than imported ON PURPOSE: this file is
+        // self-contained by design (see the header) so the lockdown guard still
+        // works when nothing else on the page has loaded. Importing utils.js
+        // would mean a missing script could hand an admin the lockdown overlay.
+        // `tests/admin-auth-outage-vs-refusal-aug2026.test.js` pins the two
+        // copies to the same answers so they cannot drift — which they had:
+        // this list accepted 'super_admin' literally while admin/auth.js only
+        // accepted it after stripping the underscore.
+        const ROLE_KEYS = ['superadmin', 'owner', 'admin'];
+        const raw = body.data && (body.data.role || (Array.isArray(body.data.roles) ? body.data.roles[0] : ''));
+        return ROLE_KEYS.includes(String(raw || '').toLowerCase().replace(/[^a-z]/g, ''));
       } catch {
         clearTimeout(t);
         return null; // null = failed (distinct from false = not admin)
