@@ -163,6 +163,13 @@ function makeSandbox() {
     // initialises _freightOwner from FREIGHT_OWNER_NONE, so the constant must
     // exist here or every test in this file dies before it starts.
     FREIGHT_OWNER_NONE: 'none', FREIGHT_OWNER_AUTO: 'auto', FREIGHT_OWNER_OPERATOR: 'operator',
+    // Same rule, same block, for the quote lifecycle (ERR-191): _quoteStatus is
+    // initialised from QUOTE_IDLE now that the page compares against the shared
+    // constants rather than bare strings.
+    QUOTE_IDLE: 'idle', QUOTE_LOADING: 'loading', QUOTE_READY: 'ready',
+    QUOTE_LIMITED: 'limited', QUOTE_UNAVAILABLE: 'unavailable',
+    shippingRowState: () => ({ kind: 'unavailable', message: '' }),
+    SHIPPING_ROW_OPTIONS: 'options', SHIPPING_ROW_IDLE: 'idle', SHIPPING_ROW_LOADING: 'loading',
     planFreightAutofill: () => ({ apply: false, key: null, option: null, owner: 'none', announce: null }),
     freeShippingGapNote: () => '',
     AdminAuth: { isOwner: () => true },

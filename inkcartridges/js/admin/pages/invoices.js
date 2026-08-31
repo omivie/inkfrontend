@@ -38,6 +38,8 @@ import {
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
   freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
   FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR,
+  shippingRowState, SHIPPING_ROW_OPTIONS, SHIPPING_ROW_IDLE, SHIPPING_ROW_LOADING,
+  QUOTE_IDLE, QUOTE_LOADING, QUOTE_READY, QUOTE_LIMITED, QUOTE_UNAVAILABLE,
 } from '../utils/invoice-quote.js';
 import { patchQuotedLineRows } from '../utils/line-row-patch.js';
 import { marginBadge, formatProfitDollars } from '../utils/profitability.js';
@@ -310,7 +312,8 @@ function effectiveDueDate(d) {
 
 // The due date to DISPLAY on the invoice — honours the "show payment due date"
 // toggle. effectiveDueDate() still drives the resolved value saved to the backend.
-// When off, both renderers fall through to the bare "Please make payment to:" line.
+// When off, both renderers drop this one line; the payment-reference instruction and
+// "Please make payment to:" are unconditional and stay put.
 function displayDueDate(d) {
   return d.show_due_date === false ? '' : effectiveDueDate(d);
 }
@@ -365,7 +368,11 @@ const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 // Advisory only. None of this is saved; it decides what to autofill and what the
 // shipping row says. It lives outside _draft on purpose — see _freightChoice.
 let _quote = null;            // last GOOD normalizeQuote() result, or null
-let _quoteStatus = 'idle';    // 'idle'|'loading'|'ready'|'limited'|'unavailable'
+// The five states are QUOTE_* in invoice-quote.js, which also owns the one
+// function that turns them into the words on screen (ERR-191). Do not compare
+// this against a bare string here — that is how `idle` came to be rendered with
+// the failure copy.
+let _quoteStatus = QUOTE_IDLE;
 let _quoteSeq = 0;            // out-of-order guard: only the newest reply is used
 let _quoteDebounce = null;
 let _volumeOffers = [];       // [{position, badge}] — hand-edited lines with a better price
@@ -1468,7 +1475,7 @@ function resetQuoteState() {
   _quoteDebounce = null;
   _quoteSeq++;
   _quote = null;
-  _quoteStatus = 'idle';
+  _quoteStatus = QUOTE_IDLE;
   _volumeOffers = [];
   _freightChoice = null;
   _freightOwner = FREIGHT_OWNER_NONE;
@@ -1503,7 +1510,15 @@ async function requestQuote() {
   const token = _editorToken;
   const seq = ++_quoteSeq;
   const req = quoteRequestBody(_draft);
-  if (!req) return;   // nothing typed yet — a quote would say nothing
+  if (!req) {
+    // Nothing typed yet — a quote would say nothing, so we do not ask. But NOT
+    // ASKING IS NOT A FAILURE (ERR-191): leaving the status alone here is what
+    // left every blank invoice claiming the courier rates were unavailable.
+    // A good quote is kept — clearing the codes must not blank a dropdown the
+    // operator is still working with.
+    if (!_quote) { _quoteStatus = QUOTE_IDLE; renderShippingRow(); }
+    return;
+  }
 
   if (req.truncated > 0) {
     // Never silently. 200 lines on one invoice is not a real scenario, but a
@@ -1511,7 +1526,7 @@ async function requestQuote() {
     warn(`quote covers the first ${MAX_QUOTE_LINES} lines; ${req.truncated} were not priced`);
   }
 
-  if (_quoteStatus !== 'ready') { _quoteStatus = 'loading'; renderShippingRow(); }
+  if (_quoteStatus !== QUOTE_READY) { _quoteStatus = QUOTE_LOADING; renderShippingRow(); }
 
   const res = await AdminAPI.quoteInvoice(req.body);
   if (!editorAlive(token) || seq !== _quoteSeq) return;
@@ -1519,16 +1534,16 @@ async function requestQuote() {
   if (!res.ok) {
     // Keep the last good quote — a rate limit or a blip must not blank the
     // dropdown, and it must not clear a price we already filled.
-    _quoteStatus = res.code === 'RATE_LIMITED' ? 'limited' : 'unavailable';
+    _quoteStatus = res.code === 'RATE_LIMITED' ? QUOTE_LIMITED : QUOTE_UNAVAILABLE;
     renderShippingRow();
     return;
   }
 
   const quote = normalizeQuote(res.data);
-  if (!quote) { _quoteStatus = 'unavailable'; renderShippingRow(); return; }
+  if (!quote) { _quoteStatus = QUOTE_UNAVAILABLE; renderShippingRow(); return; }
 
   _quote = quote;
-  _quoteStatus = 'ready';
+  _quoteStatus = QUOTE_READY;
   applyQuote(quote);
 }
 
@@ -1978,8 +1993,11 @@ function foldCreditIntoPrevious(i) {
   });
   _draft.lines.splice(i, 1);
   if (!_draft.lines.length) _draft.lines.push(blankLine());
-  // Positions shifted, so every cached answer is about the wrong row now.
-  _quote = null; _volumeOffers = [];
+  // Positions shifted, so every cached answer is about the wrong row now. The
+  // STATUS has to go back with it: 'ready' beside a null quote is the state that
+  // renders "rates unavailable", and it would sit there through the whole
+  // debounce and round-trip of the re-quote below (ERR-191).
+  _quote = null; _quoteStatus = QUOTE_IDLE; _volumeOffers = [];
   renderLines();
   refreshPreview();
   scheduleQuote();
@@ -2058,7 +2076,9 @@ function onFormClick(e) {
     if (!_draft.lines.length) _draft.lines.push(blankLine());
     // Positions shift, so every cached answer is now about the wrong row. Drop
     // them rather than re-index — a badge on the wrong line is worse than none.
-    _quote = null; _volumeOffers = [];
+    // The status goes back to idle with them, or the row claims a failure while
+    // the replacement quote is still in flight (ERR-191).
+    _quote = null; _quoteStatus = QUOTE_IDLE; _volumeOffers = [];
     renderLines(); refreshPreview(); scheduleQuote();
   } else if (act === 'apply-volume') {
     // The ONE path by which a hand-edited price is replaced: the operator asked.
@@ -2734,7 +2754,7 @@ function editorBodyHtml(d) {
           </label>
           <label class="inv-field inv-field--check">
             <input type="checkbox" data-field="show_due_date"${d.show_due_date === false ? '' : ' checked'}>
-            <span class="inv-field__label">Show payment due date <span class="inv-field__hint">(on the invoice — off leaves just “Please make payment to:”)</span></span>
+            <span class="inv-field__label">Show payment due date <span class="inv-field__hint">(on the invoice — off drops just this line; the rest of the payment block stays)</span></span>
           </label>
         </div>
       </section>
@@ -3058,9 +3078,16 @@ function quoteLineAt(i) {
  * save path, still typeable. This dropdown only writes into it. That is the
  * whole integration, and it is why no schema changed.
  *
- * Every state says what it is. An empty or missing dropdown would read as "there
- * are no shipping options", so when the rates cannot be read the row says so and
- * points at the input the operator can always fall back to.
+ * Every state says what it is, and the words are shippingRowState()'s — one
+ * branch per value of _quoteStatus, in one place, so a state can never fall
+ * through to a message about a different one. It did: `idle` had no branch and
+ * landed on the failure copy, which is what a blank New Invoice showed before
+ * any request had been made (ERR-191).
+ *
+ * The `--warn` class is this function's call, not the resolver's, and it is the
+ * difference between a prompt and an alarm: idle and loading are neither wrong
+ * nor actionable-in-alarm, while limited and unavailable are the row telling the
+ * operator to type the freight themselves.
  */
 function renderShippingRow() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-freight-pick');
@@ -3077,15 +3104,10 @@ function renderShippingRow() {
   if (active && active.matches?.('[data-freight-option]')) { _shippingRowDirty = true; return; }
   _shippingRowDirty = false;
 
-  if (_quoteStatus === 'loading' && !_quote) {
-    host.innerHTML = `<span class="inv-freight__note">Checking courier rates…</span>`;
-    return;
-  }
-  if (!_quote || !_quote.shipping.hasOptions) {
-    const why = _quoteStatus === 'limited'
-      ? 'Rate limit reached — courier rates will refresh shortly.'
-      : 'Courier rates unavailable — type the freight manually.';
-    host.innerHTML = `<span class="inv-freight__note inv-freight__note--warn">${esc(why)}</span>`;
+  const state = shippingRowState(_quote, _quoteStatus);
+  if (state.kind !== SHIPPING_ROW_OPTIONS) {
+    const calm = state.kind === SHIPPING_ROW_IDLE || state.kind === SHIPPING_ROW_LOADING;
+    host.innerHTML = `<span class="inv-freight__note${calm ? '' : ' inv-freight__note--warn'}">${esc(state.message)}</span>`;
     return;
   }
 
@@ -3119,7 +3141,7 @@ function renderShippingRow() {
     ${weight ? `<span class="inv-freight__note">${esc(weight)}</span>` : ''}
     ${!offerFree && gap ? `<span class="inv-freight__note">${esc(gap)}</span>` : ''}
     ${offerFree ? `<button type="button" class="inv-freight__free" data-form-action="apply-free-shipping">${esc(qualifyLabel)}</button>` : ''}
-    ${_quoteStatus === 'limited' ? `<span class="inv-freight__note inv-freight__note--warn">Rates may be a moment out of date (rate limit).</span>` : ''}`;
+    ${_quoteStatus === QUOTE_LIMITED ? `<span class="inv-freight__note inv-freight__note--warn">Rates may be a moment out of date (rate limit).</span>` : ''}`;
 }
 
 function renderLines() {
@@ -3589,7 +3611,7 @@ function renderPreview(d) {
     ${bulkSaved > 0 ? `<div class="inv-doc__savings">You saved ${esc(money(bulkSaved))} on this order by buying in bulk.</div>` : ''}
 
     <div class="inv-doc__pay">
-      <div class="inv-doc__pay-title">${displayDueDate(d) ? `<div>Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong></div>` : ''}<div>Please make payment to.</div></div>
+      <div class="inv-doc__pay-title">${displayDueDate(d) ? `<div>Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong></div>` : ''}<div>Use Invoice number as Payment Reference</div><div>Please make payment to:</div></div>
       <table>
         <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
         <tr><td>a/c Number:</td><td><strong>${esc(d.footer.bankAcct)}</strong></td></tr>
@@ -3803,15 +3825,19 @@ function buildInvoiceDoc(d) {
     ? doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M)
     : [];
   // One reservation for the whole block: the account number must never be split from
-  // "Please make payment to.", and the sign-off must never be orphaned on a page of
-  // its own — this is the block the customer pays us from.
-  const payH = 24 + (due ? 17.5 : 0) + 21 + 16.5
+  // "Please make payment to:", and the sign-off must never be orphaned on a page of
+  // its own — this is the block the customer pays us from. Every `py +=` below has a
+  // matching term in payH; add a printed line to one and you must add it to the other.
+  const payH = 24 + (due ? 17.5 : 0) + 17.5 + 21 + 16.5
     + (thanksLines.length ? 32 + thanksLines.length * 14 : 0);
   ensure(payH);
   let py = ty + 24;
   doc.setFontSize(13.5);
   if (due) { text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 17.5; }
-  text('Please make payment to.', M, py);
+  // Unconditional: the reference instruction survives the due-date toggle, because a
+  // payment with no reference is unmatchable whether or not we printed a due date.
+  text('Use Invoice number as Payment Reference', M, py); py += 17.5;
+  text('Please make payment to:', M, py);
   py += 21;
   doc.setFont('times', 'normal');
   text(`a/c Name:`, M, py); doc.setFont('times', 'bold'); text(d.footer.bankName || '', M + 84, py); py += 16.5;

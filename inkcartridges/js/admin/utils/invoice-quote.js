@@ -692,3 +692,65 @@ export function parcelWeightNote(quote) {
   if (!uncounted) return base;
   return `${base} — ${uncounted} unrecognised ${uncounted === 1 ? 'code is' : 'codes are'} not counted`;
 }
+
+// =========================================================================
+//  The freight row's state
+// =========================================================================
+
+/**
+ * The quote lifecycle, as one vocabulary rather than string literals in two
+ * files. The page owns the variable; this module owns the words, so a typo in
+ * either place is a value the resolver below cannot match instead of a silent
+ * fall-through to "unavailable" — which is exactly how ERR-191 read on screen.
+ */
+export const QUOTE_IDLE = 'idle';               // we have not asked (nothing typed yet)
+export const QUOTE_LOADING = 'loading';         // asked, waiting
+export const QUOTE_READY = 'ready';             // asked, answered
+export const QUOTE_LIMITED = 'limited';         // asked, rate-limited
+export const QUOTE_UNAVAILABLE = 'unavailable'; // asked, and it failed
+
+export const SHIPPING_ROW_IDLE = 'idle';
+export const SHIPPING_ROW_LOADING = 'loading';
+export const SHIPPING_ROW_LIMITED = 'limited';
+export const SHIPPING_ROW_UNAVAILABLE = 'unavailable';
+export const SHIPPING_ROW_OPTIONS = 'options';
+
+/**
+ * What the freight row should SAY — one branch per state of the quote (ERR-191).
+ *
+ * `_quoteStatus` has five values and the row used to have three branches: a
+ * `loading` one, a `limited` one, and an `else` that assumed failure. So `idle`
+ * — "we have not asked yet" — was rendered with the failure copy, and because a
+ * blank draft never triggers a request at all (`quoteRequestBody` returns null
+ * when no line has a code or description) that warning was the FIRST PAINT of
+ * every New Invoice and stayed until something was typed. The rates were fine
+ * throughout; `npm run probe:invoice-quote` was 17/17 with 8 live options.
+ *
+ * A SKIP IS NOT A FAILURE. Reporting one as the other costs the real message its
+ * meaning: `unavailable` also covers a 5xx, an auth failure, a CORS error and an
+ * unparseable payload, none of which an operator will look twice at once they
+ * have learned to ignore the same red text on every empty invoice.
+ *
+ * Order is load-bearing and preserves the old behaviour everywhere but `idle`:
+ * a good quote keeps its dropdown through a later loading or rate-limited reply
+ * (that is what "keep the last good quote" is for), so OPTIONS is tested first.
+ *
+ * DOM-free on purpose — the caller owns the markup, and the `--warn` class is
+ * its own decision: `idle` and `loading` are prompts, not alarms.
+ *
+ * @returns {{kind:string, message:string}} message is '' for OPTIONS.
+ */
+export function shippingRowState(quote, status) {
+  if (quote && quote.shipping?.hasOptions) return { kind: SHIPPING_ROW_OPTIONS, message: '' };
+  if (!quote && status === QUOTE_LOADING) {
+    return { kind: SHIPPING_ROW_LOADING, message: 'Checking courier rates…' };
+  }
+  if (!quote && status === QUOTE_IDLE) {
+    // Names the thing the operator can do about it. There is nothing wrong yet.
+    return { kind: SHIPPING_ROW_IDLE, message: 'Courier rates load once a line has a product code or description.' };
+  }
+  if (status === QUOTE_LIMITED) {
+    return { kind: SHIPPING_ROW_LIMITED, message: 'Rate limit reached — courier rates will refresh shortly.' };
+  }
+  return { kind: SHIPPING_ROW_UNAVAILABLE, message: 'Courier rates unavailable — type the freight manually.' };
+}
