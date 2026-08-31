@@ -16238,3 +16238,78 @@ body.page-shop {
 .business-invoice__note[hidden] { display: none; }
 
 .business-error[hidden] { display: none; }
+
+/* ── Return request (data-tracking-capture aug2026 §2.1) ────────────────────
+   The first return surface on the site. Sits under the shipping address on the
+   order-detail page and is hidden entirely for an order that cannot be
+   returned — never disabled-but-visible, which reads as "we won't let you".
+   Tokens match .order-shipping directly above so the two blocks are the same
+   card in both themes. */
+.order-return {
+    margin-top: var(--spacing-lg);
+    background-color: var(--color-background-alt);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    border: 1px solid var(--color-border);
+}
+
+.order-return__intro {
+    margin: 0 0 var(--spacing-md);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-text-muted);
+}
+
+.order-return__field { margin-bottom: var(--spacing-md); }
+
+.order-return__field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.order-return__field label small {
+    margin-left: 6px;
+    font-weight: 400;
+    color: var(--color-text-muted);
+}
+
+.order-return__field select,
+.order-return__field input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+}
+
+.order-return__hint {
+    margin: 6px 0 0;
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    color: var(--color-text-muted);
+}
+
+/* A failure the customer must read before they walk away thinking it sent. */
+.order-return__error {
+    margin: 0 0 var(--spacing-md);
+    padding: 11px 13px;
+    font-size: var(--font-size-sm);
+    line-height: 1.55;
+    color: var(--color-error, #b42318);
+    background-color: var(--color-error-bg, rgba(180, 35, 24, 0.08));
+    border: 1px solid var(--color-error, #b42318);
+    border-radius: var(--radius-md);
+}
+
+.order-return__done {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-text-muted);
+}

@@ -1178,6 +1178,11 @@ async function runDashboardLoad(mySeq) {
     AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc', signal), // 10
     AdminAPI.expenses.list({ limit: 1000 }, signal),          // 11  raw expense records → trend lines
     AdminAPI.getTrafficTimeseries(trafficFrom, trafficTo, signal), // 12  Performance overview traffic overlay
+    // 13  Conversion funnel. Takes NO params — its window is fixed at 30 days
+    // server-side and every filter it appears to accept is a decoy (see the
+    // method's comment). The card says so on its face rather than pretending to
+    // follow the page's range.
+    AdminAPI.getConversionFunnel(signal),
   ];
 
   const results = await Promise.allSettled(promises);
@@ -1228,6 +1233,7 @@ async function runDashboardLoad(mySeq) {
     _loadedAt: new Date().toISOString(),   // drives the "Updated …" stamp in the header
     kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
     recentOrders: val(5), topProducts: val(6), missingCost,
+    funnel: val(13),
     trackingReq: val(7), trackingOrders: val(8),
     worstMarginSkus: worstMargin, worstMarginTruncated,
     // Raw expense records for the performance chart's Added/Total expense lines.
@@ -1351,6 +1357,7 @@ function render(d) {
       <div class="admin-dash">
         ${chartCard('Traffic by source', 'sessions · approx', 'dash-c-traffic-source')}
         ${renderTopProductsCard(d.topProducts)}
+        ${renderFunnelCard(d.funnel)}
       </div>
     </section>
     ${row('Risk', 'danger', chartCard('Refund rate', 'over time', 'dash-c-refund-rate'), chartCard('Refund reasons', 'share', 'dash-c-refund-reasons'))}
@@ -1359,6 +1366,168 @@ function render(d) {
   drawAllCharts(d);
   wireOrderRowClicks();
   wireAlertToggles();
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * CONVERSION FUNNEL (data-tracking-capture-fe-handoff-aug2026 §2.3)
+ *
+ * Visitors → product viewers → add to cart → checkout → order, over a FIXED
+ * 30-day window.
+ *
+ * Three things this card refuses to do, each of them a way the same number has
+ * gone wrong on this page before:
+ *
+ * 1. IT NEVER PRINTS 0% FOR "WE MEASURED NOTHING". `overall_conversion_rate` is
+ *    now null when there were no visitors, which is the honest answer; a 0% rate
+ *    is a measurement and this is not one. Renders as — (ERR-063/068/073/075/
+ *    076/127, the absence-as-zero family).
+ *
+ * 2. IT NEVER DRAWS AN IMPOSSIBLE FUNNEL AS IF IT WERE REAL. A funnel is
+ *    monotonic by construction: you cannot start more checkouts than you had
+ *    carts. Live today it is NOT — `added_to_cart: 2` sits under
+ *    `started_checkout: 78`, and the backend's own `drop_off.cart_to_checkout`
+ *    reads **-3800%**. That is not a customer behaviour, it is the broken
+ *    `add_to_cart` emitter (handoff §1.3, fixed in this same change: the event
+ *    was guarded by `typeof CartAnalytics !== 'undefined'` on 30 pages that
+ *    never loaded the script). Rendering -3800% next to four confident-looking
+ *    numbers would launder a wiring bug into a business insight. So a stage that
+ *    exceeds the one above it is called out BY NAME, and its rate is withheld.
+ *    The callout disappears on its own once the fixed emitter has 30 days of
+ *    data — it is measured, not hardcoded.
+ *
+ * 3. IT NEVER LABELS ITSELF WITH THE PAGE'S DATE RANGE. The endpoint ignores
+ *    window_days and date_from/date_to entirely (measured: 7, 90, 999 and an
+ *    explicit range all return the identical 30-day payload — the ERR-151 decoy
+ *    shape). The subtitle comes from `meta.window_days`, the server's own echo,
+ *    and says out loud that it does not follow the filter above it.
+ * ──────────────────────────────────────────────────────────────────────────── */
+const FUNNEL_STAGE_LABELS = {
+  visitors: 'Visitors',
+  product_viewers: 'Viewed a product',
+  added_to_cart: 'Added to cart',
+  started_checkout: 'Started checkout',
+  completed_purchase: 'Ordered',
+};
+
+/** Already a percent (6.44 = 6.44%). NOT fmtPct — see funnelPct's note. */
+function funnelPct(v) {
+  const n = numOrNull(v);
+  if (n == null) return null;
+  return `${n.toFixed(n < 10 ? 2 : 1)}%`;
+}
+
+/**
+ * Stages in server order, each marked against its IMMEDIATE predecessor.
+ *
+ * A funnel cannot widen: no step can record more events than the step before it.
+ * Comparing each stage to the one directly above it (rather than to a running
+ * maximum) localises the fault to the pair that actually disagrees, instead of
+ * condemning every stage downstream of the first bad one.
+ *
+ * `underReporting` marks the EARLIER half of an inconsistent pair, because that
+ * is the one that is wrong: `added_to_cart: 2` beneath `started_checkout: 78`
+ * means add-to-cart is under-counting, not that 78 checkouts are imaginary.
+ *
+ * Plain data, deliberately, so the rule can be tested without a DOM.
+ */
+function funnelStages(data) {
+  const raw = Array.isArray(data?.funnel) ? data.funnel : [];
+  const rows = raw.map((row) => ({
+    stage: row?.stage,
+    label: FUNNEL_STAGE_LABELS[row?.stage] || String(row?.stage || MISSING),
+    count: numOrNull(row?.count),
+    rate: numOrNull(row?.rate),
+    underReporting: false,
+    exceededBy: null,
+  }));
+  for (let i = 1; i < rows.length; i++) {
+    const prev = rows[i - 1];
+    // An unknown count cannot be exceeded — absence is not a bound.
+    if (prev.count == null || rows[i].count == null) continue;
+    if (rows[i].count > prev.count) {
+      prev.underReporting = true;
+      prev.exceededBy = rows[i];
+    }
+  }
+  return rows;
+}
+
+function renderFunnelCard(data) {
+  const d = data || null;
+  const meta = d?.meta || {};
+  const windowDays = numOrNull(meta.window_days);
+  const sub = windowDays ? `last ${windowDays} days · fixed window` : 'fixed window';
+
+  const shell = (inner) => `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title"><span>Conversion funnel <small>${esc(sub)}</small></span></div>
+      ${inner}
+    </div>`;
+
+  if (!d) {
+    return shell('<p class="admin-conv-funnel__empty">Funnel data could not be loaded.</p>');
+  }
+  if (meta.data_gap === true) {
+    // The backend says its own aggregate is unavailable. That is a louder fact
+    // than an empty chart, and it names the thing to check — the whole point of
+    // §2.3 was replacing a fabricated number, and silence here would be a
+    // quieter version of the same failure.
+    return shell(`
+      <p class="admin-conv-funnel__gap">No funnel could be computed — the backend reports
+      <code>data_gap</code>, meaning the traffic aggregate (migration 155) is not in
+      place. No numbers are shown rather than estimated ones.</p>`);
+  }
+
+  const stages = funnelStages(d);
+  if (!stages.length) {
+    return shell('<p class="admin-conv-funnel__empty">No funnel stages were returned.</p>');
+  }
+
+  const broken = stages.filter((s) => s.underReporting);
+  const top = stages[0]?.count;
+
+  const rows = stages.map((s) => {
+    const width = (top && s.count != null && !s.underReporting)
+      ? Math.max(2, Math.round((s.count / top) * 100))
+      : 0;
+    // The count is still shown — it is what the table holds — but its RATE is
+    // withheld, because a percentage of a number we know to be under-counted is
+    // not a measurement of anything a customer did.
+    const rate = s.underReporting ? MISSING : (funnelPct(s.rate) ?? MISSING);
+    return `
+      <li class="admin-conv-funnel__row${s.underReporting ? ' admin-conv-funnel__row--broken' : ''}">
+        <span class="admin-conv-funnel__label">${esc(s.label)}</span>
+        <span class="admin-conv-funnel__bar"><i style="width:${width}%"></i></span>
+        <span class="admin-conv-funnel__count">${s.count == null ? MISSING : esc(String(s.count))}</span>
+        <span class="admin-conv-funnel__rate">${esc(rate)}</span>
+      </li>`;
+  }).join('');
+
+  // null → "—", never 0%. `overall_conversion_rate` is visitors → orders, so it
+  // does NOT route through the broken stage and is still a real number when one
+  // exists; withholding it too would throw away a good measurement to punish a
+  // neighbouring bad one.
+  const overallLine = `
+    <p class="admin-conv-funnel__overall">
+      <span>Visitor → order</span>
+      <strong>${esc(funnelPct(d.overall_conversion_rate) ?? MISSING)}</strong>
+    </p>`;
+
+  const warning = broken.length ? `
+    <p class="admin-conv-funnel__broken">
+      ${broken.map((s) => `<strong>${esc(s.label)}</strong> (${esc(String(s.count))}) sits below
+        <strong>${esc(s.exceededBy.label)}</strong> (${esc(String(s.exceededBy.count))})`).join('; ')} —
+      a funnel cannot widen, so that step is under-counting rather than describing customers, and
+      its rate is withheld. Cause: the <code>add_to_cart</code> emitter, repaired 2026-08-31
+      (cart-analytics.js was loaded on 3 pages while cart.js is on 33). This note clears itself
+      once the fix has a full window of data behind it.
+    </p>` : '';
+
+  const provenance = meta.source
+    ? `<p class="admin-conv-funnel__source">${esc(String(meta.source))}. Independent of the date filter above.</p>`
+    : '<p class="admin-conv-funnel__source">Independent of the date filter above.</p>';
+
+  return shell(`<ul class="admin-conv-funnel">${rows}</ul>${overallLine}${warning}${provenance}`);
 }
 
 // ---------- layout helpers ----------

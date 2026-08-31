@@ -26,11 +26,16 @@ const RibbonsPage = {
         title: document.getElementById('drilldown-title'),
         levelBrands: document.getElementById('level-brands'),
         levelProducts: document.getElementById('level-products'),
-        productsGrid: document.getElementById('ribbon-products-grid'),
         pagination: document.getElementById('ribbon-pagination'),
         loading: document.getElementById('drilldown-loading'),
         empty: document.getElementById('drilldown-empty'),
         emptyMessage: document.getElementById('empty-message'),
+        // ERR-193 — a separate pane for a request that FAILED, so an outage can
+        // never be rendered in the words reserved for an empty catalogue. Same
+        // three ids and the same CSS as /shop (shop-page.js), deliberately.
+        error: document.getElementById('drilldown-error'),
+        errorMessage: document.getElementById('error-message'),
+        errorRetryBtn: document.getElementById('drilldown-retry-btn'),
         skeletonBrands: document.getElementById('skeleton-brands'),
         skeletonProducts: document.getElementById('skeleton-products')
     },
@@ -90,6 +95,7 @@ const RibbonsPage = {
             this._unloading = false;
             if (!e.persisted) return;
             if (this.elements.empty) this.elements.empty.hidden = true;
+            if (this.elements.error) this.elements.error.hidden = true;
             this.parseURLState();
             this.syncFilterUI();
             this.navigationVersion++;
@@ -113,6 +119,7 @@ const RibbonsPage = {
             if (levelBrands) levelBrands.hidden = false;
             if (levelProducts) levelProducts.hidden = true;
             this.elements.empty.hidden = true;
+            if (this.elements.error) this.elements.error.hidden = true;
         } else {
             if (levelBrands) levelBrands.hidden = true;
             if (levelProducts) levelProducts.hidden = false;
@@ -133,6 +140,22 @@ const RibbonsPage = {
             // Try new ribbon_brands table first, fall back to legacy API
             let brands = [];
             const res = await API.getRibbonBrandsList();
+
+            // ERR-193 — the brand GRID had the same defect as the brand pages: a
+            // failed read fell through to `brands.length === 0` and rendered "No
+            // ribbon brands found." The legacy API below is a genuine fallback for
+            // an EMPTY ribbon_brands table, not a substitute for a failed read, so
+            // only a real failure short-circuits here.
+            if (res && res.ok === false) {
+                this.showLoadingState('brands', false);
+                this.reportLoadFailure('ribbon_brands', res);
+                this.showError(
+                    "We couldn't load the ribbon brands. The server may be warming up — please try again.",
+                    () => this.loadBrands()
+                );
+                return;
+            }
+
             const ribbonBrands = res?.data?.brands || [];
 
             if (ribbonBrands.length > 0) {
@@ -189,7 +212,11 @@ const RibbonsPage = {
             this.updateTitle();
         } catch (e) {
             this.showLoadingState('brands', false);
-            this.showEmpty('Failed to load ribbon brands. Please try again.');
+            this.reportLoadFailure('ribbon_brands', { code: 'THROWN', status: null });
+            this.showError(
+                "We couldn't load the ribbon brands. The server may be warming up — please try again.",
+                () => this.loadBrands()
+            );
         }
     },
 
@@ -331,24 +358,127 @@ const RibbonsPage = {
             this.elements.emptyMessage.textContent = message;
         }
         this.elements.empty.hidden = false;
+        if (this.elements.error) this.elements.error.hidden = true;
     },
 
-    // =========================================
-    // RIBBON MANUFACTURER BRANDS
-    // =========================================
-    async loadRibbonBrands() {
-        const select = document.getElementById('ribbon-brand-filter');
-        if (!select) return;
-        try {
-            const res = await API.getRibbonBrands();
-            const brands = res?.data?.brands || [];
-            if (brands.length > 0) {
-                select.innerHTML = '<option value="">All Brands</option>' +
-                    brands.map(b => `<option value="${Security.escapeAttr(b)}"${this.state.ribbonBrand === b ? ' selected' : ''}>${Security.escapeHtml(b)}</option>`).join('');
-            }
-        } catch (e) {
-            // leave default "All Brands" option
+    /**
+     * Drop any previously rendered cards and pagination.
+     *
+     * Every early return below (failed, empty, filtered-to-nothing) leaves the
+     * grid untouched otherwise, because only `renderProducts` clears it. On a
+     * first paint there is nothing to leave, which is why this went unnoticed —
+     * but paging, a popstate, or a retry all reach those returns with a full grid
+     * already on screen, and an error pane floating above the previous brand's
+     * ribbons reads as though those ribbons are the answer.
+     */
+    clearProductGrids() {
+        const container = this.elements.levelProducts;
+        if (container) {
+            container.querySelectorAll('.ribbon-section-heading, .ribbon-products-grid')
+                .forEach(el => el.remove());
         }
+        if (this.elements.pagination) this.elements.pagination.innerHTML = '';
+    },
+
+    /**
+     * The pane for a request that FAILED — never the one above.
+     *
+     * ERR-193. `showEmpty` and this function used to be the same function, and on
+     * 2026-08-29 a column grant changed, `get_ribbons_by_brand` began answering
+     * 401, and every one of the 63 ribbon brand pages told visitors "No ribbons
+     * found for Brother yet. Check back soon!" for 44 hours. That sentence is
+     * correct for the ten brands we genuinely have no ribbons for, and a lie for
+     * an outage; the two cases had the same words, no retry, and no signal.
+     *
+     * Ported from shop-page.js, whose /shop equivalent has had this since May
+     * 2026 — including the three details that matter: the bfcache `_unloading`
+     * guard (so a fetch rejecting mid-navigation cannot paint a sticky error into
+     * the snapshot), replacing the button by cloning rather than stacking
+     * listeners, and bumping `navigationVersion` on retry so a zombie in-flight
+     * response from the failed attempt cannot paint over the new one.
+     *
+     * @param {string} message   what the shopper reads
+     * @param {Function} onRetry called with the fresh navigationVersion
+     */
+    showError(message, onRetry) {
+        if (this._unloading) return;
+        if (!this.elements.error) {
+            // Degrade to the empty pane rather than showing nothing at all, but
+            // with wording that still says "failed" — a legacy DOM without the
+            // pane must not silently inherit the bug this function exists to fix.
+            this.showEmpty(message || 'Failed to load ribbons. Please try again.');
+            return;
+        }
+        if (this.elements.errorMessage && message) {
+            this.elements.errorMessage.textContent = message;
+        }
+        this.elements.empty.hidden = true;
+        this.elements.error.hidden = false;
+
+        const btn = this.elements.errorRetryBtn;
+        if (btn && typeof onRetry === 'function') {
+            const fresh = btn.cloneNode(true);
+            btn.parentNode.replaceChild(fresh, btn);
+            this.elements.errorRetryBtn = fresh;
+            fresh.addEventListener('click', async () => {
+                if (this._unloading) return;
+                fresh.disabled = true;
+                try {
+                    this.elements.error.hidden = true;
+                    this.showLoading(true);
+                    this.navigationVersion++;
+                    await onRetry(this.navigationVersion);
+                } finally {
+                    fresh.disabled = false;
+                }
+            });
+        }
+    },
+
+    /**
+     * Report a catalogue read that failed, through the channel that actually
+     * carries it.
+     *
+     * WHY THIS FUNCTION EXISTS AT ALL. `DebugLog` is a no-op anywhere but
+     * localhost — every one of its methods is gated on `_isDev` (utils.js). So
+     * the `DebugLog.error` this page already had emitted precisely nothing in
+     * production, and that is a large part of why a 44-hour outage across all 63
+     * brand pages produced no alert, no error-rate change and nothing in any log.
+     * A signal that only fires on the developer's laptop is not a signal, and the
+     * hand-off's suggested fix — "a DebugLog.error rather than a warn" — would
+     * have changed nothing at all.
+     *
+     * ONE CHANNEL, NOT TWO, AND THE MISSING ONE IS NAMED. The house dual-send
+     * (rewards-nudge.js) is GA plus our own first-party tracker. GA takes an
+     * arbitrary event name and is used here. The first-party tracker CANNOT carry
+     * this yet — measured against production 2026-09-01:
+     *
+     *   POST /api/analytics/traffic-event {"event_type":"catalogue_load_failed"}
+     *     → 400 VALIDATION_FAILED: "event_type" must be one of [pageview, click]
+     *
+     * That is an honest rejection rather than a silent drop, which is to its
+     * credit, but it means a `TrafficTracker.send` here would 400 on every single
+     * failure and record nothing. Shipping a call that cannot succeed is how a
+     * page comes to believe it is instrumented when it is not — the same shape as
+     * the DebugLog line above it. So it is not shipped, the gap is written down,
+     * and `npm run probe:ribbon-brands` watches the enum in both directions so
+     * the day the backend widens it is the day we find out. The ask is BF-053 in
+     * ribbon-brand-pages-FE-response-aug2026.md.
+     *
+     * Sending this as `click` instead was considered and rejected: it would file
+     * an interaction the visitor never performed and corrupt the click metrics
+     * this endpoint exists to collect. A gap is recoverable; a fabricated row
+     * that looks right is not.
+     */
+    reportLoadFailure(surface, res) {
+        const props = {
+            surface,
+            code: (res && res.code) || 'UNKNOWN',
+            status: (res && res.status) || null,
+            brand: this.state.brand || null,
+        };
+        try { if (typeof DebugLog !== 'undefined') DebugLog.error('[Ribbons] load failed:', props); } catch (_) {}
+        try { if (typeof gtag === 'function') gtag('event', 'catalogue_load_failed', props); } catch (_) {}
     },
 
     // =========================================
@@ -381,15 +511,162 @@ const RibbonsPage = {
         return ribbon;
     },
 
+    // =========================================
+    // BRAND-BRANCH FILTERING (FE-3)
+    // =========================================
+    //
+    // `get_ribbons_by_brand` takes a slug and NOTHING else: no sort, no page, no
+    // colour, no manufacturer. The `params` object below was built on every load
+    // and then thrown away on the brand branch, so `?sort=`, `?color=`, `?brand=`
+    // and `?page=` were silently dropped from every `?printer_brand=` URL — the
+    // link looked filtered, rows came back, and none of the filtering happened.
+    //
+    // Doing it in the browser is EXACT here rather than an approximation, and that
+    // is the only reason it is allowed: the RPC returns the brand's COMPLETE,
+    // unpaginated set, and the largest brand is Epson at 25 rows against a page
+    // size of 48 (measured across all 63 brands, 2026-08-31). Filtering one page
+    // of a paginated set client-side would be the ERR-190 trap; filtering a whole
+    // set is just filtering.
+
+    /** Sale price if there is one, else retail, else null — never a confident 0. */
+    rowPrice(r) {
+        const raw = (r && r.sale_price != null) ? r.sale_price : (r && r.retail_price);
+        if (raw == null || raw === '') return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    },
+
+    /**
+     * Sort a complete row set using the API's own `sort=` vocabulary, so one URL
+     * means the same thing on both branches. Measured working on /api/ribbons:
+     * `name`, `price_asc`, `price_desc`.
+     */
+    sortRows(rows, sort) {
+        const byName = (a, b) => String(a.name || '')
+            .localeCompare(String(b.name || ''), 'en-NZ', { sensitivity: 'base' });
+        if (sort !== 'price_asc' && sort !== 'price_desc') return rows.slice().sort(byName);
+        const dir = sort === 'price_asc' ? 1 : -1;
+        return rows.slice().sort((a, b) => {
+            const pa = this.rowPrice(a);
+            const pb = this.rowPrice(b);
+            // A ribbon with no readable price is UNKNOWN, not free and not dearest,
+            // so it sorts to the end whichever way the list points — rather than
+            // heading the cheapest list at $0 (the ERR-068 shape).
+            if (pa === null && pb === null) return byName(a, b);
+            if (pa === null) return 1;
+            if (pb === null) return -1;
+            return (pa - pb) * dir || byName(a, b);
+        });
+    },
+
+    /** Colour + manufacturer-brand filtering over a complete set. */
+    filterRows(rows) {
+        let out = rows;
+        if (this.state.color) {
+            const want = String(this.state.color).trim().toLowerCase();
+            out = out.filter(r => String(r.color || '').trim().toLowerCase() === want);
+        }
+        if (this.state.ribbonBrand) {
+            const want = String(this.state.ribbonBrand).trim().toLowerCase();
+            out = out.filter(r => String(r._brandName || '').trim().toLowerCase() === want);
+        }
+        return out;
+    },
+
+    /**
+     * Copy the two fields the RPC cannot supply onto rows it did.
+     *
+     * ONLY these two cross over. Price and stock are NOT copied, even though the
+     * two payloads were measured to agree on all 82 shared SKUs (2026-08-31): the
+     * RPC row is this page's source of truth for what a ribbon costs, and a second
+     * opinion quietly overwriting it is how one surface starts quoting a different
+     * price from another. If they ever disagree we want to find out loudly, from
+     * the probe, not to have papered over it here.
+     *
+     * @returns {number} rows that gained a ladder
+     */
+    applyLadders(rows, bySku) {
+        if (!bySku || typeof bySku.get !== 'function') return 0;
+        let applied = 0;
+        for (const r of rows) {
+            const sku = (r && typeof r.sku === 'string') ? r.sku.trim() : '';
+            if (!sku) continue;
+            const info = bySku.get(sku);
+            if (!info) continue;
+            // Absence stays absence (business.js ingest contract): a row we have
+            // no ladder for gets no key at all, so it falls through to the authed
+            // route rather than reporting a confident "no discount available".
+            if (Array.isArray(info.quantity_breaks)) {
+                r.quantity_breaks = info.quantity_breaks;
+                applied++;
+            }
+            if (info.brand && !r._brandName) r._brandName = info.brand;
+        }
+        return applied;
+    },
+
+    /**
+     * FE-2 — attach the volume ladder to an already-painted brand page.
+     *
+     * The RPC carries no `quantity_breaks[]`, so `Business.ingest()` received
+     * nothing here and a guest — who by design fires no `/api/business/*` request
+     * — saw no volume pricing on any brand page, while the same ribbon showed its
+     * ladder on `/ribbons` and on its own PDP. One cached `GET /api/ribbons`
+     * covers all 82 SKUs that appear across the 63 brand pages (measured 82/82).
+     *
+     * Deliberately runs AFTER the paint and never blocks it: the cards are correct
+     * without the ladder, just less generous, so there is no reason to make anyone
+     * wait for it. The overlay is added by patching the cards in place — this must
+     * never re-render the grid under the visitor (ERR-179).
+     */
+    async hydrateLadders(rows, container, navVersion) {
+        if (!rows.length || typeof API.getRibbonLadders !== 'function') return;
+        const res = await API.getRibbonLadders();
+        // The page may have moved on, or be unloading, while that was in flight.
+        if (this.navigationVersion !== navVersion || this._unloading) return;
+        if (!res || !res.ok) {
+            // Not shown to the shopper: a missing bulk-price overlay is an absent
+            // upsell, not a wrong page. But it IS reported, because "the ladder
+            // quietly stopped appearing" is exactly the class of silence this
+            // whole entry exists to end.
+            this.reportLoadFailure('ribbon_ladders', res);
+            return;
+        }
+        if (!this.applyLadders(rows, res.bySku)) return;
+
+        // Patch, don't repaint. The brand name only ever ARRIVES here, so the
+        // favourites button shipped data-product-brand="" on every brand page.
+        container.querySelectorAll('.product-card[data-sku]').forEach(card => {
+            const info = res.bySku.get(card.dataset.sku);
+            if (!info || !info.brand) return;
+            const fav = card.querySelector('.favourite-btn[data-product-brand]');
+            if (fav && !fav.getAttribute('data-product-brand')) {
+                fav.setAttribute('data-product-brand', info.brand);
+            }
+        });
+
+        if (typeof Business !== 'undefined') {
+            Business.ingest(rows);
+            Business.decorateCards(container).catch(e =>
+                DebugLog.warn('[Ribbons] bulk pricing overlay failed:', e && e.message));
+        }
+    },
+
+    // =========================================
+    // LOAD
+    // =========================================
     async loadProducts(navVersion) {
         this.showLoading(true);
         this.elements.levelProducts.hidden = false;
         this.elements.empty.hidden = true;
+        if (this.elements.error) this.elements.error.hidden = true;
 
         // Update title/breadcrumb immediately so they reflect the brand even if the API fails
         this.resolveBrandLabel();
         this.updateBreadcrumb();
         this.updateTitle();
+
+        const label = this.state.brandLabel || this.state.brand || this.state.ribbonBrand || 'these';
 
         try {
             const params = {
@@ -402,46 +679,129 @@ const RibbonsPage = {
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;
 
-            const res = this.state.brand
+            // A printer MODEL can only be filtered by the API — the RPC has no
+            // device data at all — so a URL naming one takes the branch that can
+            // actually answer it, instead of silently widening to the whole brand.
+            const useBrandRpc = !!this.state.brand && !this.state.model;
+
+            const res = useBrandRpc
                 ? await API.getRibbonsByBrand(this.state.brand)
                 : await API.getRibbons(params);
 
             if (this.navigationVersion !== navVersion) return;
             this.showLoading(false);
 
-            if (!res.ok || !res.data) {
-                const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
-                const msg = activeBrand
-                    ? `No ribbons found for ${Security.escapeHtml(activeBrand)} yet. Check back soon!`
-                    : 'Failed to load ribbons. Please try again.';
-                this.showEmpty(msg);
+            // ERR-193 — FAILED, which is not the same thing as EMPTY. This branch
+            // used to render "No ribbons found for Brother yet. Check back soon!",
+            // the same sentence as an honestly empty brand, with no retry and no
+            // signal, and it did so on all 63 brand pages for 44 hours.
+            if (!res || res.ok !== true || !res.data) {
+                this.clearProductGrids();
+                this.reportLoadFailure(useBrandRpc ? 'ribbons_by_brand' : 'ribbons_api', res);
+                this.showError(
+                    `We couldn't load ${label} ribbons. The server may be warming up — please try again.`,
+                    (v) => this.loadProducts(v)
+                );
                 return;
             }
 
             let ribbons = res.data.products || res.data.ribbons || res.data || [];
-            const pagination = res.meta || res.data.pagination || null;
+            let pagination = res.meta || res.data.pagination || null;
 
             if (!Array.isArray(ribbons)) ribbons = [];
             ribbons = ribbons.map(r => this.normalizeRibbon(r));
 
+            // The brand genuinely stocks nothing. This copy is CORRECT for the ten
+            // brands that have no ribbons mapped, and it stays exactly as it was.
             if (ribbons.length === 0) {
+                this.clearProductGrids();
+                // The H1 gets its properly-cased label ("HP", "OKI", "IBM") from a
+                // second request that races this one; the title-cased slug is only
+                // a stand-in. Wait for the real one before writing the sentence, or
+                // the pane says "Hp" directly under a heading that says "HP".
+                // getRibbonBrandsList is memoised and init() already fired it, so
+                // this is the same promise, not another round trip.
+                await this.resolveBrandLabelFromAPI();
+                if (this.navigationVersion !== navVersion) return;
                 const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
                 const msg = activeBrand
-                    ? `No ribbons found for ${Security.escapeHtml(activeBrand)} yet. Check back soon!`
+                    ? `No ribbons found for ${activeBrand} yet. Check back soon!`
                     : 'No ribbons found.';
                 this.showEmpty(msg);
                 return;
             }
 
-            this.renderProducts(ribbons);
-            this.renderPagination(pagination, ribbons.length);
+            let visible = ribbons;
+            let hydrated = false;
+
+            if (useBrandRpc) {
+                // A manufacturer filter needs the brand NAME, which the RPC has
+                // only as a UUID. Fetch it FIRST in that one case: rendering the
+                // unfiltered set would be a page that looks filtered and isn't,
+                // which is the exact failure this codebase keeps re-learning
+                // (ERR-151/173/190). If we cannot filter, we say so.
+                if (this.state.ribbonBrand) {
+                    const ladders = typeof API.getRibbonLadders === 'function'
+                        ? await API.getRibbonLadders()
+                        : { ok: false, code: 'UNSUPPORTED' };
+                    if (this.navigationVersion !== navVersion) return;
+                    if (!ladders.ok) {
+                        this.clearProductGrids();
+                        this.reportLoadFailure('ribbon_ladders', ladders);
+                        this.showError(
+                            "We couldn't apply that brand filter just now. Please try again.",
+                            (v) => this.loadProducts(v)
+                        );
+                        return;
+                    }
+                    this.applyLadders(ribbons, ladders.bySku);
+                    hydrated = true;
+                }
+
+                const matched = this.sortRows(this.filterRows(ribbons), this.state.sort);
+
+                // Filtered down to nothing — an honest empty, but a DIFFERENT one
+                // from "this brand has no ribbons", so it gets different words.
+                if (matched.length === 0) {
+                    this.clearProductGrids();
+                    this.showEmpty(`No ${label} ribbons match those filters.`);
+                    return;
+                }
+
+                const limit = this.pageLimit;
+                const totalPages = Math.max(1, Math.ceil(matched.length / limit));
+                const current = Math.min(Math.max(1, this.state.page), totalPages);
+                visible = matched.slice((current - 1) * limit, current * limit);
+                // A real pagination record for a real page. This used to be null on
+                // every brand page, so renderPagination described the wrong set.
+                pagination = {
+                    page: current,
+                    limit,
+                    total: matched.length,
+                    total_pages: totalPages,
+                    has_prev: current > 1,
+                    has_next: current < totalPages,
+                };
+            }
+
+            this.renderProducts(visible);
+            this.renderPagination(pagination, visible.length);
             this.elements.levelProducts.hidden = false;
+
+            // FE-2, after the paint and never blocking it.
+            if (useBrandRpc && !hydrated) {
+                this.hydrateLadders(visible, this.elements.levelProducts, navVersion);
+            }
 
         } catch (error) {
             if (this.navigationVersion !== navVersion) return;
-            DebugLog.error('Failed to load ribbons:', error);
+            this.clearProductGrids();
+            this.reportLoadFailure('ribbons_thrown', { code: 'THROWN', status: null });
             this.showLoading(false);
-            this.showEmpty('Failed to load ribbons. Please try again.');
+            this.showError(
+                `We couldn't load ${label} ribbons. The server may be warming up — please try again.`,
+                (v) => this.loadProducts(v)
+            );
         }
     },
 
@@ -452,19 +812,42 @@ const RibbonsPage = {
         // Remove any previously inserted section headings + grids
         container.querySelectorAll('.ribbon-section-heading, .ribbon-products-grid').forEach(el => el.remove());
 
-        // Group ribbons by product_type
-        const groups = {};
-        ribbons.forEach(ribbon => {
-            const type = ribbon.product_type || 'printer_ribbon';
-            if (!groups[type]) groups[type] = [];
-            groups[type].push(ribbon);
-        });
-
         const sectionOrder = [
             { key: 'typewriter_ribbon', label: 'Typewriter Ribbons' },
             { key: 'printer_ribbon',    label: 'Printer Ribbons' },
             { key: 'correction_tape',   label: 'Correction Tape' },
         ];
+        const KNOWN = new Set(sectionOrder.map(s => s.key));
+
+        // Group by product_type — but only where the payload actually stated one.
+        //
+        // TWO BUGS LIVED IN THE OLD `ribbon.product_type || 'printer_ribbon'`.
+        // First, `/api/ribbons` sends no `product_type` on ANY row (measured, 109
+        // of 109), so every typewriter ribbon and correction tape reached by a
+        // `?color=` or `?printer_model=` URL was filed under the heading "Printer
+        // Ribbons" — a wrong answer stated confidently, which is worse than no
+        // heading at all. Second, a row carrying a type outside the three below
+        // was put in a group that nothing rendered, so it vanished from the page
+        // silently. Anything unlabelled or unrecognised now lands in a trailing
+        // grid with NO heading: shown, and not mislabelled.
+        const groups = {};
+        const unlabelled = [];
+        ribbons.forEach(ribbon => {
+            const type = ribbon.product_type;
+            if (type && KNOWN.has(type)) {
+                if (!groups[type]) groups[type] = [];
+                groups[type].push(ribbon);
+            } else {
+                unlabelled.push(ribbon);
+            }
+        });
+
+        const addGrid = (items) => {
+            const grid = document.createElement('div');
+            grid.className = 'ribbon-products-grid';
+            items.forEach(ribbon => grid.appendChild(this.createRibbonCard(ribbon)));
+            container.insertBefore(grid, pagination);
+        };
 
         sectionOrder.forEach(section => {
             const items = groups[section.key];
@@ -474,14 +857,10 @@ const RibbonsPage = {
             heading.className = 'ribbon-section-heading';
             heading.textContent = section.label;
             container.insertBefore(heading, pagination);
-
-            const grid = document.createElement('div');
-            grid.className = 'ribbon-products-grid';
-            items.forEach(ribbon => {
-                grid.appendChild(this.createRibbonCard(ribbon));
-            });
-            container.insertBefore(grid, pagination);
+            addGrid(items);
         });
+
+        if (unlabelled.length) addGrid(unlabelled);
 
         // Bulk-price overlay — additive, and free of any network request: the
         // ladder rides on the ribbons payload this grid was rendered from.
@@ -534,13 +913,6 @@ const RibbonsPage = {
         const sku = ribbon.sku || '';
         const imageUrl = ribbon.image_url || '';
         const ribbonId = ribbon.id;
-
-        const subtypeLabels = {
-            printer_ribbon: 'Printer Ribbon',
-            typewriter_ribbon: 'Typewriter Ribbon',
-            correction_tape: 'Correction Tape',
-        };
-        const subtypeLabel = subtypeLabels[ribbon.product_type] || null;
 
         let imageContent;
         if (imageUrl) {

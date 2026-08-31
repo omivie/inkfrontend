@@ -221,6 +221,49 @@ function itemsSummary(r) {
   return first ? `<span class="cell-mono">${esc(first)}</span>${extra}` : `${count} item${count === 1 ? '' : 's'}`;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * OUTCOME — the commercial result of a quote, including the ones we lost
+ * (data-tracking-capture-fe-handoff-aug2026 §2.2)
+ *
+ * A quote that never became an invoice currently leaves no trace of WHY. Status
+ * (open|invoiced|cancelled) says what happened to the record; outcome says what
+ * happened to the deal, and only the second one can tell you that you lose on
+ * price and not on delivery time.
+ *
+ * ONE VOCABULARY. The enums live in AdminAPI (QUICK_ORDER_OUTCOMES /
+ * QUICK_ORDER_REASONS_LOST) and the labels here map over them, so a value can
+ * never exist in the dropdown that the API layer would reject — the ERR-075 /
+ * ERR-162 shape, where a bogus option returned zero rows in silence.
+ * ──────────────────────────────────────────────────────────────────────────── */
+const OUTCOME_LABELS = { won: 'Won', lost: 'Lost', pending: 'Pending' };
+// Reuses the existing house badge palette rather than adding three near-duplicate
+// colour classes: won→completed (green), lost→cancelled (red), pending→pending (yellow).
+const OUTCOME_CLASS = { won: 'admin-badge--completed', lost: 'admin-badge--cancelled', pending: 'admin-badge--pending' };
+const REASON_LOST_LABELS = {
+  price: 'Price',
+  availability: 'Availability',
+  delivery_time: 'Delivery time',
+  competitor: 'Competitor',
+  no_response: 'No response',
+  changed_requirements: 'Changed requirements',
+  other: 'Other',
+};
+
+/**
+ * Unset renders as the house MISSING glyph, never as "Pending".
+ * "Nobody has decided yet" and "we decided it is still open" are different
+ * facts, and collapsing them would make the lost-quote report quietly optimistic
+ * — the absence-as-a-value family (ERR-063/068/073/075/076/127).
+ */
+function outcomeCell(r) {
+  const o = r.outcome;
+  if (!o || !OUTCOME_LABELS[o]) return `<span class="cell-muted">${MISSING}</span>`;
+  const why = o === 'lost' && r.reason_lost
+    ? ` <span class="cell-muted">${esc(REASON_LOST_LABELS[r.reason_lost] || r.reason_lost)}</span>`
+    : '';
+  return `<span class="admin-badge ${OUTCOME_CLASS[o] || ''}">${esc(OUTCOME_LABELS[o])}</span>${why}`;
+}
+
 const COLUMNS = [
   { key: 'order_date', label: 'Date', sortable: true, render: (r) => esc(formatDate(r.order_date || r.created_at)) },
   { key: 'customer_name', label: 'Customer', render: (r) => esc(r.customer_name || r.bill_to?.name || MISSING) },
@@ -230,9 +273,11 @@ const COLUMNS = [
   },
   { key: 'items', label: 'Items', render: (r) => itemsSummary(r) },
   { key: 'total', label: 'Total', align: 'right', sortable: true, gst: GST_INCL, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
+  { key: 'outcome', label: 'Outcome', render: (r) => outcomeCell(r) },
   {
     key: 'actions', label: '', align: 'right',
     render: (r) => `
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="outcome" data-id="${escA(r.id)}" title="Record the outcome of this quote">${icon('check', 13, 13)}</button>
       <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="invoice" data-id="${escA(r.id)}" title="Create invoice from this order">${icon('invoice', 13, 13)}</button>
       <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="delete" data-id="${escA(r.id)}" title="Delete">${icon('trash', 13, 13)}</button>`,
   },
@@ -254,7 +299,11 @@ async function onRowAction(e) {
   e.stopPropagation();
   const id = btn.dataset.id;
   const action = btn.dataset.rowAction;
-  if (action === 'invoice') {
+  if (action === 'outcome') {
+    const rows = (_table && Array.isArray(_table.data)) ? _table.data : [];
+    const row = rows.find((r) => String(r.id) === String(id));
+    showOutcomeModal(row || { id });
+  } else if (action === 'invoice') {
     const rec = await AdminAPI.getQuickOrder(id);
     if (!_alive) return;
     createInvoiceFrom(rec || { id });
@@ -277,6 +326,143 @@ async function onRowAction(e) {
       },
     });
   }
+}
+
+/**
+ * Record the commercial outcome of a quote.
+ *
+ * A small modal rather than a section in the drawer editor, for two reasons: the
+ * drawer is a full-page editor (drawer.js ignores `width` by owner request) and
+ * only one can be open at a time, and outcome is a one-field pass an operator
+ * makes down a LIST — "won, won, lost on price, still waiting" — not something
+ * they open a full order form to do.
+ *
+ * It deliberately does NOT go through buildPayload()/updateQuickOrder(): that is
+ * the PUT body that carries `status`, which drives set_quick_order_status() and
+ * the invoice bridge. Outcome is a commercial annotation and must not be able to
+ * disturb that flow (handoff §2.2), so it has its own endpoint and its own call.
+ */
+function showOutcomeModal(row) {
+  const cur = row || {};
+  const opt = (v, label, sel) => `<option value="${escA(v)}"${sel === v ? ' selected' : ''}>${esc(label)}</option>`;
+  // Nullable money: an EMPTY box means "unknown", not 0. Same idiom as the line
+  // grid's supplier cost — `value="${x ?? ''}"` with a placeholder — because a
+  // competitor price of $0.00 is a claim we would be inventing (ERR-068's
+  // "UNKNOWN is not 0", and the reason costOrNull exists one file over).
+  const moneyField = (id, label, val, hint) => `
+      <div class="admin-form-group">
+        <label for="${id}">${esc(label)}</label>
+        <input class="admin-input" type="number" step="0.01" id="${id}"
+               value="${escA(val ?? '')}" placeholder="Not recorded">
+        <p class="qo-outcome__hint">${esc(hint)}</p>
+      </div>`;
+
+  const body = `
+    <div class="qo-outcome">
+      <div class="admin-form-group">
+        <label for="qo-outcome">Outcome</label>
+        <select class="admin-select" id="qo-outcome">
+          ${opt('', 'Not decided', cur.outcome || '')}
+          ${AdminAPI.QUICK_ORDER_OUTCOMES.map((v) => opt(v, OUTCOME_LABELS[v], cur.outcome || '')).join('')}
+        </select>
+      </div>
+      <div class="admin-form-group" id="qo-reason-wrap" hidden>
+        <label for="qo-reason">Why did we lose it?</label>
+        <select class="admin-select" id="qo-reason">
+          ${opt('', 'Not recorded', cur.reason_lost || '')}
+          ${AdminAPI.QUICK_ORDER_REASONS_LOST.map((v) => opt(v, REASON_LOST_LABELS[v], cur.reason_lost || '')).join('')}
+        </select>
+        <p class="qo-outcome__hint">Only recorded for a lost quote — the server rejects it otherwise.</p>
+      </div>
+      ${moneyField('qo-discount', 'Discount offered (NZD)', cur.discount_offered, 'What we came down by to try to win it.')}
+      ${moneyField('qo-competitor', 'Competitor price (NZD)', cur.competitor_price, 'What they were quoted elsewhere, if they told us.')}
+      ${moneyField('qo-final', 'Final negotiated price (NZD)', cur.final_negotiated_price, 'What it actually sold for, if different from the quote.')}
+      <p class="qo-outcome__decided">${cur.decided_at
+        ? `Decided ${esc(formatDate(cur.decided_at))}.`
+        : 'Not yet decided — the server stamps the date on the first won or lost.'}</p>
+      <p class="qo-outcome__error" id="qo-outcome-error" hidden></p>
+    </div>`;
+
+  const footer = `
+    <button class="admin-btn admin-btn--ghost" id="qo-outcome-cancel">Cancel</button>
+    <button class="admin-btn admin-btn--primary" id="qo-outcome-save">Save outcome</button>`;
+
+  const m = Modal.open({ title: 'Quote outcome', body, footer, className: 'admin-modal--sm' });
+  const $ = (id) => m.el.querySelector('#' + id);
+
+  const outcomeEl = $('qo-outcome');
+  const reasonWrap = $('qo-reason-wrap');
+  const reasonEl = $('qo-reason');
+  const errEl = $('qo-outcome-error');
+
+  // reason_lost only exists for a lost quote. Hidden AND cleared when it does
+  // not apply, so a stale selection can never be posted into a 400.
+  const syncReason = () => {
+    const isLost = outcomeEl.value === 'lost';
+    reasonWrap.hidden = !isLost;
+    if (!isLost) reasonEl.value = '';
+  };
+  outcomeEl.addEventListener('change', syncReason);
+  syncReason();
+
+  const showError = (msg) => { errEl.textContent = msg; errEl.hidden = !msg; };
+
+  /** '' → null (clear it), otherwise a number. Never coerces blank to 0. */
+  const moneyOrNull = (id) => {
+    const raw = ($(id).value || '').trim();
+    if (!raw) return null;
+    const v = Number(raw);
+    return Number.isFinite(v) ? round2(v) : null;
+  };
+
+  $('qo-outcome-cancel').addEventListener('click', () => m.close());
+  $('qo-outcome-save').addEventListener('click', async () => {
+    const btn = $('qo-outcome-save');
+    btn.disabled = true;
+    showError('');
+    // An explicit null CLEARS a field server-side, which is exactly what an
+    // emptied box should mean — so every field is sent on every save, and
+    // "omitted keeps its value" is not relied on to express "erase this".
+    const patch = {
+      outcome: outcomeEl.value || null,
+      reason_lost: outcomeEl.value === 'lost' ? (reasonEl.value || null) : null,
+      discount_offered: moneyOrNull('qo-discount'),
+      competitor_price: moneyOrNull('qo-competitor'),
+      final_negotiated_price: moneyOrNull('qo-final'),
+    };
+    try {
+      await AdminAPI.setQuickOrderOutcome(cur.id, patch);
+      Toast.success('Outcome recorded.');
+      m.close();
+      loadData();
+    } catch (err) {
+      btn.disabled = false;
+      if (err && err.transportBlocked) {
+        // BF-021. Say what is actually wrong, name it, and do NOT dress it up as
+        // an unbuilt feature — "isn't available yet (backend endpoint pending)"
+        // is the sentence that hid ERR-131 for a month, over a route that was
+        // answering 401 the whole time. This route answers 400/404 today; the
+        // browser is what will not send the request.
+        showError('The outcome could not be saved: the browser is blocked from sending a PATCH '
+          + 'to the API (BF-021 — PATCH is missing from the backend CORS allow-list). The endpoint '
+          + 'itself is live and correct. Nothing was changed. This starts working the moment that '
+          + 'one line lands, with no change here.');
+        warn('outcome PATCH blocked by CORS (BF-021)', err);
+        noteOutcomeBlockedOnce();
+        return;
+      }
+      showError(err?.message || 'Could not save that outcome. Try again.');
+    }
+  });
+}
+
+// Told once per session, not once per click — a nag gets trained away, and this
+// is a standing platform limitation rather than a per-row failure.
+let _outcomeBlockNoted = false;
+function noteOutcomeBlockedOnce() {
+  if (_outcomeBlockNoted) return;
+  _outcomeBlockNoted = true;
+  Toast.error('Quote outcomes cannot be saved until the API allows PATCH (BF-021).');
 }
 
 async function openExisting(row) {

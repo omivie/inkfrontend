@@ -2764,6 +2764,142 @@ const AdminAccess = {
 };
 if (typeof window !== 'undefined') window.AdminAccess = AdminAccess;
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProductIdentity — can a shopper tell these two cards apart?
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT CLASS (ERR-195, and ERR-192/187 before it)
+// ----------------------------------------------------
+// On 2026-09-01 `/shop?brand=canon&category=ink&code=CI3` rendered two CMY
+// 3-pack cards that were byte-identical in title, price, colour and slug:
+//
+//     CBCI3CMY  $14.99  CMY  BCI3CMY Compatible Ink Cartridge for Canon BCI3 BCI6 CMY 3-Pack
+//     CBCI6CMY  $14.99  CMY  BCI3CMY Compatible Ink Cartridge for Canon BCI3 BCI6 CMY 3-Pack
+//
+// Two real, active, separately-purchasable rows. The shopper was asked to pick
+// one with literally no information to pick on. This is not a rendering bug —
+// the storefront printed exactly what it was given — but the storefront is
+// where the customer meets it, and today the storefront has no answer for it.
+//
+// WHY THIS DISAMBIGUATES AND NEVER HIDES
+// --------------------------------------
+// The tempting fix is to collapse the group to one card. Do not. Deciding that
+// two database rows are "the same product" is an assertion of identity the
+// frontend cannot make and has been burned making before — the same reasoning
+// that keeps the FE from asserting compatibility (ERR-135) or inferring a
+// product's source from its name (ERR-157). Both rows are live and buyable; the
+// one we hid would be the one the customer wanted, and the only symptom would
+// be a cartridge nobody can find. So: show the SKU on the affected cards, and
+// only on those cards. It is truthful, always present, it is what the product
+// URL already carries, and it is what a customer quotes in an email.
+//
+// THE KEY IS WHAT IS *RENDERED*, NOT WHAT IS STORED
+// -------------------------------------------------
+// Two rows are look-alikes when the four things a card actually shows all
+// match: cleaned display title, price, colour, pack type. The title goes
+// through `ProductName.clean` for the same reason — that de-doubler rewrites
+// titles for display (ERR-055), so it can *create* a collision that the raw
+// `name` column does not have, and a check against raw `name` would miss it.
+//
+// PURE. No DOM, no clock, no I/O — so tests execute it rather than
+// pattern-matching source text, and the live probe (`npm run probe:lookalike`)
+// loads this exact function instead of re-implementing the derivation.
+// ─────────────────────────────────────────────────────────────────────────────
+const ProductIdentity = (function () {
+    'use strict';
+
+    const norm = (v) => String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // Price is compared as a number rounded to cents, not as a string: the two
+    // list endpoints disagree on shape (`14.99` vs `"14.99"` vs `14.990`) and a
+    // string compare would call an identical pair distinct and miss the defect.
+    function priceKey(product) {
+        const raw = product && (product.retail_price != null ? product.retail_price : product.price);
+        const n = Number(raw);
+        return Number.isFinite(n) ? n.toFixed(2) : '';
+    }
+
+    /**
+     * The identity a shopper actually perceives on a product card.
+     * @param {object} product
+     * @returns {string} the composite key; '' when there is no title to compare
+     */
+    function cardKey(product) {
+        if (!product) return '';
+        const title = (typeof ProductName !== 'undefined' && ProductName.clean)
+            ? ProductName.clean(product)
+            : (product.name || '');
+        const t = norm(title);
+        if (!t) return '';                       // no title ⇒ nothing to compare
+        return [t, priceKey(product), norm(product.color), norm(product.pack_type)].join(' | ');
+    }
+
+    /**
+     * Group a rendered list into sets of mutually indistinguishable products.
+     *
+     * Order-preserving: each group lists its members in the order they appear
+     * in `list`, and the groups themselves come in first-appearance order, so
+     * the answer does not depend on how the caller sorted.
+     *
+     * @param {Array<object>} list
+     * @returns {Array<Array<object>>} only groups of 2+; [] when all distinct
+     */
+    function lookalikeGroups(list) {
+        if (!Array.isArray(list) || list.length < 2) return [];
+        const buckets = new Map();
+        for (const product of list) {
+            const key = cardKey(product);
+            if (!key) continue;
+            if (!buckets.has(key)) buckets.set(key, []);
+            buckets.get(key).push(product);
+        }
+        const out = [];
+        for (const group of buckets.values()) {
+            if (group.length > 1) out.push(group);
+        }
+        return out;
+    }
+
+    /**
+     * Tag every member of every look-alike group with the disambiguator the
+     * card renderers print.
+     *
+     * MUTATES ONE FIELD AND NOTHING ELSE. `_lookalikeSku` follows the
+     * established FE-only underscore convention (`_freightOwner`,
+     * `_statusDegraded`). The array is neither filtered nor reordered — the
+     * caller gets back exactly the products it passed in, which is what makes
+     * "never hides" a property of the code rather than a promise in a comment.
+     *
+     * The count comes back in the RETURN VALUE, not a log. `DebugLog` is a
+     * no-op anywhere but localhost (ERR-193), so a swallowed warn would be no
+     * signal at all; partial-ness belongs where a caller can act on it.
+     *
+     * @param {Array<object>} list
+     * @returns {{groups: number, marked: number, skus: string[]}}
+     */
+    function markLookalikes(list) {
+        const groups = lookalikeGroups(list);
+        let marked = 0;
+        const skus = [];
+        for (const group of groups) {
+            for (const product of group) {
+                // A row with no SKU cannot be disambiguated by one. Leave it
+                // unmarked rather than printing an empty line that says nothing
+                // — silence is honest here, a blank label is not.
+                const sku = product && product.sku ? String(product.sku).trim() : '';
+                if (!sku) continue;
+                product._lookalikeSku = sku;
+                skus.push(sku);
+                marked++;
+            }
+        }
+        return { groups: groups.length, marked, skus };
+    }
+
+    return { cardKey, lookalikeGroups, markLookalikes };
+})();
+if (typeof window !== 'undefined') window.ProductIdentity = ProductIdentity;
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -2776,6 +2912,7 @@ if (typeof module !== 'undefined' && module.exports) {
         ProductColors,
         ProductSort,
         ProductName,
+        ProductIdentity,
         SeriesCodes,
         BrandSource,
         CompatSource,

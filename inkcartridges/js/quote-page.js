@@ -475,7 +475,13 @@
     // arrive under data.products (fallback data.suggestions — see search.js).
     function fetchSmartItems(q, signal) {
         var base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
-        var url = base + '/api/search/smart?q=' + encodeURIComponent(q) + '&limit=6';
+        var plain = base + '/api/search/smart?q=' + encodeURIComponent(q) + '&limit=6';
+        // ?sid=/?vid= — the analytics join key (data-tracking-capture aug2026
+        // §1.1). A quote line typed by a real customer is a real search; it
+        // joins to the quote's order the same way the header dropdown does.
+        var url = (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyUrl)
+            ? window.TrafficTracker.identifyUrl(plain)
+            : plain;
         // Public search read — cookies explicitly omitted (ERR-124).
     return fetch(url, { signal: signal, credentials: 'omit' }).then(function (res) {
             return res.json().then(function (json) {

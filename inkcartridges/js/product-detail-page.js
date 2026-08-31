@@ -1959,9 +1959,15 @@
                 // source group so PDP related products render in the same
                 // K→C→M→Y per-code rows the shop grid uses.
                 // Spec: readfirst/code-yield-grouping-may2026.md
-                const sortByCodeThenColor = (arr) => (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
-                    ? ProductSort.byCodeThenColor(arr)
-                    : arr;
+                const sortByCodeThenColor = (arr) => {
+                    const out = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                        ? ProductSort.byCodeThenColor(arr)
+                        : arr;
+                    // Two rows a shopper cannot tell apart get their SKU printed
+                    // on the card (ERR-195). Marks only — never filters.
+                    if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(out);
+                    return out;
+                };
                 const compatibles = sortByCodeThenColor(related.filter(p => inferSource(p) === 'compatible'));
                 const genuines    = sortByCodeThenColor(related.filter(p => inferSource(p) !== 'compatible'));
 
@@ -2021,6 +2027,10 @@
                         // Splice row-breaks between (familyKey, yieldTier)
                         // groups so each yield-code starts on its own row.
                         // Spec: readfirst/code-yield-grouping-may2026.md
+                        // Two rows a shopper cannot tell apart get their SKU printed on the
+                        // card (ERR-195). Runs on the SORTED list so a group is always
+                        // adjacent, and marks only — it never filters or reorders.
+                        if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(items);
                         const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
                             ? new Set(ProductSort.rowBreakIndices(items))
                             : new Set();
@@ -2067,6 +2077,10 @@
                     if (sorted.length === 0) {
                         relatedHtml = `<div class="related-products"><h2 class="ribbon-section__title">Products related to ${Security.escapeHtml(info.sku)}</h2></div>`;
                     } else {
+                        // Two rows a shopper cannot tell apart get their SKU printed on the
+                        // card (ERR-195). Runs on the SORTED list so a group is always
+                        // adjacent, and marks only — it never filters or reorders.
+                        if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(sorted);
                         const grids = `<div class="related-products__grid product-grid">${sorted.map(p => Products.renderCard(p)).join('')}</div>`;
                         relatedHtml = `
                             <div class="related-products">
@@ -2225,7 +2239,13 @@
                         image: info.image_url || '',
                         brand: info.brandName || '',
                         quantity: qty,
-                        product_source: info.source || null
+                        product_source: info.source || null,
+                        // The printer the shopper is actually shopping for
+                        // (data-tracking-capture aug2026 §1.2). Already read from
+                        // ?printer_slug= at :120 for the "bought for this printer"
+                        // proof line — this carries the same known value into the
+                        // cart and on to the order, instead of dropping it here.
+                        printer_slug: this._printerSlug || null
                     });
                     btn.textContent = 'Added!';
                     setTimeout(() => {
@@ -2702,6 +2722,9 @@
             try {
                 const q = String(slug).replace(/-/g, ' ').trim();
                 // Public search read — cookies explicitly omitted (ERR-124).
+                // No ?sid=/?vid= here on purpose: the query is a de-slugged URL
+                // segment, not something a customer typed. See the matching
+                // comment in API.getProduct's fallback (js/api.js).
                 const res2 = await fetch(`${base}/api/search/smart?q=${encodeURIComponent(q)}&limit=20`, { credentials: 'omit' });
                 if (res2.ok) {
                     const json = await res2.json();

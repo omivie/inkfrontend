@@ -219,6 +219,18 @@
                         id: item.product?.id || item.id,
                         sku: item.product?.sku || '',
                         name: item.product?.name || 'Product',
+                        // Carried, not derived (data-tracking-capture aug2026
+                        // §1.2). This projection rebuilds cartItems from scratch
+                        // on every calculateTotals(), so a field it does not name
+                        // is stripped seconds before the order POST — the same
+                        // whitelist trap as _parseServerCart (ERR-150). The
+                        // server cart has no printer column, so the value comes
+                        // off the local line that Cart re-annotated.
+                        printer_slug: item.printer_slug
+                            || (typeof Cart !== 'undefined' && Array.isArray(Cart.items)
+                                ? (Cart.items.find(ci => (ci.id === (item.product?.id || item.id))) || {}).printer_slug
+                                : null)
+                            || null,
                         price: item.product?.retail_price || item.price_snapshot || 0,
                         quantity: item.quantity,
                         image: typeof storageUrl === 'function' ? storageUrl(item.product?.image_url) : (item.product?.image_url || '/assets/images/placeholder.png')
@@ -803,10 +815,10 @@
             }
 
             // Build items array from cart
-            const items = this.cartItems.map(item => ({
+            const items = this.cartItems.map(item => this.withPrinterSlug({
                 product_id: item.id,
                 quantity: item.quantity
-            }));
+            }, item));
 
             // Backend creates the PaymentIntent and validates all prices server-side
             const isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
@@ -830,6 +842,7 @@
                 save_address: this.checkoutData.saveAddress !== false,
                 customer_notes: this.checkoutData.orderNotes || '',
                 payment_method: 'stripe',
+                ...this.orderLevelPrinterSlug(items),
                 idempotency_key: await this.getIdempotencyKey(idempotencyLabel),
                 gclid: typeof getGclid === 'function' ? getGclid() : null,
                 ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
@@ -1039,6 +1052,46 @@
                 })),
                 created_at: new Date().toISOString()
             };
+        },
+
+        /**
+         * Add `printer_slug` to one order line — but only when we actually know it.
+         *
+         * data-tracking-capture aug2026 §1.2. The backend takes it per-item, with
+         * an order-level fallback, and asks that we send it ONLY when it is real:
+         * an unresolvable slug records nothing, and a guessed one corrupts the
+         * printer-ecosystem analysis the field exists to enable. So this omits
+         * the key entirely rather than sending null — an absent key is "we don't
+         * know", which is exactly true, while `printer_slug: null` invites a
+         * reader to wonder whether the printer was cleared.
+         *
+         * There are two payload builders on this page (Stripe and PayPal) that
+         * are near-verbatim copies of each other. They must change together, so
+         * the logic lives in one function that both call rather than in two
+         * literals that will drift.
+         */
+        withPrinterSlug(line, cartItem) {
+            const slug = (typeof PrinterContext !== 'undefined')
+                ? PrinterContext.normalize(cartItem && cartItem.printer_slug)
+                : null;
+            if (slug) line.printer_slug = slug;
+            return line;
+        },
+
+        /**
+         * The order-level `printer_slug` spread, or `{}`.
+         *
+         * Only safe when the cart speaks with one voice — EXACTLY ONE distinct
+         * known slug across the lines — because the backend applies this value to
+         * every line that lacks its own. A two-printer cart returns {} and lets
+         * the per-item values stand alone: applying either printer to the lines
+         * that lack one would be precisely the guess §1.2 warns against, and
+         * "most common" is a guess with arithmetic in front of it.
+         */
+        orderLevelPrinterSlug(items) {
+            if (typeof PrinterContext === 'undefined') return {};
+            const slug = PrinterContext.orderLevel(items || []);
+            return slug ? { printer_slug: slug } : {};
         },
 
         /**
@@ -1260,10 +1313,10 @@
                 createOrder: async () => {
                     DebugLog.log('[PayPal] createOrder called — building payload...');
                     // Build order payload with payment_method: 'paypal'
-                    const items = self.cartItems.map(item => ({
+                    const items = self.cartItems.map(item => self.withPrinterSlug({
                         product_id: item.id,
                         quantity: item.quantity
-                    }));
+                    }, item));
 
                     const isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
                     const orderPayload = {
@@ -1286,6 +1339,7 @@
                         save_address: self.checkoutData.saveAddress !== false,
                         customer_notes: self.checkoutData.orderNotes || '',
                         payment_method: 'paypal',
+                        ...self.orderLevelPrinterSlug(items),
                         idempotency_key: await self.getIdempotencyKey('paypal'),
                         gclid: typeof getGclid === 'function' ? getGclid() : null,
                         ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,

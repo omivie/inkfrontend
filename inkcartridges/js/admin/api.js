@@ -826,6 +826,29 @@ const AdminAPI = {
     if (to)   q.set('to', to);
     return analyticsHttpGet(`/api/admin/analytics/traffic/timeseries?${q.toString()}`, signal);
   },
+  /**
+   * GET /api/admin/analytics/conversion-funnel — visitors → cart → checkout → order.
+   *
+   * data-tracking-capture-fe-handoff-aug2026 §2.3. It previously computed the top
+   * of the funnel as `(distinct cart_viewed sessions × 10) || 1000` — an invented
+   * multiplier with a hardcoded fallback — and derived every rate from it.
+   * Migration 155 replaced that with a real aggregate over `traffic_events`.
+   *
+   * ⚠️ IT TAKES NO PARAMETERS. Measured 2026-08-31: `?window_days=7`, `=90`,
+   * `=999` and `?date_from=…&date_to=…` all return the byte-identical payload
+   * with `meta.window_days: 30`. The window is fixed at 30 days server-side and
+   * every filter is a DECOY — accepted, ignored (the ERR-151 shape). Nothing is
+   * sent here for exactly that reason: a query string that changes nothing
+   * teaches the next reader that the card follows the page filter, and the card
+   * must label itself from `meta.window_days` (the ECHO — ERR-145/147) instead.
+   *
+   * `meta.data_gap: true` means migration 155 is missing and the arrays are
+   * empty — surfaced, never smoothed over.
+   */
+  async getConversionFunnel(signal) {
+    return analyticsHttpGet('/api/admin/analytics/conversion-funnel', signal);
+  },
+
   async getConversionBySource(filterParams, signal) {
     return analyticsHttpGet(`/api/admin/analytics/conversion-by-source?${analyticsQuery(filterParams)}`, signal);
   },
@@ -3630,6 +3653,107 @@ const AdminAPI = {
   async updateQuickOrder(quickOrderId, payload) {
     const resp = await window.API.put(`/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}`, payload);
     if (resp && resp.ok === false) throw invoiceError(resp, 'Update quick order failed');
+    return resp?.data?.quick_order ?? resp?.data ?? null;
+  },
+
+  // ── Quick-order OUTCOME — the commercial result, including the quotes we lost ──
+  //
+  // data-tracking-capture-fe-handoff-aug2026 §2.2. Deliberately separate from
+  // `status` (open|invoiced|cancelled), which drives set_quick_order_status() and
+  // the invoice bridge: outcome is a commercial annotation and must not be able to
+  // disturb that flow. So this NEVER routes through updateQuickOrder().
+  //
+  // ⚠️ BF-021 — THIS CALL CANNOT REACH THE SERVER FROM A BROWSER TODAY.
+  // The route is live and correct (measured 2026-08-31: an invalid enum answers
+  // `400 "outcome" must be one of [won, lost, pending, null]`, a valid one answers
+  // `404 Quick order not found` — so it validates and looks up), but PATCH is
+  // absent from the backend's CORS allow-list:
+  //
+  //   OPTIONS /api/admin/quick-orders/:id/outcome  (Request-Method: PATCH)
+  //     → 204, Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
+  //
+  // and Chrome kills the request before it is sent. That is BF-021, open since
+  // 2026-07-30, the same one-line backend change ERR-131 and ERR-188 waited on.
+  //
+  // AND THERE IS NO FALLBACK VERB. Every permitted alternative was probed:
+  //   POST /:id/outcome                → 404 Endpoint not found
+  //   PUT  /:id/outcome                → 404 Endpoint not found
+  //   PUT  /:id  {outcome}             → 400 "A status is required for a
+  //                                      status-only update"  (it is a status
+  //                                      route; it does not carry outcome)
+  //   PUT  /:id  {status, outcome}     → reaches the row lookup, i.e. `outcome`
+  //                                      is neither validated nor rejected —
+  //                                      which is the ERR-151 decoy signature.
+  //                                      A write we cannot prove landed is worse
+  //                                      than one that visibly did not.
+  //   X-HTTP-Method-Override           → not on Access-Control-Allow-Headers.
+  //
+  // So the invoice pattern's PATCH→PUT fallback (setStatusWithFallback) has
+  // nothing to fall back TO here, and inventing one would write the operator's
+  // "lost to a competitor at $38.90" into a void while showing a success toast.
+  // The page therefore attempts PATCH — the correct call, which starts working
+  // the day BF-021 lands, with no code change — and reports a blocked transport
+  // by name. It must never say "not available yet": that sentence is what made
+  // ERR-131 invisible for a month, and this would be its fourth recurrence.
+  QUICK_ORDER_OUTCOMES: Object.freeze(['won', 'lost', 'pending']),
+  QUICK_ORDER_REASONS_LOST: Object.freeze([
+    'price', 'availability', 'delivery_time', 'competitor',
+    'no_response', 'changed_requirements', 'other',
+  ]),
+
+  /**
+   * PATCH /api/admin/quick-orders/:id/outcome
+   *
+   * @param {string} quickOrderId  UUID (the route validates `id` as a GUID).
+   * @param {object} patch  Any of outcome / reason_lost / discount_offered /
+   *   competitor_price / final_negotiated_price. An omitted field keeps its
+   *   value; an explicit `null` clears one — so `null` is meaningful here and
+   *   must NOT be stripped as if it were absent.
+   * @returns {Promise<object|null>} the updated record.
+   * @throws  err.code / err.details on a coded rejection; err.transportBlocked
+   *   is true when the browser never got to ask (BF-021).
+   */
+  async setQuickOrderOutcome(quickOrderId, patch) {
+    const body = patch && typeof patch === 'object' ? patch : {};
+
+    // Validate client-side the way setInvoiceStatus does, so a typo is caught
+    // here rather than becoming an opaque 400 — and so the two enums have
+    // exactly one definition on the frontend.
+    if ('outcome' in body && body.outcome !== null
+        && this.QUICK_ORDER_OUTCOMES.indexOf(body.outcome) === -1) {
+      throw new Error(`Unsupported outcome: ${body.outcome}`);
+    }
+    if ('reason_lost' in body && body.reason_lost !== null
+        && this.QUICK_ORDER_REASONS_LOST.indexOf(body.reason_lost) === -1) {
+      throw new Error(`Unsupported reason_lost: ${body.reason_lost}`);
+    }
+    // The backend 400s on a reason_lost that is not accompanied by outcome
+    // 'lost'. Refusing it here keeps the rule in one sentence on the screen
+    // instead of a round-trip later.
+    if (body.reason_lost != null && body.outcome !== 'lost') {
+      throw new Error('reason_lost is only valid when the outcome is "lost"');
+    }
+
+    let resp;
+    try {
+      resp = await window.API.patch(
+        `/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}/outcome`,
+        body,
+      );
+    } catch (e) {
+      // A THROWN error here is a bare transport failure — no status, no code,
+      // because the browser refused to send it (BF-021) or the network dropped.
+      // Distinguished from a coded rejection, which comes back as an envelope.
+      const err = new Error('Could not reach the quick-order outcome endpoint');
+      err.transportBlocked = true;
+      err.cause = e;
+      throw err;
+    }
+    if (resp && resp.ok === false) {
+      // The server answered. Never retry a coded rejection through another
+      // route — that is trying to talk it out of an answer it already gave.
+      throw invoiceError(resp, 'Update quick order outcome failed');
+    }
     return resp?.data?.quick_order ?? resp?.data ?? null;
   },
 

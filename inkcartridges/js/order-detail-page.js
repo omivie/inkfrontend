@@ -197,9 +197,243 @@
                 `;
             }
 
+            // Return request (data-tracking-capture aug2026 §2.1)
+            this.renderReturnRequest(order);
+
             // Update breadcrumb
             const breadcrumb = document.querySelector('.breadcrumb__item--current');
             if (breadcrumb) breadcrumb.textContent = `Order #${order.order_number}`;
+        },
+
+        /* ──────────────────────────────────────────────────────────────────
+         * RETURN REQUEST
+         *
+         * There was no return surface on this site at all: `returns.html` is a
+         * static policy page, and nothing anywhere called
+         * POST /api/orders/:orderNumber/return-request. The backend's §2.1 added
+         * `issue_type` and `printer_model` to an endpoint the frontend had never
+         * once used, so the fields could not have collected anything.
+         *
+         * TWO QUESTIONS, NOT ONE (see API.createReturnRequest):
+         *   reason      — the commercial why. Required.
+         *   issue_type  — the technical why. Optional, and the field that makes
+         *                 an issue RATE per (SKU × printer × supplier) real.
+         * The supplier is never asked for; the server takes it from the order
+         * line's own cost snapshot.
+         *
+         * NO DATE GATE, DELIBERATELY. It is tempting to hide this after 30 days,
+         * and it would be wrong: legal-config.js states the rule in as many
+         * words — "faulty / not-as-described returns are NEVER time-barred by the
+         * 30-day window — that's a Consumer Guarantees Act §43 right which a
+         * retailer cannot contract out of for consumer transactions". A form
+         * that vanishes on day 31 would be this site telling a customer they
+         * have no rights they in fact have. The gate is on ORDER STATE — you
+         * cannot return an order that was never paid for or was cancelled.
+         * ────────────────────────────────────────────────────────────────── */
+        RETURNABLE_STATUSES: ['paid', 'processing', 'shipped', 'completed', 'delivered'],
+
+        /**
+         * The technical taxonomy, exactly as the backend enumerates it. Labels
+         * are the customer's words; values are the contract's. A value that is
+         * not on this list is rejected server-side, so the list is the single
+         * definition on this page — never re-spelt inline.
+         */
+        ISSUE_TYPES: [
+            ['not_recognised',  'The printer doesn’t recognise it'],
+            ['print_quality',   'Poor print quality — streaks, faded, gaps'],
+            ['leaking',         'It leaked'],
+            ['dried_out',       'It arrived dried out or empty'],
+            ['physical_damage', 'It arrived physically damaged'],
+            ['wrong_item',      'The wrong item was sent'],
+            ['missing_parts',   'Something was missing from the order'],
+            ['other',           'Something else'],
+        ],
+
+        /**
+         * The commercial reasons.
+         *
+         * ⚠️ Only `faulty` is confirmed against the live contract (it is the
+         * value the backend's own handoff shows). The endpoint could not be
+         * probed for the rest: POST /return-request is aggressively rate-limited
+         * — it answers `429 RATE_LIMITED "Too many return requests. Please
+         * contact support directly."` after very few attempts, deliberately, and
+         * burning that limiter to enumerate an enum would have been a poor
+         * trade. So a rejected value is not swallowed: submit() renders the
+         * server's own `details` verbatim, which names the offending field, and
+         * BF-055 asks the backend to confirm the list.
+         */
+        RETURN_REASONS: [
+            ['faulty',          'It’s faulty or not working'],
+            ['damaged',         'It arrived damaged'],
+            ['wrong_item',      'I was sent the wrong item'],
+            ['change_of_mind',  'I changed my mind (unopened)'],
+            ['other',           'Another reason'],
+        ],
+
+        renderReturnRequest(order) {
+            const host = document.getElementById('order-return');
+            if (!host) return;
+
+            const status = String(order?.status || '').toLowerCase();
+            if (this.RETURNABLE_STATUSES.indexOf(status) === -1) {
+                host.hidden = true;
+                return;
+            }
+
+            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (x) => x;
+            const escA = typeof Security !== 'undefined' ? Security.escapeAttr : (x) => x;
+
+            // Prefill the printer from the order's own lines when §1.2 gave us
+            // one. `printer_slug` is a slug; the customer's printer has a NAME.
+            // De-slugging is a presentation convenience for a free-text box they
+            // can correct — it is never sent as a slug, and never invented from
+            // a brand or a compatibility list.
+            const items = order.order_items || order.items || [];
+            const slugs = [];
+            items.forEach((it) => {
+                const sl = it && (it.printer_slug || it.printer?.slug);
+                if (sl && slugs.indexOf(sl) === -1) slugs.push(sl);
+            });
+            const prefill = slugs.length === 1 ? this.humaniseSlug(slugs[0]) : '';
+
+            const opts = (list, placeholder) => [`<option value="">${esc(placeholder)}</option>`]
+                .concat(list.map(([v, label]) => `<option value="${escA(v)}">${esc(label)}</option>`))
+                .join('');
+
+            host.hidden = false;
+            host.innerHTML = `
+                <h2>Something wrong with this order?</h2>
+                <p class="order-return__intro">Tell us what happened and we’ll email you back with
+                   what to do next. Faulty or incorrectly supplied items are covered for as long as is
+                   reasonable under the Consumer Guarantees Act — there’s no cut-off on
+                   asking. <a href="/returns">Read the returns policy</a>.</p>
+                <form class="order-return__form" id="order-return-form" novalidate>
+                    <div class="order-return__field">
+                        <label for="return-reason">What’s the problem? <span aria-hidden="true">*</span></label>
+                        <select id="return-reason" name="reason" required>
+                            ${opts(this.RETURN_REASONS, 'Choose one…')}
+                        </select>
+                    </div>
+                    <div class="order-return__field">
+                        <label for="return-issue-type">What exactly went wrong? <small>Optional</small></label>
+                        <select id="return-issue-type" name="issue_type">
+                            ${opts(this.ISSUE_TYPES, 'Prefer not to say')}
+                        </select>
+                        <p class="order-return__hint">This is the single most useful thing you can tell
+                           us — it’s how we spot a batch that fails on one printer model and
+                           stop selling it.</p>
+                    </div>
+                    <div class="order-return__field">
+                        <label for="return-printer-model">Which printer is it in? <small>Optional</small></label>
+                        <input type="text" id="return-printer-model" name="printer_model" maxlength="120"
+                               placeholder="e.g. Brother MFC-J5740DW" value="${escA(prefill)}">
+                    </div>
+                    <p class="order-return__error" id="return-error" hidden role="alert"></p>
+                    <button type="submit" class="btn btn--primary" id="return-submit">Request a return</button>
+                </form>`;
+
+            const form = document.getElementById('order-return-form');
+            if (form) form.addEventListener('submit', (e) => this.submitReturnRequest(e, order));
+        },
+
+        /**
+         * "brother-mfc-j5740dw" -> "Brother MFC J5740DW". Presentation only —
+         * this fills a free-text box the customer can correct, and the slug
+         * itself is never sent.
+         *
+         * A token containing a digit is a model number and goes fully upper
+         * ("j5740dw" -> "J5740DW"). A short token with no vowel is an acronym
+         * ("mfc" -> "MFC", "hp" -> "HP"). Everything else is a word ("brother"
+         * -> "Brother", "pro" -> "Pro").
+         *
+         * Length alone was the first rule and it was wrong twice: it printed
+         * "J5740dw", which is not how any printer is labelled, and "PRO" for a
+         * plain English word.
+         */
+        humaniseSlug(slug) {
+            return String(slug || '')
+                .split('-')
+                .filter(Boolean)
+                .map((w) => {
+                    if (/\d/.test(w)) return w.toUpperCase();
+                    if (w.length <= 4 && !/[aeiou]/.test(w)) return w.toUpperCase();
+                    return w.charAt(0).toUpperCase() + w.slice(1);
+                })
+                .join(' ');
+        },
+
+        async submitReturnRequest(e, order) {
+            e.preventDefault();
+            const btn = document.getElementById('return-submit');
+            const errEl = document.getElementById('return-error');
+            const reason = (document.getElementById('return-reason') || {}).value || '';
+            const issueType = (document.getElementById('return-issue-type') || {}).value || '';
+            const printerModel = (document.getElementById('return-printer-model') || {}).value || '';
+
+            const fail = (msg) => {
+                if (!errEl) return;
+                errEl.textContent = msg;
+                errEl.hidden = false;
+            };
+            if (errEl) errEl.hidden = true;
+
+            if (!reason) {
+                fail('Please tell us what the problem is.');
+                return;
+            }
+            if (!btn || btn.disabled) return;   // no double-submit into a rate limiter
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+
+            let res = null;
+            try {
+                res = await API.createReturnRequest(order.order_number, {
+                    reason,
+                    issue_type: issueType,
+                    printer_model: printerModel,
+                });
+            } catch (err) {
+                DebugLog.warn('Return request failed:', err?.message);
+            }
+
+            if (res && res.ok) {
+                const host = document.getElementById('order-return');
+                if (host) {
+                    host.innerHTML = `
+                        <h2>Return requested</h2>
+                        <p class="order-return__done">Thanks — we’ve logged it against order
+                           #${(typeof Security !== 'undefined' ? Security.escapeHtml : (x) => x)(order.order_number)}
+                           and we’ll email you with what to do next. You don’t need to send
+                           anything back until we’ve replied.</p>`;
+                }
+                return;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Request a return';
+
+            // The rate limiter on this route is real and deliberate, and it says
+            // what to do instead. Passing that through beats a generic "try
+            // again", which is advice that cannot work.
+            const code = res?.error?.code;
+            if (code === 'RATE_LIMITED') {
+                fail('We’ve already had several return requests from this account recently. '
+                   + 'Please email support@inkcartridges.co.nz with your order number and we’ll pick it up from there.');
+                return;
+            }
+            if (code === 'UNAUTHORIZED') {
+                fail('Please sign in again to request a return.');
+                return;
+            }
+            // A validation failure names its own field — show that rather than
+            // hiding it behind house copy, because the value we sent is the only
+            // clue to what the server would accept instead.
+            const detail = typeof API !== 'undefined' && typeof API.extractErrorMessage === 'function'
+                ? API.extractErrorMessage(res, '')
+                : '';
+            fail(detail
+                ? `We couldn’t send that request: ${detail}`
+                : 'We couldn’t send that request just now. Please email support@inkcartridges.co.nz with your order number.');
         },
 
         /**

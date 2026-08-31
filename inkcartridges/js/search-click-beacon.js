@@ -50,11 +50,22 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * DELIBERATE DIFFERENCES FROM js/traffic-tracker.js (don't "fix" these)
  * ─────────────────────────────────────────────────────────────────────────────
- * • NO Do Not Track opt-out. traffic-tracker.js honours DNT because its payload
- *   is identity-bearing (visitor_id + session_id + UTMs). This payload carries
- *   NO identifiers — just q/sku/position/page — so it measures relevance in
- *   aggregate, not people. DNT-gating it would bias CTR-by-position INVISIBLY,
- *   because the backend cannot tell a suppressed click from an absent one.
+ * • NO Do Not Track opt-out — and it stays that way even now that the payload
+ *   CAN carry identity. This used to be justified by "this payload carries no
+ *   identifiers"; since data-tracking-capture aug2026 §1.1 it optionally carries
+ *   session_id + visitor_id, so the justification has to be rebuilt rather than
+ *   inherited. It rebuilds cleanly, because of where those ids come from:
+ *     - the ids are READ from traffic-tracker.js, which is the module that
+ *       honours DNT, and which returns before assigning `window.TrafficTracker`
+ *       when DNT is set. Under DNT there is no accessor, so there are no ids;
+ *     - so a DNT click is still COUNTED (CTR-by-position stays unbiased — the
+ *       backend still cannot tell a suppressed click from an absent one, which
+ *       was the whole point) but carries NO identity;
+ *     - and a non-DNT click joins to the same session the pageviews and the
+ *       order use.
+ *   Both invariants hold at once. Never mint an id here to "fix" a missing one:
+ *   that would tag a visitor who opted out, using this file's exemption from an
+ *   opt-out it is only exempt from because it was anonymous.
  * • NO auth. The endpoint needs none, so there is no `await getAccessToken()`
  *   (traffic-tracker waits up to 1200ms for Auth to hydrate). Nothing async
  *   runs before dispatch — that is precisely what lets the request survive the
@@ -213,6 +224,24 @@
         return false;
     }
 
+    /**
+     * Stamp the analytics session/visitor ids onto the payload, if we have any.
+     *
+     * Never mints, never throws, and leaves the payload byte-identical when
+     * traffic-tracker is absent — DNT, an /admin path, or the script not loaded.
+     * `window.TrafficTracker` is a real window global (traffic-tracker.js, last
+     * statement); `Config` two functions down is not, which is why apiBase()
+     * reads the bare identifier. Do not copy one shape onto the other — that
+     * asymmetry is ERR-156, and this file is where it was found.
+     */
+    function identify(payload) {
+        try {
+            const tt = typeof window !== 'undefined' ? window.TrafficTracker : null;
+            if (tt && typeof tt.identifyBody === 'function') tt.identifyBody(payload);
+        } catch (_) { /* analytics identity is never worth a thrown click */ }
+        return payload;
+    }
+
     function report(sku, position) {
         if (!armed) return false;
 
@@ -236,6 +265,13 @@
         const payload = { q: q, sku: sku };
         if (typeof position === 'number' && position > 0) payload.position = position;
         if (typeof armed.page === 'number' && armed.page > 0) payload.page = armed.page;
+
+        // session_id / visitor_id — the analytics join key. Body transport,
+        // because sendBeacon cannot set headers (and the header names are not on
+        // the backend's CORS allow-list anyway — see traffic-tracker.js). Added
+        // only when traffic-tracker has ids to give, which is never under DNT;
+        // see the DELIBERATE DIFFERENCES block at the top of this file.
+        identify(payload);
 
         post(JSON.stringify(payload));
         return true;

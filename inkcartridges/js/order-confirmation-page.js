@@ -2,6 +2,10 @@
     const ConfirmationPage = {
         orderData: null,
         detectedPaymentMethod: null,
+        // Set once per pageload by markConversion(); the cross-reload guard is
+        // CONVERSION_KEY in localStorage.
+        _conversionFired: false,
+        _paymentSucceeded: true,
 
         async init() {
             // Get order number from URL or sessionStorage
@@ -20,6 +24,11 @@
             if (redirectStatus && redirectStatus !== 'succeeded') {
                 // Payment failed or is pending after Stripe redirect
                 this.showPaymentPendingBanner(redirectStatus === 'failed' ? 'failed' : 'pending');
+                // …and it is NOT a completed order. This page renders for a
+                // failed 3DS the same as for a paid one, so the conversion
+                // signals have to be gated on the redirect status rather than on
+                // "we got here". See markConversion().
+                this._paymentSucceeded = false;
             }
 
             // If redirected from Stripe with a successful payment, clear cart
@@ -59,7 +68,92 @@
                 // No order number in URL but we have full data from sessionStorage
                 this.orderData = this.transformAPIOrder(storedData);
                 this.renderOrderDetails();
+                this.markConversion();
             }
+        },
+
+        /**
+         * Record that an order completed — ONE place, for every payment method
+         * and every path onto this page.
+         *
+         * WHY IT LIVES HERE AND NOT ON THE PAYMENT PAGE
+         * `checkout_completed` last fired on 2026-03-11. Commit 633d045 (the
+         * PayPal SDK rewrite, 2026-03-12 — the very next day) deleted both
+         * `CartAnalytics.trackOrderCompleted(...)` calls from payment-page.js
+         * while keeping the lines around them, and nothing has emitted the event
+         * since: 4 rows in `cart_analytics_events`, for the whole of history.
+         * The funnel has had no bottom for five months.
+         *
+         * It is NOT restored where it was deleted. Both Stripe paths write
+         * `lastOrder` and call `stripe.confirmPayment()` immediately after — the
+         * order exists, but the payment has not been taken yet, and a 3DS
+         * challenge can still fail. An event fired there counts attempts, not
+         * orders, which is a worse number than none because it looks plausible.
+         * Every successful path — Stripe redirect, Stripe inline, PayPal capture
+         * — lands here, so here is the one place that means "it actually
+         * happened".
+         *
+         * THREE GUARDS
+         * 1. `_paymentSucceeded` — Stripe sends failed and pending 3DS results
+         *    to this same URL with `?redirect_status=`. Those are not orders.
+         * 2. `_conversionFired` — one per pageload, because loadOrderFromAPI has
+         *    two success paths and the caller should not have to know which ran.
+         * 3. CONVERSION_KEY — one per ORDER NUMBER, across reloads and across
+         *    the localStorage backup path that deliberately survives a hard
+         *    refresh for an hour. A customer who refreshes their receipt (or
+         *    leaves the tab open and comes back) must not be counted twice.
+         *
+         * Guard 3 also closes a live defect in the Google Ads conversion, which
+         * previously fired inline in both branches with no dedupe of any kind: a
+         * single refresh of this page reported a second purchase of the same
+         * order to Google Ads, at full value.
+         */
+        markConversion() {
+            if (this._conversionFired) return false;
+            if (!this._paymentSucceeded) return false;
+            const order = this.orderData;
+            if (!order || !order.orderNumber) return false;
+
+            // One per order number, across reloads. Bounded: keeps the last 20.
+            const CONVERSION_KEY = 'ink_conversion_recorded';
+            try {
+                const seen = JSON.parse(localStorage.getItem(CONVERSION_KEY) || '[]');
+                if (Array.isArray(seen) && seen.indexOf(order.orderNumber) !== -1) {
+                    this._conversionFired = true;
+                    return false;
+                }
+                const next = (Array.isArray(seen) ? seen : []).concat([order.orderNumber]).slice(-20);
+                localStorage.setItem(CONVERSION_KEY, JSON.stringify(next));
+            } catch (_) {
+                // Storage unavailable (private mode). Fall through and record:
+                // the per-pageload guard still holds, and under-counting a
+                // conversion is worse than a duplicate we cannot prevent.
+            }
+            this._conversionFired = true;
+
+            // Google Ads purchase conversion.
+            if (typeof gtag === 'function') {
+                gtag('event', 'conversion', {
+                    send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
+                    value: order.total,
+                    currency: 'NZD',
+                    transaction_id: order.orderNumber
+                });
+            }
+
+            // First-party funnel bottom — `checkout_completed` in
+            // cart_analytics_events. order-confirmation.html did not load
+            // cart-analytics.js before this change, so a call here would have
+            // been a silent no-op; the enrolment test now makes that impossible
+            // to reintroduce.
+            if (typeof CartAnalytics !== 'undefined') {
+                CartAnalytics.trackOrderCompleted({
+                    order_number: order.orderNumber,
+                    total: order.total,
+                    items: order.items || []
+                });
+            }
+            return true;
         },
 
         /**
@@ -124,15 +218,7 @@
                 if (response.ok && response.data) {
                     this.orderData = this.transformAPIOrder(response.data);
                     this.renderOrderDetails();
-                    // Google Ads purchase conversion
-                    if (typeof gtag === 'function') {
-                        gtag('event', 'conversion', {
-                            send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
-                            value: this.orderData.total,
-                            currency: 'NZD',
-                            transaction_id: this.orderData.orderNumber
-                        });
-                    }
+                    this.markConversion();
                     return;
                 }
             } catch (error) {
@@ -143,15 +229,7 @@
             if (storedData && storedData.items && storedData.items.length > 0) {
                 this.orderData = this.transformAPIOrder(storedData);
                 this.renderOrderDetails();
-                // Google Ads purchase conversion (fallback path)
-                if (typeof gtag === 'function') {
-                    gtag('event', 'conversion', {
-                        send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
-                        value: this.orderData.total,
-                        currency: 'NZD',
-                        transaction_id: this.orderData.orderNumber
-                    });
-                }
+                this.markConversion();
             } else {
                 this.showFallback(orderNumber);
             }

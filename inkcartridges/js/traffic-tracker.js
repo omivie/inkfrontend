@@ -242,11 +242,153 @@
         };
     }
 
+    /* ──────────────────────────────────────────────────────────────────────
+     * ANALYTICS IDENTITY — the join key, shared with search
+     * (data-tracking-capture-fe-handoff-aug2026 §1.1)
+     *
+     * search_analytics (11,976 rows) and search_clicks stored an IP and nothing
+     * else, so a search could never be joined to the order it produced. That is
+     * why /api/admin/analytics/search/top-converting has always answered
+     * `orders: null, conversion_pct: null` — a stub, not a bug.
+     *
+     * The fix is to send the ids THIS module already mints, so search, pageviews
+     * and orders land on one key. Three rules make that safe, and they live here
+     * — one owner, one vocabulary — rather than at six call sites:
+     *
+     * 1. NEVER MINT FROM A SEARCH. These readers only ever return what the
+     *    pageview beacon already established. Both opt-outs at the top of this
+     *    file (DNT, and any /admin path) return before `window.TrafficTracker`
+     *    is ever assigned, so a page that must not be tracked has no accessor to
+     *    call and sends no ids. Opt-out is INHERITED, never re-implemented — a
+     *    second copy of that rule is a second thing to get wrong.
+     *
+     * 2. VALIDATE, NEVER SANITISE. The backend rejects a malformed id outright
+     *    rather than cleaning it up, because a mangled id groups with nothing and
+     *    still looks like real data. We hold the same line one step earlier: an
+     *    id that fails ID_PATTERN is simply not sent.
+     *
+     * 3. SUPPRESS THE COLLISION SENTINELS. getVisitorId()/getSessionId() answer
+     *    the literals 'anon' / 'ts_fallback' when web storage throws — private
+     *    browsing, quota, a locked-down profile. Both satisfy ID_PATTERN, so
+     *    without this every such visitor on earth would merge into ONE visitor
+     *    and read downstream as a single enormous customer. A shared id is worse
+     *    than no id: no id is an honest gap, a shared one is a lie with a number
+     *    on it.
+     *
+     * TRANSPORT — measured against production 2026-08-31, and it is NOT what the
+     * handoff recommends. `X-Session-Id` / `X-Visitor-Id` are absent from the
+     * backend's CORS allow-list:
+     *
+     *   OPTIONS /api/search/smart  (Access-Control-Request-Headers: x-session-id)
+     *     → 204, Access-Control-Allow-Headers:
+     *       Content-Type,Authorization,X-Requested-With,X-Request-Id,
+     *       X-Guest-Session,X-Attribution-Source          ← neither id header
+     *
+     * A browser does not degrade there — it fails the preflight and NEVER SENDS
+     * THE SEARCH AT ALL. Taking the handoff's "default, works on all GET search
+     * endpoints" at face value would have broken site search for every customer
+     * to gain an analytics column. So GET search uses the documented ?sid=/?vid=
+     * fallback instead, which is free here: /api/search/smart and /suggest both
+     * answer `cf-cache-status: DYNAMIC` on both hosts, so the extra params
+     * fragment no edge cache (the ERR-124/159 hazard does not bite). The POST
+     * click beacon carries them in its body, as specified.
+     *
+     * USE_ID_HEADERS is the one-line switch for the day the allow-list gains
+     * them. Leave it false until `npm run probe:data-capture` says otherwise —
+     * flipping it early does not degrade, it takes search down.
+     * ────────────────────────────────────────────────────────────────────── */
+    const ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
+    const COLLIDING_IDS = ['anon', 'ts_fallback'];
+    const USE_ID_HEADERS = false; // BF-054 — see probe:data-capture §1
+
+    /** The id, or null. Null means "we don't know", and nothing is sent. */
+    function usableId(value) {
+        if (typeof value !== 'string') return null;
+        if (!ID_PATTERN.test(value)) return null;
+        if (COLLIDING_IDS.indexOf(value) !== -1) return null;
+        return value;
+    }
+
+    /**
+     * { session_id, visitor_id } — either key may be absent, and the whole
+     * result is null when neither id is usable. A partial answer is still worth
+     * sending: a visitor id with no session still joins a search to a person.
+     */
+    function getIds() {
+        const out = {};
+        const session = usableId(getSessionId());
+        const visitor = usableId(getVisitorId());
+        if (session) out.session_id = session;
+        if (visitor) out.visitor_id = visitor;
+        return (session || visitor) ? out : null;
+    }
+
+    /**
+     * Stamp ?sid=/?vid= onto a GET search request. Accepts a plain params object
+     * (API.catalogEndpoint) or a URLSearchParams (API.searchSuggest), and returns
+     * the same kind it was given, unchanged when there is nothing to add — an
+     * empty `sid=` is not a smaller version of the truth, it is a different and
+     * wrong one.
+     */
+    function identifyQuery(params) {
+        const ids = getIds();
+        if (!ids) return params;
+        const isUsp = params && typeof params.append === 'function';
+        const target = params || {};
+        if (ids.session_id) { isUsp ? target.set('sid', ids.session_id) : (target.sid = ids.session_id); }
+        if (ids.visitor_id) { isUsp ? target.set('vid', ids.visitor_id) : (target.vid = ids.visitor_id); }
+        return target;
+    }
+
+    /** Stamp ?sid=/?vid= onto an already-built URL string (the raw-fetch callers). */
+    function identifyUrl(url) {
+        const ids = getIds();
+        if (!ids || typeof url !== 'string' || !url) return url;
+        const parts = [];
+        if (ids.session_id) parts.push('sid=' + encodeURIComponent(ids.session_id));
+        if (ids.visitor_id) parts.push('vid=' + encodeURIComponent(ids.visitor_id));
+        if (!parts.length) return url;
+        return url + (url.indexOf('?') === -1 ? '?' : '&') + parts.join('&');
+    }
+
+    /** Stamp session_id/visitor_id into a POST body (the click beacon). */
+    function identifyBody(body) {
+        const ids = getIds();
+        if (!ids || !body || typeof body !== 'object') return body;
+        if (ids.session_id) body.session_id = ids.session_id;
+        if (ids.visitor_id) body.visitor_id = ids.visitor_id;
+        return body;
+    }
+
+    /**
+     * Headers, for the day BF-054 lands. Returns {} today so a caller that
+     * spreads it is already written correctly and needs no edit later.
+     */
+    function identifyHeaders(headers) {
+        const target = headers || {};
+        if (!USE_ID_HEADERS) return target;
+        const ids = getIds();
+        if (!ids) return target;
+        if (ids.session_id) target['X-Session-Id'] = ids.session_id;
+        if (ids.visitor_id) target['X-Visitor-Id'] = ids.visitor_id;
+        return target;
+    }
+
     init();
     window.TrafficTracker = {
         trackPageview,
         send: (type, extra) => send(baseEvent(type, extra)),
+        // The analytics join key. Read-only: these never mint an id that the
+        // pageview beacon has not already established, and they do not exist at
+        // all under DNT or on /admin.
+        getIds,
+        identifyQuery,
+        identifyUrl,
+        identifyBody,
+        identifyHeaders,
         // exposed for tests + diagnostics; do not rely on these in product code
+        _usableId: usableId,
+        _useIdHeaders: () => USE_ID_HEADERS,
         _getUtmRid: getUtmRid,
         _getAccessToken: getAccessToken,
     };

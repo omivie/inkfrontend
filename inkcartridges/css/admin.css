@@ -6307,3 +6307,101 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   .admin-sp-offer { grid-template-columns: 1fr; gap: 8px; }
   .admin-sp-honesty__figures { gap: 16px; }
 }
+
+/* ── Quote outcome modal (data-tracking-capture aug2026 §2.2) ───────────────
+   The commercial result of a quick order — won/lost/pending, and for a loss,
+   why. Fields reuse .admin-form-group / .admin-input / .admin-select; only the
+   two explanatory lines and the blocked-transport message need styling. */
+.qo-outcome__hint {
+    margin: 4px 0 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+.qo-outcome__decided {
+    margin: 4px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+/* A blocked save must READ as blocked. Not a muted hint, not a toast that
+   scrolls away — the operator needs to know their number was not stored. */
+.qo-outcome__error {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--danger-dim);
+    color: #f87171;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* ── Conversion funnel card (data-tracking-capture aug2026 §2.3) ────────────
+   A stage list, not a chart: the interesting content is the RATE beside each
+   step and the callout when a step is impossible, neither of which a canvas
+   renders honestly. */
+.admin-conv-funnel { list-style: none; margin: 0; padding: 0; }
+.admin-conv-funnel__row {
+    display: grid;
+    grid-template-columns: 1fr 34% 56px 62px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+.admin-conv-funnel__row:last-child { border-bottom: 0; }
+.admin-conv-funnel__label { color: var(--text-secondary); }
+.admin-conv-funnel__bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border);
+    overflow: hidden;
+}
+.admin-conv-funnel__bar i {
+    display: block;
+    height: 100%;
+    background: var(--cyan-text, #5cb8e6);
+    border-radius: 4px;
+}
+.admin-conv-funnel__count { text-align: right; font-variant-numeric: tabular-nums; }
+.admin-conv-funnel__rate {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+/* An impossible stage must not look like a small one. No bar, muted figures. */
+.admin-conv-funnel__row--broken .admin-conv-funnel__label,
+.admin-conv-funnel__row--broken .admin-conv-funnel__count { color: var(--yellow-text); }
+.admin-conv-funnel__row--broken .admin-conv-funnel__bar { background: transparent; }
+
+.admin-conv-funnel__overall {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 12px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.admin-conv-funnel__overall strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.admin-conv-funnel__broken,
+.admin-conv-funnel__gap {
+    margin: 10px 0 0;
+    padding: 9px 11px;
+    border-radius: 6px;
+    background: var(--yellow-dim);
+    color: var(--yellow-text);
+    font-size: 11px;
+    line-height: 1.5;
+}
+.admin-conv-funnel__broken code, .admin-conv-funnel__gap code { font-size: 10.5px; }
+.admin-conv-funnel__source,
+.admin-conv-funnel__empty {
+    margin: 8px 0 0;
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--text-muted);
+}

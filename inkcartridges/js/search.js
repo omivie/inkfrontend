@@ -171,7 +171,16 @@
     // reason the backend misidentified this surface's feed (ERR-144).
     async function fetchSmart(query, signal) {
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
-        const url = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
+        const plain = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
+        // ?sid=/?vid= — the analytics join key (data-tracking-capture aug2026
+        // §1.1). This is the highest-volume search surface on the site, and it
+        // is a raw fetch that never enters API.request, so it has to ask for the
+        // ids itself. `window.` is correct here: TrafficTracker really is on
+        // window, unlike `Config` (ERR-156). Returns the URL untouched under
+        // DNT, on /admin, or before the tracker has loaded — never a blank param.
+        const url = (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyUrl)
+            ? window.TrafficTracker.identifyUrl(plain)
+            : plain;
         // Public search read — cookies explicitly omitted (ERR-124).
         const res = await fetch(url, { signal, credentials: 'omit' });
         let json = null;
@@ -472,6 +481,10 @@
                 const sorted = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
                     ? ProductSort.byCodeThenColor(items)
                     : items;
+                // Two rows a shopper cannot tell apart get their SKU printed on the
+                // card (ERR-195). Runs on the SORTED list so a group is always
+                // adjacent, and marks only — it never filters or reorders.
+                if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(sorted);
                 const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
                     ? new Set(ProductSort.rowBreakIndices(sorted))
                     : new Set();

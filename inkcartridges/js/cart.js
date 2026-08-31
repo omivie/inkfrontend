@@ -1334,6 +1334,15 @@ const Cart = {
                 quantity_breaks: Array.isArray(item.quantity_breaks) ? item.quantity_breaks : null
             };
             parsed.key = self.cartItemKey(parsed);
+            // printer_slug is a CLIENT-SIDE annotation — the server cart has no
+            // column for it — so it has to be re-attached here or it dies on the
+            // first loadFromServer(), which addItem() calls on itself. The map
+            // above is a documented whitelist (see the quantity_breaks note and
+            // ERR-150); this is the same trap one field along.
+            if (typeof PrinterContext !== 'undefined') {
+                const printerSlug = PrinterContext.slugFor(parsed.key);
+                if (printerSlug) parsed.printer_slug = printerSlug;
+            }
             return parsed;
         });
 
@@ -2505,6 +2514,33 @@ const Cart = {
      * Both guest and authenticated users use server-side cart
      * Also saves to localStorage for cross-origin cookie fallback
      */
+    /**
+     * Emit `add_to_cart` — the one place that does.
+     *
+     * `cart-analytics.js` used to be loaded on THREE pages (cart, checkout,
+     * payment) while this file is loaded on 33, so `typeof CartAnalytics !==
+     * 'undefined'` was false on every page a shopper actually adds from: the
+     * PDP, shop cards, the homepage, ribbons, favourites, business. The guard
+     * was an off-switch. Over the whole of history `add_to_cart` recorded 56
+     * events against `cart_viewed`'s 1,128 — the survivors were the cart page's
+     * own value-pack swap and cross-sell modal, and when that trickle stopped on
+     * 2026-08-11 the metric read as a feature breaking rather than as one that
+     * had never worked. Every page loading cart.js now loads cart-analytics.js,
+     * and tests/cart-funnel-enrolment-aug2026.test.js keeps it that way.
+     *
+     * The `typeof` guard stays: it is correct defensive style for a script that
+     * could still be absent (a page that loads cart.js alone, a future template),
+     * and it is not the bug. The missing <script> was.
+     */
+    _trackAdd(product) {
+        if (typeof CartAnalytics === 'undefined' || !product) return;
+        try {
+            CartAnalytics.trackAddToCart(product, product.quantity || 1);
+        } catch (err) {
+            DebugLog.warn('add_to_cart tracking failed (non-fatal):', err);
+        }
+    },
+
     async addItem(product) {
         // The cart's `source` field is a SUBSYSTEM namespace — it tags where
         // the row was added from ('core' for the main catalog, 'cross-sell'
@@ -2527,6 +2563,28 @@ const Cart = {
         const key = this.cartItemKey({ source: source, sku: product.sku, slug: product.slug, id: product.id });
         const isCore = source === 'core';
 
+        // Printer context (data-tracking-capture aug2026 §1.2). The caller passes
+        // a slug ONLY when a printer-scoped URL genuinely supplied one — never
+        // derived from a brand, a name or a compatibility list. It is recorded
+        // against the line key rather than only on the line, because the line is
+        // about to be rebuilt from the server, which has no printer column.
+        //
+        // It is deliberately NOT part of cartItemKey: the same cartridge bought
+        // for two printers is one cart line, and re-keying on it would orphan the
+        // pending-op journal exactly the way `source` would (see _parseServerCart).
+        // An explicit value from the caller wins (the PDP and the shop grid hold
+        // the slug in state and stay authoritative even after the URL is
+        // rewritten by a filter change). Otherwise fall back to the page's own
+        // scope: an add made on a page whose URL carries ?printer_slug= IS an
+        // add for that printer, which covers the generic card handler in
+        // products.js and the ribbons grid without threading a parameter through
+        // either. `fromLocation` reads ?printer_slug= and nothing else — never
+        // ?printer_model= or ?printer_brand=, which are not slugs.
+        const printerSlug = (typeof PrinterContext !== 'undefined')
+            ? (PrinterContext.normalize(product.printer_slug) || PrinterContext.fromLocation())
+            : null;
+        if (printerSlug) PrinterContext.remember(key, printerSlug);
+
         // Re-adding supersedes any unconfirmed removal of the same line. Without
         // this, "remove → re-add → refresh" replays a DELETE against the row that was
         // just put back (ERR-136).
@@ -2548,6 +2606,15 @@ const Cart = {
             if (productSource && !existingItem.product_source) {
                 existingItem.product_source = productSource;
             }
+            // Re-read rather than assigning printerSlug directly: remember()
+            // may have just marked this line AMBIGUOUS (a second, different
+            // printer), and slugFor() answers null for that. Writing the raw
+            // value here would hand the payload a coin toss.
+            if (typeof PrinterContext !== 'undefined') {
+                const resolved = PrinterContext.slugFor(key);
+                if (resolved) existingItem.printer_slug = resolved;
+                else delete existingItem.printer_slug;
+            }
         } else {
             this.items.push({
                 id: product.id,
@@ -2562,7 +2629,9 @@ const Cart = {
                 source: source,
                 product_source: productSource,
                 key: key,
-                slug: product.slug || ''
+                slug: product.slug || '',
+                // Present only when known; absent is the honest default.
+                ...(printerSlug ? { printer_slug: printerSlug } : {})
             });
         }
 
@@ -2595,6 +2664,13 @@ const Cart = {
                     if (typeof showToast === 'function') {
                         showToast(API.extractErrorMessage(response, 'Failed to add item to cart'), 'error');
                     }
+                    // NO add_to_cart here, deliberately: the server refused, the
+                    // line was rolled back, and the shopper's cart does not
+                    // contain it. Contrast the transport-failure catch below,
+                    // where the item IS in the cart. (The other half of that
+                    // pair is the reason this comment exists — an add that the
+                    // customer can see must be counted; one that was undone
+                    // must not.)
                     return;
                 }
 
@@ -2633,6 +2709,14 @@ const Cart = {
                 if (typeof showToast === 'function') {
                     showToast('Item saved locally. It will sync when connection is restored.', 'info');
                 }
+                // THE ADD HAPPENED — track it before returning. This branch keeps
+                // the item, saves it, and shows it in the shopper's cart; the only
+                // thing that failed is the server round-trip. Returning here
+                // without emitting meant a spell of cart-API flakiness silently
+                // zeroed add_to_cart while customers were still adding things,
+                // and the metric gave no hint that it was measuring the API's
+                // health rather than shopper behaviour.
+                this._trackAdd(product);
                 return;
             }
         }
@@ -2642,9 +2726,7 @@ const Cart = {
         }
 
         // Track analytics
-        if (typeof CartAnalytics !== 'undefined') {
-            CartAnalytics.trackAddToCart(product, product.quantity || 1);
-        }
+        this._trackAdd(product);
 
         // Show "Customers also bought" carousel from add-to-cart response.
         // Inline products render immediately; URL fallback fetches on idle so

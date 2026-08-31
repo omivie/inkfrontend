@@ -207,6 +207,7 @@ const Products = {
                     <div class="product-card__content">
                         ${brandEyebrowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayTitle)}">${Security.escapeHtml(displayTitle)}</h3>
+                        ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
                         ${qualifiesForFreeShipping(product) ? '<div class="product-card__info-row"><span class="product-card__free-shipping">Free Shipping</span></div>' : ''}
                         <div class="product-card__footer">
@@ -368,6 +369,11 @@ const Products = {
         const ordered = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
             ? ProductSort.byCodeThenColor(products)
             : products;
+        // Two rows a shopper cannot tell apart get their SKU printed on the
+        // card (ERR-195). Runs on the SORTED list so a group is always
+        // adjacent, and marks only — it never filters or reorders.
+        if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(ordered);
+
         const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
             ? new Set(ProductSort.rowBreakIndices(ordered))
             : new Set();

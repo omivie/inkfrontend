@@ -2735,7 +2735,12 @@
                                     name: item.name,
                                     price: item.price,
                                     quantity: 1,
-                                    product_source: item.source || null
+                                    product_source: item.source || null,
+                                    // Colour-pack "Add all" — a whole pack bought
+                                    // for the printer hub currently in the URL.
+                                    printer_slug: (typeof PrinterContext !== 'undefined')
+                                        ? PrinterContext.fromLocation()
+                                        : null
                                 });
                             }
                             this.textContent = 'Added!';
@@ -3961,6 +3966,11 @@
                     : new Set();
             }
 
+            // Two rows a shopper cannot tell apart get their SKU printed on the
+            // card (ERR-195). Runs on the SORTED list so a group is always
+            // adjacent, and marks only — it never filters or reorders.
+            if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(sortedProducts);
+
             sortedProducts.forEach((product, i) => {
                 if (breaks.has(i)) {
                     const breaker = document.createElement('div');
@@ -4185,6 +4195,7 @@
                     <div class="product-card__content">
                         ${infoRowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
+                        ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${ratingHTML}
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
@@ -4297,7 +4308,12 @@
                     brand: product.brand?.name || '',
                     color: product.color || '',
                     quantity: 1,
-                    product_source: product.source || null
+                    product_source: product.source || null,
+                    // The printer hub the shopper is browsing, if any
+                    // (data-tracking-capture aug2026 §1.2). `state.printer` is
+                    // the parsed ?printer_slug= at :853 — the same value already
+                    // appended to every product-card href.
+                    printer_slug: (this.state && this.state.printer) || null
                 });
 
                 button.textContent = 'Added!';

@@ -1836,6 +1836,15 @@ const API = {
         if (typeof DebugLog !== 'undefined') {
             DebugLog.warn(`[API.getProduct] /api/products/${sku} unhealthy (${primary.kind}/${primary.status || ''}) — trying search-smart fallback`);
         }
+        // DELIBERATELY NOT identified with ?sid=/?vid= (data-tracking-capture
+        // aug2026 §1.1). Nobody searched for this — it is a recovery lookup the
+        // page makes on its own behalf when /api/products/:sku is unhealthy.
+        // Stamping a visitor's id on a machine-generated query would file a
+        // search the customer never ran, and then credit it with whatever order
+        // followed — inflating the exact search→order conversion this feature
+        // exists to measure. An unattributed row is a gap; a fabricated one is
+        // a wrong number that looks right. Same call, same reasoning, in
+        // product-detail-page.js's slug→SKU fallback.
         const fb = await this._rawJsonFetch(`/api/search/smart?q=${encoded}&limit=10`);
         const products = fb.kind === 'ok' && fb.body && fb.body.ok && fb.body.data && Array.isArray(fb.body.data.products)
             ? fb.body.data.products : [];
@@ -1989,50 +1998,232 @@ const API = {
     },
 
     /**
-     * Get ribbon device brands from ribbon_brands table (Supabase REST direct)
-     * Returns array of { id, name, slug, image_url, sort_order }
-     * Uses direct fetch to avoid Auth timing issues on page load.
+     * Timeout for the direct-to-Supabase storefront reads below.
+     *
+     * These two helpers do NOT go through API.request()/_fetchWithAuth, so they
+     * inherit none of its AbortController, retry ladder, 429 handling or
+     * request-id capture. Without an explicit bound a hung socket leaves the
+     * ribbons page spinning its skeleton forever — no catch, nothing to retry.
      */
-    async getRibbonBrandsList() {
+    ANON_REST_TIMEOUT_MS: 12000,
+
+    /**
+     * One anon Supabase REST call, with the failure REPORTED rather than flattened.
+     *
+     * ERR-193. Both ribbon helpers used to `throw new Error('HTTP ' + status)`
+     * into their own catch and return a bare `{ ok:false, data:{ …: [] } }`. The
+     * page then could not tell "this brand stocks nothing" from "the database
+     * refused us", and rendered the merchandising copy for both. On 2026-08-29 a
+     * column grant changed, `get_ribbons_by_brand` began answering 401, and all
+     * 63 ribbon brand pages read "No ribbons found … Check back soon!" for 44
+     * hours. The reason was in the response body the whole time:
+     *
+     *     {"code":"42501","message":"permission denied for table products"}
+     *
+     * So the reason travels now. `code` is PostgREST's own when it sends one —
+     * that is the string that would have named this outage on day one — and
+     * `HTTP_<status>` otherwise. A timeout and a network failure are separate
+     * codes again, because "we could not reach the server" and "the server said
+     * no" call for different words and only one of them is worth retrying.
+     *
+     * @param {string} url
+     * @param {object} init      fetch init (headers/method/body); `signal` is ours
+     * @param {string} label     for the dev-console line
+     * @returns {Promise<{ok:true, rows:*}|{ok:false, error:string, code:string, status:number|null}>}
+     */
+    async _anonRest(url, init, label) {
+        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const timer = controller
+            ? setTimeout(() => controller.abort(), this.ANON_REST_TIMEOUT_MS)
+            : null;
         try {
-            const url = `${Config.SUPABASE_URL}/rest/v1/ribbon_brands?is_active=eq.true&order=sort_order.asc&select=id,name,slug,image_url,sort_order`;
-            const resp = await fetch(url, {
-                headers: {
-                    'apikey': Config.SUPABASE_ANON_KEY,
-                    'Accept': 'application/json',
-                },
-            });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            return { ok: true, data: { brands: data || [] } };
+            const resp = await fetch(url, controller ? { ...init, signal: controller.signal } : init);
+            if (!resp.ok) {
+                // PostgREST puts the real reason in a JSON body even on a 401.
+                let code = `HTTP_${resp.status}`;
+                let message = `HTTP ${resp.status}`;
+                try {
+                    const body = await resp.json();
+                    if (body && typeof body === 'object') {
+                        if (body.code) code = String(body.code);
+                        if (body.message) message = String(body.message);
+                    }
+                } catch (_) { /* non-JSON body — the status is all we get */ }
+                if (typeof DebugLog !== 'undefined') {
+                    DebugLog.error(`[API] ${label} failed: ${resp.status} ${code} — ${message}`);
+                }
+                return { ok: false, error: message, code, status: resp.status };
+            }
+            let rows;
+            try {
+                rows = await resp.json();
+            } catch (_) {
+                if (typeof DebugLog !== 'undefined') DebugLog.error(`[API] ${label}: unreadable 200 body`);
+                return { ok: false, error: 'Unreadable response from the catalogue.', code: 'BAD_RESPONSE', status: resp.status };
+            }
+            return { ok: true, rows };
         } catch (e) {
-            if (typeof DebugLog !== 'undefined') DebugLog.warn('[API] getRibbonBrandsList failed:', e.message);
-            return { ok: false, data: { brands: [] } };
+            const timedOut = e && e.name === 'AbortError';
+            const code = timedOut ? 'TIMEOUT' : 'NETWORK_ERROR';
+            const message = timedOut
+                ? 'The catalogue took too long to respond.'
+                : ((e && e.message) || 'Network error');
+            if (typeof DebugLog !== 'undefined') DebugLog.error(`[API] ${label} failed: ${code} — ${message}`);
+            return { ok: false, error: message, code, status: null };
+        } finally {
+            if (timer) clearTimeout(timer);
         }
     },
 
     /**
-     * Get ribbons by device brand slug via Supabase RPC (bypasses broken backend filter)
+     * Get ribbon device brands from ribbon_brands table (Supabase REST direct)
+     * Returns array of { id, name, slug, image_url, sort_order }
+     * Uses direct fetch to avoid Auth timing issues on page load.
+     *
+     * A failure is an ENVELOPE, not an empty list — see `_anonRest`. The brand
+     * grid had the same defect as the brand pages: a failed load rendered the
+     * "nothing here" pane.
+     */
+    /** In-flight/settled brand list, memoised for the session. Successes only. */
+    _ribbonBrandsPromise: null,
+
+    async getRibbonBrandsList() {
+        // Three callers race for this list on a brand page — the grid, the label
+        // resolver and the mega-nav — and each used to fire its own round trip.
+        // Memoising also makes the properly-cased label ("HP", not "Hp") free to
+        // await before painting an empty state, which is how the pane stopped
+        // disagreeing with the H1 two lines above it.
+        if (this._ribbonBrandsPromise) return this._ribbonBrandsPromise;
+        const attempt = this._fetchRibbonBrandsList();
+        this._ribbonBrandsPromise = attempt;
+        const settled = await attempt;
+        if (!settled || settled.ok !== true) this._ribbonBrandsPromise = null;  // never cache a failure
+        return settled;
+    },
+
+    async _fetchRibbonBrandsList() {
+        const url = `${Config.SUPABASE_URL}/rest/v1/ribbon_brands?is_active=eq.true&order=sort_order.asc&select=id,name,slug,image_url,sort_order`;
+        const res = await this._anonRest(url, {
+            headers: {
+                'apikey': Config.SUPABASE_ANON_KEY,
+                'Accept': 'application/json',
+            },
+        }, 'getRibbonBrandsList');
+        if (!res.ok) {
+            return { ok: false, error: res.error, code: res.code, status: res.status, data: { brands: [] } };
+        }
+        return { ok: true, data: { brands: res.rows || [] } };
+    },
+
+    /**
+     * Get ribbons by device brand slug via Supabase RPC.
+     *
+     * This is the storefront's only RPC and one of its few direct database
+     * calls: `/api/ribbons?printer_brand=` filters by PRINTER-MODEL brand, while
+     * the page groups by the curated `ribbon_brands` taxonomy, and the two do not
+     * agree (measured 2026-08-31: this RPC returns 10 rows for `brother`, the API
+     * route returns 7). They are different questions, so the RPC cannot simply be
+     * swapped for the route — see ribbon-brand-pages-FE-response-aug2026.md.
+     *
+     * The response carries 24 explicitly-projected public columns. It deliberately
+     * does NOT carry `cost_price` / `profit_ex_gst` / `margin_pct` (cost and margin,
+     * never public), `compatible_devices_html` (service-role only) or `color_hex`.
+     * Do not ask for a wider projection; ask the backend for the field.
+     *
+     * It also carries no `quantity_breaks` — the volume ladder is attached
+     * separately by `getRibbonLadders()`.
+     *
+     * @param {string} brandSlug  `ribbon_brands.slug`
      */
     async getRibbonsByBrand(brandSlug) {
-        try {
-            const url = `${Config.SUPABASE_URL}/rest/v1/rpc/get_ribbons_by_brand`;
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'apikey': Config.SUPABASE_ANON_KEY,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({ brand_slug: brandSlug }),
-            });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            return { ok: true, data: { products: data || [] } };
-        } catch (e) {
-            if (typeof DebugLog !== 'undefined') DebugLog.warn('[API] getRibbonsByBrand failed:', e.message);
-            return { ok: false, data: { products: [] } };
+        const url = `${Config.SUPABASE_URL}/rest/v1/rpc/get_ribbons_by_brand`;
+        const res = await this._anonRest(url, {
+            method: 'POST',
+            headers: {
+                'apikey': Config.SUPABASE_ANON_KEY,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({ brand_slug: brandSlug }),
+        }, 'getRibbonsByBrand');
+        if (!res.ok) {
+            return { ok: false, error: res.error, code: res.code, status: res.status, data: { products: [] } };
         }
+        return { ok: true, data: { products: res.rows || [] } };
+    },
+
+    /** In-flight/settled ladder lookup, memoised for the session. Successes only. */
+    _ribbonLadderPromise: null,
+
+    /**
+     * The whole ribbon catalogue's volume ladders and brand names, in one request.
+     *
+     * WHY THIS EXISTS. `get_ribbons_by_brand` returns raw product columns and no
+     * `quantity_breaks[]`, so `Business.ingest()` received nothing on brand pages
+     * and a guest — who by design fires no `/api/business/*` request — saw no
+     * volume pricing there at all, while the very same ribbon showed its ladder on
+     * `/ribbons` and on its own PDP. The ladder cannot be computed in the browser
+     * (it is priced off `cost_price`, which must never leave the server), but it
+     * does not have to be: it is public data and `GET /api/ribbons` already serves
+     * it. Measured 2026-08-31 — the whole ribbon universe is 109 rows, every one
+     * carrying a populated ladder, and the 82 distinct SKUs that appear across all
+     * 63 brand pages are covered 82/82. One request, complete coverage.
+     *
+     * The response also carries `brand` as a resolved NAME string, which the RPC
+     * has only as a `brand_id` UUID — that is why the favourites button on a brand
+     * page shipped `data-product-brand=""`.
+     *
+     * Only a SUCCESS is memoised. Caching a failure would disable the ladder for
+     * the rest of the session over one blip, and a missing ladder is invisible.
+     *
+     * @returns {Promise<{ok:boolean, bySku:Map<string,{quantity_breaks:Array, brand:(string|null)}>, error?:string, code?:string}>}
+     */
+    async getRibbonLadders() {
+        if (this._ribbonLadderPromise) return this._ribbonLadderPromise;
+        const attempt = (async () => {
+            let res;
+            try {
+                // limit=200 is the endpoint's hard maximum (201+ is a 400) and is
+                // comfortably above the 109 ribbons that exist. If the catalogue
+                // ever outgrows it the `truncated` flag below says so out loud
+                // rather than silently dropping the tail's ladders.
+                res = await this.getRibbons({ limit: 200 });
+            } catch (e) {
+                return { ok: false, bySku: new Map(), error: (e && e.message) || 'Network error', code: 'NETWORK_ERROR' };
+            }
+            if (!res || res.ok !== true) {
+                return {
+                    ok: false,
+                    bySku: new Map(),
+                    error: (res && res.error) || 'Could not load volume pricing.',
+                    code: (res && res.code) || 'UNKNOWN',
+                };
+            }
+            const rows = (res.data && (res.data.ribbons || res.data.products)) || [];
+            const bySku = new Map();
+            for (const r of rows) {
+                const sku = (r && typeof r.sku === 'string') ? r.sku.trim() : '';
+                if (!sku) continue;
+                bySku.set(sku, {
+                    // ABSENCE IS NOT AN EMPTY LADDER (business.js). Only pass the
+                    // key through when the payload actually sent an array, so a
+                    // backend that stops embedding it falls through to the authed
+                    // route instead of reporting a confident "no discount".
+                    quantity_breaks: Array.isArray(r.quantity_breaks) ? r.quantity_breaks : null,
+                    brand: (typeof r.brand === 'string' && r.brand.trim()) ? r.brand.trim() : null,
+                });
+            }
+            const total = Number(res.meta && res.meta.total);
+            const truncated = Number.isFinite(total) && total > rows.length;
+            if (truncated && typeof DebugLog !== 'undefined') {
+                DebugLog.error(`[API] getRibbonLadders: ${rows.length} of ${total} ribbons fetched — ladders missing for the remainder`);
+            }
+            return { ok: true, bySku, truncated };
+        })();
+        this._ribbonLadderPromise = attempt;
+        const settled = await attempt;
+        if (!settled.ok) this._ribbonLadderPromise = null;   // never cache a failure
+        return settled;
     },
 
     /**
@@ -2045,8 +2236,25 @@ const API = {
     },
 
     /**
-     * Get ribbons with optional filters
-     * @param {object} params - Filter parameters (printer_brand, printer_model, brand, type, color, search, sort, page, limit)
+     * Get ribbons with optional filters.
+     *
+     * WHICH PARAMS ACTUALLY FILTER, measured against production 2026-08-31 by
+     * comparing each one's `meta.total` against the unfiltered 109:
+     *
+     *   WORKS   printer_brand · printer_model · brand · color · sort · page · limit
+     *   IGNORED type · search · ribbon_brand
+     *
+     * The ignored three are not rejected — they answer `ok:true` with the FULL
+     * unfiltered set, and `type=bogus_zzz` returns all 109 just the same. This
+     * docblock used to list `type` and `search` as though they worked. A request
+     * that looks filtered, returns rows and repaints the page, while every row is
+     * wrong, is the ERR-151/173/190 decoy shape; `npm run probe:ribbon-brands`
+     * guards all three in BOTH directions, so the day one starts working is
+     * reported as loudly as the day it breaks.
+     *
+     * `limit` is capped at 200 — 201 is a hard 400, not a silent clamp.
+     *
+     * @param {object} params - printer_brand, printer_model, brand, color, sort, page, limit
      */
     async getRibbons(params = {}) {
         const query = new URLSearchParams(params).toString();
@@ -2195,13 +2403,63 @@ const API = {
         // (Previously: `typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart'` —
         //  `searchConfig` was never defined anywhere; the fallback was the
         //  only branch ever taken. Inlined to its actual value.)
-        const endpoint = this.catalogEndpoint('/api/search/smart', {
+        //
+        // ANALYTICS JOIN KEY (data-tracking-capture aug2026 §1.1). ?sid=/?vid=
+        // carry the traffic beacon's own session/visitor ids so a search can be
+        // joined to the order it produced. Header transport is CORS-blocked —
+        // see the block comment in traffic-tracker.js. `identifyQuery` returns
+        // the object untouched when there is no id to add (DNT, /admin, private
+        // browsing), so no empty param is ever emitted, and the pair sorts into
+        // catalogEndpoint's deterministic extras tail.
+        //
+        // ⚠️ If /api/search/smart is ever added to the Cloudflare Cache Rule,
+        // these params become part of the cache key and shatter the shared entry
+        // one visitor at a time. probe:data-capture §2 fails the moment
+        // cf-cache-status stops saying DYNAMIC, precisely so that is caught
+        // before it ships. Flip to headers (BF-054) first.
+        const endpoint = this.catalogEndpoint('/api/search/smart', this.identifySearch({
             q: query,
             limit: opts.limit ?? 24,
             page: opts.page,
             include: opts.include || 'compat,description'
-        });
+        }));
         return this.getPublic(endpoint);
+    },
+
+    /**
+     * Stamp the analytics session/visitor ids onto a search request's params.
+     *
+     * A thin, null-safe forwarder to the one owner of that vocabulary,
+     * `window.TrafficTracker` (js/traffic-tracker.js). It is a method on API so
+     * every search call site inside this file reads the same way, and so a
+     * missing tracker — DNT, /admin, or the script simply not loaded yet — is
+     * handled in ONE place rather than six.
+     *
+     * `window.` is deliberate and load-bearing: TrafficTracker really is on
+     * window (traffic-tracker.js, last statement), unlike `Config` / `Security`,
+     * which are bare consts whose `window.X?.` guards were silent off-switches
+     * (ERR-156 / ERR-167). Grep the `window.X =` line before copying this shape.
+     *
+     * @param {object|URLSearchParams} params
+     * @returns {object|URLSearchParams} the same object, ids added when known.
+     */
+    identifySearch(params) {
+        try {
+            const tt = typeof window !== 'undefined' ? window.TrafficTracker : null;
+            return (tt && typeof tt.identifyQuery === 'function') ? tt.identifyQuery(params) : params;
+        } catch (_) {
+            return params;
+        }
+    },
+
+    /** As identifySearch, for a call site that has already built its URL string. */
+    identifySearchUrl(url) {
+        try {
+            const tt = typeof window !== 'undefined' ? window.TrafficTracker : null;
+            return (tt && typeof tt.identifyUrl === 'function') ? tt.identifyUrl(url) : url;
+        } catch (_) {
+            return url;
+        }
     },
 
     /**
@@ -2239,7 +2497,8 @@ const API = {
     async searchSuggest(query, limit = 10) {
         if (!query || String(query).trim().length < 2) return [];
         try {
-            const params = new URLSearchParams({ q: query, limit: String(limit) });
+            // ?sid=/?vid= — the analytics join key (see identifySearch).
+            const params = this.identifySearch(new URLSearchParams({ q: query, limit: String(limit) }));
             const res = await this.getPublic(`/api/search/suggest?${params}`);
             if (res && res.ok && res.data && Array.isArray(res.data.suggestions)) {
                 return res.data.suggestions;
@@ -2655,6 +2914,44 @@ const API = {
      */
     async cancelOrder(orderNumber) {
         return this.post(`/api/orders/${orderNumber}/cancel`);
+    },
+
+    /**
+     * Ask us to take something back.
+     *
+     * POST /api/orders/:orderNumber/return-request
+     * (data-tracking-capture-fe-handoff-aug2026 §2.1)
+     *
+     * TWO DIFFERENT QUESTIONS, DELIBERATELY NOT ONE FIELD:
+     *  - `reason` is the COMMERCIAL why — required, and the thing that decides
+     *    who pays return shipping.
+     *  - `issue_type` is the TECHNICAL why — optional, and the one that makes an
+     *    issue RATE per (SKU × printer × supplier) computable. "Faulty" across
+     *    two suppliers tells you nothing; "not_recognised on Brother, from this
+     *    supplier, 6 times" tells you which stock to stop buying.
+     * The supplier is filled in server-side from the order line's own snapshot —
+     * never ask the customer, and never send one from here.
+     *
+     * `printer_model` is free text the customer types (or that we prefill from
+     * the line's printer context, when §1.2 gave us one).
+     *
+     * Optional fields are OMITTED when blank rather than sent as ''. An empty
+     * string is a value; it would land in the taxonomy as a real, meaningless
+     * category and quietly dilute every rate computed off it.
+     *
+     * @param {string} orderNumber
+     * @param {{reason: string, issue_type?: string, printer_model?: string,
+     *          items?: Array, comment?: string}} body
+     */
+    async createReturnRequest(orderNumber, body) {
+        const payload = { reason: (body && body.reason) || '' };
+        const optional = ['issue_type', 'printer_model', 'comment'];
+        optional.forEach((key) => {
+            const v = body && body[key];
+            if (typeof v === 'string' && v.trim()) payload[key] = v.trim();
+        });
+        if (body && Array.isArray(body.items) && body.items.length) payload.items = body.items;
+        return this.post(`/api/orders/${encodeURIComponent(orderNumber)}/return-request`, payload);
     },
 
     /**
