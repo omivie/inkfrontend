@@ -799,9 +799,47 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
 }
 .admin-product-modal__actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
+/* Absolutely positioned and centred on the header, so it is OUT OF FLOW: it does
+   not push the order number or the status badge aside, it slides under them. The
+   parent is `overflow: hidden`, so anything too wide is CLIPPED, not scrolled —
+   there is no scrollbar to tell you a button went missing. `max-width` reserves
+   the title (220px + gaps) and the badge, and `flex-wrap` lets the row become two
+   rather than disappear. Added when the sixth button (Shipping) arrived. */
 .om-header-btns {
   position: absolute; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px; align-items: center;
+  flex-wrap: wrap; justify-content: center;
+  max-width: calc(100% - 560px);
+}
+/* Below this width the centred group cannot fit beside the title and badge at
+   all, so it stops being centred: the header wraps and the actions take their own
+   row. Legible beats clipped.
+
+   `.admin-product-modal__actions` must go full-width here, not just wrap. It is
+   the button row's containing block, and by default it is `flex-shrink: 0` with a
+   content-driven width — so `max-width: 100%` on the buttons resolved against an
+   unbounded box and they never wrapped, they just overflowed (measured: 120px
+   past the header edge at 620px, clipped by the modal's `overflow: hidden`).
+   Giving actions the full header row bounds it, and only then can the buttons
+   wrap inside it.
+
+   THE BREAKPOINT IS COUPLED TO THE NUMBER OF BUTTONS. Above it the group is
+   absolutely positioned, and an absolute box CANNOT grow its parent — so if the
+   buttons wrap while still absolute, the second row spills out of the 61px header
+   and over the content beneath (measured: 21px of overflow at 1220px with six
+   buttons). 1360px is the width at which six buttons still fit on one line inside
+   `calc(100% - 560px)`. **Add a seventh button and this number must go up**, or
+   verify the group still fits on one row at the breakpoint. */
+@media (max-width: 1360px) {
+  .admin-product-modal__header { flex-wrap: wrap; }
+  .admin-product-modal__actions {
+    order: 3; width: 100%; margin-left: 0; min-width: 0;
+    flex-wrap: wrap; flex-shrink: 1; justify-content: flex-start;
+  }
+  .om-header-btns {
+    position: static; transform: none; max-width: 100%;
+    order: 3; justify-content: flex-start;
+  }
 }
 
 .admin-product-modal__layout { display: flex; flex: 1; min-height: 0; }
@@ -864,6 +902,31 @@
    section reads correctly in both decks; --border/--text-secondary/--danger etc.
    are redefined per theme at the top of this file. */
 .om-shipping { margin-bottom: 6px; }
+
+/* The header's Shipping button scrolls here. Without the margin the heading lands
+   flush against #om-content's 20px padding and reads as cut off. */
+#om-ship-title { scroll-margin-top: 12px; }
+
+/* A one-shot cue that the jump landed. Theme tokens only, so it reads in both
+   decks — and it is a BACKGROUND wash rather than a colour change, so it says
+   "here" without implying the section is in an error or warning state. */
+@keyframes omShipFlash {
+  0%   { background: var(--cyan-dim, rgba(38,127,181,0.16)); }
+  100% { background: transparent; }
+}
+.om-shipping--flash {
+  animation: omShipFlash 1.4s ease-out;
+  border-radius: var(--radius-sm);
+}
+/* Reduced motion still gets a cue — it just holds still. Removing the feedback
+   entirely would leave the button looking like it did nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .om-shipping--flash {
+    animation: none;
+    outline: 2px solid var(--cyan); outline-offset: 4px;
+    border-radius: var(--radius-sm);
+  }
+}
 .om-ship-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start;
 }

@@ -178,6 +178,106 @@ mistake is invisible until the save you never questioned.
 
 ---
 
+### Follow-up, same day — the owner reviewed it and found a fourth field missing, a button missing, and (underneath both) a carrier the backend invents
+
+**The question that started it was a misreading, and answering it honestly was worth the trip.** The
+owner asked *"shouldn't there be three options of tracking?"* looking at the Update Status modal,
+which showed only Carrier and Tracking number. The ticket product code **was** there and behaving
+correctly — it appears when the chosen carrier's `requires_product_code` flag is true. But checking
+that claim turned up three things that were not fine.
+
+**(g) The Update Status modal had no Tracking URL field, and for two carriers that is the whole
+link.** The Shipping Information section has four inputs; Update Status had three. `dhl` and `other`
+are the two carriers with `builds_tracking_url: false` — for them the operator's pasted URL is the
+*only* way the customer ever gets a link. So marking an order shipped through Update Status with
+either carrier sent a shipping email **with no working link at all**, recoverable only by noticing
+and going back to the section. That is the failure this whole feature exists to prevent, shipped
+inside the fix for it. Update Status now has all four fields.
+
+**(h) Adding it by hand would have made a THIRD copy of the rules.** `showStatusModal` hand-wrote
+its own refusals (`if (!tracking)`, `requiresProductCode(carrier) && !pcode`) and hand-built its
+request body — while the section asked `utils/shipping-info.js` the same questions. **The hand-built
+body is precisely what forgot the tracking URL.** Both are gone: the modal now calls
+`validateShipping(form, carrier, { markShipped: true })` and `buildPayload(null, form, …)`, so the
+two surfaces refuse the same things in the same words, and the URL's `http://` rejection came along
+for free. Problems render **on the fields** in the section's own issue styling instead of a
+`Toast.warning` that vanishes pointing at nothing. Measured in the browser: all three refusals
+(missing ticket code, `http://` URL, no number) fire with **zero network calls**.
+
+**(i) The shipping section sits below the fold, and had no way to reach it.** It renders after the
+Dates block — measured at **883px** below the top of the modal's scroller on a real order — so on a
+tall order it was invisible unless you knew to scroll, while every other primary action had a header
+button. There is now a **Shipping** button that scrolls to it, flashes it and focuses the first
+field worth typing in. The jump targets the section's **heading**, not its body: `.om-section-title`
+is a *sibling* of `.om-shipping`, so scrolling to the body lands below the words. Focus uses
+`preventScroll` so it does not fight the smooth scroll, and it deliberately does **not** mark the
+field dirty — a field marked dirty by a button press would stop the send-history read correcting it.
+
+**(j) A sixth header button does not fit, and the header had no way to say so.** `.om-header-btns`
+is `position: absolute; left: 50%` with **no `max-width`, no `flex-wrap`, and no media query
+anywhere**, inside a parent that is `overflow: hidden`. Measured with six buttons: **120px of
+horizontal overflow at 620px wide, silently clipped** — no scrollbar, no wrap, buttons simply gone.
+The first fix was wrong in an instructive way: adding `flex-wrap` let the group wrap *while still
+absolutely positioned*, and **an absolute box cannot grow its parent**, so the second row spilled
+21px out of the 61px header and over the content beneath at 1220px. The breakpoint now sits at
+1360px — the width at which six buttons still fit on one line — and below it the group leaves
+absolute flow entirely and the header wraps. The number is coupled to the button count and the CSS
+says so out loud. Verified at 1440 / 1380 / 1220 / 820 / 620 / 520px: nothing clipped, nothing
+overlapping, every button reachable.
+
+**(k) THE ONE THAT MATTERED: the backend invents a carrier, and the panel was repeating it.** Found
+only because the section pre-selected **NZ Post** on an order the list showed as `carrier: null`.
+Measured rather than assumed: `shipping_information` reports `carrier: "NZ Post" / carrier_code:
+"nz_post"` on orders whose `orders.carrier` column is **null** — **25 of 25 sampled**, and **136 of
+the 149 live orders have a null carrier**. The order row carries the real column right beside the
+block (`hasOwnProperty(order,'carrier')` true, value `null`), and the two disagree.
+
+Left alone this is the UI asserting a fact the database does not hold, and the cost is an operator
+who ships an Aramex parcel without touching a dropdown that already looked answered. `reconcileCarrier()`
+corrects the block against the order's own column, and it corrects the **block**, not just the
+rendering — otherwise `buildPayload` would compare a blank dropdown against a phantom `nz_post` and
+send a pointless `carrier: ""` clear. It only ever corrects **downward** (a claimed carrier to none),
+never writes a row carrier *into* a block that has none — that would be the same bug, ours — and
+does nothing at all when we do not hold the row. `undefined` is not an authoritative null (ERR-199
+again). Reported as **BF-049**.
+
+**A process note worth keeping: the browser lied for twenty minutes, and the repo had already
+written down why.** After the fix landed, the panel still showed NZ Post. The served files had the
+new code; the page did not. `js/admin/utils/*.js` are imported **bare, with no `?v=` token** — that
+is deliberate (a versioned entry URL loads a second module instance and double-boots, ERR-046) — so
+`APP_VERSION` busts `pages/*.js` and **cannot** bust a util. Closing the browser fixed it instantly.
+*A stale util module is indistinguishable from a fix that does not work; when a verified change
+appears not to take, suspect the module cache before the code.*
+
+**Fix**: `js/admin/utils/shipping-info.js` (`reconcileCarrier`, `carrierWasDefaulted`),
+`js/admin/pages/orders.js` (URL field, `validateShipping`/`buildPayload` reuse, inline issues,
+header button, `focusShippingSection`, `shipRememberSavedCarrier`, dead `canCancel` removed),
+`css/admin.css` (header wrap + 1360px reflow, `omShipFlash` keyframes with a reduced-motion cue that
+still shows something, `scroll-margin-top`). `APP_VERSION` → `…-shipping-information-actions` +
+`npm run build`.
+
+**Verified**: full suite **4955 pass / 0 fail** (was 4928). Three new sections in
+`tests/order-shipping-information-sep2026.test.js` (§11 parity without a second copy, §12 the button
+and the jump, §13 the invented carrier) taking it to 116 subtests, with **three more positive
+controls** — a build that drops the URL from the form read, and a build with the carrier correction
+removed, both shown to produce the broken result the real code does not. One existing pin had to be
+**re-expressed rather than relaxed**: §7 matched the hand-built body literal, which a refactor that
+changed nothing about the contract would break, so it now pins the behaviour (`buildPayload` +
+`updateOrderShipping`) instead. Driven end to end in the running admin on the owner's own order
+`2026090102`: six header buttons at five viewport widths, the jump landing on the heading with the
+flash and an undirtied focus, DHL's URL field going loud, NZ Couriers relabelling and requiring the
+code, all three refusals inline at zero network cost, and the carrier reading "No carrier recorded"
+on the null-carrier order while `20260829000001` keeps its real NZ Post.
+
+**Lesson**: **the review question that is technically a misreading is still worth taking literally.**
+"Shouldn't there be three?" was answerable with "there are, look again" — and following it anyway
+found a missing fourth field that silently emailed customers a link-less notification, a header that
+clipped buttons with no scrollbar, and a backend defaulting a carrier on 136 of 149 orders. **The
+person looking at the screen without the implementation in their head sees the thing the
+implementer's eye has stopped reporting.**
+
+---
+
 ## ERR-199 — The Orders page printed "Not recorded" on every website checkout and on the two invoices that HAD been emailed; the hand-off that fixed it described a backend that would not exist for another nine hours — **RESOLVED** (2026-09-01)
 
 **Date**: 2026-09-01 · **Context**: The owner's backend developer sent

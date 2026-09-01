@@ -114,6 +114,7 @@ const {
   formFromShipping, buildPayload, hasChanges, changedFieldCount,
   emailState, sendability, shippingErrorMessage,
   isConcurrencyConflict, isNotShippedRefusal, describeEmailOutcome, fieldIssuesFromError,
+  reconcileCarrier, carrierWasDefaulted,
 } = M;
 
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -775,9 +776,15 @@ test('§7 the page is registry-driven', async (t) => {
   });
 
   await t.test('the Update Status modal ships through the shipping endpoint', () => {
-    // The dropdown now holds registry CODES; only the shipping endpoint documents
+    // The dropdown holds registry CODES; only the shipping endpoint documents
     // accepting a code, and it is the only one that knows ticket_product_code.
-    assert.match(ordersSrc, /shippingBody = \{ carrier: carrierCode \|\| undefined, tracking_number: tracking, mark_shipped: true \}/);
+    // Pinned by BEHAVIOUR, not by the shape of the expression: the body carries
+    // mark_shipped and goes to updateOrderShipping, however it is built. (It was
+    // an object literal until §11 replaced it with buildPayload — a pin on the
+    // literal broke on a refactor that changed nothing about the contract.)
+    assert.match(ordersSrc, /shippingBody = buildPayload\(null, form, \{ markShipped: true \}\)/);
+    assert.match(ordersSrc, /if \(shippingBody\) \{\s*\n\s*const data = await AdminAPI\.updateOrderShipping\(order\.id, shippingBody\)/,
+      'a shipped status must not go through the legacy status endpoint');
   });
 
   await t.test('a 409 keeps the operator\'s typing', () => {
@@ -891,6 +898,240 @@ test('§9 POSITIVE CONTROL — the wrong readings must fail', async (t) => {
     // pass against `undefined`. This is the control on the control.
     assert.throws(() => loadModules('export function emailState( {'), /./,
       'a module that cannot parse must not load silently');
+  });
+});
+
+test('§11 Update Status reaches parity, without a second copy of the rules', async (t) => {
+  // The status modal used to hand-write its own refusals while the section asked
+  // utils/shipping-info.js the same questions. Two copies of a rule drift, and
+  // then one surface refuses what the other accepts. It also hand-built its
+  // request body — and that hand-built object is exactly what FORGOT the tracking
+  // URL, which is the defect this section exists to pin shut.
+  const statusModalSrc = ordersSrc.slice(
+    ordersSrc.indexOf('function showStatusModal'),
+    ordersSrc.indexOf('function showNoteModal'));
+
+  await t.test('the Tracking URL field exists in Update Status', () => {
+    assert.ok(statusModalSrc.includes('id="modal-url"'),
+      'without it, shipping a DHL or Other parcel from this modal emails the customer no link at all — ' +
+      'those two carriers publish nothing we can build a link from');
+    assert.ok(statusModalSrc.includes('id="modal-url-help"'));
+  });
+
+  await t.test('the URL help goes loud for carriers that build no link', () => {
+    assert.match(statusModalSrc, /buildsTrackingUrl\(c\)/,
+      'the emphasis must read the server flag, never a carrier name');
+    assert.match(statusModalSrc, /om-ship-help--loud/,
+      'reuses the section\'s class so the two surfaces cannot look different');
+    assert.match(statusModalSrc, /om-ship-input--wanted/);
+  });
+
+  await t.test('it calls validateShipping — the shared refusal vocabulary', () => {
+    assert.match(statusModalSrc, /validateShipping\(form, carrier, \{ markShipped: true \}\)/,
+      'markShipped is the intent: this save WILL flip the status, so "nothing to track by" is an error here');
+  });
+
+  await t.test('THE HAND-WRITTEN REFUSALS ARE GONE', () => {
+    assert.equal(/Toast\.warning\(`\$\{numberLabel\(null, carrier\)\} is required/.test(statusModalSrc), false,
+      'the "tracking number is required" check is validateShipping\'s job now');
+    assert.equal(/requiresProductCode\(carrier\) && !pcode/.test(statusModalSrc), false,
+      'the ticket-product-code check is validateShipping\'s job now — a second copy is how the two surfaces drift');
+  });
+
+  await t.test('the body is built by buildPayload, not by hand', () => {
+    assert.match(statusModalSrc, /shippingBody = buildPayload\(null, form, \{ markShipped: true \}\)/);
+    assert.equal(/shippingBody = \{ carrier:/.test(statusModalSrc), false,
+      'the hand-built object literal is what forgot the tracking URL');
+  });
+
+  await t.test('buildPayload(null, …) emits exactly the typed non-empty fields, URL included', () => {
+    assert.deepEqual(plain(buildPayload(null, {
+      carrierCode: 'dhl', number: 'JD0123', productCode: '', url: 'https://track.dhl.com/x',
+    }, { markShipped: true })), {
+      carrier: 'dhl', tracking_number: 'JD0123', tracking_url: 'https://track.dhl.com/x', mark_shipped: true,
+    });
+    // Empty fields are OMITTED, not sent as '' — on a fresh ship there is nothing
+    // to clear, and '' would read as a deliberate erasure in the audit.
+    assert.deepEqual(plain(buildPayload(null, {
+      carrierCode: 'nz_post', number: 'HB1', productCode: '', url: '',
+    }, { markShipped: true })), { carrier: 'nz_post', tracking_number: 'HB1', mark_shipped: true });
+  });
+
+  await t.test('problems are shown ON the fields, not only in a vanishing toast', () => {
+    assert.ok(statusModalSrc.includes('id="modal-ship-issues"'));
+    assert.match(statusModalSrc, /om-ship-issue--/, 'reuses the section\'s issue styling');
+    assert.match(statusModalSrc, /focus\(\{ preventScroll: true \}\)/,
+      'the house scroll+focus pairing (pages/invoices.js) — focus must not fight the scroll');
+  });
+
+  await t.test('POSITIVE CONTROL — losing the URL from the form read is catchable', () => {
+    // If a future edit drops `url` from readStatusForm(), the body silently loses
+    // tracking_url again and DHL customers get no link. Prove the shape differs.
+    const withUrl = buildPayload(null, { carrierCode: 'dhl', number: 'X', productCode: '', url: 'https://a.co/b' }, { markShipped: true });
+    const without = buildPayload(null, { carrierCode: 'dhl', number: 'X', productCode: '', url: '' }, { markShipped: true });
+    assert.equal('tracking_url' in withUrl, true);
+    assert.equal('tracking_url' in without, false,
+      'the two must be distinguishable, or this test could not tell a dropped field from an empty one');
+  });
+
+  await t.test('the dead `canCancel` local is gone', () => {
+    assert.equal(/const canCancel/.test(statusModalSrc), false, 'assigned and never used');
+  });
+});
+
+test('§12 the header Shipping button and the jump', async (t) => {
+  await t.test('the button is rendered AND wired', () => {
+    assert.match(ordersSrc, /data-action="shipping-info"[^`]*Shipping<\/button>/,
+      'the section sits below the fold after Dates; every other primary action has a header button');
+    assert.match(ordersSrc, /\[data-action="shipping-info"\]'\)\?\.addEventListener/,
+      'a button rendered but never bound looks identical to one that works');
+  });
+
+  await t.test('the icon key actually exists in the registry', () => {
+    // icon() returns an EMPTY <svg> for an unknown name with no error (app.js),
+    // so a typo renders an invisible button. Parse the real registry rather than
+    // hard-coding the list here, or this test drifts from it.
+    const appSrc = READ(APP);
+    const used = ordersSrc.match(/data-action="shipping-info"[\s\S]{0,200}?icon\('([a-z-]+)'/);
+    assert.ok(used, 'could not find the icon() call for the Shipping button');
+    const registry = appSrc.slice(appSrc.indexOf('const I = {'), appSrc.indexOf('function icon('));
+    assert.ok(new RegExp(`['"]?${used[1]}['"]?\\s*:`).test(registry),
+      `icon('${used[1]}') is not a key in the registry — it would render an empty <svg> silently`);
+  });
+
+  await t.test('the jump targets the HEADING, not the section body', () => {
+    // .om-section-title is a SIBLING of .om-shipping, so scrolling to the body
+    // lands below the words "Shipping Information".
+    assert.match(ordersSrc, /title: 'om-ship-title'/);
+    assert.match(ordersSrc, /const title = shipNode\(SHIP_IDS\.title\)/);
+    assert.match(ordersSrc, /id="\$\{SHIP_IDS\.title\}"/, 'the title must carry the id it is looked up by');
+  });
+
+  await t.test('focus does not fight the scroll, and does not mark the field dirty', () => {
+    const fn = ordersSrc.slice(ordersSrc.indexOf('function focusShippingSection'),
+                               ordersSrc.indexOf('/** Wire the section.'));
+    assert.match(fn, /focus\(\{ preventScroll: true \}\)/);
+    assert.equal(/dataset\.dirty\s*=/.test(fn), false,
+      'a field marked dirty by a BUTTON PRESS would stop the send-history read correcting it (ERR-179 family)');
+  });
+
+  await t.test('the flash restarts on a second press and always clears', () => {
+    const fn = ordersSrc.slice(ordersSrc.indexOf('function focusShippingSection'),
+                               ordersSrc.indexOf('/** Wire the section.'));
+    assert.match(fn, /classList\.remove\('om-shipping--flash'\)[\s\S]*offsetWidth/,
+      'without removing the class and forcing reflow, a second press animates nothing');
+    assert.match(fn, /animationend/);
+    assert.match(fn, /setTimeout\(clear/,
+      'under prefers-reduced-motion there is no animation, so animationend never fires — the cue would stick');
+  });
+
+  await t.test('the CSS exists, in theme tokens, with a reduced-motion cue that is still visible', () => {
+    assert.match(cssSrc, /@keyframes omShipFlash/);
+    assert.match(cssSrc, /\.om-shipping--flash/);
+    assert.match(cssSrc, /#om-ship-title \{ scroll-margin-top/,
+      'without it the heading lands flush against #om-content\'s padding and reads as cut off');
+    const reduced = cssSrc.slice(cssSrc.indexOf('@media (prefers-reduced-motion: reduce) {\n  .om-shipping--flash'));
+    assert.match(reduced.slice(0, 300), /outline/,
+      'reduced motion must still SHOW something — removing the cue makes the button look broken');
+  });
+
+  await t.test('the header survives a sixth button', () => {
+    // .om-header-btns is absolutely positioned inside an overflow:hidden parent,
+    // so anything too wide is CLIPPED with no scrollbar to reveal it.
+    const block = cssSrc.slice(cssSrc.indexOf('.om-header-btns {'), cssSrc.indexOf('.om-section-title'));
+    assert.match(block, /flex-wrap: wrap/, 'six buttons must wrap, not slide under the title and badge');
+    assert.match(block, /max-width:/, 'unconstrained width in an overflow:hidden parent means silent clipping');
+    assert.match(block, /@media \(max-width: \d+px\)/,
+      'below some width the centred group cannot fit beside the title at all and must leave absolute flow');
+    assert.match(block, /position: static/);
+  });
+});
+
+test('§13 the backend invents a carrier, and the panel must not repeat it', async (t) => {
+  // MEASURED 2026-09-01: shipping_information reports carrier "NZ Post" /
+  // carrier_code "nz_post" on orders whose orders.carrier column is NULL — 25 of
+  // 25 sampled, and 136 of 149 live orders have a null carrier. Left alone, the
+  // panel pre-selects NZ Post on every order that has no carrier: the UI
+  // asserting a fact the database does not hold. Reported as BF-049.
+  const ROW_NO_CARRIER = Object.freeze({ order_number: '2026090102', status: 'paid', carrier: null });
+  const BLOCK_DEFAULTED = Object.freeze({
+    carrier: 'NZ Post', carrier_code: 'nz_post',
+    tracking_number: null, tracking_number_label: 'Tracking number',
+    tracking_url: null, tracking_url_override: null, tracking_url_source: null,
+    is_shipped: false, can_send_email: false, email: null,
+  });
+
+  await t.test('a claimed carrier is removed when the order column says none', () => {
+    const fixed = reconcileCarrier(BLOCK_DEFAULTED, ROW_NO_CARRIER);
+    assert.equal(fixed.carrier_code, null);
+    assert.equal(fixed.carrier, null);
+    assert.equal(carrierWasDefaulted(fixed), true);
+  });
+
+  await t.test('a REAL carrier is left completely alone', () => {
+    // Order 20260829000001: the column says "NZ Post" and so does the block.
+    const row = { carrier: 'NZ Post' };
+    const block = { ...BLOCK_DEFAULTED, is_shipped: true };
+    const out = reconcileCarrier(block, row);
+    assert.equal(out.carrier_code, 'nz_post');
+    assert.equal(carrierWasDefaulted(out), false);
+    assert.equal(out, block, 'an untouched block must be the SAME object — no silent copying');
+  });
+
+  await t.test('it only ever corrects DOWNWARD, and never invents one itself', () => {
+    const honest = { carrier: null, carrier_code: null };
+    assert.equal(reconcileCarrier(honest, { carrier: 'Aramex' }), honest,
+      'a row carrier must never be written INTO a block that has none — that would be the same bug, ours');
+  });
+
+  await t.test('with no order row, nothing is changed — we cannot tell', () => {
+    assert.equal(reconcileCarrier(BLOCK_DEFAULTED, null), BLOCK_DEFAULTED);
+    assert.equal(reconcileCarrier(BLOCK_DEFAULTED, {}), BLOCK_DEFAULTED,
+      'a payload with no `carrier` KEY is not a payload saying the carrier is null (hasOwnProperty, ERR-199)');
+    assert.equal(reconcileCarrier(BLOCK_DEFAULTED, { carrier: undefined }), BLOCK_DEFAULTED,
+      'present-but-undefined is still not an authoritative null');
+  });
+
+  await t.test('the correction reaches the SAVE BASELINE, not just the screen', () => {
+    // If only the rendering were corrected, buildPayload would compare a blank
+    // dropdown against a phantom `nz_post` and send a pointless `carrier: ""`.
+    const fixed = reconcileCarrier(BLOCK_DEFAULTED, ROW_NO_CARRIER);
+    assert.equal(formFromShipping(fixed).carrierCode, '');
+    assert.deepEqual(plain(buildPayload(fixed, formFromShipping(fixed))), {},
+      'an untouched form on a carrier-less order must still send nothing');
+    // And choosing one really does send it.
+    assert.deepEqual(plain(buildPayload(fixed, { ...formFromShipping(fixed), carrierCode: 'nz_couriers' })),
+      { carrier: 'nz_couriers' });
+  });
+
+  await t.test('the page applies it on first paint AND on every later read', () => {
+    assert.match(ordersSrc, /const shipping = reconcileCarrier\(raw, o\);/,
+      'first paint must not flash a carrier that is not recorded');
+    assert.match(ordersSrc, /rowCarrier: Object\.prototype\.hasOwnProperty\.call\(o, 'carrier'\)/,
+      'the authoritative column is captured while we still hold the order row');
+    assert.match(ordersSrc, /reconcileCarrier\(rawShipping, \{ carrier: _shipState\.rowCarrier \}\)/,
+      '/shipping responses and PUT echoes carry no row, so the correction must be re-applied');
+  });
+
+  await t.test('a carrier the operator just saved is NOT corrected away', () => {
+    assert.match(ordersSrc, /function shipRememberSavedCarrier/);
+    assert.match(ordersSrc, /shipRememberSavedCarrier\(payload, shipping\);[\s\S]{0,120}shipAdoptShipping\(shipping, \{ rebaseline: true \}\)/,
+      'the column must be updated BEFORE the echo is adopted, or the next read blanks what was just chosen');
+  });
+
+  await t.test('POSITIVE CONTROL — without the correction the panel shows a phantom carrier', () => {
+    const broken = shipSrc.replace(
+      "    if (!orderRow || !has(orderRow, 'carrier')) return shipping;  // nothing authoritative to check against",
+      '    return shipping;',
+    );
+    assert.notEqual(broken, shipSrc);
+    const B = loadModules(broken);
+    assert.equal(B.reconcileCarrier(BLOCK_DEFAULTED, ROW_NO_CARRIER).carrier_code, 'nz_post',
+      'the broken build keeps the invented carrier…');
+    assert.equal(B.formFromShipping(B.reconcileCarrier(BLOCK_DEFAULTED, ROW_NO_CARRIER)).carrierCode, 'nz_post',
+      '…and it reaches the dropdown, which is the bug');
+    assert.equal(reconcileCarrier(BLOCK_DEFAULTED, ROW_NO_CARRIER).carrier_code, null,
+      'the real one does not');
   });
 });
 

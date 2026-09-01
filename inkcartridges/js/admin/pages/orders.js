@@ -28,6 +28,7 @@ import {
   validateShipping, formFromShipping, buildPayload, hasChanges, changedFieldCount,
   emailState, sendability, shippingErrorMessage, isConcurrencyConflict,
   isNotShippedRefusal, describeEmailOutcome, fieldIssuesFromError,
+  reconcileCarrier, carrierWasDefaulted,
 } from '../utils/shipping-info.js';
 import {
   SENT_STATE, SEND_REGIME, resolveSentInfo, INVOICE_SENT_KIND,
@@ -1381,6 +1382,10 @@ let _shipToken = 0;
 
 const SHIP_IDS = {
   root: 'om-shipping',
+  // The heading is a SIBLING of the section body, not a child — it is its own
+  // flex item in #om-content. Jumping to `root` would scroll straight past the
+  // words "Shipping Information", so the jump targets the title.
+  title: 'om-ship-title',
   carrier: 'om-ship-carrier',
   number: 'om-ship-number',
   numberLabel: 'om-ship-number-label',
@@ -1570,7 +1575,11 @@ function shipRenderSendState() {
  * override, and the carrier's template could never correct it again.
  */
 function buildShippingSection(o) {
-  const { regime, shipping } = readShipping(o);
+  const { regime, shipping: raw } = readShipping(o);
+  // The backend invents a carrier on orders that have none (BF-049) — correct it
+  // against the order's own column before anything reads it, so the dropdown and
+  // the save baseline agree with the database rather than with the block.
+  const shipping = reconcileCarrier(raw, o);
   const form = formFromShipping(shipping);
   const label = numberLabel(shipping, null);
   const isShipped = shipping?.is_shipped === true;
@@ -1583,7 +1592,7 @@ function buildShippingSection(o) {
     : '';
 
   return `
-    <div class="om-section-title">Shipping Information</div>
+    <div class="om-section-title" id="${SHIP_IDS.title}">Shipping Information</div>
     <div class="om-shipping" id="${SHIP_IDS.root}">
       ${absentNote}
       <div class="om-ship-registry-error" id="${SHIP_IDS.registryError}" hidden></div>
@@ -1680,8 +1689,13 @@ function shipPopulateCarriers() {
 }
 
 /** Re-baseline the panel from a fresh server block, and clear the dirty marks. */
-function shipAdoptShipping(shipping, { rebaseline = false } = {}) {
-  if (!shipping || !_shipState) return;
+function shipAdoptShipping(rawShipping, { rebaseline = false } = {}) {
+  if (!rawShipping || !_shipState) return;
+  // /shipping responses and PUT echoes carry no order row, so the correction is
+  // re-applied from the column we captured when the modal opened.
+  const shipping = _shipState.rowCarrier === undefined
+    ? rawShipping
+    : reconcileCarrier(rawShipping, { carrier: _shipState.rowCarrier });
   _shipState.shipping = shipping;
   if (rebaseline) {
     for (const id of [SHIP_IDS.carrier, SHIP_IDS.number, SHIP_IDS.pcode, SHIP_IDS.url]) {
@@ -1710,6 +1724,17 @@ function shipSetBusy(busy) {
   const send = shipNode(SHIP_IDS.send);
   if (save) save.disabled = busy;
   if (send) send.disabled = busy || !sendability(_shipState?.shipping).canSend;
+}
+
+/**
+ * After a save that sent a carrier, the order's own column now holds it — so the
+ * BF-049 correction must stop firing, or we would blank the carrier the operator
+ * just chose on the very next read.
+ */
+function shipRememberSavedCarrier(payload, shipping) {
+  if (!_shipState) return;
+  if (!Object.prototype.hasOwnProperty.call(payload || {}, 'carrier')) return;
+  _shipState.rowCarrier = payload.carrier === '' ? null : (shipping?.carrier ?? payload.carrier);
 }
 
 /**
@@ -1759,6 +1784,7 @@ async function shipSave() {
   try {
     const data = await AdminAPI.updateOrderShipping(_shipState.orderId, payload);
     const { shipping } = readShipping(data);
+    shipRememberSavedCarrier(payload, shipping);
     if (shipping) shipAdoptShipping(shipping, { rebaseline: true });
     shipRenderIssues([], []);
     forgetOrderCache(_shipState.orderId);
@@ -1809,6 +1835,7 @@ async function shipHandleWriteFailure(e, { markShipped = false } = {}) {
       const payload = buildPayload(_shipState.shipping, form, { markShipped: true, sendEmail: true });
       const data = await AdminAPI.updateOrderShipping(_shipState.orderId, payload);
       const { shipping } = readShipping(data);
+      shipRememberSavedCarrier(payload, shipping);
       if (shipping) shipAdoptShipping(shipping, { rebaseline: true });
       forgetOrderCache(_shipState.orderId);
       Toast.success('The order is marked shipped and the customer has been emailed.');
@@ -1897,19 +1924,69 @@ async function shipRefreshHistory({ rebaseline = false } = {}) {
   }
 }
 
+/**
+ * Jump the operator to the Shipping Information section.
+ *
+ * The section renders after the Dates block, which on a tall order puts it below
+ * the fold — so it was invisible unless you knew to scroll. Every other primary
+ * action on this modal has a header button; this is shipping's.
+ *
+ * Three details that are not obvious:
+ *   - The scroll target is the section's TITLE. `.om-section-title` is a sibling
+ *     of `.om-shipping`, so scrolling to the body lands below the heading.
+ *   - Focus is applied with `preventScroll` so it does not fight the smooth
+ *     scroll it was just given (the same pairing pages/invoices.js uses).
+ *   - Focusing a field must NOT mark it dirty. `data-dirty` is set on `input` and
+ *     `change` only, so pressing this button still lets a late send-history read
+ *     correct a field the operator has not actually typed in (ERR-179 family).
+ */
+function focusShippingSection() {
+  const title = shipNode(SHIP_IDS.title);
+  const body = shipNode(SHIP_IDS.root);
+  (title || body)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  if (body) {
+    // Restart the animation on a second press: without removing the class first
+    // the browser sees no change and nothing happens.
+    body.classList.remove('om-shipping--flash');
+    void body.offsetWidth;
+    body.classList.add('om-shipping--flash');
+    const clear = () => body.classList.remove('om-shipping--flash');
+    body.addEventListener('animationend', clear, { once: true });
+    // Fallback: under prefers-reduced-motion there is no animation, so
+    // `animationend` never fires and the cue would stay on screen for good.
+    setTimeout(clear, 2000);
+  }
+
+  // The field worth typing in first: the carrier when none is recorded yet,
+  // otherwise the number.
+  const carrier = shipNode(SHIP_IDS.carrier);
+  const target = carrier && !carrier.value ? carrier : shipNode(SHIP_IDS.number);
+  target?.focus({ preventScroll: true });
+}
+
 /** Wire the section. Called once per modal open, after the HTML is in the DOM. */
 function bindShippingSection(o) {
   const root = shipNode(SHIP_IDS.root);
   if (!root) return;
 
-  const { shipping } = readShipping(o);
+  const { shipping: raw } = readShipping(o);
   _shipState = {
     orderId: o.id,
-    shipping: shipping || null,
+    // `orders.carrier` is the column that actually records a carrier; the shipping
+    // block defaults it (BF-049). Kept so the /shipping read and every PUT echo —
+    // none of which carry the row — can be corrected the same way. `undefined`
+    // means the payload had no such key and we must not correct anything.
+    rowCarrier: Object.prototype.hasOwnProperty.call(o, 'carrier') ? o.carrier : undefined,
+    shipping: reconcileCarrier(raw, o) || null,
     registry: null,
     busy: false,
     token: ++_shipToken,
   };
+  if (carrierWasDefaulted(_shipState.shipping)) {
+    DebugLog.warn('[shipping] the backend reported a carrier for an order whose carrier column is null; ' +
+      'showing "No carrier recorded" instead (BF-049). Order:', o.order_number || o.id);
+  }
 
   for (const id of [SHIP_IDS.number, SHIP_IDS.pcode, SHIP_IDS.url, SHIP_IDS.carrier]) {
     const el = shipNode(id);
@@ -2456,6 +2533,7 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   // Actions — moved into header
   const btns = [
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="update-status">${icon('orders', 13, 13)} Update Status</button>`,
+    `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="shipping-info" title="Jump to the carrier, tracking number and tracking link for this order">${icon('fulfillment', 13, 13)} Shipping</button>`,
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-note">${icon('dashboard', 13, 13)} Add Note</button>`,
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="resend-invoice">${icon('mail', 13, 13)} Resend Invoice</button>`,
     `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 13, 13)} Refund</button>`,
@@ -2496,6 +2574,7 @@ function bindModalActions(modal, order, deleteRight = null) {
   });
 
   modal.querySelector('[data-action="update-status"]')?.addEventListener('click', () => showStatusModal(order));
+  modal.querySelector('[data-action="shipping-info"]')?.addEventListener('click', () => focusShippingSection());
   modal.querySelector('[data-action="add-note"]')?.addEventListener('click', () => showNoteModal(order));
   modal.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => showRefundModal(order));
   modal.querySelector('[data-action="resend-invoice"]')?.addEventListener('click', async (e) => {
@@ -2646,7 +2725,6 @@ function showStatusModal(order) {
   const allowed = ALL_STATUSES.filter(s => s !== current);
 
   const canShip = allowed.includes('shipped');
-  const canCancel = allowed.includes('cancelled');
 
   let bodyHtml = `
     <div class="admin-form-group">
@@ -2682,6 +2760,12 @@ function showStatusModal(order) {
           <input class="admin-input" id="modal-pcode" maxlength="8" placeholder="e.g. LH">
           <div class="admin-form-help">The 2\u20134 character code beside the ticket number. Without it the track-and-trace link 404s.</div>
         </div>
+        <div class="admin-form-group">
+          <label>Tracking URL</label>
+          <input class="admin-input" id="modal-url" placeholder="https://\u2026">
+          <div class="admin-form-help" id="modal-url-help">Optional. Overrides the link built from the carrier and number.</div>
+        </div>
+        <div class="om-ship-issues" id="modal-ship-issues" hidden></div>
       </div>
     `;
   }
@@ -2709,14 +2793,71 @@ function showStatusModal(order) {
   const carrierSel = modal.body.querySelector('#modal-carrier');
   const pcodeGroup = modal.body.querySelector('#modal-pcode-group');
   const trackingLabel = modal.body.querySelector('#modal-tracking-label');
+  const urlInput = modal.body.querySelector('#modal-url');
+  const urlHelp = modal.body.querySelector('#modal-url-help');
+  const issuesBox = modal.body.querySelector('#modal-ship-issues');
   let _statusCarriers = null;
   const applyStatusCarrier = () => {
     const c = carrierByCode(carrierSel?.value, _statusCarriers);
     if (trackingLabel) trackingLabel.textContent = numberLabel(null, c);
     if (pcodeGroup) pcodeGroup.hidden = !requiresProductCode(c);
+    // DHL and Other publish no tracking link we can build, so the operator's
+    // pasted URL is the ONLY thing that gives this customer a link. Marking an
+    // order shipped for one of them without it emails a working-looking message
+    // with nowhere to go — the exact failure this feature exists to prevent.
+    if (urlHelp) {
+      if (c && !buildsTrackingUrl(c)) {
+        urlHelp.textContent = `${c.name} publishes no tracking link we can build, so this is the only way the customer gets one \u2014 paste the link ${c.name} gave you.`;
+        urlHelp.classList.add('om-ship-help--loud');
+        urlInput?.classList.add('om-ship-input--wanted');
+      } else {
+        urlHelp.textContent = 'Optional. Overrides the link built from the carrier and number.';
+        urlHelp.classList.remove('om-ship-help--loud');
+        urlInput?.classList.remove('om-ship-input--wanted');
+      }
+    }
+  };
+
+  /** The four inputs, in the shape utils/shipping-info.js expects. */
+  const readStatusForm = () => ({
+    carrierCode: carrierSel?.value || '',
+    number: modal.body.querySelector('#modal-tracking')?.value || '',
+    productCode: modal.body.querySelector('#modal-pcode')?.value || '',
+    url: urlInput?.value || '',
+  });
+
+  const STATUS_FIELD_TO_ID = {
+    carrier: '#modal-carrier', number: '#modal-tracking',
+    productCode: '#modal-pcode', url: '#modal-url',
+  };
+
+  /**
+   * Show what is wrong ON the fields, the same way the Shipping Information
+   * section does — same module, same classes, same words. A `Toast.warning` that
+   * vanishes and points at nothing was what stood here before.
+   */
+  const renderStatusIssues = (errors = [], warnings = []) => {
+    if (!issuesBox) return;
+    issuesBox.innerHTML = [...errors, ...warnings]
+      .map((i, n) => `<div class="om-ship-issue om-ship-issue--${n < errors.length ? 'error' : 'warn'}">${esc(i.message)}</div>`)
+      .join('');
+    issuesBox.hidden = errors.length === 0 && warnings.length === 0;
+    for (const sel of Object.values(STATUS_FIELD_TO_ID)) {
+      modal.body.querySelector(sel)?.classList.remove('om-ship-input--bad');
+    }
+    for (const e of errors) modal.body.querySelector(STATUS_FIELD_TO_ID[e.field])?.classList.add('om-ship-input--bad');
   };
   if (canShip && carrierSel) {
-    carrierSel.addEventListener('change', applyStatusCarrier);
+    carrierSel.addEventListener('change', () => {
+      applyStatusCarrier();
+      // Prompt for a newly-required ticket code rather than refusing after Update.
+      const { errors, warnings } = validateShipping(readStatusForm(), carrierByCode(carrierSel.value, _statusCarriers), {});
+      renderStatusIssues(errors.filter(e => e.code !== 'UNKNOWN_CARRIER'), warnings);
+    });
+    modal.body.querySelector('#modal-tracking')?.addEventListener('blur', () => {
+      const { warnings } = validateShipping(readStatusForm(), carrierByCode(carrierSel.value, _statusCarriers), {});
+      renderStatusIssues([], warnings);
+    });
     AdminAPI.getShippingCarriers().then((registry) => {
       _statusCarriers = registry;
       carrierSel.innerHTML = ['<option value="">Select carrier</option>']
@@ -2743,21 +2884,28 @@ function showStatusModal(order) {
     let shippingBody = null;
 
     if (newStatus === 'shipped') {
-      const carrierCode = modal.body.querySelector('#modal-carrier')?.value || '';
-      const carrier = carrierByCode(carrierCode, _statusCarriers);
-      const tracking = modal.body.querySelector('#modal-tracking')?.value?.trim();
-      const pcode = modal.body.querySelector('#modal-pcode')?.value?.trim() || '';
-      if (!tracking) {
-        // The word for this field is the carrier's, not ours.
-        Toast.warning(`${numberLabel(null, carrier)} is required for shipped status`);
-        return;
-      }
-      // The same refusal the Shipping Information section makes, for the same
-      // reason: a half-filled NZ Couriers entry builds a link that 404s, and a
-      // dead link in a customer's shipping email is worse than no link.
-      if (requiresProductCode(carrier) && !pcode) {
-        Toast.warning(`${carrier.name} needs the ticket product code as well as the ticket number \u2014 without it the tracking link 404s.`);
-        modal.body.querySelector('#modal-pcode')?.focus();
+      const form = readStatusForm();
+      const carrier = carrierByCode(form.carrierCode, _statusCarriers);
+
+      // ONE REFUSAL VOCABULARY, NOT TWO.
+      //
+      // This used to hand-write its own checks — "tracking number required" and
+      // "NZ Couriers needs a product code" — while the Shipping Information
+      // section asked utils/shipping-info.js the same questions. Two copies of a
+      // rule drift, and then one surface refuses what the other accepts. Going
+      // through validateShipping() also brings the checks the new Tracking URL
+      // field needs (an `http://` link is a backend 400) without writing a third
+      // copy. `markShipped: true` is the intent: this save WILL flip the status,
+      // so "nothing to track by" is an error here even though it is not on a
+      // plain edit.
+      const { ok, errors, warnings } = validateShipping(form, carrier, { markShipped: true });
+      renderStatusIssues(errors, warnings);
+      if (!ok) {
+        const first = modal.body.querySelector(STATUS_FIELD_TO_ID[errors[0].field]);
+        if (first) {
+          first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          first.focus({ preventScroll: true });
+        }
         return;
       }
       // SHIP THROUGH THE SHIPPING ENDPOINT, not through `status`.
@@ -2771,8 +2919,11 @@ function showStatusModal(order) {
       // is still a 400, a concurrent change still a 409) and still emails the
       // customer once on dispatch, so nothing about this modal's behaviour
       // changes except that NZ Couriers can now be expressed.
-      shippingBody = { carrier: carrierCode || undefined, tracking_number: tracking, mark_shipped: true };
-      if (pcode) shippingBody.ticket_product_code = pcode;
+      // Built by the one encoder, not by hand. With a null baseline buildPayload
+      // emits exactly the non-empty typed fields and omits the rest — which is
+      // what the hand-built object was reaching for, and it cannot forget a field
+      // the way that object forgot the tracking URL.
+      shippingBody = buildPayload(null, form, { markShipped: true });
     }
 
     try {

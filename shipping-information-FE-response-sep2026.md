@@ -10,9 +10,11 @@ production before writing a line — the registry, both read paths, the merge se
 endpoints — and all of it was there, exactly as described. That is not the recent norm here
 (ERR-195, ERR-198, ERR-199 were each hand-offs whose opening claim was false), and it saved a day.
 
-Three things below are worth your time: **one row of your §6 error table does not match production**,
-**`email.send_count` is a floor and the frontend now says so**, and **there is a live customer with a
-tracking link that cannot resolve** — which is data, not code, and I have not touched it.
+Four things below are worth your time. In order of how much they matter to you:
+**`shipping_information` reports a carrier of "NZ Post" on the 136 orders whose carrier column is
+null** (§4b — the only one I'd call a defect), **one row of your §6 error table does not match
+production**, **`email.send_count` is a floor and the frontend now says so**, and **there is a live
+customer with a tracking link that cannot resolve** — data, not code, and I have not touched it.
 
 ---
 
@@ -119,6 +121,47 @@ call, not a deploy. `npm run probe:shipping-info` reports any row in this shape 
 
 ---
 
+## 4b. `shipping_information` reports a carrier on orders that have none — 136 of 149
+
+This one is worth your time more than anything else in this document, and I found it only because
+the new panel pre-selected **NZ Post** on an order the list showed as `carrier: null`.
+
+The order row and its own shipping block disagree about the same fact:
+
+```
+GET /api/admin/orders            -> 2026090102: carrier: null
+GET /api/admin/orders/2026090102 -> order.carrier: null
+                                    order.shipping_information.carrier:      "NZ Post"
+                                    order.shipping_information.carrier_code: "nz_post"
+GET /api/admin/orders/:id/shipping -> the same invented carrier
+```
+
+**25 of 25** sampled orders with a null `orders.carrier` reported `carrier_code: "nz_post"` in the
+block, and **136 of the 149** live orders have a null carrier — so this is the majority case, not an
+edge. It is a genuine default rather than stale data: it appears on `paid`, `processing` and
+`cancelled` orders that have never shipped, with `tracking_number: null`, `shipped_at: null` and
+`tracking_url_source: null` beside it.
+
+**Why it matters more than it looks.** Any surface that reads the block as the answer to *"which
+carrier is on this order?"* shows NZ Post for an order that has no carrier. In the admin that
+pre-selects a dropdown — so an operator dispatching with Aramex sees a field that already looks
+answered and has no reason to touch it. It also makes the block useless as a *"has a carrier been
+recorded yet?"* signal, which is the question the dispatch workflow actually asks.
+
+**Ask:** report `carrier` and `carrier_code` as **null** when `orders.carrier` is null. The derived
+fields that need a carrier to have a value (`number_label`, `requires_product_code`,
+`builds_tracking_url`, `supports_live_tracking`) can keep whatever neutral default suits — it is
+only the carrier **identity** that must not be invented. Unknown is not NZ Post.
+
+**Mitigated meanwhile, not fixed.** `reconcileCarrier()` corrects the block against the order row's
+own `carrier` column, which the detail payload helpfully carries right beside it. It corrects
+**downward only** — a claimed carrier to none — never writes a row carrier *into* a block, and does
+nothing when it has no row to check against. **That mitigation depends entirely on the detail
+payload continuing to include the real `carrier` column.** If that ever changes, the frontend goes
+back to repeating the invented value with no way to know.
+
+---
+
 ## 5. What the frontend now does, so you can hold us to it
 
 - **The carrier list is never hard-coded.** Both the new section *and* the Update Status modal fill
@@ -138,6 +181,10 @@ call, not a deploy. `npm run probe:shipping-info` reports any row in this shape 
 - **`ticket_number` is never sent.** One spelling cannot conflict with itself, so
   `CONFLICTING_TRACKING_NUMBER` is unreachable from this UI by construction (the probe still proves
   you return it).
+- **The Update Status modal has all four fields too**, and reaches them through the same
+  `validateShipping` / `buildPayload` the section uses. It previously had no Tracking URL field at
+  all, which meant shipping a DHL or Other parcel from it emailed the customer a notification with
+  no link — those two carriers publish nothing we can build one from.
 - **`mark_shipped: true` is announced.** The checkbox label says it emails the customer, and the
   toast reports `reason: "auto_on_ship"` back, so nobody sends an email they didn't know about.
 - **A repeat send is a deliberate act** — a confirm dialog quoting the recorded count and last send

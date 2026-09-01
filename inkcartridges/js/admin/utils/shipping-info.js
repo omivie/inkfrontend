@@ -170,6 +170,47 @@ export function carrierByCode(code, registry) {
 }
 
 /**
+ * Undo the backend's invented carrier.
+ *
+ * MEASURED 2026-09-01, not assumed: `shipping_information` reports
+ * `carrier: "NZ Post" / carrier_code: "nz_post"` on orders whose `orders.carrier`
+ * column is **null** — 25 of 25 sampled, and 136 of the 149 live orders have a
+ * null carrier. The block is therefore NOT a reliable answer to "has a carrier
+ * been recorded?"; the order row's own column is, and the detail payload carries
+ * it alongside the block (`hasOwnProperty(order, 'carrier')` is true, value null).
+ *
+ * Left uncorrected, the panel pre-selects "NZ Post" on every order that has no
+ * carrier — the UI asserting a fact the database does not hold. The operator who
+ * ships that parcel with Aramex and does not touch a dropdown that already looked
+ * answered is the whole cost.
+ *
+ * The correction is applied to the BLOCK, not just to the rendering, so the save
+ * baseline agrees with the screen: otherwise `buildPayload` would compare a blank
+ * dropdown against a phantom `nz_post` and send a pointless `carrier: ""` clear.
+ *
+ * We only ever correct DOWNWARD (a claimed carrier to none) and only when we hold
+ * the row that owns the column. Absent the row we cannot tell, so we change
+ * nothing — reported to the backend as BF-049.
+ */
+export function reconcileCarrier(shipping, orderRow) {
+    if (!shipping || typeof shipping !== 'object') return shipping;
+    if (!orderRow || !has(orderRow, 'carrier')) return shipping;  // nothing authoritative to check against
+    // The key existing is not enough: `undefined` means an object was built
+    // without the field, which is not the column telling us it is empty. Only an
+    // explicit null or an empty string is an authoritative "no carrier" (ERR-199 —
+    // absent, undefined and null are not one claim).
+    if (orderRow.carrier === undefined) return shipping;
+    if (trimmed(orderRow.carrier)) return shipping;               // a real carrier — the block agrees
+    if (!trimmed(shipping.carrier) && !trimmed(shipping.carrier_code)) return shipping; // already honest
+    return { ...shipping, carrier: null, carrier_code: null, carrierDefaulted: true };
+}
+
+/** True when this block's carrier was invented upstream and we removed it. */
+export function carrierWasDefaulted(shipping) {
+    return shipping?.carrierDefaulted === true;
+}
+
+/**
  * The stored carrier, resolved against the registry.
  *
  * `carrier_code` is the canonical field. `carrier` (the display name) is accepted
