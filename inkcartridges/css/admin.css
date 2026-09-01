@@ -5547,11 +5547,24 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .exp-preset__load:hover { color: var(--cyan-text, var(--cyan)); }
+.exp-preset__edit {
+  border: 0; background: transparent; color: var(--text-muted); cursor: pointer;
+  padding: 0 4px; display: flex; align-items: center;
+}
+.exp-preset__edit:hover { color: var(--cyan-text, var(--cyan)); }
 .exp-preset__del {
   border: 0; background: transparent; color: var(--text-muted); cursor: pointer;
-  padding: 0 8px 0 4px; display: flex; align-items: center;
+  padding: 0 8px 0 0; display: flex; align-items: center;
 }
 .exp-preset__del:hover { color: var(--magenta-text, var(--magenta)); }
+/* The chip whose preset the save row below is aimed at — the form is full of its
+   values, so it has to be unmistakable which one Update will rewrite. */
+.exp-preset.is-editing {
+  border-color: var(--cyan-text, var(--cyan));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan-text, var(--cyan)) 22%, transparent);
+}
+.exp-preset.is-editing .exp-preset__load { color: var(--cyan-text, var(--cyan)); }
+.exp-preset-mode { color: var(--text-muted); font-size: 12px; margin-bottom: 6px; }
 .exp-preset-save { display: flex; gap: 8px; align-items: center; }
 .exp-preset-save .admin-input { flex: 1; min-width: 0; }
 .exp-preset-err { color: var(--magenta-text, var(--magenta)); font-size: 12px; min-height: 14px; margin-top: 4px; }

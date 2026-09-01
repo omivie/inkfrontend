@@ -198,6 +198,94 @@ test('presetNameExists is case- and whitespace-insensitive', () => {
   assert.equal(sandbox.presetNameExists(list, ''), false);
 });
 
+// ─── editing an existing preset (Sep 2026) ───────────────────────────────────
+// The pencil on a chip loads the preset AND aims the save row at it, so Update
+// rewrites THAT preset in place. The edit path is id-anchored on purpose: upsertPreset
+// matches on NAME, so using it for a rename would overwrite the preset that already
+// owns the new name and leave the edited one behind — two presets lost in one click.
+
+const P = (name, fields = {}) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, fields });
+const LIST = () => [P('Rent', { category: 'rent', amount: 900 }),
+                    P('Power bill', { category: 'utilities', amount: 120 }),
+                    P('Netflix', { category: 'software', amount: 23 })];
+
+test('updatePreset replaces values IN PLACE — id, index and length all survive', () => {
+  const list = LIST();
+  const next = plain(sandbox.updatePreset(list, 'power-bill',
+    sandbox.toPreset({ name: 'Power bill', category: 'utilities', amount: 145 }, 'Power bill')));
+  assert.equal(next.length, 3, 'an edit must never grow the list');
+  assert.equal(next[1].id, 'power-bill', 'the id is the chip identity — it must not change');
+  assert.equal(next[1].name, 'Power bill');
+  assert.equal(next[1].fields.amount, 145);
+  assert.deepEqual(next.map(x => x.name), ['Rent', 'Power bill', 'Netflix'], 'position must hold');
+  assert.equal(plain(list)[1].fields.amount, 120, 'the input list must not be mutated');
+});
+
+test('a rename keeps the id and the position (the chip does not jump)', () => {
+  const next = plain(sandbox.updatePreset(LIST(), 'power-bill',
+    sandbox.toPreset({ name: 'Electricity', category: 'utilities', amount: 120 }, 'Electricity')));
+  assert.equal(next[1].id, 'power-bill', 'a rename keeps the original id');
+  assert.equal(next[1].name, 'Electricity');
+  assert.deepEqual(next.map(x => x.name), ['Rent', 'Electricity', 'Netflix']);
+});
+
+test('renaming ONTO another preset name throws and changes nothing', () => {
+  const list = LIST();
+  assert.throws(
+    () => sandbox.updatePreset(list, 'power-bill', sandbox.toPreset({ name: 'Rent' }, 'rent')),
+    /already exists/i,
+    'a rename must never overwrite the preset that owns that name');
+  assert.deepEqual(plain(list).map(x => x.name), ['Rent', 'Power bill', 'Netflix']);
+});
+
+// POSITIVE CONTROL for the test above: without this, updatePreset refusing EVERY
+// rename would pass just as well — the same bug pointing the other way.
+test('a preset may keep its own name (different case/whitespace still counts as its own)', () => {
+  const next = plain(sandbox.updatePreset(LIST(), 'power-bill',
+    sandbox.toPreset({ name: 'x', amount: 130 }, '  POWER BILL ')));
+  assert.equal(next[1].id, 'power-bill');
+  assert.equal(next[1].name, 'POWER BILL');
+  assert.equal(next[1].fields.amount, 130);
+});
+
+test('updatePreset on an unknown id THROWS — it never falls through to an append', () => {
+  const list = LIST();
+  assert.throws(() => sandbox.updatePreset(list, 'gone', sandbox.toPreset({ name: 'x' }, 'Ghost')),
+    /no longer exists/i);
+  assert.equal(plain(sandbox.normalizePresetList(list)).length, 3, 'a failed edit must not mint a duplicate');
+  assert.throws(() => sandbox.updatePreset(LIST(), 'rent', sandbox.toPreset({}, '  ')), /name/i);
+});
+
+test('an edit is not a new entry — the cap cannot block it', () => {
+  const full = Array.from({ length: sandbox.MAX_PRESETS }, (_, i) => P(`P${i}`, { amount: i }));
+  const next = plain(sandbox.updatePreset(full, 'p0', sandbox.toPreset({ amount: 999 }, 'P0')));
+  assert.equal(next.length, sandbox.MAX_PRESETS);
+  assert.equal(next[0].fields.amount, 999);
+  assert.equal(sandbox.validatePreset('P0', full, { exceptId: 'p0' }), null,
+    'a full list must still accept an edit of one of its own rows');
+  assert.match(sandbox.validatePreset('P1', full, { exceptId: 'p0' }), /already exists/i,
+    'but not one renamed onto a sibling');
+});
+
+test('presetNameExists/validatePreset skip the preset being edited', () => {
+  const list = LIST();
+  assert.equal(sandbox.presetNameExists(list, 'rent'), true);
+  assert.equal(sandbox.presetNameExists(list, ' RENT ', 'rent'), false, 'its own name is not a clash');
+  assert.equal(sandbox.validatePreset('Rent', list, { exceptId: 'rent' }), null);
+  assert.match(sandbox.validatePreset('Rent', list, { exceptId: 'netflix' }), /already exists/i);
+});
+
+test('THE DATE RULE HOLDS ON THE EDIT PATH TOO', () => {
+  // The edit commit snapshots the live form through the same toPreset(), so a dated
+  // payload must come out just as dateless as it does on the create path.
+  const next = plain(sandbox.updatePreset(LIST(), 'netflix', sandbox.toPreset(PAYLOAD, 'Netflix')));
+  for (const banned of ['expense_date', 'date', 'due_date', 'paid_date', 'recurrence_end', 'id', 'status', 'series_state']) {
+    assert.equal(next[2].fields[banned], undefined, `${banned} must never survive an edit either`);
+  }
+  assert.equal(next[2].fields.recurrence_count, 12, 'a count is not a date — it stays');
+  assert.equal(next[2].id, 'netflix');
+});
+
 // ─── storage contract ────────────────────────────────────────────────────────
 test('PRESET_KEY is namespaced for the shared admin_ui_prefs blob', () => {
   assert.equal(sandbox.PRESET_KEY, 'expenses.presets');
@@ -231,4 +319,44 @@ test('a preset-loaded paid date re-anchors on the expense date, never on the pre
     'the paid date must be re-armed to the re-anchored (today) expense date');
   assert.doesNotMatch(apply.slice(0, apply.indexOf('Toast.info')), /patch\.paid_date|patch\.expense_date/,
     'applyPreset must never read a date off the preset patch');
+});
+
+// ─── editor contract: editing a preset (Sep 2026) ────────────────────────────
+test('every chip carries an Edit control, and the one being edited is marked', () => {
+  const panel = PAGE_SRC.slice(PAGE_SRC.indexOf('function presetsPanel('),
+                               PAGE_SRC.indexOf('function editorBody('));
+  assert.match(panel, /data-preset-edit="\$\{escA\(p\.id\)\}"/, 'the pencil is keyed by preset id');
+  assert.match(panel, /aria-label="Edit preset \$\{escA\(p\.name\)\}"/, 'the pencil needs an accessible name');
+  assert.match(panel, /p\.id === editingId \? ' is-editing' : ''/, 'the edited chip must be visibly marked');
+  assert.match(panel, /id="e-preset-cancel"/, 'edit mode needs a way out that changes nothing');
+  assert.match(panel, /id="e-preset-mode"/, 'the panel must say which preset is being edited');
+});
+
+test('the Update commit is id-anchored — updatePreset, never upsertPreset', () => {
+  const commit = PAGE_SRC.slice(PAGE_SRC.indexOf('const updateExistingPreset = async ()'));
+  const body = commit.slice(0, commit.indexOf("$('#e-preset-cancel')"));
+  assert.ok(body.length, 'updateExistingPreset must exist');
+  assert.match(body, /updatePreset\(_presets, editingPresetId, toPreset\(/,
+    'an edit must be keyed on the id, not on the name (upsertPreset would clobber a sibling)');
+  assert.doesNotMatch(body, /upsertPreset/, 'upsertPreset matches by NAME — never use it to edit');
+  assert.match(body, /validatePreset\(name, _presets, \{ exceptId: editingPresetId \}\)/,
+    'a preset must be allowed to keep its own name');
+  assert.match(body, /presetErr\(e3\.message\)/, 'a refused rename is reported on the panel, not swallowed');
+  assert.match(body, /durable === false/, 'a local-only write must still be reported honestly');
+});
+
+test('the add path still branches away from the edit path', () => {
+  const add = PAGE_SRC.slice(PAGE_SRC.indexOf("$('#e-preset-add')?.addEventListener"));
+  assert.match(add.slice(0, 200), /if \(editingPresetId\) \{ await updateExistingPreset\(\); return; \}/,
+    '"Save as preset" must become Update while a preset is open for editing');
+});
+
+test('edit mode is never left pointing at a preset that is gone or at the wrong one', () => {
+  const chips = PAGE_SRC.slice(PAGE_SRC.indexOf("root.querySelector('#e-preset-chips')"));
+  const body = chips.slice(0, chips.indexOf('const updateExistingPreset'));
+  assert.match(body, /if \(p\.id === editingPresetId\) setPresetEditMode\(null\)/,
+    'deleting the preset under edit must leave edit mode');
+  const load = body.slice(body.indexOf("const loadBtn"), body.indexOf("const delBtn"));
+  assert.match(load, /setPresetEditMode\(null\);\s*\n\s*applyPreset\(p\)/,
+    'a plain chip load must leave edit mode, or Update would write B over A');
 });

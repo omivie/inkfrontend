@@ -52,7 +52,7 @@ import {
 } from '../utils/expense-math.js';
 import { GST_INCL, gstSub } from '../utils/gst-basis.js';
 import {
-  PRESET_KEY, MAX_PRESETS, toPreset, applyPresetToDraft, upsertPreset, removePreset,
+  PRESET_KEY, MAX_PRESETS, toPreset, applyPresetToDraft, upsertPreset, updatePreset, removePreset,
   normalizePresetList, validatePreset, presetNameExists,
 } from '../utils/expense-presets.js';
 import OverviewTab from './expenses-tab-overview.js';
@@ -1093,12 +1093,16 @@ async function savePresets(next) {
   }
 }
 
-/** Repaint just the chip row in an open editor (no full drawer rebuild). */
-function refreshPresetChips(root) {
+/**
+ * Repaint just the chip row in an open editor (no full drawer rebuild).
+ * `editingId` re-marks the chip currently open for editing — the save row's edit-mode
+ * chrome is owned by setPresetEditMode() and is deliberately NOT touched here.
+ */
+function refreshPresetChips(root, editingId = null) {
   const host = root?.querySelector('#e-presets');
   if (!host) return;
   const fresh = document.createElement('div');
-  fresh.innerHTML = presetsPanel();
+  fresh.innerHTML = presetsPanel(editingId);
   const nextChips = fresh.querySelector('#e-preset-chips');
   const curChips = host.querySelector('#e-preset-chips');
   if (nextChips && curChips) curChips.innerHTML = nextChips.innerHTML;
@@ -1109,10 +1113,11 @@ function refreshPresetChips(root) {
  * snapshot of this form (never dates — see utils/expense-presets.js), stored in the
  * admin_ui_prefs Supabase table, so it follows the account across devices.
  */
-function presetsPanel() {
+function presetsPanel(editingId = null) {
   const chips = _presets.map(p => `
-    <span class="exp-preset" data-preset-id="${escA(p.id)}">
+    <span class="exp-preset${p.id === editingId ? ' is-editing' : ''}" data-preset-id="${escA(p.id)}">
       <button type="button" class="exp-preset__load" data-preset-load="${escA(p.id)}" title="Fill the form from this preset">${esc(p.name)}</button>
+      <button type="button" class="exp-preset__edit" data-preset-edit="${escA(p.id)}" aria-label="Edit preset ${escA(p.name)}" title="Edit this preset">${icon('edit', 11, 11)}</button>
       <button type="button" class="exp-preset__del" data-preset-del="${escA(p.id)}" aria-label="Delete preset ${escA(p.name)}" title="Delete preset">${icon('close', 11, 11)}</button>
     </span>`).join('');
   return `
@@ -1121,9 +1126,11 @@ function presetsPanel() {
       <div class="exp-preset-row" id="e-preset-chips">
         ${chips || '<span class="exp-empty-inline" style="padding:4px 0">No presets yet. Fill this form in, then save it as a preset for one-click reuse.</span>'}
       </div>
+      <div class="exp-preset-mode hidden" id="e-preset-mode" aria-live="polite"></div>
       <div class="exp-preset-save" id="e-preset-save">
         <input class="admin-input" id="e-preset-name" type="text" maxlength="40" placeholder="Name this preset (e.g. Netflix subscription)" autocomplete="off">
         <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="e-preset-add">Save as preset</button>
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm hidden" id="e-preset-cancel">Cancel</button>
       </div>
       <div class="exp-preset-err" id="e-preset-err" role="alert" aria-live="polite"></div>
     </div>`;
@@ -1344,6 +1351,30 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
   // ── Presets ──
   const presetErr = (msg) => { const el = $('#e-preset-err'); if (el) el.textContent = msg || ''; };
 
+  // EDIT MODE. A chip's pencil loads the preset into the form AND aims the save row at
+  // that preset: the name box is pre-filled and still editable (that is the rename) and
+  // "Save as preset" becomes "Update preset". null = the ordinary save-a-new mode. The
+  // state lives in this closure, so a freshly opened drawer always starts in add mode.
+  let editingPresetId = null;
+
+  const setPresetEditMode = (preset) => {
+    editingPresetId = preset ? preset.id : null;
+    const nameEl = $('#e-preset-name');
+    const addBtn = $('#e-preset-add');
+    const modeEl = $('#e-preset-mode');
+    if (nameEl) nameEl.value = preset ? preset.name : '';
+    if (addBtn) addBtn.textContent = preset ? 'Update preset' : 'Save as preset';
+    $('#e-preset-cancel')?.classList.toggle('hidden', !preset);
+    if (modeEl) {
+      modeEl.textContent = preset
+        ? `Editing preset \u201C${preset.name}\u201D \u2014 change anything below, then Update.`
+        : '';
+      modeEl.classList.toggle('hidden', !preset);
+    }
+    presetErr('');
+    refreshPresetChips(root, editingPresetId);
+  };
+
   // Fill the live form from a preset, then re-run every sync so the conditional
   // panels (recurrence fields, order-linked note, end-mode) match what we just wrote.
   const applyPreset = (preset) => {
@@ -1393,14 +1424,30 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
     presetErr('');
     // Programmatic .value writes don't fire input events — arm the guard by hand.
     guard.dirty = true;
-    Toast.info(`Loaded preset "${preset.name}".`);
+    Toast.info(editingPresetId === preset.id
+      ? `Editing preset "${preset.name}" \u2014 change anything, then Update preset.`
+      : `Loaded preset "${preset.name}".`);
   };
 
   root.querySelector('#e-preset-chips')?.addEventListener('click', async (e) => {
+    const editBtn = e.target.closest('[data-preset-edit]');
+    if (editBtn) {
+      const p = _presets.find(x => x.id === editBtn.dataset.presetEdit);
+      if (!p) return;
+      // Mode first, then fill: applyPreset reads editingPresetId for its toast.
+      setPresetEditMode(p);
+      applyPreset(p);
+      $('#e-preset-name')?.focus();
+      return;
+    }
     const loadBtn = e.target.closest('[data-preset-load]');
     if (loadBtn) {
       const p = _presets.find(x => x.id === loadBtn.dataset.presetLoad);
-      if (p) applyPreset(p);
+      if (!p) return;
+      // A plain load always leaves edit mode — otherwise loading B while editing A
+      // would arm Update to write B's values over A.
+      setPresetEditMode(null);
+      applyPreset(p);
       return;
     }
     const delBtn = e.target.closest('[data-preset-del]');
@@ -1414,13 +1461,62 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
         onConfirm: async () => {
           const ok = await savePresets(removePreset(_presets, p.id));
           if (ok !== false) Toast.success(`Preset "${p.name}" deleted.`);
-          refreshPresetChips(root);
+          // Never leave the save row aimed at a preset that no longer exists.
+          if (p.id === editingPresetId) setPresetEditMode(null);
+          else refreshPresetChips(root, editingPresetId);
         },
       });
     }
   });
 
+  /**
+   * The EDIT commit. Id-anchored (`updatePreset`), never `upsertPreset` — upsert matches
+   * on NAME, so renaming onto an existing preset would overwrite that one and leave this
+   * one behind. A name belonging to another preset is REFUSED on the error line, not
+   * confirmed away: there is no dialog that makes destroying two presets the right call.
+   * No confirm on the ordinary path either — the operator picked this preset deliberately.
+   */
+  const updateExistingPreset = async () => {
+    const nameEl = $('#e-preset-name');
+    const name = (nameEl?.value || '').trim();
+    const target = _presets.find(p => p.id === editingPresetId);
+    if (!target) { setPresetEditMode(null); presetErr('That preset no longer exists.'); return; }
+    const err = validatePreset(name, _presets, { exceptId: editingPresetId });
+    if (err) { presetErr(err); nameEl?.focus(); return; }
+    presetErr('');
+
+    const snapshot = collectPayload(root, { snap: false });
+    let next;
+    try { next = updatePreset(_presets, editingPresetId, toPreset(snapshot, name)); }
+    catch (e3) { presetErr(e3.message); nameEl?.focus(); return; }
+
+    const renamed = target.name !== name;
+    const durable = await savePresets(next);
+    setPresetEditMode(null);                 // repaints the chips too
+    if (durable === false) {
+      Toast.warning(`Preset "${name}" updated on this device only \u2014 it couldn't reach the server.`);
+    } else if (renamed) {
+      Toast.success(`Preset "${target.name}" renamed to "${name}" and updated.`);
+    } else {
+      Toast.success(`Preset "${name}" updated.`);
+    }
+  };
+
+  $('#e-preset-cancel')?.addEventListener('click', () => {
+    // The form keeps the preset's values — nothing is written until Save expense, so a
+    // cancelled edit is just a loaded preset, which is what is already on screen.
+    setPresetEditMode(null);
+  });
+
+  // Enter in the name box commits whichever mode we're in; it must never submit the drawer.
+  $('#e-preset-name')?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    $('#e-preset-add')?.click();
+  });
+
   $('#e-preset-add')?.addEventListener('click', async () => {
+    if (editingPresetId) { await updateExistingPreset(); return; }
     const nameEl = $('#e-preset-name');
     const name = (nameEl?.value || '').trim();
     const overwrite = presetNameExists(_presets, name);
@@ -1435,7 +1531,7 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
       try { next = upsertPreset(_presets, toPreset(snapshot, name)); }
       catch (e3) { presetErr(e3.message); return; }
       const durable = await savePresets(next);
-      refreshPresetChips(root);
+      refreshPresetChips(root, editingPresetId);
       if (nameEl) nameEl.value = '';
       if (durable === false) {
         Toast.warning(`Preset "${name}" saved on this device only — it couldn't reach the server.`);

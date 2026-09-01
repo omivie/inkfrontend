@@ -119,18 +119,48 @@ export function upsertPreset(list, preset) {
   return arr;
 }
 
+/**
+ * Replace one preset IN PLACE, keyed on its `id`. This is the EDIT path, and it is
+ * deliberately NOT `upsertPreset`: upsert matches on NAME, so using it to rename
+ * "Power bill" to "Rent" when a "Rent" preset already exists would overwrite Rent AND
+ * leave Power bill sitting there — two presets destroyed by one click. Here a name
+ * that belongs to a DIFFERENT preset is refused outright.
+ *
+ * The original id survives a rename, so the chip keeps its place in the row. Returns
+ * a NEW array of the same length and order (never mutates). Throws with user-facing
+ * copy — the caller puts the message on the panel's error line.
+ */
+export function updatePreset(list, id, preset) {
+  const arr = Array.isArray(list) ? list.slice() : [];
+  if (!preset || !preset.name) throw new Error('Preset needs a name.');
+  const idx = arr.findIndex(p => p && p.id === id);
+  // Never fall through to an append: a failed edit must not mint a duplicate.
+  if (idx < 0) throw new Error('That preset no longer exists.');
+  const key = preset.name.trim().toLowerCase();
+  const clash = arr.some((p, i) => i !== idx && String(p?.name || '').trim().toLowerCase() === key);
+  if (clash) throw new Error(`A preset called "${preset.name.trim()}" already exists.`);
+  arr[idx] = { ...preset, id };
+  return arr;
+}
+
 /** Remove a preset by id. Returns a NEW array. */
 export function removePreset(list, id) {
   const arr = Array.isArray(list) ? list : [];
   return arr.filter(p => p && p.id !== id);
 }
 
-/** Does a preset with this name already exist? (case-insensitive) */
-export function presetNameExists(list, name) {
+/**
+ * Does a preset with this name already exist? (case-insensitive)
+ *
+ * `exceptId` skips one preset by id — that's how an EDIT lets a preset keep its own
+ * name. Without it, opening a preset for editing and pressing Update unchanged would
+ * be rejected as a duplicate of itself.
+ */
+export function presetNameExists(list, name, exceptId) {
   const key = String(name || '').trim().toLowerCase();
   if (!key) return false;
   return (Array.isArray(list) ? list : [])
-    .some(p => String(p?.name || '').trim().toLowerCase() === key);
+    .some(p => p?.id !== exceptId && String(p?.name || '').trim().toLowerCase() === key);
 }
 
 /**
@@ -154,12 +184,15 @@ export function normalizePresetList(raw) {
  * fine for a variable bill). Only a name is truly required — hence this is much
  * looser than the editor's validatePayload().
  */
-export function validatePreset(name, list, { allowOverwrite = false } = {}) {
+export function validatePreset(name, list, { allowOverwrite = false, exceptId } = {}) {
   const n = String(name || '').trim();
   if (!n) return 'Give the preset a name.';
   if (n.length > MAX_PRESET_NAME) return `Keep the name under ${MAX_PRESET_NAME} characters.`;
-  if (!allowOverwrite && presetNameExists(list, n)) return 'A preset with that name already exists.';
-  if (!allowOverwrite && !presetNameExists(list, n) && (Array.isArray(list) ? list.length : 0) >= MAX_PRESETS) {
+  const taken = presetNameExists(list, n, exceptId);
+  if (!allowOverwrite && taken) return 'A preset with that name already exists.';
+  // An EDIT never grows the list, so the cap can't be tripped by one.
+  if (!allowOverwrite && !taken && exceptId === undefined
+      && (Array.isArray(list) ? list.length : 0) >= MAX_PRESETS) {
     return `You can save up to ${MAX_PRESETS} presets. Delete one first.`;
   }
   return null;
@@ -169,7 +202,7 @@ try {
   if (typeof window !== 'undefined') {
     window.ExpensePresets = {
       PRESET_KEY, MAX_PRESETS, MAX_PRESET_NAME, PRESET_FIELDS, PRESET_BLOCKED_FIELDS,
-      toPreset, applyPresetToDraft, upsertPreset, removePreset,
+      toPreset, applyPresetToDraft, upsertPreset, updatePreset, removePreset,
       presetNameExists, normalizePresetList, validatePreset,
     };
   }
