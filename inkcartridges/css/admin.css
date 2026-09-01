@@ -5274,21 +5274,31 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 }
 /* Header band: title left, invoice meta right */
 .inv-doc__head {
-  display: flex; justify-content: space-between; align-items: flex-start;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start;
   gap: 24px; padding-bottom: 14px; margin-bottom: 22px; border-bottom: 2px solid #1b1b1b;
 }
 .inv-doc__title { font-size: 25px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; white-space: nowrap; flex: 0 0 auto; }
-/* Meta can shrink to fit the (narrow) preview panel: labels wrap rather than
-   forcing the block wide and pushing the right-aligned values off the page.
-   flex-grow:0 stops it ballooning to full width; flex-shrink:1 + min-width:0
-   let it give ground to the title when space is tight. */
-.inv-doc__meta { border-collapse: collapse; margin: 0; flex: 0 1 auto; min-width: 0; }
-.inv-doc__meta td { padding: 2px 0; font-size: 14.5px; vertical-align: top; }
+/* Meta block: label column left, value column right-aligned.
+   `min-width: 0` used to sit here so the block could "give ground to the title" —
+   but the values are nowrap, so shrinking below min-content did not wrap anything,
+   it pushed the dates and the GST number out through the right edge of the paper
+   while the labels wrapped to three lines and closed up against them. min-content
+   is the floor now (the labels are nowrap, so that floor is label + gap + value),
+   and .inv-doc__head wraps the whole block under the title when a narrow drawer
+   genuinely cannot fit both. */
+.inv-doc__meta { border-collapse: collapse; margin: 0 0 0 auto; flex: 0 1 auto; min-width: min-content; max-width: 100%; }
+.inv-doc__meta td { padding: 2px 0; font-size: 14.5px; vertical-align: baseline; }
 .inv-doc__meta td:first-child {
   color: #777; text-transform: uppercase; font-size: 12px; letter-spacing: 0.04em;
-  padding-right: 16px; text-align: left; white-space: normal;
+  padding-right: 24px; text-align: left; white-space: nowrap;
 }
 .inv-doc__meta td:last-child { text-align: right; font-weight: 700; white-space: nowrap; }
+/* Phone-width drawer (the editor is one column under 1000px): at ~400px of
+   viewport the paper is too narrow for "DATE ORDER PLACED" and a full date on one
+   line. Let the LABEL wrap there — never the value, and never an overflow. */
+@media (max-width: 420px) {
+  .inv-doc__meta td:first-child { white-space: normal; padding-right: 14px; }
+}
 
 /* Party columns: From (left) | Bill To (right), with Deliver To stacked
    beneath Bill To in the right column. */
@@ -5325,7 +5335,9 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .inv-doc__totals { margin-left: auto; border-collapse: collapse; min-width: 230px; margin-bottom: 22px; }
 .inv-doc__totals td { padding: 2px 0; }
 .inv-doc__totals td:last-child { text-align: right; padding-left: 28px; white-space: nowrap; }
-.inv-doc__grand td { border-top: 1.5px solid #1b1b1b; font-weight: 700; font-size: 18px; padding-top: 6px; }
+/* Air between the rule and the Total: at 18px the figure sat flush against the
+   1.5px rule above it (the PDF had the same defect — see buildInvoiceDoc). */
+.inv-doc__grand td { border-top: 1.5px solid #1b1b1b; font-weight: 700; font-size: 18px; padding-top: 11px; }
 /* What the customer saved by buying in bulk. Deliberately NOT a totals row: the
    line prices already carry the discount, so a "less discount" row would take it
    off a second time. This states a fact about numbers already shown. */

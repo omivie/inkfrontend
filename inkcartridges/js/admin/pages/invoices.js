@@ -3677,9 +3677,19 @@ function buildInvoiceDoc(d) {
   doc.setFont('times', 'bold'); doc.setFontSize(26); doc.setTextColor(25);
   doc.text('TAX INVOICE', M, 72);
   let my = 56;
-  invoiceMeta(d).forEach(([k, v]) => {
+  // Label and value are each right-aligned in their own column. The label column
+  // used to be pinned 100 pt in from the margin — a guess at how wide a value gets.
+  // "1st September 2026" is ~110 pt at 12 pt Times bold, so it started LEFT of that
+  // pin and the two columns overlapped: the document printed "DATE1st September
+  // 2026" with no space at all. Measure the widest value instead and seat the
+  // labels a fixed gap clear of it, so no value can ever reach its label.
+  const metaRows = invoiceMeta(d);
+  doc.setFont('times', 'bold'); doc.setFontSize(12);
+  const metaValW = metaRows.reduce((w, [, v]) => Math.max(w, doc.getTextWidth(String(v ?? ''))), 0);
+  const metaLabelX = pageW - M - metaValW - 18;
+  metaRows.forEach(([k, v]) => {
     doc.setFont('times', 'normal'); doc.setFontSize(10); doc.setTextColor(140);
-    doc.text(k.toUpperCase(), pageW - M - 100, my, { align: 'right' });
+    doc.text(k.toUpperCase(), metaLabelX, my, { align: 'right' });
     doc.setFont('times', 'bold'); doc.setFontSize(12); doc.setTextColor(25);
     doc.text(String(v ?? ''), pageW - M, my, { align: 'right' });
     my += 17.5;
@@ -3795,13 +3805,18 @@ function buildInvoiceDoc(d) {
   };
   // Sub Total / Freight / GST / rule / Total, reserved as one unit — a Total parted
   // from the figures it sums is worse than a page break in a sensible place.
-  ensure(4 * 17.5 + 6);
+  ensure(3 * 17.5 + 18 + 18);
   totRow('Sub Total', money(t.subtotal));
   totRow('Freight', t.freight === 0 ? 'Free' : money(t.freight));   // see renderPreview — a negative is a credit, not "Free"
 
   totRow('GST', money(t.gst));
-  ty += 6;
-  doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ty - 11, valX, ty - 11);
+  // The rule under the components, then AIR, then the Total. The Total prints at
+  // 16 pt, whose cap height is ~10.6 pt, so a baseline 11 pt below the rule put the
+  // top of "Total" and "$1,325.95" flush against it. 18 pt leaves the figure sitting
+  // clear of the line it is being separated by.
+  const ruleY = ty - 5;
+  doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ruleY, valX, ruleY);
+  ty = ruleY + 18;
   totRow('Total', money(t.total), { bold: true, size: 16, gap: 17.5 });
 
   // --- Bulk savings (presentational; never a totals row) ---
