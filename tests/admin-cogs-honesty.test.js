@@ -227,10 +227,25 @@ test('the Finance profit chart plots null (a gap), not 0', () => {
   assert.ok(/net\.push\(p\.net_profit != null \? num\(p\.net_profit\) : null\)/.test(body));
 });
 
-// ─── The overlay is gone ─────────────────────────────────────────────────────
+// ─── The overlay is gone; the DEDUCTION is not the overlay ───────────────────
+//
+// These two tests used to ban every client-side invoice adjustment by identifier
+// name. ERR-197 added one deliberately — the Dashboard now holds UNPAID invoiced
+// sales out of revenue and profit, on the owner's instruction, while their COGS
+// stays on accrual. Rewriting the guard rather than renaming around it is the
+// point: a ban that no longer says what it means stops being read.
+//
+// The distinction the guard now enforces is direction, and it is not cosmetic:
+//
+//   ADDING invoice revenue to a backend total DOUBLES it — the backend already
+//   counts invoices (includes_invoices: true), which is why utils/invoice-overlay.js
+//   was deleted in Jul 2026 and must stay deleted.
+//
+//   SUBTRACTING the unpaid ones cannot double anything. It removes part of a total
+//   the backend is known to contain, and only after utils/invoice-cash-basis.js has
+//   RECONCILED our view of the period against the backend's own invoice_revenue.
+
 test('the client-side invoice overlay has been fully removed', () => {
-  // The backend now counts invoiced sales itself (includes_invoices: true). Any
-  // surviving client-side top-up would DOUBLE the revenue.
   assert.ok(!fs.existsSync(path.join(ADMIN, 'utils', 'invoice-overlay.js')),
     'utils/invoice-overlay.js still exists — it was built to be deleted once the backend shipped');
   for (const [name, src] of [['dashboard', dashboardSrc], ['financial-health', financeSrc],
@@ -245,4 +260,52 @@ test('no page adds invoice revenue to a backend total client-side', () => {
     assert.ok(!/withInvoices|pnlWithInvoices/.test(src),
       `${name}.js still has a client-side invoice top-up helper`);
   }
+});
+
+test('the cash-basis layer only ever SUBTRACTS from a backend money figure', () => {
+  const src = fs.readFileSync(path.join(ADMIN, 'utils', 'invoice-cash-basis.js'), 'utf8');
+  const body = functionBody(src, 'applyCashBasis');
+  // Every money field it touches must be assigned a difference, never a sum.
+  for (const field of ['revenue', 'gross_profit', 'net_profit']) {
+    const re = new RegExp(`f\\.${field} = round2\\(\\w+ - deduction\\.\\w+\\)`);
+    assert.ok(re.test(body),
+      `applyCashBasis must assign f.${field} as a SUBTRACTION of the deduction — `
+      + 'an addition here is the double-count the overlay was deleted for');
+  }
+  assert.ok(!/\+ deduction\./.test(body),
+    'applyCashBasis adds a deduction somewhere — the direction is the whole guard');
+});
+
+test('the cash-basis layer never touches a cost figure', () => {
+  const src = fs.readFileSync(path.join(ADMIN, 'utils', 'invoice-cash-basis.js'), 'utf8');
+  const body = functionBody(src, 'applyCashBasis');
+  // The hybrid basis is the feature: revenue moves to cash, COGS stays on accrual
+  // because we are billed for the goods when the invoice is raised. If any of these
+  // were adjusted, an unpaid invoice would cost nothing and the whole point is lost.
+  for (const costField of ['cogs', 'operating_expenses', 'stripe_fees', 'total_costs', 'orders']) {
+    assert.ok(!new RegExp(`f\\.${costField}\\s*=`).test(body),
+      `applyCashBasis writes f.${costField} — costs and the order count must pass through untouched`);
+  }
+});
+
+test('the deduction is gated on the invoice status, not the shadow order status', () => {
+  // The trap: every INV- shadow order carries status 'paid' with a paid_at, even for
+  // invoices the operator has never marked paid. Reading the ORDER's flag would make
+  // every deduction zero — the feature would look shipped and do nothing.
+  const src = fs.readFileSync(path.join(ADMIN, 'utils', 'invoice-cash-basis.js'), 'utf8');
+  const body = functionBody(src, 'unrealisedDeduction');
+  assert.ok(/isUnrealised\(j\.invoice\)/.test(body),
+    'unrealisedDeduction must test j.invoice — j.order.status is "paid" for every invoice');
+  assert.ok(!/j\.order\.status/.test(body),
+    'unrealisedDeduction reads the shadow order status; that is always "paid" and would zero the deduction');
+});
+
+test('the dashboard says so when it could NOT apply the cash basis', () => {
+  // A skip is not a pass. If the reconciliation fails the figures on screen are the
+  // backend's accrual numbers, and passing those off as cash-basis ones silently is
+  // the exact failure this whole guard chain exists to prevent.
+  assert.ok(/accrual basis/.test(dashboardSrc),
+    'dashboard.js has no copy for the refusal path — an unapplied basis must be stated, not assumed');
+  assert.ok(/cb\.reason/.test(dashboardSrc),
+    'dashboard.js never renders the refusal reason');
 });

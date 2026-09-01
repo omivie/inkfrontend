@@ -365,6 +365,10 @@ const AdminAPI = {
       if (filters.sort) {
         const sortMap = {
           'created_at': filters.order === 'asc' ? 'oldest' : 'newest',
+          // Deliberate: the Order # column sorts CHRONOLOGICALLY, not by the
+          // order-number string. Sorting those as strings was equivalent only
+          // while they were fixed-width, and stopped being so at migration 157
+          // (ERR-198) — '2026090199' > '20260901100' though order 99 came first.
           'order_number': filters.order === 'asc' ? 'oldest' : 'newest',
           'total': filters.order === 'asc' ? 'total-low' : 'total-high',
           'status': 'newest', // status sort not supported, fallback to newest

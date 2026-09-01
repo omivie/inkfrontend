@@ -212,6 +212,25 @@
         async submitLookup(orderNumber, email) {
             const esc = Security.escapeHtml;
 
+            // Normalise BEFORE the presence check, so a box holding only "#" or
+            // whitespace counts as empty instead of being sent as an order number.
+            //
+            // This trims, drops a leading "#" — the site prints order numbers as
+            // "#2026090101" on the confirmation page, the receipt and the account
+            // order list, so people paste the hash back along with them — and
+            // uppercases. Measured against the live API on 2026-09-01: a
+            // lowercased legacy number is a hard 400, so a customer copying one
+            // out of an old email got told their order did not exist (ERR-198).
+            //
+            // NORMALISING IS A RESCUE, NOT A GATE. There is deliberately still no
+            // client-side format check here. The server owns its own grammar; a
+            // validator living out here would drift from it and start refusing
+            // real customers holding real order numbers, and it would fail closed
+            // and silent. Malformed input is answered by the backend's own
+            // VALIDATION_FAILED, handled further down with its message shown
+            // verbatim. `OrderNumber.isValid` exists for diagnosis and copy only.
+            orderNumber = OrderNumber.normalise(orderNumber);
+
             if (!orderNumber) {
                 this.showResult('<p>Please enter your order number so we can find your delivery.</p>', 'error');
                 document.getElementById('track-order-number')?.focus();

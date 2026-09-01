@@ -16,6 +16,7 @@
 
         async loadOrder(orderNumber) {
             let order = null;
+            let malformed = false;
 
             // Try the detail endpoint first
             try {
@@ -23,14 +24,37 @@
                 if (response.ok && response.data) {
                     order = response.data;
                     DebugLog.log('Order loaded from API');
+                } else if (response.code === 'VALIDATION_FAILED') {
+                    // NOTE the shape: API.request() FLATTENS this envelope to
+                    // { ok:false, error:<string>, code, details } (api.js ~:361),
+                    // so the code is at response.code and `error` is a message,
+                    // not an object. `response.error?.code` reads undefined and
+                    // the branch would never run.
+                    // The server refused the SHAPE, which is a different answer
+                    // from "no such order" and deserves different words (ERR-188:
+                    // a non-answer must never be dressed up as a finding).
+                    malformed = true;
                 }
             } catch (error) {
                 DebugLog.log('Could not load from API:', error.message);
             }
 
-            // Fallback: backend detail endpoint rejects legacy order numbers whose
-            // characters don't match its stricter regex (e.g. ORD-...I-...). The
-            // list endpoint is more permissive, so scan recent orders for a match.
+            // Fallback: scan the customer's own recent orders for an exact match.
+            //
+            // The comment here used to say the detail endpoint "rejects legacy
+            // order numbers whose characters don't match its stricter regex
+            // (e.g. ORD-...I-...)". Re-measured against the live API on
+            // 2026-09-01, that is no longer true: `ORD-IAAAAAAA-AAAA` and the
+            // L/O/U variants all pass validation, and the grammar is simply
+            // `ORD-{alnum}-{4..16 hex}` uppercase (see OrderNumber in utils.js).
+            //
+            // The fallback STAYS anyway. Removing it is a behaviour change and
+            // not cleanup (ERR-158), it costs one request only on a path that has
+            // already failed, and it still covers the cases this page cannot see
+            // from out here — a number stored before any of the current rules
+            // existed, or a transient failure on the detail route. What has been
+            // fixed is the reason written next to it, so the next reader is not
+            // told something untrue about the backend.
             if (!order) {
                 try {
                     const listResponse = await API.getOrders({ limit: 100 });
@@ -50,6 +74,11 @@
             if (order) {
                 this.orderData = order;
                 this.renderOrder();
+            } else if (malformed) {
+                // Say which of the two things went wrong. "Order not found" sends
+                // someone hunting for an order that is sitting in their inbox
+                // when the real problem is a truncated or mistyped reference.
+                this.showError('That doesn\u2019t look like one of our order numbers');
             } else {
                 this.showError('Order not found');
             }

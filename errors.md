@@ -41,6 +41,181 @@ describing the same incident.
 
 ---
 
+## ERR-199 — The Orders page printed "Not recorded" on every website checkout and on the two invoices that HAD been emailed; the hand-off that fixed it described a backend that would not exist for another nine hours — **RESOLVED** (2026-09-01)
+
+**Date**: 2026-09-01 · **Context**: The owner's backend developer sent
+`readfirst/orders-invoice-sent-column-FE-handoff-sep2026.md`. Its complaint was real and
+well-made: the **Invoice sent** column rendered `Not recorded` on 13 of the 15 rows on page 1,
+which reads as 13 outstanding tasks that do not exist — a storefront order is never "invoiced"
+by an operator, the customer is emailed their receipt by the payment webhook. Worse, it was
+wrong in the one place it mattered: `INV-3277` and `INV-3276` also read `Not recorded` even
+though both had been emailed (1 Sep 12:55 and 31 Aug 17:21 NZT), because those sends were made
+from the **Invoices** page, which logs to `standalone_invoice_emails` — a table the Orders page
+has never read.
+
+**The hand-off's opening sentence was false, and checking it was the whole job.** It says
+"Shipped in `GET /api/admin/orders`". Measured against live production before writing a line —
+`/health` reporting commit `01c29cba` and `db: connected` — **`channel`, `invoice_id` and
+`invoice_sent` were absent from every row**, on the list AND on the detail endpoint, under
+`?include=` / `?expand=` / `?with_invoice_sent=1`. The hand-off's description of the *existing*
+response was wrong too: it lists `profit` as a current field, and that is not there either.
+This is ERR-195 four days later — *re-run the other side's verification before building on it.*
+
+**Root cause of the trap this created: `undefined !== null` is TRUE.** Rule 1 of the hand-off
+says "gate on `invoice_sent !== null`". Written out literally against a payload that has no such
+field, every website order evaluates as **applicable** and grows a phantom outstanding task —
+the exact noise the change exists to remove, doubled. And the obvious correction is worse:
+`invoice_sent == null` collapses ABSENT into NOT-APPLICABLE, blanking the entire column
+including `INV-3277`, which **looks exactly like the hand-off's own §4 "after" table** while
+being a dead feature. A wrong answer that resembles the right one is the expensive kind
+(absence-as-zero: ERR-063/068/073/075/076/149/150; and ERR-158, *removing a fallback is a
+behaviour change, not cleanup*).
+
+**Fix — two regimes, one shaping function, one renderer.** `utils/order-invoice-sent.js` gained
+`SENT_STATE.NOT_APPLICABLE`, `SEND_REGIME`, `readServerInvoiceSent()` and `orderSendRegime()`.
+Detection is `Object.prototype.hasOwnProperty`, never truthiness, so **absent**, **`null`** and
+**`{sent_at: null}`** stay three different claims:
+
+- **SERVER** (`invoice_sent` key present) — gate on `invoice_sent !== null`, ignore `channel`
+  entirely (Rule 1), and issue **no lookup of any kind**: the answer is already on the payload.
+- **LOCAL** (key absent) — the channel question is answered from `payment_method` via the new
+  `orderChannel()` in `utils/order-profit.js`, and the send record read as it has been since
+  ERR-175. Measured before relying on it: `payment_method` is `'invoice'` on exactly the 15
+  `INV-` orders and null on all 131 website orders, **146 of 146 with zero disagreements**.
+  The fallback announces itself by name through `DebugLog.warn` and says which field is missing.
+
+The two regimes deliberately use **different words for the same-looking cell** — `Not sent`
+under SERVER (the backend checked the send log AND the pre-log stamp: a real outstanding send)
+versus `Not recorded` under LOCAL (we have no record, which is all we can honestly claim). That
+is ERR-175's "Not recorded" vs "Can't check" discipline, applied to the regime.
+
+**`orderChannel()` (`utils/order-profit.js`)** is now the single channel vocabulary — `channel`
+wins when present, an **unrecognised** value reads as Website (Rule 3, never guessed as
+"invoice", which would put a storefront sale in the no-card-fee branch), and only when `channel`
+is absent does it fall back to `payment_method` → `/^INV-/i`. `isInvoiceOrder()` is defined in
+terms of it, so the money rule and the column rule cannot drift. The Channel badge gained a
+third state (Quick order) off the same derivation.
+
+**Refused, deliberately:** joining an order to its invoice by parsing `INV-3277` into invoice
+number 3277. It matches on all 15 live rows and it is still refused — Rule 2 forbids deriving
+identity from the order number, and `public.invoices` and `admin_invoices` are two systems this
+repo has a standing rule never to conflate. The gap was reported instead, in the cell tooltip
+and in the probe, naming `invoice_id` as the thing that closes it.
+
+**Then the backend deployed, mid-implementation, and the design paid for itself.** Commit
+`01c29cba` → `b7437b8b`. All three fields appeared. **The page flipped to the SERVER regime with
+no code change**, `npm run probe:orders-invoice-sent` re-run the same minute reported
+`REGIME: SERVER`, and the browser now renders exactly the hand-off's §4 table.
+
+**Two bugs the unit suite could not see, both caught in the browser:**
+1. `source` was carrying two vocabularies. Under SERVER it held the hand-off's diagnostic
+   (`send_log` / `legacy_stamp`), and the detail modal picks its attribution sentence off
+   `source === 'server'` — so a backend-logged send arrived captioned **"recorded when resent
+   from this page"**: a claim about who sent the email, made from a field describing where the
+   record came from. Split into `source` (WHO — `server` | `admin`, identical under both
+   regimes) and `sourceKind` (the diagnostic, which decides whether a count may be printed and
+   nothing else — "`source` is diagnostic … don't surface the string", §2).
+2. The history panel captioned a **known** `send_log` count of 2 as *"the rest predate the send
+   log and were never recorded individually"*, inventing a reason. The real limit is the field's
+   SHAPE — `invoice_sent` carries one timestamp and a total — and the pre-log sentence belongs
+   to `floor` alone. The cut line also fired on `info.floor || count > sends.length`, printing
+   *"1 recorded send or more — more than the one listed"* over exactly one listed send.
+
+**`×N` is gated on `countKnown`, not just on `n > 1`.** A `sent_count` of 0 beside a real
+`sent_at` is UNKNOWN, not zero (hand-off §2, and the bug ERR-180 shipped one page over). Four
+live invoices are exactly that case and render `27 Jul` / `8 Jul` / `3 Jul` / `1 Jul` with **no**
+`×N` and the tooltip "At least one recorded send — the exact count was never logged."
+
+**Fix**: `js/admin/utils/order-invoice-sent.js` (regimes, parse, state machine),
+`js/admin/utils/order-profit.js` (`orderChannel` / `ORDER_CHANNEL`), `js/admin/pages/orders.js`
+(badge, cell, history panel, modal, hydration, resend), `css/admin.css` (`.order-sent--na`,
+`.admin-badge--quick`, `--violet-*` in both decks). `APP_VERSION` →
+`2026.09.01-invoice-cash-basis+orders-invoice-sent-channel` (appended rather than replacing a
+concurrent session's marker) + `npm run build`.
+
+**A measured side-effect: the column now costs ZERO requests.** Under SERVER the two batched
+Supabase reads (`invoices`, `order_events`) are not issued at all, and the detail modal skips
+its invoice lookup. Counted in the browser by wrapping `window.fetch`: **0 Supabase requests, 1
+call to `/api/admin/orders`**, down from 3.
+
+**Verified**: full suite **4838 pass / 0 fail**. New
+`tests/admin-orders-invoice-sent-channel-sep2026.test.js` (67), including **four positive
+controls** — the naive `!== null` gate, the `== null` "fix", a truthiness check, and a
+deliberately-broken build of the real module run through the real loader — so a parse that
+stopped distinguishing the three cases cannot go silently green (ERR-181's lesson). The 62
+existing subtests in `admin-order-invoice-sent-aug2026.test.js` pass **untouched**; the one
+assertion that had to change is in `admin-invoice-send-count-aug2026.test.js` §4, which pinned a
+hand-written floor marker in orders.js — the page now calls `recordedSendsPhrase()` instead, so
+the assertion was **raised** (import + call + the marker must never grow back) rather than
+relaxed. `npm run probe:orders-invoice-sent` green, 11 hard checks, `REGIME: SERVER`. Driven end
+to end in the running admin: all 131 website rows `—` with an inert span, the 15 invoice rows
+showing `1 Sept`, `31 Aug`, `1 Sept ×2`, `Not sent` and four legacy stamps, all three history
+panels, and both detail-modal branches.
+
+**Lesson**: **an absent field, a null field and a field that says "not yet" are three different
+claims, and the language will happily fold any two of them together.** `undefined !== null` is
+true and `undefined == null` is true, so both of the obvious ways to write the gate are wrong,
+in opposite directions, and one of them produces a screen indistinguishable from the correct
+one. Ask `hasOwnProperty`. And a second lesson, cheaper to learn: **a hand-off is a claim about
+production, not a description of it** — this one was accurate about the defect, accurate about
+the fix, and nine hours early about the deploy.
+
+---
+
+## ERR-198 — A backend hand-off said "no code changes required"; the shortened order number silently broke the refund lookup, mangled every dashboard order reference, and the site had been advertising five order-number formats that have never existed — **RESOLVED (frontend)** (2026-09-01)
+
+**Date**: 2026-09-01 · **Context**: The backend shipped migration 157, which stopped zero-padding the daily order sequence: `20260829000004` → `2026090101`. The hand-off (`readfirst/order-number-format-change-FE-handoff-sep2026.md`) read our deployed bundles first and concluded **"No code changes required"**, with two surfaces it could not inspect and asked us to check. It was right about what it looked for — there is no `\d{14}` regex, no `parseInt`, no `.length === 14` anywhere in the tree — and wrong about what that implied.
+
+**Root cause: the migration did not change how an order number PARSES. It changed the fact that order numbers were FIXED WIDTH.** Two things rested on that and neither said so out loud.
+
+**(a) No order number could previously be a prefix of another — and two call sites took `rows[0]`.** Every number was 14 characters, so no two could share a prefix. They can now: `2026090110` (order 10) is a strict prefix of `20260901100` (order 100). The admin order search is a case-insensitive substring `ILIKE` (measured, `probe:orders-search`), so one query legitimately returns both, in whatever order the backend likes. `pages/refunds.js` asked for `getOrders({ search: val }, 1, 1)` — a page size of **one** — and bound `foundOrder = orders[0]` with no equality check, then attached a credit/refund to it. `pages/orders.js` `focusOnOrder()` had the same shape: an exact-match arm, then `else if (rows.length === 1) openOrderModal(rows[0])`, on the reasoning that a search for a whole order number returning exactly one row must have returned *that* order. True while numbers were fixed-width; false now. Both now go through `OrderNumber.pickExact`, which matches whole normalised strings and returns **null** on a near-miss — the refund box names the candidates and refuses to bind, because an order the operator did not ask for is worse than an honest miss. Reachable at ~100 orders in a day; today's volume is ~4. It is a guard rail, and it is the same guard rail the backend built its own range validator for.
+
+**(b) Truncating an order number for display used to be safe, because the leading 8 characters were a redundant date prefix.** `pages/dashboard.js` rendered `String(n).slice(-8)` at five sites. On the old format that dropped the date and kept the whole counter — `20260829000004` → `29000004`. On a 10-character number the same slice eats the **century**: `2026090101` → `26090101`, and `20260901100` → `60901100`. Neither is an order number, neither can be pasted into the order search, and the first reads like a date. Replaced by `orderRef()` → `OrderNumber.forDisplay`, which never truncates; the 29-character legacy form gets a CSS ellipsis (`.cell-ordernum`) so the DOM keeps the full, copyable value and only the pixels are clipped. **Nothing in the suite had ever tested it.**
+
+**(c) The site was telling customers five order-number formats that have never existed.** `ORD-ABC123-XYZ` (both Track Order forms), `ORD-1042` (contact form), `INK-78542` (hardcoded in the `account/order-detail.html` `<h1>` — visible only when the order *fails* to load, i.e. when the customer is already lost), `INK-10432` (the receipt test fixture) and `ORD-ABC-1` (api.js JSDoc, twice). Not one is a shape the backend has ever minted; `ORD-ABC123-XYZ` is not even a valid legacy form. The hand-off's §3 could not see these because it read the JS bundles and these live in HTML and JSDoc. All replaced with `OrderNumber.EXAMPLE`, and a test now asserts every order-number example in the shipped tree satisfies `OrderNumber.isValid`, so the copy cannot rot back.
+
+**(d) The customer receipt PDF printed its order number straight through its own label — for every pre-2026-05-18 order.** `order-receipt.js` seated the meta label column at `pageW - M - 110`: a constant reserving space for text, the exact shape ERR-196 fixed one file over in `buildInvoiceDoc`. Measured against the Times metrics jsPDF draws with, 110 pt holds every date and every numeric order number (10-char 55.0 pt, 14-char 77.0 pt) and fails outright for both legacy shapes — `ORD-MMQXBRYO-6E93` is **124.7 pt** (overlaps by 14.7) and `ORD-MP7GA80N-C3DD9FA2EC39F1DE` is **198.6 pt** (overlaps by 88.6). ERR-196 looked at this file, judged it "one long date away", and left it — because it weighed the *dates*, not the order number, which is the widest value the block ever prints. Now measured with `doc.getTextWidth()` and seated 18 pt clear; worst case leaves the leftmost label at x=258.9 against an `ORDER RECEIPT` heading ending at x=247.3. The existing suite asserted every string lands inside the **page box** and always passed — it never asked whether two strings land on top of *each other*, which is how the pin survived.
+
+**Also fixed, same family**: three un-encoded order numbers interpolated into API paths (`api.js` `getOrder`, `cancel`, `capture-paypal`) while their siblings `getOrderTracking` and `createReturnRequest` encoded — now all five consistent. Four dead deep-links that emitted an order number into a param nothing reads (`dashboard.js` ×3 used `orders?order=` / `orders?search=`; `orders.js` reads `focus` and `q` only) and `coupons.js`'s `#orders/<uuid>`, a route the SPA router has never resolved — the dashboard ones now emit `focus=` with the order number, and the coupon cell renders text instead of a link that goes nowhere, because a coupon-usage row carries only a UUID and the orders list cannot be searched by UUID. `order-detail-page.js` now distinguishes a `VALIDATION_FAILED` from a miss ("that doesn't look like one of our order numbers" vs "Order not found") — and note the envelope shape: `API.request()` **flattens** it to `{ ok, error:<string>, code, details }`, so `response.error?.code` reads `undefined` and that branch would never have run.
+
+**Two claims in the tree that were not true, both re-measured**: `order-detail-page.js` carried a comment saying the detail endpoint "rejects legacy order numbers whose characters don't match its stricter regex (e.g. `ORD-...I-...`)". Measured live: `ORD-IAAAAAAA-AAAA` and the L/O/U variants all validate. The fallback **stays** — removing one is a behaviour change, not cleanup (ERR-158), and it costs a request only on a path that has already failed — but the reason beside it is now true. And a note from a sibling audit that the fallback's `limit: 100` "cannot reach the 128 legacy rows" conflated store-wide orders with a customer's own: `/api/orders` returns the signed-in customer's history, where 100 is ample.
+
+**Fix**: new `OrderNumber` vocabulary in `js/utils.js` (`normalise` / `isValid` / `equals` / `pickExact` / `forDisplay` / `era` / `EXAMPLE`), deliberately with **no comparator** — sorting order numbers as strings is chronologically wrong above 99/day (`'2026090199' > '20260901100'` though order 99 came first), so lists sort on `created_at` and a test pins that no comparator exists. `js/admin/pages/{dashboard,orders,refunds,coupons}.js`, `js/admin/api.js` (the Order # column maps to the backend's date sort **on purpose** — now written down so nobody "fixes" it into a string sort), `js/{api,order-receipt,order-detail-page,track-order-page}.js`, `css/admin.css`, four HTML surfaces. `APP_VERSION` → `2026.09.01-cash-basis-invoice-sent-order-number-format` + `npm run build` restamp.
+
+**Verified**: the grammar was **measured, not cited** — `GET /api/orders/:orderNumber` validates *before* it authenticates, so the accepted shapes are observable unauthenticated (400 = rejected, 401 = accepted). Numeric is 10–14 digits (9 → 400, 15 → 400); the date prefix is **not** checked (`20261301100`, month 13, is accepted — a numeric order number is not a parseable date); legacy is `ORD-{alnum}-{4..16 hex}`, uppercase only. New `npm run probe:order-number` re-runs that sweep and fails if `OrderNumber.isValid` and the server ever disagree; it is read-only, paced, and reports a 429 as **INCONCLUSIVE with exit 2**, never as a pass. New `tests/order-number-format-sep2026.test.js` (20) plus 3 geometry tests added to `tests/order-receipt-jul2026.test.js`; **run against the pre-fix receipt source, both geometry tests fail**, and the suite carries positive controls for the truncation, the `rows[0]` bind, the `rows.length === 1` fallback and all five invented formats. The receipt test's fake jsPDF gained real Adobe standard-14 Times metrics and now records font size and alignment, without which "does the label overlap its value?" cannot be asked at all. Full suite 4836 / 0.
+
+**Lesson**: **a hand-off that says "no code changes required" has answered the question it asked, not the question you have.** This one searched for *parsing* assumptions and correctly found none — but the migration never touched parsing. It removed a property nobody had written down: that order numbers were fixed width, and therefore that no one could be a prefix of another and that the first eight characters were disposable. Two `rows[0]`s and five `slice(-8)`s were resting on that property, and none of them mentions a length, so no search for a length would ever have found them. **When a format changes, do not grep for the old format — enumerate what the old format made TRUE, and grep for the code that relied on it.** Corollary, learned twice in one session: a measurement taken with a bad control is not a measurement. The first sweep of the legacy grammar probed the hex run with `6E93X` and `GGGG`, read the 400s as a length rule, and concluded "4 or 16 only"; `X` and `G` are not hex digits, so those strings were rejected on characters and the length question was never asked. With hex-only controls the rule is a plain `{4,16}` range — and a validator built on the first answer would have refused real legacy orders.
+
+## ERR-197 — Invoiced sales counted as revenue on the day they were raised; the dashboard showed money we had not been paid, and nothing on the Invoices page said how much was owed — **RESOLVED** (2026-09-01)
+
+**Date**: 2026-09-01 · **Context**: The owner asked for two things: a box at the top of `/admin#invoices` showing how much of the invoiced book is still unpaid, and for dashboard revenue and profit to recognise an invoice only once its PAID slider is flipped — while still being charged for the goods from the day the invoice is created. Nine of fifteen live invoices are unpaid; **$4,066.39 of a $5,409.14 book, 75%**, was being reported as earned.
+
+**Not a bug — a basis change, and the codebase argued against it.** `countsForAnalytics()` (js/admin/utils/invoice-math.js) documents the accrual rule in its own comment, ending "the paid/unpaid toggle … can never move revenue". `utils/invoice-overlay.js` was deleted in Jul 2026 and `tests/admin-cogs-honesty.test.js` installed to keep it deleted. That guard is aimed at a client-side **top-up**, which would double a revenue the backend already contains. This is a **deduction**, which cannot double anything — so the guard was rewritten to say what it actually means (direction + never touching a cost) rather than renamed around. A ban that no longer states its own reason stops being read.
+
+### The gate was measured, and the plan's gate was the wrong one
+
+The plan named `source_order_id` as the discriminator: an invoice raised *against an existing order* is paperwork for a sale the backend already counted, and deducting it would delete a real order's revenue. `npm run probe:invoice-cash-basis` established it is **not on `/api/admin/invoices` list rows** — keys are `id, invoice_number, issue_date, customer_name, total_incl_gst, status, profit_excl_gst, cost_excl_gst, emailed_at, email_count`. By the plan that stopped the dashboard half.
+
+It did not, because a **better** discriminator exists. Every invoice the backend counts materialises as a shadow order `INV-<invoice_number>` (`payment_method: 'invoice'`), and that order *is* the thing the dashboard's revenue contains. It answers both questions: an invoice raised against a real order gets no shadow order — the backend's own double-count guard — so it never joins and is never deducted; and the order's `created_at` is the day the money was booked.
+
+**`issue_date` is the wrong date, and it is the trap that would have been hardest to see.** The backend books on the shadow order's `created_at`, which differs from `issue_date` on **8 of 15** live invoices, by up to 8 days and across month boundaries. INV-3277 carries `issue_date` 2026-09-01, was booked 2026-08-28, and the backend reports `invoice_revenue = 0` for the whole of September. Bucketing by the date on the list row would have moved money out of the wrong month and left a phantom in the right one — and every total would still have added up, so nothing would have looked wrong.
+
+**Reconciliation replaced the missing field, and is stronger than it.** `kpi-summary` carries `invoice_revenue` and `invoice_orders`, forwarded by `api.js:276` since Jul 2026 and **read by nothing**. The deduction now requires Σ(joined, non-cancelled invoices in period) to *equal* `invoice_revenue` and the count to equal `invoice_orders` before it will subtract anything. Exact to the cent on every window measured: Jun 1/$195.99, Jul 5/$1,551.92, Aug 8/$3,661.23, Sep 0/$0.
+
+**The trap that would have shipped a feature that did nothing:** every INV- shadow order carries `status: 'paid'` with a `paid_at` — including all nine invoices the operator has never marked paid. The order's paid flag is decoupled from the customer's. Reading it would have made every deduction zero, on a page that looked correct. A test pins that `unrealisedDeduction` tests `j.invoice`, never `j.order.status`.
+
+**Arithmetic**: revenue −`total_incl_gst` (incl-GST); gross and net profit −`total_incl_gst × 20/23` (the ERR-111 ex-GST basis); COGS, operating expenses, Stripe fees and the **orders count** untouched — the owner's decision, so AOV is re-derived and necessarily falls. Not `profit_excl_gst + cost_excl_gst`: on #3266 and #3273 the two differ by exactly $6.09 each, a $7.00-incl freight line the invoice's profit excludes but the shadow order's revenue includes.
+
+**Five refusals, each printed on the page.** No `includes_invoices`; either fetch null; a truncated page; a failed reconciliation; an unpaid invoice with no readable total. Every one renders the backend's unadjusted accrual figures *with a banner saying so*. A dashboard that quietly withholds three quarters of its invoiced revenue and shows a loss without explaining why is indistinguishable from a broken one.
+
+**Order of operations matters twice.** `checkMarginConsistency` runs on the **unadjusted** backend pair first, so it stays the ERR-111 regression detector it was built as; margins are then re-derived from the adjusted figures. And `checkNetDrift`'s KPI side had to be adjusted too — the buckets behind it already were, so leaving it alone would have reported a "backend disagrees with itself" drift exactly equal to the deduction, on every single load, drowning any real one.
+
+**Fix**: new `js/admin/utils/invoice-cash-basis.js`; `pages/invoices.js` (outstanding strip + `applyRowStatus` hook); `pages/dashboard.js` (fetch, `buildCashBasis`, KPI strip, `buildOverviewBuckets`, drift guard, tooltip footer); `css/admin.css` (`.inv-kpi-strip`); `pages/financial-health.js` (a basis label — the P&L stays accrual, and two money screens must not disagree in silence).
+
+**Verified**: `npm run probe:invoice-cash-basis` 15/15 hard checks, four windows reconciling exactly. New `tests/dashboard-invoice-cash-basis-sep2026.test.js` (32) built on the real live book including its two freight invoices and its void. The three rewritten guards in `admin-cogs-honesty.test.js` were **mutation-tested** — flipping a subtraction to an addition, writing `f.cogs`, and reading `j.order.status` each fail exactly one guard and only that one. Full suite **4748/0**. Live in Playwright: the box read $4,066.39/9; flipping invoice 3275 ($98.34) gave $3,968.05/8 to the cent through the BF-021 PUT fallback; flipping back restored $4,066.39/9, with `emailed_at` and `email_count` intact on the server. Dashboard: revenue $15,945.52, gross $813.24, net **−$2,470.13**, AOV $141.11 — margins re-derived (5.9% / −17.8%) and reproducible by hand.
+
+**Lesson**: **the field you were told to check is not always the one that answers the question.** The plan stopped at a missing `source_order_id`; the backend was already telling us what it had counted, in two places nobody read — a shadow order per invoice, and an `invoice_revenue` total that had been forwarded through `api.js` for two months with no consumer. A reconciliation against a number the other side published is worth more than a flag you trust, because it re-proves itself on every load instead of being true once. **And the date a document displays is not the date it was booked**: `issue_date` was right there on the row, plausible, and wrong for 8 of 15 records — a number that reconciles in total can still be in the wrong month.
+
 ## ERR-196 — The invoice printed "DATE1st September 2026" and stood the Total on the rule above it; the admin preview pushed the dates off the paper — **RESOLVED** (2026-09-01)
 
 **Date**: 2026-09-01 · **Context**: The owner downloaded Invoice 3277 to check the layout. Three defects, one document: (1) in the PDF the header's label ran straight into its value — `DATE1st September 2026`, `DATE ORDER PLACED 28th August 2026` nearly so; (2) the `Total  $1,325.95` line rested directly on the rule that is supposed to separate it from the figures it sums; (3) in the admin's live preview (`/admin#invoices`) the meta values — the two dates and the GST number — ran out through the right edge of the paper, while the labels wrapped to three lines and closed up against them.

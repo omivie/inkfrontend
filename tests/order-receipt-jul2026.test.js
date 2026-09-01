@@ -66,6 +66,11 @@ const LEGAL_CONFIG = {
  * items table anywhere on the page, including right at the bottom edge, which is
  * how the overflow contract gets exercised.
  */
+/** Adobe standard-14 AFM widths (per 1000 em) for the two Times faces in use. */
+const TIMES_BOLD = { A: 722, B: 667, C: 722, D: 722, E: 667, F: 611, G: 778, H: 778, I: 389, J: 500, K: 778, L: 667, M: 944, N: 722, O: 778, P: 611, Q: 778, R: 722, S: 556, T: 667, U: 722, V: 722, W: 1000, X: 722, Y: 722, Z: 667, '-': 333, ' ': 250, '.': 250, ',': 250, $: 500, '#': 500 };
+const TIMES_ROMAN = { A: 722, B: 667, C: 667, D: 722, E: 611, F: 556, G: 722, H: 722, I: 333, J: 389, K: 722, L: 611, M: 889, N: 722, O: 722, P: 556, Q: 722, R: 667, S: 556, T: 611, U: 722, V: 722, W: 944, X: 722, Y: 722, Z: 611, '-': 333, ' ': 250, '.': 250, ',': 250, $: 500, '#': 500 };
+for (let d = 0; d <= 9; d++) { TIMES_BOLD[String(d)] = 500; TIMES_ROMAN[String(d)] = 500; }
+
 function makeFakeJsPdf(opts = {}) {
     const calls = { text: [], addPage: 0, setPage: [], save: [], lines: [], autoTable: [] };
 
@@ -79,8 +84,22 @@ function makeFakeJsPdf(opts = {}) {
             getNumberOfPages: () => self.pageCount
         };
     }
-    Doc.prototype.setFont = function () { return this; };
+    Doc.prototype.setFont = function (_family, style) { this.fontStyle = style || 'normal'; return this; };
     Doc.prototype.setFontSize = function (n) { this.fontSize = n; return this; };
+    /**
+     * Real Times metrics, because the builder now MEASURES (ERR-198).
+     *
+     * `buildReceiptDoc` seats the header meta labels a fixed gap clear of the
+     * widest value via doc.getTextWidth(), the same way buildInvoiceDoc does
+     * since ERR-196. A fake that returned a made-up number here would let the
+     * geometry test pass while the real PDF overlapped, so these are the
+     * Adobe standard-14 AFM widths (per 1000 em) that jsPDF actually draws
+     * Times with — the same numbers the fix was measured against.
+     */
+    Doc.prototype.getTextWidth = function (s) {
+        const t = this.fontStyle === 'bold' ? TIMES_BOLD : TIMES_ROMAN;
+        return [...String(s)].reduce((a, c) => a + ((t[c] === undefined ? 500 : t[c]) / 1000), 0) * (this.fontSize || 12);
+    };
     Doc.prototype.setTextColor = function () { return this; };
     Doc.prototype.setDrawColor = function () { return this; };
     Doc.prototype.setLineWidth = function () { return this; };
@@ -88,8 +107,15 @@ function makeFakeJsPdf(opts = {}) {
         calls.lines.push({ page: this.currentPage, x1, y1, x2, y2 });
         return this;
     };
-    Doc.prototype.text = function (s, x, y) {
-        calls.text.push({ page: this.currentPage, s: String(s), x, y });
+    Doc.prototype.text = function (s, x, y, opts) {
+        // size/style/align are recorded so a test can reconstruct the box a string
+        // actually occupies — without them "does the label overlap its value?"
+        // cannot be asked at all, which is how the 110 pt pin survived (ERR-198).
+        calls.text.push({
+            page: this.currentPage, s: String(s), x, y,
+            size: this.fontSize, style: this.fontStyle || 'normal',
+            align: (opts && opts.align) || 'left',
+        });
         return this;
     };
     Doc.prototype.splitTextToSize = function (s, width) {
@@ -176,7 +202,10 @@ function loadReceipt(opts = {}) {
 }
 
 const ORDER = {
-    order_number: 'INK-10432',
+    // A real interim-format number (matching this fixture's July date) rather
+    // than the fabricated 'INK-10432' — a shape the backend has never minted,
+    // and the wrong width to exercise the header geometry with (ERR-198).
+    order_number: '20260728000001',
     created_at: '2026-07-28T02:00:00Z',
     customer_email: 'buyer@example.com',
     subtotal: 89.98,
@@ -490,7 +519,7 @@ test('order number, date and recipient are on the receipt', () => {
     const { OrderReceipt, calls } = loadReceipt();
     OrderReceipt.build(ORDER);
     const drawn = calls.text.map((c) => c.s).join(' | ');
-    assert.match(drawn, /INK-10432/);
+    assert.match(drawn, /20260728000001/);
     assert.match(drawn, /ORDER NUMBER/);
     assert.match(drawn, /Jun Jackson/);
     assert.match(drawn, /12 Example St/);
@@ -545,12 +574,12 @@ test('item rows render code, name, qty and amount; unknowns become em-dashes', (
 test('download() saves a sanitised filename', async () => {
     const { OrderReceipt, calls } = loadReceipt();
     assert.equal(await OrderReceipt.download(ORDER), true);
-    assert.deepEqual(calls.save, ['Receipt-INK-10432.pdf']);
+    assert.deepEqual(calls.save, ['Receipt-20260728000001.pdf']);
 });
 
 test('safeName strips path and shell-hostile characters', () => {
     const { OrderReceipt } = loadReceipt();
-    assert.equal(OrderReceipt.safeName('INK-10432'), 'Receipt-INK-10432.pdf');
+    assert.equal(OrderReceipt.safeName('20260728000001'), 'Receipt-20260728000001.pdf');
     assert.equal(OrderReceipt.safeName('../../etc/passwd'), 'Receipt-....etcpasswd.pdf');
     assert.equal(OrderReceipt.safeName(''), 'Receipt-order.pdf');
     assert.equal(OrderReceipt.safeName(null), 'Receipt-order.pdf');
@@ -613,7 +642,7 @@ test('attach() reads the order at CLICK time, not at bind time', async () => {
     OrderReceipt.attach(btn, () => current);
     current = ORDER;              // arrives after binding
     await handlers[0]();
-    assert.deepEqual(calls.save, ['Receipt-INK-10432.pdf']);
+    assert.deepEqual(calls.save, ['Receipt-20260728000001.pdf']);
 });
 
 test('attach() tolerates a missing button or getter', () => {
@@ -676,4 +705,86 @@ test('ensureLib resolves true without touching the network when jsPDF is already
     sandbox.document.head.appendChild = () => { appended += 1; };
     assert.equal(await OrderReceipt.ensureLib(), true);
     assert.equal(appended, 0);
+});
+
+// ── Header meta geometry (ERR-198) ──────────────────────────────────────────
+//
+// The label column used to be pinned at `pageW - M - 110`: a constant reserving
+// space for text, which is a measurement someone declined to take (ERR-196's
+// lesson, and this file is where it went unlearned). The suite above asserts
+// every string lands inside the PAGE BOX, and it always did — what it never
+// asked was whether two strings land on top of EACH OTHER. That is why the pin
+// survived here after being fixed in the invoice builder one file over.
+
+/** The box a recorded text call occupies, honouring right-alignment. */
+function boxOf(call, widthOf) {
+    const w = widthOf(call.s, call.style, call.size);
+    const x0 = call.align === 'right' ? call.x - w : call.x;
+    return { x0, x1: x0 + w, y: call.y, w };
+}
+
+/** Width using the same Times metrics the fake draws with. */
+function timesWidth(s, style, size) {
+    const t = style === 'bold' ? TIMES_BOLD : TIMES_ROMAN;
+    return [...String(s)].reduce((a, c) => a + ((t[c] === undefined ? 500 : t[c]) / 1000), 0) * (size || 12);
+}
+
+const META_LABELS = ['ORDER NUMBER', 'DATE', 'INVOICE NUMBER'];
+
+test('a header meta label never collides with its own value, at any order-number width', () => {
+    // Every shape the backend has ever minted, widest last. The two legacy forms
+    // are the ones that broke it: at 11 pt Times bold they are 124.7 pt and
+    // 198.6 pt wide against a 110 pt pin, so each printed straight through its
+    // own ORDER NUMBER label on every receipt for a pre-2026-05-18 order.
+    const shapes = [
+        '2026090101', '20260901100', '20260829000004',
+        'ORD-MMQXBRYO-6E93', 'ORD-MP7GA80N-C3DD9FA2EC39F1DE',
+    ];
+    for (const orderNumber of shapes) {
+        const { OrderReceipt, calls } = loadReceipt();
+        OrderReceipt.build({ ...ORDER, order_number: orderNumber });
+
+        const labels = calls.text.filter((c) => META_LABELS.includes(c.s));
+        assert.ok(labels.length >= 2, `sanity: the meta labels were drawn for ${orderNumber}`);
+
+        const value = calls.text.find((c) => c.s === orderNumber);
+        assert.ok(value, `the order number ${orderNumber} must be drawn on the receipt`);
+
+        const vBox = boxOf(value, timesWidth);
+        for (const label of labels.filter((l) => l.y === value.y)) {
+            const lBox = boxOf(label, timesWidth);
+            assert.ok(lBox.x1 <= vBox.x0,
+                `on a receipt for ${orderNumber} the label "${label.s}" ends at `
+                + `x=${lBox.x1.toFixed(1)} but its value starts at x=${vBox.x0.toFixed(1)} — `
+                + `they overlap by ${(lBox.x1 - vBox.x0).toFixed(1)} pt, so the PDF prints them `
+                + `on top of each other (ERR-198).`);
+        }
+    }
+});
+
+test('the meta gap is derived from the widest value, not from a constant', () => {
+    // Pin the SHAPE of the fix, not a number: a future value one character wider
+    // must move the labels, which a hardcoded offset can never do.
+    const src = fs.readFileSync(path.join(ROOT, 'js', 'order-receipt.js'), 'utf8');
+    assert.match(src, /getTextWidth/,
+        'the receipt builder must MEASURE its meta values with the font that draws them');
+    assert.doesNotMatch(src, /pageW - M - 110/,
+        'the 110 pt label pin is the defect — it must not come back');
+    assert.match(src, /const metaLabelX = pageW - M - metaValW - 18;/,
+        'labels are seated a fixed gap clear of the measured widest value');
+});
+
+test('POSITIVE CONTROL — the pre-fix 110 pt pin DOES overlap the legacy numbers', () => {
+    // If this ever stops overlapping, the geometry test above is not measuring
+    // anything and would pass against the broken source.
+    const PIN = 110;
+    const overlaps = (n) => timesWidth(n, 'bold', 11) > PIN;
+    assert.ok(!overlaps('20260829000004'),
+        'the interim 14-digit form fit inside the old pin — which is why nobody noticed');
+    assert.ok(!overlaps('2026090101'),
+        'and the new 10-digit form fits too, so the migration did not cause this');
+    assert.ok(overlaps('ORD-MMQXBRYO-6E93'),
+        'the short legacy form is 124.7 pt and overlapped by 14.7 pt');
+    assert.ok(overlaps('ORD-MP7GA80N-C3DD9FA2EC39F1DE'),
+        'the long legacy form is 198.6 pt and overlapped by 88.6 pt');
 });

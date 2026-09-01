@@ -267,14 +267,32 @@ test('§4 both admin pages count sends in the same words', async (t) => {
     assert.match(INVOICES_SRC, /recordedSendsPhrase\(info\.count, \{ floor: info\.floor \}\)/);
   });
 
-  // orders.js still spells the phrase inline and its own test greps the
-  // literal. That is exactly the drift a shared module exists to catch, so
-  // pin the two against each other rather than trusting them to stay equal.
-  await t.test('the Orders page spells the same phrase', () => {
-    assert.ok(ORDERS_SRC.includes('recorded send'), 'orders.js must still say "recorded send"');
+  // ERR-199 CLOSED THE DRIFT THIS SUBTEST WAS WATCHING.
+  //
+  // It used to read: "orders.js still spells the phrase inline and its own test
+  // greps the literal, so pin the two against each other rather than trusting
+  // them to stay equal" — and it pinned the literal
+  // `${info.truncated ? ' or more' : ''}` in orders.js against
+  // recordedSendsPhrase(2, {floor:true}).endsWith(' or more').
+  //
+  // orders.js now CALLS the shared builder instead of spelling the sentence a
+  // third time, which is what utils/send-history.js was extracted for. Pinning a
+  // hand-written copy is strictly weaker than pinning the absence of one, so the
+  // assertion was raised rather than relaxed: the page must import the builder,
+  // must call it, and must not reintroduce a hand-rolled floor marker. The
+  // "or more" wording itself is now owned in exactly one place and pinned by §2.
+  await t.test('the Orders page uses the shared builder rather than its own copy', () => {
+    assert.match(ORDERS_SRC, /import \{[^}]*recordedSendsPhrase[^}]*\} from '\.\.\/utils\/send-history\.js'/,
+      'orders.js must import the shared phrase builder');
+    assert.match(ORDERS_SRC, /recordedSendsPhrase\(/, 'and actually call it');
     assert.ok(recordedSendsPhrase(2).includes('recorded send'));
-    assert.match(ORDERS_SRC, /\$\{info\.truncated \? ' or more' : ''\}/, 'and marks its floor the same way');
     assert.equal(recordedSendsPhrase(2, { floor: true }).endsWith(' or more'), true);
+    // The specific hand-rolled marker this subtest used to require. Its RETURN
+    // would mean a second copy of the wording had grown back on the page.
+    assert.doesNotMatch(ORDERS_SRC, /\$\{info\.truncated \? ' or more' : ''\}/,
+      'orders.js has gone back to spelling the floor marker by hand');
+    assert.doesNotMatch(ORDERS_SRC, /' or more'/,
+      'the "or more" wording belongs to recordedSendsPhrase() alone');
   });
 
   await t.test('neither page says "sent N times"', () => {

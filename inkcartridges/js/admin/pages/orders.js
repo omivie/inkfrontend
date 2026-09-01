@@ -7,15 +7,19 @@ import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { marginBadge } from '../utils/profitability.js';
-import { orderProfitFromDetail, isInvoiceOrder, PROFIT_STATE } from '../utils/order-profit.js';
+import {
+  orderProfitFromDetail, isInvoiceOrder, orderChannel, ORDER_CHANNEL, PROFIT_STATE,
+} from '../utils/order-profit.js';
 import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 // Supplier/Origin rendering is shared with the Products page — see utils/sourcing.js.
 // A second copy of the origin vocabulary is how the two surfaces would drift apart.
 import { originBadge, supplierCell } from '../utils/sourcing.js';
 // Invoice-send vocabulary — the same module AdminAPI writes through, so the
 // reader and the writer cannot disagree about what a send record looks like.
+import { recordedSendsPhrase } from '../utils/send-history.js';
 import {
-  SENT_STATE, resolveSentInfo,
+  SENT_STATE, SEND_REGIME, resolveSentInfo, INVOICE_SENT_KIND,
+  readServerInvoiceSent, orderSendRegime,
   isInvoiceSendEvent, invoiceSendNoteText,
 } from '../utils/order-invoice-sent.js';
 // Deletability is a SERVER answer, per order, per caller — never a status rule
@@ -32,6 +36,9 @@ import {
 // lives in utils/order-profit.js (utils must never import a page — that would be
 // circular). pages/dashboard.js keeps its own documented mirror.
 export { isInvoiceOrder };
+// The channel vocabulary itself, for callers that need all three values rather
+// than the one boolean. Its own statement so the pin on the line above stays exact.
+export { orderChannel };
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -257,7 +264,7 @@ async function hydrateProfits(rows) {
 
 function orderLabel(id) {
   const o = lookupOrder(id);
-  return o?.order_number || String(id || '').slice(0, 8) || 'order';
+  return window.OrderNumber.forDisplay(o?.order_number) || String(id || '').slice(0, 8) || 'order';
 }
 
 /**
@@ -272,10 +279,36 @@ function groupSelection(selected) {
   return groupSelectionForDelete([...selected], lookupOrder);
 }
 
+/**
+ * Which channel the order arrived through, as a badge.
+ *
+ * Reads utils/order-profit.js `orderChannel()` \u2014 the SAME derivation the
+ * no-card-fee profit rule uses, and the same one the Invoice sent column gates
+ * on while the backend's `channel` field is missing. Three surfaces, one answer.
+ * A second copy here is how the badge and the money would come to disagree about
+ * what an invoiced sale is.
+ */
+const CHANNEL_BADGE = Object.freeze({
+  [ORDER_CHANNEL.INVOICE]: {
+    cls: 'admin-badge--invoice', label: 'Invoice',
+    tip: 'Invoiced sale \u2014 phone, walk-in or B2B. Paid by bank transfer, so no card fee.',
+  },
+  [ORDER_CHANNEL.QUICK_ORDER]: {
+    cls: 'admin-badge--quick', label: 'Quick order',
+    tip: 'Raised from the admin Quick Order page rather than the website checkout.',
+  },
+  [ORDER_CHANNEL.WEB]: {
+    cls: 'admin-badge--web', label: 'Website',
+    tip: 'Placed through the website checkout.',
+  },
+});
+
 function channelBadge(o) {
-  return isInvoiceOrder(o)
-    ? `<span class="admin-badge admin-badge--invoice" title="Invoiced sale \u2014 phone, walk-in or B2B. Paid by bank transfer, so no card fee.">Invoice</span>`
-    : `<span class="admin-badge admin-badge--web" title="Placed through the website checkout.">Website</span>`;
+  // An unrecognised channel falls to WEB inside orderChannel() (handoff Rule 3),
+  // so this lookup cannot miss \u2014 but default anyway rather than render
+  // `undefined` if the vocabulary and the badge map ever drift.
+  const spec = CHANNEL_BADGE[orderChannel(o)] || CHANNEL_BADGE[ORDER_CHANNEL.WEB];
+  return `<span class="admin-badge ${spec.cls}" title="${esc(spec.tip)}">${esc(spec.label)}</span>`;
 }
 
 /**
@@ -355,6 +388,18 @@ function formatDateTime(d) {
  * same cell as one whose lookup failed — see SENT_STATE.FAILED. Collapsing those
  * two is the absence-as-zero family this repo keeps re-learning
  * (ERR-063/068/073/075/076/149/150).
+ *
+ * AND THE QUESTION DOES NOT APPLY TO EVERY ROW (ERR-199). A storefront order is
+ * never "invoiced" by an operator — the customer is emailed their receipt by the
+ * payment webhook. Printing "Not recorded" on 13 of 15 rows read as 13 outstanding
+ * tasks that did not exist. Those rows are now NOT_APPLICABLE and render an
+ * em-dash, which is a THIRD answer: not "no record", not "could not check", but
+ * "this question is not asked of this row".
+ *
+ * Which rows those are is decided by utils/order-invoice-sent.js under one of two
+ * regimes — the backend's `invoice_sent` field when it is on the payload, and
+ * `orderChannel()` off `payment_method` until then. Read that module's header for
+ * why the two are not one code path, and why an ABSENT field is not a null one.
  */
 const _sentCache = new Map();   // orderId -> resolveSentInfo(...) result
 let _sentAbort = null;
@@ -371,15 +416,45 @@ function formatSentShort(d) {
   } catch { return MISSING; }
 }
 
+/**
+ * One sentence per state, plus the pair whose MEANING changes with the regime.
+ *
+ * Under SERVER the backend has looked in the place invoices are actually emailed
+ * from, so "no send" is a real outstanding task. Under LOCAL it is only "we have
+ * no record" — and the cell uses a different word for it ("Not recorded" vs
+ * "Not sent") precisely so an operator can tell which of the two answers they are
+ * being given. Same discipline as ERR-175's "Not recorded" vs "Can't check".
+ */
 const SENT_TIP = Object.freeze({
   [SENT_STATE.NOT_RECORDED]:
     'No invoice send recorded for this order. That does NOT mean none was sent \u2014 '
-    + 'the invoice email sent automatically at checkout is not yet recorded by the backend, '
-    + 'so only resends fired from this page appear here.',
+    + 'the invoice email sent automatically at checkout is not recorded by the backend, and a '
+    + 'send made from the Invoices page is not visible here either, so only resends fired from '
+    + 'this page appear. The backend link that would close that gap (invoice_id) has not shipped.',
   [SENT_STATE.NO_INVOICE]:
     'No invoice record exists for this order, so there is nothing that could have been emailed.',
   [SENT_STATE.FAILED]:
     'Invoice-send lookup failed \u2014 reload to retry. This is NOT "never sent": we could not check.',
+  [SENT_STATE.NOT_APPLICABLE]:
+    'Not applicable \u2014 this is not an invoiced sale. The customer was emailed their receipt '
+    + 'automatically at checkout; an operator never issues an invoice for it, so there is no send '
+    + 'for this column to report. Blank here means "no such task", not "nothing was sent".',
+});
+
+/**
+ * The NOT_RECORDED label and tooltip, which differ by regime. See SENT_TIP.
+ * Keyed by regime so a new regime cannot be added without answering this too.
+ */
+const NOT_RECORDED_COPY = Object.freeze({
+  [SEND_REGIME.SERVER]: {
+    label: 'Not sent',
+    tip: 'This invoice has never been emailed. The backend checked the send log AND the pre-log '
+      + 'stamp and found neither, so this is a real outstanding send \u2014 not a gap in our records.',
+  },
+  [SEND_REGIME.LOCAL]: {
+    label: 'Not recorded',
+    tip: SENT_TIP[SENT_STATE.NOT_RECORDED],
+  },
 });
 
 /**
@@ -395,32 +470,57 @@ function sentCellHtml(row, info) {
     return `${open('order-sent--pending', 'Checking when this invoice was last sent\u2026')}\u00b7</span>`;
   }
 
+  // NOT APPLICABLE is checked FIRST of the settled states, and deliberately so:
+  // it is the one answer that means the column had no business asking, and it
+  // must never be reachable by falling through the states that mean "we asked
+  // and got nothing". An inert span \u2014 there is no history behind an em-dash.
+  if (info.state === SENT_STATE.NOT_APPLICABLE) {
+    return `${open('order-sent--na', SENT_TIP[SENT_STATE.NOT_APPLICABLE])}${MISSING}</span>`;
+  }
+
   if (info.state === SENT_STATE.SENT) {
     const n = info.count || 1;
-    // "recorded sends", never "sent N times". The checkout email is recorded
-    // nowhere (BF-046), so this number is a FLOOR — there may be earlier sends
-    // we cannot see, and the history panel says so in as many words.
+    // "recorded sends", never "sent N times". Neither regime sees every send:
+    // under LOCAL the checkout email is recorded nowhere (BF-046) and a send made
+    // from the Invoices page is invisible here; under SERVER a legacy stamp
+    // predates the send log. So the number is a FLOOR, and it says so.
+    const floor = info.floor || info.truncated;
+    // recordedSendsPhrase() rather than the same sentence spelled a third time.
+    // utils/send-history.js exists so the Orders column and the Invoices column
+    // cannot describe one fact in two vocabularies (ERR-120/129/143/180), and a
+    // page that keeps its own copy is a page that will drift from it.
     const tip = `Invoice last sent ${formatDateTime(info.at)}.`
-      + ` ${n} recorded send${n === 1 ? '' : 's'}${info.truncated ? ' or more' : ''}.`
+      + (info.countKnown
+        ? ` ${recordedSendsPhrase(n, { floor })}.`
+        : ' At least one recorded send \u2014 the exact count was never logged.')
       + (info.invoiceNumber ? ` Invoice ${info.invoiceNumber}.` : '')
       + ' Click for the full history.';
-    // \u00d7N only past one send: printing "\u00d71" over a single send states a
-    // fact we would be inventing (same rule as the Invoices page's .inv-sent).
-    const times = n > 1 ? `<span class="order-sent__times">\u00d7${esc(n)}</span>` : '';
+    // \u00d7N past one send only, AND only when the count is a real tally. A zero
+    // count beside a real date is UNKNOWN, not zero \u2014 the handoff's
+    // legacy_stamp case, and the exact bug ERR-180 shipped on the Invoices page.
+    // So `countKnown` gates this every bit as hard as `n > 1` does; printing
+    // "\u00d71" over a single send would state a fact we would be inventing.
+    const times = info.countKnown && n > 1 ? `<span class="order-sent__times">\u00d7${esc(n)}</span>` : '';
     // A <button>, not a <span>: it opens the history, it is keyboard-reachable,
-    // and DataTable's row-click guard skips `closest('button, a, input')` — so
+    // and DataTable's row-click guard skips `closest('button, a, input')` \u2014 so
     // this click cannot also open the order behind it (components/table.js).
     return `<button type="button" class="order-sent order-sent--yes" data-order-sent="${id}"`
       + ` data-action="sent-history" title="${esc(tip)}">`
       + `${formatSentShort(info.at)}${times}</button>`;
   }
 
-  // FAILED is styled apart from the two "we looked and found nothing" states on
-  // purpose — an operator must never read a broken lookup as "never invoiced".
-  // These stay inert spans: there is no history behind them to open.
+  // "We looked and found nothing" \u2014 and WHICH nothing depends on who looked.
+  // Under SERVER this is a real outstanding send; under LOCAL it is only the
+  // absence of a record. Two words for two claims (ERR-175).
+  if (info.state === SENT_STATE.NOT_RECORDED) {
+    const copy = NOT_RECORDED_COPY[info.regime] || NOT_RECORDED_COPY[SEND_REGIME.LOCAL];
+    return `${open('order-sent--none', copy.tip)}${copy.label}</span>`;
+  }
+
+  // FAILED is styled apart from every "we looked" state on purpose \u2014 an
+  // operator must never read a broken lookup as "never invoiced".
   const cls = info.state === SENT_STATE.FAILED ? 'order-sent--failed' : 'order-sent--none';
-  const label = info.state === SENT_STATE.NOT_RECORDED ? 'Not recorded' : MISSING;
-  return `${open(cls, SENT_TIP[info.state] || '')}${label}</span>`;
+  return `${open(cls, SENT_TIP[info.state] || '')}${MISSING}</span>`;
 }
 
 /**
@@ -433,18 +533,46 @@ function sentCellHtml(row, info) {
  * there is no async response that could land in a stale modal.
  */
 function renderOrderSendHistory(info, orderNumber) {
-  // ALWAYS shown. Until BF-046 lands this is unconditionally true, and it is the
-  // difference between "this invoice went out once" and "we have one record of
-  // it going out" — which is all we can honestly claim.
-  const caveat = `<p class="inv-hist__note">Only sends recorded here are listed. The invoice emailed
-    automatically at checkout isn\u2019t recorded yet, so there may have been earlier sends we can\u2019t
-    see.</p>`;
+  // ALWAYS shown on an invoice row, and WHAT it admits depends on who answered.
+  //
+  // Under SERVER the limit is the SHAPE of the field, not a gap in the record:
+  // `invoice_sent` carries ONE timestamp (the most recent) and a total, so a
+  // fully-logged invoice sent three times still lists one row. Saying those
+  // unlisted sends "predate the send log" would be inventing a reason \u2014 that
+  // is only true when `floor` is set, which is the legacy_stamp case, and it
+  // gets its own sentence.
+  //
+  // Under LOCAL two whole sources are invisible, and the second one is the
+  // reason this feature was reported broken in the first place.
+  const caveat = info?.regime === SEND_REGIME.SERVER
+    ? `<p class="inv-hist__note">The backend reports the most recent send and a total, so only the
+       latest is listed individually.${info?.floor ? ' At least one send predates the send log and'
+      + ' was never recorded on its own, so the total is a lower bound.' : ''}</p>`
+    : `<p class="inv-hist__note">Only sends recorded here are listed. The invoice emailed
+       automatically at checkout isn\u2019t recorded yet, and a send made from the Invoices page
+       isn\u2019t visible on this page at all \u2014 the backend link that would join them
+       (invoice_id) hasn\u2019t shipped \u2014 so there may have been earlier sends we can\u2019t
+       see.</p>`;
 
   if (info?.state === SENT_STATE.FAILED) {
     return `<div class="inv-hist__error">
         <p><strong>Couldn\u2019t load this order\u2019s send history.</strong></p>
         <p>This is a read error, not proof that nothing went out \u2014 don\u2019t read it as a clean
            history. Close this and reload to retry.</p>
+      </div>`;
+  }
+
+  // The question does not apply to this row at all. Below FAILED on purpose:
+  // the two states are mutually exclusive (a row nobody looked up cannot have a
+  // failed lookup), and a read error must be answered before ANY branch that
+  // renders "nothing to show" \u2014 that ordering is pinned by
+  // tests/admin-order-invoice-sent-aug2026.test.js and is worth keeping exact.
+  if (info?.state === SENT_STATE.NOT_APPLICABLE) {
+    return `<div class="inv-hist__empty">
+        <p><strong>This order was not invoiced.</strong></p>
+        <p>It came through the website checkout, so the customer was emailed their receipt
+           automatically and no operator invoice was ever issued. There is no send history to
+           show \u2014 which is not the same as nothing having been sent.</p>
       </div>`;
   }
 
@@ -465,17 +593,29 @@ function renderOrderSendHistory(info, orderNumber) {
       </li>`;
   }).join('');
 
+  // A list that is SHORT of the count, said out loud. A count above the rows
+  // shown is the whole reason this panel exists (ERR-177) \u2014 but the sentence has
+  // to be true: `truncated` is our own 500-row scan filling up, and a SERVER count
+  // above one is the field's shape, not a missing record.
+  //
+  // The condition is `count > sends.length` ALONE. Adding `|| info.floor` printed
+  // "1 recorded send or more \u2014 more than the one listed" over a single listed
+  // send, which is not more than one. The floor is stated in the caveat instead,
+  // where it belongs.
   const cut = info.truncated
     ? `<p class="inv-hist__note">There were more events than this page reads in one go, so this
        list may be incomplete.</p>`
-    : '';
+    : (info.count > sends.length
+      ? `<p class="inv-hist__note">${esc(recordedSendsPhrase(info.count, { floor: info.floor }))} in
+         total \u2014 more than the ${sends.length === 1 ? 'one' : sends.length} listed above.</p>`
+      : '');
   return `<ul class="inv-hist">${items}</ul>${caveat}${cut}`;
 }
 
 /** Open the send history for one order. Renders from cache — no fetch. */
 function openOrderSendHistory(order, info) {
   const modal = Modal.open({
-    title: `Invoice send history \u2014 ${order?.order_number || order?.id?.slice(0, 8) || 'order'}`,
+    title: `Invoice send history \u2014 ${window.OrderNumber.forDisplay(order?.order_number) || order?.id?.slice(0, 8) || 'order'}`,
     className: 'admin-modal--invoice-history',
     body: renderOrderSendHistory(info, order?.order_number),
     footer: `<button class="admin-btn admin-btn--ghost" data-action="close">Close</button>`,
@@ -492,29 +632,45 @@ function modalSentValue(info) {
   if (!info || info.state === SENT_STATE.PENDING) {
     return `<span class="admin-text-muted">Checking\u2026</span>`;
   }
+  // There is room for a sentence here, so the em-dash gets one. A bare dash in
+  // the detail modal would read as missing data rather than as "not asked".
+  if (info.state === SENT_STATE.NOT_APPLICABLE) {
+    return `<span class="admin-text-muted">${MISSING} not an invoiced sale</span>`
+      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 the receipt was emailed `
+      + `automatically at checkout, so there is no operator invoice to send</span>`;
+  }
   if (info.state === SENT_STATE.SENT) {
     const n = info.count || 1;
     const who = info.source === 'server'
       ? 'recorded by the backend'
       : 'recorded when resent from this page';
-    // "recorded sends", not "sent N times" — the checkout email is recorded
-    // nowhere, so this is a floor. The button opens the same history panel the
-    // list column does, so the two surfaces cannot tell different stories.
+    // "recorded sends", not "sent N times" \u2014 a floor under both regimes. The
+    // button opens the same history panel the list column does, so the two
+    // surfaces cannot tell different stories.
+    const floor = info.floor || info.truncated;
     return `${esc(formatDateTime(info.at))}`
       + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 ${esc(who)}</span>`
       + ` <button type="button" class="om-sent-more" data-action="om-sent-history">`
-      + `${esc(n)} recorded send${n === 1 ? '' : 's'}${info.truncated ? '+' : ''}</button>`;
+      + `${esc(info.countKnown
+        ? recordedSendsPhrase(n, { floor, compact: true })
+        : 'send history')}</button>`;
   }
   if (info.state === SENT_STATE.FAILED) {
     return `<span class="order-sent--failed" title="${esc(SENT_TIP[SENT_STATE.FAILED])}">Can\u2019t check</span>`
-      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 reload to retry \u2014 this is not \u201Cnever sent\u201D</span>`;
+      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 reload to retry \u2014 this is not \u201cnever sent\u201d</span>`;
   }
   if (info.state === SENT_STATE.NO_INVOICE) {
     return `<span class="admin-text-muted">${MISSING} no invoice record for this order</span>`;
   }
+  if (info.regime === SEND_REGIME.SERVER) {
+    return `<span class="admin-text-muted">Not sent</span>`
+      + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 this invoice has never been `
+      + `emailed \u2014 an outstanding send, not a gap in our records</span>`;
+  }
   return `<span class="admin-text-muted">Not recorded</span>`
-    + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 the checkout email isn\u2019t stamped yet, `
-    + `so this means no record \u2014 not that nothing was sent</span>`;
+    + `<span class="admin-text-muted" style="font-weight:400"> \u00b7 the checkout email isn\u2019t `
+    + `stamped and a send from the Invoices page isn\u2019t visible here, so this means no record `
+    + `\u2014 not that nothing was sent</span>`;
 }
 
 /**
@@ -539,20 +695,67 @@ function patchSentCell(row, info = _sentCache.get(row?.id)) {
  * `in.(...)` queries. Called AFTER _table.setData and never awaited before it,
  * so the table paints immediately (first-paint rule, ERR-121).
  */
+/**
+ * Resolve one row's send state without touching the network.
+ *
+ * Under SERVER this is the WHOLE answer \u2014 the backend has already applied the
+ * channel rule and already merged its own two send sources, so re-deriving any
+ * part of it here would be the second place to get it wrong (handoff Rule 1).
+ * Under LOCAL it answers only for rows the question does not apply to, and those
+ * rows are then skipped by the fan-out below rather than fetched and discarded.
+ *
+ * Returns null when the row genuinely needs a lookup.
+ */
+function sentInfoWithoutLookup(row, regime) {
+  if (regime === SEND_REGIME.SERVER) {
+    return resolveSentInfo({ serverSent: readServerInvoiceSent(row) });
+  }
+  // LOCAL: `payment_method` answers the channel question. `orderChannel()` is the
+  // SAME derivation the Channel badge and the no-card-fee profit rule use, so a
+  // row cannot be badged Website in one column and looked up as an invoice in the
+  // next. Measured 146/146 against live data \u2014 npm run probe:orders-invoice-sent.
+  if (orderChannel(row) !== ORDER_CHANNEL.INVOICE) {
+    return resolveSentInfo({ applicable: false });
+  }
+  return null;
+}
+
 async function hydrateInvoiceSent(rows) {
   _sentAbort?.abort();
   _sentAbort = null;
   if (!Array.isArray(rows) || !rows.length) return;
 
-  const ctrl = new AbortController();
-  _sentAbort = ctrl;
+  // WHICH REGIME IS LIVE is decided once, from the page as a whole, and never
+  // per row: a page that answered under two regimes at once would put two
+  // different meanings of "Not sent"/"Not recorded" in one column.
+  const regime = orderSendRegime(rows);
+  if (regime === SEND_REGIME.LOCAL) {
+    // Loud, and by name. This is a real degradation \u2014 the column cannot see a
+    // send made from the Invoices page \u2014 and it is invisible from the screen
+    // alone, because the fallback renders a perfectly plausible cell.
+    window.DebugLog?.warn?.('[orders] GET /api/admin/orders carries no `invoice_sent` field \u2014 '
+      + 'falling back to payment_method for the channel rule and to order_events for the send '
+      + 'record. Sends made from the Invoices page are NOT visible in this column until the '
+      + 'backend ships invoice_sent/invoice_id. Run: npm run probe:orders-invoice-sent');
+  }
 
   const todo = [];
   for (const row of rows) {
     if (_sentCache.has(row.id)) { patchSentCell(row); continue; }
+    // Answered from the payload alone \u2014 cache it and paint it. Under SERVER this
+    // is every row on the page, so the two batched lookups below never run at all.
+    const direct = sentInfoWithoutLookup(row, regime);
+    if (direct) {
+      _sentCache.set(row.id, direct);
+      patchSentCell(row, direct);
+      continue;
+    }
     todo.push(row);
   }
   if (!todo.length) return;
+
+  const ctrl = new AbortController();
+  _sentAbort = ctrl;
 
   const ids = todo.map(r => r.id);
   let invoices, events;
@@ -577,8 +780,11 @@ async function hydrateInvoiceSent(rows) {
       invoiceFailed: invoices.failed,
       eventFailed: events.failed,
       truncated: !!events.truncated,
+      // We only reach here for a row the channel rule said DOES apply, so say so
+      // explicitly rather than leaving the default to imply it.
+      applicable: true,
     });
-    // A failed lookup is NOT cached — otherwise a single blip would pin every
+    // A failed lookup is NOT cached \u2014 otherwise a single blip would pin every
     // row to "lookup failed" until the tab is destroyed, and reloading would
     // not retry as the tooltip promises.
     if (info.state !== SENT_STATE.FAILED) _sentCache.set(row.id, info);
@@ -592,8 +798,25 @@ const COLUMNS = [
     render: (r) => `<span class="cell-nowrap">${formatDate(r.created_at)}</span>`,
   },
   {
+    // SORTABLE, AND IT SORTS BY DATE ON PURPOSE (ERR-198).
+    //
+    // admin/api.js maps this key to the backend's `newest`/`oldest`, i.e.
+    // `created_at`. That used to be a distinction without a difference: while
+    // every order number was `YYYYMMDD` + a zero-padded counter, sorting them
+    // as strings gave exactly the chronological order. Migration 157 ended the
+    // padding, so the two orderings have come apart —
+    //
+    //     '2026090199' > '20260901100'   // true, but order 99 came FIRST
+    //
+    // — and the 128 legacy `ORD-…` rows never sorted chronologically as strings
+    // at all. Date is the ordering an operator actually wants from this column,
+    // so the mapping stays; what changes is that it is now written down. Do not
+    // "fix" api.js to sort on the order-number string: that is the bug.
     key: 'order_number', label: 'Order #', sortable: true,
-    render: (r) => `<span class="cell-mono">${esc(r.order_number || r.id?.slice(0, 8) || MISSING)}</span>`,
+    // Printed WHOLE — see dashboard.js orderRef() for why truncating one is not
+    // safe any more. `cell-mono` carries no width and the Orders table is not
+    // `--colsized`, so mixed 10/11/14/29-char values ragged-edge but never clip.
+    render: (r) => `<span class="cell-mono">${esc(window.OrderNumber.forDisplay(r.order_number) || r.id?.slice(0, 8) || MISSING)}</span>`,
   },
   {
     key: 'customer', label: 'Customer',
@@ -716,15 +939,21 @@ function writeHashParams(patch) {
 // Falls back gracefully to the filtered list if the order isn't in the results.
 async function focusOnOrder(orderNumber) {
   if (!orderNumber || !_table) return;
-  const wanted = String(orderNumber).trim().toLowerCase();
   const rows = _table.data || [];
-  const match = rows.find(r => String(r.order_number || '').toLowerCase() === wanted);
+  const match = window.OrderNumber.pickExact(rows, orderNumber);
   if (match) {
     openOrderModal(match);
-  } else if (rows.length === 1) {
-    openOrderModal(rows[0]);
   }
   // else: leave the search applied so the admin can pick from the filtered list.
+  //
+  // There used to be an `else if (rows.length === 1) openOrderModal(rows[0])`
+  // here — open the only row, on the assumption that a search for a whole order
+  // number returning exactly one row must have returned THAT order. Fixed-width
+  // numbers made that true; since ERR-198 they do not. `?search=` is a substring
+  // ILIKE, so a deep link to `2026090110` can land on a page holding only
+  // `20260901100` — one row, the wrong order, opened silently. Opening an order
+  // the operator did not ask for is worse than opening none, so a near-miss now
+  // leaves the filtered list on screen and lets them choose.
 }
 
 async function loadOrders() {
@@ -1117,7 +1346,7 @@ async function openOrderModal(order) {
         <button class="admin-product-modal__close" data-action="close" aria-label="Close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
-        <div class="admin-product-modal__title">${esc(order.order_number || order.id?.slice(0, 8) || 'Order')}</div>
+        <div class="admin-product-modal__title">${esc(window.OrderNumber.forDisplay(order.order_number) || order.id?.slice(0, 8) || 'Order')}</div>
         <div class="admin-product-modal__actions" id="om-header-actions">
           ${statusBadge(order.status)}
         </div>
@@ -1144,14 +1373,24 @@ async function openOrderModal(order) {
   document.addEventListener('keydown', onKeyDown);
   modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
 
+  // Can this order's send state be answered from the row we already have?
+  //
+  // Decided BEFORE the fetch, and from the LIST row, because the list row is the
+  // one the backend ships `invoice_sent` on — the detail endpoint does not
+  // carry it (measured against live production, 2026-09-01). When the row answers
+  // for itself the invoice lookup below is not issued at all: a request whose
+  // answer we would discard can only fail in ways that mislead.
+  const directSent = sentInfoWithoutLookup(order, orderSendRegime([order]));
+
   // Fetch full data
   const [fullOrder, events, breakdown, invoiceLookup] = await Promise.all([
     AdminAPI.getOrder(order.id),
     AdminAPI.getOrderEvents(order.id),
     AdminAPI.getOrderBreakdown(order.id),
     // The order payload carries no send date of its own — it lives on the
-    // order-derived invoice row (public.invoices.emailed_at).
-    AdminAPI.getOrderInvoicesByOrderIds([order.id]),
+    // order-derived invoice row (public.invoices.emailed_at). Skipped entirely
+    // when the row already answered.
+    directSent ? Promise.resolve(null) : AdminAPI.getOrderInvoicesByOrderIds([order.id]),
   ]);
   if (_activeModal !== modal) return; // closed during fetch
 
@@ -1173,12 +1412,12 @@ async function openOrderModal(order) {
   const deleteRight = resolveDeleteRight(fullOrder, lookupOrder(order.id), order);
 
   // Update header title (actions + badge will be set by buildOrderModalContent)
-  modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
+  modal.querySelector('.admin-product-modal__title').textContent = window.OrderNumber.forDisplay(o.order_number) || o.id?.slice(0, 8) || 'Order';
 
   // Build single-page content
   // Resolved once, here, and handed down — so the Dates row, the button hint and
   // the list cell behind the modal cannot disagree about the same order.
-  const sentInfo = resolveSentInfo({
+  const sentInfo = directSent || resolveSentInfo({
     invoice: invoiceLookup?.byOrderId?.get(String(order.id)) || null,
     // The whole list, not newestSendEvent(): the Dates row shows a count and
     // opens the same history panel the list column does.
@@ -1187,6 +1426,8 @@ async function openOrderModal(order) {
     // getOrderEvents returns null on failure. Without this, a failed history load
     // would render "Not recorded" — asserting an absence we never established.
     eventFailed: events === null,
+    // We only reach here for a row the channel rule said DOES apply.
+    applicable: true,
   });
   if (sentInfo.state !== SENT_STATE.FAILED) _sentCache.set(order.id, sentInfo);
   patchSentCell(order, sentInfo);
@@ -1653,7 +1894,24 @@ function bindModalActions(modal, order, deleteRight = null) {
         DebugLog.warn('[orders] invoice send recorded failed:', err?.message);
       }
 
-      if (recordedAt) {
+      // Does the Invoice sent column even ask about this row? The Resend
+      // button is deliberately NOT gated — resending a website customer their
+      // receipt is a real thing an operator does, and it is what this endpoint
+      // has always done. But that resend is a RECEIPT, not an operator invoice,
+      // and writing it into this column is precisely the noise ERR-199 removed:
+      // the handoff's own worked example has 20260827000003 correctly LOSING its
+      // "28 Aug \u00d72", because those two sends were receipts. So the note is still
+      // written (the timeline keeps the audit trail) and the column is left alone.
+      const stillNotApplicable = (sentInfoWithoutLookup(
+        lookupOrder(order.id) || order, orderSendRegime([lookupOrder(order.id) || order]),
+      ) || {}).state === SENT_STATE.NOT_APPLICABLE;
+
+      if (recordedAt && stillNotApplicable) {
+        // Both facts, and neither dressed up: the email went out, and this column
+        // is not where it shows up.
+        Toast.success('Receipt email resent — recorded on this order\u2019s timeline. '
+          + 'The Invoice sent column tracks operator invoices only, so it stays blank.');
+      } else if (recordedAt) {
         Toast.success('Invoice email resent — recorded on this order.');
         // APPEND, NEVER REPLACE. Rebuilding the state from this one send alone
         // would reset the count to 1 on every resend — the column would say
@@ -1664,14 +1922,16 @@ function bindModalActions(modal, order, deleteRight = null) {
         const info = resolveSentInfo({
           invoice: null,
           events: [
-            { created_at: recordedAt, payload: { kind: 'invoice_sent' } },
+            { created_at: recordedAt, payload: { kind: INVOICE_SENT_KIND } },
             // The cache holds resolved {at, source} entries, not raw rows — map
             // them back to the event shape resolveSentInfo reads.
             ...(prior?.sends || []).map(sn => ({
-              created_at: sn.at, payload: { kind: 'invoice_sent' },
+              created_at: sn.at, payload: { kind: INVOICE_SENT_KIND },
             })),
           ],
           truncated: !!prior?.truncated,
+          // A resend only ever happens on a row the question applies to.
+          applicable: true,
         });
         // Carry the invoice number across: this rebuild has no invoice row of
         // its own, and dropping it would blank the tooltip until the next load.

@@ -28,6 +28,11 @@
   --magenta-hover: #d92a7d;
   --magenta-dim: rgba(199,31,110,0.12);
   --magenta-text: #e8609e;
+  /* Quick Order's channel badge (ERR-199). Defined in the palette rather than
+     inlined at the one call site so the light deck can override the text colour
+     the same way cyan and magenta do below. */
+  --violet-dim: rgba(124,58,237,0.14);
+  --violet-text: #a78bfa;
   --yellow: var(--yellow-primary, #F4C430);
   --yellow-hover: #f7d054;
   --yellow-dim: rgba(244,196,48,0.12);
@@ -73,6 +78,7 @@
   --ring: rgba(38,127,181,0.35);
   --cyan-text: #1e6a99;
   --magenta-text: #a61858;
+  --violet-text: #6d28d9;
   --yellow-text: #b8940e;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
   --shadow: 0 2px 8px rgba(0,0,0,0.08);
@@ -708,6 +714,10 @@
    behaves differently: bank transfer, so no card fee on its profit. */
 .admin-badge--invoice { background: var(--cyan-dim); color: var(--cyan-text); }
 .admin-badge--web { background: var(--surface-3, rgba(148,163,184,0.14)); color: var(--text-muted); }
+/* Quick Order is its own channel in the backend vocabulary (orders.channel), and
+   its own badge here — it is neither a website checkout nor an operator invoice,
+   and rendering it as "Website" would misfile every one of them. */
+.admin-badge--quick { background: var(--violet-dim, rgba(139,92,246,0.16)); color: var(--violet-text, #a78bfa); }
 /* Order-item origin — how a line's pack was produced. Assembled = we built it from
    singles (Supplier cell lists all constituents); Pre-boxed = one supplier pack. */
 .admin-badge--in-house { background: var(--cyan-dim); color: var(--cyan-text); }
@@ -3987,6 +3997,15 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .admin-dash-table tbody tr:last-child td { border-bottom: none; }
 .admin-dash-table .cell-right { text-align: right; }
 .admin-dash-table .cell-mono { font-family: var(--font-mono); }
+/* An order number is printed WHOLE (ERR-198) — never truncated in JS, because a
+   shortened one matches no order and cannot be pasted into the order search.
+   The dashboard cards are narrow and the legacy ORD- form runs to 29 characters,
+   so the ellipsis lives HERE: the DOM keeps the full, copyable, selectable value
+   and only the pixels are clipped. Numeric forms (10-14 chars) never reach the
+   cap, so in practice this fires only for the pre-2026-05-18 rows. */
+.admin-dash-table .cell-ordernum {
+  max-width: 14ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .admin-dash-table .cell-muted { color: var(--text-muted); }
 .admin-dash-table .cell-truncate {
   max-width: 0; width: 100%;
@@ -4877,6 +4896,14 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .order-sent { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
 .order-sent--yes { color: var(--success); font-weight: 600; }
 .order-sent--none, .order-sent--pending { color: var(--text-muted); }
+/* NOT APPLICABLE — the question was never asked of this row (ERR-199). Set
+   BACK from the two "we asked" states rather than level with them: an operator
+   scanning the column has to be able to see at a glance which rows are even in
+   scope, and a dash at the same weight as "Not recorded" reads as one more row
+   with something missing — which is the noise this state exists to remove.
+   It is NOT display:none: a blank cell would leave the column's meaning to be
+   guessed at, and the tooltip on this span is where it is spelled out. */
+.order-sent--na { color: var(--text-muted); opacity: 0.5; cursor: help; }
 /* Deliberately NOT muted: a lookup we could not complete has to catch the eye,
    otherwise it reads as a quiet "nothing here" — the exact confusion this
    column exists to prevent. Same treatment as .order-profit--failed. */
@@ -6430,3 +6457,23 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
     line-height: 1.45;
     color: var(--text-muted);
 }
+
+/* ── Invoices: outstanding-money strip above the table (ERR-197) ─────────────
+   Mirrors .exp-kpi-strip (the established "summary over the current filtered
+   set" pattern) rather than the big .admin-kpi dashboard tiles — this is a list
+   page, and the figure belongs with the rows it describes. Its own class names
+   because the two strips answer different questions and will drift. */
+.inv-kpi-strip {
+  display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline;
+  padding: 10px 14px; margin-bottom: 10px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.inv-kpi-strip__item { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.inv-kpi-strip__label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.inv-kpi-strip__basis { display: block; color: var(--text-muted); font-size: 9.5px; opacity: 0.8; text-transform: none; letter-spacing: normal; white-space: nowrap; }
+.inv-kpi-strip__value { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.inv-kpi-strip__value--muted { color: var(--text-muted); font-weight: 600; }
+/* The note carries the partial-ness and the why-it's-zero copy. It takes a full
+   row so a long sentence never squeezes the figure it is qualifying. */
+.inv-kpi-strip__note { flex: 1 0 100%; color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
+.inv-kpi-strip--warn { border-color: var(--yellow, var(--border-strong)); }

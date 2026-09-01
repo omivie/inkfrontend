@@ -47,6 +47,10 @@ async function load() {
   _catOverrides = normalizeCategoryOverrides(prefs?.[CATEGORY_OVERRIDES_KEY]);
   // NB the backend's P&L already includes invoiced (phone / walk-in / B2B) sales —
   // it returns includes_invoices: true. The frontend renders; it does not aggregate.
+  // This page stays on the backend's ACCRUAL basis on purpose. The Dashboard holds
+  // unpaid invoices out (ERR-197); the difference is labelled under the P&L table
+  // rather than reconciled away, because both bases are legitimate answers to
+  // different questions.
   _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, expenses: expenses?.items || [] };
   render();
 }
@@ -302,6 +306,13 @@ function renderPnLTable() {
   html += `<p class="fh-pnl-note">Revenue is GST-inclusive; cost of goods, fees, expenses and profit
     are GST-exclusive. Gross profit = revenue ÷ 1.15 − cost of goods, so these rows don’t subtract
     straight down the column. GST is collected on IRD’s behalf and remitted, so it was never income.</p>`;
+  // Two money screens must never disagree in silence. Since ERR-197 the Dashboard
+  // recognises invoiced sales when they are PAID; this P&L still shows the backend's
+  // accrual figures, which count them from the day they were raised. Both are
+  // defensible; an unlabelled difference between them is not.
+  html += `<p class="fh-pnl-note">Invoiced sales are counted here from the date they were invoiced,
+    paid or not. The <a href="#dashboard">Dashboard</a> counts them only once they are marked paid,
+    so its revenue and profit will read lower while invoices are outstanding.</p>`;
   if (unknownRows.length) {
     html += `<p class="fh-pnl-note">${esc(unknownRows.join(', '))} ${unknownRows.length === 1 ? 'is' : 'are'} unavailable —
       at least one sale in this period has no cost of goods recorded, so profit can’t be calculated.

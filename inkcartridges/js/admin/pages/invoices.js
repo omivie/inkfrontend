@@ -47,6 +47,7 @@ import {
   ordersFrom, searchParties, orderToParty, partyEmptyText, orderEmptyText,
 } from '../utils/party-search.js';
 import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
+import { isOutstanding } from '../utils/invoice-cash-basis.js';
 
 const GST_RATE = 0.15;
 
@@ -357,6 +358,21 @@ let _filters = { search: '', status: '' };
 let _page = 1;
 let _limit = 20;
 let _searchDebounce = null;
+/**
+ * The outstanding-money box above the table. Its own fetch, because the table is
+ * PAGINATED and summing the visible page would report a fraction of the debt as
+ * if it were all of it.
+ *
+ *   total    — $ incl GST still owed across the whole filtered set
+ *   count    — how many invoices that is
+ *   scanned / of — how many rows we actually managed to read. When they differ
+ *                  the figure is a FLOOR and says so; a capped scan that printed
+ *                  a bare total would understate the debt in silence.
+ *   state    — 'loading' | 'ready' | 'none' | 'error'. 'error' must never render
+ *              $0.00: an absence of data is not an absence of debt.
+ */
+let _outstanding = { state: 'loading', total: 0, count: 0, scanned: 0, of: null };
+let _outstandingSeq = 0;   // out-of-order guard: only the newest scan may render
 
 let _draft = null;        // the invoice currently in the editor
 let _editorRefs = null;   // { drawer }
@@ -792,6 +808,7 @@ export default {
             <option value="void">Void</option>
           </select>
         </div>
+        <div id="inv-outstanding"></div>
         <div id="inv-table"></div>
       </div>
     `;
@@ -909,6 +926,139 @@ const COLUMNS = [
   },
 ];
 
+// =========================================================================
+//  Outstanding box — how much of the invoiced book is still unpaid
+// =========================================================================
+
+/**
+ * Render the strip. Four states, and each one says which it is.
+ *
+ * The number answers "of the invoices you can see, how much is still owed?", so
+ * it follows the search box and the status dropdown. It does NOT follow the
+ * global date chips, because this page has never read them — `listInvoices`
+ * takes no date parameter (js/admin/api.js:3280).
+ */
+function renderOutstanding() {
+  const el = _container?.querySelector('#inv-outstanding');
+  if (!el) return;
+  const o = _outstanding;
+
+  if (o.state === 'loading') {
+    el.innerHTML = `<div class="inv-kpi-strip"><div class="inv-kpi-strip__item">`
+      + `<span class="inv-kpi-strip__label">Outstanding</span>`
+      + `<span class="inv-kpi-strip__value inv-kpi-strip__value--muted">Checking…</span></div></div>`;
+    return;
+  }
+
+  // An absence of data is not an absence of debt. Never $0.00 here.
+  if (o.state === 'error') {
+    el.innerHTML = `<div class="inv-kpi-strip inv-kpi-strip--warn"><div class="inv-kpi-strip__item">`
+      + `<span class="inv-kpi-strip__label">Outstanding</span>`
+      + `<span class="inv-kpi-strip__value inv-kpi-strip__value--muted">Unavailable</span></div>`
+      + `<div class="inv-kpi-strip__note">The unpaid total could not be loaded, so it is not shown. `
+      + `This is not a zero — reload to try again.</div></div>`;
+    return;
+  }
+
+  // Filtering to Paid or Void asks for a set that cannot contain anything owed.
+  // Saying so is honest; showing an unrelated all-invoices figure beside those
+  // rows would not be.
+  if (o.state === 'none') {
+    el.innerHTML = `<div class="inv-kpi-strip"><div class="inv-kpi-strip__item">`
+      + `<span class="inv-kpi-strip__label">Outstanding</span>`
+      + `<span class="inv-kpi-strip__value">${esc(money(0))}</span></div>`
+      + `<div class="inv-kpi-strip__note">This filter shows only ${esc(_filters.status)} invoices, `
+      + `none of which can be outstanding.</div></div>`;
+    return;
+  }
+
+  const partial = o.of != null && o.scanned < o.of;
+  const label = partial ? 'Outstanding (at least)' : 'Outstanding';
+  const items = [
+    [label, money(o.total), GST_INCL],
+    ['Unpaid invoices', partial ? `${o.count}+` : String(o.count), ''],
+  ];
+  const note = partial
+    ? `Read ${o.scanned} of ${o.of} invoices — the real total is this or higher.`
+    : (_filters.search ? `Matching “${_filters.search}”.` : '');
+
+  el.innerHTML = `<div class="inv-kpi-strip">`
+    + items.map(([l, v, basis]) =>
+      `<div class="inv-kpi-strip__item"><span class="inv-kpi-strip__label">${esc(l)}`
+      + (basis ? `<span class="inv-kpi-strip__basis">${esc(basis)}</span>` : '')
+      + `</span><span class="inv-kpi-strip__value">${esc(v)}</span></div>`).join('')
+    + (note ? `<div class="inv-kpi-strip__note">${esc(note)}</div>` : '')
+    + `</div>`;
+}
+
+/**
+ * Scan the filtered set for money still owed.
+ *
+ * Paged rather than limited to the visible page: the table shows 20 rows and the
+ * debt is a property of the whole set. `limit=200` is a hard 400 from the backend
+ * (measured), so 100 is the page size, and PAGE_CAP bounds a runaway loop. Hitting
+ * the cap does not fail — it makes the answer a FLOOR, which `renderOutstanding`
+ * then labels as one.
+ */
+async function loadOutstanding() {
+  const seq = ++_outstandingSeq;
+  const showsOnlySettled = _filters.status === 'paid' || _filters.status === 'void';
+  _outstanding = showsOnlySettled
+    ? { state: 'none', total: 0, count: 0, scanned: 0, of: null }
+    : { state: 'loading', total: 0, count: 0, scanned: 0, of: null };
+  renderOutstanding();
+  if (showsOnlySettled) return;
+
+  const PAGE = 100;
+  const PAGE_CAP = 20;             // 2,000 invoices; the live book is 15
+  let total = 0, count = 0, scanned = 0, of = null, failed = false;
+
+  // Ask for the unpaid slice when the operator has not pinned a status
+  // themselves. `!== 'paid'` still filters locally, so a `draft` the server
+  // hands back under an unpaid query is counted rather than quietly dropped.
+  const statusFilter = _filters.status || 'unpaid';
+
+  for (let page = 1; page <= PAGE_CAP; page++) {
+    const data = await AdminAPI.listInvoices(
+      { ...(_filters.search ? { search: _filters.search } : {}), status: statusFilter }, page, PAGE);
+    if (seq !== _outstandingSeq) return;      // a newer scan started; drop this one
+    if (!data) { failed = true; break; }
+    const rows = data.invoices || data.items || (Array.isArray(data) ? data : []);
+    of = data.pagination?.total ?? data.total ?? of;
+    scanned += rows.length;
+    for (const r of rows) {
+      if (!isOutstanding(r)) continue;
+      const t = Number(r.total_incl_gst ?? r.total);
+      if (!Number.isFinite(t)) continue;
+      total += t;
+      count++;
+    }
+    if (!rows.length || rows.length < PAGE) break;
+  }
+
+  if (seq !== _outstandingSeq) return;
+  _outstanding = failed && !scanned
+    ? { state: 'error', total: 0, count: 0, scanned: 0, of: null }
+    : { state: 'ready', total: Math.round(total * 100) / 100, count, scanned, of };
+  renderOutstanding();
+}
+
+/**
+ * Move the box by one invoice after a PAID flip, without a refetch.
+ *
+ * Called only once the server has confirmed the new status — never off the
+ * checkbox, which `onRowAction` has already flipped optimistically.
+ */
+function adjustOutstanding(row, wasOutstanding, nowOutstanding) {
+  if (_outstanding.state !== 'ready' || wasOutstanding === nowOutstanding) return;
+  const t = Number(row?.total_incl_gst ?? row?.total);
+  if (!Number.isFinite(t)) { loadOutstanding(); return; }   // can't do the sum — re-measure
+  const sign = nowOutstanding ? 1 : -1;
+  _outstanding.total = Math.round((_outstanding.total + sign * t) * 100) / 100;
+  _outstanding.count += sign;
+  renderOutstanding();
+}
+
 async function loadData() {
   if (!_table) return;
   _table.setLoading(true);
@@ -917,6 +1067,7 @@ async function loadData() {
   const rows = data?.invoices || data?.items || (Array.isArray(data) ? data : []);
   const pagination = data?.pagination || (data?.total != null ? { total: data.total, page: _page, limit: _limit } : null);
   _table.setData(rows, pagination);
+  loadOutstanding();
 }
 
 async function onRowAction(e) {
@@ -1145,8 +1296,14 @@ function applyRowStatus(id, inv, wanted) {
   const status = inv?.status || wanted;
   const row = _table.data.find((r) => String(r.id) === String(id));
   if (!row) { loadData(); return; }
+  // Read the OLD status off the cached row before Object.assign overwrites it —
+  // the outstanding box moves on the transition, not on the destination.
+  const wasOutstanding = isOutstanding(row);
   Object.assign(row, inv || {}, { status });
+  const nowOutstanding = isOutstanding(row);
+  // loadData() re-scans the box itself, so only adjust on the path that doesn't.
   if (_filters.status && _filters.status !== status) { loadData(); return; }
+  adjustOutstanding(row, wasOutstanding, nowOutstanding);
   _table.setData(_table.data, _table.pagination);
 }
 

@@ -58,26 +58,77 @@ export const PROFIT_STATE = {
 };
 
 /**
- * Is this order an invoiced sale (phone / walk-in / B2B) rather than a website order?
+ * The three channels an order can arrive through. One vocabulary, and the only
+ * place the storefront/invoice/quick-order distinction is decided (ERR-199).
  *
- * The backend materialises a saved invoice as a shadow `orders` row. It sets
- * `payment_method: 'invoice'` and numbers it `INV-<n>`. NB it does NOT expose the
- * `orders.channel` column on the API (the spec asked for it; it isn't there), so
- * payment_method is the contract and the order-number prefix is the belt-and-braces
- * fallback. If `channel` ever appears, it wins.
+ * These are the backend's own `orders.channel` values, spelled here so a reader
+ * of any surface can find the whole vocabulary in one place rather than three
+ * string comparisons scattered across a page module.
+ */
+export const ORDER_CHANNEL = Object.freeze({
+  WEB: 'web',
+  INVOICE: 'invoice',
+  QUICK_ORDER: 'quick_order',
+});
+
+/**
+ * Which channel did this order arrive through?
+ *
+ * `channel` IS THE AUTHORITY when the backend sends it. The Sep-2026 handoff is
+ * explicit that an order whose number happens to start `INV-` but whose channel
+ * says `web` is a website order, so the number is never consulted once `channel`
+ * is present — and an UNRECOGNISED channel value reads as Website (handoff
+ * Rule 3), never as "invoice", because guessing "invoice" from an unknown string
+ * would put a storefront order in the no-card-fee branch and overstate its profit.
+ *
+ * Measured against live production 2026-09-01: `channel` IS NOT ON THE PAYLOAD.
+ * It is absent on every row of the list and the detail endpoint, and `?channel=`
+ * is an accepted-and-ignored decoy (`zzznope` returns the full 50-row set). So
+ * the ladder below it is load-bearing, not belt-and-braces, and REMOVING IT
+ * WOULD BE A BEHAVIOUR CHANGE rather than a cleanup (ERR-158): the backend
+ * materialises a saved invoice as a shadow `orders` row with
+ * `payment_method: 'invoice'`, numbered `INV-<n>`.
+ *
+ * The ladder is measured, not assumed — `payment_method` is `'invoice'` on
+ * exactly the 15 `INV-` orders and null on all 131 website orders, 146 of 146
+ * with zero disagreements against the number prefix (npm run probe:orders-invoice-sent).
  *
  * This matters for money: an invoiced sale is paid by bank transfer, so it carries
  * NO card processing fee. Charging it the Stripe 2.65% + $0.30 understates its profit.
  *
  * Lives here rather than in pages/orders.js so utils never has to import a page
- * (that would be circular). pages/orders.js re-exports it for its own callers;
- * pages/dashboard.js keeps its documented local mirror.
+ * (that would be circular). pages/orders.js re-exports isInvoiceOrder for its own
+ * callers; pages/dashboard.js keeps its documented local mirror.
+ */
+export function orderChannel(o) {
+  if (!o) return ORDER_CHANNEL.WEB;
+
+  if (o.channel) {
+    const c = String(o.channel).toLowerCase().trim();
+    if (c === ORDER_CHANNEL.INVOICE) return ORDER_CHANNEL.INVOICE;
+    if (c === ORDER_CHANNEL.QUICK_ORDER) return ORDER_CHANNEL.QUICK_ORDER;
+    // Rule 3: anything else the backend sends — including a value added after
+    // this was written — is treated as Website rather than guessed at.
+    return ORDER_CHANNEL.WEB;
+  }
+
+  // No `channel` on the payload. Fall back, in the order the evidence supports.
+  if (o.payment_method) {
+    return String(o.payment_method).toLowerCase() === ORDER_CHANNEL.INVOICE
+      ? ORDER_CHANNEL.INVOICE : ORDER_CHANNEL.WEB;
+  }
+  return /^INV-/i.test(String(o.order_number || '')) ? ORDER_CHANNEL.INVOICE : ORDER_CHANNEL.WEB;
+}
+
+/**
+ * Is this order an invoiced sale (phone / walk-in / B2B) rather than a website order?
+ *
+ * Thin over orderChannel() on purpose: the money path (no card fee) and the
+ * invoice-sent column must never disagree about what an invoiced sale IS.
  */
 export function isInvoiceOrder(o) {
   if (!o) return false;
-  if (o.channel) return String(o.channel).toLowerCase() === 'invoice';
-  if (o.payment_method) return String(o.payment_method).toLowerCase() === 'invoice';
-  return /^INV-/i.test(String(o.order_number || ''));
+  return orderChannel(o) === ORDER_CHANNEL.INVOICE;
 }
 
 function warn(msg) {

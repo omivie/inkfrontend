@@ -302,18 +302,38 @@ function showCreateRefundFlow() {
       const val = orderInput.value.trim();
       if (!val) { orderInfo.textContent = ''; foundOrder = null; return; }
       orderInfo.textContent = 'Searching\u2026';
-      const result = await AdminAPI.getOrders({ search: val }, 1, 1);
+      // The backend `?search=` is a case-insensitive SUBSTRING match, and since
+      // ERR-198 order numbers are no longer fixed width — `2026090110` (order 10)
+      // is a strict prefix of `20260901100` (order 100). A `limit: 1` could
+      // therefore return the superstring and hide the exact row completely, and
+      // this code then took `orders[0]` and attached a refund to it. Ask for a
+      // page of candidates and bind ONLY to a whole-string match.
+      const result = await AdminAPI.getOrders({ search: val }, 1, 10);
       const orders = Array.isArray(result) ? result : (result?.orders || result?.data || []);
-      if (orders.length) {
-        foundOrder = orders[0];
+      const exact = window.OrderNumber.pickExact(orders, val);
+      if (exact) {
+        foundOrder = exact;
         const created = new Date(foundOrder.created_at);
         const minAgo = ((Date.now() - created) / 60000).toFixed(0);
         const canFull = minAgo <= 10;
         const orderTotal = foundOrder.total_amount ?? foundOrder.total ?? 0;
-        orderInfo.innerHTML = `Found: ${esc(foundOrder.order_number || foundOrder.id?.slice(0, 8))} \u2014 ${formatPrice(orderTotal)} \u2014 ${esc(foundOrder.status || '')}`;
+        orderInfo.innerHTML = `Found: ${esc(window.OrderNumber.forDisplay(foundOrder.order_number) || foundOrder.id?.slice(0, 8))} \u2014 ${formatPrice(orderTotal)} \u2014 ${esc(foundOrder.status || '')}`;
         amountHelp.textContent = canFull
           ? `Full refund allowed (order is ${minAgo}min old, within 10min window)`
           : `Partial refund only (order is ${minAgo}min old, past 10min window)`;
+      } else if (orders.length) {
+        // Candidates came back, but none of them IS the order that was asked
+        // for. A refund must never be attached to a near-miss, so name what did
+        // match and stop — an honest miss beats refunding the wrong customer.
+        foundOrder = null;
+        const shown = orders.slice(0, 5)
+          .map((o) => window.OrderNumber.forDisplay(o.order_number))
+          .filter(Boolean)
+          .map((n) => esc(n));
+        orderInfo.innerHTML = `No order is exactly <strong>${esc(val)}</strong>. `
+          + `${orders.length} contain${orders.length === 1 ? 's' : ''} it: ${shown.join(', ')}`
+          + `${orders.length > shown.length ? '\u2026' : ''} \u2014 enter the full order number.`;
+        amountHelp.textContent = '';
       } else {
         foundOrder = null;
         orderInfo.textContent = 'No order found';

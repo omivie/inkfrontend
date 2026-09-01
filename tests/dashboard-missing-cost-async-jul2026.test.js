@@ -229,6 +229,10 @@ test('a PENDING scan never reaches the "Profit unavailable" branch', () => {
 
 function makeScanCtx({ orders, detail, abortAfter = Infinity }) {
   const box = { console, Math, Number, Object, Array, String, Boolean, JSON, Error, Promise, isNaN };
+  // The alert label routes through orderRef() → OrderNumber (ERR-198), so the
+  // sandbox needs the real vocabulary. Required, not stubbed: a hand-written
+  // stand-in here would let the label drift from what the dashboard prints.
+  box.window = { OrderNumber: require(path.join(__dirname, '..', 'inkcartridges', 'js', 'utils.js')).OrderNumber };
   box.globalThis = box;
   const c = vm.createContext(box);
   let detailCalls = 0;
@@ -253,7 +257,9 @@ function makeScanCtx({ orders, detail, abortAfter = Infinity }) {
       return detail;
     },
   };
-  vm.runInContext(lift('computeMissingCostAlert') + '\n;globalThis.computeMissingCostAlert = computeMissingCostAlert;', c, { filename: 'scan.js' });
+  // orderRef is lifted from the real source too — one source of truth, so the
+  // label the test judges is byte-for-byte the one the dashboard renders.
+  vm.runInContext(lift('orderRef') + '\n' + lift('computeMissingCostAlert') + '\n;globalThis.computeMissingCostAlert = computeMissingCostAlert;', c, { filename: 'scan.js' });
   return { run: box.computeMissingCostAlert, signal, calls: () => detailCalls };
 }
 

@@ -224,9 +224,36 @@
         if (t.invoiceNumber) meta.push(['Invoice Number', t.invoiceNumber]);
 
         let my = 56;
+        // Label and value are each right-aligned in their own column. The label
+        // column used to be pinned 110 pt in from the right margin — a guess at
+        // how wide a value gets, and the very shape that printed
+        // "DATE1st September 2026" on the tax invoice (ERR-196). That fix landed
+        // in admin/pages/invoices.js and this sibling builder kept the guess.
+        //
+        // Measured against the Times metrics jsPDF draws with, the guess holds
+        // for every date and for every NUMERIC order number — 10-char 55.0 pt,
+        // 11-char 60.5 pt, 14-char 77.0 pt — and fails outright for both legacy
+        // shapes, which are the widest value this document ever prints:
+        //
+        //     ORD-MMQXBRYO-6E93              124.7 pt   overlaps by 14.7 pt
+        //     ORD-MP7GA80N-C3DD9FA2EC39F1DE  198.6 pt   overlaps by 88.6 pt
+        //
+        // So every receipt for a pre-2026-05-18 order printed its order number
+        // straight through its own ORDER NUMBER label (ERR-198). Shortening the
+        // new format did not cause this and does not fix it — the legacy rows
+        // are permanent, and they are exactly the customers most likely to be
+        // digging up an old receipt.
+        //
+        // Measure the widest value with the font that will draw it, then seat
+        // the labels a fixed 18 pt clear of it, so no value can reach its label.
+        // Worst case leaves the leftmost label starting at x=258.9 against an
+        // "ORDER RECEIPT" heading that ends at x=247.3 — 11.6 pt of daylight.
+        doc.setFont('times', 'bold'); doc.setFontSize(11);
+        const metaValW = meta.reduce((w, [, v]) => Math.max(w, doc.getTextWidth(String(v == null ? '' : v))), 0);
+        const metaLabelX = pageW - M - metaValW - 18;
         meta.forEach(([k, v]) => {
             doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(140);
-            text(k.toUpperCase(), pageW - M - 110, my, { align: 'right' });
+            text(k.toUpperCase(), metaLabelX, my, { align: 'right' });
             doc.setFont('times', 'bold'); doc.setFontSize(11); doc.setTextColor(25);
             text(v, pageW - M, my, { align: 'right' });
             my += 16;

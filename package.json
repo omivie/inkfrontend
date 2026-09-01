@@ -27,7 +27,10 @@
     "sweep:b2b": "node scripts/sweep-business-pricing.mjs",
     "sweep:b2b:check": "node scripts/sweep-business-pricing.mjs --check",
     "sweep:b2b:record": "node scripts/sweep-business-pricing.mjs --record",
-    "probe:data-capture": "node scripts/probe-data-capture.mjs"
+    "probe:data-capture": "node scripts/probe-data-capture.mjs",
+    "probe:invoice-cash-basis": "node scripts/probe-invoice-cash-basis.mjs",
+    "probe:orders-invoice-sent": "node scripts/probe-orders-invoice-sent.mjs",
+    "probe:order-number": "node scripts/probe-order-number-format.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

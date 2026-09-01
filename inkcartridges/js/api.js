@@ -2838,10 +2838,10 @@ const API = {
 
     /**
      * Get single order by order number
-     * @param {string} orderNumber - Order number (e.g., "ORD-ABC123-XYZ")
+     * @param {string} orderNumber - Order number — an OPAQUE string (e.g. "2026090101"; also 14-digit and legacy "ORD-…" forms). Never parse, slice or pad it. See OrderNumber in utils.js (ERR-198).
      */
     async getOrder(orderNumber) {
-        return this.get(`/api/orders/${orderNumber}`);
+        return this.get(`/api/orders/${encodeURIComponent(orderNumber)}`);
     },
 
     async getRecentTracking() {
@@ -2913,7 +2913,7 @@ const API = {
      * @param {string} orderNumber - Order number to cancel
      */
     async cancelOrder(orderNumber) {
-        return this.post(`/api/orders/${orderNumber}/cancel`);
+        return this.post(`/api/orders/${encodeURIComponent(orderNumber)}/cancel`);
     },
 
     /**
@@ -2956,11 +2956,11 @@ const API = {
 
     /**
      * Capture a PayPal payment after user approval
-     * @param {string} orderNumber - Order number (e.g., "ORD-ABC123-XYZ")
+     * @param {string} orderNumber - Order number — an OPAQUE string (e.g. "2026090101"; also 14-digit and legacy "ORD-…" forms). Never parse, slice or pad it. See OrderNumber in utils.js (ERR-198).
      * @param {string} paypalOrderId - PayPal order ID from createOrder response
      */
     async capturePaypal(orderNumber, paypalOrderId) {
-        return this.post(`/api/orders/${orderNumber}/capture-paypal`, {
+        return this.post(`/api/orders/${encodeURIComponent(orderNumber)}/capture-paypal`, {
             paypal_order_id: paypalOrderId
         });
     },

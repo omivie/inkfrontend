@@ -67,8 +67,15 @@ const LOG_COLUMNS = [
   { key: 'code', label: 'Coupon', render: (r) => `<span class="cell-mono">${esc(r.coupon?.code || '—')}</span>` },
   { key: 'user_email', label: 'User Email', render: (r) => esc(r.user_email || '—') },
   {
+    // This was an <a href="#orders/<uuid>">. There is no such route — the SPA
+    // router splits the hash on "?" and looks up "orders/<uuid>", which matches
+    // no page — so the link had never worked (ERR-198). A coupon-usage row
+    // carries only the order UUID, and the orders list cannot be searched by
+    // UUID (?search= matches customer name and order number only), so there is
+    // no honest link to build here. Show the reference as text rather than
+    // offering a click that goes nowhere.
     key: 'order_id', label: 'Order', render: (r) => r.order_id
-      ? `<a href="#orders/${esc(r.order_id)}">${esc(String(r.order_id).slice(0, 8))}</a>`
+      ? `<span class="cell-mono">${esc(String(r.order_id).slice(0, 8))}</span>`
       : '—',
   },
   { key: 'ip_address', label: 'IP', render: (r) => esc(r.ip_address || '—') },

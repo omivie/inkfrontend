@@ -2900,6 +2900,213 @@ const ProductIdentity = (function () {
     return { cardKey, lookalikeGroups, markLookalikes };
 })();
 if (typeof window !== 'undefined') window.ProductIdentity = ProductIdentity;
+
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ORDER NUMBERS ARE OPAQUE STRINGS OF VARIABLE WIDTH (ERR-198)
+// ------------------------------------------------------------
+// On 2026-09-01 the backend (migration 157) stopped zero-padding the daily
+// sequence. Four shapes now coexist in every order list, and all four still
+// resolve on every lookup endpoint:
+//
+//     2026090101              current   10 chars
+//     20260901100             current   11 chars, >99 orders in one day
+//     20260829000004          interim   14 chars, migrations 069–156
+//     ORD-MMQXBRYO-6E93       legacy    pre-2026-05-18
+//     ORD-MP7GA80N-C3DD9FA2EC39F1DE
+//
+// The backend hand-off concluded "no code changes required" because it searched
+// for PARSING assumptions — a `\d{14}` regex, a `parseInt`, a length check —
+// and the frontend genuinely had none. But the migration did not change how an
+// order number parses. It changed the fact that order numbers were FIXED WIDTH,
+// and two things rested on that without ever saying so:
+//
+//   1. NO ORDER NUMBER COULD BE A PREFIX OF ANOTHER. It can now: `2026090110`
+//      (order 10) is a strict prefix of `20260901100` (order 100). The admin
+//      order search is a substring ILIKE, so one query can return both, and two
+//      call sites used to take `rows[0]` — one of them to attach a refund.
+//      That is why `pickExact` exists and why nothing may bind to a near-miss.
+//
+//   2. TRUNCATING FOR DISPLAY WAS SAFE, because the leading 8 characters were a
+//      redundant date prefix; `20260829000004`.slice(-8) → `29000004` kept the
+//      whole counter. On a 10-character number the same slice eats the century
+//      and prints `26090101` — not an order number, not searchable, and it
+//      reads like a date. That is why `forDisplay` exists and never truncates.
+//
+// THE GRAMMAR IS MEASURED, NOT ASSUMED
+// ------------------------------------
+// Every rule below was read off the live API on 2026-09-01, not copied from the
+// hand-off. `GET /api/orders/:orderNumber` validates BEFORE it authenticates,
+// so the accepted grammar is observable unauthenticated: 400 = rejected,
+// 401 = accepted-then-auth. `npm run probe:order-number` re-runs that sweep and
+// fails if this file and the backend ever disagree — a citation is not a
+// measurement, and a validator that drifts from the server refuses real orders.
+//
+//     digits      10–14 inclusive   (9 → 400, 15 → 400)
+//     legacy      ORD-{alnum}-{4..16 hex}, UPPERCASE only (ord-… → 400)
+//                 hex run: 3 → 400, 4..16 → ok, 17 → 400; lowercase hex → 400
+//     whitespace  trimmed by the backend before validating
+//     the date prefix is NOT checked: `20261301100` (month 13) is accepted
+//
+// That last line is the one to remember: a numeric order number is NOT a
+// parseable date. Never slice one for a date — take the date from `created_at`
+// (`party-search.js:108` does this correctly).
+//
+// THERE IS DELIBERATELY NO COMPARATOR HERE
+// ----------------------------------------
+// Sorting order numbers as strings is chronologically correct today and stops
+// being correct above 99 orders in a day: '2026090199' > '20260901100' is true,
+// but order 99 came first. Order lists sort on `created_at`. A test pins that no
+// comparator on `order_number` exists anywhere, so this cannot be "optimised"
+// back in later.
+//
+// PURE. No DOM, no clock, no I/O — tests execute it rather than pattern-matching
+// source text, and the live probe loads this exact function instead of
+// re-implementing the grammar.
+// ─────────────────────────────────────────────────────────────────────────────
+const OrderNumber = (function () {
+    'use strict';
+
+    /** 10–14 digits. Measured; the backend's own schema is `\d{8}\d{2,6}`. */
+    const NUMERIC = /^\d{10,14}$/;
+
+    /**
+     * `ORD-{alnum}-{4..16 hex}`, uppercase only. Bounded against the live API:
+     * the hex run rejects 3 and 17, accepts every length between; the id run
+     * accepts 1 upward; a lowercase hex run is a 400.
+     *
+     * A NOTE ON HOW THIS WAS MEASURED, because the first attempt got it wrong.
+     * Probing with `ORD-MMQXBRYO-6E93X` and `ORD-MMQXBRYO-GGGG` produced 400s
+     * that read like a LENGTH rule — "4 or 16 only". They were nothing of the
+     * kind: `X` and `G` are not hex digits, so those strings were rejected on
+     * characters and the length question was never actually asked. Re-run with
+     * hex-only controls the rule is a plain range. A measurement taken with a
+     * bad control is not a measurement (ERR-186's lesson, one file over).
+     */
+    const LEGACY = /^ORD-[A-Z0-9]+-[0-9A-F]{4,16}$/;
+
+    /**
+     * The example shown to customers and operators. ONE source, so the copy in
+     * `track-order.html`, `account/track-order.html`, `contact.html` and the
+     * api.js JSDoc cannot drift back to a fictional shape — a test asserts every
+     * example in the tree satisfies `isValid`.
+     *
+     * Before ERR-198 the tree carried five invented examples, none of which the
+     * backend has ever minted: `ORD-ABC123-XYZ`, `ORD-1042`, `INK-78542`,
+     * `INK-10432`, `ORD-ABC-1`.
+     */
+    const EXAMPLE = '2026090101';
+
+    /**
+     * What the customer typed, turned into what the backend accepts.
+     *
+     * Trims, drops a leading `#` (the site prints order numbers as `#2026090101`
+     * everywhere, so people paste the hash back), and uppercases. Uppercasing is
+     * a pure rescue and never a loss: digits are unaffected, and the backend
+     * rejects a lowercased legacy number outright — `ord-mmqxbryo-6e93` is a
+     * hard 400 today, measured, so a customer copying one out of an old email in
+     * a mail client that lowercased it gets told their order does not exist.
+     *
+     * @param {*} value
+     * @returns {string} '' when there is nothing to normalise
+     */
+    function normalise(value) {
+        if (value == null) return '';
+        return String(value).trim().replace(/^#+\s*/, '').trim().toUpperCase();
+    }
+
+    /**
+     * Does this match a shape the backend will accept?
+     *
+     * FOR DIAGNOSIS AND COPY — NEVER TO BLOCK A SUBMISSION. The server is the
+     * authority on its own grammar; a client gate that drifts from it refuses a
+     * real customer holding a real order number, and it fails closed and silent.
+     * `track-order-page.js` keeps its presence-only check and surfaces the
+     * backend's own VALIDATION_FAILED instead.
+     *
+     * @param {*} value
+     * @returns {boolean}
+     */
+    function isValid(value) {
+        const v = normalise(value);
+        return NUMERIC.test(v) || LEGACY.test(v);
+    }
+
+    /**
+     * Whole-string equality on the normalised forms. Never a prefix, never a
+     * substring, never `includes` — that is precisely the confusion this file
+     * exists to prevent.
+     *
+     * @returns {boolean} false when either side is empty
+     */
+    function equals(a, b) {
+        const x = normalise(a);
+        return x !== '' && x === normalise(b);
+    }
+
+    /**
+     * The row that IS the wanted order, or null.
+     *
+     * The backend's `?search=` is a case-insensitive substring match, so a query
+     * for `2026090110` can legitimately return `20260901100` alongside it — or
+     * instead of it, first. Callers used to take `rows[0]` and one of them
+     * attached a refund to whatever came back. There is no safe guess here: an
+     * order the operator did not ask for is worse than an honest miss, so a
+     * near-match returns null and the caller must say it found nothing.
+     *
+     * @param {Array<object>} rows
+     * @param {*} wanted
+     * @returns {object|null}
+     */
+    function pickExact(rows, wanted) {
+        const w = normalise(wanted);
+        if (!w || !Array.isArray(rows)) return null;
+        for (const row of rows) {
+            if (row && normalise(row.order_number) === w) return row;
+        }
+        return null;
+    }
+
+    /**
+     * The order number as a human must see it: WHOLE.
+     *
+     * Callers must not truncate. A shortened order number cannot be pasted into
+     * the order search, cannot be quoted in an email, and — since the sequence
+     * is no longer padded — is not even unique. Where space is tight, let CSS
+     * ellipsis it: the DOM keeps the full, copyable value and the text content
+     * is never a string that no order has.
+     *
+     * @param {*} value
+     * @returns {string}
+     */
+    function forDisplay(value) {
+        return value == null ? '' : String(value).trim();
+    }
+
+    /**
+     * Which generation minted this. DIAGNOSTICS ONLY — nothing user-facing and
+     * nothing that gates behaviour; all four eras are equally valid and equally
+     * resolvable.
+     *
+     * Honest limit: exactly 14 digits is reported as 'interim' because that is
+     * what every 14-digit row in the database actually is, but the grammar alone
+     * cannot tell it from a hypothetical 6-digit daily sequence. Do not build
+     * anything that needs that distinction to be sound.
+     *
+     * @param {*} value
+     * @returns {'daily'|'interim'|'legacy'|'unknown'}
+     */
+    function era(value) {
+        const v = normalise(value);
+        if (LEGACY.test(v)) return 'legacy';
+        if (/^\d{14}$/.test(v)) return 'interim';
+        if (/^\d{10,13}$/.test(v)) return 'daily';
+        return 'unknown';
+    }
+
+    return { normalise, isValid, equals, pickExact, forDisplay, era, EXAMPLE, NUMERIC, LEGACY };
+})();
+if (typeof window !== 'undefined') window.OrderNumber = OrderNumber;
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -2920,6 +3127,7 @@ if (typeof module !== 'undefined' && module.exports) {
         TrustStats,
         DispatchCountdown,
         CouponSuggestion,
-        AdminAccess
+        AdminAccess,
+        OrderNumber
     };
 }
