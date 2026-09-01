@@ -348,10 +348,27 @@
         },
 
         // Tracking number / carrier / ETA / shipped rows — only the present ones.
+        //
+        // THE NUMBER'S LABEL COMES OFF THE RESPONSE (Sep 2026, ERR-200).
+        // NZ Couriers calls it a *ticket number*, and it is not interchangeable
+        // with a tracking number: the ticket number alone does not resolve to a
+        // tracking page — the customer needs the 2–4 character ticket product
+        // code beside it to use NZ Couriers' own track-and-trace form. Calling it
+        // "Tracking number" and omitting the product code left them holding half
+        // a reference under the wrong name.
+        //
+        // `tracking_number_label` is on every order response for exactly this, so
+        // the label is RENDERED, never branched on: adding a carrier stays a
+        // one-file change on the backend. Same rule as BrandSource in utils.js —
+        // never infer from a name. The fallback covers a cached older payload
+        // only; it is not a per-carrier default.
         buildInfoRows(data) {
             const esc = Security.escapeHtml;
             const rows = [];
-            if (data.tracking_number) rows.push(this._infoRow('Tracking number', data.tracking_number));
+            if (data.tracking_number) {
+                rows.push(this._infoRow(data.tracking_number_label || 'Tracking number', data.tracking_number));
+            }
+            if (data.ticket_product_code) rows.push(this._infoRow('Ticket product code', data.ticket_product_code));
             if (data.carrier) rows.push(this._infoRow('Carrier', data.carrier));
             const eta = fmtDate(data.estimated_delivery);
             if (eta) {

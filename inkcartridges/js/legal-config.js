@@ -131,7 +131,17 @@
         currency:               'NZD',
         currencySymbol:         '$',
         get freeShippingThreshold() { return freeShippingThreshold(); },
-        carriers:               ['NZ Post', 'Aramex (CourierPost network)'],
+        // The carriers the shipping policy names. NZ Couriers joined the roster in
+        // Sep 2026 (it is in the backend's carrier registry, and the admin can now
+        // record a ticket number against an order) — a policy page that still
+        // named two carriers while parcels went out on a third was a statement
+        // about our own service that had stopped being true.
+        //
+        // This is POLICY COPY, not a source of truth about what the system can
+        // handle: the real registry is server-side and reaches the frontend via
+        // GET /api/admin/shipping/carriers. Nothing derives behaviour from this
+        // array — see js/admin/utils/shipping-info.js.
+        carriers:               ['NZ Post', 'Aramex (CourierPost network)', 'NZ Couriers'],
         handlingTime:           'Auckland metro orders placed before 2:00pm NZT on a business day are dispatched same-day. Orders placed after 2:00pm, on weekends, or on NZ public holidays dispatch the next working day. Outside Auckland metro, dispatch is the next working day after order placement.',
         shippingZones: [
             { zone: 'Auckland metro',        urban: '$7.00', rural: '$14.00', eta: '1–2 working days' },

@@ -7,8 +7,13 @@
  *   2. Backend records a row in `order_tracking_requests` and emails the
  *      opted-in admins (Settings → notify_tracking_requests).
  *   3. Admin opens THIS page, clicks "Open order to add tracking", which deep
- *      links to the order. Adding a tracking number on the order update form
- *      (PUT /api/admin/orders/:id) is what closes the loop.
+ *      links to the order. Recording tracking against the order is what closes
+ *      the loop. Since Sep 2026 there are TWO ways to do that and both count:
+ *        - the Update Status modal (PUT /api/admin/orders/:id), as before; and
+ *        - the Shipping Information section (PUT /api/admin/orders/:id/shipping),
+ *          where `send_email: true` marks pending requests fulfilled explicitly.
+ *      Listing only the first would leave an admin who used the new section
+ *      wondering why the request they just answered still reads pending.
  *   4. The backend then AUTOMATICALLY flips any pending request for that order
  *      to `fulfilled` and emails the customer the shipping confirmation.
  *

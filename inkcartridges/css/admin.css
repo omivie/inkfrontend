@@ -858,6 +858,83 @@
   border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.06));
 }
 .om-meta-row:last-child { border-bottom: none; }
+
+/* ---- Shipping Information section (Sep 2026, ERR-200) ----
+   Everything here uses the theme tokens rather than literal colours, so the
+   section reads correctly in both decks; --border/--text-secondary/--danger etc.
+   are redefined per theme at the top of this file. */
+.om-shipping { margin-bottom: 6px; }
+.om-ship-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start;
+}
+.om-ship-grid__wide { grid-column: 1 / -1; }
+.om-ship-grid .admin-form-group { margin-bottom: 12px; }
+.om-ship-grid .admin-form-group[hidden] { display: none; }
+
+/* A field the backend will refuse, marked before the round trip. */
+.om-ship-input--bad { border-color: var(--danger) !important; }
+/* DHL / Other publish no tracking link, so the URL box is the only way the
+   customer gets one. It is drawn as wanted, not merely available. */
+.om-ship-input--wanted { border-color: var(--cyan) !important; }
+.om-ship-help--loud { color: var(--cyan) !important; font-weight: 600; }
+
+.om-ship-issues { margin: 2px 0 12px; display: grid; gap: 6px; }
+.om-ship-issues[hidden] { display: none; }
+.om-ship-issue {
+  font-size: 12px; line-height: 1.5; padding: 8px 10px; border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+.om-ship-issue--error {
+  color: var(--danger); background: var(--danger-dim, rgba(239,68,68,0.08));
+  border-left-color: var(--danger);
+}
+.om-ship-issue--warn {
+  color: var(--warning, #b45309); background: rgba(180,83,9,0.08);
+  border-left-color: var(--warning, #b45309);
+}
+
+.om-ship-note {
+  font-size: 12px; line-height: 1.55; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px;
+}
+.om-ship-note[hidden] { display: none; }
+.om-ship-note--muted { color: var(--text-secondary); background: var(--border-light, rgba(0,0,0,0.04)); }
+.om-ship-note--warn { color: var(--warning, #b45309); background: rgba(180,83,9,0.08); }
+
+.om-ship-registry-error {
+  font-size: 12px; line-height: 1.55; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px;
+  color: var(--danger); background: var(--danger-dim, rgba(239,68,68,0.08));
+}
+.om-ship-registry-error[hidden] { display: none; }
+
+.om-ship-link { font-size: 13px; margin: 0 0 12px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.om-ship-link[hidden] { display: none; }
+.om-ship-link a { color: var(--cyan); font-weight: 600; }
+.om-ship-link__src { color: var(--text-secondary); font-size: 12px; }
+
+.om-ship-actions {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  flex-wrap: wrap; padding-top: 4px;
+}
+.om-ship-actions__right { display: flex; gap: 8px; flex-shrink: 0; }
+.om-ship-check { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.om-ship-check[hidden] { display: none; }
+.om-ship-check input { margin-top: 2px; flex-shrink: 0; }
+
+/* The send claim. Four states, four different sentences — a send count is a
+   FLOOR, and `send_count: 0` on a shipped order is UNKNOWN, not zero. */
+.om-ship-sendstate { font-size: 12px; line-height: 1.55; margin-top: 12px; }
+.om-ship-sendstate strong { font-weight: 600; }
+.om-ship-sendstate__detail { display: block; color: var(--text-secondary); margin-top: 2px; }
+.om-ship-sendstate--recorded strong { color: var(--success); }
+.om-ship-sendstate--unlogged strong { color: var(--warning, #b45309); }
+.om-ship-sendstate--unknown strong { color: var(--text-secondary); }
+.om-ship-sendstate--not_applicable strong { color: var(--text-secondary); }
+
+@media (max-width: 720px) {
+  .om-ship-grid { grid-template-columns: 1fr; }
+  .om-ship-actions { align-items: flex-start; flex-direction: column; }
+  .om-ship-actions__right { width: 100%; }
+}
 .om-meta-row span:first-child { color: var(--text-secondary); white-space: nowrap; }
 .om-meta-row span:last-child { font-weight: 500; text-align: right; }
 

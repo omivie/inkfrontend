@@ -30,7 +30,8 @@
     "probe:data-capture": "node scripts/probe-data-capture.mjs",
     "probe:invoice-cash-basis": "node scripts/probe-invoice-cash-basis.mjs",
     "probe:orders-invoice-sent": "node scripts/probe-orders-invoice-sent.mjs",
-    "probe:order-number": "node scripts/probe-order-number-format.mjs"
+    "probe:order-number": "node scripts/probe-order-number-format.mjs",
+    "probe:shipping-info": "node scripts/probe-shipping-information.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

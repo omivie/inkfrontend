@@ -41,6 +41,143 @@ describing the same incident.
 
 ---
 
+## ERR-200 — A carrier the admin could not name: NZ Couriers was unexpressible, four shipped orders were one obvious gate away from a duplicate email, and one customer has been holding a tracking link that can never find a parcel — **RESOLVED** (2026-09-01)
+
+**Date**: 2026-09-01 · **Context**: The owner's backend developer sent
+`readfirst/shipping-information-section-FE-handoff-sep2026.md` (migration 158, 27 backend tests).
+Its complaint was exactly right. The only place to record a courier and a tracking number was the
+**Update Status** modal, and only while flipping an order to `shipped` — so shipping details, which
+are a fact about the *parcel*, could not be revisited or corrected without re-opening a status modal
+you had no intention of using; there was no way to re-send tracking on demand; and **NZ Couriers
+could not be expressed at all**, because it identifies a consignment by a 2–4 character *ticket
+product code* **plus** the 8-digit *ticket number*, and the ticket number alone does not resolve to
+a tracking page.
+
+**This hand-off was true, and checking it was still the whole job.** Unlike ERR-195/198/199, every
+claim in it held: `GET /api/admin/shipping/carriers` answered 200 with all seven carriers,
+`shipping_information` was on the order detail, `/orders/:id/shipping` returned the full block, and
+the customer endpoints already carried `ticket_product_code` / `carrier_code` /
+`tracking_number_label`. Two carriers it elided with `...` resolved to `post_haste` and `aramex`
+(both `builds_tracking_url: true`, `supports_live_tracking: false`). **What a hand-off describes is
+a CONTRACT; what it cannot describe is the DATA behind it, and every trap here was in the data.**
+
+**(a) `email.send_count` is a FLOOR, and the obvious gate mails a customer twice.** Counted live
+before writing the panel: **4 of the 13 shipped orders report `send_count: 0` with `last_status:
+null` — while being shipped.** Dispatch emails the customer automatically, so those sends predate
+the log. Written as `send_count > 0 ? 'sent' : 'never sent'`, all four render "never sent", and an
+operator reading that sends a second copy of an email the customer already has. This is ERR-180 one
+page over, and the answer is the same vocabulary: `recordedSendsPhrase()` from
+`utils/send-history.js` — **"1 recorded send", never "sent once"** — plus a distinct `UNLOGGED`
+state whose words are *"No recorded sends — this order shipped before its sends were logged, so the
+customer may already have had these details."*
+
+**(b) The two endpoints disagree about `email`, BY DESIGN, and one of them is the one the panel
+opens with.** `GET /api/admin/orders/:id` nests `shipping_information` with **`email: null`** — it
+skips the extra query. Measured on order `20260829000001`: `email: null` there, `send_count: 1` on
+`/orders/:id/shipping`. **ABSENT, NULL and a real object are three claims** (ERR-199, four entries
+earlier: `undefined !== null` and `undefined == null` are both true). So `readShipping()` reports a
+REGIME — `FULL` / `PARTIAL` / `ABSENT` — detected with `hasOwnProperty`, and the panel opens saying
+**"Send history not loaded"**, which claims nothing, then upgrades.
+
+**(c) A live customer has a tracking link that cannot resolve, and the backend cannot refuse it.**
+Order `20260809000002` has a full URL typed into `tracking_number`, so the carrier template built
+`…/tracking/item/https%3A%2F%2Fwww.nzpost.co.nz%2Ftools%2Ftracking%3Ftrackid%3D…` — verified by
+hand: it 301s to `?trackid=https%3A%2F%2F…`, which will never match a parcel. It has been in that
+customer's order page since 10 August. The backend **cannot** reject it — a tracking reference has
+no universal grammar and a rule would refuse a legitimate carrier's format — so the frontend WARNS
+on input, names the Tracking URL field as the right home for it, **and saves anyway**: a rule we
+invented must never refuse a save the backend would have accepted.
+
+**(d) The URL box is an OVERRIDE, and binding it to the derived link would have frozen every one.**
+The response carries two URLs that look alike and mean opposite things: `tracking_url` is where the
+customer is sent (usually carrier-built), `tracking_url_override` is what an operator typed, `null`
+when derived. Prefill the input from the first and **the very first save of an untouched form
+stores today's generated link as a permanent override**, after which the carrier's template can
+never correct it. `formFromShipping()` reads `tracking_url_override`, and a positive control runs a
+build that reads the other one to prove the test would catch it.
+
+**(e) `tracking_url_source: 'operator'` had never once executed in production** — all 13 shipped
+orders are `carrier_template`. ERR-180's lesson (*count the live rows before believing a feature
+works*) applied pre-emptively: the branch has a fixture, a third honest `source not stated` case,
+and the probe reports when it finally gets live exercise.
+
+**(f) The hand-off's own §6 error table is wrong in one row, and the probe found it.** It documents
+`INVALID_TRACKING_URL` for a bad tracking URL. Production answers **`VALIDATION_FAILED` with
+`details: [{ field: 'tracking_url', … }]`** — Joi rejects it in the schema layer before the
+handler's check is reached. Keying only on the documented code left the input unmarked and showed
+the operator `"tracking_url" must be a valid uri with a scheme matching the https pattern`. So
+`fieldIssuesFromError()` reads **details[] as well as** the documented codes, and
+`errorFromEnvelope()` in `admin/api.js` now carries `details` onto the thrown Error — it was
+dropping the only field that says which input to mark.
+
+**Fix.** New `js/admin/utils/shipping-info.js` — the whole vocabulary: regimes, the registry
+readers, `validateShipping()` (mirrors every backend 400 client-side), `buildPayload()` (merge
+semantics: **omitted keeps, `""` clears**, unchanged fields never sent, and the `ticket_number`
+alias never co-sent, which makes `CONFLICTING_TRACKING_NUMBER` unreachable), `emailState()`,
+`sendability()`, `fieldIssuesFromError()`. A new **Shipping Information** section in the order
+detail modal replaces the old read-only "Tracking" block and is rendered **unconditionally** —
+gating it on already having details hid it from the one order that needed it. It **patches, never
+re-renders**: a `data-dirty` marker means a field the operator has touched is never written to by a
+late async read (ERR-179), and a `_shipToken` bump on close stops a stale registry or history read
+landing in the next order's panel.
+
+**Also fixed, same family — the second carrier list.** The Update Status modal hand-wrote five
+`<option>`s (`NZ Post`, `CourierPost`, `Aramex`, `DHL`, `Other`). It could not express NZ Couriers
+or Post Haste at all, and would drift from the registry the moment a carrier was added. It is now
+filled from the same `GET /api/admin/shipping/carriers`, gains the ticket-product-code field on the
+same server flag, and — because its dropdown now holds registry **codes** — ships through
+`PUT /orders/:id/shipping` with `mark_shipped: true` rather than the legacy status endpoint, which
+documents no code handling and does not know `ticket_product_code`. `mark_shipped` runs the same
+state machine and still emails once on dispatch, so its behaviour is otherwise unchanged.
+`AdminAPI.updateTracking()` — dead code, zero call sites, a second writer to the same four columns —
+was deleted.
+
+**Customer-facing:** `track-order-page.js` now renders `tracking_number_label` verbatim and shows a
+**Ticket product code** row; without both, an NZ Couriers customer sees half a reference under the
+wrong name. The frontend still builds no tracking URL anywhere. The shipping policy named two
+carriers while parcels were about to go out on a third, so `legal-config.js` gained NZ Couriers
+(and `legal-page.js`'s `join(' and ')` became "A, B and C" — written for two, it read as "A and B
+and C" the moment there were three); the unbound prose in `about.html`, `faq.html` and
+`returns.html` was corrected too. `tracking-requests.js` and the `AdminAPI` block comment were
+updated: **two** paths now fulfil a tracking request, and listing only the old one would leave an
+admin wondering why the request they just answered still read pending.
+
+**Refused, deliberately:** re-surfacing tracking on the customer order-detail page. It is pinned
+shut by `tracking-on-demand-may2026.test.js` §1.4, and that was a product decision, not an
+oversight. And fixing order `20260809000002`'s pasted-URL number from here — that is **data**, and
+retyping a customer's tracking reference is an operator's call; the guard stops the next one and
+the probe keeps reporting this one.
+
+**Verified.** Full suite **4928 pass / 0 fail** (was 4839). New
+`tests/order-shipping-information-sep2026.test.js` (89 subtests) including **five positive
+controls** — the naive `send_count > 0` gate, the naive `email == null` gate, and three
+deliberately-broken builds of the real module run through the real loader (one that drops the
+`is_shipped` test, one that binds the URL box to the derived link, one that resolves carriers by
+display name) — so a parse that stops distinguishing these cases cannot go green (ERR-181/186). The
+existing `tracking-inline-lookup-jun2026` and `tracking-on-demand-may2026` suites pass
+**unmodified**. New `npm run probe:shipping-info` is green with **13 hard checks**; it is read-only,
+prints its mode first and in the footer, has no `--record` mode, never sends `send_email` /
+`mark_shipped` and never calls the send endpoint — and it proves the error contract **without
+writing** by bracketing each deliberately-rejected PUT with a read and asserting the order is
+byte-identical afterwards. Driven end to end in the running admin against live data: all seven
+carriers in both dropdowns, the label flipping to "Ticket number" and the product code becoming
+required on NZ Couriers, DHL surfacing the URL field as the only way to give that customer a link,
+the URL-in-number warning firing, the four `send_count: 0` orders reading "may already have been
+emailed", the no-op guard refusing to spend a request on an untouched form, and a real save +
+restore on order `20260730000001` confirmed byte-identical against the API with `send_count` still
+0 (no email sent). `APP_VERSION` → `…-shipping-information` + `npm run build`.
+
+**Lesson**: **a hand-off is a description of a CONTRACT; the traps live in the DATA behind it.**
+This one was accurate in every claim it made and still hid four defects, because none of them were
+statements about the API — they were facts about the rows: how many shipped orders predate the send
+log, which endpoint fills in `email`, what an operator once typed into a number box, and which
+branch has never executed. Read the contract, then **count the rows**. Corollary, learned again:
+when two fields on one payload look alike and mean opposite things (`tracking_url` vs
+`tracking_url_override`), the harmless-looking one is the one that binds to the input, and the
+mistake is invisible until the save you never questioned.
+
+---
+
 ## ERR-199 — The Orders page printed "Not recorded" on every website checkout and on the two invoices that HAD been emailed; the hand-off that fixed it described a backend that would not exist for another nine hours — **RESOLVED** (2026-09-01)
 
 **Date**: 2026-09-01 · **Context**: The owner's backend developer sent

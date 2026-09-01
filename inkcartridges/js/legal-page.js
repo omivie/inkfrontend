@@ -134,9 +134,14 @@
             el.textContent = (cfg.paymentMethods || []).join(', ');
         });
 
-        // Carriers list.
+        // Carriers list. `join(' and ')` was written when there were two and reads
+        // as "A and B and C" the moment there are three — so the last conjunction
+        // is separated out: "A, B and C".
         $$('[data-legal-bind="carriers"]').forEach(function (el) {
-            el.textContent = (cfg.carriers || []).join(' and ');
+            var list = cfg.carriers || [];
+            el.textContent = list.length > 1
+                ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1]
+                : (list[0] || '');
         });
 
         // Shipping zone table — populated only on /shipping where the

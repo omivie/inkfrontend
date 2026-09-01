@@ -9,6 +9,18 @@ import { BusinessAccountRegistry } from './utils/business-accounts.js';
 // pages/orders.js — see the module header for why it is not defined twice.
 import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './utils/order-invoice-sent.js';
 
+// The carrier registry (GET /api/admin/shipping/carriers) is a constant per
+// deploy — names, number labels, whether a product code is required, whether the
+// backend can build a tracking URL, whether the number can be polled. It is
+// fetched once per admin session and shared by the order modal and the Update
+// Status modal, so those two can never offer different carriers.
+//
+// The in-flight promise is cached as well as the result: opening two orders
+// quickly would otherwise fire two identical requests against the shared admin
+// limiter. A FAILED fetch caches neither — see getShippingCarriers().
+let _carrierRegistry = null;
+let _carrierRegistryPromise = null;
+
 // Direct RPC via Supabase REST — avoids creating a second GoTrueClient
 async function rpc(fnName, params = {}, signal = null) {
   try {
@@ -134,6 +146,13 @@ function errorFromEnvelope(resp, fallbackMessage) {
   const e = new Error(message);
   e.code = resp?.code || (err && typeof err === 'object' ? err.code : null) || null;
   e.status = resp?.status ?? null;
+  // VALIDATION_FAILED carries the offending FIELD in details[], and for the
+  // shipping endpoints that is the only way to know which input to mark: the
+  // documented `INVALID_TRACKING_URL` code is not what production returns — a bad
+  // tracking_url comes back as VALIDATION_FAILED with details[0].field
+  // 'tracking_url' (measured 2026-09-01). Purely additive for every other caller.
+  const details = resp?.details ?? (resp?.error && typeof resp.error === 'object' ? resp.error.details : undefined);
+  if (details !== undefined) e.details = details;
   if (resp?.request_id) e.request_id = resp.request_id;
   return e;
 }
@@ -442,16 +461,94 @@ const AdminAPI = {
     }
   },
 
-  async updateTracking(orderId, carrier, trackingNumber, shippedAt) {
-    try {
-      const resp = await window.API.put(`/api/admin/orders/${orderId}`, {
-        carrier, tracking_number: trackingNumber, shipped_at: shippedAt
-      });
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] updateTracking failed:', e.message);
-      throw e;
-    }
+  // ---- SHIPPING INFORMATION (Sep 2026, migration 158, ERR-200) ----
+  //
+  // Replaces the old `updateTracking()`, which was dead code (zero call sites)
+  // and a SECOND write path to the same four columns. Two writers to one set of
+  // columns is how they drift, and this one skipped the state machine entirely.
+  //
+  //   GET  /api/admin/shipping/carriers        the registry — NEVER hard-code it
+  //   GET  /api/admin/orders/:id/shipping      current values + send history
+  //   PUT  /api/admin/orders/:id/shipping      merge-semantics save
+  //   POST /api/admin/orders/:id/shipping/send-email
+  //
+  // Roles on the writes: super_admin, order_manager. Merge semantics on the PUT:
+  // an OMITTED field keeps its stored value, an EMPTY STRING clears it to null —
+  // utils/shipping-info.js `buildPayload()` is the only place that is encoded.
+
+  /**
+   * The carrier registry, cached for the session.
+   *
+   * Cached because it is a constant per deploy and the order modal would
+   * otherwise refetch it on every open. THROWS rather than returning a default
+   * list: a guessed set of carriers is worse than a panel that says it could not
+   * load one, because the operator cannot tell a guess from the truth (and NZ
+   * Couriers — the whole reason this exists — would be the entry missing from any
+   * list old enough to be worth guessing).
+   */
+  async getShippingCarriers() {
+    if (_carrierRegistry) return _carrierRegistry;
+    if (_carrierRegistryPromise) return _carrierRegistryPromise;
+    _carrierRegistryPromise = (async () => {
+      try {
+        const resp = await window.API.get('/api/admin/shipping/carriers');
+        if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not load the carrier list');
+        const carriers = resp?.data?.carriers;
+        if (!Array.isArray(carriers) || carriers.length === 0) {
+          throw new Error('The server returned no carriers.');
+        }
+        _carrierRegistry = carriers;
+        return carriers;
+      } catch (e) {
+        // Not cached: a transient failure must not poison the whole session.
+        _carrierRegistryPromise = null;
+        DebugLog.warn('[AdminAPI] getShippingCarriers failed:', e.message);
+        throw e;
+      }
+    })();
+    return _carrierRegistryPromise;
+  },
+
+  /**
+   * Current shipping details for one order, including the email send history.
+   *
+   * Deliberately NOT fail-soft. Its sibling `getOrder()` returns null on error,
+   * which is right for a read whose absence degrades a cell — but here null would
+   * be indistinguishable from "this order has no shipping details yet", and the
+   * panel would invite an operator to re-send an email it simply failed to count
+   * (ERR-063/068/073/075/076 — absence-as-zero, and ERR-180 for this exact field).
+   */
+  async getOrderShipping(orderId, signal = null) {
+    const resp = await window.API.get(`/api/admin/orders/${orderId}/shipping`, signal ? { signal } : {});
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not load the shipping details');
+    return resp?.data ?? null;
+  },
+
+  /**
+   * Save shipping details. `payload` comes from shipping-info `buildPayload()`.
+   *
+   * Returns the whole envelope's data — `status_changed` and `email` matter to the
+   * caller as much as `shipping` does, because `mark_shipped: true` emails the
+   * customer even when `send_email` was not asked for (`reason: 'auto_on_ship'`).
+   */
+  async updateOrderShipping(orderId, payload) {
+    const resp = await window.API.put(`/api/admin/orders/${orderId}/shipping`, payload);
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not save the shipping details');
+    return resp?.data ?? null;
+  },
+
+  /**
+   * Email the customer their shipping details without touching any stored value.
+   *
+   * `force` defaults to TRUE, matching the endpoint's own default: the operator
+   * pressed a button labelled "Send", typically to correct a mistyped number that
+   * already went out once, and a silent no-op would look exactly like a send.
+   * The confirm dialog is where a repeat send is questioned, not here.
+   */
+  async sendShippingEmail(orderId, { force = true } = {}) {
+    const resp = await window.API.post(`/api/admin/orders/${orderId}/shipping/send-email`, { force });
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not send the shipping email');
+    return resp?.data ?? null;
   },
 
   async addOrderNote(orderId, note, type = 'note') {
@@ -2606,9 +2703,10 @@ const AdminAPI = {
   // Customers submit their order number on /track-order; the backend records a
   // row in `order_tracking_requests` (migration 083) and emails the opted-in
   // admins. Fulfilment is AUTOMATIC — there is no fulfil/dismiss endpoint. When
-  // an admin sets a tracking number on the order via PUT /api/admin/orders/:id,
-  // the backend flips any pending request for that order to `fulfilled` and
-  // emails the customer their tracking. So this surface only LISTS requests and
+  // an admin sets a tracking number on the order — via PUT /api/admin/orders/:id
+  // OR, since Sep 2026, via PUT /api/admin/orders/:id/shipping with
+  // `send_email: true` — the backend flips any pending request for that order to
+  // `fulfilled` and emails the customer their tracking. So this surface LISTS and
   // routes the admin to the order to add tracking (see pages/tracking-requests.js).
   //
   // Contract (verified against the live backend, June 2026):
