@@ -5062,6 +5062,76 @@ button.order-sent:hover { text-decoration: underline; }
 button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 /* Send count, only rendered past one send. */
 .order-sent__times { color: var(--text-muted); font-weight: 500; }
+
+/* ---- Orders list: "Tracking requested" chip (ERR-201) ----------------------
+   Shares the Invoice / tracking cell with .order-sent above, as a SEPARATE root
+   element — see trackingChipHtml() in pages/orders.js for why the two halves
+   must not be one node (patchSentCell replaces .order-sent wholesale).
+
+   IT IS A FILLED PILL, AND THAT IS THE POINT. Amber was already spoken for in
+   this cell: .order-sent--failed uses --yellow-text specifically so a lookup we
+   could not complete catches the eye. A second amber THING would blur the two.
+   So the tracking states are told apart from the invoice states by SHAPE first
+   — a solid pill against plain text — and only then by colour. */
+.order-track {
+  /* A flex container rather than an inline span: it takes the full cell width,
+     which is what puts the invoice answer on its own line beneath the chip
+     instead of alongside it. */
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 2px; cursor: help;
+}
+/* Nothing to say about this row. NOT removed from the DOM — the hook has to
+   stay addressable — but it must occupy no space, or every cell in the column
+   would gain a phantom line and the rows that changed would stop standing out. */
+.order-track--empty { display: none; }
+.order-track__pill {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.order-track__when { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+/* OUTSTANDING — a customer is waiting. The only state here that is a task. */
+.order-track--requested { background: var(--yellow-dim); color: var(--yellow-text); }
+/* Outstanding, and un-clearable: the order is cancelled, so nothing will ship,
+   so no email will ever fire (hand-off Rule 4). Muted rather than hidden — the
+   customer really did ask, and a frontend does not get to retire a fact for
+   being inconvenient — but set back hard, because there is no action to take. */
+.order-track--stuck {
+  background: var(--surface-3, rgba(148,163,184,0.14)); color: var(--text-muted);
+  opacity: 0.75;
+}
+/* Answered: the shipping-information email went out, or it was dismissed. */
+.order-track--done { background: var(--success-dim); color: var(--success); }
+/* The field arrived and we could not parse it. Red, not amber, because this is
+   a defect rather than a task — and because amber next to .order-track--requested
+   would read as a slightly different kind of waiting. */
+.order-track--unreadable { background: var(--danger-dim); color: #f87171; }
+/* --success is tuned for the dark deck and under-contrasts on the light one,
+   the same fix .order-sent--yes needed above. */
+.admin[data-theme="light"] .order-track--done { color: #15803d; }
+
+/* The cell that holds both. Stacked, so an invoice-claimed order whose customer
+   ALSO asked for tracking shows both facts — the hand-off offered precedence,
+   where the chip would suppress the send date, and stacking was chosen instead:
+   one true thing does not cancel another. */
+.admin-table td.cell-invoice-track { line-height: 1.35; }
+/* The one thing the chip DOES suppress: the invoice half's "not applicable"
+   em-dash, and only that.
+
+   An em-dash means "this cell has nothing to report". Once a chip is sitting
+   above it the cell plainly does have something to report, so the dash stops
+   being an answer and becomes a stray mark under a pill. Every other invoice
+   state stays: a send date, "Not sent", "Not recorded", and above all
+   .order-sent--failed, which must never be hidden by anything — a lookup that
+   did not complete has to stay visible however busy the cell gets.
+
+   Done as a sibling selector rather than in the renderer ON PURPOSE. The two
+   halves of this cell are patched independently (see trackingChipHtml), and
+   teaching either renderer about the other's state would put the coupling back
+   that the split exists to avoid. CSS can see both; the JS does not have to. */
+.order-track:not(.order-track--empty) + .order-sent--na { display: none; }
 /* "3 recorded sends" in the order modal's Dates block. */
 .om-sent-more {
   background: none; border: 0; padding: 0; font: inherit; font-weight: 400;

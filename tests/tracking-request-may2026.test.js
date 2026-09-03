@@ -238,7 +238,16 @@ test('SQL doc mirrors the deployed order_tracking_requests schema', () => {
   assert.match(sql, /create table if not exists public\.order_tracking_requests/, 'table create missing');
   // Status is pending|fulfilled only — no dismissed.
   assert.match(sql, /status[\s\S]*check \(status in \('pending', 'fulfilled'\)\)/, 'status check constraint missing/wrong');
-  assert.ok(!/dismissed/.test(sql), 'dismissed status must be gone from the schema doc');
+  // The DDL must never claim a 'dismissed' status the deployed schema does not
+  // have. Checked against the STATEMENTS rather than the whole file (ERR-201):
+  // the header comment now records that a dismiss endpoint has been REQUESTED of
+  // the backend and what it would need — a widened CHECK constraint — and that
+  // note is the opposite of drift, it is the thing that stops someone
+  // re-discovering the gap. Stripping comments makes this assertion stricter,
+  // not laxer: prose can no longer satisfy it either, so a 'dismissed' that
+  // appeared in a real column default or check would still be caught.
+  const ddl = sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+  assert.ok(!/dismissed/.test(ddl), 'dismissed status must be gone from the deployed schema DDL');
   // One pending request per order (partial unique index).
   assert.match(sql, /unique index[\s\S]*where status = 'pending'/, 'one-pending-per-order partial unique index missing');
   // order_id cascades on delete.

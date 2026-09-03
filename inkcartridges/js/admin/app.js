@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.01-order-number-format-invoice-sent-channel-shipping-information-actions';
+const APP_VERSION = '2026.09.01-order-number-format-invoice-sent-channel-shipping-information-actions-tracking-requested';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

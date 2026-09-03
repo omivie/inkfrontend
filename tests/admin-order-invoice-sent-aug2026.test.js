@@ -331,7 +331,12 @@ test('the write path', async (t) => {
 test('the three surfaces', async (t) => {
   await t.test('the column exists and carries NO gst slot', () => {
     const col = slice(ordersSrc, "key: '_invoice_sent'", '},');
-    assert.match(col, /label:\s*'Invoice sent'/);
+    // RENAMED 2026-09-03 (ERR-201). The cell answers two questions now — has the
+    // invoice been emailed, and is a customer waiting on tracking — and a header
+    // naming only one of them makes the other look like a rendering fault. The
+    // key stays `_invoice_sent` because the invoice half is still what owns the
+    // cell's hydration; only the human-facing label widened.
+    assert.match(col, /label:\s*'Invoice \/ tracking'/);
     // Blank `gst` means "basis undocumented" for a MONEY header (utils/gst-basis.js).
     // A date must not borrow that vocabulary.
     assert.doesNotMatch(col, /\bgst:/);

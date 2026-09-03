@@ -14,10 +14,27 @@
  * sep2026.md) says `GET /api/admin/orders` now ships `channel`, `invoice_id` and
  * `invoice_sent` per row, and that the column should read `invoice_sent` alone.
  * Measured against live production on 2026-09-01 (backend commit 01c29cba, db
- * connected): ALL THREE ARE ABSENT, on the list and on the detail endpoint, under
+ * connected): ALL THREE WERE ABSENT, on the list and on the detail endpoint, under
  * every opt-in param tried. `?channel=` is worse than absent — it is accepted and
  * ignored, returning the full unfiltered set for `zzznope` (the ERR-151/173 decoy
- * family). So this module answers under whichever regime is actually live:
+ * family).
+ *
+ * RE-MEASURED 2026-09-03 (backend commit 90ca2496, db connected): the deploy has
+ * landed. `channel`, `invoice_id` and `invoice_sent` are present on 154/154 rows
+ * of the LIST — so the column is answering under SERVER today, and the LOCAL
+ * branch below is now a fallback rather than the live path. `?channel=` is still
+ * a decoy; that has not changed and must never be trusted as a filter.
+ *
+ * THE DETAIL ENDPOINT STILL DOES NOT CARRY `invoice_sent`, which is why
+ * openOrderModal() decides the regime from the LIST row and not from the payload
+ * it is about to fetch. `GET /orders/:id` DOES carry `tracking_request` — the two
+ * endpoints disagree about their own contract in opposite directions, field by
+ * field, so neither is a safe proxy for the other (utils/order-tracking-request.js
+ * walks a candidate ladder for exactly this reason).
+ *
+ * None of that lets the two regimes collapse into one code path. A deploy can be
+ * rolled back, and the whole cost of this module is that the day it is, the
+ * column degrades to a weaker answer LOUDLY instead of silently:
  *
  *   SERVER   the `invoice_sent` KEY is present on the row. The backend has
  *            already applied the channel rule, so gate on `invoice_sent !== null`

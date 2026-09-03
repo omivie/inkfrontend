@@ -1,7 +1,14 @@
 /**
  * Orders Page — Full-page modal detail + bulk selection/delete
  */
-import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
+import {
+  AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown,
+  // The sidebar's pending-tracking-request count. Imported here because this
+  // page is now one of the places that CLEARS a request, and a badge that keeps
+  // counting a request the operator just answered is the same fact rendered two
+  // ways on one screen.
+  refreshTrackingRequestsBadge,
+} from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -35,6 +42,17 @@ import {
   readServerInvoiceSent, orderSendRegime,
   isInvoiceSendEvent, invoiceSendNoteText,
 } from '../utils/order-invoice-sent.js';
+// "Has this customer asked us where their parcel is?" — the whole vocabulary,
+// including the two facts the backend deliberately does NOT fold into `state`:
+// whether a cancelled order's request can still be cleared, and how long the
+// customer has been waiting. Nothing in this page may read `tracking_request`
+// directly; a second copy of these rules is how the cell and the modal would
+// start disagreeing about one customer (ERR-201).
+import {
+  TRACK_STATE, TRACK_REGIME,
+  readTrackingRequestFrom, trackingRequestRegime,
+  resolveTrackingInfo, trackingChipCopy,
+} from '../utils/order-tracking-request.js';
 // Deletability is a SERVER answer, per order, per caller — never a status rule
 // re-implemented here. utils/order-deletability.js owns the whole vocabulary:
 // which door, why not, what the confirm dialog says, how a purge response reads.
@@ -421,11 +439,46 @@ function forgetInvoiceSent(id) {
   if (id) _sentCache.delete(id);
 }
 
-/** Short cell date — "27 Aug". Full timestamp lives in the tooltip. */
+/**
+ * Tell the sidebar its tracking count may have moved.
+ *
+ * The backend clears an open tracking request when a shipping-information email
+ * actually goes out — across five admin send paths, three of which live on this
+ * page. Before this column existed nobody could see the staleness: the count sat
+ * in the sidebar and the request lived on a different screen. Now the operator
+ * watches the chip disappear from the row in front of them while the badge two
+ * inches to the left still counts it, which is one fact rendered two ways on one
+ * screen — the thing utils/order-invoice-sent.js opens by warning about.
+ *
+ * Deliberately fire-and-forget and deliberately unconditional on the email's
+ * outcome: the backend gates fulfilment on the send returning true, and asking
+ * it for the number is cheaper and more honest than deciding here whether the
+ * number changed. A failed refresh leaves the old count standing, which is the
+ * behaviour it already had.
+ */
+function refreshTrackingCount() {
+  try { refreshTrackingRequestsBadge(); } catch { /* the badge is never worth an exception */ }
+}
+
+/**
+ * Short cell date — "27 Aug". Full timestamp lives in the tooltip.
+ *
+ * THE try/catch BELOW CANNOT CATCH THE FAILURE IT WAS WRITTEN FOR.
+ * `new Date('nonsense')` does not throw; it returns an Invalid Date, and
+ * `Invalid Date.toLocaleDateString()` is the literal string "Invalid Date" —
+ * which this function would then have printed into the cell. Nothing observed
+ * live has ever hit it (every `sent_at` the backend sends is a real timestamp),
+ * so this is a latent hole rather than a live bug, but it is one line and it
+ * sits in the middle of the cell being rebuilt (ERR-201). shortStamp() applies
+ * the same guard for the tracking chip beside it; the two are kept separate only
+ * because this one answers in MISSING and the util answers in null.
+ */
 function formatSentShort(d) {
   if (!d) return MISSING;
   try {
-    return new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return MISSING;
+    return dt.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
   } catch { return MISSING; }
 }
 
@@ -469,6 +522,71 @@ const NOT_RECORDED_COPY = Object.freeze({
     tip: SENT_TIP[SENT_STATE.NOT_RECORDED],
   },
 });
+
+/**
+ * "Tracking requested" — the chip that shares this cell with the invoice answer.
+ *
+ * A SIBLING ELEMENT, NOT PART OF sentCellHtml, AND THAT IS LOAD-BEARING.
+ * patchSentCell() replaces `[data-order-sent]` wholesale via outerHTML, so every
+ * branch of sentCellHtml has to keep returning exactly ONE root. Rendering the
+ * chip inside it would mean either moving that hook (breaking the history
+ * button's dataset.orderSent) or letting the next patch silently eat the chip —
+ * and the patch fires on every modal open, every modal close and every
+ * hydration landing, so it would vanish at exactly the moments an operator was
+ * looking at the row. The chip gets its own hook, `[data-order-track]`, and the
+ * two halves of this cell can never clobber one another.
+ *
+ * IT ALSO NEEDS NO CACHE, NO FETCH AND NO HYDRATION, which is the whole
+ * difference between it and the Invoice sent renderer next door. The answer is
+ * already on the list payload; there is nothing to look up. The symmetry with
+ * hydrateInvoiceSent() is inviting and wrong — copying that fan-out here would
+ * issue one pointless request per row for a field we are already holding.
+ *
+ * BOTH FACTS RENDER. The hand-off suggests precedence (tracking outranks the
+ * invoice answer and hides it), and the owner chose stacking instead: on an
+ * invoice-claimed order whose customer ALSO asked for tracking, suppressing the
+ * send date would be the frontend deciding one true thing cancels out another.
+ * Rows carrying only one of the two look exactly as they did before this change.
+ *
+ * The hook element is emitted even when there is nothing to say, so a future
+ * patch has a target and so the cell's structure does not change shape between
+ * rows.
+ *
+ * `now` is injectable purely so "N days waiting" can be asserted against a fixed
+ * clock. Without it the age tests would pass or fail depending on the hour the
+ * suite ran — which is not a test, it is a coin toss that occasionally reports a
+ * bug.
+ */
+function trackingChipHtml(row, now = null) {
+  const id = esc(String(row?.id ?? ''));
+  const copy = trackingChipCopy(resolveTrackingInfo({ order: row, now }));
+  if (!copy) return `<span class="order-track order-track--empty" data-order-track="${id}"></span>`;
+  const sub = copy.sub ? `<span class="order-track__when">${esc(copy.sub)}</span>` : '';
+  return `<span class="order-track" data-order-track="${id}" title="${esc(copy.tip)}">`
+    + `<span class="order-track__pill ${esc(copy.cls)}">${esc(copy.label)}</span>${sub}</span>`;
+}
+
+/**
+ * Say so, by name, when the backend has not shipped the field.
+ *
+ * Without this the degradation is completely invisible: an order list with no
+ * `tracking_request` key renders precisely the same cells as one where nobody
+ * has asked for tracking. That is the fallback-shaped failure this repo keeps
+ * re-learning — the answer looks fine, so nothing gets reported, so a dead
+ * column survives for weeks (ERR-063/068/073/075/076/149/150, and ERR-193's
+ * 44 hours of empty shelves).
+ *
+ * Warned once per load rather than per row, and from the page as a whole, for
+ * the same reason orderSendRegime() is read once: a page answering under two
+ * regimes at once would put two meanings of "no chip" in one column.
+ */
+function noteTrackingRegime(rows) {
+  if (trackingRequestRegime(rows) === TRACK_REGIME.SERVER) return;
+  window.DebugLog?.warn?.('[orders] GET /api/admin/orders carries no `tracking_request` field — '
+    + 'the "Tracking requested" chip cannot render, and a customer waiting on tracking is '
+    + 'indistinguishable here from one who never asked. This is NOT "nobody asked". The standalone '
+    + 'Tracking Requests page still has the queue. Run: npm run probe:tracking-requested');
+}
 
 /**
  * One renderer for the first paint and the async patch, so a cell cannot look
@@ -687,6 +805,44 @@ function modalSentValue(info) {
 }
 
 /**
+ * The modal's "Tracking request" value.
+ *
+ * ONE VOCABULARY WITH THE CHIP, and it is the same sentence, not a paraphrase.
+ * trackingChipCopy() already writes the full explanation — the list cell hides
+ * it in a tooltip only because a table cell has no room for it. The modal has
+ * room, so it prints the very same string inline. A second set of words here is
+ * how the cell and the modal would end up telling one operator two different
+ * stories about one customer (ERR-120/129/143/180).
+ *
+ * ALWAYS RENDERED, including when nobody asked. An absent row would read as
+ * "this order has no tracking request", which is a claim we can only make when
+ * we actually looked — and the two cases where we did NOT look (the field is
+ * absent, or unreadable) get their own words rather than a blank.
+ */
+function modalTrackingValue(info) {
+  const muted = (txt) => `<span class="admin-text-muted" style="font-weight:400"> · ${esc(txt)}</span>`;
+
+  if (!info || info.state === TRACK_STATE.UNKNOWN) {
+    // Not "nobody asked" — this backend does not report the field at all, so the
+    // question is unanswered rather than answered no.
+    return `<span class="order-sent--failed">Can\u2019t check</span>`
+      + muted('this backend does not report tracking requests on the order payload \u2014 '
+        + 'the Tracking Requests page still has the queue');
+  }
+  if (info.state === TRACK_STATE.NONE) {
+    return `<span class="admin-text-muted">${MISSING} no tracking request</span>`
+      + muted('this customer has not asked where their parcel is');
+  }
+
+  const copy = trackingChipCopy(info);
+  if (!copy) return `<span class="admin-text-muted">${MISSING}</span>`;
+
+  // The very same pill the list cell renders, so the two surfaces are not just
+  // saying the same words but wearing the same colour for the same state.
+  return `<span class="order-track__pill ${esc(copy.cls)}">${esc(copy.label)}</span>${muted(copy.tip)}`;
+}
+
+/**
  * Swap one cell in place — never setData, which would drop row focus.
  *
  * `info` is passed EXPLICITLY rather than always re-read from the cache, because
@@ -878,8 +1034,17 @@ const COLUMNS = [
     // NO `gst:` SLOT. Blank there means "GST basis undocumented" for a money
     // column (utils/gst-basis.js) — this is a date, and borrowing that slot
     // would put it in the money vocabulary it has nothing to do with.
-    key: '_invoice_sent', label: 'Invoice sent',
-    render: (r) => sentCellHtml(r, _sentCache.get(r.id)),
+    // RENAMED from "Invoice sent" (ERR-201). The cell now answers two questions
+    // — has this invoice been emailed, and is a customer waiting on tracking —
+    // and a header naming only one of them would make the other look like a bug.
+    // The backend's hand-off suggested the rename in as many words: "Consider
+    // renaming the column header to Invoice / tracking so it reads honestly".
+    key: '_invoice_sent', label: 'Invoice / tracking', className: 'cell-invoice-track',
+    // TWO ROOTS, ONE CELL, and they are patched independently — see
+    // trackingChipHtml() for why the chip is not folded into sentCellHtml().
+    // Order matters: the outstanding request is the actionable half and reads
+    // first, with the invoice answer beneath it.
+    render: (r) => trackingChipHtml(r) + sentCellHtml(r, _sentCache.get(r.id)),
   },
   {
     // Owner-only — filtered out of the column list for everyone else, exactly
@@ -1017,6 +1182,9 @@ async function loadOrders() {
   hydrateProfits(rows);
   // Same rule, and two batched lookups for the whole page rather than per row.
   hydrateInvoiceSent(rows);
+  // No hydration twin — the tracking answer is already on these rows. All this
+  // does is complain, loudly and by name, if the field is not there at all.
+  noteTrackingRegime(rows);
 }
 
 // ---- Bulk bar ----
@@ -1797,6 +1965,7 @@ async function shipSave() {
     // on claiming a stale count after a save that emailed someone.
     shipRefreshHistory();
     loadOrders();
+    refreshTrackingCount();
   } catch (e) {
     await shipHandleWriteFailure(e, { markShipped, form });
   } finally {
@@ -1841,6 +2010,7 @@ async function shipHandleWriteFailure(e, { markShipped = false } = {}) {
       Toast.success('The order is marked shipped and the customer has been emailed.');
       shipRefreshHistory();
       loadOrders();
+      refreshTrackingCount();
     } catch (e2) {
       Toast.error(shippingErrorMessage(e2));
     }
@@ -1885,8 +2055,20 @@ async function shipSend() {
     const { shipping } = readShipping(data);
     if (shipping) shipAdoptShipping(shipping);
     const note = describeEmailOutcome(data?.email);
-    if (data?.email?.sent === false) Toast.warning(note || 'The email was not sent.');
-    else Toast.success(note || 'The customer has been emailed their shipping details.');
+    if (data?.email?.sent === false) {
+      Toast.warning(note || 'The email was not sent.');
+    } else {
+      Toast.success(note || 'The customer has been emailed their shipping details.');
+      // A SEND CAN CLEAR A TRACKING REQUEST, so this path now has to refresh the
+      // list — it never did before, because nothing on the row used to change.
+      // The row is re-read from the backend rather than patched from here: the
+      // backend decides whether the request was fulfilled (it gates that on the
+      // send returning true), and a frontend that assumed the transition would be
+      // asserting an outcome it did not witness.
+      forgetOrderCache(_shipState.orderId);
+      loadOrders();
+      refreshTrackingCount();
+    }
     shipRefreshHistory();
   } catch (e) {
     await shipHandleWriteFailure(e);
@@ -2138,12 +2320,26 @@ async function openOrderModal(order) {
   if (sentInfo.state !== SENT_STATE.FAILED) _sentCache.set(order.id, sentInfo);
   patchSentCell(order, sentInfo);
 
+  // The tracking answer, read from whichever payload actually carries the field.
+  //
+  // The two endpoints do not agree about their own contract: measured live on
+  // 2026-09-03, `GET /orders/:id` carries `tracking_request` and does NOT carry
+  // `invoice_sent`, which is the exact reverse of the assumption the block above
+  // is built on. So this takes candidates in preference order — freshest first,
+  // the list row last — the same ladder resolveDeleteRight() walks a few lines
+  // up, and for the same reason: an absent contract is a reason to look at the
+  // next payload, never a reason to answer from one that never had it.
+  const trackInfo = resolveTrackingInfo({
+    tr: readTrackingRequestFrom(fullOrder, lookupOrder(order.id), order),
+    orderStatus: o.status,
+  });
+
   // `events` is passed THROUGH, null and all — see the timeline's null branch.
   // `events || []` here is what made a failed history look like an empty one.
-  buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed, deleteRight, sentInfo });
+  buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed, deleteRight, sentInfo, trackInfo });
 }
 
-function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false, deleteRight = null, sentInfo = null } = {}) {
+function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false, deleteRight = null, sentInfo = null, trackInfo = null } = {}) {
   // Never fall back to a status rule here. An absent right is an UNRESOLVED
   // right, and unresolved fails closed with a reason of its own.
   const right = deleteRight || orderDeleteRight(o);
@@ -2182,6 +2378,11 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   // read as "this order has no invoice", which is a different claim entirely.
   datesRows += `<div class="om-meta-row"><span>Invoice sent</span>`
     + `<span data-om-sent>${modalSentValue(sentInfo)}</span></div>`;
+  // Same rule as the row above: always rendered. This is also the row an
+  // operator arriving from the Tracking Requests page came here to read, so it
+  // must be present on the order they were sent to even when the answer is no.
+  datesRows += `<div class="om-meta-row"><span>Tracking request</span>`
+    + `<span data-om-track>${modalTrackingValue(trackInfo)}</span></div>`;
 
   // Shipping address — shown inline as middle meta column
   const addr = o.shipping_address || {};
@@ -2947,6 +3148,10 @@ function showStatusModal(order) {
       Modal.close();
       closeOrderModal();
       loadOrders();
+      // The transition to `shipped` is one of the five paths that clears an open
+      // tracking request — and, per the backend hand-off, one of the two that
+      // used not to. Ask the sidebar for a fresh count.
+      refreshTrackingCount();
     } catch (e) {
       // The shipping endpoint answers with documented codes; `e.message` alone
       // would surface raw backend prose for a 409 or a missing product code.

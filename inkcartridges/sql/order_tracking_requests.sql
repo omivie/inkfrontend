@@ -8,10 +8,26 @@
 -- confirmation immediately; otherwise it logs a `pending` row that surfaces in
 -- the admin "Tracking Requests" page.
 --
--- FULFILMENT IS AUTOMATIC. There is no fulfil/dismiss endpoint. When an admin
--- sets a tracking number on the order (PUT /api/admin/orders/:id) the backend
--- flips any `pending` request for that order to `fulfilled` and emails the
--- customer their tracking. So `status` is only ever 'pending' | 'fulfilled'.
+-- FULFILMENT IS AUTOMATIC, AND IT IS GATED ON AN EMAIL ACTUALLY GOING OUT.
+-- There is still no fulfil/dismiss endpoint. Since Sep 2026 all five admin send
+-- paths clear the open request through one backend helper
+-- (`fulfillPendingTrackingRequests`), and every one of them is gated on the send
+-- returning true. Two of them previously did not clear it at all — the Update
+-- Status modal's transition to `shipped`, and marking shipped from the Shipping
+-- Information section without ticking "send email" — which are the busiest ship
+-- paths, so a request could stay open long after the customer had been emailed.
+--
+-- The corollary matters more than the fix: SETTING A TRACKING NUMBER IS NOT WHAT
+-- CLEARS THE REQUEST. Flipping an order to `shipped` with no tracking number on
+-- it emails nothing, so the request correctly stays `pending` — the customer
+-- really is still waiting. `status` is only ever 'pending' | 'fulfilled'.
+--
+-- AND A REQUEST ON A CANCELLED ORDER CAN NEVER CLEAR. Nothing will ship, so no
+-- email will ever fire, so the row stays `pending` for ever (live example:
+-- 20260714000001, cancelled 14 Jul 2026 with an open request). The admin Orders
+-- column mutes the chip on those rows rather than pretending it is actionable;
+-- a real resolve needs a 'dismissed' status, which needs this CHECK constraint
+-- widened. Requested in orders-tracking-requested-column-FE-response-sep2026.md.
 --
 -- OWNERSHIP: all reads/writes go through the BACKEND (service role), never the
 -- browser. The customer submit endpoint (POST /api/orders/track-request) is

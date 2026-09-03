@@ -14,8 +14,22 @@
  *          where `send_email: true` marks pending requests fulfilled explicitly.
  *      Listing only the first would leave an admin who used the new section
  *      wondering why the request they just answered still reads pending.
- *   4. The backend then AUTOMATICALLY flips any pending request for that order
- *      to `fulfilled` and emails the customer the shipping confirmation.
+ *   4. The backend then flips any pending request for that order to
+ *      `fulfilled` and emails the customer the shipping confirmation — BUT ONLY
+ *      IF THE EMAIL ACTUALLY GOES OUT. Fulfilment is gated on the send returning
+ *      true, so flipping an order to `shipped` with no tracking number on it
+ *      emails nothing and correctly leaves the request open. "Add a tracking
+ *      number" is the action; the email is what closes the loop.
+ *
+ * Since Sep 2026 the request is ALSO visible on the Orders list itself, as a
+ * chip in the Invoice / tracking column (ERR-201), so an operator working that
+ * list can see who is waiting without coming here first. This page remains the
+ * queue view and the only place the whole backlog is enumerable.
+ *
+ * ONE REQUEST CAN NEVER BE CLEARED FROM ANYWHERE: a cancelled order will never
+ * ship, so no email will ever fire against it. `20260714000001` has been in that
+ * state since 14 Jul 2026. The Orders chip mutes it; there is nothing this page
+ * can do about it until the backend grows a dismiss endpoint.
  *
  * There is deliberately NO inline "fulfil" or "dismiss" action here: the
  * backend exposes no such endpoint. Fulfilment is a side-effect of setting
@@ -91,7 +105,7 @@ function renderShell(inner) {
   _container.innerHTML = `
     <div class="admin-page-header">
       <h1>Tracking Requests</h1>
-      <p class="admin-page-header__sub">Customers who asked for tracking on their order. Open the order and add a tracking number — the customer is emailed automatically and the request clears itself.</p>
+      <p class="admin-page-header__sub">Customers who asked for tracking on their order. Open the order and add a tracking number — the request clears itself once the customer is actually emailed. A cancelled order can never send that email, so its request stays here.</p>
     </div>
     <div class="admin-segmented" style="display:inline-flex;gap:4px;margin-bottom:var(--spacing-md, 16px);background:var(--bg-subtle,#f1f5f9);padding:4px;border-radius:8px">
       ${tabs.map(t => `

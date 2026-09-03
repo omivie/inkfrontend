@@ -41,6 +41,135 @@ describing the same incident.
 
 ---
 
+## ERR-201 — Seven customers were waiting for tracking and the Orders page could not see one of them; the hand-off that fixed it was the first in three to be true, and half the feature it describes has never once run — **RESOLVED** (2026-09-03)
+
+**Date**: 2026-09-03 · **Context**: The owner's backend developer sent
+`readfirst/orders-tracking-requested-column-FE-handoff-sep2026.md`. Its complaint was exact: a
+customer who cannot find their parcel fills in the form at `/track-order`, which writes an
+`order_tracking_requests` row and lights up the standalone Tracking Requests page and the sidebar
+badge — **and nowhere else**. The operator working the Orders list, which is where orders are
+actually processed, got no signal at all. Order `2026090203` looked identical to the four rows
+either side of it while that customer had been waiting since 2 September. Meanwhile the Invoice
+sent column is an em-dash on every website row, and website rows are the only rows tracking
+requests ever come from. The cell was free.
+
+**THE HAND-OFF WAS TRUE — the first of three in a row that was.** ERR-199's opened with a contract
+that would not exist for another nine hours; ERR-198's opened with "no code changes required" and
+five call sites needed changing. This one was re-measured out of habit against backend commit
+`90ca2496`, `db: connected`, and every claim held: `tracking_request` on **154/154** order rows
+across all four pages and on the detail endpoint too, **7** open requests all on website rows
+reconciling **7/7** against `GET /api/admin/tracking-requests`, and `20260714000001` cancelled with
+an open request exactly as the "Known gap" section said. *Checking it was still the whole job* —
+everything below is something the hand-off does not say.
+
+**(a) The trap is ERR-199's trap, and it had to be re-solved rather than assumed.** An absent
+`tracking_request` is `undefined`; `undefined !== null` is TRUE, so the literal reading marks all
+154 rows as carrying a request. The obvious correction `== null` is worse — it collapses ABSENT
+into "nobody asked", which renders **identically to a correct build**, so a feature that never
+works looks finished. Detection is `hasOwnProperty`, and ABSENT / `null` / `{state:…}` stay three
+states. Pinned with both wrong gates as their own named tests, plus positive controls that run
+broken builds of the real module through the real loader.
+
+**(b) 🚨 HALF THIS FEATURE HAS NEVER RUN, ON EITHER SIDE.**
+`GET /api/admin/tracking-requests?status=fulfilled` returns **zero rows. Ever.** All 7 live requests
+are `pending` with `request_count: 1`. So `state:"sent"`, the Rule-2 re-ask, `request_count > 1`
+and the backend's own `fulfillPendingTrackingRequests` helper are **all unexercised in production**
+— including the two clearing paths the backend fixed *in this very change*. That is precisely the
+standing the Invoices `×N` indicator had for eight months while having never once rendered
+(ERR-180). Every branch is pinned by tests, flagged as unproven in the module header, and
+`npm run probe:tracking-requested` reprints the caveat on every run until a fulfilled row exists.
+
+**(c) 🚨 THE GROUND TRUTH IS A 200 WITH ZERO ROWS.** `order_tracking_requests` has RLS enabled with
+no permissive policies, so PostgREST hands a browser-shaped client `200 []` while seven rows sit
+there. A probe that read it would report "no tracking requests exist" and **certify a completely
+broken column green** — the ERR-188 family, a refusal wearing the costume of an answer. The probe
+measures that trap deliberately, names it, and reconciles against the admin endpoint instead.
+
+**(d) Five filter params, all decoys.** `?tracking_request=`, `?tracking_requested=`,
+`?has_tracking_request=`, `?tracking_state=` and `?tracking=` are each accepted and ignored —
+`zzznope` returns the full 50-row page. Positive control: `?status=cancelled` really filters, to 16.
+So **no client-side filter was shipped**: it would see 20 of 154 rows while looking like a full
+filter, which is the decoy bug reimplemented in our own code. Six of the seven waiting customers
+are not on page 1. Asked for as a real param in the FE response.
+
+**(e) The two endpoints disagree about their own field list, in opposite directions.**
+`/orders/:id` carries `tracking_request` and does **not** carry `invoice_sent`; the list carries
+both. So neither is a safe proxy for the other, and `utils/order-tracking-request.js` walks a
+candidate ladder (`readTrackingRequestFrom`) the way `resolveDeleteRight` already does — an absent
+contract is a reason to look at the next payload, never to answer from one that never had it.
+
+**(f) The structural constraint that shaped the whole design.** `patchSentCell` replaces
+`[data-order-sent]` by `outerHTML`, so every branch of `sentCellHtml` must return exactly one root.
+Folding the chip in would have meant either moving that hook (breaking the history button) or
+letting the next patch eat the chip — and that patch fires on every modal open, modal close and
+hydration landing, so it would have vanished at exactly the moments an operator was looking. The
+chip is a **sibling root with its own `[data-order-track]` hook**, which left `sentCellHtml` and its
+two existing test files **byte-identical**.
+
+**(g) The chip needs no cache, no fetch and no hydration** — the answer is already on the list
+payload. The symmetry with `hydrateInvoiceSent` beside it is inviting and wrong: copying that
+fan-out would have issued one pointless request per row for a field already in hand. Written into
+the function header, because the next person to read the two side by side will assume otherwise.
+
+**(h) Two live docs were describing the old fulfilment rule.** The SQL reference said a request
+clears "when an admin sets a tracking number on the order"; the Tracking Requests page told
+operators it "clears itself", unconditionally. Fulfilment is now gated on **an email actually going
+out** — flipping an order to `shipped` with no tracking number emails nothing and correctly leaves
+the request open. Both corrected.
+
+**(i) A thread this feature exposed rather than created.** `refreshTrackingRequestsBadge` is
+exported from `app.js` and was **never called from `pages/orders.js`**. Invisible before: the count
+sat in the sidebar and the request lived on another screen. With the column shipped, an operator
+who answers a request watches the chip clear while the badge two inches away still counts it. Now
+refreshed from all four paths that can clear one. The explicit "Send to customer" also had to start
+reloading the list — it never needed to before, because nothing on the row used to change. The row
+is re-read from the backend rather than patched locally: **the backend gates fulfilment on the send
+returning true, and assuming the transition would be asserting an outcome we did not witness.**
+
+**(j) `formatSentShort` had a try/catch that could never catch.** `new Date('nonsense')` does not
+throw — it returns an Invalid Date whose `toLocaleDateString()` is the literal string
+"Invalid Date". Latent rather than live (every `sent_at` the backend sends is real), but it sits in
+the middle of the cell being rebuilt. Guarded, and the new util applies the same guard.
+
+**Owner decisions.** Stack both facts rather than the hand-off's precedence ladder — on an
+invoice-claimed order whose customer also asked, precedence would silently drop the send date. Mute
+on cancelled **and** ask for the dismiss endpoint. No filter.
+
+**Fix**: new `js/admin/utils/order-tracking-request.js` (the whole vocabulary: `TRACK_STATE`,
+`TRACK_REGIME`, `readTrackingRequest`, `readTrackingRequestFrom`, `trackingRequestRegime`,
+`resolveTrackingInfo`, `trackingChipCopy`, and hardened stamp parsing);
+`js/admin/pages/orders.js` (`trackingChipHtml`, `modalTrackingValue`, `noteTrackingRegime`,
+`refreshTrackingCount`, the column rename to **Invoice / tracking**, the Dates-block row, the
+`formatSentShort` guard); `css/admin.css` (`.order-track*`, `.cell-invoice-track`, both decks);
+`sql/order_tracking_requests.sql` and `js/admin/pages/tracking-requests.js` (the stale fulfilment
+promises); `js/admin/utils/order-invoice-sent.js` (its header still said all three ERR-199 fields
+were absent — the list deploy has since landed, the detail one has not). `APP_VERSION` →
+`…-shipping-information-actions-tracking-requested` (appended, not replacing) + `npm run build`.
+
+**Refused, deliberately:** a "waiting for tracking" filter on the Orders page. It could only filter
+the 20 rows already fetched while presenting as a full filter — the same lie the five decoy params
+tell, written by us instead of the backend. The sidebar badge already carries the honest
+catalogue-wide count and the deep link from the queue page already works. Requested as a real
+backend param instead.
+
+**Verified**: full suite **5041 pass / 0 fail** (was 4955). New
+`tests/orders-tracking-requested-column-sep2026.test.js` (86 subtests) including **five positive
+controls** — the `!== null` gate, the `== null` gate, an unfloored `countKnown`, dropped cancelled
+muting and dropped re-ask detection, each run as a broken build of the real module through the real
+loader, each of which must fail. New `npm run probe:tracking-requested` is green with **14 hard
+checks**, `REGIME: SERVER`, 7/7 reconciled in both directions. Two existing guards were updated
+rather than deleted, and one of them made **stricter**: `tracking-request-may2026.test.js`'s
+"no `dismissed` in the schema doc" now checks the DDL with comments stripped, so prose may explain
+the requested endpoint while a real `dismissed` in a column default would still be caught.
+
+**Lesson**: **a hand-off being true is not the same as a feature being exercised.** Every sentence
+in this one checked out, and the two things worth knowing were still invisible from it — that half
+the state machine has never run on either side of the wire, and that the table holding the answer
+returns `200 []` to anyone who asks politely. *Read the contract, count the rows, and then ask
+which branches have ever actually happened.*
+
+---
+
 ## ERR-200 — A carrier the admin could not name: NZ Couriers was unexpressible, four shipped orders were one obvious gate away from a duplicate email, and one customer has been holding a tracking link that can never find a parcel — **RESOLVED** (2026-09-01)
 
 **Date**: 2026-09-01 · **Context**: The owner's backend developer sent
