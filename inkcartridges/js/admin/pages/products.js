@@ -21,6 +21,7 @@ import {
 } from '../utils/product-deletability.js';
 import { SUPPLIER_LABELS, PACK_PACK_TYPES } from '../utils/sourcing.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
+import { pgrstLike } from '../utils/pgrst.js';
 import {
   typesForCategory, defaultTypeForCategory, previewCodeForSku,
   needsCodeOverride, mergeCodeIntoEffective, normCode,
@@ -74,6 +75,9 @@ function extractBrandName(p) {
 
 let _container = null;
 let _table = null;
+// Set when the direct-Supabase search leg fails and we silently reach for the
+// backend instead. Read (and cleared) at the fallback, which says so out loud.
+let _supabaseFellBack = false;
 let _compatController = null;
 let _page = 1;
 let _search = '';
@@ -775,8 +779,11 @@ async function loadProducts() {
       // Brand filter
       if (_brandFilter) query = query.eq('brand_id', _brandFilter);
 
-      // Search filter
-      if (_search) query = query.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`);
+      // Search filter — the value is QUOTED, not interpolated raw (ERR-202).
+      // `.or()` is comma/paren-delimited, so an operator searching "Smith, Ltd"
+      // used to send a 400 and "Acme (NZ)" silently matched nothing. Our own
+      // titles carry the same characters — "(2,500 pages)". See utils/pgrst.js.
+      if (_search) query = query.or(`name.ilike.${pgrstLike(_search)},sku.ilike.${pgrstLike(_search)}`);
 
       // Active filter
       if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
@@ -801,6 +808,8 @@ async function loadProducts() {
       // three-valued logic), so legacy uncoloured products would silently
       // vanish from "Singles Only" without the color.is.null arm.
       if (_packFilter) {
+        // Not user input (ERR-202): these come from the canonical
+        // ProductColors.PACK_VALUES list and are already quoted per value.
         const PACKS = window.ProductColors.PACK_VALUES;
         const packList = `("${PACKS.join('","')}")`;
         if (_packFilter === 'packs') query = query.in('color', PACKS);
@@ -877,13 +886,21 @@ async function loadProducts() {
       loadRowExtras();
       return;
     } catch (e) {
-      // Fall through to backend API
+      // Fall through to backend API — but SAY SO. The two legs are different
+      // engines with different matching, so an operator who is not told the
+      // result set changed hands cannot explain why the rows moved (ERR-202).
+      window.DebugLog?.warn?.('[Products] Supabase search failed, using backend', e?.message || e);
+      _supabaseFellBack = true;
     }
   }
 
   // Fallback: use backend API
   // The backend has no color param — if the pack filter is active, say so
   // LOUDLY rather than presenting unfiltered rows as a filtered result.
+  if (_supabaseFellBack) {
+    _supabaseFellBack = false;
+    Toast.warning('Product search fell back to the backend — results may match slightly differently');
+  }
   if (_packFilter) Toast.warning('Pack filter unavailable right now — showing unfiltered results');
   // Same for the supplier filter: /api/admin/products has no `supplier` param, so
   // these rows are NOT filtered by supplier. Never let the dropdown imply they are.

@@ -48,6 +48,8 @@
  * tests/admin-invoice-party-picker-aug2026.test.js drives it with stubs.
  */
 
+import { foldFilterPunct } from './pgrst.js';
+
 /** Rows out of any envelope this backend has ever used. See the shape note above. */
 export function ordersFrom(data) {
   if (Array.isArray(data)) return data;
@@ -70,12 +72,24 @@ export function customerName(c) {
   return String(o.full_name || `${o.first_name || ''} ${o.last_name || ''}`.trim() || '');
 }
 
+/**
+ * The operator's query, split into comparable tokens.
+ *
+ * `, ( )` are folded to whitespace FIRST (ERR-202). The remote leg of this
+ * search cannot see them — the backend's Sep-2026 escaper strips them, and our
+ * own PostgREST calls quote them — so a local half that kept them was holding
+ * the returned rows to a stricter standard than the query that fetched them.
+ * Typing "Walker, Vieland" produced the token "walker," and then discarded a
+ * stored "Vieland Walker", i.e. the picker reported a customer it had just been
+ * handed as "no match". Both halves fold identically or the widening below
+ * stops being the pure widening its header promises.
+ */
 export function queryTokens(q) {
-  return String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return foldFilterPunct(q).toLowerCase().split(/\s+/).filter(Boolean);
 }
 
 export function matchesAllTokens(haystack, tokens) {
-  const hay = String(haystack || '').toLowerCase();
+  const hay = foldFilterPunct(haystack).toLowerCase();
   return tokens.length > 0 && tokens.every((t) => hay.includes(t));
 }
 

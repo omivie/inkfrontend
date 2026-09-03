@@ -79,7 +79,7 @@ function buildColumns() {
 async function loadPrinters() {
   if (!_table) return;
   _table.setLoading(true);
-  const { printers, total } = await AdminAPI.getPrinters({
+  const res = await AdminAPI.getPrinters({
     search: _search,
     brandId: _brandFilter,
     sort: _sort,
@@ -88,7 +88,14 @@ async function loadPrinters() {
     limit: LIMIT,
   });
   if (!_table) return;
-  _table.setData(printers, { total, page: _page, limit: LIMIT });
+  // null = the query could not be run (ERR-202). An empty table would claim
+  // "no printer matches", which is a different — and false — statement.
+  if (res == null) {
+    _table.setData([], { total: 0, page: _page, limit: LIMIT });
+    Toast.error('Couldn’t search printer models — that’s an unanswered search, not an empty one. Try again.');
+    return;
+  }
+  _table.setData(res.printers || [], { total: res.total || 0, page: _page, limit: LIMIT });
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────

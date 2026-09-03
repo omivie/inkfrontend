@@ -32,7 +32,8 @@
     "probe:orders-invoice-sent": "node scripts/probe-orders-invoice-sent.mjs",
     "probe:order-number": "node scripts/probe-order-number-format.mjs",
     "probe:shipping-info": "node scripts/probe-shipping-information.mjs",
-    "probe:tracking-requested": "node scripts/probe-tracking-requested-column.mjs"
+    "probe:tracking-requested": "node scripts/probe-tracking-requested-column.mjs",
+    "probe:search-escaping": "node scripts/probe-search-escaping.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

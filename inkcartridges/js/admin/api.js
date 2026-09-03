@@ -8,6 +8,7 @@ import { BusinessAccountRegistry } from './utils/business-accounts.js';
 // One vocabulary for "when was this order's invoice sent", shared with
 // pages/orders.js — see the module header for why it is not defined twice.
 import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './utils/order-invoice-sent.js';
+import { pgrstLike } from './utils/pgrst.js';
 
 // The carrier registry (GET /api/admin/shipping/carriers) is a constant per
 // deploy — names, number labels, whether a product code is required, whether the
@@ -1736,7 +1737,9 @@ const AdminAPI = {
       }
       if (filters.product_type) query = query.eq('product_type', filters.product_type);
       if (filters.is_active !== undefined && filters.is_active !== '') query = query.eq('is_active', filters.is_active === 'true' || filters.is_active === true);
-      if (filters.search) query = query.or(`name.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
+      // Quoted, not interpolated raw — a comma or bracket in the box is data,
+      // not `.or()` syntax (ERR-202). See utils/pgrst.js.
+      if (filters.search) query = query.or(`name.ilike.${pgrstLike(filters.search)},sku.ilike.${pgrstLike(filters.search)}`);
       query = query.order(filters.sort || 'name', { ascending: filters.sortDir !== 'desc' });
       const limit = filters.limit || 200;
       const page = filters.page || 1;
@@ -2365,13 +2368,25 @@ const AdminAPI = {
 
   // ---- Printer Models (Supabase direct) ----
 
+  /**
+   * Printer models for the compatibility picker.
+   *
+   * Returns null — NOT an empty list — when the query could not be run
+   * (ERR-202). It used to swallow every failure into `{ printers: [], total: 0 }`,
+   * so a 400 from a malformed filter, an RLS refusal and a genuine "no printer
+   * is called that" all painted the same empty picker. That is the ERR-193
+   * swallow-to-empty pattern: an unanswered question rendered as an answer.
+   * Callers must tell the two apart — null means say so, [] means say "none".
+   */
   async getPrinters({ search = '', brandId = '', sort = 'full_name', order = 'asc', page = 1, limit = 200 } = {}) {
     try {
       const sb = this._sb();
-      if (!sb) return { printers: [], total: 0 };
+      if (!sb) return null;
       let query = sb.from('printer_models')
         .select('id, full_name, model_name, slug, brand_id, brands(name)', { count: 'exact' });
-      if (search) query = query.or(`full_name.ilike.%${search}%,model_name.ilike.%${search}%`);
+      // Quoted — see utils/pgrst.js (ERR-202). A printer model legitimately
+      // carries brackets ("HL-L2350DW (series)"), which used to hard-400 here.
+      if (search) query = query.or(`full_name.ilike.${pgrstLike(search)},model_name.ilike.${pgrstLike(search)}`);
       if (brandId) query = query.eq('brand_id', brandId);
       const col = ['full_name', 'model_name', 'slug'].includes(sort) ? sort : 'full_name';
       query = query.order(col, { ascending: order !== 'desc' });
@@ -2382,7 +2397,7 @@ const AdminAPI = {
       return { printers: data || [], total: count || 0 };
     } catch (e) {
       adminApiWarn('Failed to load printers', e);
-      return { printers: [], total: 0 };
+      return null;   // couldn't ask — never an empty result
     }
   },
 

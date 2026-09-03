@@ -41,6 +41,124 @@ describing the same incident.
 
 ---
 
+## ERR-202 — The security hand-off said "nothing is required of the frontend"; the vulnerability it had just fixed was still open in our own code, three call sites deep — **RESOLVED** (2026-09-03)
+
+**Date**: 2026-09-03 · **Context**: The owner's backend developer sent
+`security-hardening-sep2026-FE-handoff.md`, reporting a Sep 2026 OWASP pass + dependency
+remediation. Its headline was **"TL;DR: nothing is *required* of the frontend."** §2: "**None.**
+No code change, no redeploy dependency, no contract migration." §4 offered four self-check
+prompts, explicitly unverified — *"I have not verified them against the frontend codebase, so
+treat them as prompts, not findings"* — and offered a dedicated FE security pass as "a separate
+engagement".
+
+That offer was the tell. The four prompts were the only part of the document nobody had measured,
+and one of them was wrong in a way that mattered.
+
+**WHAT THE HAND-OFF GOT RIGHT** (measured before anything was written, `npm run
+probe:search-escaping`):
+- The injection fix is genuine. `/api/search/smart?q=zzqqxnonexistent,sku.eq.GTN251BK` → 0 rows +
+  recovery rails; the `or(...)` form likewise. An injected PostgREST filter no longer steers the
+  result set.
+- No envelope changed — `products / facets / total / pagination / intent`, `did_you_mean` +
+  `corrected_from`, `recovery.rails[]`, all intact.
+- §4.1 (keys) **PASSES**: `config.js` ships a `role:anon` JWT (decoded, not assumed), Stripe is
+  `pk_live_` publishable, PayPal a client ID, Turnstile a site key. No service-role key, no
+  committed `.env`, nothing stray under the served tree.
+- §4.4 (CSP) **PASSES**: live on `www`, `script-src 'self'` + explicit hosts + a sha256 hash, **no
+  `unsafe-inline` / `unsafe-eval` in `script-src`**, `frame-ancestors 'none'`, HSTS preload.
+  *Measure `www`, not the apex* — the apex 307s to `www` before headers apply, which makes a
+  perfectly healthy CSP look absent.
+
+**(a) 🚨 §4.3 IS BACKWARDS FOR THE ADMIN SPA — AND THAT IS WHERE THE BUG WAS.** The document says
+*"no client-side escaping is needed (the backend handles it)"*. True for `/api/search/*`. **The
+admin SPA does not go through the backend.** Three admin searches talk **directly to PostgREST**,
+so the escaper the backend had just written was never in the path — and all three built their
+filter by interpolating the operator's raw text into a comma/paren-delimited `.or()`:
+
+```js
+query.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`)   // pages/products.js
+query.or(`name.ilike.%${filters.search}%,…`)                 // api.js  (ribbon products)
+query.or(`full_name.ilike.%${search}%,…`)                    // api.js  (printer models)
+```
+
+**The same vulnerability class the backend had just fixed, still open on our side of the wire.**
+Measured live against PostgREST with an admin JWT:
+
+| Operator types | Result |
+|---|---|
+| `TN251` | 200, correct rows |
+| `Smith, Ltd` | **400** `PGRST100 failed to parse logic tree` |
+| `Acme (NZ)` | 200 but **`[]`** — parens are literal to `ilike` |
+| `x,is_active.eq.false` | **400** `invalid input syntax for boolean: "false%"` |
+
+PostgREST rejects the malformed tree, so this is not exfiltration. It is worse in the boring
+direction: **a comma or a bracket is not an attack, it is a Tuesday.** Company names carry them
+("Acme (NZ) Limited"), operators type them, and *our own product titles* end in `(2,500 pages)`.
+Every one of those searches was erroring or silently returning nothing.
+
+**(b) THE FAILURE WAS INVISIBLE, IN TWO DIFFERENT WAYS.** `getPrinters` caught the 400 and returned
+`{ printers: [], total: 0 }` — the ERR-193 swallow-to-empty pattern exactly, an unanswered question
+rendered as an answer. `products.js` caught it and silently fell through to the HTTP backend, so
+the *same search box* was served by two different engines depending on which unrelated dropdown
+happened to be set. Neither said a word.
+
+**(c) THE FIX ALREADY EXISTED IN-TREE AND WAS WIRED TO THE WRONG THING.**
+`components/product-search.js` carried `sbSafe`, stripping `[,()]`, with a comment naming this
+precise hazard — attached only to `resolveSkus`, never to the three query paths that needed it.
+*A guard that exists but is not on the path is not a guard.*
+
+**(d) STRIPPING IS THE WORKAROUND; QUOTING IS THE FIX.** Deleting the characters is safe but lossy
+— it answers a different question than the operator asked, and `(2,500 pages)` degrades to
+`2 500 pages`. PostgREST accepts a **double-quoted value**, inside which `,` `(` `)` `.` carry no
+syntactic weight. Verified live in the same session as the failures above:
+
+```
+name.ilike."%Black (2,500 pages)%"   → 200, the two real products
+name.ilike."%x,is_active.eq.false%"  → 200, [] — inert literal text
+name.ilike."%quote\" inject%"        → 200, [] — no break-out
+```
+
+So the value is preserved **and** the injection is closed. `(2,500 pages)` now *finds rows where
+it used to 400*. Only `"` and `\` can terminate a quoted value, so only those are escaped; `%`
+and `_` stay wildcards, which is a decision recorded in `utils/pgrst.js`, not an oversight.
+
+**(e) THE SAME ROOT CAUSE, RUNNING THE OTHER WAY, IN THE PARTY PICKER.**
+`utils/party-search.js` sends one token remotely and then filters the returned rows locally with
+`matchesAllTokens`, which kept punctuation verbatim. Typing `Walker, Vieland` produced the token
+`"walker,"` and then discarded a stored `Vieland Walker` — **every row the backend had just
+returned was thrown away client-side**, and the invoice / Quick Order picker reported "no match"
+for a customer that exists. That is ERR-176's *"not looked, reported as not found"* re-entering
+through a different door, in the very file written to prevent it. The backend's new stripping
+widened the gap, because the remote leg now loses the comma too.
+
+**(f) §3 IS WRONG ABOUT TWO OF THE THREE ENDPOINTS IT NAMES.** It says the search endpoints "strip
+the characters `,` `(` `)`". Only `/smart` does. Measured: `/api/search/by-part?q=TN251` → 7 rows,
+`?q=(TN251)` → **0**, `?q=TN251,` → **0**, while `?q=TN251␣` → 7 (so it trims whitespace but not
+punctuation). Nothing calls `by-part` today — `API.searchByPart` is exported and uncalled — so
+this is a documentation defect, not an outage. It becomes an outage the day someone wires it up
+believing §3.
+
+**Rule:** **A value crossing into a PostgREST filter is ESCAPED AT THE BOUNDARY — quoted, never
+stripped, never trusted.** One module owns it (`js/admin/utils/pgrst.js`): `pgrstLike` for
+anything searched, `foldFilterPunct` for the LOCAL half of a search that also runs remotely so
+both halves agree on what a token is. And: **"the backend handles it" is scoped to the calls that
+go through the backend.** Any direct-to-Supabase call is a second front door with no guard on it —
+grep `.or(\`` before believing otherwise.
+
+**Pinned by:** `tests/security-hardening-sep2026.test.js` (21 tests — the escaper, both positive
+controls, the exact `.or()` string each call site now builds, a scan that fails on ANY raw
+`ilike.%${...}` interpolation, `getPrinters` null-vs-empty, the `Walker, Vieland` case, plus
+standing guards that no non-anon JWT ships and that `script-src` never gains `unsafe-inline`).
+All four fixes mutation-tested — each reverted in turn, each confirmed to turn the suite red.
+Live contract: `npm run probe:search-escaping` (READ-ONLY; the PostgREST section SKIPS BY NAME
+without `SUPABASE_JWT` — a skip is not a pass). Punctuation cases added to
+`npm run audit:typeahead`, whose corpus had been hyphens-only.
+
+**Also fixed:** the admin noindex header was on `/admin/(.*)`, which does not match the bare
+`/admin` — measured live, the admin index page was served with no `X-Robots-Tag` at all.
+
+---
+
 ## ERR-201 — Seven customers were waiting for tracking and the Orders page could not see one of them; the hand-off that fixed it was the first in three to be true, and half the feature it describes has never once run — **RESOLVED** (2026-09-03)
 
 **Date**: 2026-09-03 · **Context**: The owner's backend developer sent

@@ -419,6 +419,35 @@ async function main() {
         }
     }
     {
+        // Punctuation tolerance — the coverage gap the Sep-2026 security
+        // hand-off exposed (ERR-202). Until now this whole corpus was
+        // hyphens-only, so the backend could have started or stopped stripping
+        // `, ( )` and nothing here would have noticed.
+        //
+        // The hand-off's §3 says /api/search/* strips those three characters.
+        // For /smart that is TRUE and it is a fix to DEFEND, exactly like the
+        // separator tolerance above: our own product titles carry them (the
+        // page-yield suffix is literally "(2,500 pages)"), and the typeahead
+        // writes a full title back into the box on select, so the round-trip
+        // has to survive. Asserted positively so a regression is loud.
+        const [plain, bracketed, comma] = await Promise.all([
+            smart('TN251'), smart('(TN251)'), smart('TN251,'),
+        ]);
+        if (plain.__err || bracketed.__err || comma.__err) {
+            bad('punctuation probe', plain.__err || bracketed.__err || comma.__err);
+        } else {
+            const keys = new Set(rowsOf(plain, 'products').map(idKey));
+            for (const [label, res] of [['(TN251)', bracketed], ['TN251,', comma]]) {
+                const rows = rowsOf(res, 'products');
+                const overlap = rows.filter((r) => keys.has(idKey(r)));
+                check(overlap.length > 0, `smart search tolerates ${label}`,
+                    `"${label}" returned no row that "TN251" returned — /api/search/smart has `
+                    + 'STOPPED neutralising , ( ). Storefront searches carrying a bracket '
+                    + '(a pasted product title, a did-you-mean re-search) now miss. See ERR-202.');
+            }
+        }
+    }
+    {
         // The documented cap. Note it is enforced with a 400, NOT an empty 200 —
         // API.searchSuggest swallows the error into [], so a caller that raised
         // its limit past 24 would see "no suggestions" and never know why.

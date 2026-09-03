@@ -13,6 +13,7 @@
 import { attachAutocomplete } from './autocomplete.js';
 import { AdminAPI } from '../app.js';
 import { costOrNull } from '../utils/invoice-math.js';
+import { foldFilterPunct } from '../utils/pgrst.js';
 
 const PLACEHOLDER_IMG = '/assets/images/placeholder-product.svg';
 const escH = (s) => Security.escapeHtml(String(s ?? ''));
@@ -47,7 +48,13 @@ export function productCostExGst(p) {
 // PostgREST's .or() filter is comma/paren-delimited, so those characters in a
 // raw search term would corrupt the expression. The picker takes free text, so
 // strip them rather than trust the input.
-const sbSafe = (s) => String(s ?? '').replace(/[,()]/g, ' ').trim();
+//
+// FOLDING is right HERE and only here: this value feeds an exact `.in()` SKU
+// list, where punctuation cannot be part of a real SKU, so dropping it loses
+// nothing. Anywhere the operator's text is SEARCHED rather than matched exactly,
+// use pgrstLike() instead — it quotes the value so "(2,500 pages)" still finds
+// its rows (ERR-202). One module owns both rules: utils/pgrst.js.
+const sbSafe = foldFilterPunct;
 
 // NOTE (ERR-071, Jul 2026): there used to be a `fetchProductCosts` here that
 // back-filled the "Our Cost" box on open, because the invoice API was believed not

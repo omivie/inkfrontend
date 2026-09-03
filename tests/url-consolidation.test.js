@@ -234,15 +234,27 @@ test('vercel.json — /product-by-name rewrites to backend (so /html/product-by-
         'rewrite must target the backend /html/product-by-name route (the backend keeps that URL per spec)');
 });
 
-test('vercel.json — admin noindex header is on /admin/* (not the legacy /html/admin/*)', () => {
+test('vercel.json — admin noindex header is on /admin and /admin/* (not the legacy /html/admin/*)', () => {
     const cfg = readJson(VERCEL_JSON);
-    const noindexRule = cfg.headers.find((h) =>
+    const noindexRules = cfg.headers.filter((h) =>
         Array.isArray(h.headers) &&
         h.headers.some((kv) => kv.key === 'X-Robots-Tag' && /noindex/.test(kv.value)),
     );
-    assert.ok(noindexRule, 'admin noindex header rule must exist');
-    assert.equal(noindexRule.source, '/admin/(.*)',
-        'admin noindex must be on /admin/(.*) since /html/admin/* now 301s away before headers apply');
+    assert.ok(noindexRules.length > 0, 'admin noindex header rule must exist');
+    const sources = noindexRules.map((r) => r.source).sort();
+
+    // `/admin/(.*)` does NOT match the bare `/admin`, so the admin index page
+    // was served without the header — measured live Sep 2026, ERR-202. Both
+    // sources are required; neither alone covers the surface.
+    assert.deepEqual(sources, ['/admin', '/admin/(.*)'],
+        'noindex must cover BOTH the bare /admin and /admin/*');
+
+    // The original guarantee: the header must not have drifted back onto the
+    // legacy /html/admin/* path, which now 301s away before headers apply.
+    for (const src of sources) {
+        assert.ok(!src.startsWith('/html/'),
+            `noindex must not sit on a legacy /html/ path (${src})`);
+    }
 });
 
 test('vercel.json — admin route still rewrites to /html/admin (the on-disk location is unchanged)', () => {
