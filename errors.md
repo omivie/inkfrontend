@@ -41,6 +41,140 @@ describing the same incident.
 
 ---
 
+## ERR-204 — The best hand-off we have had all year, and following its rendering advice to the letter would still have told the owner they spent $0.00 on 500 Google Ads queries — **RESOLVED** (2026-09-03)
+
+**Date**: 2026-09-03 · **Context**: The owner's backend developer sent
+`analytics-dashboards-FE-handoff-sep2026.md`: three jobs — raise the storefront's
+click-element truncation from 80 to 200, build two catalogue-engagement panels, build the
+acquisition dashboards now that Search Console was connected. Shipped as a new owner-only
+page (`#catalog-engagement`) and a new Finance-hub tab (`#analytics?tab=acquisition`).
+
+**WHAT THE HAND-OFF GOT RIGHT** (measured before a line was written, now
+`npm run probe:analytics-dashboards`): **all six endpoints live, authenticated and returning
+real data on the first try** — 401 authenticated, 404 on a negative control, envelope shapes
+exactly as documented. After ERR-198/199/200/202, each of which opened with a false claim,
+this one's body was accurate. Its two headline *rendering rules* were the problem, and both
+were about the same thing: a number that means "nobody measured this".
+
+**(a) 🚨 THE RULE WAS FALSE ONE ENDPOINT OVER, AND THE LIE WAS ABOUT MONEY.** §"Two rules
+here": *"`null` = that source isn't connected. `0` = connected and genuinely zero."* True on
+`/landing-pages` (`ads_*` null on all 174 rows). **Exactly backwards on `/search-terms`** —
+with the SAME `meta.sources.google_ads.connected === false`:
+
+| | `paid_clicks` / `paid_cost` |
+|---|---|
+| `/landing-pages`, 174 rows | `null` (rule holds) |
+| `/search-terms`, **500 of 500 rows** | **`0`** (rule inverted) |
+
+Followed literally, the Search Terms table asserts **"$0.00 spent across 500 queries"** — a
+factual claim about money from an integration that has never been connected. Same family as
+[[ERR-180]] (`email_count: 0` beside a real `emailed_at`) and [[ERR-200]] (`send_count: 0` on
+a shipped order): **a zero that means "we never asked" is worse than a blank, because it is
+confident.** Fix: **connectedness is read from `meta.sources`, NEVER from a cell.** The
+source is consulted *before* the value, so no value shape can override the verdict. A
+**third** state the doc never names is the most common one — *connected, but no row for this
+URL*, 103 of 174 landing-page rows — and it gets its own copy.
+
+**(b) 🚨 THE DOUBLE-COUNT IS 6.41×, NOT THE 3× THE EXAMPLE SUGGESTS.** Google's figures are
+per-URL and repeat identically on every channel row. Across all 174 rows: naive sum
+**84,935** impressions against a true **13,259**. `/` alone repeats 4,088 on all *eight* of
+its channel rows (32,704). The doc offered two remedies; **collapsing by path beats showing
+the block on the first row only**, because a column a reader can drag their eye down is a
+column they will add up. Collapsed, the channel sub-rows carry **no SEO columns at all — not
+blanked, absent** — so the wrong total is unconstructible rather than merely discouraged.
+Collapsing is only safe because the 16 multi-channel paths repeat *identically* (verified,
+16/16); `collapseByPath` sets `seoDiverged` if that ever stops being true, because from that
+day forward collapsing would be losing data rather than de-duplicating it.
+
+**(c) 🚨 THE RATE LIMITER ADVERTISES 30 AND ENFORCES 20 — UNMENTIONED, AND THE HEADERS LIE.**
+Reproduced twice from a cold window: requests #1–#20 answer 200 with
+`ratelimit-limit: 30, policy: 30;w=60`, counting `remaining` down to **10** — and #21 is
+refused by a second limiter whose own 429 headers say `20;w=60, retry-after: 44`. A client
+trusting `ratelimit-remaining` fires ten more and 429s on the first. **This nearly shipped as
+an empty dashboard**: `analyticsHttpGet` returns `null` for 401/403/500/abort/429 alike, and
+`null` renders as an empty table — a rate-limited Catalogue Engagement would have reported
+"no products were viewed". Added `analyticsHttpGetLoud` (discriminated:
+`{rateLimited, retryAfter} | {status} | {aborted} | {network}`) + a shared in-flight dedupe
+and 20s TTL. `analyticsHttpGet` was left alone — thirty-odd callers depend on its shape, and
+removing a fallback is a behaviour change, not cleanup ([[ERR-158]]).
+
+**(d) "`offshore_bounce_views_excluded` reports the count either way." IT DOES NOT — THREE
+STATES, NOT A NUMBER.** `/catalog/products` → **8** (259 rows) · the same with
+`include_offshore_bounces=true` → **0** (267 rows) · `/catalog/brands` → **key absent
+entirely**. The middle one is the trap: the count drops to zero exactly when the eight views
+are *included*. Printing "0 excluded" beside an unfiltered table tells the operator the
+filter finds nothing. ⇒ `readOffshoreExcluded` returns MEASURED / SUPPRESSED / UNKNOWN and
+the three states produce three different sentences (a test asserts they are three).
+
+**(e) `view_to_sale_rate: null` IS 20% OF THE TABLE, AND 7 ROWS EXCEED 100%.** The doc's
+"null is not zero" is right and *understated*: 51 of 259 rows are null (all with views = 0,
+clicks > 0), and a further 155 carry a genuine `0`. Both branches are live in volume, so
+both are exercised by real data rather than only by tests ([[ERR-180]]'s lesson: the invoice
+`×N` indicator stood for eight months having never once rendered). Separately, the field is
+**not a rate at all** — measured, it is `units_sold / views` on all 208 rows that have views,
+so 7 rows legitimately exceed 1, up to **3.0** (`C564BK`: 1 view, 3 sold). `300%` under a
+"View → sale" heading reads as broken, and an operator who distrusts one column distrusts
+the table. **Never capped** — capping invents a measurement — but flagged and explained.
+
+**(f) JOB 1 WAS RIGHT, AND THE NUMBER BEHIND IT IS WORSE THAN THE DOC SAYS.** Across all
+4,085 live products, `('link:' + pathname)`: **max 113 chars**, p95 99, **2,380 (58.3%)
+truncated at 80 — and all 2,380 lost their ENTIRE final segment**, because the cap was
+applied *after* the 5-char `link:` prefix, leaving 75 characters of path. The SKU is that
+last segment. Also: **there were FOUR caps, not one** — three at 80 (`data-track`, `#id`,
+`link:`) and one at 40 applied to button text *before* the `btn:` prefix, a 44-char ceiling
+on one branch of the same column. And the button branch had **dead code**:
+`('btn:' + text) || 'btn'` can never take its right arm, since the left always holds the
+truthy `'btn:'` — an empty-text button was recording the literal `"btn:"`.
+
+**Owner decisions.** Catalogue Engagement as its own page under Catalog (beside Demand
+Ranking) rather than a seventh Finance tab; Acquisition as a Finance tab beside Traffic.
+Entry pages collapsed by path with an expandable channel split, over the first-row-only
+alternative.
+
+**Fix**: `js/traffic-tracker.js` (one `ELEMENT_MAX_CHARS = 200`, applied after the prefix on
+all four branches, with the measurement written above it; dead `|| 'btn'` → a ternary;
+duplicated `/admin` guard de-duplicated — cosmetic, the opt-out does fire, `/html/*` 301s to
+`/*`) · new `js/admin/utils/catalog-engagement.js` + `js/admin/utils/acquisition.js` (the
+vocabularies) · new `js/admin/pages/catalog-engagement.js` + `js/admin/pages/acquisition.js` ·
+`js/admin/api.js` (`analyticsHttpGetLoud` / `…Shared` + six methods) · `app.js` (nav +
+`APP_VERSION`) · `pages/analytics.js` (the tab) · `css/admin.css`.
+
+**Refused, deliberately:** a Next button (`?offset=` is accepted and ignored, so it would
+silently re-serve page one — the limit control says so instead); capping the over-100% rate;
+printing an excluded count in the two states where the backend supplies none; reading
+`ratelimit-remaining`; and sending `product_type`/`sort`/`search`, all four confirmed decoys
+against a positive control (`?source=genuine` really filters, 144 of 259).
+
+**Rule:** **Ask `meta` who is connected before you ask a cell what it says.** A source that
+has never been connected still sends numbers, and on one of these two endpoints those
+numbers are zeros. And: **a per-URL figure repeated on per-channel rows is one measurement,
+not N** — de-duplicate it structurally, so the wrong total cannot be constructed rather than
+merely being discouraged by a footnote.
+
+**Pinned by:** `tests/traffic-element-truncation-sep2026.test.js` (20 — runs the real
+`labelFor` in a sandbox against the longest live URL), `tests/catalog-engagement-sep2026.test.js`
+(45) and `tests/acquisition-analytics-sep2026.test.js` (49); 114 assertions, each suite with
+labelled positive and negative controls. **All ten fixes mutation-tested** — each reverted in
+turn, each confirmed to turn its suite red. Live contract:
+`npm run probe:analytics-dashboards` (READ-ONLY, no recording mode, and **paced**, because an
+unpaced probe of a rate-limited endpoint fails on its own footprint) — green at 33 hard
+checks. Verified in the running admin against live data: 51 em-dashes, 7 flagged over-unity
+cells, the toggle flipping 259 → 267 with the disclosure changing wording, entry pages
+totalling 13,259 not 84,935, and 500 `paid_*` cells reading "—".
+
+**Verified**: full suite **5,227 pass / 0 fail**.
+
+**Also fixed:** replied in `analytics-dashboards-FE-response-sep2026.md` with four asks —
+advertise the binding rate limit, emit `null` for `paid_*` while Ads is unconnected, report
+the would-have-been-excluded count while unfiltered, add the offshore key to
+`/catalog/brands` — plus 400-or-implement for the four decoys.
+
+**Lesson**: *A hand-off can be completely true about its data and still wrong about how to
+read it — and "0 vs null" is the sentence to re-measure on every endpoint separately, because
+the same unconnected source told the truth on one and lied on the next.*
+
+---
+
 ## ERR-202 — The security hand-off said "nothing is required of the frontend"; the vulnerability it had just fixed was still open in our own code, three call sites deep — **RESOLVED** (2026-09-03)
 
 **Date**: 2026-09-03 · **Context**: The owner's backend developer sent

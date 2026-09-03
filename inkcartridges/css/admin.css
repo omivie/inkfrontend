@@ -6687,3 +6687,186 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
    row so a long sentence never squeezes the figure it is qualifying. */
 .inv-kpi-strip__note { flex: 1 0 100%; color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
 .inv-kpi-strip--warn { border-color: var(--yellow, var(--border-strong)); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CATALOGUE ENGAGEMENT (ce-*) + ACQUISITION (acq-*)  — Sep 2026, ERR-204
+   ══════════════════════════════════════════════════════════════════════════
+   Two analytics surfaces built on the Sep-2026 backend endpoints. Both lean on
+   the existing admin vocabulary (.admin-card / .admin-table / .admin-badge /
+   .admin-traffic-* / .admin-empty) and only add what is genuinely new:
+
+     • a "this figure is not known" treatment that reads as DELIBERATE rather
+       than as an empty cell — a dotted underline on the em-dash, so an operator
+       can tell "nobody measured this" from "the page failed to render".
+     • an expandable path group for the entry-pages table.
+     • a source-status strip.
+
+   Theme-safe: every colour goes through the existing custom properties, which
+   are redefined per theme higher in this file. Nothing here hardcodes a hex. */
+
+/* ── shared: the honest missing value ─────────────────────────────────────── */
+/* Not decoration. A bare em-dash is indistinguishable from a rendering bug, and
+   these two pages put one in up to a fifth of their cells on purpose. */
+.ce-missing,
+.acq-missing {
+  border-bottom: 1px dotted var(--border-strong);
+  cursor: help;
+}
+
+/* ── Catalogue Engagement ─────────────────────────────────────────────────── */
+.ce-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
+
+.ce-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin-bottom: 16px;
+}
+.ce-controls__spacer { flex: 1 1 auto; }
+.ce-filter { display: inline-flex; align-items: center; gap: 8px; }
+.ce-filter__label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .3px; color: var(--text-muted);
+}
+.ce-filter .admin-select { padding: 3px 8px; font-size: 12px; width: auto; }
+.ce-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text-secondary); cursor: pointer; user-select: none;
+}
+.ce-toggle input { cursor: pointer; }
+
+.ce-caption {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--text-muted); margin-bottom: 14px;
+}
+.ce-caption__sep { opacity: .5; }
+/* "raise Show to see more" — this endpoint has no next page, and the caption is
+   the only place that can say so. */
+.ce-caption__more { font-style: italic; }
+
+.ce-product { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ce-product__sku {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+}
+.ce-product__name {
+  font-size: 11.5px; color: var(--text-muted);
+  max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ce-src { font-size: 9.5px; letter-spacing: .03em; }
+.ce-src--genuine { background: var(--cyan-dim); color: var(--cyan-text); }
+.ce-src--compatible { background: var(--surface-hover); color: var(--text-muted); }
+
+/* Engagement is a SORT KEY. Muted on purpose — it must never read as the
+   headline metric, because summing hub views and product views hides exactly
+   the difference the two columns beside it exist to show. */
+.ce-engagement { color: var(--text-muted); font-size: 12px; cursor: help; }
+.ce-engagement--diverged { color: var(--yellow-text); }
+
+.ce-notes { padding: 12px 14px; }
+.ce-note { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.ce-note--warn { color: var(--yellow-text); }
+.ce-coverage {
+  margin: 10px 0 0; padding-left: 18px;
+  font-size: 11.5px; line-height: 1.55; color: var(--text-muted);
+}
+.ce-coverage li { margin-bottom: 4px; }
+.ce-coverage strong { color: var(--text-secondary); }
+
+.ce-warning {
+  padding: 12px 14px; margin-bottom: 16px;
+  border-color: var(--yellow, var(--border-strong));
+  background: var(--yellow-dim);
+  font-size: 12.5px; line-height: 1.55; color: var(--text-secondary);
+}
+.ce-warning code {
+  font-family: var(--font-mono); font-size: 11.5px;
+  background: var(--surface); border-radius: 4px; padding: 1px 5px;
+}
+
+.ce-countdown, .acq-countdown { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+/* ── Acquisition ──────────────────────────────────────────────────────────── */
+.acq-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 16px; }
+
+.acq-sources { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.acq-source {
+  display: flex; align-items: flex-start; gap: 9px;
+  flex: 1 1 220px; min-width: 0; max-width: 340px;
+  padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-hover);
+}
+.acq-source__mark {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; font-weight: 700;
+}
+.acq-source--on    .acq-source__mark { background: var(--success-dim); color: var(--success); }
+.acq-source--off   .acq-source__mark { background: var(--surface); color: var(--text-muted); }
+.acq-source--unknown .acq-source__mark { background: var(--yellow-dim); color: var(--yellow-text); }
+.acq-source--off { border-style: dashed; }
+.acq-source__label { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.acq-source__detail { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.acq-source__msg {
+  font-size: 10.5px; line-height: 1.45; color: var(--text-muted);
+  margin-top: 5px; font-family: var(--font-mono); word-break: break-word;
+}
+
+.acq-note {
+  font-size: 11.5px; line-height: 1.55; color: var(--text-muted);
+  margin-top: 10px;
+}
+.acq-note--warn { color: var(--yellow-text); }
+.acq-note strong { color: var(--text-secondary); }
+
+.acq-table th.acq-th-paid { color: var(--text-muted); }
+.acq-cell-path { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.acq-cell-path code {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px;
+}
+.acq-cell-term { font-size: 12.5px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acq-chancount {
+  flex: 0 0 auto; font-size: 10px; color: var(--text-muted);
+  background: var(--surface-hover); border-radius: 999px; padding: 1px 7px;
+}
+
+.acq-caret {
+  flex: 0 0 auto; width: 18px; height: 18px; padding: 0;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-muted); font-size: 11px; line-height: 1;
+  transition: transform .12s ease;
+}
+.acq-caret:hover { color: var(--text); }
+.acq-caret--open { transform: rotate(90deg); }
+.acq-caret--none { cursor: default; }
+
+.acq-row--group > td { font-weight: 500; }
+.acq-row--sub > td {
+  background: var(--surface-hover);
+  font-size: 11.5px; color: var(--text-muted);
+  border-top: 0;
+}
+.acq-sub-label { padding-left: 26px; }
+/* The sub-row's SEO span carries COPY, not a blanked number — a blank there
+   would invite exactly the mental sum this table exists to prevent. */
+.acq-sub-na { font-size: 10.5px; font-style: italic; }
+
+.acq-flag { color: var(--yellow-text); cursor: help; }
+.acq-partial { color: var(--text-muted); cursor: help; font-weight: 400; }
+
+.acq-table tfoot td {
+  border-top: 2px solid var(--border-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .acq-source { flex: 1 1 100%; max-width: none; }
+  .ce-product__name, .acq-cell-path code, .acq-cell-term { max-width: 200px; }
+}
+
+/* View → sale above 100% is REAL (units sold ÷ views: one view can buy a
+   4-pack). Never capped — marked, so the operator reads it as explained rather
+   than as a broken number. 7 of 259 live rows, 2026-09-03. */
+.ce-rate--over {
+  color: var(--yellow-text);
+  border-bottom: 1px dotted var(--border-strong);
+  cursor: help;
+}

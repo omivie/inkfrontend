@@ -46,6 +46,7 @@ const TABS = [
   { id: 'pricing',     label: 'Pricing', lazy: true },
   { id: 'market-intel', label: 'Market Intel', lazy: true },
   { id: 'traffic',     label: 'Traffic', lazy: true },
+  { id: 'acquisition', label: 'Acquisition', lazy: true },
 ];
 
 const TAB_IDS = TABS.map(t => t.id);
@@ -150,6 +151,7 @@ async function renderTabContent() {
       'pricing': './cc-profit.js',
       'market-intel': './cc-market-intel.js',
       'traffic': './website-traffic.js',
+      'acquisition': './acquisition.js',
     };
     try {
       const mod = await import(moduleMap[_activeTab]);

@@ -357,6 +357,126 @@ async function analyticsHttpGet(path, signal) {
 }
 
 /**
+ * THE ANALYTICS FAMILY IS RATE-LIMITED, AND analyticsHttpGet CANNOT SAY SO.
+ * ========================================================================
+ * Measured 2026-09-03 against production: the /api/admin/analytics/* family is
+ * rate-limited, and the headers describe the WRONG limiter. A 200 advertises
+ * `ratelimit-policy: 30;w=60` and counts `ratelimit-remaining` down to 10 —
+ * and then the 21st request is refused by a second, stricter limiter whose own
+ * headers say `20;w=60`. Reproduced twice.
+ *
+ * So the real budget is TWENTY per user per minute, shared across the whole
+ * family, and `ratelimit-remaining` overstates the headroom by ten. Nothing
+ * here reads that header. The 21st request gets
+ *
+ *     429  {"ok":false,"error":{"code":"RATE_LIMITED", ...}}
+ *     retry-after: 45
+ *
+ * `analyticsHttpGet` above returns `null` for that, exactly as it returns null
+ * for a 500, a 403 and an abort. A page built on it renders a rate limit as an
+ * empty table: an outage wearing the costume of a measurement, which is the
+ * ERR-063/068/188 family and the reason for the "fail-soft must be LOUD" rule.
+ * It stays as it is — thirty-odd existing callers depend on that shape, and
+ * removing a fallback is a behaviour change, not cleanup (ERR-158).
+ *
+ * This is its loud sibling. It reports WHICH failure happened, carries
+ * `retry-after` so a page can count down instead of guessing, and returns
+ * `meta` intact — `window.API.get` would otherwise staple meta onto
+ * `data.pagination`, which on these endpoints means hanging a property off the
+ * returned ARRAY.
+ *
+ *   { ok: true, data, meta }                      success
+ *   { ok: false, rateLimited: true, retryAfter }  429 — a NUMBER of seconds
+ *   { ok: false, status }                         any other non-2xx
+ *   { ok: false, aborted: true }                  the filter changed under us
+ *   { ok: false, network: true, message }         fetch threw (offline/CORS)
+ */
+async function analyticsHttpGetLoud(path, signal) {
+  try {
+    if (signal?.aborted) return { ok: false, aborted: true };
+    const token = window.Auth?.session?.access_token;
+    const resp = await fetch(`${Config.API_URL}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+      signal,
+    });
+    if (resp.status === 429) {
+      // The seconds come from the HEADER. The 429 body carries no retry_after,
+      // so a body-only reader would count down from a guess.
+      const hdr = Number(resp.headers.get('retry-after'));
+      return {
+        ok: false,
+        rateLimited: true,
+        retryAfter: Number.isFinite(hdr) && hdr > 0 ? hdr : 60,
+      };
+    }
+    if (!resp.ok) return { ok: false, status: resp.status };
+    const json = await resp.json();
+    if (json && json.ok === false) return { ok: false, status: resp.status, code: json?.error?.code || null };
+    return { ok: true, data: json?.data ?? null, meta: json?.meta ?? null };
+  } catch (e) {
+    if (e?.name === 'AbortError') return { ok: false, aborted: true };
+    DebugLog.warn(`[AdminAPI] analytics GET ${path} failed:`, e.message);
+    return { ok: false, network: true, message: e.message };
+  }
+}
+
+/**
+ * A 20-per-minute budget is generous for one paint and thin for an operator
+ * dragging a date range. Two cheap guards, both keyed on the FULL url so a
+ * different filter is a different request:
+ *
+ *   - in-flight dedupe: two panels asking for the same thing at the same time
+ *     make one request, not two.
+ *   - a short TTL: flipping back to a tab you were just on is free.
+ *
+ * Deliberately small (20s). This is throttling, not caching — analytics that
+ * silently answers from five minutes ago is its own kind of lie, and the pages
+ * show the range they actually asked for.
+ */
+const _analyticsInFlight = new Map();
+const _analyticsCache = new Map();
+const ANALYTICS_TTL_MS = 20000;
+
+function analyticsHttpGetShared(path, signal) {
+  const now = Date.now();
+  const hit = _analyticsCache.get(path);
+  if (hit && (now - hit.at) < ANALYTICS_TTL_MS) return Promise.resolve(hit.value);
+
+  const pending = _analyticsInFlight.get(path);
+  if (pending) return pending;
+
+  const p = analyticsHttpGetLoud(path, signal).then((res) => {
+    _analyticsInFlight.delete(path);
+    // Never cache a failure — a rate limit that stuck around for 20 seconds
+    // would outlive its own retry-after and block the recovery it describes.
+    if (res && res.ok) _analyticsCache.set(path, { at: Date.now(), value: res });
+    return res;
+  }).catch((e) => {
+    _analyticsInFlight.delete(path);
+    throw e;
+  });
+  _analyticsInFlight.set(path, p);
+  return p;
+}
+
+/** Build a query string, dropping empties, for the Sep-2026 analytics endpoints.
+ *  These take `from`/`to` — NOT the `date_from`/`date_to` that analyticsQuery()
+ *  emits — so they deliberately do not route through it (same reason
+ *  getTrafficTimeseries does not). Only params VERIFIED to be honoured are
+ *  emitted; product_type/sort/offset/search are accepted and silently ignored
+ *  (measured), so sending them would imply a filter that does not exist. */
+function catalogQueryString(opts = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(opts)) {
+    if (v === null || v === undefined || v === '') continue;
+    q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+/**
  * Product columns the ribbon admin reads. Deliberately EXCLUDES every
  * cost-bearing column — cost_price, profit_ex_gst, margin_pct — see ERR-170.
  */
@@ -919,6 +1039,56 @@ const AdminAPI = {
   async getTrafficBySource(filterParams, signal) {
     return analyticsHttpGet(`/api/admin/analytics/series/traffic-by-source?${analyticsQuery(filterParams)}`, signal);
   },
+
+  // ─── Catalogue engagement + acquisition (Sep 2026, ERR-204) ───────────────
+  // All six use analyticsHttpGetShared so a rate limit is REPORTED rather than
+  // rendered as an empty table, and so a fast filter change cannot burn the
+  // 20-req/60s budget. They return the LOUD envelope, not bare data — the
+  // pages need to tell "no rows" apart from "could not ask".
+
+  /** Most-viewed / most-clicked cartridges.
+   *  Honoured: from, to, source, brand_id, limit (1–500), include_offshore_bounces. */
+  async getCatalogProductEngagement(opts = {}, signal = null) {
+    return analyticsHttpGetShared(
+      `/api/admin/analytics/catalog/products${catalogQueryString(opts)}`, signal);
+  },
+
+  /** Brand hub + product engagement, ranked.
+   *  Honoured: from, to, limit (1–200), include_offshore_bounces.
+   *  NOTE: this endpoint does NOT return offshore_bounce_views_excluded at all
+   *  (measured) — utils/catalog-engagement.js reports that as UNKNOWN, not 0. */
+  async getCatalogBrandEngagement(opts = {}, signal = null) {
+    return analyticsHttpGetShared(
+      `/api/admin/analytics/catalog/brands${catalogQueryString(opts)}`, signal);
+  },
+
+  /** Channel totals + the meta.sources block that says which integrations are live. */
+  async getAcquisitionSummary(opts = {}, signal = null) {
+    return analyticsHttpGetShared(
+      `/api/admin/analytics/acquisition/summary${catalogQueryString(opts)}`, signal);
+  },
+
+  /** Entry URLs ranked by entry_sessions. Honoured: from, to, channel, limit.
+   *  Rows are per path+channel and REPEAT Google's per-URL SEO figures — never
+   *  sum a SEO column down this table (utils/acquisition.js collapseByPath). */
+  async getAcquisitionLandingPages(opts = {}, signal = null) {
+    return analyticsHttpGetShared(
+      `/api/admin/analytics/acquisition/landing-pages${catalogQueryString(opts)}`, signal);
+  },
+
+  /** Organic + paid queries. The paid_* columns are 0 on every row while Google
+   *  Ads is unconnected — read meta.sources, never the cell (ERR-204 trap 1). */
+  async getAcquisitionSearchTerms(opts = {}, signal = null) {
+    return analyticsHttpGetShared(
+      `/api/admin/analytics/acquisition/search-terms${catalogQueryString(opts)}`, signal);
+  },
+
+  /** { buckets, channels, series: [{ channel, points: [{bucket_start, sessions, pageviews}] }] } */
+  async getAcquisitionTimeseries(opts = {}, signal = null) {
+    return analyticsHttpGetShared(
+      `/api/admin/analytics/acquisition/timeseries${catalogQueryString(opts)}`, signal);
+  },
+
   // Traffic time-series (daily sessions + pageviews) for the Performance overview overlay. This
   // endpoint keys on `from`/`to` (NOT the `date_from`/`date_to` analyticsQuery emits), so build
   // the query directly. Caller supplies a wide fallback range so the all-time view still returns.

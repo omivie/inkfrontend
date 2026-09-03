@@ -33,7 +33,9 @@
     "probe:order-number": "node scripts/probe-order-number-format.mjs",
     "probe:shipping-info": "node scripts/probe-shipping-information.mjs",
     "probe:tracking-requested": "node scripts/probe-tracking-requested-column.mjs",
-    "probe:search-escaping": "node scripts/probe-search-escaping.mjs"
+    "probe:search-escaping": "node scripts/probe-search-escaping.mjs",
+    "probe:analytics-dashboards": "node scripts/probe-analytics-dashboards.mjs",
+    "probe:orders-supplier": "node scripts/probe-orders-supplier-columns.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

@@ -18,13 +18,39 @@
     'use strict';
 
     if (navigator.doNotTrack === '1' || window.doNotTrack === '1') return;
-    if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/admin')) return;
+    if (location.pathname.startsWith('/admin')) return;
 
     const SESSION_KEY = 'ic_traffic_session';
     const VISITOR_KEY = 'ic_traffic_visitor';
     const UTM_RID_KEY = 'utm_rid'; // sessionStorage; spec-mandated key name
     const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
     const AUTH_READY_TIMEOUT_MS = 1200; // bound first-pageview wait so tracking never blocks the page
+
+    /**
+     * Cap for the click `element` value. ONE constant for every branch of
+     * labelFor(), applied AFTER the prefix, so 200 means the same thing wherever
+     * it is read.
+     *
+     * This is a MEASUREMENT, not a round number. Measured 2026-09-03 across all
+     * 4,085 live products (`canonical_url` from /api/products):
+     *
+     *     max length of ("link:" + pathname) ......... 113 chars
+     *     95th percentile ............................  99 chars
+     *     truncated at the old cap of 80 ............. 2,380 (58.3%)
+     *     ...of those, losing the ENTIRE SKU segment . 2,380 (all of them)
+     *     truncated at 120 ...........................     0
+     *
+     * The old cap was applied after the 5-char "link:" prefix as well, so only 75
+     * path characters survived — and the SKU is the LAST path segment, which is
+     * what the backend resolves a click to a product with. It recovered 66% by
+     * slug prefix; the rest were unattributable
+     * (readfirst/analytics-dashboards-FE-handoff-sep2026.md, job 1).
+     *
+     * 200 clears the measured worst case by 87 characters. The API accepts 512
+     * and the column is unlimited, so the headroom is free. If a product slug
+     * ever grows past this, `npm run probe:analytics-dashboards` §8 fails.
+     */
+    const ELEMENT_MAX_CHARS = 200;
 
     function uuid() {
         if (crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -186,19 +212,35 @@
         send(baseEvent('pageview'));
     }
 
+    /**
+     * One cap, applied AFTER the prefix, for every branch of labelFor().
+     * Previously three branches capped at 80 and the button branch capped its
+     * text at 40 BEFORE concatenation (a 44-char ceiling), so the same column
+     * carried two different budgets and neither was named.
+     */
+    function cap(value) {
+        return String(value).slice(0, ELEMENT_MAX_CHARS);
+    }
+
     function labelFor(el) {
         if (!el) return null;
-        if (el.dataset && el.dataset.track) return el.dataset.track.slice(0, 80);
-        if (el.id) return ('#' + el.id).slice(0, 80);
+        if (el.dataset && el.dataset.track) return cap(el.dataset.track);
+        if (el.id) return cap('#' + el.id);
         const a = el.closest && el.closest('a[href]');
         if (a) {
             try {
                 const u = new URL(a.href, location.href);
-                return ('link:' + (u.hostname === location.hostname ? u.pathname : u.hostname)).slice(0, 80);
+                return cap('link:' + (u.hostname === location.hostname ? u.pathname : u.hostname));
             } catch (_) { return 'link'; }
         }
         const btn = el.closest && el.closest('button');
-        if (btn) return ('btn:' + (btn.textContent || '').trim().slice(0, 40)) || 'btn';
+        if (btn) {
+            // The old form was `('btn:' + text) || 'btn'`, whose fallback could
+            // never run: the left operand always held at least the truthy 'btn:',
+            // so a button with no text recorded the literal "btn:".
+            const text = (btn.textContent || '').trim();
+            return text ? cap('btn:' + text) : 'btn';
+        }
         return null;
     }
 

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.01-order-number-format-invoice-sent-channel-shipping-information-actions-tracking-requested';
+const APP_VERSION = '2026.09.03-shipping-information-tracking-requested-catalog-engagement-acquisition';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -105,6 +105,9 @@ const NAV_ITEMS = [
   // supplier cost on every row, and the endpoints behind it are super_admin.
   { key: 'supplier-prices', label: 'Supplier Prices', icon: 'suppliers', ownerOnly: true },
   { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
+  // Catalogue engagement sits with Demand Ranking: both answer "which products
+  // deserve attention", one from interest signals and one from measured views.
+  { key: 'catalog-engagement', label: 'Catalogue Engagement', icon: 'analytics', ownerOnly: true },
 
   { section: 'Data Operations' },
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', ownerOnly: true },
