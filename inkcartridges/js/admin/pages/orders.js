@@ -20,7 +20,10 @@ import {
 import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 // Supplier/Origin rendering is shared with the Products page — see utils/sourcing.js.
 // A second copy of the origin vocabulary is how the two surfaces would drift apart.
-import { originBadge, supplierCell } from '../utils/sourcing.js';
+import {
+  originBadge, supplierCell,
+  orderSuppliersFromDetail, orderSupplierCostFromDetail,
+} from '../utils/sourcing.js';
 // Invoice-send vocabulary — the same module AdminAPI writes through, so the
 // reader and the writer cannot disagree about what a send record looks like.
 import { recordedSendsPhrase } from '../utils/send-history.js';
@@ -126,19 +129,28 @@ function lookupOrder(id) {
 function forgetOrderCache(id) {
   if (!id) return;
   _seenOrders.delete(id);
-  forgetProfit(id);
+  forgetRowDetail(id);
   forgetInvoiceSent(id);
 }
 
 /**
- * Profit column state.
+ * Detail-hydrated column state — Profit, Supplier and Supplier cost.
  *
- * The orders LIST endpoint does not return `supplier_cost_snapshot` or
- * `shipping_absorbed` — those exist only on GET /api/admin/orders/:id (ERR-039).
- * So the column can't be rendered from the list payload; it fans out one cheap
- * detail GET per visible row AFTER the table has painted, and patches the cells
- * in as they land. Results are cached by order id, so paging back and forth
- * costs nothing.
+ * The orders LIST endpoint does not return `supplier_cost_snapshot`,
+ * `shipping_absorbed`, `suppliers[]` or `origin` — those exist only on
+ * GET /api/admin/orders/:id (ERR-039, and measured again for the sourcing
+ * fields on 2026-09-03: 0 of 142 list items carried them, 10 of 10 detail
+ * items did). So none of the three columns can be rendered from the list
+ * payload; ONE detail GET per visible row is fanned out AFTER the table has
+ * painted and the cells are patched in as they land. Results are cached by
+ * order id, so paging back and forth costs nothing.
+ *
+ * ⚠ THREE COLUMNS, ONE FETCH. Every field all three need arrives in the same
+ * response. If you are adding a fourth detail-fed column, read it out of the
+ * response this already makes — a second fan-out would double the load on the
+ * backend's 60/min limiter for data that is already in hand. That is why this
+ * is called hydrateRowDetail() and not hydrateProfits(): a function named for
+ * one of its three consumers invites exactly that mistake.
  *
  * 20 rows/page minus the cancelled ones (which need no fetch at all), in batches
  * of 6 against the backend's 60/min limiter — the same budget reasoning as the
@@ -146,11 +158,15 @@ function forgetOrderCache(id) {
  * 20 is fixed; if that ever changes this fan-out needs a cap.
  */
 const _profitCache = new Map();   // orderId -> orderProfitFromDetail(...) result
+// orderId -> { suppliers, cost, state } — the sourcing half of the same response.
+const _sourcingCache = new Map();
 let _profitAbort = null;
 const PROFIT_BATCH = 6;
 
-function forgetProfit(id) {
-  if (id) _profitCache.delete(id);
+function forgetRowDetail(id) {
+  if (!id) return;
+  _profitCache.delete(id);
+  _sourcingCache.delete(id);
 }
 
 /**
@@ -245,14 +261,151 @@ function patchProfitCell(row) {
 }
 
 /**
- * Fill in the Profit column for the rows now on screen.
+ * Sourcing column state, one entry per hydrated row.
+ *
+ * The same five-way distinction the Profit column draws, for the same reason:
+ * "we haven't asked yet", "we asked and the call failed", "this order was
+ * cancelled so we never asked", "it has no lines" and "the lines are there but
+ * nobody recorded a supplier" are five different facts, and a cell that renders
+ * them identically is a cell that cannot be trusted for any of them.
+ */
+const SOURCING_STATE = Object.freeze({
+  PENDING: 'pending',
+  CANCELLED: 'cancelled',
+  FAILED: 'failed',
+  OK: 'ok',
+});
+
+/**
+ * Supplier names for one order.
+ *
+ * The partial case is the one worth reading twice. When SOME of an order's
+ * lines name a supplier and others don't, printing the names we found would
+ * assert that the order came from those suppliers and no others — which is
+ * exactly the claim `supplier_fulfillment` makes and gets wrong. So the names
+ * are followed by a "+N?" marker whose tooltip counts the silent lines. Two of
+ * the 45 orders measured on 2026-09-03 are in this state.
+ */
+function supplierNameCellHtml(row, info) {
+  const id = esc(row.id);
+  const open = (cls, title) =>
+    `<span class="order-supplier${cls ? ' ' + cls : ''}" data-order-supplier="${id}" title="${esc(title)}">`;
+
+  if (!info || info.state === SOURCING_STATE.PENDING) {
+    return `${open('order-supplier--pending', 'Loading line items…')}·</span>`;
+  }
+  if (info.state === SOURCING_STATE.CANCELLED) {
+    return `${open('order-supplier--none', 'Cancelled — this order\'s line items were not loaded, so its supplier is not known here. Open the order to see them.')}${MISSING}</span>`;
+  }
+  if (info.state === SOURCING_STATE.FAILED) {
+    return `${open('order-supplier--failed', 'Line-item lookup failed — reload to retry. This is NOT "no supplier".')}${MISSING}</span>`;
+  }
+
+  const { names, constituents, missingSupplierCount, itemCount } = info.suppliers;
+  if (!itemCount) {
+    return `${open('order-supplier--none', 'No line items recorded on this order, so there is nothing to source.')}${MISSING}</span>`;
+  }
+  if (!names.length) {
+    return `${open('order-supplier--none', `No supplier is recorded on any of this order's ${itemCount} line${itemCount === 1 ? '' : 's'}. Not the same as having no supplier.`)}${MISSING}</span>`;
+  }
+
+  // color/sku → name, one row per constituent, exactly as the modal's per-line
+  // Supplier cell builds its tooltip.
+  const lines = constituents.map((c) => `${c.label} → ${c.name}`);
+  if (missingSupplierCount > 0) {
+    lines.push(`${missingSupplierCount} line${missingSupplierCount === 1 ? '' : 's'} with no supplier recorded`);
+  }
+  const tip = missingSupplierCount > 0
+    ? `${missingSupplierCount} of ${itemCount} lines ${missingSupplierCount === 1 ? 'has' : 'have'} `
+      + `no supplier recorded, so this list is INCOMPLETE — the order may also have been sourced `
+      + `from someone not named here.\n\n${lines.join('\n')}`
+    : lines.join('\n');
+
+  const partial = missingSupplierCount > 0
+    ? `<span class="order-supplier__partial">+${missingSupplierCount}?</span>`
+    : '';
+  return `${open(missingSupplierCount > 0 ? 'order-supplier--partial' : '', tip)}`
+    + `<span class="order-supplier__names">${names.map(esc).join(', ')}</span>`
+    + partial
+    + `</span>`;
+}
+
+/**
+ * What the order cost us, ex-GST.
+ *
+ * UNKNOWN and $0 are different answers and are rendered differently. The
+ * em-dash branches each say WHY in their own words — a cell that reads "—" for
+ * four unrelated reasons teaches the operator to ignore it.
+ */
+function supplierCostCellHtml(row, info) {
+  const id = esc(row.id);
+  const open = (cls, title) =>
+    `<span class="order-supplier-cost${cls ? ' ' + cls : ''}" data-order-supplier-cost="${id}" title="${esc(title)}">`;
+
+  if (!info || info.state === SOURCING_STATE.PENDING) {
+    return `${open('order-supplier-cost--pending', 'Loading cost data…')}·</span>`;
+  }
+  if (info.state === SOURCING_STATE.CANCELLED) {
+    return `${open('order-supplier-cost--none', 'Cancelled — nothing was sourced, so no supplier cost was realised.')}${MISSING}</span>`;
+  }
+  if (info.state === SOURCING_STATE.FAILED) {
+    return `${open('order-supplier-cost--failed', 'Cost lookup failed — reload to retry. This is NOT $0.')}${MISSING}</span>`;
+  }
+
+  const { costExGst, missingCostCount, itemCount } = info.cost;
+  if (!itemCount) {
+    return `${open('order-supplier-cost--none', 'No line items recorded on this order, so there is nothing to cost.')}${MISSING}</span>`;
+  }
+  if (costExGst == null) {
+    const tip = `${missingCostCount} of ${itemCount} item${itemCount === 1 ? '' : 's'} `
+      + `${missingCostCount === 1 ? 'has' : 'have'} no recorded supplier cost, so this order's `
+      + `total cost can't be stated. It is UNKNOWN, not $0.`;
+    return `${open('order-supplier-cost--none', tip)}${MISSING}</span>`;
+  }
+
+  return `${open('', 'What we paid our suppliers for this order, ex-GST: the sum of each line\'s cost snapshot × quantity. Excludes freight, fees and the order discount — it is a cost, not a margin.')}`
+    + formatPrice(costExGst)
+    + `</span>`;
+}
+
+// Both sourcing cells for one row, swapped in place. Same reasoning as
+// patchProfitCell: setData/setColumns would re-render the whole table and drop
+// row focus on each of ~20 landing fetches.
+function patchSourcingCells(row) {
+  if (!_table?.container || !row?.id) return;
+  const key = CSS.escape(String(row.id));
+  const info = _sourcingCache.get(row.id);
+  const nameCell = _table.container.querySelector(`[data-order-supplier="${key}"]`);
+  if (nameCell) nameCell.outerHTML = supplierNameCellHtml(row, info);
+  const costCell = _table.container.querySelector(`[data-order-supplier-cost="${key}"]`);
+  if (costCell) costCell.outerHTML = supplierCostCellHtml(row, info);
+}
+
+/** The sourcing half of one detail response. */
+function sourcingFromDetail(order) {
+  return {
+    state: SOURCING_STATE.OK,
+    suppliers: orderSuppliersFromDetail(order),
+    cost: orderSupplierCostFromDetail(order),
+  };
+}
+
+/**
+ * Fill in the three detail-fed columns — Profit, Supplier, Supplier cost — for
+ * the rows now on screen, from ONE detail GET per row.
  *
  * Called AFTER _table.setData — never awaited before it, so the table paints
- * immediately and profit arrives progressively (the dashboard first-paint rule,
- * ERR-121). Superseded loads abort their predecessor so leaving the page or
- * paging fast doesn't burn the rate limiter on rows nobody is looking at.
+ * immediately and the three columns arrive progressively (the dashboard
+ * first-paint rule, ERR-121). Superseded loads abort their predecessor so
+ * leaving the page or paging fast doesn't burn the rate limiter on rows nobody
+ * is looking at.
+ *
+ * All three columns are owner-only, so the one owner gate below covers them
+ * all. If a future detail-fed column is NOT owner-only, this gate has to move
+ * to the individual cells — do not simply drop it, or every admin starts
+ * fanning out cost fetches.
  */
-async function hydrateProfits(rows) {
+async function hydrateRowDetail(rows) {
   _profitAbort?.abort();
   _profitAbort = null;
   if (!AdminAuth.isOwner() || !Array.isArray(rows) || !rows.length) return;
@@ -262,14 +415,20 @@ async function hydrateProfits(rows) {
 
   const todo = [];
   for (const row of rows) {
-    if (_profitCache.has(row.id)) { patchProfitCell(row); continue; }
+    if (_profitCache.has(row.id)) { patchProfitCell(row); patchSourcingCells(row); continue; }
     // Cancelled orders are resolvable from the list row alone — no revenue was
     // realised, so there is nothing to fetch. On a page like the current one
     // that's a third of the requests saved.
+    //
+    // The sourcing columns pay for that saving in coverage: a cancelled order's
+    // lines DO have suppliers, we simply never ask. Both cells say exactly that
+    // rather than rendering a bare dash that reads as "no supplier".
     const fromListRow = orderProfitFromDetail(row);
     if (fromListRow.state === PROFIT_STATE.CANCELLED) {
       _profitCache.set(row.id, fromListRow);
+      _sourcingCache.set(row.id, { state: SOURCING_STATE.CANCELLED });
       patchProfitCell(row);
+      patchSourcingCells(row);
       continue;
     }
     todo.push(row);
@@ -284,11 +443,13 @@ async function hydrateProfits(rows) {
       const row = batch[j];
       // A detail call we couldn't make is not $0 and not "no cost recorded" — it
       // is a question we failed to ask. Cache it as FAILED so the cell says so.
-      const info = (res.status === 'fulfilled' && res.value)
-        ? orderProfitFromDetail(res.value)
-        : { state: PROFIT_STATE.FAILED };
-      _profitCache.set(row.id, info);
+      const ok = res.status === 'fulfilled' && res.value;
+      _profitCache.set(row.id, ok ? orderProfitFromDetail(res.value) : { state: PROFIT_STATE.FAILED });
+      // Same response, read a second time for a different question. Note this is
+      // NOT a second request — see the header on hydrateRowDetail().
+      _sourcingCache.set(row.id, ok ? sourcingFromDetail(res.value) : { state: SOURCING_STATE.FAILED });
       patchProfitCell(row);
+      patchSourcingCells(row);
     });
   }
 }
@@ -1057,6 +1218,27 @@ const COLUMNS = [
     align: 'right',
   },
   {
+    // WHO this order's products came from. Owner-only and not sortable for the
+    // same two reasons as Profit above: it is cost-adjacent data, and the value
+    // is not on the list payload at all (measured 2026-09-03: 0 of 142 list
+    // items carry `suppliers`), so a header click could only order the 20 rows
+    // already hydrated while looking like a full sort.
+    //
+    // NO `gst:` SLOT — this is a name, not money. Borrowing the slot would put
+    // it in the money vocabulary (utils/gst-basis.js) it has nothing to do with.
+    key: '_supplier', label: 'Supplier',
+    render: (r) => supplierNameCellHtml(r, _sourcingCache.get(r.id)),
+  },
+  {
+    // What we PAID for it, ex-GST — deliberately a different basis from the
+    // Total beside it (incl. GST) and from Profit (net of GST), which is
+    // precisely why the header states it. A money column with a blank `gst`
+    // slot means "basis undocumented", and this one is documented.
+    key: '_supplier_cost', label: 'Supplier cost', gst: GST_EXCL,
+    render: (r) => supplierCostCellHtml(r, _sourcingCache.get(r.id)),
+    align: 'right',
+  },
+  {
     key: '_actions', label: '',
     render: (r) => {
       const st = (r.status || '').toLowerCase();
@@ -1068,6 +1250,18 @@ const COLUMNS = [
     align: 'right',
   },
 ];
+
+/**
+ * Columns only the owner sees — filtered out of the list for every other admin,
+ * exactly like the order modal's Cost/Profit columns.
+ *
+ * A SET, not an inline `c.key !== '_profit'`, because this is now three keys and
+ * the failure mode of forgetting one is silent: the column simply renders for
+ * everybody, and supplier cost is the figure ERR-170 was logged for leaking.
+ * Every one of these is also fed by hydrateRowDetail(), whose owner gate must
+ * agree with this list.
+ */
+const OWNER_ONLY_COLUMNS = new Set(['_profit', '_supplier', '_supplier_cost']);
 
 /**
  * Does this query look like an email address? Mirrors the branch in
@@ -1178,8 +1372,9 @@ async function loadOrders() {
     : 'No orders found';
   _table.setData(rows, pagination);
   // Deliberately NOT awaited: the table must paint from the list payload alone,
-  // and the per-row cost fetches fill the Profit column in behind it (ERR-121).
-  hydrateProfits(rows);
+  // and the per-row detail fetches fill Profit, Supplier and Supplier cost in
+  // behind it (ERR-121). ONE fetch per row feeds all three.
+  hydrateRowDetail(rows);
   // Same rule, and two batched lookups for the whole page rather than per row.
   hydrateInvoiceSent(rows);
   // No hydration twin — the tracking answer is already on these rows. All this
@@ -3448,7 +3643,7 @@ async function renderOrdersTab(container) {
   _table = new DataTable(tableContainer, {
     // Profit is owner-only, same gate as the modal's Cost/Profit columns. A
     // non-owner never sees the column AND never triggers the detail fan-out.
-    columns: AdminAuth.isOwner() ? COLUMNS : COLUMNS.filter(c => c.key !== '_profit'),
+    columns: AdminAuth.isOwner() ? COLUMNS : COLUMNS.filter(c => !OWNER_ONLY_COLUMNS.has(c.key)),
     rowKey: 'id',
     selectable: true,
     onSelectionChange: (sel) => updateBulkBar(sel),
@@ -3518,6 +3713,9 @@ function destroyOrdersTab() {
   _profitAbort?.abort();
   _profitAbort = null;
   _profitCache.clear();
+  // Same fetch filled both. Clearing one and not the other would leave the
+  // sourcing cells rendering a previous page's answers on the next paint.
+  _sourcingCache.clear();
   _sentAbort?.abort();
   _sentAbort = null;
   _sentCache.clear();

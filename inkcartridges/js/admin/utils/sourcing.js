@@ -210,3 +210,125 @@ export function originLabel(origin) {
   const m = ORIGIN_META[origin];
   return m ? m[1] : MISSING;
 }
+
+/* ── ORDER-LEVEL sourcing (the Orders LIST columns) ─────────────────────────
+ *
+ * Everything above answers a question about ONE line (or one product). The two
+ * functions below roll a whole order up into the pair of cells the Orders list
+ * shows beside Profit: who we bought this order from, and what it cost us.
+ *
+ * They read the SAME per-line fields the modal renders — `suppliers[]` and
+ * `supplier_cost_snapshot` — so the list and the modal cannot come to different
+ * conclusions about the same order.
+ *
+ * ⚠ WHAT THEY DELIBERATELY DO NOT READ: `order.supplier_fulfillment`.
+ * -------------------------------------------------------------------------
+ * The detail payload carries a top-level, owner-only
+ * `{ selected_supplier, total_supplier_cost, line_details[] }` that looks like
+ * precisely this feature pre-built. Measured against production 2026-09-03 over
+ * 45 non-cancelled orders, it is not:
+ *
+ *   - it is populated on 13 of them (29%), while the line items answer for 39;
+ *     26 orders whose LINES name a supplier have it null.
+ *   - on order 2026090102 — the one order in the sample sourced from two
+ *     suppliers — it reports `selected_supplier: "Augmento"` and
+ *     `total_supplier_cost: 27.07`. That order's lines are DSNZ + Augmento and
+ *     cost $97.58. It named one supplier's slice as the order's whole.
+ *
+ * A field that is right 11 times and quietly wrong the 12th is worse than no
+ * field, because nothing on screen distinguishes the two. `selected_supplier`
+ * is evidently a fulfilment CHOICE, not a sourcing roll-up. Do not "simplify"
+ * these functions by reaching for it — a test forbids the identifier, and
+ * `npm run probe:orders-supplier` §2 watches it in case the backend ever
+ * changes what it means.
+ */
+
+/** Line items, however this payload spells them. Mirrors order-profit.js. */
+function orderItems(order) {
+  if (!order || typeof order !== 'object') return [];
+  if (Array.isArray(order.items)) return order.items;
+  if (Array.isArray(order.order_items)) return order.order_items;
+  return [];
+}
+
+/**
+ * Who an ORDER was sourced from, rolled up across its lines.
+ *
+ * `names` is de-duplicated in first-seen order — the same rule supplierCell()
+ * uses per line, so a single-line order reads identically in the list and in
+ * the modal. `constituents` keeps one entry per supplier entry (NOT deduped)
+ * because that is what makes the tooltip worth hovering.
+ *
+ * `missingSupplierCount` is the reason this returns an object rather than a
+ * string. Two of the 45 orders measured on 2026-09-03 have a supplier on SOME
+ * lines and none on others; printing just the names we found would present a
+ * partial answer as a complete one — the exact failure that makes
+ * `supplier_fulfillment` unusable. The caller must render the shortfall.
+ *
+ * @returns {{names: string[], constituents: Array<{label: string, name: string}>,
+ *            missingSupplierCount: number, itemCount: number}}
+ */
+export function orderSuppliersFromDetail(order) {
+  const items = orderItems(order);
+  const names = [];
+  const seen = new Set();
+  const constituents = [];
+  let missingSupplierCount = 0;
+
+  for (const item of items) {
+    const list = Array.isArray(item && item.suppliers)
+      ? item.suppliers.filter((s) => s && s.name)
+      : [];
+    // A line nobody recorded a supplier for. Counted, never skipped silently.
+    if (!list.length) { missingSupplierCount++; continue; }
+    for (const s of list) {
+      const name = String(s.name);
+      if (!seen.has(name)) { seen.add(name); names.push(name); }
+      // color first, then the constituent's own sku, then the line's — the same
+      // ladder supplierCell() walks for its tooltip.
+      constituents.push({ label: String(s.color || s.sku || (item && item.sku) || '?'), name });
+    }
+  }
+
+  return { names, constituents, missingSupplierCount, itemCount: items.length };
+}
+
+/**
+ * What an ORDER cost us: Σ (supplier_cost_snapshot × qty), EX-GST.
+ *
+ * ── Why this is not read off the Profit column's result ────────────────────
+ * `orderProfitFromDetail()` already sums the same numbers into
+ * `totalCostExGst`, and reusing it would be one less function. But it also
+ * nulls that field when `computeProfitBreakdown` refuses the REVENUE side
+ * (order-profit.js, the `if (!breakdown)` branch) — so an order whose costs are
+ * every one of them recorded would show "—" here merely because its revenue
+ * could not be stated. Supplier cost is a cost fact and must not inherit a
+ * revenue-side refusal. One question, one function (ERR-182); a test pins the
+ * two sums equal wherever both are stateable, so they cannot drift.
+ *
+ * `costExGst` is null — UNKNOWN, never 0 — when any line has no recorded cost,
+ * and when there are no lines at all (Σ over nothing is 0, and "$0.00" is a
+ * claim we did not make). `== null` and nothing looser: a snapshot of a genuine
+ * 0 is a real recorded cost (a giveaway, a sample), and `?? 0` here is the
+ * whole ERR-063/068 bug class.
+ *
+ * @returns {{costExGst: number|null, missingCostCount: number, itemCount: number}}
+ */
+export function orderSupplierCostFromDetail(order) {
+  const items = orderItems(order);
+  let costExGst = 0;
+  let missingCostCount = 0;
+
+  for (const item of items) {
+    const snapshot = item ? item.supplier_cost_snapshot : null;
+    if (snapshot == null) { missingCostCount++; continue; }
+    const qty = item.qty ?? item.quantity ?? 0;
+    costExGst += snapshot * qty;
+  }
+
+  return {
+    costExGst: (missingCostCount || !items.length) ? null : costExGst,
+    missingCostCount,
+    itemCount: items.length,
+  };
+}

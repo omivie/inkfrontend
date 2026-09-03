@@ -421,7 +421,7 @@ test('ENROLMENT: every consumer of orderProfitFromDetail gets the discount for f
     const calls = ordersSrc.match(/orderProfitFromDetail\(/g) || [];
     assert.ok(calls.length >= 2, 'the list column and the modal must both call it');
     assert.ok(!/discount_amount/.test(
-        ordersSrc.slice(ordersSrc.indexOf('async function hydrateProfits'),
+        ordersSrc.slice(ordersSrc.indexOf('async function hydrateRowDetail'),
             ordersSrc.indexOf('function orderLabel'))),
         'the list hydration must not re-derive the discount — it comes back inside the result');
 });

@@ -175,6 +175,113 @@ the same unconnected source told the truth on one and lied on the next.*
 
 ---
 
+## ERR-203 — Two new Orders columns, and the one backend field built to answer them reported a single supplier's slice as the whole order — **RESOLVED** (2026-09-03)
+
+**Date**: 2026-09-03 · **Context**: The owner asked for two more columns on the admin Orders
+list: which supplier an order's products came from, and the total beside it. Both facts already
+existed — rendered per line inside the order-detail modal since Jul 2026 — so answering "where is
+this month's volume going?" meant opening twenty modals one at a time.
+
+Three decisions were taken up front: the total is **supplier cost, ex-GST**; both columns are
+**owner-only**, like Profit; they sit **immediately right of Profit**.
+
+**(a) 🚨 THE FIELD THAT LOOKED LIKE THE FEATURE, PRE-BUILT.** `GET /api/admin/orders/:id` carries a
+top-level, owner-only
+
+```jsonc
+"supplier_fulfillment": { "selected_supplier": "Augmento", "total_supplier_cost": 27.07,
+                          "line_details": [ … ] }
+```
+
+— exactly the two columns, already computed, and (per the Jul 2026 notes) *"confirmed shipped by
+the backend but the frontend never reads it"*. Reaching for it would have been one line of work
+instead of two functions. **Measured first** (production, 45 non-cancelled orders):
+
+| | `supplier_fulfillment` | `items[].suppliers[]` |
+|---|---|---|
+| orders it can answer for | **13 / 45 (29%)** | **39 / 45 (87%)** |
+| orders where the LINES name a supplier and it is null | — | **26** |
+| name agreement, where present | 12 / 13 | — |
+| cost agreement, where present | 11 / 13 | — |
+
+The two disagreements are the whole story. On **2026090102** the field says
+`selected_supplier: "Augmento"`, `total_supplier_cost: 27.07`. That order's lines are **DSNZ +
+Augmento** and cost **$97.58**. It is the ONE order in the sample sourced from two suppliers, and
+the field named one of them as the answer and a third of the cost as the total. (A second cost
+disagreement on `20260829000001`: $16.60 of lines vs $13.50.)
+
+`selected_supplier` is evidently a fulfilment **choice** — which supplier we picked to send it —
+not a sourcing roll-up. It is singular by design and cannot express the multi-supplier case at
+all. **A field that is right eleven times and quietly wrong the twelfth is worse than no field**,
+because nothing on screen distinguishes them: an order confidently reading "Augmento · $27.07" is
+pixel-identical to one that is correct.
+
+Built from `items[].suppliers[]` + `items[].supplier_cost_snapshot` instead, which reconcile.
+`utils/sourcing.js` carries the measurement in a comment, a test bans the three identifiers
+(`supplier_fulfillment` / `selected_supplier` / `total_supplier_cost`) outside that comment, and
+`probe:orders-supplier` §2 re-runs the reconciliation live — so the day the backend fixes the
+field, we find out, rather than the ban quietly outliving its reason.
+
+**(b) The columns cost ZERO new requests.** Neither value is on the list payload — measured, **0 of
+142 list items** carry `suppliers`, `origin` or `supplier_cost_snapshot`, against **10 of 10**
+detail items (the ERR-039 regime, still holding). But `hydrateProfits()` was **already** fanning
+out one `GET /api/admin/orders/:id` per visible non-cancelled row for the Profit column, and that
+one response contains every field all three columns need.
+
+So it was renamed **`hydrateRowDetail()`** and fills two caches from one settled result. The
+rename is the point: a function named for one of its three consumers is how a fourth column
+acquires a second fan-out and silently doubles the load on a 60/min limiter. Verified in the
+browser — **17 detail requests for 20 rows** (the 3 cancelled rows are still resolved from the
+list row alone), unchanged from before.
+
+**(c) The partial case had to reach the UI.** 2 of 45 orders have a supplier on SOME lines and
+none on others. Returning just the names found would make exactly the claim that makes
+`supplier_fulfillment` unusable — a partial list presented as complete. So
+`orderSuppliersFromDetail()` returns `missingSupplierCount` and the cell renders
+`Augmento +1?` with a tooltip counting the silent lines. Live example `20260821000002`.
+
+**(d) The cost column does NOT read the Profit column's total.** `orderProfitFromDetail()` already
+sums the same numbers into `totalCostExGst`, but nulls it when `computeProfitBreakdown` refuses
+the **revenue** side — so an order whose every cost is recorded would have shown "—" merely
+because its revenue could not be stated. Supplier cost is a cost fact and must not inherit a
+revenue-side refusal (ERR-182: one question, one function). The near-duplication is held in place
+by a **positive control** — a test and probe §5 both assert the two sums agree wherever both can
+speak (live: **44/44 orders, to the cent**).
+
+**(e) The owner gate became a named set.** It was `COLUMNS.filter(c => c.key !== '_profit')`.
+Three owner-only columns now share the fan-out, and the failure mode of forgetting one is silent:
+the column simply renders for every admin, and supplier cost is the figure **ERR-170** was logged
+for leaking. It is `OWNER_ONLY_COLUMNS` now, gating the DataTable and agreeing with the
+hydration's own owner check. Three older tests pinned the old string verbatim and were updated
+deliberately.
+
+**TWO PROCESS NOTES.**
+
+*A false green, caught.* The non-owner check was first run against a patched copy of the site
+served on **port 3001** — which is not in the backend's CORS allowlist. The page never booted, so
+the assertion "0 supplier cells, 0 detail requests" passed while proving nothing. Re-run on port
+3000 it is real: 20 rows render, headers stop at Invoice/tracking, 0 detail requests. **An empty
+result from a surface that never loaded is not evidence** — the harness now refuses to grade
+itself unless the table actually rendered.
+
+*A skip is not a pass.* `probe:orders-supplier` §3 walks the render branches and names the one
+with no live data (`cost UNKNOWN` — no sampled order has a line missing its cost) rather than
+counting it green. Every other branch is exercised: fully-supplied 37, partial 2, no-supplier 5,
+multi-supplier 1.
+
+**Verification**: 5,229 tests pass (32 new). `npm run probe:orders-supplier` — 16 checks, exit 0.
+Driven end-to-end in a browser as owner against live production at 1512px: 13 columns, table
+1216px, no horizontal page scroll, Customer still 143px. Acceptance rows —
+`2026090305 → DSNZ / $140.13`, `2026090304 → Augmento / $99.00`, and
+**`2026090102 → DSNZ, Augmento / $97.58`**, the order `supplier_fulfillment` gets wrong.
+
+**Files**: `js/admin/utils/sourcing.js` (+`orderSuppliersFromDetail`, `orderSupplierCostFromDetail`),
+`js/admin/pages/orders.js`, `css/admin.css`,
+`tests/admin-orders-supplier-columns-sep2026.test.js` (new),
+`scripts/probe-orders-supplier-columns.mjs` (new).
+
+---
+
 ## ERR-202 — The security hand-off said "nothing is required of the frontend"; the vulnerability it had just fixed was still open in our own code, three call sites deep — **RESOLVED** (2026-09-03)
 
 **Date**: 2026-09-03 · **Context**: The owner's backend developer sent

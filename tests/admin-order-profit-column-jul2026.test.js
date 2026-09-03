@@ -210,18 +210,23 @@ test('the Profit column exists and is NOT sortable', () => {
 });
 
 test('the Profit column is owner-gated at the DataTable, so non-owners never fan out', () => {
-  assert.match(ordersSrc, /AdminAuth\.isOwner\(\)\s*\?\s*COLUMNS\s*:\s*COLUMNS\.filter\(c => c\.key !== '_profit'\)/);
-  const hydrate = ordersSrc.slice(ordersSrc.indexOf('async function hydrateProfits'), ordersSrc.indexOf('function orderLabel'));
+  // The gate is a NAMED SET now (ERR-203): Profit was joined by Supplier and
+  // Supplier cost, all fed by the same fan-out, and an inline `!== '_profit'`
+  // is how the third one would have shipped ungated to every admin.
+  assert.match(ordersSrc, /AdminAuth\.isOwner\(\)\s*\?\s*COLUMNS\s*:\s*COLUMNS\.filter\(c => !OWNER_ONLY_COLUMNS\.has\(c\.key\)\)/);
+  assert.match(ordersSrc, /const OWNER_ONLY_COLUMNS = new Set\(\[[^\]]*'_profit'[^\]]*\]\)/,
+    'the Profit column must still be in the owner-only set');
+  const hydrate = ordersSrc.slice(ordersSrc.indexOf('async function hydrateRowDetail'), ordersSrc.indexOf('function orderLabel'));
   assert.ok(/!AdminAuth\.isOwner\(\)/.test(hydrate) && /return;/.test(hydrate),
-    'hydrateProfits must bail for non-owners');
+    'hydrateRowDetail must bail for non-owners');
 });
 
 test('profit hydration runs AFTER setData and is never awaited (first paint, ERR-121)', () => {
   const load = ordersSrc.slice(ordersSrc.indexOf('async function loadOrders'), ordersSrc.indexOf('// ---- Bulk bar ----'));
   const setDataAt = load.indexOf('_table.setData(rows, pagination)');
-  const hydrateAt = load.indexOf('hydrateProfits(rows)');
+  const hydrateAt = load.indexOf('hydrateRowDetail(rows)');
   assert.ok(setDataAt > -1 && hydrateAt > setDataAt, 'the table must paint before costs are fetched');
-  assert.ok(!/await hydrateProfits/.test(load), 'awaiting it would re-gate first paint behind ~20 round-trips');
+  assert.ok(!/await hydrateRowDetail/.test(load), 'awaiting it would re-gate first paint behind ~20 round-trips');
 });
 
 test('the detail fan-out is batched and abortable', () => {
@@ -235,20 +240,26 @@ test('destroyOrdersTab aborts in-flight fetches and clears the cache', () => {
   const destroy = ordersSrc.slice(ordersSrc.indexOf('function destroyOrdersTab'), ordersSrc.indexOf('// ---- Tab switching ----'));
   assert.match(destroy, /_profitAbort\?\.abort\(\)/);
   assert.match(destroy, /_profitCache\.clear\(\)/);
+  // The same fetch fills the sourcing cache; clearing one and not the other
+  // would leave a previous page's suppliers on screen after the next paint.
+  assert.match(destroy, /_sourcingCache\.clear\(\)/);
 });
 
 test('the cache is invalidated wherever an order status or existence changes', () => {
-  // Two eviction helpers now: forgetProfit() drops the profit answer, and
-  // forgetOrderCache() drops the profit answer AND the row's delete contract
-  // (it calls forgetProfit internally). Every call site that used to be a bare
+  // Two eviction helpers now: forgetRowDetail() drops everything the detail
+  // fetch produced (profit AND sourcing — one fetch, one eviction, ERR-203),
+  // and forgetOrderCache() drops that AND the row's delete contract (it calls
+  // forgetRowDetail internally). Every call site that used to be a bare
   // forgetProfit on a status change or a delete is now the wider one, because a
   // status change flips deletability too. Count both — what the invariant cares
   // about is that no path mutates an order without dropping its cached answers.
-  const evictions = (ordersSrc.match(/forget(Profit|OrderCache)\(/g) || []).length;
+  const evictions = (ordersSrc.match(/forget(RowDetail|OrderCache)\(/g) || []).length;
   assert.ok(evictions >= 4,
     `status update, single delete, bulk delete and the helper itself (found ${evictions})`);
-  assert.match(ordersSrc, /function forgetOrderCache\(id\)[\s\S]{0,200}forgetProfit\(id\)/,
-    'forgetOrderCache must still drop the profit cache, not just the delete contract');
+  assert.match(ordersSrc, /function forgetOrderCache\(id\)[\s\S]{0,200}forgetRowDetail\(id\)/,
+    'forgetOrderCache must still drop the detail caches, not just the delete contract');
+  assert.match(ordersSrc, /function forgetRowDetail\(id\)[\s\S]{0,200}_sourcingCache\.delete\(id\)/,
+    'and forgetRowDetail must drop BOTH caches the one fetch filled');
 });
 
 test('a failed detail call is cached as FAILED, never as a zero or an unknown', () => {

@@ -94,7 +94,12 @@ test('the profit breakdown (courier row included) is gated on owner-only showCos
 });
 
 test('the Orders list Profit column is gated on the same owner check', () => {
-  assert.ok(/AdminAuth\.isOwner\(\)\s*\?\s*COLUMNS\s*:\s*COLUMNS\.filter\(c => c\.key !== '_profit'\)/.test(ordersSrc),
+  // Since ERR-203 the gate is a named set — Profit, Supplier and Supplier cost
+  // are all owner-only and all fed by the one fan-out. The invariant is the
+  // same one: a non-owner sees no Profit column and triggers no cost fetches.
+  assert.ok(/AdminAuth\.isOwner\(\)\s*\?\s*COLUMNS\s*:\s*COLUMNS\.filter\(c => !OWNER_ONLY_COLUMNS\.has\(c\.key\)\)/.test(ordersSrc),
+    'the DataTable must filter its columns through the owner-only set');
+  assert.ok(/const OWNER_ONLY_COLUMNS = new Set\(\[[^\]]*'_profit'[^\]]*\]\)/.test(ordersSrc),
     'a non-owner must see no Profit column — and therefore trigger no cost fan-out');
 });
 

@@ -2994,6 +2994,40 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .order-profit--none, .order-profit--pending { color: var(--text-muted); }
 .order-profit--failed { color: var(--yellow-text); font-weight: 600; }
 
+/* -- Orders list: Supplier + Supplier cost columns (ERR-203) ----------------
+   Fed by the SAME per-row detail fetch as Profit above, so the three columns
+   share a state vocabulary and must share its colours: muted = "we know we
+   don't know", amber = "we failed to ask". Neither ever reads as $0 or as an
+   absent supplier. */
+.order-supplier {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  max-width: 160px;
+}
+.order-supplier__names {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* SOME lines named a supplier and some didn't. The marker is not decoration —
+   without it the names read as the complete list, which is the one claim this
+   column must never make (see utils/sourcing.js on supplier_fulfillment). */
+.order-supplier__partial {
+  flex: 0 0 auto;
+  font-size: 11px; font-weight: 700; color: var(--yellow-text);
+  cursor: help;
+}
+.order-supplier--partial { color: var(--text); }
+.order-supplier--none, .order-supplier--pending { color: var(--text-muted); }
+.order-supplier--failed { color: var(--yellow-text); font-weight: 600; }
+
+/* Ex-GST, and a different basis from both the Total and the Profit beside it —
+   the header's gst sub-line is what tells them apart, so keep the figure
+   mono/tabular like its two neighbours or the eye reads down the wrong column. */
+.order-supplier-cost {
+  font-family: var(--font-mono); font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.order-supplier-cost--none, .order-supplier-cost--pending { color: var(--text-muted); }
+.order-supplier-cost--failed { color: var(--yellow-text); font-weight: 600; }
+
 /* Order modal: profit can't be stated because a line has no supplier cost.
    Occupies the slot the Profit Breakdown would have used, rather than leaving
    it blank (which would read as "this order type has no profit data"). */

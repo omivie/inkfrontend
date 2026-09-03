@@ -344,9 +344,14 @@ test('the three surfaces', async (t) => {
   });
 
   await t.test('the column is not owner-gated — an invoice is not cost data', () => {
-    const gate = slice(ordersSrc, 'AdminAuth.isOwner() ? COLUMNS', ',');
-    assert.match(gate, /_profit/);
-    assert.doesNotMatch(gate, /_invoice_sent/);
+    // The gate moved into a named set when Profit was joined by Supplier and
+    // Supplier cost (ERR-203). What this test cares about is unchanged: the
+    // cost-bearing columns are owner-only and this one is not.
+    const set = ordersSrc.match(/const OWNER_ONLY_COLUMNS = new Set\(\[([^\]]*)\]\)/);
+    assert.ok(set, 'the owner-only column list must exist');
+    assert.match(set[1], /_profit/);
+    assert.doesNotMatch(set[1], /_invoice_sent/);
+    assert.match(ordersSrc, /AdminAuth\.isOwner\(\) \? COLUMNS : COLUMNS\.filter\(c => !OWNER_ONLY_COLUMNS\.has\(c\.key\)\)/);
   });
 
   await t.test('hydration runs after setData and is never awaited', () => {
