@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.04-shipping-information-tracking-requested-catalog-engagement-acquisition-send-refusal';
+const APP_VERSION = '2026.09.05-shipping-information-tracking-requested-catalog-engagement-acquisition-status-prefill';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

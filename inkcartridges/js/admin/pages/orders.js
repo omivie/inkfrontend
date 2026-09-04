@@ -2070,27 +2070,48 @@ function confirmShipping({ title, lines, confirmLabel, danger = false }) {
   });
 }
 
-/** Fill the carrier dropdown from the registry and select the stored carrier. */
-function shipPopulateCarriers() {
-  const sel = shipNode(SHIP_IDS.carrier);
-  const registry = _shipState?.registry;
+/**
+ * Fill a carrier dropdown from the registry and select the carrier the order
+ * already has. **Both** surfaces call this — the Shipping Information section and
+ * the Update Status modal.
+ *
+ * It is one function on purpose. ERR-200 found this modal carrying its own
+ * hand-written list of five carriers, which could not express NZ Couriers and
+ * drifted from the section's; the fix made both read the same registry, and then
+ * the modal still kept its own *filling* of that registry, which forgot to
+ * re-select anything. Two copies of a job, one of them right, is how that
+ * happens twice.
+ *
+ * The two behaviours the modal's copy was missing, and the reasons they exist:
+ *  - the operator's own change survives an async fill (`dataset.dirty`);
+ *  - a stored carrier the registry has never heard of stays VISIBLE rather than
+ *    collapsing to the empty option, which would look like a cleared field and
+ *    save as one.
+ */
+function populateCarrierSelect(sel, registry, shipping, { emptyLabel = 'No carrier recorded' } = {}) {
   if (!sel || !Array.isArray(registry)) return;
-  const stored = carrierOf(_shipState.shipping, registry);
+  const stored = carrierOf(shipping, registry);
   const wasDirty = sel.dataset.dirty === '1';
   const chosen = wasDirty ? sel.value : (stored?.code || '');
   sel.innerHTML = [
-    `<option value="">No carrier recorded</option>`,
+    `<option value="">${esc(emptyLabel)}</option>`,
     ...registry.map(c => `<option value="${Security.escapeAttr(c.code)}">${esc(c.name)}</option>`),
   ].join('');
   sel.value = chosen;
-  // A stored carrier the registry has never heard of must not silently become
-  // "No carrier recorded" — that would look like a cleared field and save as one.
-  if (!sel.value && _shipState.shipping?.carrier) {
-    const raw = _shipState.shipping.carrier;
+  if (!sel.value && shipping?.carrier) {
+    const raw = shipping.carrier;
     sel.insertAdjacentHTML('afterbegin', `<option value="">${esc(raw)} (not in the carrier list)</option>`);
     sel.value = '';
   }
   sel.disabled = false;
+}
+
+/** Fill the panel's carrier dropdown from the registry and select the stored carrier. */
+function shipPopulateCarriers() {
+  const sel = shipNode(SHIP_IDS.carrier);
+  const registry = _shipState?.registry;
+  if (!sel || !Array.isArray(registry)) return;
+  populateCarrierSelect(sel, registry, _shipState.shipping);
   shipApplyCarrier();
 }
 
@@ -3172,6 +3193,27 @@ function showStatusModal(order) {
 
   const canShip = allowed.includes('shipped');
 
+  // WHAT THE ORDER ALREADY HAS. This dialog used to open blank on an order whose
+  // carrier, tracking number and tracking URL were all saved — so the operator
+  // retyped them, and validateShipping's markShipped rule FORCED them to, because
+  // an empty form has nothing to track by (ERR-206).
+  //
+  // The panel's block is the better source when it belongs to this order: its
+  // /shipping read has landed and the BF-049 carrier correction is already
+  // applied. The orderId guard is not optional — `_shipState` belongs to whichever
+  // order is open, and a stale one bleeding into another order's dialog is the
+  // same family as ERR-179.
+  // `let`, because the list's quick-status button hands us a THIN list row with
+  // no shipping_information at all; that path reads the block a moment later and
+  // replaces this.
+  let _seededShipping = (_shipState?.orderId === order.id ? _shipState.shipping : null)
+    || reconcileCarrier(readShipping(order).shipping, order)
+    || null;
+  // `url` comes off formFromShipping — i.e. `tracking_url_override`, never the
+  // derived `tracking_url`. Seeding the derived link would freeze a
+  // carrier-built URL into a permanent override on the next save.
+  const seedForm = formFromShipping(_seededShipping);
+
   let bodyHtml = `
     <div class="admin-form-group">
       <label>New Status</label>
@@ -3186,29 +3228,39 @@ function showStatusModal(order) {
     // Information section. It used to be five hand-written <option>s here, which
     // meant this modal could not express NZ Couriers or Post Haste at all — and
     // that a carrier added to the backend registry appeared on one surface and
-    // not the other. The <select> starts with the stored value only and is filled
+    // not the other. The <select> opens holding the order's OWN carrier and is
+    // refilled by populateCarrierSelect() — the same function the section uses —
     // once AdminAPI.getShippingCarriers() resolves.
+    //
+    // NO ASTERISKS ON CARRIER OR NUMBER. validateShipping needs a number *or* a
+    // link, and only refuses a carrier it does not recognise; neither field is
+    // required on its own. Live order 2026090305 has a tracking URL and nothing
+    // else, and the backend will ship it — a label that says otherwise describes
+    // a stricter rule than any code here enforces.
     bodyHtml += `
       <div id="tracking-fields" style="display:none">
         <div class="admin-form-group">
-          <label>Carrier *</label>
+          <label>Carrier</label>
           <select class="admin-select" id="modal-carrier" disabled>
-            <option value="">Loading carriers\u2026</option>
+            <option value="${Security.escapeAttr(seedForm.carrierCode)}">${esc(_seededShipping?.carrier || 'Loading carriers\u2026')}</option>
           </select>
           <div class="admin-form-error" id="modal-carrier-error" hidden></div>
         </div>
         <div class="admin-form-group">
-          <label><span id="modal-tracking-label">Tracking Number</span> *</label>
-          <input class="admin-input" id="modal-tracking" placeholder="Required for shipped status">
+          <label><span id="modal-tracking-label">Tracking Number</span></label>
+          <input class="admin-input" id="modal-tracking" value="${Security.escapeAttr(seedForm.number)}"
+                 autocomplete="off" spellcheck="false" placeholder="As printed on the label">
+          <div class="admin-form-help">Marking an order shipped needs a tracking number <strong>or</strong> a tracking link below — either one on its own is enough.</div>
         </div>
         <div class="admin-form-group" id="modal-pcode-group" hidden>
           <label>Ticket product code *</label>
-          <input class="admin-input" id="modal-pcode" maxlength="8" placeholder="e.g. LH">
+          <input class="admin-input" id="modal-pcode" maxlength="8" value="${Security.escapeAttr(seedForm.productCode)}" placeholder="e.g. LH">
           <div class="admin-form-help">The 2\u20134 character code beside the ticket number. Without it the track-and-trace link 404s.</div>
         </div>
         <div class="admin-form-group">
           <label>Tracking URL</label>
-          <input class="admin-input" id="modal-url" placeholder="https://\u2026">
+          <input class="admin-input" id="modal-url" value="${Security.escapeAttr(seedForm.url)}"
+                 autocomplete="off" spellcheck="false" placeholder="https://\u2026">
           <div class="admin-form-help" id="modal-url-help">Optional. Overrides the link built from the carrier and number.</div>
         </div>
         <div class="om-ship-issues" id="modal-ship-issues" hidden></div>
@@ -3294,6 +3346,15 @@ function showStatusModal(order) {
     for (const e of errors) modal.body.querySelector(STATUS_FIELD_TO_ID[e.field])?.classList.add('om-ship-input--bad');
   };
   if (canShip && carrierSel) {
+    // One marker per field, set on the first keystroke, so the late reads below
+    // leave alone anything the operator has already touched. Same contract as the
+    // Shipping Information panel: patch cells, never re-render (ERR-179).
+    for (const sel of Object.values(STATUS_FIELD_TO_ID)) {
+      const el = modal.body.querySelector(sel);
+      if (!el) continue;
+      el.addEventListener('input', () => { el.dataset.dirty = '1'; });
+      el.addEventListener('change', () => { el.dataset.dirty = '1'; });
+    }
     carrierSel.addEventListener('change', () => {
       applyStatusCarrier();
       // Prompt for a newly-required ticket code rather than refusing after Update.
@@ -3306,10 +3367,9 @@ function showStatusModal(order) {
     });
     AdminAPI.getShippingCarriers().then((registry) => {
       _statusCarriers = registry;
-      carrierSel.innerHTML = ['<option value="">Select carrier</option>']
-        .concat(registry.map(c => `<option value="${Security.escapeAttr(c.code)}">${esc(c.name)}</option>`))
-        .join('');
-      carrierSel.disabled = false;
+      // The SAME filler the section uses. Writing innerHTML here by hand is what
+      // dropped the stored selection: the options came back, the choice did not.
+      populateCarrierSelect(carrierSel, registry, _seededShipping, { emptyLabel: 'Select carrier' });
       applyStatusCarrier();
     }).catch((e) => {
       // No guessed list, and no silently-empty dropdown either: say why it is
@@ -3321,6 +3381,43 @@ function showStatusModal(order) {
       }
       carrierSel.innerHTML = '<option value="">Carrier list unavailable</option>';
     });
+
+    // BOTH DOORS, ONE MECHANISM.
+    //
+    // The header button hands us the full detail order, so `_seededShipping` is
+    // already populated above. The list's quick-status button hands us a LIST ROW,
+    // where readShipping() reports ABSENT and `_shipState` is null — that path
+    // would still open blank. So when we have no block, ask for one.
+    //
+    // The row's own flat `carrier`/`tracking_number` columns are deliberately NOT
+    // read here: that would be a second reader of the same fact, and the row does
+    // not carry `tracking_url_override` at all — only the derived link, which is
+    // exactly the field that must never reach this form.
+    if (!_seededShipping) {
+      AdminAPI.getOrderShipping(order.id).then((data) => {
+        const { shipping } = readShipping(data);
+        if (!shipping || !modal.body.isConnected) return;
+        _seededShipping = reconcileCarrier(shipping, order);
+        const late = formFromShipping(_seededShipping);
+        // Patch only what the operator has not touched. A late read landing on
+        // top of someone's typing is ERR-179 in miniature.
+        const patch = (sel, value) => {
+          const el = modal.body.querySelector(sel);
+          if (el && el.dataset.dirty !== '1' && !el.value) el.value = value;
+        };
+        patch('#modal-tracking', late.number);
+        patch('#modal-pcode', late.productCode);
+        patch('#modal-url', late.url);
+        if (_statusCarriers) {
+          populateCarrierSelect(carrierSel, _statusCarriers, _seededShipping, { emptyLabel: 'Select carrier' });
+        }
+        applyStatusCarrier();
+      }).catch(() => {
+        // Silent by design: this is a convenience read. The operator can still
+        // type the details, and the save path validates them either way. Saying
+        // "couldn't prefill" would be noise about something they may not need.
+      });
+    }
   }
 
   modal.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => Modal.close());
@@ -3365,11 +3462,14 @@ function showStatusModal(order) {
       // is still a 400, a concurrent change still a 409) and still emails the
       // customer once on dispatch, so nothing about this modal's behaviour
       // changes except that NZ Couriers can now be expressed.
-      // Built by the one encoder, not by hand. With a null baseline buildPayload
-      // emits exactly the non-empty typed fields and omits the rest — which is
-      // what the hand-built object was reaching for, and it cannot forget a field
-      // the way that object forgot the tracking URL.
-      shippingBody = buildPayload(null, form, { markShipped: true });
+      // Built by the one encoder, not by hand — and diffed against what the order
+      // ALREADY HAS, not against nothing. The null baseline here was a leftover
+      // from when this dialog opened blank and had nothing to diff against: it
+      // meant every prefilled field would be re-sent as if it had changed. With
+      // the real block, merge semantics do the right thing in both directions —
+      // an untouched form sends only `mark_shipped`, and a field the operator
+      // deliberately empties is sent as "" and genuinely clears (ERR-206).
+      shippingBody = buildPayload(_seededShipping, form, { markShipped: true });
     }
 
     try {

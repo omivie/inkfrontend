@@ -689,6 +689,33 @@ test('§5 emailState — four claims, four sentences', async (t) => {
   // ERR-205. The page has to add "so do THIS next" to the reason, and it must pick
   // the advice off a code rather than off the sentence — a copy edit that reworded
   // the reason would otherwise silently switch the advice off.
+  // ERR-206, and it is a live case: order 2026090305 holds a tracking URL, no
+  // number and a null carrier column. The backend will mark it shipped. The
+  // dialog's "Carrier *" / "Tracking number *" said it could not.
+  await t.test('marking shipped needs a number OR a link — neither field alone is required', () => {
+    const urlOnly = validateShipping(
+      { carrierCode: '', number: '', productCode: '', url: 'https://tools.usps.com/tracking/007942' },
+      null, { markShipped: true });
+    assert.equal(urlOnly.ok, true, 'a link with no number and no carrier is shippable — 2026090305 is exactly this');
+
+    // POSITIVE CONTROL. Without it the assertion above would still pass if
+    // validateShipping stopped refusing anything at all.
+    const neither = validateShipping({ carrierCode: '', number: '', productCode: '', url: '' },
+      null, { markShipped: true });
+    assert.equal(neither.ok, false, 'nothing to track by must still be refused');
+    assert.equal(neither.errors[0].code, SHIPPING_ISSUE.NOTHING_TO_TRACK_BY);
+
+    // And the dialog must stop claiming otherwise.
+    const modal = ordersSrc.slice(
+      ordersSrc.indexOf('function showStatusModal(order)'),
+      ordersSrc.indexOf('function showNoteModal('));
+    assert.equal(/<label>Carrier \*<\/label>/.test(modal), false,
+      'a rule we invented must never look stricter than the one the backend enforces');
+    assert.equal(/Required for shipped status/.test(modal), false);
+    assert.match(modal, /tracking number <strong>or<\/strong> a tracking link/i,
+      'the real rule belongs on the screen');
+  });
+
   await t.test('sendability names WHICH refusal, not just that there is one', () => {
     // Positive control: the enabled block must report no blocker at all. Without
     // this, `blocker` could be a constant string and every assertion below passes.
@@ -842,9 +869,61 @@ test('§7 the page is registry-driven', async (t) => {
     // mark_shipped and goes to updateOrderShipping, however it is built. (It was
     // an object literal until §11 replaced it with buildPayload — a pin on the
     // literal broke on a refactor that changed nothing about the contract.)
-    assert.match(ordersSrc, /shippingBody = buildPayload\(null, form, \{ markShipped: true \}\)/);
+    assert.match(ordersSrc, /shippingBody = buildPayload\([A-Za-z_$][\w$]*, form, \{ markShipped: true \}\)/,
+      'the body is built by the one encoder and carries markShipped');
+    assert.equal(/buildPayload\(null, form/.test(ordersSrc), false,
+      'ERR-206: a null baseline re-sends every prefilled field as if it had changed, and it was ' +
+      'only ever there because the dialog opened blank and had nothing to diff against');
     assert.match(ordersSrc, /if \(shippingBody\) \{\s*\n\s*const data = await AdminAPI\.updateOrderShipping\(order\.id, shippingBody\)/,
       'a shipped status must not go through the legacy status endpoint');
+  });
+
+  // ERR-206. The order held a carrier, a number and a URL; this dialog asked for
+  // all three again, and validateShipping's markShipped rule made retyping them
+  // compulsory rather than merely annoying.
+  await t.test('Update Status opens holding what the order already has', () => {
+    const modal = ordersSrc.slice(
+      ordersSrc.indexOf('function showStatusModal(order)'),
+      ordersSrc.indexOf('function showNoteModal('));
+    assert.ok(modal.length > 0, 'showStatusModal must be findable');
+
+    assert.match(modal, /formFromShipping\(_seededShipping\)/,
+      'the seed comes from the same reader the section uses — and therefore from ' +
+      'tracking_url_override, never the derived tracking_url');
+    for (const id of ['#modal-tracking', '#modal-pcode', '#modal-url']) {
+      const input = new RegExp(`id="${id.slice(1)}"[^>]*value="`);
+      assert.match(modal, input, `${id} opens blank — the operator retypes what the server holds`);
+    }
+    assert.match(modal, /<option value="\$\{Security\.escapeAttr\(seedForm\.carrierCode\)\}"/,
+      'the carrier <select> must open on the stored code, not on a bare placeholder');
+
+    // _shipState belongs to whichever order is open. Reading it unguarded would
+    // seed one order's dialog from another order's panel.
+    assert.match(modal, /_shipState\?\.orderId === order\.id/,
+      'the panel block may only be borrowed when it is THIS order\'s');
+  });
+
+  await t.test('one carrier populator, used by both surfaces', () => {
+    assert.match(ordersSrc, /function populateCarrierSelect\(/);
+    const calls = ordersSrc.match(/populateCarrierSelect\(/g) || [];
+    assert.ok(calls.length >= 3, `expected the definition plus both call sites, found ${calls.length}`);
+    // The modal used to rebuild the options by hand and never re-select — so a
+    // seeded carrier would have been wiped the moment the registry landed.
+    assert.equal(/carrierSel\.innerHTML = \['<option value=""><\/option>'\]/.test(ordersSrc), false);
+    assert.equal(/carrierSel\.innerHTML = \['<option value="">Select carrier<\/option>'\]/.test(ordersSrc), false,
+      'the modal must not hand-build the registry options again — that copy forgot the selection');
+  });
+
+  await t.test('the list\'s quick-status door reads the block it was not given', () => {
+    const modal = ordersSrc.slice(
+      ordersSrc.indexOf('function showStatusModal(order)'),
+      ordersSrc.indexOf('function showNoteModal('));
+    assert.match(modal, /if \(!_seededShipping\) \{[\s\S]*AdminAPI\.getOrderShipping\(order\.id\)/,
+      'the list row carries no shipping_information, so that entry point must fetch one');
+    assert.match(modal, /el\.dataset\.dirty !== '1'/,
+      'a late read must not land on top of what the operator has already typed (ERR-179)');
+    assert.equal(/order\.tracking_number/.test(modal), false,
+      'the row\'s flat columns are a SECOND reader of the same fact, and carry no tracking_url_override');
   });
 
   await t.test('a 409 keeps the operator\'s typing', () => {
@@ -999,9 +1078,12 @@ test('§11 Update Status reaches parity, without a second copy of the rules', as
   });
 
   await t.test('the body is built by buildPayload, not by hand', () => {
-    assert.match(statusModalSrc, /shippingBody = buildPayload\(null, form, \{ markShipped: true \}\)/);
+    assert.match(statusModalSrc, /shippingBody = buildPayload\([A-Za-z_$][\w$]*, form, \{ markShipped: true \}\)/);
     assert.equal(/shippingBody = \{ carrier:/.test(statusModalSrc), false,
       'the hand-built object literal is what forgot the tracking URL');
+    // ERR-206: the baseline is the order's own block, so an untouched prefilled
+    // form sends only mark_shipped and a deliberately-emptied field really clears.
+    assert.equal(/buildPayload\(null, form/.test(statusModalSrc), false);
   });
 
   await t.test('buildPayload(null, …) emits exactly the typed non-empty fields, URL included', () => {

@@ -41,6 +41,82 @@ describing the same incident.
 
 ---
 
+## ERR-206 — The order held a carrier, a number and a link; the dialog for shipping it asked for all three again, and made retyping them compulsory — **RESOLVED** (2026-09-05)
+
+**Date**: 2026-09-05 · **Context**: The owner recorded NZ Post, a tracking number and a
+tracking URL on order `2026090301` through the Shipping Information section, opened
+**Update Status → shipped**, and found **Carrier \*** and **Tracking number \*** empty and
+marked required. *"once i enter the information inside the page. shouldnt it automatically fill
+in the infomration in the shipped dropdown and also change the order to shipped?"*
+
+**Measured first, against the live API, read-only.** The data really was saved:
+
+```
+2026090301  paid · shipped_at null · carrier "NZ Post"/nz_post
+            tracking_number 00894210392920028494
+            tracking_url_override https://tools.usps.com/… (tracking_url_source "operator")
+2026090305  paid · carrier NULL · tracking_number NULL
+            tracking_url_override https://tools.usps.com/… — a URL and nothing else
+```
+
+**(a) 🚨 THE DIALOG NEVER ASKED THE ORDER WHAT IT HAD.** `showStatusModal()` hardcoded all four
+fields empty — the carrier `<select>` carried a placeholder option, and the three inputs had
+**no `value=` attribute at all**. It never called `readShipping()` or `formFromShipping()`,
+though it receives the full detail order *and* `_shipState` is lexically in scope. Two hundred
+lines away `buildShippingSection()` prefills from exactly those helpers. There was no comment,
+test or hand-off note defending the difference: it is a leftover from when this modal was the
+*only* place shipping details existed and so had nothing to prefill **from**. Nobody revisited
+it when the section arrived and gave it a source. ⇒ It now seeds from the panel's block when
+that block belongs to this order (guarded on `orderId` — `_shipState` belongs to whichever
+order is open, and a stale one seeding a different order's dialog is the ERR-179 family), else
+from the detail payload via `readShipping` + `reconcileCarrier`.
+
+**(b) AND IT WOULD HAVE WIPED A SEEDED VALUE ANYWAY.** The registry callback rebuilt
+`carrierSel.innerHTML` and **never re-selected the stored code**. `shipPopulateCarriers()` did
+this correctly forty lines up — including keeping a carrier the registry has never heard of
+*visible* rather than letting it collapse into the empty option and save as a clear. **ERR-200
+had already fixed one divergence between these two surfaces** (the modal's hand-written list of
+five carriers, which could not express NZ Couriers): it made both read the same registry, and
+left the modal its own private *filling* of that registry. Half a deduplication is a place for
+the next drift to live. ⇒ One `populateCarrierSelect()`, called by both.
+
+**(c) THE `null` BASELINE WAS ONLY EVER RIGHT BECAUSE THE FORM WAS BLANK.**
+`buildPayload(null, form, {markShipped:true})` emitted every non-empty typed field. Harmless
+while nothing was prefilled; the moment fields are seeded it would re-send all of them as
+changes. ⇒ The baseline is the order's own block, so merge semantics work in both directions —
+an untouched form sends **only `mark_shipped: true`**, and a field the operator deliberately
+empties is sent as `""` and genuinely clears.
+
+**(d) THE ASTERISKS DESCRIBED A STRICTER RULE THAN ANY CODE ENFORCES.** `validateShipping`
+needs *a number **or** a link*, and refuses a carrier only when it is given and unrecognised —
+neither field is required on its own. **Order `2026090305` is precisely that case**: a URL, no
+number, a null carrier column, and the backend will ship it. "Carrier \*" and "Tracking number
+\*" made that look impossible. The standing rule is that *a rule we invented must never refuse a
+save the backend would have accepted* — this one did not technically refuse, it just told the
+operator it would, which costs the same. ⇒ Asterisks gone; the real rule is on the screen.
+
+**(e) A COMMENT THAT DESCRIBED A DIFFERENT FUNCTION.** The block above the modal's markup read
+*"The `<select>` starts with the stored value only and is filled once
+`AdminAPI.getShippingCarriers()` resolves"* — true of `buildShippingSection`, false of the
+function it sat in, and it had been sitting there since ERR-200. **A comment copied along with
+code stops being a description and becomes a claim nobody checks.**
+
+**Not changed, deliberately.** Marking shipped still requires the explicit **"Mark the order
+shipped"** tick (owner's call this session). It emails the customer the moment it fires, and an
+email that goes out because someone saved a typo correction cannot be recalled. The section's
+own tick + Save remains the one-step path; this fix means Update Status is no longer the *long*
+path.
+
+**The lesson.** ERR-200 unified the *vocabulary* of these two surfaces — same registry, same
+validator, same encoder — and left them with different *starting states*, which nothing compared.
+**Two surfaces agreeing about the rules is not the same as two surfaces agreeing about the
+data.** When one screen writes a fact, ask what the other screen opens holding.
+
+**Files**: `js/admin/pages/orders.js` (`showStatusModal` seeding + late read,
+`populateCarrierSelect` extracted from `shipPopulateCarriers`) ·
+`tests/order-shipping-information-sep2026.test.js` (+4, incl. a positive control that a form
+with neither number nor link is still refused with `NOTHING_TO_TRACK_BY`).
+
 ## ERR-205 — The refusal was written four times over, carefully, and stored in the one attribute a disabled button can never show — **RESOLVED** (2026-09-04)
 
 **Date**: 2026-09-04 · **Context**: The owner opened order `2026090301` in the admin Orders
