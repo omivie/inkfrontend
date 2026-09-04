@@ -893,7 +893,7 @@
 .om-meta-row {
   display: flex; justify-content: space-between; align-items: baseline;
   font-size: 14px; gap: 8px; padding: 4px 0;
-  border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.06));
+  border-bottom: 1px solid var(--border);
 }
 .om-meta-row:last-child { border-bottom: none; }
 
@@ -960,7 +960,7 @@
   font-size: 12px; line-height: 1.55; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px;
 }
 .om-ship-note[hidden] { display: none; }
-.om-ship-note--muted { color: var(--text-secondary); background: var(--border-light, rgba(0,0,0,0.04)); }
+.om-ship-note--muted { color: var(--text-secondary); background: var(--border); }
 .om-ship-note--warn { color: var(--warning, #b45309); background: rgba(180,83,9,0.08); }
 
 .om-ship-registry-error {
@@ -983,6 +983,17 @@
 .om-ship-check[hidden] { display: none; }
 .om-ship-check input { margin-top: 2px; flex-shrink: 0; }
 
+/* Why Send is refused, in text. `.admin-btn:disabled` below sets
+   `pointer-events: none`, so the button's own `title` can never be hovered —
+   the refusal has to be readable without pointing at anything (ERR-205). */
+.om-ship-why {
+  font-size: 12px; line-height: 1.55; margin-top: 8px; text-align: right;
+  color: var(--text-secondary);
+}
+.om-ship-why[hidden] { display: none; }
+.om-ship-why strong { font-weight: 600; color: var(--text); }
+.om-ship-why__next { display: block; margin-top: 2px; }
+
 /* The send claim. Four states, four different sentences — a send count is a
    FLOOR, and `send_count: 0` on a shipped order is UNKNOWN, not zero. */
 .om-ship-sendstate { font-size: 12px; line-height: 1.55; margin-top: 12px; }
@@ -997,6 +1008,8 @@
   .om-ship-grid { grid-template-columns: 1fr; }
   .om-ship-actions { align-items: flex-start; flex-direction: column; }
   .om-ship-actions__right { width: 100%; }
+  /* The buttons are no longer on the right of anything, so neither is the reason. */
+  .om-ship-why { text-align: left; }
 }
 .om-meta-row span:first-child { color: var(--text-secondary); white-space: nowrap; }
 .om-meta-row span:last-child { font-weight: 500; text-align: right; }

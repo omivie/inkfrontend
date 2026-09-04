@@ -526,6 +526,19 @@ export function emailState(shipping) {
 }
 
 /**
+ * Why "Send to customer" is refused, as a code rather than as prose.
+ *
+ * `reason` is the sentence an operator reads; this is the same fact in a shape a
+ * caller can branch on. Branching on the sentence would mean a copy edit silently
+ * turning off the advice that goes with it.
+ */
+export const SEND_BLOCKER = Object.freeze({
+    NOT_LOADED: 'not_loaded',
+    NOT_SHIPPED: 'not_shipped',
+    NO_TARGET: 'no_target',
+});
+
+/**
  * Whether "Send to customer" may be pressed at all, and why not.
  *
  * `can_send_email` is the backend's own answer (`is_shipped && (tracking_number ||
@@ -533,26 +546,41 @@ export function emailState(shipping) {
  * endpoint cannot disagree. The reconstruction is only for a block that predates
  * the field — and it says which of the two halves is missing, because "disabled"
  * with no reason is the thing an operator files a bug about.
+ *
+ * Returns `{ canSend, reason, blocker }`. `blocker` is null exactly when `canSend`
+ * is true — the caller uses it to add the NEXT ACTION beside the reason, which is
+ * the half a bare tooltip never had room for.
  */
 export function sendability(shipping) {
-    if (!shipping) return { canSend: false, reason: 'No shipping details have been loaded for this order.' };
+    if (!shipping) {
+        return {
+            canSend: false,
+            blocker: SEND_BLOCKER.NOT_LOADED,
+            reason: 'No shipping details have been loaded for this order.',
+        };
+    }
 
     const hasTarget = !!trimmed(shipping.tracking_number) || !!trimmed(shipping.tracking_url);
     const isShipped = shipping.is_shipped === true;
 
     if (has(shipping, 'can_send_email') && typeof shipping.can_send_email === 'boolean') {
-        if (shipping.can_send_email) return { canSend: true, reason: '' };
+        if (shipping.can_send_email) return { canSend: true, reason: '', blocker: null };
         return {
             canSend: false,
+            blocker: !isShipped ? SEND_BLOCKER.NOT_SHIPPED : SEND_BLOCKER.NO_TARGET,
             reason: !isShipped
                 ? 'The order has to be marked shipped first — the email says "your order has shipped", and the customer\'s own order page hides tracking until then.'
                 : 'Add a tracking number or a tracking link first — there is nothing to tell the customer.',
         };
     }
 
-    if (!isShipped) return { canSend: false, reason: 'The order has to be marked shipped first.' };
-    if (!hasTarget) return { canSend: false, reason: 'Add a tracking number or a tracking link first.' };
-    return { canSend: true, reason: '' };
+    if (!isShipped) {
+        return { canSend: false, blocker: SEND_BLOCKER.NOT_SHIPPED, reason: 'The order has to be marked shipped first.' };
+    }
+    if (!hasTarget) {
+        return { canSend: false, blocker: SEND_BLOCKER.NO_TARGET, reason: 'Add a tracking number or a tracking link first.' };
+    }
+    return { canSend: true, reason: '', blocker: null };
 }
 
 /* ─────────────────────────── failures ─────────────────────────── */

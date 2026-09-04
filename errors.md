@@ -41,6 +41,77 @@ describing the same incident.
 
 ---
 
+## ERR-205 — The refusal was written four times over, carefully, and stored in the one attribute a disabled button can never show — **RESOLVED** (2026-09-04)
+
+**Date**: 2026-09-04 · **Context**: The owner opened order `2026090301` in the admin Orders
+modal, saw a filled-in carrier, tracking number and tracking URL beside a greyed-out
+**"Send to customer"**, and asked: *"why is the send to customer button not clickable?
+shouldnt this be clickable?"*
+
+**The button was right. Every word of the explanation was right. Nobody could read any of it.**
+
+**THE ANSWER TO THE QUESTION.** No — it should not be clickable. `sendability()`
+(`js/admin/utils/shipping-info.js`) returned `canSend:false` off the backend's own
+`can_send_email`, which is `is_shipped && (tracking_number || tracking_url)`. The order is
+**paid, not shipped**; `POST /orders/:id/shipping/send-email` would have answered
+`ORDER_NOT_SHIPPED`. The path the owner actually wanted was the checkbox eighty pixels to the
+left — tick **Mark the order shipped**, press **Save shipping details**, and `mark_shipped:true`
+emails the customer these details (`reason:"auto_on_ship"`). "Send to customer" is the
+*re-send* path for an order that has already shipped.
+
+**(a) 🚨 A REASON IN A `title` ON A DISABLED BUTTON IS A REASON NOBODY HAS.** ERR-200 shipped
+four refusal sentences and a docblock explaining why they existed — *"'disabled' with no reason
+is the thing an operator files a bug about"*. They went to `btn.title` (`orders.js`). And
+`css/admin.css` says `.admin-btn:disabled { … pointer-events: none; }`. A disabled form control
+dispatches no pointer events to begin with; with `pointer-events:none` on top, the tooltip
+**cannot fire on hover, on touch, or from the keyboard**. Measured in a headless browser:
+`getComputedStyle(btn).pointerEvents === 'none'`. Those four sentences had been in production
+since 1 September and had been read by **exactly zero humans**. The feature was not missing —
+it was *unreachable*, which looks identical from the operator's chair and is worse from ours,
+because the code review keeps finding the explanation and ticking it off.
+⇒ The refusal now renders into the DOM as text (`.om-ship-why`), beside the button. The `title`
+stays — it is correct for the *enabled* button — but it is no longer the only copy of the answer.
+
+**(b) THE CHECKBOX HAD NO LISTENER AT ALL.** `SHIP_IDS.mark` was referenced in exactly three
+places: rendered, unchecked on adopt, and read inside `shipSave()`. Nothing anywhere in the repo
+listened to it. So an operator who ticked **"Mark the order shipped"** got a panel that still
+said — invisibly — *"the order has to be marked shipped first"*, about the thing they had
+visibly just done, with the send-state line underneath still reading *"This order has not
+shipped yet"*. ⇒ `change` now re-runs `shipRenderSendState()`. **Copy only**: `sendability()`
+reads the SAVED server block and must keep doing so, because a ticked box is an intention and
+the endpoint refuses intentions. The advice reads the checkbox; the verdict never does.
+
+**(c) THREE WRITERS FOR ONE FACT.** `shipSetBusy()` re-derived `send.disabled` from its own
+`sendability()` call and left `title` untouched, so a busy disable wore whatever reason was
+last painted. ⇒ It now calls `shipRenderSendState()`, which is the single writer for the
+button's disabled state, its title and the visible note. They cannot drift.
+
+**(d) FOUND BY THE NEW GUARD, NOT BY THE EYE — A `var()` NAMING A TOKEN NOBODY DEFINES.**
+Writing the note's CSS, `var(--text-primary)` looked like a theme token. `--text-primary` is
+**not defined anywhere in `admin.css`** (it is used at eight other sites in the file to this
+day). CSS does not error on that — the property silently falls back and the text wears an
+inherited colour. A test that every `var(--x)` in the shipping block resolves to a real
+definition caught it, and then immediately caught a **pre-existing** one shipped with ERR-200:
+`var(--border-light, rgba(0,0,0,0.06))` at `.om-meta-row` and `.om-ship-note--muted`.
+`--border-light` does not exist either, so *the fallback was always the value* — a hardcoded
+light-theme colour, meaning a near-invisible dark tint on a dark surface in the dark deck. The
+section's existing "colours must come from theme tokens" test could not see it: it strips
+`var(…)` before looking for hex literals, so a hex hiding **inside** a `var()` fallback is
+exactly its blind spot. ⇒ Both now use `--border`, which is defined in both decks.
+
+**The lesson.** *Shipping the explanation is not the same as shipping it somewhere it can be
+read.* ERR-200 did the hard half — it noticed that a bare disabled button is a bug report
+waiting to happen, and wrote four different sentences for four different refusals. It then put
+them where the stylesheet three thousand lines away had already guaranteed they could never
+appear. Two files, each locally reasonable. **When a control refuses, ask where the refusal
+lands on the glass — not whether it was written.**
+
+**Files**: `js/admin/utils/shipping-info.js` (`SEND_BLOCKER`, `sendability().blocker`) ·
+`js/admin/pages/orders.js` (`shipSendAdvice`, `shipRenderSendState`, `shipSetBusy`, the `mark`
+listener) · `css/admin.css` (`.om-ship-why`) ·
+`tests/order-shipping-information-sep2026.test.js` (+7, incl. a positive control that the
+enabled block reports `blocker: null`, and the undefined-token guard).
+
 ## ERR-204 — The best hand-off we have had all year, and following its rendering advice to the letter would still have told the owner they spent $0.00 on 500 Google Ads queries — **RESOLVED** (2026-09-03)
 
 **Date**: 2026-09-03 · **Context**: The owner's backend developer sent

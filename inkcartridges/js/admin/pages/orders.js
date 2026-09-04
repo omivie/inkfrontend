@@ -32,7 +32,7 @@ import { recordedSendsPhrase } from '../utils/send-history.js';
 // page may branch on a carrier NAME; every per-carrier behaviour reads a flag the
 // server sent (utils/shipping-info.js, ERR-200).
 import {
-  SHIPPING_REGIME, EMAIL_STATE,
+  SHIPPING_REGIME, EMAIL_STATE, SEND_BLOCKER,
   readShipping, carrierByCode, carrierOf, numberLabel,
   requiresProductCode, buildsTrackingUrl, supportsLiveTracking,
   validateShipping, formFromShipping, buildPayload, hasChanges, changedFieldCount,
@@ -1762,6 +1762,10 @@ const SHIP_IDS = {
   mark: 'om-ship-mark',
   save: 'om-ship-save',
   send: 'om-ship-send',
+  // The refusal, in the DOM as TEXT. A disabled .admin-btn has pointer-events:
+  // none (css/admin.css), so a `title` on it can never be hovered — the reason
+  // was written for four months and read by nobody. See ERR-205.
+  why: 'om-ship-why',
   sendState: 'om-ship-sendstate',
   registryError: 'om-ship-registry-error',
   live: 'om-ship-live',
@@ -1905,16 +1909,43 @@ function shipRenderLink() {
 }
 
 /**
- * The send-history line and the state of the Send button.
+ * What the refusal SAYS, once the reason itself is known.
+ *
+ * Split out because the reason answers "why not" and this answers "so what do I
+ * do" — and for the one blocker an operator can clear from this very panel, the
+ * answer is a checkbox eighty pixels to the left. The checkbox's own state is
+ * read here, not in sendability(): sendability reads SAVED server truth, and a
+ * ticked box is an intention, not a fact about the order.
+ */
+function shipSendAdvice(blocker) {
+  if (blocker !== SEND_BLOCKER.NOT_SHIPPED) return '';
+  const markGroup = shipNode(SHIP_IDS.markGroup);
+  if (!markGroup || markGroup.hidden) return '';
+  return shipNode(SHIP_IDS.mark)?.checked
+    ? 'Saving will mark this order shipped and email the customer these details. “Send to customer” is for sending them again afterwards.'
+    : 'Tick “Mark the order shipped” on the left and press Save shipping details — that emails these details.';
+}
+
+/**
+ * The send-history line, the state of the Send button, and — out loud — why the
+ * button is refusing.
  *
  * Four different sentences for four different claims — see emailState(). The one
  * that matters is UNLOGGED: `send_count: 0` on a shipped order is NOT zero, it is
  * a log that does not reach back that far, and 4 of the 13 shipped orders live
  * today are exactly that case.
+ *
+ * The refusal goes in the DOM as text. It used to live only in `btn.title`, and
+ * `.admin-btn:disabled` sets `pointer-events: none` — so the tooltip could not
+ * fire on hover, on touch or from the keyboard, and every one of these carefully
+ * written reasons was unreadable (ERR-205). The title is still set, because it
+ * costs nothing and it is right for the ENABLED button; it is no longer the only
+ * copy of the answer.
  */
 function shipRenderSendState() {
   const line = shipNode(SHIP_IDS.sendState);
   const btn = shipNode(SHIP_IDS.send);
+  const why = shipNode(SHIP_IDS.why);
   const s = _shipState?.shipping || null;
   if (!line || !btn) return;
 
@@ -1923,9 +1954,20 @@ function shipRenderSendState() {
   line.className = `om-ship-sendstate om-ship-sendstate--${state.state}`;
   line.innerHTML = `<strong>${esc(state.phrase)}</strong>${esc(when)}<span class="om-ship-sendstate__detail">${esc(state.detail)}</span>`;
 
-  const { canSend, reason } = sendability(s);
+  const { canSend, reason, blocker } = sendability(s);
   btn.disabled = !canSend || !!_shipState?.busy;
   btn.title = canSend ? 'Email the customer their shipping details' : reason;
+
+  if (!why) return;
+  if (canSend) {
+    why.hidden = true;
+    why.innerHTML = '';
+    return;
+  }
+  const advice = shipSendAdvice(blocker);
+  why.hidden = false;
+  why.innerHTML = `<strong>Can’t send yet:</strong> ${esc(reason)}`
+    + (advice ? `<span class="om-ship-why__next">${esc(advice)}</span>` : '');
 }
 
 /**
@@ -2002,6 +2044,7 @@ function buildShippingSection(o) {
           <button class="admin-btn admin-btn--primary admin-btn--sm" id="${SHIP_IDS.save}">Save shipping details</button>
         </div>
       </div>
+      <div class="om-ship-why" id="${SHIP_IDS.why}" hidden></div>
       <div class="om-ship-sendstate" id="${SHIP_IDS.sendState}"></div>
     </div>
   `;
@@ -2084,9 +2127,11 @@ function shipAdoptShipping(rawShipping, { rebaseline = false } = {}) {
 function shipSetBusy(busy) {
   if (_shipState) _shipState.busy = busy;
   const save = shipNode(SHIP_IDS.save);
-  const send = shipNode(SHIP_IDS.send);
   if (save) save.disabled = busy;
-  if (send) send.disabled = busy || !sendability(_shipState?.shipping).canSend;
+  // One writer for the send button's disabled state, its title AND the visible
+  // refusal. This used to re-derive `disabled` on its own and leave the other two
+  // standing, so a busy disable wore whatever reason happened to be there.
+  shipRenderSendState();
 }
 
 /**
@@ -2386,6 +2431,11 @@ function bindShippingSection(o) {
   });
   shipNode(SHIP_IDS.save)?.addEventListener('click', shipSave);
   shipNode(SHIP_IDS.send)?.addEventListener('click', shipSend);
+  // Copy only. Ticking the box does not — must not — enable Send: the endpoint
+  // refuses an unshipped order, and sendability() reads the saved block, never
+  // this checkbox. What changes is that the panel stops telling someone to do the
+  // thing they have visibly just done.
+  shipNode(SHIP_IDS.mark)?.addEventListener('change', shipRenderSendState);
 
   shipRenderLink();
   shipRenderSendState();

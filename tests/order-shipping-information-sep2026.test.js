@@ -112,7 +112,7 @@ const {
   requiresProductCode, buildsTrackingUrl, supportsLiveTracking,
   looksLikeUrl, normaliseTrackingUrl, validateShipping,
   formFromShipping, buildPayload, hasChanges, changedFieldCount,
-  emailState, sendability, shippingErrorMessage,
+  emailState, sendability, SEND_BLOCKER, shippingErrorMessage,
   isConcurrencyConflict, isNotShippedRefusal, describeEmailOutcome, fieldIssuesFromError,
   reconcileCarrier, carrierWasDefaulted,
 } = M;
@@ -686,6 +686,66 @@ test('§5 emailState — four claims, four sentences', async (t) => {
     assert.equal(sendability(null).canSend, false);
   });
 
+  // ERR-205. The page has to add "so do THIS next" to the reason, and it must pick
+  // the advice off a code rather than off the sentence — a copy edit that reworded
+  // the reason would otherwise silently switch the advice off.
+  await t.test('sendability names WHICH refusal, not just that there is one', () => {
+    // Positive control: the enabled block must report no blocker at all. Without
+    // this, `blocker` could be a constant string and every assertion below passes.
+    const allowed = sendability(readShipping(LIVE_FULL_ENVELOPE).shipping);
+    assert.equal(allowed.canSend, true);
+    assert.equal(allowed.blocker, null, 'a permitted send has nothing blocking it');
+
+    assert.equal(sendability(null).blocker, SEND_BLOCKER.NOT_LOADED);
+    assert.equal(sendability({ can_send_email: false, is_shipped: false, tracking_number: '1' }).blocker,
+      SEND_BLOCKER.NOT_SHIPPED);
+    assert.equal(sendability({ can_send_email: false, is_shipped: true, tracking_number: '' }).blocker,
+      SEND_BLOCKER.NO_TARGET);
+    // The reconstruction for blocks predating can_send_email has to agree.
+    assert.equal(sendability({ is_shipped: false, tracking_number: '1' }).blocker, SEND_BLOCKER.NOT_SHIPPED);
+    assert.equal(sendability({ is_shipped: true, tracking_number: '', tracking_url: '' }).blocker,
+      SEND_BLOCKER.NO_TARGET);
+
+    assert.equal(new Set(Object.values(SEND_BLOCKER)).size, Object.values(SEND_BLOCKER).length,
+      'two blockers sharing a code would make the advice unpickable');
+  });
+
+  await t.test('ERR-205 — the refusal is in the DOM as text, not only in a title', () => {
+    // The coupling this test exists to hold: a disabled .admin-btn cannot be
+    // hovered, so `btn.title` is write-only for exactly the state that needs it.
+    assert.match(cssSrc, /\.admin-btn:disabled \{[^}]*pointer-events: none/,
+      'if this rule ever goes, the tooltip works again and the note below becomes optional — '
+      + 'until then, a reason kept only in a title is a reason nobody can read');
+
+    assert.match(ordersSrc, /why: 'om-ship-why'/, 'the refusal needs an element of its own');
+    assert.match(ordersSrc, /id="\$\{SHIP_IDS\.why\}"/, 'and that element has to be rendered');
+
+    const render = ordersSrc.slice(
+      ordersSrc.indexOf('function shipRenderSendState()'),
+      ordersSrc.indexOf('function buildShippingSection('));
+    assert.ok(render.includes('shipNode(SHIP_IDS.why)'), 'shipRenderSendState must write the visible note');
+    assert.match(render, /why\.innerHTML = /, 'the reason goes into the node, not just onto the button');
+    assert.match(render, /why\.hidden = true/, 'and it disappears when the send is allowed');
+    assert.match(render, /btn\.title = canSend/, 'the title stays — it is right for the ENABLED button');
+
+    // Ticking the box must repaint the advice. Nothing listened to this checkbox
+    // at all, so the panel went on telling operators to tick what they had ticked.
+    assert.match(ordersSrc, /shipNode\(SHIP_IDS\.mark\)\?\.addEventListener\('change', shipRenderSendState\)/,
+      'the checkbox has to re-render the advice');
+
+    // ...and must NOT change the verdict. sendability() reads the saved server
+    // block; a ticked box is an intention. The advice reads the checkbox, the
+    // decision never does.
+    assert.ok(!shipSrc.includes('om-ship-mark'), 'the util must not know the checkbox exists');
+    const setBusy = ordersSrc.slice(
+      ordersSrc.indexOf('function shipSetBusy('),
+      ordersSrc.indexOf('function shipRememberSavedCarrier('));
+    assert.ok(setBusy.includes('shipRenderSendState()'),
+      'one writer for disabled + title + note, or a busy disable strands a stale reason');
+    assert.ok(!/send\.disabled = busy/.test(setBusy),
+      'shipSetBusy re-deriving disabled on its own is how the three drifted apart');
+  });
+
   await t.test('auto_on_ship is announced — the operator did not tick a Send box', () => {
     assert.match(describeEmailOutcome({ requested: false, sent: true, reason: 'auto_on_ship' }),
       /automatically/i, 'marking shipped emails the customer; silence is how you hear it from the customer');
@@ -1183,6 +1243,7 @@ test('§10 shipping hygiene', async (t) => {
     for (const cls of [
       '.om-shipping', '.om-ship-grid', '.om-ship-issue--error', '.om-ship-issue--warn',
       '.om-ship-sendstate--unlogged', '.om-ship-sendstate--unknown', '.om-ship-registry-error',
+      '.om-ship-why', '.om-ship-why__next',
       '.om-ship-input--bad', '.om-ship-link',
     ]) {
       assert.ok(cssSrc.includes(cls), `admin.css is missing ${cls}`);
@@ -1190,6 +1251,16 @@ test('§10 shipping hygiene', async (t) => {
     const block = cssSrc.slice(cssSrc.indexOf('.om-shipping {'), cssSrc.indexOf('@media (max-width: 720px)', cssSrc.indexOf('.om-shipping {')));
     assert.equal(/#[0-9a-f]{6}(?![^(]*\))/i.test(block.replace(/var\([^)]*\)/g, '')), false,
       'colours must come from the theme tokens, or the section only reads correctly in one deck');
+
+    // A var() naming a token nobody defines is not an error anywhere — the
+    // property just falls back to inherited and the text quietly wears the wrong
+    // colour in one deck. `--text-primary` is not a token in this stylesheet; it
+    // reads like one, and it is used elsewhere in the file to this day.
+    const used = new Set([...block.matchAll(/var\((--[a-z0-9-]+)/gi)].map(m => m[1]));
+    for (const token of used) {
+      assert.ok(new RegExp(`\\${token}\\s*:`).test(cssSrc),
+        `${token} is used in the shipping section but never defined — silent fallback, wrong colour`);
+    }
   });
 
   await t.test('the handoff is filed where incoming briefs live', () => {
