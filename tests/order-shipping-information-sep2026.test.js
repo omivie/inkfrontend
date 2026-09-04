@@ -112,7 +112,7 @@ const {
   requiresProductCode, buildsTrackingUrl, supportsLiveTracking,
   looksLikeUrl, normaliseTrackingUrl, validateShipping,
   formFromShipping, buildPayload, hasChanges, changedFieldCount,
-  emailState, sendability, SEND_BLOCKER, shippingErrorMessage,
+  emailState, sendability, SEND_BLOCKER, shippingErrorMessage, isTransitionRefusal,
   isConcurrencyConflict, isNotShippedRefusal, describeEmailOutcome, fieldIssuesFromError,
   reconcileCarrier, carrierWasDefaulted,
 } = M;
@@ -716,6 +716,28 @@ test('§5 emailState — four claims, four sentences', async (t) => {
       'the real rule belongs on the screen');
   });
 
+  // ERR-207: the backend sends NO CODE for a refused transition, so the operator
+  // got raw prose — `Invalid transition: 'paid' -> 'shipped'` — straight off the
+  // wire, about a state machine they have never been shown.
+  await t.test('a refused status transition gets operator copy, not backend prose', () => {
+    assert.equal(isTransitionRefusal({ message: "Invalid transition: 'paid' -> 'shipped'" }), true);
+    assert.equal(isTransitionRefusal({ message: 'Cannot transition from a terminal state' }), true);
+    assert.equal(isTransitionRefusal({ code: 'INVALID_TRANSITION' }), true,
+      'when the backend finally gives it a code, the code must win');
+
+    // POSITIVE CONTROL. Without this the matcher could return true for everything
+    // and every assertion above would still pass.
+    assert.equal(isTransitionRefusal({ message: 'Validation failed' }), false);
+    assert.equal(isTransitionRefusal({ code: 'UNKNOWN_CARRIER' }), false);
+    assert.equal(isTransitionRefusal(null), false);
+
+    const msg = shippingErrorMessage({ message: "Invalid transition: 'paid' -> 'shipped'" });
+    assert.match(msg, /Processing/, 'the message has to name the step that is missing');
+    assert.equal(/Invalid transition/.test(msg), false, 'raw backend prose is not operator copy');
+    // ...and an unrelated message must still fall through to the default.
+    assert.equal(shippingErrorMessage({ message: 'Boom' }), 'Boom');
+  });
+
   await t.test('sendability names WHICH refusal, not just that there is one', () => {
     // Positive control: the enabled block must report no blocker at all. Without
     // this, `blocker` could be a constant string and every assertion below passes.
@@ -924,6 +946,76 @@ test('§7 the page is registry-driven', async (t) => {
       'a late read must not land on top of what the operator has already typed (ERR-179)');
     assert.equal(/order\.tracking_number/.test(modal), false,
       'the row\'s flat columns are a SECOND reader of the same fact, and carry no tracking_url_override');
+  });
+
+  // ERR-207. `paid -> shipped` is not an edge in the backend's state machine —
+  // measured, not assumed: 195 status_change events in production hold ZERO of
+  // them, and all 13 shipped orders went paid -> processing -> shipped. Update
+  // Status crossed that gap with an inline `if`; the panel's checkbox and the
+  // mark-shipped-and-send retry did not, so the checkbox had never once worked
+  // from `paid` — which is 129 of 160 live orders.
+  await t.test('every mark_shipped sender crosses paid -> processing', () => {
+    assert.match(ordersSrc, /async function bridgeToShippable\(/, 'one bridge, not one per surface');
+
+    // The old inline `if` was unpinned: deleting it left the whole suite green.
+    // Slice each sender to the NEXT top-level function, not by a fixed length —
+    // showStatusModal is ~2000 lines and a fixed window silently stops covering it.
+    const fnBody = (name) => {
+      const start = ordersSrc.indexOf(`function ${name}(`);
+      assert.ok(start > 0, `${name} must exist`);
+      const next = ordersSrc.slice(start + 10).search(/\n(?:async )?function \w/);
+      return ordersSrc.slice(start, next === -1 ? undefined : start + 10 + next);
+    };
+    for (const fn of ['shipSave', 'shipHandleWriteFailure', 'showStatusModal']) {
+      assert.match(fnBody(fn), /bridgeToShippable\(/, `${fn} sends mark_shipped and must bridge first`);
+    }
+    // And the hand-written edge must be gone, or there are two rules again.
+    assert.equal(/newStatus === 'shipped' && current === 'paid'/.test(ordersSrc), false,
+      'the inline bridge is what made this rule invisible to the other two senders');
+  });
+
+  await t.test('the bridge only ever moves paid -> processing', () => {
+    const start = ordersSrc.indexOf('async function bridgeToShippable(');
+    const body = ordersSrc.slice(start, ordersSrc.indexOf('\n}', start));
+    // Widening this reaches AdminAPI.updateOrderStatus's catch, which FORCES a
+    // refused transition through admin_force_order_status on a message match.
+    // A bridge from a status the backend would refuse turns that escape hatch
+    // into the normal path.
+    assert.match(ordersSrc, /const BRIDGEABLE_FROM = 'paid';/);
+    assert.match(ordersSrc, /const SHIPPABLE_FROM = 'processing';/);
+    assert.match(body, /!== BRIDGEABLE_FROM\) return false/,
+      'anything other than `paid` must leave the status alone');
+    for (const status of ['pending', 'shipped', 'completed', 'cancelled', 'refunded']) {
+      assert.equal(new RegExp(`'${status}'`).test(body), false,
+        `the bridge must not name ${status} — only paid -> processing is observed legal`);
+    }
+  });
+
+  await t.test('a bridge that moved the order, then failed, says so', () => {
+    // The order really is Processing at that point. Reporting only "save failed"
+    // hides a status change the operator did not ask for on its own.
+    assert.match(ordersSrc, /moved to Processing/,
+      'partial-ness belongs on the screen, not only in the error');
+    assert.match(ordersSrc, /NOT marked shipped and no email went out/);
+    const start = ordersSrc.indexOf('async function shipHandleWriteFailure(');
+    const body = ordersSrc.slice(start, start + 1200);
+    assert.match(body, /bridged = false/, 'the failure handler has to be told whether the bridge fired');
+  });
+
+  await t.test('the panel knows the order\'s status at all', () => {
+    assert.match(ordersSrc, /status: \(o\.status \|\| ''\)\.toLowerCase\(\)/,
+      '_shipState carried no status, so it could not have known it needed to bridge');
+    assert.match(ordersSrc, /_shipState\.status = SHIPPABLE_FROM/,
+      'after a bridge the local status must move, or a second Save bridges processing -> processing');
+    assert.match(ordersSrc, /_shipState\.status = String\(data\.status\)\.toLowerCase\(\)/,
+      'the PUT echo carries the real status; prefer it to anything we inferred');
+  });
+
+  await t.test('forcing a refused transition is no longer silent', () => {
+    const force = apiSrc.slice(apiSrc.indexOf('async updateOrderStatus('), apiSrc.indexOf('admin_force_order_status') + 400);
+    assert.match(force, /Toast\.warning/,
+      'DebugLog is a no-op off localhost, so overriding the state machine happened invisibly in production');
+    assert.match(force, /admin_force_order_status/, 'the force itself is unchanged — only its audibility');
   });
 
   await t.test('a 409 keeps the operator\'s typing', () => {
@@ -1298,6 +1390,15 @@ test('§10 shipping hygiene', async (t) => {
     assert.match(probe, /No --record mode exists/,
       'and the header must say so, since the mode line is what a reader trusts');
     assert.match(probe, /process\.exit\(2\)/, 'a run that could not run must not exit 0 — a skip is not a pass');
+  });
+
+  await t.test('the probe measures the state machine WITHOUT exercising it', () => {
+    const probe = READ(PROBE);
+    assert.match(probe, /order_events\?select=order_id,payload,created_at&type=eq\.status_change/,
+      'the transitions the system has already performed are readable without writing one');
+    assert.match(probe, /paid -> shipped is not an edge/,
+      'the claim the panel violated has to be an assertion, not a comment');
+    assert.match(probe, /every shipped order passed through processing/);
   });
 
   await t.test('the probe never sends a real customer an email', () => {

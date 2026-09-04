@@ -396,12 +396,69 @@ async function main() {
         }
     }
 
-    /* ---- 7. Not checked here ---- */
-    console.log('\n\x1b[1m7. Not checked here\x1b[0m');
+    /* ---- 7. The state machine, WITHOUT writing to it ---- */
+    //
+    // This section exists because of ERR-207. `mark_shipped` is the one thing this
+    // probe may never send — it emails a real customer, and a test pins that
+    // prohibition shut. So the one behaviour that broke went unmeasured: the panel
+    // sent mark_shipped straight from `paid`, and there is no paid -> shipped edge.
+    //
+    // The transitions the system has ACTUALLY performed are readable without
+    // writing anything. `order_events` is the record; this reads it and asserts the
+    // shape of the machine, so a future surface that forgets the bridge is caught
+    // by a probe that still never mails anyone.
+    console.log('\n\x1b[1m7. The order state machine — read from history, never exercised\x1b[0m');
+    {
+        const evRes = await fetch(
+            `${SUPABASE}/rest/v1/order_events?select=order_id,payload,created_at&type=eq.status_change`
+            + '&order=created_at.asc&limit=2000',
+            { headers: H });
+        const events = evRes.ok ? await evRes.json() : null;
+        if (!Array.isArray(events)) {
+            skip('the observed transition map', `order_events unreadable over PostgREST (${evRes.status}) — nothing was verified here`);
+        } else {
+            const edges = new Map();
+            const byOrder = new Map();
+            for (const e of events) {
+                const from = e?.payload?.from ?? '(none)';
+                const to = e?.payload?.to ?? '(none)';
+                edges.set(`${from} -> ${to}`, (edges.get(`${from} -> ${to}`) || 0) + 1);
+                if (!byOrder.has(e.order_id)) byOrder.set(e.order_id, []);
+                byOrder.get(e.order_id).push(to);
+            }
+            console.log(`  ${events.length} status_change events; every edge production has performed:`);
+            for (const [edge, n] of [...edges].sort((a, b) => b[1] - a[1])) {
+                console.log(`      ${String(n).padStart(4)}  ${edge}`);
+            }
+
+            // The claim that broke the panel, stated as an assertion.
+            const direct = edges.get('paid -> shipped') || 0;
+            if (direct === 0) {
+                ok('paid -> shipped is not an edge', 'zero occurrences in the whole history — mark_shipped from `paid` MUST be bridged through `processing`');
+            } else {
+                soft('paid -> shipped has now happened', `${direct} occurrence(s). If the backend has gained that edge, bridgeToShippable() in js/admin/pages/orders.js is now unnecessary — but harmless.`);
+            }
+
+            const shippedOrders = [...byOrder.entries()].filter(([, path]) => path.includes('shipped'));
+            const skippedProcessing = shippedOrders.filter(([, path]) => !path.includes('processing'));
+            if (shippedOrders.length === 0) {
+                skip('every shipped order passed through processing', 'no order in the event log has ever reached `shipped`');
+            } else if (skippedProcessing.length === 0) {
+                ok('every shipped order passed through processing', `${shippedOrders.length}/${shippedOrders.length} — the bridge is the only route to shipped`);
+            } else {
+                soft('an order reached shipped without processing', `${skippedProcessing.length} of ${shippedOrders.length}: ${skippedProcessing.map(([id]) => id.slice(0, 8)).join(', ')}`);
+            }
+        }
+    }
+
+    /* ---- 8. Not checked here ---- */
+    console.log('\n\x1b[1m8. Not checked here\x1b[0m');
     console.log('  • The shipping EMAIL itself (labels, ticket-product-code row, the Track button URL).');
     console.log('    Sending one emails a real customer, so it is verified by reading the order the');
     console.log('    operator sends, never by this probe.');
-    console.log('  • `mark_shipped` and the state machine. Flipping a live order\'s status is a write.');
+    console.log('  • `mark_shipped` ITSELF. Flipping a live order\'s status is a write, and it emails');
+    console.log('    the customer. §7 reads what the machine has already done instead — that is as');
+    console.log('    close as a probe may get, and it is enough to catch a missing bridge (ERR-207).');
     console.log('  • Whether the poller actually returns scan events for supports_live_tracking carriers.');
 
     /* ---- summary ---- */

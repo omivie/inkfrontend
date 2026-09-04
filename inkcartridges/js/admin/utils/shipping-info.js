@@ -632,6 +632,15 @@ export function shippingErrorMessage(err) {
         default:
             break;
     }
+    // No code comes back for this one, so it is matched on the message — see
+    // isTransitionRefusal. Raw backend prose ("Invalid transition: 'paid' ->
+    // 'shipped'") is a sentence about a state machine the operator has never been
+    // shown, and it told them nothing about what to do next.
+    if (isTransitionRefusal(err)) {
+        return 'The order cannot go straight to that status — it has to pass through Processing first. '
+            + 'Nothing was saved. Try again; if it keeps happening, move it to Processing from Update Status and then retry.';
+    }
+
     // Same test the Invoices page uses — a fetch that never reached the server has
     // no code, and telling someone their change "failed" when it was never sent is
     // how a save gets repeated until it duplicates.
@@ -724,6 +733,22 @@ export function isConcurrencyConflict(err) {
 /** Did the backend refuse only because the order has not shipped yet? Offer the retry. */
 export function isNotShippedRefusal(err) {
     return err?.code === 'ORDER_NOT_SHIPPED';
+}
+
+/**
+ * Did the backend refuse the STATUS TRANSITION itself?
+ *
+ * ⚠️ THIS MATCHES ON PROSE, WHICH IS FRAGILE ON PURPOSE-OF-LAST-RESORT GROUNDS.
+ * The backend sends no code for it: the 400 arrives as
+ * `Invalid transition: 'paid' -> 'shipped'` and nothing else, and the hand-off's
+ * error table has no row for it at all. The same three patterns are already
+ * sniffed in `api.js`'s updateOrderStatus, so this is the existing signal rather
+ * than a new one. **The moment the backend gives this a code, match the code and
+ * delete the regex** — a message we do not control is not a contract.
+ */
+export function isTransitionRefusal(err) {
+    if (err?.code === 'INVALID_TRANSITION' || err?.code === 'INVALID_STATUS_TRANSITION') return true;
+    return /invalid\s+transition|cannot\s+transition|terminal\s*state/i.test(err?.message || '');
 }
 
 /**

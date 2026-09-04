@@ -565,9 +565,18 @@ const AdminAPI = {
       }
       return resp?.data ?? null;
     } catch (e) {
-      // If backend rejects the transition, force it via direct Supabase RPC
+      // If backend rejects the transition, force it via direct Supabase RPC.
+      //
+      // THIS OVERRIDES THE ORDER STATE MACHINE, and it used to do so in silence:
+      // DebugLog is a no-op off localhost, so in production nothing said that the
+      // server had refused this change and we pushed it through anyway. The force
+      // itself is unchanged — only its audibility (ERR-207).
       if (e.message && /terminal.state|cannot transition|invalid.*transition/i.test(e.message)) {
         DebugLog.warn('[AdminAPI] Backend blocked transition, using admin force RPC');
+        if (typeof Toast !== 'undefined') {
+          Toast.warning(`The server refused the change to "${status}" and it was forced through anyway. `
+            + 'If that was not intended, check the order before doing anything else.');
+        }
         const result = await rpc('admin_force_order_status', {
           p_order_id: orderId,
           p_status: status,

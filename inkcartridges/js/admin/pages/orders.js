@@ -2166,6 +2166,38 @@ function shipRememberSavedCarrier(payload, shipping) {
   _shipState.rowCarrier = payload.carrier === '' ? null : (shipping?.carrier ?? payload.carrier);
 }
 
+/** The one status the backend will ship FROM, and the one it will bridge from. */
+const SHIPPABLE_FROM = 'processing';
+const BRIDGEABLE_FROM = 'paid';
+
+/**
+ * `paid -> shipped` IS NOT AN EDGE IN THE BACKEND'S STATE MACHINE.
+ *
+ * Measured, not assumed: all 195 `status_change` events in production contain
+ * **zero** paid->shipped, and every one of the 13 shipped orders went
+ * paid -> processing -> shipped. Send `mark_shipped: true` from `paid` and the
+ * PUT comes back 400 `Invalid transition: 'paid' -> 'shipped'`.
+ *
+ * Update Status knew this and crossed the gap inline; the Shipping Information
+ * panel and the mark-shipped-and-send retry did not, so the checkbox failed on
+ * 129 of 160 live orders and had never once succeeded from `paid` (ERR-207). One
+ * function now, so a fourth sender cannot be written without it.
+ *
+ * ONLY `paid`, and ONLY to `processing` — both halves observed legal. This guard
+ * is load-bearing beyond tidiness: `AdminAPI.updateOrderStatus`'s catch FORCES a
+ * refused transition through the `admin_force_order_status` RPC on a message
+ * match, so bridging from a status the backend would refuse would quietly make
+ * that escape hatch the normal path.
+ *
+ * @returns {boolean} true if the order was actually moved — the caller owes the
+ *   operator a sentence about it if what follows then fails.
+ */
+async function bridgeToShippable(orderId, currentStatus) {
+  if ((currentStatus || '').toLowerCase() !== BRIDGEABLE_FROM) return false;
+  await AdminAPI.updateOrderStatus(orderId, SHIPPABLE_FROM, { status: SHIPPABLE_FROM });
+  return true;
+}
+
 /**
  * Save. Everything the backend would refuse is refused here first, so the
  * operator meets the problem on the field rather than as a toast after a trip.
@@ -2210,11 +2242,20 @@ async function shipSave() {
   const original = save ? save.textContent : '';
   shipSetBusy(true);
   if (save) save.textContent = 'Saving…';
+  let bridged = false;
   try {
+    // The gap has to be crossed BEFORE the shipping PUT, not after it fails —
+    // there is no paid -> shipped edge, so without this the whole save is
+    // refused and nothing at all is written.
+    if (markShipped) {
+      bridged = await bridgeToShippable(_shipState.orderId, _shipState.status);
+      if (bridged) _shipState.status = SHIPPABLE_FROM;
+    }
     const data = await AdminAPI.updateOrderShipping(_shipState.orderId, payload);
     const { shipping } = readShipping(data);
     shipRememberSavedCarrier(payload, shipping);
     if (shipping) shipAdoptShipping(shipping, { rebaseline: true });
+    if (data?.status) _shipState.status = String(data.status).toLowerCase();
     shipRenderIssues([], []);
     forgetOrderCache(_shipState.orderId);
 
@@ -2228,7 +2269,7 @@ async function shipSave() {
     loadOrders();
     refreshTrackingCount();
   } catch (e) {
-    await shipHandleWriteFailure(e, { markShipped, form });
+    await shipHandleWriteFailure(e, { markShipped, form, bridged });
   } finally {
     shipSetBusy(false);
     if (save) save.textContent = original || 'Save shipping details';
@@ -2242,7 +2283,16 @@ async function shipSave() {
  * was typing. The typed values are kept and only the server's view is refreshed;
  * throwing the form away would lose the correction that prompted the edit.
  */
-async function shipHandleWriteFailure(e, { markShipped = false } = {}) {
+async function shipHandleWriteFailure(e, { markShipped = false, bridged = false } = {}) {
+  // A HALF-DONE WRITE IS NOT A FAILED WRITE. If the bridge moved the order and
+  // the shipping PUT then failed, the order really is Processing now — a change
+  // the operator did not ask for on its own, and one they would otherwise only
+  // discover from the list. Partial-ness belongs on the screen, not in a log.
+  if (bridged) {
+    Toast.warning('The order was moved to Processing, but the shipping details did not save — '
+      + 'it is NOT marked shipped and no email went out.');
+    loadOrders();
+  }
   if (isConcurrencyConflict(e)) {
     Toast.warning(shippingErrorMessage({ code: 'CONFLICT' }));
     await shipRefreshHistory({ rebaseline: false });
@@ -2260,19 +2310,31 @@ async function shipHandleWriteFailure(e, { markShipped = false } = {}) {
       confirmLabel: 'Mark shipped & send',
     });
     if (!yes) return;
+    let retryBridged = false;
     try {
       const form = shipReadForm();
       const payload = buildPayload(_shipState.shipping, form, { markShipped: true, sendEmail: true });
+      // This retry sends mark_shipped too, so it needs the same bridge. Without
+      // it, the offer that exists to rescue an ORDER_NOT_SHIPPED refusal would
+      // itself be refused, for a second and completely different reason.
+      retryBridged = await bridgeToShippable(_shipState.orderId, _shipState.status);
+      if (retryBridged) _shipState.status = SHIPPABLE_FROM;
       const data = await AdminAPI.updateOrderShipping(_shipState.orderId, payload);
       const { shipping } = readShipping(data);
       shipRememberSavedCarrier(payload, shipping);
       if (shipping) shipAdoptShipping(shipping, { rebaseline: true });
+      if (data?.status) _shipState.status = String(data.status).toLowerCase();
       forgetOrderCache(_shipState.orderId);
       Toast.success('The order is marked shipped and the customer has been emailed.');
       shipRefreshHistory();
       loadOrders();
       refreshTrackingCount();
     } catch (e2) {
+      if (retryBridged) {
+        Toast.warning('The order was moved to Processing, but the shipping details did not save — '
+          + 'it is NOT marked shipped and no email went out.');
+        loadOrders();
+      }
       Toast.error(shippingErrorMessage(e2));
     }
     return;
@@ -2422,6 +2484,12 @@ function bindShippingSection(o) {
     // means the payload had no such key and we must not correct anything.
     rowCarrier: Object.prototype.hasOwnProperty.call(o, 'carrier') ? o.carrier : undefined,
     shipping: reconcileCarrier(raw, o) || null,
+    // The panel never knew the order's STATUS, only its shipping block — and
+    // `mark_shipped` cannot be sent from every status (see bridgeToShippable).
+    // Kept fresh from the top-level `status` that /shipping reads and PUT echoes
+    // both carry; readShipping() returns only the `shipping` sub-object and drops
+    // that sibling, so it is read at the call sites.
+    status: (o.status || '').toLowerCase(),
     registry: null,
     busy: false,
     token: ++_shipToken,
@@ -3472,11 +3540,13 @@ function showStatusModal(order) {
       shippingBody = buildPayload(_seededShipping, form, { markShipped: true });
     }
 
+    let bridged = false;
     try {
-      // Backend requires paid → processing → shipped; bridge automatically when needed
-      if (newStatus === 'shipped' && current === 'paid') {
-        await AdminAPI.updateOrderStatus(order.id, 'processing', { status: 'processing' });
-      }
+      // The same bridge the Shipping Information panel uses. This used to be an
+      // inline `if` here and NOWHERE ELSE, which is exactly why the panel's
+      // checkbox shipped broken — the rule was a comment in one function rather
+      // than a function every sender shares (ERR-207).
+      if (newStatus === 'shipped') bridged = await bridgeToShippable(order.id, current);
       if (shippingBody) {
         const data = await AdminAPI.updateOrderShipping(order.id, shippingBody);
         const note = describeEmailOutcome(data?.email);
@@ -3498,6 +3568,11 @@ function showStatusModal(order) {
       // used not to. Ask the sidebar for a fresh count.
       refreshTrackingCount();
     } catch (e) {
+      if (bridged) {
+        Toast.warning('The order was moved to Processing, but the rest did not save — '
+          + 'it is NOT marked shipped and no email went out.');
+        loadOrders();
+      }
       // The shipping endpoint answers with documented codes; `e.message` alone
       // would surface raw backend prose for a 409 or a missing product code.
       Toast.error(shippingBody ? shippingErrorMessage(e) : `Failed: ${e.message}`);

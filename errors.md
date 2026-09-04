@@ -41,6 +41,83 @@ describing the same incident.
 
 ---
 
+## ERR-207 — The one-step path I recommended twice in this log had never once worked, because the rule that makes it work lived in a comment inside the other surface — **RESOLVED** (2026-09-05)
+
+**Date**: 2026-09-05 · **Context**: The owner ticked **Mark the order shipped** on order
+`2026090301` (`paid`), pressed **Save shipping details**, and got a red toast:
+**`Invalid transition: 'paid' → 'shipped'`**. Nothing saved. *"it seems there might still be an
+issue?"*
+
+**(a) 🚨 THE BACKEND HAS NO `paid → shipped` EDGE, AND ONLY ONE OF THREE SENDERS KNEW.**
+Derived read-only from all 195 `status_change` rows in `order_events` — the transitions the
+system has actually performed, not the ones a document claims:
+
+```
+147  pending -> paid           13  processing -> shipped
+ 14  paid -> processing         6  paid -> cancelled
+ 13  pending -> cancelled       2  cancelled -> paid
+
+paid -> shipped:  0        all 13 shipped orders went paid -> processing -> shipped
+```
+
+Three places send `mark_shipped: true`. `showStatusModal` bridged the gap with an inline `if`.
+`shipSave()` — the checkbox — did not. Neither did `shipHandleWriteFailure()`'s
+mark-shipped-and-send retry. **129 of 160 live orders are `paid`**, so the checkbox worked only
+from `processing`, which exactly one order was in. It shipped on 1 September and had never once
+succeeded.
+
+**(b) THE RULE EXISTED IN EXACTLY ONE COMMENT.** `orders.js:3476`, *"Backend requires paid →
+processing → shipped"* — not a helper, not a constant, and in **no** hand-off document. The
+ERR-200 hand-off says only that "an invalid source status is a `400`" and never enumerates the
+machine; its §6 error table has no row for it. So the 400 arrives with **no error code**, falls
+through `shippingErrorMessage()`'s `return err?.message` default, and the operator reads raw
+backend prose about a state machine nobody has ever shown them. ⇒ one `bridgeToShippable()` every
+sender crosses, `paid → processing` only; `isTransitionRefusal()` + operator copy.
+
+**(c) THE GUARD IS LOAD-BEARING BEYOND TIDINESS.** `AdminAPI.updateOrderStatus`'s catch
+(`api.js:568`) matches `/terminal.state|cannot transition|invalid.*transition/i` and **forces the
+change through the `admin_force_order_status` RPC** — overriding the state machine, and doing it
+in silence, because `DebugLog` is a no-op off localhost. Bridging from any status the backend
+would refuse would have quietly made that escape hatch the normal path. The bridge therefore
+moves **only** `paid`, and the force path now raises a `Toast.warning` — unchanged in behaviour,
+no longer invisible.
+
+**(d) A HALF-DONE WRITE IS NOT A FAILED WRITE.** The bridge is a real status change. If it
+succeeds and the shipping PUT then fails, the order **is** `Processing` and is **not** shipped —
+something the operator did not ask for on its own and would otherwise meet later, in the list.
+All three senders now say so and refresh.
+
+**WHY IT SHIPPED UNNOTICED — three failures that compound:**
+
+1. **The one check that would have caught it is the one we banned.**
+   `scripts/probe-shipping-information.mjs` may never send `mark_shipped` — it emails a real
+   customer — and *that prohibition is itself pinned by a test*. So the single behaviour that
+   broke was, by construction, unmeasurable. ⇒ New §7 reads the transitions the machine has
+   **already performed** out of `order_events` and asserts `paid → shipped` has occurred zero
+   times and every shipped order passed through `processing`. Zero writes, no email, and it would
+   have failed on day one. *When a probe is forbidden from performing an action, have it read the
+   record of that action instead.*
+2. **The bridge had no test.** Deleting `orders.js:3477-3479` left all 5233 assertions green.
+3. **🚨 I PUT THE BROKEN PATH IN THIS LOG. TWICE.** ERR-205 told a future reader to "tick *Mark
+   the order shipped*, press *Save shipping details*"; ERR-206 called it "the one-step path". I
+   had read `mark_shipped`'s contract in the hand-off, confirmed the checkbox existed, and
+   confirmed it emails on dispatch — and never once checked that the transition it depends on was
+   legal. Both entries are corrected in place, with a pointer here rather than a quiet rewrite.
+   **A path you have read the code for is not a path you have seen work.**
+
+**The lesson.** ERR-206's was *"two surfaces agreeing about the rules is not the same as agreeing
+about the data."* This is the sharper version: **the two surfaces did not even agree about the
+rules — one of them held a rule the other had never been told.** A constraint recorded as a
+comment inside the single function that honours it is not a constraint, it is a coincidence; the
+moment a second caller appears it is already wrong.
+
+**Files**: `js/admin/pages/orders.js` (`bridgeToShippable`, `SHIPPABLE_FROM`/`BRIDGEABLE_FROM`,
+`_shipState.status`, all three senders) · `js/admin/utils/shipping-info.js`
+(`isTransitionRefusal` + one `shippingErrorMessage` branch) · `js/admin/api.js` (force path made
+audible) · `scripts/probe-shipping-information.mjs` (§7) ·
+`tests/order-shipping-information-sep2026.test.js` (+7, with a positive control that the prose
+matcher does not match everything).
+
 ## ERR-206 — The order held a carrier, a number and a link; the dialog for shipping it asked for all three again, and made retyping them compulsory — **RESOLVED** (2026-09-05)
 
 **Date**: 2026-09-05 · **Context**: The owner recorded NZ Post, a tracking number and a
@@ -104,8 +181,9 @@ code stops being a description and becomes a claim nobody checks.**
 **Not changed, deliberately.** Marking shipped still requires the explicit **"Mark the order
 shipped"** tick (owner's call this session). It emails the customer the moment it fires, and an
 email that goes out because someone saved a typo correction cannot be recalled. The section's
-own tick + Save remains the one-step path; this fix means Update Status is no longer the *long*
-path.
+own tick + Save was called the one-step path here — **wrong, and ERR-207 (2026-09-05) says why**:
+it did not bridge `paid → processing`, so it failed on every paid order. At the time of writing,
+Update Status was the *only* working path.
 
 **The lesson.** ERR-200 unified the *vocabulary* of these two surfaces — same registry, same
 validator, same encoder — and left them with different *starting states*, which nothing compared.
@@ -132,7 +210,10 @@ shouldnt this be clickable?"*
 **paid, not shipped**; `POST /orders/:id/shipping/send-email` would have answered
 `ORDER_NOT_SHIPPED`. The path the owner actually wanted was the checkbox eighty pixels to the
 left — tick **Mark the order shipped**, press **Save shipping details**, and `mark_shipped:true`
-emails the customer these details (`reason:"auto_on_ship"`). "Send to customer" is the
+emails the customer these details (`reason:"auto_on_ship"`).
+**⚠️ CORRECTED BY ERR-207 (2026-09-05): that advice was wrong.** `paid → shipped` is not an edge
+in the backend's state machine and this panel did not bridge it, so ticking and saving from `paid`
+returned `Invalid transition: 'paid' → 'shipped'` and saved nothing. It had never worked. "Send to customer" is the
 *re-send* path for an order that has already shipped.
 
 **(a) 🚨 A REASON IN A `title` ON A DISABLED BUTTON IS A REASON NOBODY HAS.** ERR-200 shipped
