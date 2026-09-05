@@ -55,11 +55,25 @@
                 if (text) text.textContent = 'Please wait while we verify your email address.';
                 if (resendBtn) resendBtn.style.display = 'none';
 
-                // Initialize Supabase and let it process the tokens
-                const supabaseClient = supabase.createClient(
-                    Config.SUPABASE_URL,
-                    Config.SUPABASE_ANON_KEY
-                );
+                // Reuse auth.js's client rather than building a second one
+                // (ERR-209). verify-email.html loads auth.js, and a bare
+                // createClient() here shares the SAME default storageKey while
+                // defaulting to localStorage — so in session mode the two clients
+                // wrote the token to different stores: a leak plus a split brain.
+                // auth.js already has detectSessionInUrl:true, so it processes
+                // the hash; we only need to listen. auth.js's DOMContentLoaded
+                // handler is registered first (document order, both deferred) and
+                // assigns .supabase synchronously, so it is ready by now.
+                const supabaseClient = (typeof Auth !== 'undefined' && Auth.supabase) || null;
+                if (!supabaseClient) {
+                    // LOUD, not silent: without a client we cannot observe the
+                    // verification at all, so say so rather than leaving the user
+                    // on a spinner that never resolves.
+                    DebugLog.error('[verify-email] Auth.supabase unavailable; cannot confirm verification');
+                    if (heading) heading.textContent = 'Verification status unknown';
+                    if (text) text.textContent = 'We could not confirm your email address just now. Please try the link again, or sign in to check.';
+                    return;
+                }
 
                 // Listen for auth state change
                 supabaseClient.auth.onAuthStateChange((event, session) => {

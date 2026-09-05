@@ -120,7 +120,7 @@
         ],
         cookies: [
             { category: 'Strictly necessary',    examples: 'Session, cart, CSRF, Cloudflare Turnstile',       optional: false },
-            { category: 'Functional',            examples: 'Saved address, login persistence (Supabase)',     optional: false },
+            { category: 'Functional',            examples: 'Saved address, login persistence (Supabase — “Remember me”)', optional: false },
             { category: 'Analytics',             examples: 'Google Analytics 4 (anonymised IP)',              optional: true  },
             { category: 'Advertising / reviews', examples: 'Google Customer Reviews opt-in survey',           optional: true  },
         ],
@@ -195,8 +195,8 @@
         // Effective / last-updated date for all policy pages. Bumped on
         // any substantive policy change. Read by legal-page.js to render
         // the "Last updated" stamp.
-        policyEffectiveDate:    '2026-05-05',
-        policyVersion:          '2026.05',
+        policyEffectiveDate:    '2026-09-05',
+        policyVersion:          '2026.09',
 
         // ─── Helpers ──────────────────────────────────────────────────────
         formatAddressOneLine: function () {

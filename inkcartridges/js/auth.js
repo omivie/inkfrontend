@@ -13,6 +13,132 @@ const Auth = {
     readyPromise: null,
     _resolveReady: null,
 
+    // ---------------------------------------------------------------------
+    // "REMEMBER ME" PERSISTENCE (ERR-209)
+    //
+    // supabase-js chooses its storage at createClient() time, which happens in
+    // init() on DOMContentLoaded — long before a checkbox on a form can be read
+    // at submit. So the mode cannot be a constructor argument. Instead the
+    // adapter below consults _persistMode() on EVERY get/set/remove, and the
+    // login page writes the mode just before signing in.
+    //
+    // ABSENT MEANS REMEMBERED. A missing flag is a user who was never offered
+    // the choice, not a user who declined it — so an absent flag must never
+    // sign anybody out. Every read failure also falls back to 'local' for the
+    // same reason: a storage-hostile browser degrades to today's behaviour
+    // rather than to surprise logouts.
+    // ---------------------------------------------------------------------
+    PERSIST_KEY: 'ic_auth_persist',   // localStorage, 'local' | 'session'
+    _memory: {},                      // last-resort store (private-mode Safari throws on write)
+
+    _persistMode() {
+        try {
+            return localStorage.getItem(Auth.PERSIST_KEY) === 'session' ? 'session' : 'local';
+        } catch (e) {
+            return 'local';
+        }
+    },
+
+    // Derive the token key from the configured project rather than hardcoding
+    // it, and match by PREFIX so chunked ('.0'/'.1') and PKCE ('-code-verifier')
+    // keys a future supabase-js may introduce are swept too.
+    _authKeyPrefix() {
+        const ref = (String(Config.SUPABASE_URL).match(/\/\/([^.]+)\./) || [])[1] || '';
+        return 'sb-' + ref + '-auth-token';
+    },
+
+    _isAuthKey(key) {
+        if (!key) return false;
+        const p = Auth._authKeyPrefix();
+        return key === p || key.indexOf(p + '-') === 0 || key.indexOf(p + '.') === 0;
+    },
+
+    _storageAdapter: {
+        getItem(key) {
+            // NO FALLBACK, deliberately. In session mode this reads sessionStorage
+            // and nothing else, so a stale localStorage token left by an earlier
+            // remembered login is simply invisible. That makes "a session the user
+            // asked to end cannot come back" a structural property rather than a
+            // cleanup race — reintroducing a fallback here IS the bug (ERR-158).
+            const store = Auth._persistMode() === 'session' ? sessionStorage : localStorage;
+            try {
+                const v = store.getItem(key);
+                return v === null && Object.prototype.hasOwnProperty.call(Auth._memory, key)
+                    ? Auth._memory[key]
+                    : v;
+            } catch (e) {
+                return Object.prototype.hasOwnProperty.call(Auth._memory, key) ? Auth._memory[key] : null;
+            }
+        },
+        setItem(key, value) {
+            const session = Auth._persistMode() === 'session';
+            const primary = session ? sessionStorage : localStorage;
+            const other = session ? localStorage : sessionStorage;
+            try { primary.setItem(key, value); } catch (e) { Auth._memory[key] = value; }
+            // Symmetric: exactly one home, always. This is what stops a token
+            // being left behind in localStorage when the user opts out.
+            try { other.removeItem(key); } catch (e) { /* ignore */ }
+        },
+        removeItem(key) {
+            // Unconditional across both stores — sign-out must not depend on
+            // what the mode happens to say at the time.
+            try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
+            try { sessionStorage.removeItem(key); } catch (e) { /* ignore */ }
+            delete Auth._memory[key];
+        }
+    },
+
+    // Remove every auth key from one or both stores, by predicate.
+    _sweepAuthKeys(store) {
+        const stores = store ? [store] : [localStorage, sessionStorage];
+        stores.forEach(s => {
+            try {
+                for (let i = s.length - 1; i >= 0; i--) {
+                    const k = s.key(i);
+                    if (Auth._isAuthKey(k)) s.removeItem(k);
+                }
+            } catch (e) { /* ignore */ }
+        });
+    },
+
+    // Belt-and-braces on top of getItem()'s blindness: if the user opted out,
+    // no auth material should sit on disk at all. Runs before createClient().
+    _reconcilePersistence() {
+        if (Auth._persistMode() !== 'session') return;
+        Auth._sweepAuthKeys(localStorage);
+    },
+
+    /**
+     * Record whether this browser should stay signed in after it closes.
+     * Called by the login page BEFORE signIn()/signInWithOAuth() so the adapter
+     * is already in the right mode for every write supabase makes — including
+     * ones we don't own, like the follow-on refresh and detectSessionInUrl.
+     *
+     * Existing auth material is MOVED rather than dropped, so the current tab
+     * survives the change: a signed-in user who signs in again with the box
+     * unticked simply has their session downgraded to tab-lifetime.
+     *
+     * @param {boolean} remember
+     */
+    setPersistMode(remember) {
+        const mode = remember ? 'local' : 'session';
+        try { localStorage.setItem(Auth.PERSIST_KEY, mode); } catch (e) { /* ignore */ }
+
+        const from = remember ? sessionStorage : localStorage;
+        const to = remember ? localStorage : sessionStorage;
+        try {
+            for (let i = from.length - 1; i >= 0; i--) {
+                const k = from.key(i);
+                if (!Auth._isAuthKey(k)) continue;
+                const v = from.getItem(k);
+                if (v !== null) { try { to.setItem(k, v); } catch (e) { /* ignore */ } }
+                from.removeItem(k);
+            }
+        } catch (e) { /* ignore */ }
+
+        if (Auth.session) Auth._setAuthCookie();   // re-express the cookie under the new mode
+    },
+
     /**
      * Initialize Supabase client
      */
@@ -30,9 +156,25 @@ const Auth = {
         }
 
         try {
+            // Purge any on-disk token before the client can read it (ERR-209).
+            this._reconcilePersistence();
+
+            // persistSession/autoRefreshToken/detectSessionInUrl are the
+            // supabase-js v2 defaults, spelled out so that adding an options
+            // object here is provably a no-op for everything except `storage`.
+            // Removing this block is a behaviour change, not cleanup (ERR-158)
+            // — it silently returns every user to unconditional localStorage.
             this.supabase = supabase.createClient(
                 Config.SUPABASE_URL,
-                Config.SUPABASE_ANON_KEY
+                Config.SUPABASE_ANON_KEY,
+                {
+                    auth: {
+                        storage: this._storageAdapter,
+                        persistSession: true,
+                        autoRefreshToken: true,
+                        detectSessionInUrl: true
+                    }
+                }
             );
 
             // Get initial session
@@ -336,10 +478,31 @@ const Auth = {
             Favourites.onAuthStateChange(false);
         }
 
-        // Clear any session-specific data (e.g., order data from payment flow)
+        // Clear any session-specific data (e.g., order data from payment flow).
+        // NOTE (ERR-209): in session mode this also holds the auth token, so this
+        // is now the ONLY place in the tree allowed to call sessionStorage.clear()
+        // — anywhere else it would silently sign a non-remembered user out.
+        // Pinned by tests/remember-me-session-scope-sep2026.test.js §4.
         try {
             sessionStorage.clear();
         } catch (e) { /* storage may be unavailable */ }
+
+        // Total eviction. supabase's own removeItem already hits both stores via
+        // the adapter; sweeping by predicate additionally catches chunked and
+        // verifier keys.
+        this._sweepAuthKeys();
+
+        // Clear the flag rather than setting it to 'local': absent means
+        // remembered, so a signed-out browser is indistinguishable from a fresh
+        // one, and the next login writes the flag explicitly anyway. This also
+        // keeps entry points that never see the checkbox — a reset-password or
+        // verification link — on today's known-good behaviour.
+        try { localStorage.removeItem(Auth.PERSIST_KEY); } catch (e) { /* ignore */ }
+
+        // Called directly rather than relying only on the SIGNED_OUT event,
+        // because the cookie's shape now depends on a flag we just deleted.
+        // The event path calling it again is idempotent.
+        this._clearAuthCookie();
 
         return { error };
     },
@@ -471,7 +634,18 @@ const Auth = {
     },
 
     _setAuthCookie() {
-        document.cookie = '__ink_auth=1; path=/; SameSite=Strict; max-age=604800';
+        // Session mode omits max-age ENTIRELY, which makes this a session
+        // cookie the browser drops at shutdown — the same lifetime as the
+        // sessionStorage token it accompanies. Remembered mode is byte-for-byte
+        // the pre-ERR-209 cookie.
+        //
+        // Both readers (middleware.js:45, rewards-nudge.js:139) test only for
+        // the presence of `__ink_auth=1`, and a session cookie is serialised
+        // into the Cookie header identically to a persistent one for as long as
+        // it exists — so the /admin edge gate is unaffected within a browsing
+        // session, and correctly redirects to login after a restart.
+        const base = '__ink_auth=1; path=/; SameSite=Strict';
+        document.cookie = this._persistMode() === 'session' ? base : base + '; max-age=604800';
     },
 
     _clearAuthCookie() {
@@ -670,3 +844,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Make Auth available globally
 window.Auth = Auth;
+
+// Node-only export so tests can exercise the persistence adapter directly
+// (matches the guarded export in utils.js). No effect in the browser.
+if (typeof module !== 'undefined' && module.exports) module.exports = { Auth };

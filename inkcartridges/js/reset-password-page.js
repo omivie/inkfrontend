@@ -7,9 +7,18 @@
             const wrapper = form.closest('.auth-form-wrapper');
 
             // Initialize Supabase
+            // persistSession:false (ERR-209) — this client shares the DEFAULT
+            // storageKey with auth.js, so persisting here would write the token
+            // straight to localStorage and defeat an unticked "Remember me".
+            // The recovery session is only needed in memory for the setSession →
+            // updateUser sequence below, and not writing a recovery-grant refresh
+            // token to disk is a security improvement in its own right.
+            // detectSessionInUrl:false preserves the ERR-126 rationale in
+            // reset-password.html: nothing may consume the hash before line 43.
             const supabaseClient = supabase.createClient(
                 Config.SUPABASE_URL,
-                Config.SUPABASE_ANON_KEY
+                Config.SUPABASE_ANON_KEY,
+                { auth: { persistSession: false, detectSessionInUrl: false } }
             );
 
             // Extract recovery tokens from URL hash BEFORE clearing it

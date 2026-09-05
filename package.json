@@ -35,7 +35,8 @@
     "probe:tracking-requested": "node scripts/probe-tracking-requested-column.mjs",
     "probe:search-escaping": "node scripts/probe-search-escaping.mjs",
     "probe:analytics-dashboards": "node scripts/probe-analytics-dashboards.mjs",
-    "probe:orders-supplier": "node scripts/probe-orders-supplier-columns.mjs"
+    "probe:orders-supplier": "node scripts/probe-orders-supplier-columns.mjs",
+    "verify:remember-me": "node scripts/verify-remember-me.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

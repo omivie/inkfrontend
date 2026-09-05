@@ -41,6 +41,78 @@ describing the same incident.
 
 ---
 
+## ERR-209 — The security control on the login page had never been read, and the reassuring state was the one that lied — **RESOLVED** (2026-09-05)
+
+**Date**: 2026-09-05 · **Context**: The owner asked a plain question — *"can you check if the
+remember me login is working"* — and supplied a real account to test with.
+
+**(a) 🚨 IT HAD NEVER BEEN READ. NOT STALE, NOT RACED — NEVER READ.** Measured in a live browser
+with a getter spy installed on `#remember-me`, signing in twice as a real user:
+
+```
+                              box UNCHECKED    box CHECKED
+reads of .checked                   —               0
+lookups of #remember-me             —               0
+args reaching Auth.signIn           2               2
+token in localStorage               ✅              ✅
+token in sessionStorage             ✗               ✗
+__ink_auth cookie              max-age=604800  max-age=604800
+survives a browser restart          ✅              ✅
+```
+
+Ticking it ON produced **zero** reads and **zero** lookups, so this was never a stale value or an
+ordering bug — there was no reader at all. The entire repo contained two references to the
+control, both the markup itself (`login.html:99-100`). `Auth.signIn(email, password)` had no
+third parameter to carry the preference even if someone had read it.
+
+**(b) THE FAILURE POINTED THE REASSURING WAY.** The box rendered *unticked* by default, so the
+state that looked like "don't keep me signed in on this shared machine" was the state that lied.
+`legal-config.js:123` and `privacy.html:246` both described login persistence as unconditional —
+accurate about the code, and in direct contradiction of what the UI implied. A control nobody
+reads fails silently; a control nobody reads whose safe-looking default is the lie fails
+*invisibly*. ⇒ measure the control, don't read the handler: the spy is what settled it.
+
+**(c) THE CONSTRUCTOR RUNS BEFORE THE CHECKBOX EXISTS.** supabase-js picks its storage at
+`createClient` time (`auth.js:33`), inside `init()` on `DOMContentLoaded` — long before a form is
+submitted. No constructor-time boolean can express "decide later". ⇒ `_storageAdapter`, which
+consults `_persistMode()` on **every** `get`/`set`/`remove`, and `setPersistMode()` called
+*before* `signIn`. **`getItem` has NO FALLBACK, deliberately**: in session mode it reads
+sessionStorage only, so a stale on-disk token is invisible rather than merely cleaned up later.
+Re-adding that fallback is the original bug wearing a different hat (ERR-158).
+
+**(d) THREE OTHER FILES WOULD HAVE QUIETLY DEFEATED IT.** The adapter only governs the client it
+is passed to. `verify-email-page.js:59` and `reset-password-page.js:10` each built their **own**
+client with a bare two-arg `createClient` — same *default* `storageKey`, but default localStorage
+— so a user arriving by verification or reset link got the token written to disk whatever the box
+said, and on the verify page two clients wrote the same key to two different stores. And
+`site-guard.js`'s `sg-auth` client had `detectSessionInUrl` defaulting to true while its `run()`
+excludes only `/admin*` — so on `/account`, the OAuth landing page, it could win the race for the
+URL hash and stash a second, always-persistent identity. ⇒ all three fixed; §4b/§4c of the test
+pin them. **A per-client setting is not a per-app setting — grep for every `createClient`.**
+
+**(e) THE LIVE CHECK PASSED WITH THE BUG PUT BACK.** The end-to-end "no resurrection" check went
+green after `getItem`'s fallback was deliberately reintroduced, because `_reconcilePersistence()`
+had already purged the key at init. Mutating each layer separately showed it only fails when
+**both** go. The check is honest about what it pins — the end-to-end property — and the two
+mechanisms are pinned individually by unit §1c and §1g. ***A green end-to-end check attributes
+nothing: mutate each layer or you do not know which one is load-bearing.***
+
+**(f) DEFAULT TICKED, ON PURPOSE.** Wiring the box up unchanged would have silently shortened the
+session of every user who has never touched it — which is all of them. `login.html:99` now ships
+`checked`, making it an opt-**out**: ticked is exactly today's behaviour, and an absent
+`ic_auth_persist` flag also means remembered, so nobody signed in today is logged out by the
+deploy. **Absence is "never asked", not "declined".**
+
+**Verify**: `npm test` (`tests/remember-me-session-scope-sep2026.test.js`, 20 checks) and
+`BASE_URL=… E2E_EMAIL=… E2E_PASSWORD=… npm run verify:remember-me` (15 live checks — real
+sign-in, hence `verify:` not `probe:`; skips loudly and exits 2 without credentials).
+JavaScript cannot read a cookie's `max-age`, and you cannot restart a browser mid-test, so the
+two decisive checks go through Playwright: `context.cookies()` (a session cookie reports
+`expires: -1`) and `storageState()`, which serialises cookies and localStorage but **not**
+sessionStorage — filtering out session cookies reproduces a restart exactly.
+
+---
+
 ## ERR-208 — Every hub tab in the admin has had an address for a year; from inside the hub, using it did nothing — **RESOLVED** (2026-09-05)
 
 **Date**: 2026-09-05 · **Context**: The owner asked for the analytics surfaces to be gathered:

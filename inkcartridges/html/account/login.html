@@ -96,7 +96,10 @@
 
                             <div class="form-row form-row--split">
                                 <div class="form-group form-group--checkbox">
-                                    <input type="checkbox" id="remember-me" name="rememberMe" class="form-checkbox">
+                                    <!-- checked by default (ERR-209): this is an opt-OUT. Ticked is
+                                         what every user gets today, so wiring the box up must not
+                                         silently shorten anyone's session. -->
+                                    <input type="checkbox" id="remember-me" name="rememberMe" class="form-checkbox" checked>
                                     <label for="remember-me" class="form-label form-label--checkbox">Remember me</label>
                                 </div>
                                 <a href="/account/forgot-password" class="auth-form__forgot">Forgot password?</a>
@@ -272,16 +275,16 @@
     <script defer src="/js/utils.js?v=447ea8c6"></script>
     <script defer src="/js/api.js?v=c248efdf"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=55cfdbef"></script>
+    <script defer src="/js/auth.js?v=276f4880"></script>
     <script defer src="/js/business.js?v=f037a8fb"></script>
     <script defer src="/js/products.js?v=1c4ed7d2"></script>
     <script defer src="/js/search.js?v=dd8f9368"></script>
     <script defer src="/js/main.js?v=8eed1d93"></script>
-    <script defer src="/js/legal-config.js?v=8e92e962"></script>
+    <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=6deb5ef7"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/login-page.js?v=65f2a45d"></script>
+    <script defer src="/js/login-page.js?v=6bbdd4c2"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
-    <script defer src="/js/site-guard.js?v=ef1677e5"></script>
+    <script defer src="/js/site-guard.js?v=2d3b4ae7"></script>
 </body>
 </html>

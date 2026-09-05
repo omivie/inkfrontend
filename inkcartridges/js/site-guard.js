@@ -22,7 +22,13 @@
     // Use a separate storageKey so this client's session doesn't conflict
     // with auth.js's Supabase client (different localStorage namespace).
     _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { storageKey: 'sg-auth', persistSession: true }
+      // detectSessionInUrl:false (ERR-209) — this client has no OAuth flow of
+      // its own (the overlay only calls signInWithPassword), but run() excludes
+      // only /admin*, so on the OAuth landing page /account it would otherwise
+      // race auth.js for the URL hash and stash a duplicate, always-persistent
+      // identity under 'sg-auth' — defeating an unticked "Remember me".
+      // persistSession stays true: the overlay's unlock must survive navigation.
+      auth: { storageKey: 'sg-auth', persistSession: true, detectSessionInUrl: false }
     });
     return _sb;
   }

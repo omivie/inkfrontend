@@ -96,6 +96,13 @@
                     const password = document.getElementById('login-password').value;
                     const submitBtn = loginForm.querySelector('button[type="submit"]');
 
+                    // ERR-209: record BEFORE signing in, so supabase's very first
+                    // write lands in the right store. Deliberately not a third
+                    // argument to Auth.signIn — the mode must govern every write
+                    // supabase makes, not just this one call.
+                    // A missing checkbox means remembered (see Auth.PERSIST_KEY).
+                    Auth.setPersistMode(document.getElementById('remember-me')?.checked ?? true);
+
                     submitBtn.disabled = true;
                     submitBtn.textContent = 'Signing in...';
 
@@ -424,6 +431,18 @@
             socialProviders.forEach(({ selector, signIn, label }) => {
                 document.querySelectorAll(selector).forEach(btn => {
                     btn.addEventListener('click', async () => {
+                        // ERR-209: MUST run before signInWithOAuth navigates away.
+                        // The provider returns to /account, which has no checkbox —
+                        // a preference recorded after this point is never recorded
+                        // at all (same shape as ERR-151→155).
+                        // querySelectorAll matches the social buttons in BOTH
+                        // panels; only #login-panel has the checkbox, and a new
+                        // registration is remembered.
+                        Auth.setPersistMode(
+                            btn.closest('#login-panel')
+                                ? (document.getElementById('remember-me')?.checked ?? true)
+                                : true
+                        );
                         btn.disabled = true;
                         try {
                             const { error } = await signIn();
