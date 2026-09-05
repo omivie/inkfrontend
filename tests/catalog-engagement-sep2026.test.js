@@ -386,13 +386,15 @@ test('§7b the rate limit is reported, with the seconds from the HEADER', () => 
     'the rate-limited state must say it is not a measurement of zero');
 });
 
-test('§7c app.js registers the page, owner-only, under Catalog', () => {
+test('§7c app.js registers the page, owner-only, under Analytics', () => {
   assert.match(APP, /key: 'catalog-engagement'/);
-  const catalogIdx = APP.indexOf("section: 'Catalog'");
-  const dataOpsIdx = APP.indexOf("section: 'Data Operations'");
+  // Shipped under "Catalog"; moved in the Sep 2026 pass that gave every read-only
+  // reporting surface one home (tests/admin-analytics-section-sep2026.test.js).
+  const analyticsIdx = APP.indexOf("section: 'Analytics'");
+  const salesIdx = APP.indexOf("section: 'Sales'");
   const ceIdx = APP.indexOf("key: 'catalog-engagement'");
-  assert.ok(catalogIdx !== -1 && ceIdx > catalogIdx && ceIdx < dataOpsIdx,
-    'must sit in the Catalog section');
+  assert.ok(analyticsIdx !== -1 && ceIdx > analyticsIdx && ceIdx < salesIdx,
+    'must sit in the Analytics section');
   assert.match(APP.slice(ceIdx, ceIdx + 140), /ownerOnly: true/);
 });
 

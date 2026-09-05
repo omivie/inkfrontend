@@ -93,16 +93,17 @@ test('getDemandRanking does NOT route through the date/brand analyticsQuery conv
 // 2. app.js — registration + owner gate
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('app.js registers the demand-ranking nav item under Catalog, owner-only', () => {
+test('app.js registers the demand-ranking nav item under Analytics, owner-only', () => {
     assert.ok(/key:\s*'demand-ranking'/.test(APP_JS),
         'NAV_ITEMS must include a demand-ranking entry');
-    // July 2026 IA overhaul: demand-ranking (an inventory/demand signal) moved from
-    // "Analytics" into the "Catalog" section (before "Data Operations").
-    const catalogIdx = APP_JS.indexOf("section: 'Catalog'");
-    const dataOpsIdx = APP_JS.indexOf("section: 'Data Operations'");
+    // July 2026 put demand-ranking in "Catalog"; Sep 2026 gathered every read-only
+    // reporting surface into a dedicated "Analytics" section (between Overview and
+    // Sales) — see tests/admin-analytics-section-sep2026.test.js for that contract.
+    const analyticsIdx = APP_JS.indexOf("section: 'Analytics'");
+    const salesIdx = APP_JS.indexOf("section: 'Sales'");
     const drIdx = APP_JS.indexOf("key: 'demand-ranking'");
-    assert.ok(catalogIdx !== -1 && drIdx > catalogIdx && drIdx < dataOpsIdx,
-        'demand-ranking nav item must live under the Catalog section');
+    assert.ok(analyticsIdx !== -1 && drIdx > analyticsIdx && drIdx < salesIdx,
+        'demand-ranking nav item must live under the Analytics section');
     const navLine = APP_JS.slice(drIdx, drIdx + 120);
     assert.ok(navLine.includes('ownerOnly: true'),
         'demand-ranking nav item must be ownerOnly: true');

@@ -273,6 +273,48 @@
 }
 .admin-nav-badge.warn { background: var(--magenta-dim); color: var(--magenta-text); }
 .admin-nav-divider { height: 1px; margin: 8px 20px; background: var(--border); }
+
+/* ---- Collapsible sidebar groups (Sep 2026) ----
+   Every section header is a real <button> owning a real container, so a section can be
+   folded away. The button also carries .admin-nav-section__label, which is where its
+   type scale, its light-theme colour and the 60px-rail "hide every label" rule already
+   live — this block only adds the button reset, the chevron and the folding. */
+.admin-nav-group { margin-bottom: 2px; }
+.admin-nav-group__toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; margin: 0;
+  border: none; background: none; cursor: pointer;
+  font-family: inherit; text-align: left;
+  border-radius: var(--radius);
+  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.admin-nav-group__toggle:hover { color: var(--text-secondary); background: rgba(255,255,255,0.03); }
+.admin-nav-group__toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.admin-nav-group__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-nav-group__chevron {
+  display: flex; flex-shrink: 0; opacity: 0.6;
+  transition: transform 0.18s var(--ease);
+}
+.admin-nav-group__toggle[aria-expanded="false"] .admin-nav-group__chevron { transform: rotate(-90deg); }
+.admin-nav-group__items { padding: 0 8px; }
+.admin-nav-group.is-collapsed .admin-nav-group__items { display: none; }
+
+/* Hub tabs, indented beneath their parent item. No icon: seven rows sharing one glyph
+   reads as noise, and the indent plus the smaller type already say "inside". */
+.admin-nav-item--sub {
+  padding-left: 40px;
+  font-size: 12px; font-weight: 400;
+  color: var(--text-muted);
+}
+.admin-nav-item--sub:hover { color: var(--text-secondary); }
+.admin-nav-item--sub.active { color: var(--text); font-weight: 500; }
+/* The parent row of an active sub-link: present, but not competing with it. */
+.admin-nav-item.is-current-hub { color: var(--text); }
+.admin-nav-item.is-current-hub svg { opacity: 1; }
+.admin[data-theme="light"] .admin-nav-group__toggle:hover { background: rgba(255,255,255,0.03); }
+.admin[data-theme="light"] .admin-nav-item--sub { color: #8a8a9e; }
+.admin[data-theme="light"] .admin-nav-item--sub:hover,
+.admin[data-theme="light"] .admin-nav-item--sub.active { color: #e2e2ea; }
 .admin-sidebar__footer {
   padding: 12px; border-top: 1px solid var(--border); flex-shrink: 0;
 }
@@ -1605,9 +1647,18 @@
 .admin-sidebar--collapsed .admin-sidebar__nav {
   padding: 8px 4px;
 }
-.admin-sidebar--collapsed .admin-nav-section {
+.admin-sidebar--collapsed .admin-nav-section,
+.admin-sidebar--collapsed .admin-nav-group__items {
   padding: 0;
 }
+/* In the 60px rail the group headers are gone (the .admin-nav-section__label hide rule
+   below covers the button), so there is nothing left to fold BY — a collapsed group would
+   just be rows that vanished with no way to bring them back. The rail is deliberately the
+   flat top-level jump list it has always been: every group's items shown, sub-rows hidden
+   (seven identically-iconed rows in 60px are unreadable, and their labels are gone too). */
+.admin-sidebar--collapsed .admin-nav-group.is-collapsed .admin-nav-group__items { display: block; }
+.admin-sidebar--collapsed .admin-nav-group__toggle,
+.admin-sidebar--collapsed .admin-nav-item--sub { display: none; }
 .admin-sidebar--collapsed .admin-nav-item {
   justify-content: center;
   padding: 9px;
@@ -1683,6 +1734,14 @@
   .admin-sidebar--collapsed .admin-user-card { justify-content: flex-start; padding: 8px; }
   .admin-sidebar--collapsed .admin-sidebar__brand { justify-content: flex-start; padding: 20px 20px 16px; }
   .admin-sidebar--collapsed .admin-nav-item.active::before { display: block; }
+  /* The drawer is 280px with full labels, so the group headers and hub sub-rows come
+     back — and with them the ability to fold a section. */
+  .admin-sidebar--collapsed .admin-nav-group__toggle { display: flex; }
+  /* .admin-sidebar--collapsed .admin-nav-item wins on specificity here and would flatten
+     the indent, so the sub-row restates it. */
+  .admin-sidebar--collapsed .admin-nav-item--sub { display: flex; padding-left: 40px; }
+  .admin-sidebar--collapsed .admin-nav-group.is-collapsed .admin-nav-group__items { display: none; }
+  .admin-sidebar--collapsed .admin-nav-group__items { padding: 0 8px; }
 }
 
 /* ---- Animations ---- */

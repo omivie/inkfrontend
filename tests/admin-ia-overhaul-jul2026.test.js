@@ -51,7 +51,10 @@ const OWNER_PAGES = [
 
 test('§1 sidebar uses the business-workflow section headers', () => {
   const sections = [...SRC.matchAll(/section:\s*'([^']+)'/g)].map(m => m[1]);
-  for (const expected of ['Overview', 'Sales', 'Catalog', 'Data Operations', 'Finance', 'Marketing', 'System']) {
+  // 'Analytics' joined them in Sep 2026 (see admin-analytics-section-sep2026.test.js).
+  // Note this is not the OLD build-order "Analytics" section the July pass retired: that
+  // one routed to a page titled "Finance"; this one is the dedicated reporting home.
+  for (const expected of ['Overview', 'Analytics', 'Sales', 'Catalog', 'Data Operations', 'Finance', 'Marketing', 'System']) {
     assert.ok(sections.includes(expected), `NAV_ITEMS is missing the "${expected}" section — got: ${sections.join(', ')}`);
   }
   // The old build-order section names must be gone (they were the confusing ones).

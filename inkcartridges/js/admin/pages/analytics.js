@@ -1,9 +1,28 @@
 /**
- * Analytics Page — In-depth drill-down across 5 metric categories
- * Tabbed layout: Revenue | Customers | Products | Operations | Traffic
+ * Analytics hub ("Performance") — in-depth drill-down across the metric families.
+ * ==============================================================================
+ *
+ * Tabs are NOT declared here. They live in utils/analytics-tabs.js, which the admin
+ * sidebar also reads, so the bar on this page and the indented sub-links under the
+ * ANALYTICS group can never list different tabs (Sep 2026 — ERR-208).
+ *
+ * Two things this page owes the shell, both because the router keys off the route and
+ * this hub's real address includes `?tab=`:
+ *
+ *   • `onRouteChange({ tab })` — the hash changed but the ROUTE did not (someone clicked
+ *     a sidebar sub-link while already here). Before ERR-208 there was no such hook and
+ *     the click did nothing at all: hashchange fired, app.js compared route-without-query,
+ *     saw no change, and returned.
+ *   • an `admin:tab-change` CustomEvent on `window` after every switch — writeTabToHash()
+ *     uses history.replaceState (deliberately: tab switches should not stack back-button
+ *     entries), which fires NO hashchange, so the sidebar would otherwise never learn about
+ *     a tab clicked in-page. A DOM event is also the only channel that reaches the shell:
+ *     app.js is evaluated as two module instances (see its __ADMIN_BOOTED__ guard), and the
+ *     one that owns the sidebar is not the one this file imports.
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
+import { ANALYTICS_TABS, ANALYTICS_TAB_IDS, ANALYTICS_DEFAULT_TAB, analyticsTabLabel } from '../utils/analytics-tabs.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -39,17 +58,9 @@ function kpiCard({ label, value, raw, prevRaw, missingTip, sub }) {
   return html;
 }
 
-const TABS = [
-  { id: 'revenue',     label: 'Revenue' },
-  { id: 'health',      label: 'Health', lazy: true },
-  { id: 'margins',     label: 'Margins', lazy: true },
-  { id: 'pricing',     label: 'Pricing', lazy: true },
-  { id: 'market-intel', label: 'Market Intel', lazy: true },
-  { id: 'traffic',     label: 'Traffic', lazy: true },
-  { id: 'acquisition', label: 'Acquisition', lazy: true },
-];
-
-const TAB_IDS = TABS.map(t => t.id);
+// Tabs come from the shared manifest — see utils/analytics-tabs.js for why.
+const TABS = ANALYTICS_TABS;
+const TAB_IDS = ANALYTICS_TAB_IDS;
 
 // Read/persist the active tab in the hash query so #analytics?tab=traffic
 // deep-links (the website-traffic route redirects here, June 2026 IA overhaul).
@@ -71,7 +82,7 @@ function writeTabToHash(tabId) {
 }
 
 let _container = null;
-let _activeTab = 'revenue';
+let _activeTab = ANALYTICS_DEFAULT_TAB;
 let _data = null;
 let _lazyTabModule = null;
 
@@ -99,7 +110,7 @@ function render() {
   Charts.destroyAll();
 
   _container.innerHTML = `
-    <div class="admin-page-header"><h1>Finance</h1></div>
+    <div class="admin-page-header"><h1>Performance</h1></div>
     <div class="admin-analytics-tabs" id="analytics-tabs">
       ${TABS.map(t => `
         <button class="admin-analytics-tab${t.id === _activeTab ? ' is-active' : ''}" data-tab="${esc(t.id)}">
@@ -113,22 +124,48 @@ function render() {
   _container.querySelector('#analytics-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-tab]');
     if (!btn) return;
-    const tabId = btn.dataset.tab;
-    if (tabId === _activeTab) return;
-
-    // Destroy lazy tab if active
-    if (_lazyTabModule?.destroy) _lazyTabModule.destroy();
-    _lazyTabModule = null;
-
-    _activeTab = tabId;
-    writeTabToHash(tabId);
-    _container.querySelectorAll('.admin-analytics-tab').forEach(b => {
-      b.classList.toggle('is-active', b.dataset.tab === tabId);
-    });
-    renderTabContent();
+    switchTab(btn.dataset.tab);
   });
 
   renderTabContent();
+}
+
+/**
+ * The ONE way this hub changes tab — the in-page bar and the sidebar sub-links both
+ * end up here, so they cannot diverge in what they clean up (ERR-208). Returns false
+ * when there is nothing to do, which is what stops the hashchange -> onRouteChange ->
+ * switchTab -> announce -> ... path from looping.
+ */
+function switchTab(tabId) {
+  if (!_container) return false;
+  if (!TAB_IDS.includes(tabId)) return false;
+  if (tabId === _activeTab) { announceTab(); return false; }
+
+  // Destroy lazy tab if active
+  if (_lazyTabModule?.destroy) _lazyTabModule.destroy();
+  _lazyTabModule = null;
+
+  _activeTab = tabId;
+  writeTabToHash(tabId);
+  _container.querySelectorAll('.admin-analytics-tab').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.tab === tabId);
+  });
+  announceTab();
+  renderTabContent();
+  return true;
+}
+
+/**
+ * Tell the shell which tab is showing. Carries two jobs the router cannot do itself:
+ * the sidebar highlight (writeTabToHash uses replaceState, which fires no hashchange)
+ * and the document title (navigate() reads `page.title` once, before any tab is known).
+ */
+function announceTab() {
+  const label = analyticsTabLabel(_activeTab);
+  if (label) document.title = `${label} | Admin | InkCartridges.co.nz`;
+  window.dispatchEvent(new CustomEvent('admin:tab-change', {
+    detail: { route: 'analytics', tab: _activeTab },
+  }));
 }
 
 async function renderTabContent() {
@@ -141,20 +178,13 @@ async function renderTabContent() {
   const el = _container?.querySelector('#analytics-tab-content');
   if (!el) return;
 
-  // Handle lazy-loaded tabs (margins, pricing, market-intel)
+  // Lazily-mounted tabs. The module path travels WITH the label in the shared manifest
+  // (utils/analytics-tabs.js) — it used to live in a second object keyed by the same ids.
   const tab = TABS.find(t => t.id === _activeTab);
   if (tab?.lazy) {
     el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh"><div class="admin-loading__spinner"></div></div>`;
-    const moduleMap = {
-      'health': './financial-health.js',
-      'margins': './margin.js',
-      'pricing': './cc-profit.js',
-      'market-intel': './cc-market-intel.js',
-      'traffic': './website-traffic.js',
-      'acquisition': './acquisition.js',
-    };
     try {
-      const mod = await import(moduleMap[_activeTab]);
+      const mod = await import(tab.lazy);
       _lazyTabModule = mod.default;
       el.innerHTML = '';
       await _lazyTabModule.init(el);
@@ -327,13 +357,26 @@ async function renderBrandChart(data) {
 // ---- Module export ----
 
 export default {
-  title: 'Finance',
+  title: 'Performance',
 
   async init(container) {
     _container = container;
-    _activeTab = readTabFromHash() || 'revenue';
+    _activeTab = readTabFromHash() || ANALYTICS_DEFAULT_TAB;
     _lazyTabModule = null;
-    await loadAnalytics();
+    await loadAnalytics();   // ends in render()
+    announceTab();           // a bare #analytics resolved to a tab — say which one
+  },
+
+  /**
+   * The hash changed but the route did not: a sidebar sub-link clicked while already
+   * on this page. Without this the click was silent (ERR-208).
+   */
+  onRouteChange({ tab } = {}) {
+    // No tab in the address (someone navigated to a bare #analytics while already here):
+    // the hub keeps the panel it is showing — but it must SAY so, or the sidebar would
+    // fall back to marking the parent row while a named tab is still on screen.
+    if (!tab) { announceTab(); return; }
+    switchTab(tab);
   },
 
   destroy() {

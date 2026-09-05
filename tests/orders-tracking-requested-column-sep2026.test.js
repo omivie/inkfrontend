@@ -821,7 +821,16 @@ test('§10 shipping hygiene', async (t) => {
   });
 
   await t.test('APP_VERSION moved — it is the only thing that busts pages/*.js', () => {
-    assert.match(READ(APP), /const APP_VERSION = '[^']*tracking-requested/);
+    // Was: assert.match(READ(APP), /const APP_VERSION = '[^']*tracking-requested/) — a
+    // literal pinned inside a moving cache key, the ERR-063 shape. Two such pins had
+    // already forced APP_VERSION to accrete one slug per feature instead of being renamed.
+    // Assert the thing that is actually true: this feature's ship moved the constant off
+    // the value that preceded it (commit 9735831).
+    const ver = READ(APP).match(/const APP_VERSION = '([^']+)'/);
+    assert.ok(ver, 'APP_VERSION must be declared');
+    assert.notEqual(ver[1], '2026.09.01-order-number-format-invoice-sent-channel-shipping-information-actions',
+      'APP_VERSION was not bumped when the tracking-requested column shipped');
+    assert.match(ver[1], /^2026\.\d{2}\.\d{2}-[a-z0-9-]+$/, 'and it keeps the dated build-tag grammar');
   });
 
   await t.test('the CSS states exist, in both decks', () => {

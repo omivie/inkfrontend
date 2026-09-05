@@ -1418,7 +1418,17 @@ test('§10 shipping hygiene', async (t) => {
     const app = READ(APP);
     const m = app.match(/const APP_VERSION = '([^']+)'/);
     assert.ok(m, 'APP_VERSION must exist');
-    assert.match(m[1], /shipping-information/, 'lazily-imported page modules are busted by this constant alone');
+    // Was: assert.match(m[1], /shipping-information/). That is the ERR-063 anti-pattern
+    // asset-cache-tokens.test.js warns about at length — a feature test pinning a literal
+    // inside a MOVING cache key. It had already started deforming the constant: every
+    // later feature had to append its own slug rather than replace it, so APP_VERSION grew
+    // from "2026.09.01-invoice-header-total-spacing" into a five-slug changelog in four
+    // days, and the sixth feature would have gone red for choosing a clean name.
+    // What this test actually means is "shipping this feature bumped the constant" — so
+    // assert that, against the value that shipped immediately BEFORE it (commit d4e62fc).
+    assert.notEqual(m[1], '2026.09.01-cash-basis-order-number-format-invoice-sent-channel',
+      'APP_VERSION was not bumped when Shipping Information shipped — it is the only thing ' +
+      'that busts the lazily-imported page modules.');
     assert.match(m[1], /^2026\.\d{2}\.\d{2}-[a-z0-9-]+$/, 'and it must keep the dated build-tag grammar');
   });
 

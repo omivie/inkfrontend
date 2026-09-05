@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.05-shipping-information-tracking-requested-catalog-engagement-acquisition-ship-bridge';
+const APP_VERSION = '2026.09.05-analytics-section-collapsible-nav-groups';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -24,6 +24,9 @@ const APP_VERSION = '2026.09.05-shipping-information-tracking-requested-catalog-
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
 import { AdminAPI } from './api.js';
+// The Analytics hub's tab list, shared with pages/analytics.js so the sidebar's
+// sub-links and the page's own tab bar can never disagree. See that file's header.
+import { ANALYTICS_TABS } from './utils/analytics-tabs.js';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
@@ -59,6 +62,7 @@ const I = {
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>',
 };
 
@@ -70,10 +74,20 @@ function icon(name, w = 18, h = 18) {
 // Sidebar is grouped into business-workflow sections (July 2026 IA overhaul —
 // see ADMIN_CENTRE_AUDIT.md). Sections read the way an ecommerce operation is
 // run — Sales, Catalog, Data Operations, Finance, Marketing — rather than the
-// order the codebase was built. An empty section header is automatically
-// suppressed for a role that can see none of its items (see renderSidebar's
-// pending-section logic), so all-owner groups don't leave orphaned labels for
-// staff.
+// order the codebase was built. A section with no item this role may see renders
+// nothing at all, header included (see renderSidebar), so all-owner groups don't
+// leave orphaned labels for staff.
+//
+// Sep 2026: every section is now a COLLAPSIBLE GROUP and analytics has its own
+// (ADMIN_CENTRE_AUDIT.md §8 item 9 — the deferred fix for the 27-item wall).
+// `hubTabs` marks an item whose hub tabs render as indented sub-links beneath it;
+// the value names the manifest, never the tabs themselves.
+//
+// KEEP THIS ARRAY FLAT — one level of object literal per entry, no nested arrays or
+// objects. tests/admin-ia-overhaul-jul2026.test.js §3 audits owner gating by parsing
+// `{ key: '…' … }` with a regex that stops at the first `}`; a nested `children: [...]`
+// would make every item after it invisible to that audit and silently reopen the
+// direct-hash hole the July pass closed.
 //
 // IMPORTANT: every `key` here is a route hash. The July 2026 overhaul only
 // REGROUPED and RELABELLED items — no key was renamed — so all deep links,
@@ -83,6 +97,26 @@ function icon(name, w = 18, h = 18) {
 const NAV_ITEMS = [
   { section: 'Overview' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+
+  // Everything you READ rather than write. Before Sep 2026 these four were spread
+  // across three sections — the hub under "Finance", Demand Ranking / Catalogue
+  // Engagement / Price Monitor under "Catalog" — so there was no one place to go
+  // and look at how the business is doing.
+  { section: 'Analytics' },
+  // Route key stays `analytics` (deep links, ?tab= state and the margin /
+  // financial-health / website-traffic redirects all resolve through it). The LABEL
+  // changed from "Finance" in Sep 2026: under an ANALYTICS header, "Finance" misnames
+  // a hub whose seven tabs include Traffic and Acquisition. `hubTabs` gives it the
+  // indented sub-links.
+  { key: 'analytics', label: 'Performance', icon: 'finance', ownerOnly: true, hubTabs: 'analytics' },
+  { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
+  // Catalogue Engagement sits with Demand Ranking: both answer "which products
+  // deserve attention", one from interest signals and one from measured views.
+  { key: 'catalog-engagement', label: 'Catalogue Engagement', icon: 'analytics', ownerOnly: true },
+  // Price Monitor reports competitor prices and margin gaps. It can also WRITE prices,
+  // which is why it sat under Catalog until Sep 2026 — but the owner reads it far more
+  // often than they reprice from it, and it belongs beside the margin analysis it feeds.
+  { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
 
   { section: 'Sales' },
   { key: 'orders', label: 'Orders', icon: 'orders' },
@@ -100,14 +134,10 @@ const NAV_ITEMS = [
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
   { key: 'product-codes', label: 'Product Codes', icon: 'products', ownerOnly: true },
-  { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
   // What we PAY, next to what competitors CHARGE. Owner-only because it renders
-  // supplier cost on every row, and the endpoints behind it are super_admin.
+  // supplier cost on every row, and the endpoints behind it are super_admin. Stays in
+  // Catalog (unlike Price Monitor): its day job is mapping supplier lines to products.
   { key: 'supplier-prices', label: 'Supplier Prices', icon: 'suppliers', ownerOnly: true },
-  { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
-  // Catalogue engagement sits with Demand Ranking: both answer "which products
-  // deserve attention", one from interest signals and one from measured views.
-  { key: 'catalog-engagement', label: 'Catalogue Engagement', icon: 'analytics', ownerOnly: true },
 
   { section: 'Data Operations' },
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', ownerOnly: true },
@@ -118,12 +148,10 @@ const NAV_ITEMS = [
   // `control-center` so `#control-center?tab=…` deep links and cc2-topbar keep working.
   { key: 'control-center', label: 'Site Health', icon: 'lab', ownerOnly: true },
 
+  // Expenses is a ledger you WRITE, which is why it stayed here when the analytics
+  // hub moved out in Sep 2026 — its Overview tab reports, but its other two tabs are
+  // data entry. A one-item section, like Overview and Content.
   { section: 'Finance' },
-  // Label is "Finance" but the route is #analytics: the analytics hub IS the finance
-  // surface (Revenue/Health/Margins/Pricing/Market-Intel/Traffic). Kept as-is so the
-  // existing #analytics deep links and the website-traffic/margin/financial-health
-  // redirects into it keep resolving.
-  { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
   { key: 'expenses', label: 'Expenses', icon: 'invoice', ownerOnly: true },
 
   { section: 'Marketing' },
@@ -168,12 +196,18 @@ const ROUTE_REDIRECTS = {
   'refunds': 'orders',
   'ribbons': 'products', // retired May 2026 — preserved so old bookmarks land on Products
   'reviews': 'customers',
-  'margin': 'analytics',
-  'financial-health': 'analytics',
+  // These two land on their own TAB, not just the hub. They pointed at a bare
+  // `analytics` until Sep 2026 — so #margin, a bookmark whose whole meaning is "take me
+  // to Margins", dropped you on Revenue. It could not have been fixed before: arriving
+  // at `analytics?tab=margins` from another page worked, but from inside the hub the
+  // router ignored the change entirely (ERR-208). `website-traffic` below has always
+  // carried its tab; these now match it.
+  'margin': 'analytics?tab=margins',
+  'financial-health': 'analytics?tab=health',
   'coupons': 'promotions',
   // June 2026 IA overhaul — folded surfaces keep working from old bookmarks,
   // landing on the exact tab (hubs read ?tab= from the hash).
-  'website-traffic': 'analytics?tab=traffic',   // now the Finance "Traffic" tab
+  'website-traffic': 'analytics?tab=traffic',   // the hub's "Traffic" tab
   'image-audit': 'genuine-image-audit',         // legacy image audit retired
   'contact-emails': 'settings?tab=notifications', // now a Settings hub tab
   'shipping-rates': 'settings?tab=shipping',
@@ -210,6 +244,59 @@ let _currentPageName = null;
 let _navToken = 0;
 
 // ---- Shell Rendering ----
+// ---- Sidebar group state ----
+// Sep 2026: sidebar sections are collapsible (ADMIN_CENTRE_AUDIT.md §8 item 9).
+// We persist ONLY the ids the operator explicitly collapsed, never the expanded ones —
+// so a section added in a later release defaults to open instead of inheriting a stale
+// preference that was recorded before it existed.
+const NAV_GROUPS_KEY = 'admin_nav_groups';
+
+function readCollapsedGroups() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) || '[]');
+    return new Set(Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : []);
+  } catch {
+    return new Set(); // private mode / corrupted value — every group open is the safe default
+  }
+}
+
+function writeCollapsedGroups(set) {
+  try { localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify([...set])); } catch { /* non-fatal */ }
+}
+
+const groupId = (section) =>
+  String(section).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+// The indented sub-links under a hub item. `hubTabs` names a manifest, never the tabs:
+// the Analytics rows come from the same ANALYTICS_TABS that pages/analytics.js renders
+// its own bar from, so the sidebar cannot list a tab the page doesn't have (or miss one
+// it does). Sub-links carry BOTH data-nav (the route) and data-nav-tab (the ?tab= value)
+// — setActiveNav needs the pair to tell "Traffic" from "Performance".
+function hubTabsFor(item) {
+  return item.hubTabs === 'analytics' ? ANALYTICS_TABS : [];
+}
+
+function hubTabRowsHtml(item) {
+  return hubTabsFor(item).map(t => `
+        <a href="#${esc(item.key)}?tab=${esc(t.id)}" class="admin-nav-item admin-nav-item--sub"
+           data-nav="${esc(item.key)}" data-nav-tab="${esc(t.id)}" data-tooltip="${esc(t.label)}">
+          <span class="admin-nav-label">${esc(t.label)}</span>
+        </a>`).join('');
+}
+
+function navRowHtml(item) {
+  if (item.divider) return '<div class="admin-nav-divider"></div>';
+  const navHref = item.href || `#${item.key}`;
+  const badgeHtml = item.badge
+    ? ` <span class="admin-nav-badge" id="nav-badge-${esc(item.key)}" style="display:none"></span>`
+    : '';
+  return `
+        <a href="${esc(navHref)}" class="admin-nav-item" data-nav="${esc(item.key)}" data-tooltip="${esc(item.label)}">
+          ${icon(item.icon)}
+          <span class="admin-nav-label">${esc(item.label)}${badgeHtml}</span>
+        </a>${hubTabRowsHtml(item)}`;
+}
+
 function renderSidebar() {
   const sidebar = document.getElementById('sidebar');
   const isOwner = AdminAuth.isOwner();
@@ -227,35 +314,47 @@ function renderSidebar() {
         ${icon('logout', 16, 16)}
       </button>
     </div>
-    <nav class="admin-sidebar__nav">
+    <nav class="admin-sidebar__nav" id="admin-nav">
   `;
 
-  // A section label is held "pending" until its first visible child is about
-  // to render — so an all-owner group renders no orphaned header for staff.
-  let pendingSection = null;
+  // Bucket the flat NAV_ITEMS into sections FIRST. The July 2026 rule — a section whose
+  // every item is hidden from this role must render nothing at all, header included —
+  // used to be a "pending label" string emitted just before the first visible child.
+  // That worked when the header and the items were unrelated siblings; a real group
+  // wrapper has to be opened before its children, so the decision has to be made up
+  // front. Same rule, decided earlier.
+  const groups = [];
+  let current = { section: null, items: [] };
+  groups.push(current);
   for (const item of NAV_ITEMS) {
-    if (item.divider) {
-      pendingSection = null;
-      html += '<div class="admin-nav-divider"></div>';
-      continue;
-    }
     if (item.section) {
-      pendingSection = item.section;
+      current = { section: item.section, items: [] };
+      groups.push(current);
       continue;
     }
     if (item.ownerOnly && !isOwner) continue;
-    if (pendingSection) {
-      html += `<div class="admin-nav-section"><div class="admin-nav-section__label">${esc(pendingSection)}</div></div>`;
-      pendingSection = null;
-    }
-    const navHref = item.href || `#${item.key}`;
-    const badgeHtml = item.badge ? ` <span class="admin-nav-badge" id="nav-badge-${esc(item.key)}" style="display:none"></span>` : '';
+    current.items.push(item);
+  }
+
+  const collapsed = readCollapsedGroups();
+  for (const g of groups) {
+    if (!g.items.length) continue;
+    const rows = g.items.map(navRowHtml).join('');
+    if (!g.section) { html += rows; continue; }   // items before the first section header
+    const gid = groupId(g.section);
+    const isCollapsed = collapsed.has(gid);
+    // The label keeps the .admin-nav-section__label class so the existing theme colours
+    // and the 60px-rail "hide every label" rule keep applying to it unchanged.
     html += `
-      <div class="admin-nav-section">
-        <a href="${esc(navHref)}" class="admin-nav-item" data-nav="${item.key}" data-tooltip="${esc(item.label)}">
-          ${icon(item.icon)}
-          <span class="admin-nav-label">${esc(item.label)}${badgeHtml}</span>
-        </a>
+      <div class="admin-nav-group${isCollapsed ? ' is-collapsed' : ''}" data-group="${esc(gid)}">
+        <button type="button" class="admin-nav-group__toggle admin-nav-section__label"
+                data-nav-group-toggle="${esc(gid)}"
+                aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-controls="navgrp-${esc(gid)}">
+          <span class="admin-nav-group__text">${esc(g.section)}</span>
+          <span class="admin-nav-group__chevron">${icon('chevronDown', 12, 12)}</span>
+        </button>
+        <div class="admin-nav-group__items" id="navgrp-${esc(gid)}">${rows}
+        </div>
       </div>
     `;
   }
@@ -283,6 +382,21 @@ function renderSidebar() {
   collapseBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
   document.getElementById('app-shell').appendChild(collapseBtn);
   collapseBtn.addEventListener('click', toggleCollapse);
+
+  // Collapse/expand a sidebar group. One delegated listener on the nav — the rows inside
+  // are anchors and must keep their normal navigation, so we only act on the toggle.
+  document.getElementById('admin-nav')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-nav-group-toggle]');
+    if (!btn) return;
+    const group = btn.closest('.admin-nav-group');
+    if (!group) return;
+    const nowCollapsed = group.classList.toggle('is-collapsed');
+    btn.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+    const set = readCollapsedGroups();
+    if (nowCollapsed) set.add(btn.dataset.navGroupToggle);
+    else set.delete(btn.dataset.navGroupToggle);
+    writeCollapsedGroups(set);
+  });
 
   // Back to site - via explicit sidebar button and user card click
   const goToSite = () => { window.location.href = '/'; };
@@ -319,6 +433,57 @@ function getRouteFromHash() {
   return hash || 'dashboard';
 }
 
+/**
+ * The part of the address BELOW the route — today just `?tab=`, which is how every hub
+ * (#analytics, #control-center, #settings, #orders, …) records which panel is showing.
+ * getRouteFromHash() throws this away on purpose; the router needs both halves.
+ */
+function getRouteDetailFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  const q = hash.indexOf('?');
+  if (q < 0) return {};
+  const tab = new URLSearchParams(hash.slice(q + 1)).get('tab');
+  return tab ? { tab } : {};
+}
+
+/**
+ * Paint the sidebar for `route` (+ `tab`, when the page has told us which one is showing).
+ *
+ * A hub route matches TWO kinds of row: the parent item (data-nav only) and its indented
+ * sub-links (data-nav + data-nav-tab). Exactly one of them should read as "you are here":
+ * the sub-link when we know the tab, the parent otherwise. The parent of an active
+ * sub-link keeps a quieter `is-current-hub` marker so the trail doesn't lose its middle
+ * step.
+ */
+function setActiveNav(route, tab) {
+  const rows = document.querySelectorAll('.admin-nav-item');
+  let subMatch = null;
+  if (tab) {
+    for (const el of rows) {
+      if (el.dataset.nav === route && el.dataset.navTab === tab) { subMatch = el; break; }
+    }
+  }
+  rows.forEach(el => {
+    const isRoute = el.dataset.nav === route;
+    const isSub = !!el.dataset.navTab;
+    el.classList.toggle('active', subMatch ? el === subMatch : (isRoute && !isSub));
+    el.classList.toggle('is-current-hub', !!subMatch && isRoute && !isSub);
+  });
+  expandGroupFor(subMatch || document.querySelector('.admin-nav-item.active'));
+}
+
+/**
+ * Open the group holding the active row. Deliberately NOT persisted: showing you where
+ * you are should not silently rewrite a section you chose to keep shut — the stored set
+ * records explicit toggles only.
+ */
+function expandGroupFor(el) {
+  const group = el?.closest?.('.admin-nav-group');
+  if (!group || !group.classList.contains('is-collapsed')) return;
+  group.classList.remove('is-collapsed');
+  group.querySelector('[data-nav-group-toggle]')?.setAttribute('aria-expanded', 'true');
+}
+
 async function navigate(pageName) {
   // Handle legacy route redirects
   if (ROUTE_REDIRECTS[pageName]) {
@@ -336,10 +501,10 @@ async function navigate(pageName) {
     _currentPage.destroy();
   }
 
-  // Update nav active state
-  document.querySelectorAll('.admin-nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.nav === pageName);
-  });
+  // Update nav active state. The tab (if any) is refined a moment later by the page's
+  // own admin:tab-change announcement — a bare #analytics resolves to a default tab that
+  // only the hub knows.
+  setActiveNav(pageName, getRouteDetailFromHash().tab);
 
   // Close mobile sidebar
   document.getElementById('sidebar')?.classList.remove('open');
@@ -422,9 +587,24 @@ function openCommandPalette() {
   _cmdPaletteOpen = true;
 
   const isOwner = AdminAuth.isOwner();
-  const commands = NAV_ITEMS
-    .filter(item => !item.divider && !item.section && (!item.ownerOnly || isOwner))
-    .map(item => ({ key: item.key, label: item.label, icon: item.icon, type: 'page' }));
+  const pages = NAV_ITEMS.filter(item => !item.divider && !item.section && (!item.ownerOnly || isOwner));
+  const commands = pages.map(item => ({ key: item.key, label: item.label, icon: item.icon, type: 'page' }));
+
+  // Hub tabs are real destinations with their own addresses, so they are searchable too —
+  // "traffic" and "acquisition" are things the owner looks for by name, not by remembering
+  // which hub they were filed under. Same manifest as the sidebar; gated with its parent.
+  for (const item of pages) {
+    if (!item.hubTabs) continue;
+    for (const t of hubTabsFor(item)) {
+      commands.push({
+        key: item.key,
+        hash: `${item.key}?tab=${t.id}`,
+        label: `${item.label} \u203a ${t.label}`,
+        icon: item.icon,
+        type: 'page',
+      });
+    }
+  }
 
   commands.push(
     { key: '_theme', label: 'Toggle Theme (Light/Dark)', icon: 'sun', type: 'action' },
@@ -458,7 +638,7 @@ function openCommandPalette() {
       `<div class="cmd-palette__item${i === activeIdx ? ' active' : ''}" data-idx="${i}">
         ${icon(cmd.icon, 16, 16)}
         <span class="cmd-palette__item-label">${esc(cmd.label)}</span>
-        ${cmd.type === 'page' ? `<span class="cmd-palette__item-hint">#${cmd.key}</span>` : ''}
+        ${cmd.type === 'page' ? `<span class="cmd-palette__item-hint">#${esc(cmd.hash || cmd.key)}</span>` : ''}
       </div>`
     ).join('') || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No results</div>';
   }
@@ -466,7 +646,7 @@ function openCommandPalette() {
   function execCommand(cmd) {
     closeCommandPalette();
     if (cmd.type === 'page') {
-      window.location.hash = cmd.key;
+      window.location.hash = cmd.hash || cmd.key;
     } else if (cmd.key === '_theme') {
       const root = document.querySelector('.admin');
       const current = root.getAttribute('data-theme');
@@ -528,7 +708,7 @@ function showShortcutsHelp() {
         <dt>g d</dt><dd>Go to Dashboard</dd>
         <dt>g p</dt><dd>Go to Products</dd>
         <dt>g o</dt><dd>Go to Orders</dd>
-        <dt>g a</dt><dd>Go to Finance</dd>
+        <dt>g a</dt><dd>Go to Performance (Analytics)</dd>
         <dt>g c</dt><dd>Go to Customers</dd>
         <dt>j / k</dt><dd>Navigate table rows</dd>
         <dt>Enter</dt><dd>Open focused row</dd>
@@ -654,7 +834,26 @@ async function boot() {
       const newRoute = getRouteFromHash();
       if (newRoute !== _currentPageName) {
         navigate(newRoute);
+        return;
       }
+      // Same page, different address: a sidebar sub-link into the hub we are already on.
+      // Until Sep 2026 this branch did not exist, so the click was silent — the hash
+      // changed, this listener compared route-without-query, saw no change and returned,
+      // and the hub only ever read ?tab= in its init() (ERR-208). Any hub can opt in by
+      // exporting onRouteChange; there is no registry to keep in step.
+      const detail = getRouteDetailFromHash();
+      setActiveNav(newRoute, detail.tab);
+      _currentPage?.onRouteChange?.(detail);
+    });
+
+    // A tab switched from INSIDE a page. Hubs persist the tab with history.replaceState
+    // (no back-button clutter), which fires no hashchange, so the announcement is the only
+    // way the sidebar hears about it. It is a DOM event rather than a call because app.js
+    // is evaluated as two module instances (see the __ADMIN_BOOTED__ guard below) and the
+    // page modules import the one that does NOT own this sidebar.
+    window.addEventListener('admin:tab-change', (e) => {
+      const { route, tab } = e.detail || {};
+      if (route && route === _currentPageName) setActiveNav(route, tab);
     });
 
     // Initial route

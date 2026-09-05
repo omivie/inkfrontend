@@ -65,6 +65,10 @@ const mod = import(pathToFileURL(path.join(ADMIN, 'utils', 'acquisition.js')).hr
 
 const PAGE = R('inkcartridges', 'js', 'admin', 'pages', 'acquisition.js');
 const HUB = R('inkcartridges', 'js', 'admin', 'pages', 'analytics.js');
+// Sep 2026: the hub's tabs moved into a manifest shared with the admin sidebar, so the
+// label and the module path now travel together in one object instead of in a TABS array
+// and a parallel moduleMap. See tests/admin-analytics-section-sep2026.test.js §5.
+const HUB_TABS = R('inkcartridges', 'js', 'admin', 'utils', 'analytics-tabs.js');
 const API = R('inkcartridges', 'js', 'admin', 'api.js');
 const CSS = R('inkcartridges', 'css', 'admin.css');
 
@@ -418,10 +422,14 @@ test('§6 api.js exposes all four endpoints through the LOUD helper', () => {
 });
 
 test('§6b the hub registers the Acquisition tab and can load it', () => {
-  assert.match(HUB, /\{ id: 'acquisition', label: 'Acquisition', lazy: true \}/);
-  assert.match(HUB, /'acquisition': '\.\/acquisition\.js'/,
-    'a tab in TABS with no moduleMap entry renders a permanent spinner');
-  assert.ok(HUB.indexOf("id: 'acquisition'") > HUB.indexOf("id: 'traffic'"),
+  assert.match(HUB_TABS, /\{ id: 'acquisition',\s+label: 'Acquisition',\s+lazy: '\.\/acquisition\.js' \}/,
+    "the Acquisition tab must carry its own module path. It used to be listed in a TABS " +
+    'array with `lazy: true` and named again in a separate moduleMap; a tab that appeared ' +
+    'in the first and was forgotten in the second rendered a permanent spinner. One object ' +
+    'now holds both, so that particular hole is closed by construction.');
+  assert.match(HUB, /const TABS = ANALYTICS_TABS;/,
+    'the hub must render the shared manifest, not a private copy of it');
+  assert.ok(HUB_TABS.indexOf("id: 'acquisition'") > HUB_TABS.indexOf("id: 'traffic'"),
     'it belongs beside Traffic, the other first-party traffic surface');
 });
 

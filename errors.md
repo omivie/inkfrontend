@@ -41,6 +41,101 @@ describing the same incident.
 
 ---
 
+## ERR-208 — Every hub tab in the admin has had an address for a year; from inside the hub, using it did nothing — **RESOLVED** (2026-09-05)
+
+**Date**: 2026-09-05 · **Context**: The owner asked for the analytics surfaces to be gathered:
+*"now that we have lots of analytics pages in the admin centre, i am thinking that we should
+create one dedicated section in the admin side bar instead of the multiple which would hold all
+the analytics sections we have neatly organised and placed."* The reorganisation is the feature.
+This entry is the bug that had to be fixed first, plus two the same fix exposed.
+
+**(a) 🚨 A link to a hub tab was inert whenever you were already on that hub.** The Analytics
+hub's seven panels each have a real address — `#analytics?tab=traffic` and friends. Two pieces of
+code decided what happened when you used one:
+
+```js
+// app.js — the router, on every hashchange
+const newRoute = getRouteFromHash();          // strips everything after '?'
+if (newRoute !== _currentPageName) navigate(newRoute);   // ...and otherwise, nothing
+
+// pages/analytics.js — the hub
+async init(container) { _activeTab = readTabFromHash() || 'revenue'; ... }   // read ONCE
+```
+
+Arriving from another page, the route changed, `navigate()` ran, `init()` read the tab: correct.
+Arriving from *inside* the hub, the route was identical, so the router returned — and `init()`
+never runs again. The hash in the address bar changed and **nothing else did.** No error, no
+console warning: the link simply had no effect. `website-traffic.js:562` has shipped a
+`#analytics?tab=traffic` link since June 2026 into exactly that dead spot.
+
+**(b) The two redirects that name a panel dropped the panel.** `ROUTE_REDIRECTS` mapped
+`'margin' → 'analytics'` and `'financial-health' → 'analytics'`, so `#margin` — a bookmark whose
+entire meaning is *take me to Margins* — landed on Revenue. `'website-traffic'` alone carried its
+tab. This could not have been fixed before (a) was: pointing them at `analytics?tab=margins` would
+have worked from elsewhere and been inert from inside the hub, which is worse than consistent.
+Both now carry their tab, verified in the running admin.
+
+**(c) One list of tabs had already become two, and the sidebar would have made three.**
+`analytics.js` held a `TABS` array for the tab bar *and* a separate `moduleMap` object keyed by
+the same seven ids for the lazy `import()`. A tab present in the first and forgotten in the second
+renders a permanent spinner. Putting tab links in the sidebar meant a third copy. They are now one
+manifest, `utils/analytics-tabs.js`, where the label and the module path live in the same object —
+imported by the hub and by the router, which is also the only reason the router can render a
+sub-link it has not hardcoded.
+
+**(d) Two tests were pinning a literal inside a MOVING cache key — and had already started
+deforming it.** `order-shipping-information-sep2026` asserted `/shipping-information/` and
+`orders-tracking-requested-column-sep2026` asserted `'[^']*tracking-requested'` against
+`APP_VERSION`. That is the ERR-063 anti-pattern `asset-cache-tokens.test.js` warns about at
+length. It was not hypothetical: every feature since had to *append* its slug rather than choose a
+name, so in four days the constant grew
+
+```
+2026.09.01-invoice-header-total-spacing
+  → 2026.09.05-shipping-information-tracking-requested-catalog-engagement-acquisition-ship-bridge
+```
+
+and this pass would have been the sixth to go red for naming itself honestly. Both now assert what
+they actually mean — `notEqual` against the value that shipped immediately before that feature —
+which is the form `admin-expenses-page-contract` and `admin-column-customization` already use.
+
+**WHY IT SHIPPED UNNOTICED**
+
+- Nothing ever threw. A dead link and a working link are indistinguishable without watching the
+  screen, and the one dead link in the codebase was on a sign-in stub almost nobody reaches.
+- The hub's own tab bar always worked, because it never went through the router — it mutates
+  `_activeTab` directly and records the result with `history.replaceState`. The address was an
+  *output* of the tab bar and had never been tested as an *input* to it.
+- `readTabFromHash()` exists, is correct, and is called exactly once per page load. A function
+  that reads the address is easy to mistake for a page that responds to it.
+- Every deep-link test navigates from somewhere else, which is the case that worked.
+
+**The lesson.** ERR-207's was *"a rule recorded as a comment inside the only function that honours
+it is a coincidence."* This is its routing twin: **a page that reads its address only at `init()`
+is not addressable — it is merely launchable.** The router had made the same assumption from the
+other side, treating everything after the `?` as decoration; between them, half of every hub's
+addresses worked in one direction only. The fix is small and it is a contract, not a patch: the
+router notices a change *below* the route and offers it to the page via `onRouteChange`, and a page
+that changes panel on its own says so with an `admin:tab-change` event — necessarily a DOM event,
+because `app.js` is evaluated as two module instances and the page modules import the one that does
+not own the sidebar.
+
+**Files**: `js/admin/utils/analytics-tabs.js` (new — the single tab manifest) ·
+`js/admin/pages/analytics.js` (`switchTab`/`announceTab`/`onRouteChange`, tabs and lazy paths from
+the manifest, label "Finance" → "Performance") · `js/admin/app.js` (`getRouteDetailFromHash`,
+`setActiveNav`, `expandGroupFor`, the query-only hashchange branch, the `admin:tab-change`
+listener, collapsible `renderSidebar()` groups, the Analytics section, `margin`/`financial-health`
+redirects, hub tabs in the command palette) · `css/admin.css` (`.admin-nav-group*`,
+`.admin-nav-item--sub`, the 60px-rail and 768px states) · `ADMIN_CENTRE_AUDIT.md` ·
+`tests/admin-analytics-section-sep2026.test.js` (new, +28 across §1–§10, with positive controls on
+both CSS slices) · `tests/demand-ranking-jul2026.test.js`, `tests/catalog-engagement-sep2026.test.js`,
+`tests/admin-ia-overhaul-jul2026.test.js` (section moved in lockstep) ·
+`tests/acquisition-analytics-sep2026.test.js` (asserts the manifest, not the two lists) ·
+`tests/order-shipping-information-sep2026.test.js`, `tests/orders-tracking-requested-column-sep2026.test.js`
+(the APP_VERSION pins, (d)).
+
+---
+
 ## ERR-207 — The one-step path I recommended twice in this log had never once worked, because the rule that makes it work lived in a comment inside the other surface — **RESOLVED** (2026-09-05)
 
 **Date**: 2026-09-05 · **Context**: The owner ticked **Mark the order shipped** on order
