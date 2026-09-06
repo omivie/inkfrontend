@@ -81,6 +81,27 @@ apart. It was not that nobody looked — it is that looking could not have told 
 **Code written against an endpoint that does not exist yet is untested code wearing a comment that
 says it is ready.**
 
+**Postscript, one hour later — the test that guarded this passed for the wrong reason.**
+`describeLadder is byte-identical without a contract price` read its baseline with
+`git show HEAD:inkcartridges/js/business.js` at test time. That is a baseline only while the change
+is UNCOMMITTED. The moment this commit landed, `HEAD` became the new file, `before` and `now` were
+the same implementation, and the comparison could never pass again — red on main for every session,
+and caught by another one within the hour. It had been green throughout the entire build of the
+thing it existed to guard.
+
+**The obvious fix was worse than the bug.** Stripping the two new keys from *both* sides turns it
+green and permanently vacuous: the shipped code compared to the shipped code, forever, with green
+meaning nothing. The baseline is now FROZEN —
+`tests/fixtures/ladder-baseline-pre-contract-pricing.json`, the pre-change implementation's own
+output over the production sweep, checked in. No git at test time, verified green in a clean shallow
+clone. And it guards itself: regenerate that fixture from current code and every ladder gains
+`basePrice`/`contractPrice`, so the test asserts those keys are ABSENT and fails loudly naming the
+commit to regenerate from (verified by injecting a regenerated baseline).
+
+**A baseline that is computed from the code under test is not a baseline.** `git show HEAD:` looks
+like an independent oracle and stops being one at exactly the moment the work ships — which is the
+one moment nobody re-runs the test expecting news.
+
 ### What shipped
 
 **(a) The Business page now lists real accounts.** Two addressable tabs
