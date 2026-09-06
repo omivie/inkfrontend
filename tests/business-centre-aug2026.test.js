@@ -870,13 +870,40 @@ test('§7 the §4 detail payload is displayed, under the customer-facing name', 
     }
 });
 
-test('§7 today’s reorder price comes from the live pricing path, never from history', () => {
+// UPDATED 2026-09-06. The invariant is unchanged — a reorder tile must never
+// print a price out of order history — but the mechanism moved.
+//
+// It used to be enforced by /top-products carrying NO price at all, with the
+// figure fetched separately from Business.getPricing. Since backend migration
+// 165 the tiles read /api/business/reorder-items, whose `price` is what THIS
+// ACCOUNT pays today (their contract price when one is set, else list) and is
+// computed server-side per request, not stored per order.
+//
+// So the assertions now pin the same rule at its new location: the price is a
+// server field read verbatim, the frontend still computes nothing, and a row
+// without one still says so out loud.
+test('§7 today’s reorder price comes from the server, never from order history', () => {
     const code = codeOnly(PAGE_JS);
-    assert.match(code, /Business\.getPricing/,
-        '/top-products carries no price on purpose — a March figure is not today’s price');
-    assert.match(code, /Business\.describeLadder/, 'the ladder interpreter is the one authority');
+    assert.match(code, /reorder-items/,
+        'the tiles read the endpoint whose `price` is what this account pays today');
+    // Scoped to the ENDPOINT path. `top-products-list` / `-empty` / `-error` are
+    // element ids in business.html and are deliberately unchanged: the tiles are
+    // the same tiles, fed from a better source.
+    assert.doesNotMatch(code, /business\/top-products/,
+        'the old endpoint carried no price and needed a second call — both are gone');
+    assert.doesNotMatch(code, /decorateReorderPrices/,
+        'the second pricing round trip is gone with it');
+
+    // The renderer is the whole surface for this rule, so scope to it.
+    const fn = code.slice(code.indexOf('function reorderPriceHtml'));
+    const body = fn.slice(0, fn.indexOf('\n    }') + 6);
+    assert.match(body, /Number\(it && it\.price\)/, 'the account price, read verbatim');
+    assert.match(body, /it\.list_price/, 'and list only as a struck-through "was"');
+    assert.doesNotMatch(body, /quantity_ordered|order_count/,
+        'nothing about the price may be derived from what was ordered before');
+
     assert.ok(!/\*\s*retail|retail\s*\*|\/\s*1\.15|\*\s*0\.\d/.test(code),
         'the frontend must not compute a business price — ERR-139');
     assert.match(code, /price unavailable/,
-        'a SKU the pricing call could not answer for renders an explicit unknown, not a guess');
+        'a row the server could not price renders an explicit unknown, not a guess');
 });

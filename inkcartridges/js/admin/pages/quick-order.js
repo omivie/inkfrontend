@@ -28,7 +28,7 @@ import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../com
 import {
   PRICE_AUTO, PRICE_MANUAL, MAX_QUOTE_LINES,
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume,
-  formatVolumePercent,
+  formatVolumePercent, contractBadge, accountNotice, OFFER_CONTRACT,
 } from '../utils/invoice-quote.js';
 import { costOrNull } from '../utils/invoice-math.js';
 import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
@@ -549,7 +549,11 @@ function scheduleQuote() {
 async function requestQuote() {
   const token = _editorToken;
   const seq = ++_quoteSeq;
-  const req = quoteRequestBody(_draft);
+  // The Quick Order draft genuinely carries a customer id (fillFromCustomer),
+  // so the account resolves server-side with no extra lookup. A contact-only or
+  // guest-order fill leaves it null and the quote is priced at list — which is
+  // correct: neither proves a business account.
+  const req = quoteRequestBody(_draft, { customerId: _draft.customer_id || null });
   if (!req) return;
   if (req.truncated > 0) warn(`quote covers the first ${MAX_QUOTE_LINES} lines; ${req.truncated} were not priced`);
 
@@ -576,7 +580,26 @@ async function requestQuote() {
   const host = _editorRefs?.drawer.body.querySelector('#qo-lines');
   if (!patchQuotedLineRows(host, _draft.lines, { noteHtml: lineQuoteNote })) renderLines();
 
+  renderAccountNotice();
   if (changed) refreshTotals();
+}
+
+/**
+ * The one sentence about the customer's business account, above the lines.
+ *
+ * Repainted on every quote rather than once on open, because the account is
+ * resolved from whoever the draft was filled from — and that can change while
+ * the editor is open. It is rendered even when nothing was priced: "this
+ * account has contract pricing but none of these products has a negotiated
+ * price" is a fact the operator needs in order to trust the numbers, and its
+ * absence is exactly what makes a suspended account look like a broken feature.
+ */
+function renderAccountNotice() {
+  const host = _editorRefs?.drawer.body.querySelector('#qo-account-notice');
+  if (!host) return;
+  const notice = accountNotice(_quote);
+  if (!notice) { host.innerHTML = ''; return; }
+  host.innerHTML = `<p class="inv-account-notice${notice.warn ? ' inv-account-notice--warn' : ''}">${esc(notice.message)}</p>`;
 }
 
 /** The quote's answer for one draft-line index, if we have one. */
@@ -597,11 +620,27 @@ function lineQuoteNote(l, i) {
     bits.push(`<span class="inv-vol inv-vol--applied">Volume &minus;${esc(formatVolumePercent(pct))}${esc(saving)}</span>`);
   } else {
     const offer = _volumeOffers.find((o) => o.position === i);
-    if (offer) {
+    if (offer && offer.kind === OFFER_CONTRACT) {
+      // A dollar figure and no percent: the backend supplies no contract
+      // percentage and we do not derive one.
+      bits.push(`<button type="button" class="inv-vol inv-vol--offer inv-vol--contract-offer" data-form-action="apply-contract" data-line="${i}">Apply contract price ${esc(money(offer.badge.unitPrice))}</button>`);
+    } else if (offer) {
       bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="apply-volume" data-line="${i}">Apply volume price ${esc(money(offer.badge.unitPrice))} (&minus;${esc(offer.badge.percentText)})</button>`);
     }
   }
   const ql = quoteLineAt(i);
+  // Read from the QUOTE, never from a draft field. A contract chip stamped on
+  // the line would be one refactor away from buildPayload() and the QO -> invoice
+  // bridge, and a negotiated rate does not belong in either.
+  const cb = contractBadge(ql);
+  if (cb) {
+    const saving = num(cb.lineSaving) > 0 ? ` · saves ${money(cb.lineSaving)}` : '';
+    // When a rung ALSO applied, the volume chip above is already showing a
+    // saving measured against the contract price, not against list. Say so, or
+    // the operator reads it as the full discount.
+    const onTop = Number.isFinite(pct) && pct > 0 ? ' (volume saving is on top of this)' : '';
+    bits.push(`<span class="inv-vol inv-vol--contract">Contract price ${esc(money(cb.unitPrice))}${esc(saving)}${esc(onTop)}</span>`);
+  }
   if (ql && ql.resolved && !ql.isActive) bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
   if (!bits.length) return '';
   return `<div class="inv-line__note">${bits.join('')}</div>`;
@@ -690,6 +729,25 @@ function onFormClick(e) {
     };
     _volumeOffers = _volumeOffers.filter((o) => o.position !== i);
     renderLines(); refreshTotals();
+  } else if (act === 'apply-contract') {
+    // A SEPARATE action from apply-volume on purpose. That handler stamps the
+    // three volume_* keys, which are saved into the record and cross the bridge
+    // to the invoice — routing a negotiated price through it would file it as a
+    // volume discount and print a rung that does not exist on the customer's
+    // document. Here the price moves and nothing is claimed.
+    const i = +e.target.closest('[data-line]').dataset.line;
+    const offer = _volumeOffers.find((o) => o.position === i);
+    if (!offer || offer.kind !== OFFER_CONTRACT || !_draft.lines[i]) return;
+    _draft.lines[i] = {
+      ..._draft.lines[i],
+      unitPrice: offer.badge.unitPrice,
+      priceSource: PRICE_AUTO,
+      volumePercent: null,
+      volumeSaving: null,
+      volumeQuantity: null,
+    };
+    _volumeOffers = _volumeOffers.filter((o) => o.position !== i);
+    renderLines(); refreshTotals();
   } else if (act === 'clear-fill') {
     _draft.customer = { name: '', company: '', phone: '', email: '', address: '' };
     _draft.contact_id = null;
@@ -760,6 +818,7 @@ function editorBodyHtml(d) {
 
       <section class="inv-section">
         <div class="inv-section__title">Products</div>
+        <div id="qo-account-notice"></div>
         <div class="inv-lines-head qo-lines-head${canSeeCost() ? '' : ' inv-line--nocost'}">
           <span>Product Code</span><span>Description</span><span>Qty</span><span>Unit Price${gstSub(GST_EXCL)}</span>${canSeeCost() ? `<span>Our Cost${gstSub(GST_EXCL)}</span>` : ''}<span></span>
         </div>

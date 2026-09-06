@@ -676,14 +676,45 @@ test('the create/update writes throw with details attached', () => {
   assert.match(update, /encodeURIComponent/);
 });
 
+// INVERTED 2026-09-06, when the backend shipped migration 165 and
+// `GET /api/admin/business/accounts` started answering 200. The URL assertion
+// is unchanged and still pins ERR-152; what moved is that the request is now
+// made by `listBusinessAccountsPage()` and the device rows became a FALLBACK
+// rather than a merge (a locally-recorded account that has since been closed on
+// the backend must not keep appearing in the invoice picker forever).
 test('listBusinessAccounts asks the REAL namespace, and local ids are tagged', () => {
-  const fn = API.match(/async listBusinessAccounts\(\)[\s\S]*?\n  \},/)[0];
-  assert.match(fn, /\/api\/admin\/business\/accounts/,
+  const page = API.match(/async listBusinessAccountsPage\([\s\S]*?\n  \},/)[0];
+  assert.match(page, /\/api\/admin\/business\/accounts/,
     'every admin business route lives under /api/admin/business/* — the old ' +
     '/api/admin/business-accounts was a guessed URL that could never have lit up (ERR-152)');
-  assert.doesNotMatch(fn, /admin\/business-accounts/);
+  assert.doesNotMatch(page, /admin\/business-accounts/);
+
+  const fn = API.match(/async listBusinessAccounts\(\)[\s\S]*?\n  \},/)[0];
   assert.match(fn, /_source: 'device'/,
     'a device-local id must be distinguishable from one the backend vouched for');
+});
+
+// ERR-221. The endpoint caps `limit` at 100 and over-limit is a hard 400, not a
+// clamp — so the caller that asked for 200 got a VALIDATION_FAILED envelope,
+// `resp.data` was undefined, and it silently returned the device-local rows:
+// exactly what it returned during the 404 years, with no toast and no warning.
+// The picker listed only accounts created in THIS browser while the real list
+// sat one working request away.
+test('the accounts list never asks for more than the endpoint will give (ERR-221)', () => {
+  const page = API.match(/async listBusinessAccountsPage\([\s\S]*?\n  \},/)[0];
+  assert.doesNotMatch(page, /limit=\d{3,}/,
+    '?limit=101 is a 400, not a clamp — measured live 2026-09-06');
+  assert.match(page, /BUSINESS_ACCOUNT_PAGE_MAX/,
+    'the ceiling is a named constant, not a literal repeated at each call site');
+  assert.match(API, /const BUSINESS_ACCOUNT_PAGE_MAX = 100;/);
+
+  // `status=approved` is ALSO a 400 here: this endpoint's vocabulary is
+  // active|suspended|closed. Filtering server rows for 'approved' — which the
+  // old code did — would have dropped every real row even once the limit was
+  // fixed. Two independent bugs, both looking like "the endpoint isn't live".
+  const fn = API.match(/async listBusinessAccounts\(\)[\s\S]*?\n  \},/)[0];
+  assert.doesNotMatch(fn, /'approved'/,
+    'approved is the STOREFRONT status vocabulary (/api/business/status); this route 400s on it');
 });
 
 test('an unreadable server list still returns null when nothing local is known', () => {
@@ -696,12 +727,42 @@ test('an unreadable server list still returns null when nothing local is known',
 // 7. Honesty — nothing on these surfaces claims more than it knows
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('the device-local list never calls itself the list of business accounts', () => {
-  assert.match(PAGE_SRC, /Accounts created on this device/);
-  assert.match(PAGE_SRC, /This is not the list of business accounts/i,
-    'GET /api/admin/business/accounts is a 404 — a heading that implied completeness would be ' +
-    'a fabricated collection (ERR-063/068/073)');
-  assert.match(PAGE_SRC, /404/, 'and it names the reason rather than hand-waving');
+// INVERTED 2026-09-06. This used to assert the OPPOSITE: that the page renders
+// "Accounts created on this device" and says plainly that
+// `GET /api/admin/business/accounts` is a 404. Both were true and both are now
+// false — the endpoint answers 200, and a device-local list beside the real one
+// is two lists that can disagree, which is worse than one that can be briefly
+// incomplete.
+//
+// The honesty requirement did not go away, it moved: the page must no longer
+// claim a 404 that does not happen, and it must not silently DELETE the local
+// record either, because that record may still hold the only copy of an id the
+// server has not returned. Hence reconciliation, and hence forgetting is a
+// click rather than a side effect.
+test('the page no longer claims a 404 the backend stopped returning', () => {
+  // Scoped to the COMMENT-STRIPPED source, i.e. what an operator can actually
+  // read on screen. The docblock still explains why the page used to look the
+  // way it did, and that history is worth keeping — the test is about the copy,
+  // not about forbidding the file to remember anything.
+  assert.doesNotMatch(PAGE, /Accounts created on this device/,
+    'the device registry is no longer a surface — the server list is');
+  assert.doesNotMatch(PAGE, /This is not the list of business accounts/i);
+  assert.doesNotMatch(PAGE, /404/,
+    'migration 165 shipped this endpoint; a stale 404 in the copy is a lie to the operator');
+});
+
+test('device records are reconciled, never auto-forgotten', () => {
+  assert.match(PAGE_SRC, /BusinessAccountRegistry/,
+    'the registry still exists — createBusinessAccount has nowhere else to put a fresh id');
+  assert.match(PAGE, /const complete = /,
+    'only a complete, unfiltered read can say an id is missing from the server');
+  // Forgetting is driven by a click handler, never by the paint. An automatic
+  // delete on the strength of a paginated read is absence-proves-absence — the
+  // exact mistake matchApplications() exists to prevent.
+  const paint = PAGE.match(/function paintReconciliation\([\s\S]*?\n\}/)[0];
+  assert.match(paint, /addEventListener\('click'/);
+  assert.match(paint, /if \(!complete\)/,
+    'an incomplete read must offer nothing rather than propose a deletion');
 });
 
 test('the applications queue is stated as read-only, with no invented action endpoint', () => {
@@ -777,7 +838,13 @@ test('every untrusted value the HTML builders interpolate is escaped', () => {
     ['business-upgrade.js localAccountHtml', fnBody(COMPONENT, 'localAccountHtml')],
     ['business-upgrade.js field', fnBody(COMPONENT, 'field')],
     ['business-upgrade.js addressFieldset', fnBody(COMPONENT, 'addressFieldset')],
-    ['business.js localAccountsHtml', fnBody(PAGE, 'localAccountsHtml')],
+    // `business.js localAccountsHtml` was here until 2026-09-06; the device list
+    // it rendered is gone (see above). These are the builders that replaced it,
+    // and they interpolate the same operator-typed values.
+    ['business.js paintAccounts', fnBody(PAGE, 'paintAccounts')],
+    ['business.js accountDetailsHtml', fnBody(PAGE, 'accountDetailsHtml')],
+    ['business.js accountHeaderHtml', fnBody(PAGE, 'accountHeaderHtml')],
+    ['business.js paintReconciliation', fnBody(PAGE, 'paintReconciliation')],
   ];
   // Builders that escape their own arguments. A call to one of these is safe;
   // this list is narrow on purpose, and each entry is asserted below.

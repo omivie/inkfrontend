@@ -121,12 +121,36 @@ function computeDiscountBreakdown(summary, total, b2bBlock) {
     // Half a cent of tolerance keeps float noise out of it.
     const residual = aggregate - loyalty - b2b;
 
+    // ── THE CONTRACT SPLIT IS A BREAKDOWN OF `b2b`, NOT AN ADDITION TO IT ──
+    //
+    // Since migration 165 an account can have its own negotiated price for a
+    // product. Mechanically that saving rides the EXISTING volume-discount line
+    // — it is inside `volume_discount.discount_amount`, and therefore already
+    // inside `summary.discount` and `summary.total`.
+    //
+    // So `contract` and `volumeOnly` below are the two halves of `b2b`, and
+    // `contract + volumeOnly === b2b`. Adding either to `b2b` would double-count
+    // a discount the customer receives once — the shopper would be shown a
+    // saving the total does not reflect, which is precisely the shape the
+    // `shortfall` guard exists to catch (ERR-169). There is no new arithmetic
+    // here and there must never be.
+    const contract = num(b2bMeta && b2bMeta.contract_discount_amount);
+    const volumeOnly = num(b2bMeta && b2bMeta.volume_discount_amount);
+    // Absent means "this backend does not report the split", which is NOT
+    // "zero lines were contract-priced". The label reads null as "don't claim".
+    const rawLineCount = b2bMeta && b2bMeta.contract_line_count;
+    const contractLineCount = rawLineCount == null || !Number.isFinite(Number(rawLineCount))
+        ? null : Number(rawLineCount);
+
     return {
         loyalty,
         b2b,
         other: Math.max(0, residual),
         total: aggregate,
         b2bMeta,
+        contract,
+        volumeOnly,
+        contractLineCount,
         shortfall: residual < -0.005 ? Math.abs(residual) : 0
     };
 }
@@ -161,6 +185,23 @@ if (typeof window !== 'undefined') window.computeDiscountBreakdown = computeDisc
  */
 function businessDiscountLabel(b2bMeta) {
     const company = b2bMeta && typeof b2bMeta.company_name === 'string' ? b2bMeta.company_name.trim() : '';
+
+    // CONTRACT PRICING (migration 165). The backend sets `source` to 'contract'
+    // when the whole saving is negotiated and 'volume+contract' when it is
+    // mixed. Naming it matters commercially: a customer who agreed a rate wants
+    // to see that rate honoured by name, and "Volume discount" beside a price
+    // they negotiated reads as the wrong discount having been applied.
+    //
+    // The ERR-149 rule still holds underneath: with no `company_name` we say
+    // what KIND of pricing it is, never who we think the shopper is. An absent
+    // company name is the server not naming one, which is evidence of nothing.
+    const source = b2bMeta && typeof b2bMeta.source === 'string' ? b2bMeta.source : '';
+    if (source === 'contract') {
+        return company ? `Contract pricing — ${company}` : 'Contract pricing';
+    }
+    if (source === 'volume+contract') {
+        return company ? `Volume & contract pricing — ${company}` : 'Volume & contract pricing';
+    }
     return company ? `Volume discount — ${company}` : 'Volume discount';
 }
 if (typeof window !== 'undefined') window.businessDiscountLabel = businessDiscountLabel;
@@ -1416,7 +1457,20 @@ const Cart = {
                 // as `price` because the ladder is compared against retail, and a
                 // renamed field is exactly what hid the bug.
                 retail_price: item.product.retail_price,
-                quantity_breaks: Array.isArray(item.quantity_breaks) ? item.quantity_breaks : null
+                quantity_breaks: Array.isArray(item.quantity_breaks) ? item.quantity_breaks : null,
+                // CONTRACT PRICING (migration 165). Same whitelist trap, one
+                // field further along: this map DISCARDS everything it does not
+                // name, which is how the ladder went missing in ERR-150.
+                //
+                // `contract_price` is this account's own negotiated price, or
+                // null. `price_source` says which of the three actually applied
+                // — 'contract' | 'volume' | 'list' — and is the only honest way
+                // to label a line, because a contract price does NOT always win:
+                // the account is charged min(contract, ladder, list), so a deep
+                // enough quantity rung beats it and the line is then a volume
+                // line despite the contract existing.
+                contract_price: item.contract_price != null ? item.contract_price : null,
+                price_source: item.price_source || null
             };
             parsed.key = self.cartItemKey(parsed);
             // printer_slug is a CLIENT-SIDE annotation — the server cart has no
@@ -2528,7 +2582,7 @@ const Cart = {
      * @param {number} discount  aggregate discount (Cart.getDiscount())
      */
     _renderDiscountRows: function(discount) {
-        const { loyalty, b2b, other, b2bMeta, shortfall } = computeDiscountBreakdown(this.serverSummary, discount);
+        const { loyalty, b2b, other, b2bMeta, shortfall, contract, contractLineCount } = computeDiscountBreakdown(this.serverSummary, discount);
 
         // The footing gate (ERR-169). Called from HERE rather than from the two
         // summary renderers because this is the one function both of them share —
@@ -2567,6 +2621,7 @@ const Cart = {
         // customer's discount rate rather than an average over their basket.
         const note = document.getElementById('cart-b2b-note');
         if (note) {
+            const bits = [];
             const flooredLines = b2bMeta && Number(b2bMeta.floored_line_count) > 0;
             if (b2b > 0 && flooredLines) {
                 const pct = b2bMeta && Number.isFinite(Number(b2bMeta.effective_percent))
@@ -2575,7 +2630,26 @@ const Cart = {
                 const realised = pct != null && typeof Business !== 'undefined'
                     ? ` That works out at ${Business.formatPercent(pct)} across your cart.`
                     : '';
-                note.textContent = 'Some items are already at their best possible price.' + realised;
+                bits.push('Some items are already at their best possible price.' + realised);
+            }
+
+            // CONTRACT PRICING. `contractLineCount` is null when this backend
+            // does not report the split — say nothing then, rather than "0 lines
+            // at your agreed price", which is a claim we cannot support.
+            //
+            // The number quoted is `contract`, which is a SUBSET of `b2b` and is
+            // therefore already inside the row above. It is described as "of
+            // this" for exactly that reason: two figures side by side invite
+            // addition, and adding them would overstate the saving.
+            if (b2b > 0 && contractLineCount != null && contractLineCount > 0) {
+                const lines = `${contractLineCount} item${contractLineCount === 1 ? '' : 's'}`;
+                bits.push(contract > 0 && contract < b2b - 0.005
+                    ? `${lines} at your agreed price (${formatPrice(contract)} of this).`
+                    : `${lines} at your agreed price.`);
+            }
+
+            if (bits.length) {
+                note.textContent = bits.join(' ');
                 note.hidden = false;
             } else {
                 note.hidden = true;

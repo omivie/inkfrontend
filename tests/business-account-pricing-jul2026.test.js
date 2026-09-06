@@ -1188,8 +1188,15 @@ test('PDP: the sticky buy-bar tracks the QUANTITY, it is not locked to one price
     // The bar must show what this add-to-cart will actually charge: the rung's
     // unit price when one applies, retail when the quantity is below the entry.
     assert.match(src, /offerAtQuantity/);
-    assert.match(src, /rung \? rung\.businessPrice : ladder\.retailPrice/,
-        'below the entry rung the sticky price is RETAIL, because that is what is charged');
+    // UPDATED 2026-09-06 (contract pricing, backend migration 165). The rule is
+    // unchanged — the bar shows WHAT THIS ADD-TO-CART WILL CHARGE — but below
+    // the entry rung that is no longer always retail: an account with a
+    // negotiated price for this product pays that price at quantity 1.
+    // `ladder.basePrice` IS `ladder.retailPrice` unless a contract price
+    // applies, so this is the same assertion for every shopper who has no
+    // contract, and a correct one for the few who do.
+    assert.match(src, /rung \? rung\.businessPrice : ladder\.basePrice/,
+        'below the entry rung the sticky price is what this customer actually pays');
     assert.match(src, /businessLocked = '1'/, 'the generic mirror must still be held off');
 
     // And the quantity controls repaint it.
@@ -1231,7 +1238,15 @@ test('PDP: every value interpolated into HTML is escaped', () => {
 
 test('PDP: the live status line is written with textContent, never innerHTML', () => {
     const src = stripComments(pdpVolumeSource());
-    const sync = src.slice(src.indexOf('syncVolumePricing()'));
+    // Scoped to syncVolumePricing's own DECLARATION, not to the first mention of
+    // its name. renderVolumePricing calls it, so `indexOf('syncVolumePricing()')`
+    // used to land on that call site and sweep in every sibling function that
+    // followed — which is how an unrelated builder's insertAdjacentHTML could
+    // fail a test about the status line. (Widened accidentally; narrowed
+    // 2026-09-06. The assertions themselves are unchanged.)
+    const decl = src.indexOf('syncVolumePricing() {');
+    assert.ok(decl >= 0, 'syncVolumePricing must exist');
+    const sync = src.slice(decl);
     assert.match(sync, /status\.textContent = parts\.join/);
     assert.doesNotMatch(sync, /status\.innerHTML/);
     assert.doesNotMatch(sync, /insertAdjacentHTML/);

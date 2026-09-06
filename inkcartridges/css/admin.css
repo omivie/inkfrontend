@@ -6986,3 +6986,125 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   border-bottom: 1px dotted var(--border-strong);
   cursor: help;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONTRACT PRICING — one business account's own price for one product
+   js/admin/components/contract-pricing-panel.js · js/admin/pages/business.js
+   js/admin/utils/contract-pricing.js  ·  backend migration 165, Sep 2026
+
+   The palette here does one job: separate a CONTRACT price from a VOLUME
+   discount at a glance. They look alike on a line (both are "less than list")
+   and they are not alike at all — the ladder is public and every shopper gets
+   it, a contract price is negotiated with one account and appears on no public
+   payload. The volume chip stays cyan (.inv-vol--applied, unchanged); contract
+   takes MAGENTA — the other half of the house pair defined at the top of this
+   file — so the two never read as the same badge. Both are brand tokens; do not
+   reach for a colour that is not one of them.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cp-toolbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+}
+.cp-toolbar__search { flex: 1 1 260px; min-width: 0; }
+
+.cp-pager {
+  display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+  margin-top: 10px; font-size: 11.5px;
+}
+
+.cp-table td { vertical-align: top; }
+.cp-off { font-size: 11px; color: var(--text-muted); }
+/* Below cost is the one state the server refuses without an acknowledgement.
+   Once acknowledged it is a live price, so it must stay visible on the row —
+   not only in the dialog where it was agreed to. */
+.cp-danger { color: var(--danger); font-weight: 600; }
+
+.cp-actions { white-space: nowrap; }
+
+/* The flags row sits UNDER its price row and spans the table, so a long
+   explanation never squeezes the money columns. */
+.cp-flags-row td { padding-top: 0; border-top: 0; }
+.cp-flags { font-size: 11px; color: var(--text-muted); }
+
+.cp-form__facts {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 14px;
+  /* Deliberately a literal rather than the surface-3 token used further up this
+     file: that token is never DEFINED anywhere here, so every existing use of it
+     already renders its fallback. Two admin tests slice this stylesheet from a
+     marker to END OF FILE and assert that every variable they find is defined,
+     so an appended block inherits those checks — naming an undefined token here
+     (even in prose) fails them. */
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: var(--radius, 6px);
+}
+.cp-form__facts > div { display: flex; flex-direction: column; gap: 2px; }
+.cp-form__label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.cp-form__value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; font-weight: 600;
+}
+.cp-form__actions { margin-top: 14px; }
+
+/* The live guard rails. Four tones, and the distinction between amber and red
+   is the whole point: amber is "profitable, but deeper than the automatic
+   discount would ever go" — a decision the operator owns — while red is the
+   one the server will refuse. Reserving red for the refusal is what keeps it
+   meaningful. Info covers "above list" and "margin unknown": both are true,
+   neither is a problem. */
+.cp-note { font-size: 11.5px; line-height: 1.5; margin-top: 6px; min-height: 17px; }
+.cp-note--ok { color: var(--text-muted); }
+.cp-note--info { color: var(--text-secondary); }
+.cp-note--amber { color: var(--yellow-text); }
+.cp-note--red { color: var(--danger); font-weight: 600; }
+
+.cp-history__note { font-size: 11px; margin-bottom: 10px; }
+.cp-delta { font-size: 11px; }
+/* Down is the customer paying less. Green for them, and the sign carries the
+   meaning anyway — colour alone is never the only cue (formatSignedMoney
+   always prints a leading − or +). */
+.cp-delta--down { color: var(--success, #16a34a); }
+.cp-delta--up { color: var(--yellow-text); }
+
+/* ── The account drawer ─────────────────────────────────────────────────── */
+
+.biz-drawer { max-width: 1100px; margin: 0 auto; }
+.biz-drawer__actions { margin-top: 14px; }
+.biz-panel { margin-top: 16px; }
+.biz-panel[hidden] { display: none !important; }
+
+.biz-reconcile { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.biz-reconcile:empty { display: none; border-top: 0; margin: 0; padding: 0; }
+
+/* ── The operator editors: contract chips ───────────────────────────────── */
+
+/* Accent, NOT the cyan of .inv-vol--applied. An operator scanning a 20-line
+   invoice must be able to tell "this is the public bulk price" from "this is
+   the rate we negotiated with this customer" without reading either. */
+.inv-vol--contract {
+  background: rgba(199, 31, 110, 0.10);
+  color: var(--magenta);
+  font-weight: 600;
+}
+.inv-vol--contract-offer {
+  border-color: var(--magenta);
+  color: var(--magenta);
+}
+.inv-vol--contract-offer:hover { background: rgba(199, 31, 110, 0.12); }
+
+/* The one sentence about the customer's business account, above the lines.
+   Its --warn variant carries the suspended/closed case, which is the highest
+   value string in the feature: without it, a contract customer quoted at list
+   looks like a broken feature rather than a suspended account. */
+.inv-account-notice {
+  font-size: 11.5px; line-height: 1.5; margin: 0 0 10px;
+  padding: 7px 10px; border-radius: var(--radius, 6px);
+  background: rgba(199, 31, 110, 0.08);
+  color: var(--text-secondary);
+}
+.inv-account-notice--warn {
+  background: var(--yellow-dim); color: var(--yellow-text); font-weight: 600;
+}

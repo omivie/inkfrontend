@@ -177,6 +177,10 @@ const Business = {
     _cacheOwner: undefined,
     _statusPromise: null,
     _priceCache: new Map(),   // sku -> item from the AUTHED route; owner-scoped
+    // The company name the AUTHED pricing envelope last reported. Owner-scoped
+    // like _priceCache and cleared with it — it names one account, so it must
+    // never survive a sign-out any more than the prices do.
+    _lastCompanyName: null,
     // sku -> item built from a PUBLIC catalog payload. Identical for every
     // shopper, so it is deliberately NOT owner-scoped and reset() leaves it
     // alone: signing in or out cannot change a public price, and binning it
@@ -369,6 +373,29 @@ const Business = {
         const retailPrice = Number(item.retail_price);
         if (!Number.isFinite(retailPrice) || retailPrice <= 0) return null;
 
+        // ── THE PRICE THE LADDER IS MEASURED AGAINST ──────────────────────
+        //
+        // Normally that is retail. For an account with a CONTRACT price on this
+        // product (migration 165) it is the contract price, because that is what
+        // this customer pays at quantity 1 — and a "saving" measured from retail
+        // would overstate what buying more actually gets them.
+        //
+        // The backend already sends this account's rungs relative to the
+        // contract price and drops the ones that do not beat it, so `basePrice`
+        // changes NO arithmetic; it changes what the drop test and the savings
+        // fallback compare against. With no contract price, `basePrice` IS
+        // `retailPrice` and every existing ladder is byte-identical — pinned by
+        // a test over the recorded Jul-2026 fixtures, because this is the one
+        // interpreter four surfaces read.
+        //
+        // `contract_price` only ever appears on the AUTHED payload, which lands
+        // in the owner-scoped `_priceCache`. It must never reach `_ladderCache`,
+        // which is public and deliberately never wiped — see the cache note in
+        // the header.
+        const contractPrice = Number(item.contract_price);
+        const hasContract = Number.isFinite(contractPrice) && contractPrice > 0 && contractPrice < retailPrice;
+        const basePrice = hasContract ? contractPrice : retailPrice;
+
         if (!Array.isArray(item.quantity_breaks)) {
             const v1 = item.business_price !== undefined;
             this._warn(
@@ -409,7 +436,9 @@ const Business = {
             // start one rung too high.
             if (!Number.isFinite(minQuantity) || minQuantity < 2) continue;
             if (!Number.isFinite(businessPrice) || businessPrice <= 0) continue;
-            if (businessPrice >= retailPrice) { droppedAtOrAboveRetail++; continue; }
+            // Measured against basePrice: a rung that does not beat what this
+            // customer already pays has nothing to advertise, contract or not.
+            if (businessPrice >= basePrice) { droppedAtOrAboveRetail++; continue; }
 
             // savings_amount is DEFINED by the contract as retail_price -
             // business_price. Preferring the server's figure and subtracting two
@@ -419,7 +448,7 @@ const Business = {
             const rawSavings = Number(raw.savings_amount);
             const savings = Number.isFinite(rawSavings) && rawSavings > 0
                 ? rawSavings
-                : Math.round((retailPrice - businessPrice) * 100) / 100;
+                : Math.round((basePrice - businessPrice) * 100) / 100;
 
             const percent = Number(raw.effective_percent);
 
@@ -452,6 +481,10 @@ const Business = {
         return {
             sku,
             retailPrice,
+            // What this customer pays at qty 1, and what the rungs are measured
+            // from. Equal to retailPrice unless a contract price applies.
+            basePrice,
+            contractPrice: hasContract ? contractPrice : null,
             breaks,
             entry: breaks[0],
             best: breaks[breaks.length - 1],
@@ -605,6 +638,7 @@ const Business = {
     reset() {
         this._statusPromise = null;
         this._priceCache.clear();
+        this._lastCompanyName = null;
         this._cacheOwner = undefined;
         this._statusDegraded = false;
     },
@@ -902,6 +936,12 @@ const Business = {
                     'the backend pricing model may have changed. Ladders may render incorrectly.'
                 );
             }
+            // Contract pricing (migration 165): the envelope names the account
+            // whose prices these are. Kept beside the prices, in the same
+            // owner-scoped lifetime, so a label can never outlive the data.
+            if (typeof res.data.company_name === 'string' && res.data.company_name.trim()) {
+                this._lastCompanyName = res.data.company_name.trim();
+            }
             const items = Array.isArray(res.data.items) ? res.data.items : [];
             const answered = new Set();
             for (const item of items) {
@@ -927,6 +967,79 @@ const Business = {
     async getLadderFor(sku) {
         const { items } = await this.getPricing([sku]);
         return this.describeLadder(items.get(sku));
+    },
+
+    /**
+     * This account's own negotiated price for one SKU, for the PDP.
+     *
+     * ── WHY THIS EXISTS RATHER THAN RIDING getPricing() ────────────────────
+     *
+     * `getPricing()` answers from `_ladderCache` FIRST and returns before it
+     * ever asks getStatus() — deliberately, so a guest's grid never queues
+     * behind a 3s auth handshake. Since BF-032 put `quantity_breaks` on the
+     * public payload, that first step answers for almost every product. A
+     * contract price appears ONLY on the authed payload, so routing this
+     * through getPricing() would mean a business customer with a negotiated
+     * rate never saw it — the public ladder would answer first, every time.
+     *
+     * ── AND WHY IT DOES NOT "FIX" THAT BY MERGING THE CACHES ──────────────
+     *
+     * The split is a safety property, not an optimisation. `_ladderCache` is
+     * public and deliberately never wiped (clearing it blanks every painted
+     * grid the moment a session resolves); `_priceCache` is owner-scoped and
+     * wiped on every auth change. A contract price is one company's negotiated
+     * rate. Putting it in the never-wiped public cache would show it to the next
+     * person to use a shared machine, until they reloaded. Do not merge them.
+     *
+     * Costs one request, for B2B users only, on the PDP only — the zero-request
+     * property is preserved for guests and retail accounts, which is where it
+     * matters for paint time and edge-cacheability.
+     *
+     * Computes nothing: every figure is returned verbatim.
+     *
+     * @param {string} sku
+     * @returns {Promise<{yourPrice:number, retailPrice:number, contractPrice:number|null,
+     *                    priceSource:string|null, savingsAmount:number|null,
+     *                    savingsPercent:number|null, companyName:string|null}|null>}
+     *          null means "no contract price applies, or we could not ask" —
+     *          the caller renders the ordinary ladder either way.
+     */
+    async getContractPrice(sku) {
+        const wanted = this.normalizeSkus([sku]);
+        if (!wanted.length) return null;
+        const key = wanted[0];
+
+        // Contract prices are per-account, so an inactive account has none by
+        // definition and a guest must never trigger this request at all.
+        const status = await this.getStatus();
+        if (!status.active) return null;
+
+        this._syncCacheOwner();
+        let item = this._priceCache.get(key);
+        if (!item) {
+            const result = { items: new Map(), missed: [] };
+            await this._fetchChunk([key], result);
+            item = result.items.get(key);
+        }
+        if (!item) return null;
+
+        const contractPrice = Number(item.contract_price);
+        if (!Number.isFinite(contractPrice) || contractPrice <= 0) return null;
+
+        const yourPrice = Number(item.your_price);
+        const retailPrice = Number(item.retail_price);
+        return {
+            yourPrice: Number.isFinite(yourPrice) ? yourPrice : contractPrice,
+            retailPrice: Number.isFinite(retailPrice) ? retailPrice : null,
+            contractPrice,
+            // 'contract' | 'volume' | 'list'. A contract price does NOT always
+            // win — the account is charged min(contract, ladder, list) — so this
+            // is the only honest label for what actually applied at qty 1.
+            priceSource: typeof item.price_source === 'string' ? item.price_source : null,
+            savingsAmount: Number.isFinite(Number(item.contract_savings_amount)) ? Number(item.contract_savings_amount) : null,
+            savingsPercent: Number.isFinite(Number(item.contract_savings_percent)) ? Number(item.contract_savings_percent) : null,
+            companyName: this._lastCompanyName || null,
+        };
     },
 
     // ─────────────────────────────────────────────────────────────────────────

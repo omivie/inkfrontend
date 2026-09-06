@@ -36,6 +36,7 @@ import {
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume, lineDocNote,
   hasManualDiscount, clearDiscount,
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
+  contractBadge, accountNotice, OFFER_CONTRACT,
   freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
   FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR,
   shippingRowState, SHIPPING_ROW_OPTIONS, SHIPPING_ROW_IDLE, SHIPPING_ROW_LOADING,
@@ -1663,10 +1664,42 @@ function scheduleQuote() {
  *     autocomplete component guards the same way; API.request() cannot be
  *     aborted, because it overwrites any signal a caller passes.)
  */
+/**
+ * Who to price this quote for, if anyone.
+ *
+ * ── THE INVOICE EDITOR HAS NO `customer_id`, AND THAT IS DELIBERATE ────────
+ *
+ * The draft carries `business_account_id` (the explicit portal-link control)
+ * but no customer id — a customer here can arrive from contacts, from the
+ * customers table, or from an order (including a guest checkout, which proves
+ * no account at all). The customers-table id, when there is one, lives in the
+ * module-local `_fillSource`, and it stays there: putting it on `_draft` would
+ * put it one refactor away from buildPayload(), documentDrift() and
+ * setStatusViaFullUpdate(), all of which walk the draft's keys.
+ *
+ * ── THE `type === 'customer'` GATE IS LOAD-BEARING ─────────────────────────
+ *
+ * `_fillSource.userId` is only set for a customers-table pick. A contact fill
+ * sets no id, and an order fill sets none either. Sending a CONTACTS id as
+ * `customer_id` would not merely fail — a bogus id returns 200 with
+ * `contract_prices_consulted: false` (measured 2026-09-06), so the quote would
+ * quietly fall back to list pricing and look completely healthy. Worse, an id
+ * that happened to collide would price this invoice against somebody else's
+ * negotiated rates.
+ *
+ * An explicit account link outranks an inferred customer — see quoteRequestBody.
+ */
+function quoteIdentity() {
+  return {
+    businessAccountId: _draft.business_account_id || null,
+    customerId: _fillSource?.type === 'customer' ? (_fillSource.userId || null) : null,
+  };
+}
+
 async function requestQuote() {
   const token = _editorToken;
   const seq = ++_quoteSeq;
-  const req = quoteRequestBody(_draft);
+  const req = quoteRequestBody(_draft, quoteIdentity());
   if (!req) {
     // Nothing typed yet — a quote would say nothing, so we do not ask. But NOT
     // ASKING IS NOT A FAILURE (ERR-191): leaving the status alone here is what
@@ -1734,6 +1767,8 @@ function applyQuote(quote) {
   const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
   const patched = patchQuotedLineRows(host, _draft.lines, { noteHtml: lineQuoteNote });
   if (!patched) renderLines();
+
+  renderAccountNotice();
 
   // The margin readout reads every line's price, so it moves whenever one does —
   // renderLines() used to carry it in for free, and a patch has to say so.
@@ -1931,6 +1966,10 @@ function onFormInput(e) {
     if (t.dataset.field === 'business_account_id') {
       const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
       if (host) host.outerHTML = businessLinkHtml(_draft);
+      // Re-price: the account is now WHO the quote is for. Without this the
+      // operator links a contract customer and every line stays at list, with
+      // nothing on screen suggesting the link did anything.
+      scheduleQuote();
     }
     // A hand-typed freight figure wins over any courier option. Don't fight the
     // operator — just relabel the dropdown "Custom" so it stops claiming to
@@ -2252,6 +2291,26 @@ function onFormClick(e) {
     };
     _volumeOffers = _volumeOffers.filter((o) => o.position !== i);
     renderLines(); refreshPreview();
+  } else if (act === 'apply-contract') {
+    // A SEPARATE action from apply-volume on purpose. That handler stamps the
+    // three volume_* keys, and those are SAVED into the invoice and printed on
+    // the customer's document by lineDocNote(). Routing a negotiated price
+    // through it would file it as a volume discount and print "Bulk price — X%
+    // off at N+", naming a rung that does not exist and disclosing this
+    // account's rate. Here the price moves and nothing is claimed.
+    const i = +e.target.closest('[data-line]').dataset.line;
+    const offer = _volumeOffers.find((o) => o.position === i);
+    if (!offer || offer.kind !== OFFER_CONTRACT || !_draft.lines[i]) return;
+    _draft.lines[i] = {
+      ..._draft.lines[i],
+      unitCost: offer.badge.unitPrice,
+      priceSource: PRICE_AUTO,
+      volumePercent: null,
+      volumeSaving: null,
+      volumeQuantity: null,
+    };
+    _volumeOffers = _volumeOffers.filter((o) => o.position !== i);
+    renderLines(); refreshPreview();
   } else if (act === 'apply-free-shipping') {
     const free = (_quote?.shipping.options || []).find((o) => o.key === 'free');
     if (!free) return;
@@ -2267,11 +2326,13 @@ function onFormClick(e) {
     _draft.business_account_id = id;
     const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
     if (host) host.outerHTML = businessLinkHtml(_draft);
+    scheduleQuote();   // re-price against this account — see the field handler
     Toast.success('Linked — save the invoice to publish it to their portal.');
   } else if (act === 'unlink-business') {
     _draft.business_account_id = null;
     const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
     if (host) host.outerHTML = businessLinkHtml(_draft);
+    scheduleQuote();   // and back to list pricing, visibly
     Toast.success('Unlinked — save to remove it from their portal.');
   } else if (act === 'clear-fill') {
     // Undo an auto-fill: blank the billing + delivery parties and drop the source link.
@@ -2951,6 +3012,7 @@ function editorBodyHtml(d) {
 
       <section class="inv-section">
         <div class="inv-section__title">Line items</div>
+        <div id="inv-account-notice"></div>
         <div class="inv-lines-head${canSeeCost() ? '' : ' inv-line--nocost'}">
           <span>Product Code</span><span>Description</span><span>Number</span><span>Unit Price${gstSub(GST_EXCL)}</span>${canSeeCost() ? `<span>Our Cost${gstSub(GST_EXCL)}</span>` : ''}<span></span>
         </div>
@@ -3174,6 +3236,26 @@ function lineDiscountRow(l, i) {
  * and contributes no weight to the courier quote, and "no badge" reads exactly
  * like "no discount was available" unless you say which it is.
  */
+/**
+ * The one sentence about this customer's business account, above the lines.
+ *
+ * Repainted on every quote rather than once on open: the account is resolved
+ * from the link control or from whoever the draft was filled from, and both can
+ * change while the editor is open.
+ *
+ * It renders even when NOTHING was priced. "This account has contract pricing
+ * but none of these products has a negotiated price" is a fact the operator
+ * needs in order to trust the numbers, and a suspended account with no such
+ * sentence is indistinguishable from a broken feature.
+ */
+function renderAccountNotice() {
+  const host = _editorRefs?.drawer?.body?.querySelector('#inv-account-notice');
+  if (!host) return;
+  const notice = accountNotice(_quote);
+  if (!notice) { host.innerHTML = ''; return; }
+  host.innerHTML = `<p class="inv-account-notice${notice.warn ? ' inv-account-notice--warn' : ''}">${esc(notice.message)}</p>`;
+}
+
 function lineQuoteNote(l, i) {
   const bits = [];
 
@@ -3186,12 +3268,31 @@ function lineQuoteNote(l, i) {
     bits.push(`<span class="inv-vol inv-vol--applied">Volume &minus;${esc(formatVolumePercent(pct))}${was ? ` (was ${esc(money(was))})` : ''}${esc(saving)}</span>`);
   } else {
     const offer = _volumeOffers.find((o) => o.position === i);
-    if (offer) {
+    if (offer && offer.kind === OFFER_CONTRACT) {
+      // A dollar figure and no percent — the backend supplies no contract
+      // percentage for a line, and we do not derive one.
+      bits.push(`<button type="button" class="inv-vol inv-vol--offer inv-vol--contract-offer" data-form-action="apply-contract" data-line="${i}">Apply contract price ${esc(money(offer.badge.unitPrice))}</button>`);
+    } else if (offer) {
       bits.push(`<button type="button" class="inv-vol inv-vol--offer" data-form-action="apply-volume" data-line="${i}">Apply volume price ${esc(money(offer.badge.unitPrice))} (&minus;${esc(offer.badge.percentText)})</button>`);
     }
   }
 
   const ql = quoteLineAt(i);
+
+  // Read the contract fact from the QUOTE, never from a draft field. Nothing
+  // about a negotiated rate is stamped on the line: it must not reach
+  // buildPayload(), the QO -> invoice bridge, or lineDocNote() — which prints on
+  // the customer's own invoice.
+  const cb = contractBadge(ql);
+  if (cb) {
+    const saving = num(cb.lineSaving) > 0 ? ` · saves ${money(cb.lineSaving)}` : '';
+    // If a rung also applied, the volume chip above is showing a saving measured
+    // against THIS price, not against list. Unlabelled, an operator reads the
+    // two as one total discount off list.
+    const onTop = Number.isFinite(pct) && pct > 0 ? ' (volume saving is on top of this)' : '';
+    bits.push(`<span class="inv-vol inv-vol--contract">Contract price ${esc(money(cb.unitPrice))}${esc(saving)}${esc(onTop)}</span>`);
+  }
+
   if (ql && ql.resolved && !ql.isActive) {
     bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
   }

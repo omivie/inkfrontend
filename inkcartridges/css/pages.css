@@ -15450,6 +15450,32 @@ body.page-shop {
     color: var(--color-text-muted);
 }
 
+/* Contract price — this account's own negotiated rate (backend migration 165).
+   Sits at the TOP of #volume-pricing, above the rungs, because it is what this
+   customer pays at quantity 1 and the rungs are measured from it.
+
+   It lives here and nowhere else on the page. #product-price and its
+   itemprop="price" content attribute stay at the public list price forever:
+   that markup is crawled anonymously and feeds Merchant Center, so a
+   per-account price there would be cloaking. An extra, labelled line for a
+   signed-in customer is personalisation; rewriting the marked-up price is not. */
+.volume-pricing__contract {
+    margin: 0 0 var(--spacing-sm, 0.75rem);
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--color-success-bg, rgba(22, 163, 74, 0.08));
+    color: var(--color-text, inherit);
+    font-size: var(--font-size-sm, 0.875rem);
+    line-height: 1.45;
+}
+/* A quantity rung beat the agreed price. Stated rather than hidden: the
+   customer should know their contract exists even on the occasions when buying
+   more is cheaper still. Muted, because nothing is wrong. */
+.volume-pricing__contract--beaten {
+    background: var(--color-surface-2, rgba(148, 163, 184, 0.10));
+    color: var(--color-text-muted);
+}
+
 /* ── Product-card overlay ──────────────────────────────────────────────── */
 
 .product-card__biz-price {
@@ -16390,4 +16416,25 @@ body.page-shop {
     font-size: var(--font-size-sm);
     line-height: 1.6;
     color: var(--color-text-muted);
+}
+
+/* Reorder tile price — what THIS account pays (backend migration 165).
+   The struck-through "was" only appears when list is genuinely higher, so a
+   customer with no contract price sees one clean number rather than a
+   decorative strike-through of the same figure. */
+.business-reorder__was {
+    color: var(--color-text-muted);
+    font-size: 0.9em;
+    margin-left: 0.3rem;
+}
+.business-reorder__contract {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 999px;
+    background: var(--color-success-bg, rgba(22, 163, 74, 0.10));
+    color: var(--color-text-muted);
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }

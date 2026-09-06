@@ -1104,12 +1104,19 @@
             if (!sku || !section || typeof Business === 'undefined') return;
 
             let ladder;
+            let contract = null;
             try {
                 // The product payload carries the public ladder — hand it over
                 // first so this resolves with no request and no auth wait, for
                 // guests included.
                 Business.ingest(this.product);
                 ladder = await Business.getLadderFor(sku);
+                // This account's own negotiated price, if it has one. Separate
+                // call on purpose: getLadderFor() answers from the PUBLIC cache
+                // first and would never see a contract price. B2B users only —
+                // getContractPrice() returns null without an active account, so
+                // a guest fires nothing. See the docblock in js/business.js.
+                contract = await Business.getContractPrice(sku);
             } catch (e) {
                 DebugLog.warn('[PDP] volume pricing unavailable:', e && e.message);
                 return;
@@ -1118,6 +1125,13 @@
             // The shopper may have navigated to another product while the
             // request was in flight — never paint a stale ladder.
             if (!this.product || this.product.sku !== sku) return;
+
+            this._contractPrice = contract || null;
+            // A contract price is worth showing even when there is no ladder at
+            // all: it IS the price this customer pays. Returning early on a null
+            // ladder would hide the negotiated rate on every product whose band
+            // has no volume discount.
+            this.renderContractPrice();
             if (!ladder) return;
 
             this._volumeLadder = ladder;
@@ -1198,6 +1212,56 @@
          * Cheap, synchronous, and a no-op when there is no ladder — so the
          * quantity handlers can call it unconditionally.
          */
+        /**
+         * "Your price $104.90 — Jackson · saves $29.59 (22%)".
+         *
+         * ── WHAT THIS MUST NEVER TOUCH ────────────────────────────────────
+         *
+         * `#product-price` and its `itemprop="price"` content attribute. That
+         * markup feeds Merchant Center and is crawled ANONYMOUSLY, so it must
+         * keep showing the public list price: writing one account's negotiated
+         * rate into it would be cloaking — a price in the structured data that
+         * no crawler, and no other shopper, can ever be charged.
+         *
+         * Showing an authenticated customer an ADDITIONAL, labelled line is
+         * personalisation, which the volume ladder already does in this same
+         * section. Replacing the marked-up price is not. The distinction is the
+         * whole reason this renders into #volume-pricing and nowhere else.
+         *
+         * Every figure is the server's. Nothing here computes a price, a saving
+         * or a percent.
+         */
+        renderContractPrice() {
+            const section = document.getElementById('volume-pricing');
+            if (!section) return;
+            const existing = section.querySelector('.volume-pricing__contract');
+            const c = this._contractPrice;
+
+            if (!c) { if (existing) existing.remove(); return; }
+
+            const who = c.companyName ? ` — ${Security.escapeHtml(c.companyName)}` : '';
+            // `savings_amount` / `savings_percent` are sent as 0 when there is
+            // nothing to report, and absent when the server did not compute
+            // them. Neither is a reason to print "saves $0.00".
+            const saved = (c.savingsAmount != null && c.savingsAmount > 0)
+                ? ` · saves ${Security.escapeHtml(formatPrice(c.savingsAmount))}${
+                    c.savingsPercent != null && c.savingsPercent > 0
+                        ? ` (${Security.escapeHtml(Business.formatPercent(c.savingsPercent))})` : ''}`
+                : '';
+            // price_source says which of contract / volume / list actually
+            // applied at quantity 1. A contract price does NOT always win — the
+            // account pays min(contract, ladder, list) — so when a rung beat it
+            // we say the agreed price exists rather than claiming it is charged.
+            const applies = c.priceSource !== 'volume';
+            const html = applies
+                ? `<p class="volume-pricing__contract"><strong>Your price ${Security.escapeHtml(formatPrice(c.yourPrice))}</strong>${who}${saved}</p>`
+                : `<p class="volume-pricing__contract volume-pricing__contract--beaten"><strong>Your agreed price is ${Security.escapeHtml(formatPrice(c.contractPrice))}</strong>${who} — buying this many is cheaper still.</p>`;
+
+            section.hidden = false;
+            if (existing) existing.outerHTML = html;
+            else section.insertAdjacentHTML('afterbegin', html);
+        },
+
         syncVolumePricing() {
             const ladder = this._volumeLadder;
             const section = document.getElementById('volume-pricing');
@@ -1225,6 +1289,11 @@
                         `At ${qty} you pay ${formatPrice(rung.businessPrice)} each — ` +
                         `saving ${formatPrice(Business.lineSavings(ladder, qty))}.`
                     );
+                } else if (ladder.contractPrice != null) {
+                    // Below the entry rung, a contract customer pays their
+                    // agreed price — not "the standard" one, which is a
+                    // different number and not what this add-to-cart charges.
+                    parts.push(`At ${qty} you pay your agreed ${formatPrice(ladder.basePrice)} each.`);
                 } else {
                     parts.push(`At ${qty} you pay the standard ${formatPrice(ladder.retailPrice)} each.`);
                 }
@@ -1243,7 +1312,11 @@
             // what this add-to-cart will charge. The lock flag still keeps the
             // generic #product-price mirror from stomping the value.
             if (stickyPrice) {
-                stickyPrice.textContent = formatPrice(rung ? rung.businessPrice : ladder.retailPrice);
+                // basePrice is retailPrice unless a contract price applies, in
+                // which case it is what this add-to-cart will actually charge.
+                // Showing retail there would advertise a price this customer
+                // will not be asked for.
+                stickyPrice.textContent = formatPrice(rung ? rung.businessPrice : ladder.basePrice);
                 stickyPrice.dataset.businessLocked = '1';
             }
         },

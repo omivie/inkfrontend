@@ -41,6 +41,181 @@ describing the same incident.
 
 ---
 
+## ERR-221 — The endpoint the frontend had been waiting a month for shipped, and the code written to greet it asked for 200 rows of a list that caps at 100 — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The backend shipped per-business-account **contract pricing**
+(migration 165): an admin sets one account's own price for one product, and that account pays it.
+Hand-off `readfirst/business-account-contract-pricing-FE-handoff-sep2026.md`. The frontend had none
+of it — no admin surface, neither operator editor sent a customer identity when it quoted, and no
+storefront surface read a contract price.
+
+**THE BUG THAT WAS ALREADY THERE, AND HAD NEVER ONCE WORKED.** Building the pricing surface needs
+`business_accounts.id`, and until this morning nothing exposed it: `GET /api/admin/business/accounts`
+was a **404**, the 409 on a duplicate create carried no id, and `business_applications` returns the
+*application's* id. So `js/admin/pages/business.js` rendered a **localStorage-only** list captioned
+*"Accounts created on this device"*, and `AdminAPI.listBusinessAccounts()` merged that device
+registry into the invoice editor's portal-link picker. All of that was correct, and all of it was
+labelled honestly.
+
+`listBusinessAccounts()` was also written *ready* for the day the endpoint arrived. It would not
+have worked, for **two independent reasons**, and neither would have looked like a bug:
+
+```
+GET /api/admin/business/accounts?limit=200   -> 400  "limit" must be less than or equal to 100
+GET /api/admin/business/accounts?status=approved -> 400  must be one of [active, suspended, closed]
+```
+
+It asked for `?limit=200`. Over-limit is a **hard 400, not a clamp**. And `js/api.js` returns a
+`VALIDATION_FAILED` 400 as an **envelope** rather than throwing — so `resp?.data?.accounts` was
+`undefined`, `rows` was not an array, and the function fell through to
+`return local.length ? local : null`: **the identical value it had returned for the entire month
+the endpoint was a 404.** No toast, no warning, no console line. It then *also* filtered server rows
+for `status === 'approved'`, a value this route never returns, which would have dropped every real
+row even after the limit was fixed.
+
+**The check could not fail.** That is the whole lesson, and it is the same shape as ERR-219 next door
+(`null * 1.15` is `0` in JavaScript, so an unknown supplier cost rendered a confident `$0.00`): a
+failure wearing the costume of a legitimate answer, with nothing on screen able to tell the two
+apart. It was not that nobody looked — it is that looking could not have told anyone.
+
+**Code written against an endpoint that does not exist yet is untested code wearing a comment that
+says it is ready.**
+
+### What shipped
+
+**(a) The Business page now lists real accounts.** Two addressable tabs
+(`#business?tab=accounts|applications`) plus a per-account drawer at
+`#business?account=<uuid>&tab=pricing|details|history`. `onRouteChange()` **re-reads
+`window.location.hash`** rather than its argument — `app.js` passes `getRouteDetailFromHash()`, which
+extracts `?tab=` and nothing else, so an `{account}` parameter would be `undefined` forever and the
+symptom would read as a caching bug (ERR-208 in a new shape). A row click sets the hash and
+**returns**; it never calls the drawer opener, so there is no second path into the detail view that
+could work while the URL did not.
+
+**(b) The device registry became a reconciliation, not a second list.** Two lists that can disagree
+is worse than one that can be briefly incomplete — but deleting it outright would discard the only
+copy of an id the server might not have returned. So confirmed ids are reported as confirmed and
+forgotten **on a click**, never automatically, and only after a *complete, unfiltered* read. An
+automatic delete on the strength of a paginated read is absence-proves-absence, the exact mistake
+`matchApplications()` exists to prevent.
+
+**(c) Two places where a null would have rendered as a zero.** `net_margin_percent` is null when the
+product has no supplier cost — *"we could not check"* — and `Number(null)` is `0`. A 0% margin and an
+unknown margin are opposite claims. Likewise the §4.6 history table: `previous_price` is null on a
+first `set` **and** on a `reactivated`, and `new_price` is null on a `removed`, so the obvious
+rendering turns *"this price had no predecessor"* into *"the price used to be $0.00"* and *"the price
+was withdrawn"* into *"the price was changed to $0.00"*. Both live in
+`js/admin/utils/contract-pricing.js` (`evaluatePrice`, `describeHistoryRow`), which is pure and
+driven directly by the test file.
+
+**(d) 🚨 THE 409 ARRIVES WITHOUT ITS NUMBERS.** Below cost is the *one* refusal, and it is designed
+to be overridden — the operator confirms and we re-send with `acknowledge_below_cost`. To write that
+dialog honestly we need `details.evaluation`: the break-even figure and the margin the price would
+actually produce. `js/api.js` special-cases a 409 and returns
+`{ok:false, error:<the MESSAGE STRING>, code, data:<raw body>}` — so `invoiceError()`'s object branch
+never runs, its `resp.details` fallback finds nothing (a 409 has no top-level `details`), and
+`err.details` comes out **null**. The evaluation survives only at `resp.data.error.details`. Missed,
+the operator gets a confirmation dialog that asks *"are you sure?"* and quotes no figures at all.
+`contractEvaluation()` reads both shapes and returns `null` — never `{}` — when there genuinely is
+none, and the panel then **refuses to offer a blind override** rather than render blanks.
+
+**(e) A contract price is not a volume discount and must never be filed as one.**
+`volumePercent` / `volumeSaving` / `volumeQuantity` are persisted into the saved invoice or quick
+order, cross the QO→invoice bridge, and drive `lineDocNote()` — which prints on the **customer's own
+invoice**. Stamping them from a contract price would store a false claim and print *"Bulk price — 22%
+off at 1+"*, naming a rung that does not exist. It would also **disclose this account's negotiated
+rate on a document they may forward to anyone**, which is why a contract line deliberately prints
+*nothing* on the PDF: the volume ladder is public and tells the customer only what the website
+already does; a negotiated price is not. `apply-contract` is a separate handler from `apply-volume`
+for the same reason.
+
+**(f) Identity is a SECOND ARGUMENT to `quoteRequestBody(draft, identity)`, not a draft field.**
+Quick Order genuinely has a `customer_id`; the invoice editor does not — its customers-table id lives
+in a module-local `_fillSource`, and putting it on the draft would place it one refactor from
+`buildPayload()`, `documentDrift()` and `setStatusViaFullUpdate()`, all of which walk the draft's
+keys. The `_fillSource.type === 'customer'` gate is load-bearing: a **contacts** id sent as
+`customer_id` does not fail loudly — a bogus id answers **200** with `consulted:false` (measured), so
+the quote falls back to list pricing and looks perfectly healthy. Exactly one identifier is ever
+sent; `business_account_id` wins when both exist, because an explicit operator link outranks an
+inference. Send neither and nothing changes.
+
+**(g) Linking an account now re-prices.** All three `business_account_id` mutation points call
+`scheduleQuote()`. Without it the operator links a contract customer and every line stays at list,
+with nothing on screen suggesting the link did anything.
+
+**(h) `contract_pricing.discount_amount` is a SUBSET of `volume_discount.discount_amount`.** The
+contract saving rides the existing volume-discount line, so it is already inside `summary.discount`
+and `summary.total`. Adding the two would show a saving the total does not reflect — ERR-169 exactly.
+`computeDiscountBreakdown()` exposes `contract` / `volumeOnly` as the two **halves** of `b2b`; the
+arithmetic is untouched.
+
+**(i) The cache split is a safety property, and the PDP invites breaking it.** `getPricing()` answers
+from the public `_ladderCache` **before** it ever calls `getStatus()` — so a guest's grid never
+queues behind a 3s auth handshake — and since BF-032 that first step answers for almost every
+product. A contract price appears only on the *authed* payload, so routing it through `getPricing()`
+would mean a business customer never saw their own rate. The obvious fix is to merge the caches;
+`_ladderCache` is **never wiped**, so that would show one company's negotiated price to the next
+person on a shared machine. Instead: a narrow `Business.getContractPrice(sku)`, gated on an active
+account *before* it requests anything, reading `_priceCache` only. `#product-price` and its
+`itemprop="price"` content attribute are **never touched** — that markup is crawled anonymously and
+feeds Merchant Center.
+
+**(j) `describeLadder()` gained `basePrice`.** A contract customer's rungs must be measured from what
+they already pay, not from retail, or a "saving" overstates what buying more actually gets them.
+Without a contract price `basePrice === retailPrice` and every existing ladder is **byte-identical** —
+asserted against the recorded live sweep, not a hand-written fixture.
+
+**(k) The hand-off's §8 claim that the reorder tiles need "no FE change" is FALSE for this
+frontend.** It assumes `GET /api/business/reorder-items`; we called `GET /api/business/top-products`,
+which carries no price *and no product id*. Switched, which also removes a second round trip. Neither
+business account has order history, so that endpoint answers `[]` in production and its
+`sku`/`name`/`product_url` fields **could not be observed** — so a row without a SKU is reported by
+name rather than rendered as a dead tile, and the tile never synthesises a `/p/<sku>` URL.
+
+### Measured, not assumed
+
+Production held **zero contract prices** on the day this shipped, so every populated shape in the
+hand-off was unprovable by reading — the §4.3 row, the §4.6 null table, the per-line `contract`
+block, the cart figures. `scripts/probe-contract-pricing.mjs` is read-only by default and prints its
+mode before any work; `--write` runs set → update → **409 refuse** → acknowledge → history →
+cross-account isolation → catalogue-untouched → remove → double-DELETE-404 → reactivate → remove,
+cleans up in a `finally`, **verifies the cleanup**, and reddens the exit code if it fails.
+**85/85 against production**, on the owner's own account, cleaned up after. Findings:
+
+- `set` is observable only **once** per (account, product): a removal soft-deletes, so every later
+  first-write is `reactivated`. Both carry `previous_price: null` — which is why *that* is the
+  assertion, not the action name. (The probe's own first run failed on this and was right to.)
+- **Bridge parity holds**: the invoice quote's qty-1 `unit_excl_gst` and the quick-order quote's
+  pre-resolved `unit_price_excl_gst` agreed to the cent ($5.90). That is what licenses keeping both
+  editors on the one shared endpoint instead of adopting `/api/admin/quick-orders/quote` — a second
+  line shape inside the function both editors share is the "two same-shaped price fields, one qty-1
+  and one final" trap the hand-off itself warns about.
+- A **bogus** `customer_id` answers 200 / `consulted:false` — indistinguishable from a genuine retail
+  customer. So the chip says *"No business account"*, never *"list pricing confirmed"*.
+- The account object carries an undocumented `application_id`.
+- CORS allows `GET,POST,PUT,DELETE,OPTIONS`. **PATCH is still absent** (BF-021), so the error copy
+  here must not blame CORS the way `describeUpdateError()` correctly does for PATCH.
+
+**Files**: `js/admin/utils/contract-pricing.js` (new) · `js/admin/components/contract-pricing-panel.js`
+(new) · `js/admin/pages/business.js` (rebuilt) · `js/admin/api.js` · `js/admin/utils/invoice-quote.js`
+· `js/admin/pages/invoices.js` · `js/admin/pages/quick-order.js` · `js/cart.js` · `js/business.js` ·
+`js/product-detail-page.js` · `js/business-page.js` · `css/admin.css` · `css/pages.css`
+
+**Pinned by**: `tests/admin-contract-pricing-sep2026.test.js` (42) ·
+`tests/contract-pricing-quote-sep2026.test.js` (24) · `tests/cart-contract-pricing-sep2026.test.js`
+(14) · `tests/business-contract-storefront-sep2026.test.js` (19) — **99 new tests**. Three
+assertions in `tests/admin-business-upgrade-aug2026.test.js` pinned the now-expired 404 premise and
+were **inverted with dated comments**, not deleted; two more were added in their place.
+`npm run probe:contract-pricing`.
+
+**Trap for next time**: appending to the end of `css/admin.css` inherits two unrelated tests
+(`admin-quick-order-outcome` §4, `conversion-funnel` §5) that slice the file from their own marker to
+**end of file** and assert every `var(--x)` they find is defined — and the regex matches inside
+comments too. `--surface-3` and `--accent-strong` are used across that stylesheet and defined
+nowhere.
+
+---
+
 ## ERR-220 — "Genuine" was selected and every row said Compatible; the page had been on its emergency route since a database grant changed — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: A screenshot of `/admin#products`: the Source dropdown reads

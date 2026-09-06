@@ -91,6 +91,67 @@ function invoiceError(resp, fallback) {
   return err;
 }
 
+/**
+ * Dig the §5 `evaluation` block out of a `PRICE_BELOW_COST` refusal.
+ *
+ * ── WHY THIS IS NOT JUST `err.details.evaluation` ──────────────────────────
+ *
+ * A 409 is the ONE refusal contract pricing has, and it is designed to be
+ * overridden: the operator confirms, we re-send with `acknowledge_below_cost`.
+ * To write that confirmation honestly we need `details.evaluation` — the
+ * break-even figure and the margin the price would actually produce. A dialog
+ * that asks "are you sure?" and cannot say what you are agreeing to is worse
+ * than an error.
+ *
+ * The shared client does not deliver it by the usual route. js/api.js
+ * special-cases a 409-with-code and returns
+ *
+ *     { ok:false, error: <the MESSAGE STRING>, code, data: <the raw body> }
+ *
+ * so `resp.error` is a string, `invoiceError()`'s object branch never runs, its
+ * `resp.details` fallback finds nothing (a 409 has no top-level `details`), and
+ * `err.details` comes out **null**. The evaluation survives only at
+ * `resp.data.error.details`. On the throw path it is at `err.details`.
+ *
+ * Both shapes are read here. Returns `null` — never `{}` — when there is
+ * genuinely nothing, so the caller can say "we can't show you the numbers"
+ * instead of rendering a dialog full of blanks. Total by construction: this is
+ * called while handling an error and must not throw a second one.
+ */
+function contractEvaluation(source) {
+  try {
+    if (!source || typeof source !== 'object') return null;
+    // Envelope path (409): { ok:false, code, data: { error: { details: {...} } } }
+    const fromEnvelope = source?.data?.error?.details?.evaluation;
+    if (fromEnvelope && typeof fromEnvelope === 'object') return fromEnvelope;
+    // Throw path: err.details.evaluation
+    const fromDetails = source?.details?.evaluation;
+    if (fromDetails && typeof fromDetails === 'object') return fromDetails;
+    // Already-unwrapped details object.
+    const direct = source?.evaluation;
+    if (direct && typeof direct === 'object') return direct;
+    return null;
+  } catch { return null; }
+}
+
+/**
+ * `invoiceError()` plus the evaluation, for the contract-price write paths.
+ *
+ * The 409 arrives as an envelope whose `error` is a string, so the message the
+ * backend wrote — which contains the break-even figure — is at `resp.error`
+ * and must not be replaced by the fallback.
+ */
+function contractPriceError(resp, fallback) {
+  const err = invoiceError(resp, fallback);
+  const evaluation = contractEvaluation(resp);
+  if (evaluation) err.evaluation = evaluation;
+  // A 409's machine code rides at the top level of the envelope, not inside a
+  // (string) `error`. invoiceError already copies it; assert it here because
+  // describeSaveError branches on nothing else.
+  if (!err.code && resp?.code) err.code = resp.code;
+  return err;
+}
+
 // The only three states PATCH /api/admin/invoices/:id/status accepts.
 //
 // `void` is deliberately absent. Voiding also has to cancel the invoice's shadow
@@ -112,6 +173,14 @@ const PURGE_CHUNK = 25;
 // against a 30/min admin limiter.
 const BUSINESS_APPLICATION_PAGE_MAX = 100;
 const BUSINESS_APPLICATION_MAX_PAGES = 10;
+
+// `GET /api/admin/business/accounts` (migration 165) has the same ceiling and
+// the same refusal: `?limit=101` is a 400 reading `"limit" must be less than or
+// equal to 100`, measured live 2026-09-06. This constant exists because the
+// first caller of this endpoint asked for 200 and silently got nothing back for
+// as long as nobody looked (ERR-221).
+const BUSINESS_ACCOUNT_PAGE_MAX = 100;
+const BUSINESS_ACCOUNT_MAX_PAGES = 10;
 
 /**
  * Turn a non-ok `{ ok:false, error, code, status, request_id }` envelope into an
@@ -3588,13 +3657,36 @@ const AdminAPI = {
     }
   },
 
-  // Approved business accounts, for the invoice editor's portal-link picker.
+  // Business accounts, for the invoice editor's portal-link picker and the
+  // Business page's account list.
   //
   // `standalone_invoices.business_account_id` is a FK to business_accounts(id),
   // and that id is the ONE value that puts an invoice on a customer's /business
-  // portal. NO endpoint exposes it: GET /api/admin/business/accounts is a 404
-  // (re-probed 2026-08-09), and the FK rejects both business_applications.id and
-  // user_id (see business-centre-FE-response-aug2026.md).
+  // portal.
+  //
+  // ── THE 404 IS OVER, AND THE FIX THAT WAITED FOR IT WAS ITSELF BROKEN ─────
+  //
+  // `GET /api/admin/business/accounts` returned 404 from the day this function
+  // was written until the backend shipped it with migration 165. This function
+  // was written ready for that day — and it would not have worked, because it
+  // asked for `?limit=200` and the endpoint caps `limit` at 100.
+  //
+  // Over-limit is a **400 VALIDATION_FAILED**, not a silent clamp (measured
+  // 2026-09-06). js/api.js returns a 400 VALIDATION_FAILED as an ENVELOPE
+  // rather than throwing, so `resp.data` was undefined, `rows` was not an
+  // array, and this returned the device-local rows — the exact same value it
+  // returned during the 404 years. No toast, no warning, no symptom: the
+  // picker went on listing only accounts created in THIS browser while the
+  // real list sat one working request away. See ERR-221.
+  //
+  // It also filtered the server rows for `status === 'approved'`, a value this
+  // endpoint never returns — its vocabulary is active|suspended|closed, and
+  // `?status=approved` is itself a 400. That filter would have dropped every
+  // real row even after the limit was fixed. Two independent bugs, both of
+  // which look exactly like "the endpoint isn't live yet".
+  //
+  // The lesson worth keeping: code written against an endpoint that does not
+  // exist yet is UNTESTED code wearing a comment that says it is ready.
   //
   // THE PATH WAS WRONG UNTIL 2026-08-09 (ERR-152). This asked for
   // `/api/admin/business-accounts`, in a namespace the backend does not use —
@@ -3608,14 +3700,19 @@ const AdminAPI = {
   // correct-but-unshipped one produce the identical fail-soft null.
   //
   // `null` = "we don't know", which is NOT the same as `[]` = "there are no
-  // approved accounts", and the caller renders them differently.
+  // business accounts", and the caller renders them differently.
   //
-  // Accounts this device recorded at creation time are merged in, tagged
-  // `_source: 'device'`, so the picker works for accounts the sales team made
-  // here. They are NOT the list of business accounts and the caller labels them
-  // as local — see utils/business-accounts.js.
+  // ── DEVICE ROWS ARE A FALLBACK NOW, NOT A MERGE ───────────────────────────
   //
-  // @returns {Promise<Array|null>} approved accounts, or null when unavailable
+  // They used to be concatenated onto a good server answer. That made sense
+  // while the server could not answer at all; it does not now, because a
+  // locally-recorded account that has since been CLOSED on the backend would
+  // keep appearing in the picker forever, and two lists that can disagree is
+  // worse than one list that can be briefly incomplete. So: a successful read
+  // is the answer. Device rows are used only when we could not ask, and stay
+  // tagged `_source: 'device'` so the caller can label them honestly.
+  //
+  // @returns {Promise<Array|null>} accounts, or null when unavailable
   async listBusinessAccounts() {
     const local = BusinessAccountRegistry.all().accounts
       .filter((a) => a.status !== 'closed')
@@ -3628,15 +3725,76 @@ const AdminAPI = {
         _source: 'device',
       }));
     try {
-      const resp = await window.API.get('/api/admin/business/accounts?limit=200');
-      const rows = resp?.data?.accounts ?? resp?.data?.items ?? (Array.isArray(resp?.data) ? resp.data : null);
-      if (!Array.isArray(rows)) return local.length ? local : null;
-      const server = rows.filter((r) => r && (r.status == null || r.status === 'approved' || r.status === 'active'));
-      const seen = new Set(server.map((r) => String(r.id)));
-      return server.concat(local.filter((a) => !seen.has(String(a.id))));
+      const page = await this.listBusinessAccountsPage({ page: 1, limit: BUSINESS_ACCOUNT_PAGE_MAX });
+      if (!page || !Array.isArray(page.accounts)) return local.length ? local : null;
+
+      const rows = page.accounts.slice();
+      // Page until the table is exhausted. The picker's whole job is "find the
+      // account for this customer", and only a complete read can answer that
+      // with a no — a first page that happens not to contain them is not an
+      // answer (the ERR-151 shape, applied to pagination instead of filters).
+      const totalPages = Number(page.pagination?.total_pages);
+      if (Number.isFinite(totalPages) && totalPages > 1) {
+        for (let p = 2; p <= Math.min(totalPages, BUSINESS_ACCOUNT_MAX_PAGES); p++) {
+          const next = await this.listBusinessAccountsPage({ page: p, limit: BUSINESS_ACCOUNT_PAGE_MAX });
+          if (!next || !Array.isArray(next.accounts)) break;
+          rows.push(...next.accounts);
+        }
+      }
+      // Closed accounts cannot receive an invoice, so they are not offered.
+      // Suspended ones ARE — an invoice raised during a suspension is still
+      // theirs, and hiding the account would look like the account was deleted.
+      return rows.filter((r) => r && r.status !== 'closed');
     } catch (e) {
       adminApiWarn('Business accounts unavailable (portal linking is disabled)', e);
       return local.length ? local : null;
+    }
+  },
+
+  /**
+   * One page of `GET /api/admin/business/accounts` (backend migration 165).
+   *
+   * `limit` is capped at 100 and over-limit is a hard 400, so the cap is
+   * enforced here rather than trusted to the caller — see the ERR-221 note
+   * above for what happened the last time it was not.
+   *
+   * `status` must be one of active|suspended|closed. `approved` — the value
+   * `/api/business/status` answers on the storefront — is a 400 here. Two
+   * endpoints, two vocabularies; ACCOUNT_STATUSES in utils/contract-pricing.js
+   * is the one that applies to this route.
+   *
+   * @returns {Promise<{accounts:Array, pagination:object|null}|null>} null = we could not ask
+   */
+  async listBusinessAccountsPage({ search, status, page = 1, limit = BUSINESS_ACCOUNT_PAGE_MAX } = {}) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('limit', String(Math.min(Number(limit) || BUSINESS_ACCOUNT_PAGE_MAX, BUSINESS_ACCOUNT_PAGE_MAX)));
+      if (search) params.set('search', search);
+      if (status) params.set('status', status);
+      const resp = await window.API.get(`/api/admin/business/accounts?${params}`);
+      const accounts = resp?.data?.accounts;
+      if (!Array.isArray(accounts)) return null;
+      return { accounts, pagination: resp?.data?.pagination ?? resp?.meta ?? null };
+    } catch (e) {
+      adminApiWarn('Business accounts', e);
+      return null;
+    }
+  },
+
+  /**
+   * One business account (§4.2). 404s on an unknown id rather than answering
+   * an empty object, so `null` here means "we could not read it" and an
+   * explicit not-found is reported by the caller as a missing account.
+   */
+  async getBusinessAccount(id) {
+    try {
+      const resp = await window.API.get(`/api/admin/business/accounts/${encodeURIComponent(id)}`);
+      if (resp && resp.ok === false) return null;
+      return resp?.data?.account ?? null;
+    } catch (e) {
+      adminApiWarn('Business account', e);
+      return null;
     }
   },
 
@@ -3675,6 +3833,140 @@ const AdminAPI = {
     );
     if (resp && resp.ok === false) throw invoiceError(resp, 'Could not update that business account');
     return resp?.data?.account ?? resp?.data ?? null;
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONTRACT PRICING — one account's own price for one product (super_admin)
+  // Contract: readfirst/business-account-contract-pricing-FE-handoff-sep2026.md
+  //
+  // These responses carry `cost_price` and `net_margin_percent`. That matches
+  // the existing policy on GET /admin/products, and it is one more reason the
+  // surface is owner-gated in the UI as well as on the server.
+  //
+  // Reads fail soft to null (= "we could not ask"), writes throw. PUT and
+  // DELETE are both inside the CORS allow-list — verified 2026-09-06,
+  // `Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS`. PATCH is
+  // still absent from that list, which is the BF-021 wall; nothing here uses
+  // it, so nothing here inherits it.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * This account's live contract prices (§4.3).
+   *
+   * Each row embeds `last_change`, so the table's "was → now" column costs no
+   * second call per row — do not add one.
+   */
+  async listContractPrices(businessAccountId, { search, page = 1, limit = 25 } = {}) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('limit', String(limit));
+      if (search) params.set('search', search);
+      const resp = await window.API.get(
+        `/api/admin/business/accounts/${encodeURIComponent(businessAccountId)}/custom-prices?${params}`);
+      if (!resp || resp.ok === false || !Array.isArray(resp?.data?.items)) return null;
+      return {
+        account: resp.data.account ?? null,
+        items: resp.data.items,
+        pagination: resp?.data?.pagination ?? resp?.meta ?? null,
+      };
+    } catch (e) {
+      adminApiWarn('Contract prices', e);
+      return null;
+    }
+  },
+
+  /**
+   * Catalogue search scoped to one account (§4.4). Active products only.
+   *
+   * Every hit carries `break_even_price` and `floor_price`, which is what lets
+   * the price box warn WHILE THE OPERATOR TYPES with no round trip. Writes are
+   * limited to 20/min; a validation round trip per keystroke would eat that
+   * budget for no reason. Keep the guard rails local.
+   */
+  async searchAccountProducts(businessAccountId, { q, onlyPriced = false, page = 1, limit = 20 } = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (onlyPriced) params.set('only_priced', 'true');
+      params.set('page', String(page));
+      params.set('limit', String(limit));
+      const resp = await window.API.get(
+        `/api/admin/business/accounts/${encodeURIComponent(businessAccountId)}/product-search?${params}`);
+      if (!resp || resp.ok === false || !Array.isArray(resp?.data?.items)) return null;
+      return { items: resp.data.items, pagination: resp?.data?.pagination ?? resp?.meta ?? null };
+    } catch (e) {
+      adminApiWarn('Product search', e);
+      return null;
+    }
+  },
+
+  /**
+   * Set or update this account's price for one product (§4.5). Idempotent.
+   *
+   * `custom_price` is GST-INCLUSIVE — the same basis as the storefront price
+   * and as `products.retail_price`. Sending an ex-GST figure here silently
+   * undercharges by 15%, and nothing downstream would notice.
+   *
+   * THROWS on a below-cost refusal with `.code = 'PRICE_BELOW_COST'` and
+   * `.evaluation` attached, so the caller can confirm and re-send the identical
+   * body with `acknowledge_below_cost: true`. The refused request changes
+   * nothing — the stored price is untouched.
+   */
+  async setContractPrice(businessAccountId, productId, body) {
+    const resp = await window.API.put(
+      `/api/admin/business/accounts/${encodeURIComponent(businessAccountId)}/custom-prices/${encodeURIComponent(productId)}`,
+      body,
+    );
+    if (resp && resp.ok === false) throw contractPriceError(resp, 'Could not save that price');
+    return resp?.data ?? null;
+  },
+
+  /**
+   * Withdraw this account's price for one product (§4.7). The account
+   * immediately reverts to list plus the ordinary volume ladder.
+   *
+   * 404 when the account has no price for that product, which makes a
+   * double-click safe AND honest — it reports rather than pretending to
+   * succeed. Callers read that through `isAlreadyRemoved()`.
+   *
+   * The optional `{notes}` body rides through `API.delete`'s options, which
+   * request() spreads straight into fetch. Verified end-to-end by
+   * `npm run probe:contract-pricing -- --live-write`; if the server ever
+   * refuses a DELETE body, that probe fails rather than this silently dropping
+   * the operator's reason for ending a contract.
+   */
+  async removeContractPrice(businessAccountId, productId, { notes } = {}) {
+    const path = `/api/admin/business/accounts/${encodeURIComponent(businessAccountId)}/custom-prices/${encodeURIComponent(productId)}`;
+    const options = {};
+    const trimmed = String(notes ?? '').trim();
+    if (trimmed) options.body = JSON.stringify({ notes: trimmed });
+    const resp = await window.API.delete(path, options);
+    if (resp && resp.ok === false) throw contractPriceError(resp, 'Could not remove that price');
+    return resp?.data ?? null;
+  },
+
+  /**
+   * The audit trail (§4.6), account-wide or narrowed to one product.
+   *
+   * Rows carry SNAPSHOT `sku` and `name` taken at the time of the change, and
+   * no foreign key to `products` — so a later SKU rename, or deleting the
+   * product entirely, cannot rewrite history. Render the row's own `sku`.
+   */
+  async listContractPriceHistory(businessAccountId, { productId, page = 1, limit = 50 } = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (productId) params.set('product_id', productId);
+      params.set('page', String(page));
+      params.set('limit', String(limit));
+      const resp = await window.API.get(
+        `/api/admin/business/accounts/${encodeURIComponent(businessAccountId)}/price-history?${params}`);
+      if (!resp || resp.ok === false || !Array.isArray(resp?.data?.items)) return null;
+      return { items: resp.data.items, pagination: resp?.data?.pagination ?? resp?.meta ?? null };
+    } catch (e) {
+      adminApiWarn('Price history', e);
+      return null;
+    }
   },
 
   /**

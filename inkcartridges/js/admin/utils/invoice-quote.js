@@ -47,6 +47,20 @@ export const PRICE_AUTO = 'auto';
 export const PRICE_MANUAL = 'manual';
 
 /**
+ * What kind of price an `offers[]` entry is proposing.
+ *
+ * These are NOT interchangeable and the editors must not route one through the
+ * other's handler: applying a volume offer stamps `volumePercent` /
+ * `volumeSaving` / `volumeQuantity`, and those three keys are PERSISTED into
+ * the saved invoice or quick order and carried across the QO → invoice bridge.
+ * A negotiated per-account price filed as a volume discount would be a false
+ * claim in a stored record — and it would print "Bulk price — X% off at N+" on
+ * the customer's document, naming a rung that does not exist.
+ */
+export const OFFER_VOLUME = 'volume';
+export const OFFER_CONTRACT = 'contract';
+
+/**
  * The two editors name the ex-GST sell price differently — Invoices calls it
  * `unitCost` (it is the "Cost (excl. GST)" column printed on the customer's
  * invoice), Quick Order calls it `unitPrice`. Both are the same number, and
@@ -148,9 +162,33 @@ export function deliveryHintFromDraft(draft) {
  * would just be quoting ourselves; omitting it on untouched lines is what the
  * brief asks for and keeps a deliberate override honoured.
  *
+ * ── WHO THE CUSTOMER IS, AND WHY IT IS A SECOND ARGUMENT ───────────────────
+ *
+ * Since migration 165 the endpoint prices a business account's own negotiated
+ * rates when it is told who the customer is. It accepts either identifier and
+ * resolves the account server-side.
+ *
+ * That identity is passed in SEPARATELY rather than read off `draft`, and the
+ * reason is structural. The Quick Order draft genuinely has a `customer_id`
+ * field — it is saved and re-read. The invoice draft does not: its customer id
+ * lives in a module-local `_fillSource`, and putting it on the draft to make
+ * this function simpler would put it one careless refactor away from
+ * `buildPayload()`, `documentDrift()` and `setStatusViaFullUpdate()`, all three
+ * of which walk the draft's keys. A key that is never on the draft cannot be
+ * persisted by accident.
+ *
+ * EXACTLY ONE identifier is sent. `business_account_id` wins when both are
+ * available: it is an explicit operator choice made in the link control, while
+ * a customer id is inferred from whoever the draft was filled from, and if the
+ * two disagree (invoicing a subsidiary against a parent's account) the server
+ * picks one and we cannot tell which. Send neither and nothing changes —
+ * that guarantee is load-bearing for every quote that has no business account.
+ *
+ * @param {object} draft
+ * @param {{customerId?:string|null, businessAccountId?:string|null}} [identity]
  * @returns {{body:object, truncated:number}|null} null when there is nothing to quote
  */
-export function quoteRequestBody(draft) {
+export function quoteRequestBody(draft, identity = {}) {
   const all = Array.isArray(draft?.lines) ? draft.lines : [];
   if (!all.length) return null;
   // Nothing typed anywhere: a quote would only tell us the zone options, and the
@@ -186,6 +224,12 @@ export function quoteRequestBody(draft) {
   const body = { line_items };
   const hint = deliveryHintFromDraft(draft);
   if (hint) body.delivery = hint;
+
+  // One identifier, or none. See the docblock for why both is not an option.
+  const accountId = str(identity?.businessAccountId);
+  const customerId = str(identity?.customerId);
+  if (accountId) body.business_account_id = accountId;
+  else if (customerId) body.customer_id = customerId;
 
   return { body, truncated: all.length - kept.length };
 }
@@ -226,6 +270,7 @@ export function normalizeQuote(payload) {
     retailInclGst: l?.retail_incl_gst != null ? num(l.retail_incl_gst) : null,
     unitExclGst: l?.unit_excl_gst != null ? num(l.unit_excl_gst) : null,
     volume: normalizeVolume(l?.volume),
+    contract: normalizeContract(l?.contract),
   }));
 
   const hasOptions = Array.isArray(rawShipping?.options);
@@ -239,7 +284,132 @@ export function normalizeQuote(payload) {
     suggestedKey: rawShipping.suggested_key ?? null,
   } : { hasOptions: false, options: [], weightKg: null, goodsTotalInclGst: null, freeShippingThreshold: null, freeShippingEligible: false, suggestedKey: null };
 
-  return { lines, shipping };
+  return { lines, shipping, account: normalizeQuoteAccount(data) };
+}
+
+/**
+ * The business account this quote resolved, if any.
+ *
+ * ── `consulted` AND `pricedLineCount` ARE TWO DIFFERENT FACTS ──────────────
+ *
+ * `contract_prices_consulted: true` does NOT mean a line got a contract price.
+ * An active account with no negotiated price on any quoted line reports `true`
+ * and `0`, and that is a completely ordinary state that must not read as a
+ * fault. Badge off the COUNT; explain off the STATUS.
+ *
+ * `pricedLineCount` is null when the key is absent, and only then. An older
+ * backend that does not send it must not be reported as "0 lines priced" —
+ * that is the absence-as-zero shape this codebase keeps paying for.
+ */
+function normalizeQuoteAccount(data) {
+  const id = data?.business_account_id ?? null;
+  const consulted = data?.contract_prices_consulted === true;
+  const rawCount = data?.contract_priced_line_count;
+  return {
+    id,
+    name: data?.business_account_name ?? null,
+    status: data?.business_account_status ?? null,
+    consulted,
+    pricedLineCount: rawCount != null ? num(rawCount) : null,
+  };
+}
+
+/**
+ * A line's negotiated price, or null when this account has none for it.
+ *
+ * Same shape discipline as normalizeVolume: `contract: null` means "no
+ * negotiated price applies" and is preserved as null, never flattened into a
+ * zero-saving object. Both endpoints always send the key, so this is a value
+ * check rather than a presence one.
+ *
+ * There is deliberately NO percent here. The backend supplies per-unit and
+ * per-line savings in dollars and no contract percentage, and we do not compute
+ * one — a percent we derived would be the only number on the surface that we
+ * made up.
+ */
+function normalizeContract(c) {
+  if (!c || typeof c !== 'object') return null;
+  const unitExclGst = c.unit_excl_gst != null ? num(c.unit_excl_gst) : null;
+  if (unitExclGst == null) return null;
+  return {
+    unitInclGst: c.unit_incl_gst != null ? num(c.unit_incl_gst) : null,
+    unitExclGst,
+    perUnitSavingExclGst: c.per_unit_saving_excl_gst != null ? num(c.per_unit_saving_excl_gst) : null,
+    lineSavingExclGst: c.line_saving_excl_gst != null ? num(c.line_saving_excl_gst) : null,
+  };
+}
+
+/**
+ * The contract equivalent of volumeBadge(): the figures a chip needs, or null.
+ *
+ * Note what this does NOT return — a percent. See normalizeContract().
+ */
+export function contractBadge(quoteLine) {
+  const c = quoteLine?.contract;
+  if (!c || c.unitExclGst == null) return null;
+  return {
+    unitPrice: c.unitExclGst,
+    perUnitSaving: c.perUnitSavingExclGst,
+    lineSaving: c.lineSavingExclGst,
+  };
+}
+
+/**
+ * One sentence about the account above the line items, or null for "nothing to
+ * say". Both editors render this.
+ *
+ * ── THE SUSPENDED BRANCH IS THE MOST VALUABLE STRING IN THIS FEATURE ───────
+ *
+ * Only an ACTIVE account prices a quote. A suspended or closed one is still
+ * resolved and reported, and is quoted at LIST. Without this sentence the
+ * operator sees list prices on a customer they know has negotiated rates and
+ * concludes the feature is broken — or worse, does not notice and invoices
+ * them at list. `warn: true` exists so it cannot be styled as an aside.
+ *
+ * ── AND `consulted: false` IS AMBIGUOUS, MEASURED 2026-09-06 ───────────────
+ *
+ * Three situations answer `consulted: false` with every field null, and the
+ * response cannot tell them apart: no identifier was sent; the customer is an
+ * ordinary retail customer; or the id we sent was WRONG (a bogus UUID returns
+ * 200, not 404). So the copy is "No business account" — a statement about what
+ * we found — and never "list pricing confirmed", which would claim a lookup we
+ * cannot prove happened.
+ */
+export function accountNotice(quote) {
+  const a = quote?.account;
+  if (!a || !a.consulted || !a.id) return null;
+
+  const who = a.name || 'This business account';
+
+  if (a.status && a.status !== 'active') {
+    return {
+      kind: 'inactive',
+      warn: true,
+      message: `${who}’s account is ${a.status} — its contract prices are NOT being applied. These lines are priced at list.`,
+    };
+  }
+
+  if (a.pricedLineCount == null) {
+    return {
+      kind: 'unknown',
+      warn: true,
+      message: `${who} has contract pricing, but the server did not say how many lines used it.`,
+    };
+  }
+
+  if (a.pricedLineCount > 0) {
+    return {
+      kind: 'priced',
+      warn: false,
+      message: `Contract pricing — ${who} · ${a.pricedLineCount} line${a.pricedLineCount === 1 ? '' : 's'} at their negotiated price.`,
+    };
+  }
+
+  return {
+    kind: 'consulted',
+    warn: false,
+    message: `${who} has contract pricing, but none of these products has a negotiated price.`,
+  };
 }
 
 function normalizeOption(o) {
@@ -361,6 +531,30 @@ export function volumeBadge(quoteLine) {
  * They are cleared whenever we are NOT the author of the price — we must never
  * print "6% off" beside a number we did not compute.
  *
+ * ── A CONTRACT PRICE LANDS HERE TOO, AND STAMPS NOTHING ────────────────────
+ *
+ * Since migration 165, `unit_excl_gst` IS this account's negotiated price when
+ * one applies, and the `volume` block is returned only when a quantity rung
+ * beats it. So `target = badge ? badge.unitPrice : ql.unitExclGst` already
+ * resolves the two correctly and needs no new arithmetic.
+ *
+ * What matters is what it must NOT do. With a contract price and no rung,
+ * `badge` is null, so the else-branch below clears all three `volume_*` keys —
+ * and that is exactly right, for two reasons that are easy to "fix" and must
+ * not be:
+ *
+ *   1. Those keys are SAVED into the invoice/quick-order record and cross the
+ *      QO → invoice bridge. Filing a negotiated price as a volume discount
+ *      would put a false claim in a stored document.
+ *   2. They drive `lineDocNote()`, which prints on the CUSTOMER'S invoice.
+ *      "Bulk price — 22% off at 1+" would both name a rung that does not exist
+ *      and disclose this account's negotiated rate on a document they may
+ *      forward. A contract line prints nothing, and printing nothing is the
+ *      feature.
+ *
+ * The contract price is still fully auditable — see the price history (§4.6) —
+ * so nothing is lost by not stamping it.
+ *
  * @param {Array} lines  draft lines
  * @param {object} quote normalizeQuote() output
  * @returns {{lines:Array, applied:number[], offers:Array, changed:boolean}}
@@ -409,7 +603,20 @@ export function applyQuoteToLines(lines, quote) {
       // through. The discount check is not redundant with it.
       if (badge && linePrice(line) >= 0 && !hasManualDiscount(line)
           && round2(linePrice(line)) !== round2(badge.unitPrice)) {
-        offers.push({ position: i, badge });
+        offers.push({ position: i, kind: OFFER_VOLUME, badge });
+      } else if (!badge && linePrice(line) >= 0 && !hasManualDiscount(line)) {
+        // No rung beat it, but this account may still have a negotiated price
+        // for the product. Without this branch a contract customer's hand-typed
+        // line gets NO affordance at all — the ladder's absence would hide the
+        // contract, which is the one price on the quote we most want offered.
+        //
+        // Gated on `contract` being present, not merely on unitExclGst: with no
+        // contract and no rung, `unitExclGst` is just list, and "apply the list
+        // price" is noise on every untouched line in the editor.
+        const cb = contractBadge(ql);
+        if (cb && round2(linePrice(line)) !== round2(cb.unitPrice)) {
+          offers.push({ position: i, kind: OFFER_CONTRACT, badge: cb });
+        }
       }
       // The badge on a hand-edited line would be a claim about a price we did
       // not set, so it goes. `discountSaving` is deliberately NOT touched here:
@@ -462,6 +669,21 @@ export function clearVolume(line) {
  * document someone reads months later, and "6% off" alone does not explain
  * itself. Wording matches the storefront's "Buy 3+" vocabulary
  * (Business.breakLabel) so the counter and the website say the same thing.
+ *
+ * ── A CONTRACT PRICE DELIBERATELY PRINTS NOTHING HERE ──────────────────────
+ *
+ * This needs no code: a contract line carries no `volumePercent` (see
+ * applyQuoteToLines), so the guard below already returns ''. Saying so out loud
+ * because it looks like an omission and is not.
+ *
+ * The volume ladder is PUBLIC — every shopper gets the same rungs, so printing
+ * "6% off at 7+" tells the customer only what the website already tells them. A
+ * negotiated per-account price is not public. Printing "Contract price — 22%
+ * off list" on a document the customer may forward to a supplier, a competitor
+ * or their own customer discloses the rate we agreed with them, and invites
+ * "why isn't my other line discounted too". If a line ever needs explaining on
+ * the document, the operator's own manual discount + note is the path — it
+ * prints in their words, at their discretion.
  */
 export function lineDocNote(line) {
   // A discount the OPERATOR gave, in their own words. Takes precedence: it is

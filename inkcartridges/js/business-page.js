@@ -153,6 +153,30 @@
     /** Invoices tab page size. Anything beyond it is paged in, never dropped. */
     const PAGE_SIZE = 20;
 
+    /**
+     * One reorder tile's price line.
+     *
+     * Three server-supplied fields, no arithmetic:
+     *   price        what THIS account pays (contract price, or list)
+     *   list_price   what everyone else pays — a "was" only when it is higher
+     *   price_source 'contract' | 'list'
+     *
+     * Quantity is 1 on a reorder tile, so no volume rung applies; the ladder is
+     * applied once the item is actually added to the cart. Saying "$X ea" and
+     * nothing about rungs is therefore the honest form here — the old tile led
+     * with an entry-rung price ("$22.78 ea at 3+") for a button that adds one.
+     */
+    function reorderPriceHtml(it) {
+        const price = Number(it && it.price);
+        if (!Number.isFinite(price) || price <= 0) return '— price unavailable';
+        const list = Number(it && it.list_price);
+        const cheaper = Number.isFinite(list) && list > price + 0.005;
+        const was = cheaper ? ` <s class="business-reorder__was">${esc(money(list))}</s>` : '';
+        const tag = it && it.price_source === 'contract'
+            ? ' <span class="business-reorder__contract">your price</span>' : '';
+        return `${esc(money(price))} ea${was}${tag}`;
+    }
+
     const BusinessPage = {
 
         _tab: 'overview',
@@ -948,9 +972,38 @@
             return null;
         },
 
+        /**
+         * The reorder tiles.
+         *
+         * ── WHY THIS MOVED OFF /top-products (Sep 2026) ────────────────────
+         *
+         * `/api/business/top-products` deliberately carries NO price: a figure
+         * from an order placed in March is not what the item costs today, so the
+         * field was left off and the price was fetched separately from the live
+         * pricing path. That was right, and it is now unnecessary — and, since
+         * contract pricing shipped, incomplete.
+         *
+         * `/api/business/reorder-items` answers the same question and carries
+         * `price` = WHAT THIS ACCOUNT PAYS (their contract price when one is
+         * set, else list), plus `list_price` for a struck-through "was" and
+         * `price_source`. One request instead of two, and the number is the
+         * account's own rather than a public ladder rung.
+         *
+         * ── AND WHAT IS UNPROVEN ABOUT IT ─────────────────────────────────
+         *
+         * The backend's hand-off documents only the PRICE keys. Neither business
+         * account has order history, so this endpoint returns `[]` in production
+         * and its `sku` / `name` / `product_url` / `quantity_ordered` /
+         * `order_count` / `in_stock` fields could not be observed. They are read
+         * defensively below and a row missing its SKU is reported by name rather
+         * than rendered as a blank tile — because the failure mode we are
+         * guarding against is not an error, it is eight silent empty cards.
+         * `npm run probe:contract-pricing` prints the row shape the moment any
+         * row exists.
+         */
         async loadTopProducts() {
             show('top-products-error', false);
-            const res = await this.get('/api/business/top-products?limit=8', 'items');
+            const res = await this.get('/api/business/reorder-items?limit=8', 'items');
             const list = $('top-products-list');
             if (!list) return;
             if (!res.ok) {
@@ -959,16 +1012,40 @@
                 show('top-products-error', true);
                 return;
             }
-            const items = (res.data && res.data.items) || [];
+            const all = (res.data && res.data.items) || [];
+            // A row with no SKU cannot be priced, linked or added to a cart.
+            // Dropping it silently would render a tile that does nothing, which
+            // is the failure this whole rewrite exists to remove (ERR-218).
+            const items = all.filter((it) => it && it.sku);
+            if (items.length !== all.length) {
+                warn(`[BusinessPage] ${all.length - items.length} reorder row(s) arrived with no sku and were not rendered`);
+            }
             show('top-products-empty', items.length === 0);
             list.innerHTML = items.map((it) => {
                 const buyable = it.purchasable !== false && it.in_stock !== false;
                 const reason = it.in_stock === false ? 'Out of stock' : 'Unavailable';
+                // Ordering history is what makes a tile a REORDER tile rather
+                // than a recommendation. Absent, we say nothing rather than
+                // "ordered undefined across undefined orders".
+                const ordered = Number(it.quantity_ordered);
+                const orders = Number(it.order_count);
+                const historyMeta = Number.isFinite(ordered) && Number.isFinite(orders)
+                    ? ` · ordered ${esc(ordered)} across ${esc(orders)} order${orders === 1 ? '' : 's'}`
+                    : '';
                 return `
                 <article class="business-reorder__item">
-                    <a class="business-reorder__name" href="${esc(it.product_url || '#')}">${esc(it.name || it.sku)}</a>
-                    <p class="business-reorder__meta">${esc(it.sku)} · ordered ${esc(it.quantity_ordered)} across ${esc(it.order_count)} order${it.order_count === 1 ? '' : 's'}</p>
-                    <p class="business-reorder__price" data-price-for="${esc(it.sku)}">&nbsp;</p>
+                    ${it.product_url
+                        // NEVER synthesise `/p/<sku>` here. The canonical product
+                        // URL is the backend's to give (canonical_url / product_url);
+                        // hand-building one makes this the PRIMARY link to a shape
+                        // the repo only allows as a documented fallback, and it is
+                        // pinned by tests/value-pack-and-product-url-contract.js.
+                        // With no URL we render the name as text — a tile that
+                        // cannot link is still a tile that can reorder.
+                        ? `<a class="business-reorder__name" href="${esc(it.product_url)}">${esc(it.name || it.sku)}</a>`
+                        : `<span class="business-reorder__name">${esc(it.name || it.sku)}</span>`}
+                    <p class="business-reorder__meta">${esc(it.sku)}${historyMeta}</p>
+                    <p class="business-reorder__price" data-price-for="${esc(it.sku)}">${reorderPriceHtml(it)}</p>
                     ${buyable
                         ? `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}<button type="button" class="btn btn--secondary business-reorder__add" data-sku="${esc(it.sku)}" data-product-name="${esc(it.name || it.sku)}">${typeof QtyStepper !== 'undefined' ? QtyStepper.ctaLabel(1) : 'Add to cart'}</button></div>`
                         : `<button type="button" class="btn btn--secondary" disabled>${esc(reason)}</button>`}
@@ -982,11 +1059,15 @@
                     // ERR-218 — this called Cart.addItem(sku, 1). addItem takes a
                     // PRODUCT OBJECT and has no second parameter, so it read
                     // .id/.sku/.name off a bare string, got undefined for all of
-                    // them and POSTed product_id: undefined. /top-products carries
+                    // them and POSTed product_id: undefined. /top-products carried
                     // no product id at all (sku, name, product_url, counts), which
                     // is why the id had to come from somewhere — so resolve the
-                    // SKU against the live catalogue first, the same authority
-                    // decorateReorderPrices already uses for the price.
+                    // SKU against the live catalogue first.
+                    //
+                    // Still true on /reorder-items: whether IT carries a product
+                    // id is UNKNOWN, because both accounts have no order history
+                    // and the endpoint answers []. So the lookup stays. If the
+                    // probe ever sees an id on a real row, this can go.
                     if (typeof Cart === 'undefined' || !Cart.addItem) return;
                     const sku = btn.getAttribute('data-sku');
                     const quantity = (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1;
@@ -1031,48 +1112,20 @@
                 });
             });
 
-            this.decorateReorderPrices(list, items);
         },
 
         /**
-         * Today's price on each reorder tile.
+         * Today's price on each reorder tile — the ACCOUNT'S price.
          *
-         * /top-products carries NO price, deliberately — a figure from an order
-         * placed in March is not what the item costs today, and re-presenting it
-         * as one is exactly why the field was left off. So the price is read
-         * from the live pricing path (Business.getPricing → describeLadder),
-         * the same authority the PDP and the product cards use. A SKU that call
-         * could not answer for renders `—`, never a guess, and nothing here
-         * computes a price.
+         * `price` is what this account actually pays: their contract price when
+         * one is set, else list. `list_price` is what everyone else pays, so it
+         * only earns a struck-through "was" when it is genuinely higher.
+         *
+         * Nothing is computed. A row with no usable price prints "— price
+         * unavailable", never a guess and never a stale figure from an old
+         * order, which is the rule /top-products was designed around and which
+         * survives the move.
          */
-        async decorateReorderPrices(root, items) {
-            if (typeof Business === 'undefined' || !Business.getPricing) return;
-            const skus = items.map((it) => it && it.sku).filter(Boolean);
-            if (!skus.length) return;
-
-            let pricing = null;
-            try {
-                pricing = await Business.getPricing(skus);
-            } catch (e) {
-                warn('[BusinessPage] reorder pricing', e && e.message);
-            }
-
-            const missed = new Set((pricing && pricing.missed) || []);
-            root.querySelectorAll('[data-price-for]').forEach((el) => {
-                const sku = el.getAttribute('data-price-for');
-                const item = pricing && !missed.has(sku) ? pricing.items.get(sku) : null;
-                if (!item) { el.textContent = '— price unavailable'; return; }
-
-                const ladder = Business.describeLadder(item);
-                if (ladder && ladder.entry) {
-                    el.textContent = `${money(ladder.entry.businessPrice)} ea at ${Business.breakLabel(ladder.entry)}`;
-                    return;
-                }
-                const retail = num(item.retail_price);
-                el.textContent = retail !== null ? `${money(retail)} ea` : '— price unavailable';
-            });
-        },
-
         invoiceQuery(extra) {
             const p = new URLSearchParams();
             const status = ($('invoice-filter-status') || {}).value;
