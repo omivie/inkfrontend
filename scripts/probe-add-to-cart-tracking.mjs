@@ -245,6 +245,45 @@ const run = async () => {
             : soft('quantity not echoed', 'the tag falls back to 1');
     }
 
+    // ── §3b — the case that exposes the trap ──────────────────────────────
+    console.log('\n\x1b[1m§3b — a SECOND add to the same line: total vs delta\x1b[0m');
+    const add2 = await req('POST', `${BASE}/api/cart/items`, {
+        headers: { 'x-guest-session': guest },
+        body: { product_id: productId, quantity: 1 },
+    });
+    if (add2.status !== 200 && add2.status !== 201) {
+        bad('second add', `expected 2xx, got ${add2.status}`);
+    } else {
+        const d2 = add2.json?.data || {};
+        console.log(`    quantity=${JSON.stringify(d2.quantity)} (line total) · quantity_added=${JSON.stringify(d2.quantity_added)} (delta)`);
+        // This is the ONLY case that can tell the two apart: on an empty line
+        // the total IS the delta, which is exactly why the wrong formula
+        // survived review and unit tests (BF-060).
+        if (d2.quantity_added === 1) {
+            ok('quantity_added reports the DELTA (1) — the field the Ads value is built on');
+        } else if (d2.quantity_added === undefined) {
+            soft('quantity_added ABSENT — running on the local derivation',
+                'not broken: AdsConversions falls back to deriving the delta from the line\'s prior '
+                + 'quantity, capped at what was requested. But the server\'s own delta is the '
+                + 'authoritative one, so find out whether the field was rolled back (BF-060).');
+        } else {
+            bad('quantity_added IS NOT THE DELTA',
+                `added 1 to a line holding 2 and quantity_added came back ${JSON.stringify(d2.quantity_added)}. `
+                + 'The Google Ads conversion value is built on this field — if it reports the line total, '
+                + 'every add to an existing line is over-reported (BF-060, the $290.97-for-one-cartridge bug).');
+        }
+        if (d2.quantity === 3) {
+            ok('quantity is still the LINE TOTAL (3) — unchanged meaning, as the backend intended');
+        } else {
+            soft('quantity', `expected the line total 3, got ${JSON.stringify(d2.quantity)}`);
+        }
+        if (d2.quantity_added !== undefined && d2.quantity === d2.quantity_added) {
+            bad('THE TWO FIELDS AGREE ON A MERGE — one of them is wrong',
+                'on a second add to the same line the total and the delta MUST differ. If they are '
+                + 'equal here, quantity_added is not a delta and the Ads value is inflated.');
+        }
+    }
+
     console.log('\n\x1b[1m§4 — the cart-event beacon accepts the shared traffic id\x1b[0m');
     const ev = await req('POST', `${BASE}/api/analytics/cart-event`, {
         body: { event_type: 'add_to_cart', session_id: 'ts_probe_atc', visitor_id: 'tv_probe_atc', product_id: productId, quantity: 1 },

@@ -102,7 +102,23 @@ const AdsConversions = {
             const sku = typeof product.sku === 'string' ? product.sku.trim() : '';
             if (!sku) return { sent: false, reason: 'no-sku' };
 
-            /* QUANTITY IS A DELTA, AND THE SERVER REPORTS A TOTAL.
+            /* QUANTITY IS A DELTA. THE SERVER NOW REPORTS ONE — AND A TOTAL.
+             *
+             * `quantity_added` is the units added by THIS call, on both the
+             * insert and the merge path. It is the authoritative answer and it
+             * is what this uses (backend added it 2026-09-06 in response to
+             * BF-060; verified live the same day: empty line + 2 -> added 2,
+             * then + 1 -> quantity 3 / quantity_added 1).
+             *
+             * The derivation below is kept as a live fallback, NOT as dead code.
+             * Without it, a response missing `quantity_added` falls back to
+             * `confirmed.quantity` — the LINE TOTAL — and the triple-value bug
+             * returns silently. Removing a fallback is a behaviour change, not a
+             * cleanup (ERR-158). Both paths are pinned by tests, including one
+             * asserting they agree.
+             */
+
+            /* THE DERIVATION, for a response that does not carry the delta.
              *
              * `confirmed.quantity` is the RESULTING LINE TOTAL, not the amount
              * added. Measured in a real browser 2026-09-06: a line already
@@ -130,10 +146,14 @@ const AdsConversions = {
             const priorQty = Number.isFinite(prior) && prior > 0 ? prior : 0;
 
             const serverTotal = Number(confirmed.quantity);
-            const delta = Number.isFinite(serverTotal) ? serverTotal - priorQty : NaN;
-            const quantity = (Number.isFinite(delta) && delta > 0 && delta <= requestedQty)
-                ? delta
+            const derived = Number.isFinite(serverTotal) ? serverTotal - priorQty : NaN;
+            const fallbackQty = (Number.isFinite(derived) && derived > 0 && derived <= requestedQty)
+                ? derived
                 : requestedQty;
+
+            // The server's own delta wins when it is there.
+            const added = Number(confirmed.quantity_added);
+            const quantity = (Number.isFinite(added) && added > 0) ? added : fallbackQty;
 
             // PRICE COMES FROM THE SERVER OR NOT AT ALL.
             //

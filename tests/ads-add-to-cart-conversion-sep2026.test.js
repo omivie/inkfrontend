@@ -210,6 +210,58 @@ test('§1 the item is the SKU, tagged retail', () => {
     ]);
 });
 
+test('§1 the server\'s own quantity_added wins when present', () => {
+    // Added by the backend on 2026-09-06 in answer to BF-060, because
+    // `quantity` is the resulting LINE TOTAL and could not change meaning (the
+    // cart UI depends on it). Verified live the same day: empty line + 2 ->
+    // quantity_added 2; then + 1 -> quantity 3, quantity_added 1.
+    const { ads, calls } = loadGtag();
+    ads.addToCart(confirmed({ price_snapshot: 96.99, quantity: 3, quantity_added: 1 }),
+        { priorQuantity: 2, requestedQuantity: 1 });
+    assert.equal(calls[0][2].items[0].quantity, 1);
+    assert.equal(calls[0][2].value, 96.99);
+});
+
+test('§1 quantity_added is trusted over the local derivation when they disagree', () => {
+    // The server knows what it actually inserted; the local cart is a cache and
+    // can be stale. If they disagree, the server is right.
+    const { ads, calls } = loadGtag();
+    ads.addToCart(confirmed({ price_snapshot: 10, quantity: 9, quantity_added: 2 }),
+        { priorQuantity: 0, requestedQuantity: 5 });   // derivation would say 5
+    assert.equal(calls[0][2].items[0].quantity, 2);
+    assert.equal(calls[0][2].value, 20);
+});
+
+test('§1 an absent or junk quantity_added falls back to the derivation, NOT the line total', () => {
+    // This is the whole reason the derivation is kept. Without it a response
+    // without the field falls through to `quantity` — the LINE TOTAL — and the
+    // triple-value bug returns silently. Removing a fallback is a behaviour
+    // change, not a cleanup (ERR-158).
+    for (const junk of [undefined, null, 0, -1, '', 'abc', NaN, {}]) {
+        const { ads, calls } = loadGtag();
+        const c = confirmed({ price_snapshot: 96.99, quantity: 3 });
+        if (junk !== undefined) c.quantity_added = junk;
+        ads.addToCart(c, { priorQuantity: 2, requestedQuantity: 1 });
+        assert.equal(calls[0][2].items[0].quantity, 1,
+            `quantity_added ${JSON.stringify(junk)} must fall back to the delta, never to 3`);
+        assert.equal(calls[0][2].value, 96.99);
+    }
+});
+
+test('§1 the two paths AGREE on the case that hid the bug — an add to an empty line', () => {
+    // The trap is that the wrong formula is RIGHT here: on an empty line the
+    // line total IS the delta, so this case cannot distinguish them. Pinning
+    // the agreement keeps that fact executable rather than folkloric.
+    const withField = loadGtag();
+    withField.ads.addToCart(confirmed({ price_snapshot: 50, quantity: 2, quantity_added: 2 }),
+        { priorQuantity: 0, requestedQuantity: 2 });
+    const withoutField = loadGtag();
+    withoutField.ads.addToCart(confirmed({ price_snapshot: 50, quantity: 2 }),
+        { priorQuantity: 0, requestedQuantity: 2 });
+    assert.equal(withField.calls[0][2].value, withoutField.calls[0][2].value);
+    assert.equal(withField.calls[0][2].value, 100);
+});
+
 test('§1 QUANTITY IS A DELTA — the server reports the resulting LINE TOTAL', () => {
     // The bug this replaces, measured in a real browser 2026-09-06: a line
     // holding 2, add 1 more, response says quantity: 3. Sent straight through

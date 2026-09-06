@@ -186,8 +186,19 @@ prior quantity, capped at what was requested (a stale-low local cart must never
 *inflate* a conversion) while still honouring a genuine stock clamp downward.
 Re-verified live: line 3 → 4, and Google receives `quantity: 1, value: 96.99`.
 
-**If `quantity` is meant to be the delta, this is a backend bug — please say
-which it is.** We have assumed line-total because that is what production does.
+**Answered and fixed at source the same day.** It is a doc defect, not a backend
+one: `quantity` reporting the line's resulting state is correct for a cart-item
+resource and the cart UI depends on it. The backend added an additive
+**`quantity_added`** — the delta on both the insert and the merge path — which we
+verified live before adopting (empty line + 2 -> `quantity_added: 2`; then + 1 ->
+`quantity: 3, quantity_added: 1`) and now prefer.
+
+**We did not delete the derivation, and this is deliberate.** A response missing
+`quantity_added` would otherwise fall through to `quantity` — the line total —
+and the triple-value bug returns silently. It is a live fallback, not dead code,
+and both paths are pinned, including a test asserting they **agree on an add to
+an empty line**: the case where the wrong formula is right, and therefore the
+reason it survived review in the first place.
 
 ### 3b. `Number(null)` is `0`
 

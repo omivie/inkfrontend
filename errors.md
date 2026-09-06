@@ -93,6 +93,19 @@ requested** (a stale-low local cart must never *inflate* a conversion) while sti
 genuine stock clamp downward. Re-verified live: line 3 -> 4, Google receives `quantity: 1,
 value: 96.99`.
 
+**Resolved at source the same day (BF-060).** The backend confirmed it is a doc defect rather than a
+backend one — `quantity` reporting the line's resulting state is correct for a cart-item resource and
+the cart UI depends on it — and added an **additive `quantity_added`**, the delta on both the insert
+and the merge path. Verified live before adopting it (the ERR-221 rule: code written against an
+endpoint that does not exist yet is untested code wearing a comment that says it is ready): empty
+line + 2 -> `quantity_added: 2`; then + 1 -> `quantity: 3, quantity_added: 1`. `AdsConversions` now
+prefers it. **The derivation was NOT deleted.** Without it, a response missing the field falls
+through to `quantity` — the line total — and the bug returns silently; removing a fallback is a
+behaviour change, not a cleanup (ERR-158). Both paths are pinned, including a test asserting they
+**agree on an add to an empty line** — the case where the wrong formula is right, which is precisely
+why it survived review. `probe:add-to-cart` §3b performs a **second add to the same line**, the only
+call that can tell a total from a delta.
+
 ### `Number(null)` is `0`, again
 
 The first cut wrote `Number(confirmed.price_snapshot)` and range-checked after. `Number(null)` and
