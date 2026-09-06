@@ -10,6 +10,7 @@
     "audit:fit": "node inkcartridges/scripts/fit-audit.js",
     "audit:colours": "node scripts/audit-colour-vocabulary.mjs",
     "audit:types": "node scripts/audit-product-types.mjs",
+    "audit:brand-categories": "node scripts/audit-brand-categories.mjs",
     "audit:typeahead": "node scripts/audit-ribbon-typeahead.mjs",
     "audit:searchclick": "node scripts/audit-search-click-beacon.mjs",
     "audit:colours:static": "node scripts/audit-colour-vocabulary.mjs --static",

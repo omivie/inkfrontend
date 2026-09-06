@@ -74,9 +74,13 @@
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'drums' }
           ]},
+        // No Ink Cartridges entry: we have never stocked a Lexmark ink_cartridge
+        // or ink_bottle, and the link sat here landing customers on "No products
+        // found" until one of them reported it (ERR-215). `npm run
+        // audit:brand-categories` now measures every entry in this array against
+        // the live catalogue — check B1 is the one that catches this shape.
         { slug: 'lexmark', name: 'Lexmark', logo: '/assets/brands/lexmark.png',
           categories: [
-              { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'drums' }
           ]},

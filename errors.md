@@ -41,6 +41,84 @@ describing the same incident.
 
 ---
 
+## ERR-215 — The menu offered a Lexmark ink cartridge we have never sold, and hid five Epson products we do sell — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent two screenshots of
+`/shop?brand=lexmark&category=ink` — the Cartridge Brands mega open above an empty shelf reading
+*"No products found."* — and asked for the whole menu checked: *"check that all of the categories
+have products in them otherwise they shouldn't be there. also check that a category has been
+created for all products that we have."*
+
+**(a) THE MENU WAS NEVER CHECKED AGAINST THE SHELF, BY ANYTHING.** `BRANDS` in `js/mega-nav.js`
+is a hardcoded array of 29 brand+category claims. `GET /api/site/nav` looked like the safeguard,
+but `hydrateFromSiteNav()` lifts the CATEGORY lists straight back out of the local array
+(`CATEGORY_LINKS_BY_BRAND`) — the feed can reorder cards or drop a whole brand, and **can never
+correct a single wrong category link**. No test and no script had ever compared the array to the
+catalogue. The only instrument pointed at those 29 links was a customer clicking one.
+
+**(b) ONE LINK WAS DEAD, AND EXACTLY ONE.** Walked all 4,085 products (`/api/products`, 4,077
+returned + 8 `removed_from_page`, reconciles exactly) and cross-checked every link against a real
+`?category=` query. `lexmark` holds zero `ink_cartridge` and zero `ink_bottle` rows;
+`/api/shop?brand=lexmark&category=ink` returns `meta.total: 0`. Every other link on every other
+card resolves to stock. Entry removed.
+
+**(c) 🚨 THE SAME AXIS WAS BROKEN IN THE OPPOSITE DIRECTION, AND THAT HALF WAS WORSE.** Epson's
+"Drums & Supplies" is 5 `maintenance_box` rows. The mega link to them **works**. But `/shop`'s own
+Epson brand page **hid the tile**, so the only path to five purchasable products was a menu link
+that bypassed the page supposedly listing what Epson has.
+
+Cause: `/api/shop`'s brand-scoped **`counts` facet omits `maintenance_box` from `counts.drums`**
+while its `?category=drums` **filter includes it** — measured `epson` ABSENT/5, `canon` 9/12,
+`brother` 61/62. `shop-page.js` read `counts.drums || 0` and `loadCategories()` filtered on `> 0`,
+so **an absent key became a hidden category**. Absence read as zero, again
+(ERR-063/068/073/075/076/149/150).
+
+**(d) THE FIX IS A RULE, NOT A SPECIAL CASE.** *A zero for a multi-type family is unproven until
+measured.* `_confirmMultiTypeZeros()` reads family sizes from `API._CATEGORY_PRODUCT_TYPES`, so it
+covers `ink` (2 types) and `drums` (7) today and any category that later gains a second type,
+without anyone remembering to come back. Hardcoding `'drums'` would have fixed Epson and left the
+next one. Tri-state, deliberately: `> 0` shows the tile and **warns** (the drift detector);
+`=== 0` hides it, proven; `null` keeps the facet's answer but says out loud that the tile was
+hidden **unconfirmed**. New `API.getCategoryTotal()` returns `null`, never `0`, on failure, and
+routes through `catalogEndpoint` so it mints no parallel edge-cache key — and deliberately avoids
+`getShopData`, which would fire a 200-row compat sidecar just to read a count.
+
+**(e) THE FACET IS WHY THE MENU CANNOT SIMPLY BE MADE DATA-DRIVEN.** The obvious cleanup — derive
+the menu from `counts` — would have **deleted** Epson's Drums & Supplies and shrunk Canon's and
+Brother's. Measuring the proxy before trusting it is the only reason that cleanup was not shipped.
+The array stays hardcoded and an audit measures it instead. The facet itself is filed as **BF-056**.
+
+**(f) THE INSTRUMENT, AND ITS POSITIVE CONTROL.** New `npm run audit:brand-categories` — read-only,
+650ms-paced (ERR-188), no `--record` of any kind. B1 offered-but-empty, B2 live-but-unoffered,
+B3 enrolment (a brand on the /shop grid with no mega card, and vice versa), B4 facet-vs-truth.
+**Run before the fix, it failed on `lexmark/ink` and named `epson/drums` — an audit that is green
+before the fix is measuring nothing** (ERR-185). B4 first cried wolf: it reported 7 disagreements,
+4 of which were the facet reading *higher* than the walk. That is expected — the facet counts
+before the per-page pack guard — and the excess summed to exactly the 8 `removed_from_page` rows.
+B4 now reconciles over-counts against that figure and only reports **undercounts**, which left 3,
+all `drums`. Reporting a fully-explained gap as an open condition is how a solved thing reads as a
+live limitation (ERR-184/186).
+
+**(g) RIBBONS ARE EXEMPT, AND THE EXEMPTION IS PRINTED.** 48 ribbon rows sit under Brother, Canon,
+Epson, Lexmark and OKI with no Cartridge Brands link. They are reachable — all five are in the
+63-brand `ribbon_brands` taxonomy behind the Ribbons mega, and `shop-page.js` redirects
+`?category=ribbons` to `/ribbons`. The audit prints the exemption with its row count on every run:
+**a skip nobody sees is indistinguishable from a check that passed.**
+
+**Verified**: audit red before / green after (28 links, 10 cards, 4,077 products);
+`npm run audit:types` still clean. New `tests/brand-category-menu-sep2026.test.js` (16) —
+negative-controlled by reverting each half and confirming 3 tests fail. **A second Claude session
+was live in this working tree** (60+ modified files, 5 untracked test files), so the full suite was
+replayed in a clean `git worktree` at HEAD carrying **only** this change: **5,298 pass, 0 fail**
+(baseline 5,282/0). The 11 failures in the shared tree are that session's in-flight work, confirmed
+by isolation rather than assumption. That session also **overwrote this entry once** mid-write and
+took the number it was first filed under — hence 215; the log write is now verify-and-retry.
+
+**Lesson**: a hardcoded list that a feed appears to validate is the most dangerous shape there is —
+the hydration made the array look supervised for a year while nothing read the one field that
+mattered. And when a count and a filter disagree, **the filter is the product and the count is the
+opinion**: measure the outcome, never the proxy.
+
 ## ERR-209 — The security control on the login page had never been read, and the reassuring state was the one that lied — **RESOLVED** (2026-09-05)
 
 **Date**: 2026-09-05 · **Context**: The owner asked a plain question — *"can you check if the

@@ -1577,6 +1577,72 @@
             });
         },
 
+        /**
+         * A zero for a MULTI-TYPE family is UNPROVEN until measured.
+         *
+         * The brand-scoped `counts` facet on /api/shop is not trustworthy for a
+         * category that spans several `product_type`s: the backend omits
+         * `maintenance_box` from `counts.drums` while its `?category=drums`
+         * FILTER returns those rows (measured 2026-09-06 — epson ABSENT/5,
+         * canon 9/12, brother 61/62).
+         *
+         * Epson is the brand where that bit. Its entire drums family is 5
+         * maintenance boxes, so the key was absent, `counts.drums || 0` read the
+         * absence as zero, and the tile filter below dropped "Drums & Supplies"
+         * — 5 purchasable products with no path from the brand drilldown, while
+         * the mega menu linked straight to them. Absence is not zero
+         * (ERR-063/068/073/075/076/149/150; this one is ERR-215).
+         *
+         * So: any category whose family holds more than one product_type and
+         * whose facet count came back 0 gets ONE confirming request before we
+         * are allowed to hide it. Today that is `ink` (2 types) and `drums` (7).
+         * Single-type families stay on the cheap path — there is nothing for the
+         * facet to omit. Membership is read from API._CATEGORY_PRODUCT_TYPES, so
+         * a category that gains a type is covered without touching this code.
+         *
+         * Tri-state, deliberately:
+         *   > 0   → show the tile, and WARN. That warning is the drift detector.
+         *   === 0 → hide. Proven empty (this is Lexmark → ink, correctly hidden).
+         *   null  → UNMEASURED. Keep the facet's answer, but say out loud that
+         *           the tile was hidden unconfirmed. Never silently.
+         */
+        async _confirmMultiTypeZeros(categoryCounts, navVersion) {
+            const brand = this.state.brand;
+            if (!brand || !categoryCounts) return;
+            const families = (typeof API !== 'undefined' && API._CATEGORY_PRODUCT_TYPES) || null;
+            if (!families) return;
+
+            const suspects = this.categories.filter(cat => {
+                if (cat.id === 'ribbons') return false;       // counted separately, never a tile
+                if ((categoryCounts[cat.id] || 0) > 0) return false;
+                const family = families[cat.apiCategory];
+                return Array.isArray(family) && family.length > 1;
+            });
+            if (!suspects.length) return;
+
+            const confirmed = await Promise.all(suspects.map(cat =>
+                API.getCategoryTotal(brand, cat.apiCategory)
+                    .then(total => ({ cat, total }))
+                    .catch(() => ({ cat, total: null }))));
+            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+            confirmed.forEach(({ cat, total }) => {
+                if (total === null) {
+                    DebugLog.warn(
+                        `[category-counts] ${brand}/${cat.apiCategory}: the counts facet said 0 and the ` +
+                        `confirming query could not be read — hiding the "${cat.name}" tile UNCONFIRMED.`);
+                    return;
+                }
+                if (total > 0) {
+                    categoryCounts[cat.id] = total;
+                    DebugLog.warn(
+                        `[category-counts] ${brand}/${cat.apiCategory}: the /api/shop counts facet reported ` +
+                        `0/absent, but ?category=${cat.apiCategory} serves ${total}. Showing "${cat.name}" ` +
+                        `on the real total. The facet undercounts multi-type families (ERR-215).`);
+                }
+            });
+        },
+
         async loadCategories(navVersion) {
             const grid = this.elements.categoriesGrid;
             grid.innerHTML = '';
@@ -1593,7 +1659,7 @@
             };
 
             // Check cache for category counts
-            const cacheKey = `${this.state.brand}-category-counts-v4`;
+            const cacheKey = `${this.state.brand}-category-counts-v5`;
             let categoryCounts = this.cache.products[cacheKey];
 
             if (!categoryCounts) {
@@ -1623,6 +1689,10 @@
                                     paper: counts.paper || 0,
                                     ribbons: 0
                                 };
+                                // The facet undercounts multi-type families, so a zero
+                                // from it is a question, not an answer (ERR-215).
+                                await this._confirmMultiTypeZeros(categoryCounts, navVersion);
+                                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                             }
                         } else {
                             this._shopEndpointAvailable = false;

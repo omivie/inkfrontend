@@ -793,6 +793,37 @@ const API = {
         return qs ? `${path}?${qs}` : path;
     },
 
+    /**
+     * The REAL number of products behind a brand+category link.
+     *
+     * WHY THIS IS NOT `getShopData`. Two reasons, both measured (ERR-215):
+     *
+     *   1. `getShopData` with brand+category and no `source` fires a parallel
+     *      compat-recovery sidecar — a 200-row /api/products fetch we do not
+     *      want when all we need is a count.
+     *   2. The brand-scoped `counts` facet that /api/shop returns is WRONG. The
+     *      backend omits `maintenance_box` from `counts.drums` while its
+     *      `?category=drums` FILTER includes it (2026-09-06: epson absent/5,
+     *      canon 9/12, brother 61/62). So a caller that needs the truth has to
+     *      ask the category question directly, which is what this does.
+     *
+     * Goes through `catalogEndpoint` so CATALOG_PARAM_ORDER holds and this
+     * mints no parallel Cloudflare edge key (ERR-124/159).
+     *
+     * @returns {Promise<number|null>} the count, or NULL when it could not be
+     *   read. Null is "unmeasured" and callers MUST NOT collapse it to 0 —
+     *   "the shelf is empty" and "I could not see the shelf" are different
+     *   sentences, and merging them is the bug this function exists to fix.
+     */
+    async getCategoryTotal(brand, category) {
+        if (!brand || !category) return null;
+        const endpoint = this.catalogEndpoint('/api/shop', { brand, category, limit: 1 });
+        const res = await this.getWithSWR(endpoint, { anonymous: true }).catch(() => null);
+        if (!res || res.ok === false) return null;
+        const total = res.meta && res.meta.total;
+        return typeof total === 'number' ? total : null;
+    },
+
     // =========================================================================
     // SWR (stale-while-revalidate) in-memory cache for catalog GETs
     // =========================================================================
