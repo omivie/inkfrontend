@@ -949,11 +949,12 @@ const RibbonsPage = {
                                 <span class="product-card__price">${formatPrice(price)}</span>
                             </div>
                             ${inStock
-                                ? `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
+                                ? `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
                                         data-product-id="${ribbonId}"
-                                        aria-label="Add ${Security.escapeAttr(displayName)} to cart">
-                                    Add to Cart
-                                  </button>`
+                                        data-product-name="${Security.escapeAttr(displayName)}"
+                                        aria-label="${Security.escapeAttr(typeof QtyStepper !== 'undefined' ? QtyStepper.ctaAriaLabel(1, displayName) : `Add ${displayName} to cart`)}">
+                                    ${typeof QtyStepper !== 'undefined' ? QtyStepper.ctaLabel(1) : 'Add to Cart'}
+                                  </button></div>`
                                 : `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
                                         data-action="contact"
                                         aria-label="Contact us about ${Security.escapeAttr(displayName)}">
@@ -992,9 +993,17 @@ const RibbonsPage = {
         } else if (cartBtn) {
             cartBtn.addEventListener('click', async (e) => {
                 e.preventDefault();
+                // Its sibling surfaces all stop this and this one did not: the
+                // card body is wrapped in <a class="product-card__link">, so an
+                // un-stopped click navigates away mid-add (ERR-218).
+                e.stopPropagation();
                 await this.addToCart(ribbon, cartBtn);
             });
         }
+
+        // ONE delegated stepper listener per card — ribbon cards are built and
+        // appended individually rather than through a shared grid renderer.
+        if (typeof QtyStepper !== 'undefined') QtyStepper.bind(card);
 
         return card;
     },
@@ -1004,6 +1013,9 @@ const RibbonsPage = {
     // =========================================
     async addToCart(ribbon, button) {
         const originalText = button.textContent;
+        // Read the stepper before the button goes busy (ERR-218).
+        const quantity = (typeof QtyStepper !== 'undefined') ? QtyStepper.read(button) : 1;
+        if (typeof QtyStepper !== 'undefined') QtyStepper.busy(button, true);
         button.textContent = 'Adding...';
         button.disabled = true;
 
@@ -1016,7 +1028,7 @@ const RibbonsPage = {
                 image: ribbon.image_url || '',
                 brand: ribbon._brandName || '',
                 color: ribbon.color || '',
-                quantity: 1,
+                quantity,
                 product_source: ribbon.source || null
             });
 
@@ -1024,9 +1036,14 @@ const RibbonsPage = {
             button.classList.add('btn--success');
 
             setTimeout(() => {
-                button.textContent = originalText;
                 button.classList.remove('btn--success');
                 button.disabled = false;
+                if (typeof QtyStepper !== 'undefined') {
+                    QtyStepper.busy(button, false);
+                    QtyStepper.reset(button);
+                } else {
+                    button.textContent = originalText;
+                }
             }, 1500);
         } catch (error) {
             DebugLog.error('Add to cart error:', error);
@@ -1034,9 +1051,15 @@ const RibbonsPage = {
             button.classList.add('btn--error');
 
             setTimeout(() => {
-                button.textContent = originalText;
                 button.classList.remove('btn--error');
                 button.disabled = false;
+                // Failed: the quantity is not spent, so keep what they chose.
+                if (typeof QtyStepper !== 'undefined') {
+                    QtyStepper.busy(button, false);
+                    button.textContent = QtyStepper.ctaLabel(QtyStepper.read(button));
+                } else {
+                    button.textContent = originalText;
+                }
             }, 2000);
         }
     },

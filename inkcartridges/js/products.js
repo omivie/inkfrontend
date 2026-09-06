@@ -255,7 +255,28 @@ const Products = {
                                     // implicit-submit candidate (HTML5 default-button rule)
                                     // and the click handler's preventDefault swallows Enter.
                                     // Pinned by tests/search-enter-key-may2026.test.js.
-                                    return `<button type="button" class="product-card__add-btn btn btn--primary"
+                                    // ERR-218: the CTA now shares a row with a
+                                    // quantity stepper, and the visible label is
+                                    // short because the row is 140.3px wide (the
+                                    // arithmetic is in components.css). The
+                                    // accessible name is NOT abbreviated.
+                                    //
+                                    // The guard is real, not decorative:
+                                    // QtyStepper is a top-level const in utils.js,
+                                    // reachable here by bare name exactly as
+                                    // ProductSort and Security are. If it is ever
+                                    // missing we say so out loud and fall back to
+                                    // today's single-unit button rather than
+                                    // silently shipping a card that adds nothing.
+                                    const hasStepper = typeof QtyStepper !== 'undefined';
+                                    if (!hasStepper && typeof DebugLog !== 'undefined') {
+                                        DebugLog.error('QtyStepper missing — product cards fall back to single-unit add (ERR-218)');
+                                    }
+                                    const ctaText = hasStepper ? QtyStepper.ctaLabel(1) : 'Add to Cart';
+                                    const ctaAria = hasStepper
+                                        ? QtyStepper.ctaAriaLabel(1, product.name)
+                                        : `Add ${product.name} to cart`;
+                                    const cta = `<button type="button" class="product-card__add-btn btn btn--primary"
                                         ${disabled ? 'disabled' : ''}
                                         data-product-id="${Security.escapeAttr(product.id)}"
                                         data-product-sku="${Security.escapeAttr(product.sku)}"
@@ -263,9 +284,12 @@ const Products = {
                                         data-product-price="${Security.escapeAttr(product.retail_price)}"
                                         data-product-image="${Security.escapeAttr(resolvedImage)}"
                                         data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}"
-                                        data-product-source="${Security.escapeAttr(product.source || '')}">
-                                    Add to Cart
+                                        data-product-source="${Security.escapeAttr(product.source || '')}"
+                                        aria-label="${Security.escapeAttr(ctaAria)}">
+                                    ${Security.escapeHtml(ctaText)}
                                     </button>`;
+                                    if (!hasStepper) return cta;
+                                    return `<div class="product-card__buy">${QtyStepper.markup({ value: 1 })}${cta}</div>`;
                                 })()}
                             </div>
                         </div>
@@ -300,25 +324,30 @@ const Products = {
      * contact-button-may2026.md) navigate to /contact instead of falling
      * through to the wrapping card-link <a> (which points to the PDP).
      */
+    /**
+     * ERR-218 — this used to be a DEAD BUTTON, and silently so.
+     *
+     * The body below called `Cart.add(btn.dataset.productId, 1)` behind a
+     * `Cart.add` truthiness guard. The Cart module has never had an `add`: it
+     * has addItem, updateQuantity, removeItem and clear. So the guard was always
+     * false, the branch never ran, and the handler's preventDefault +
+     * stopPropagation swallowed the click — including stopping it reaching the
+     * document-level delegate in Cart.bindEvents that would otherwise have
+     * caught it. A shopper clicked Add to Cart and precisely nothing happened,
+     * with nothing logged.
+     *
+     * It mattered on exactly one surface, which is why it went unnoticed: the
+     * /shop zero-results "browse by printer" recovery rail (shop-page.js) binds
+     * this and only this. That rail's Add to Cart has never once worked.
+     *
+     * The same family the memory index already names: if the fallback is the
+     * only branch that ever runs, the guard IS the bug (ERR-167). The fix is to
+     * have one add path rather than two, so this now forwards. Kept as a named
+     * function because callers reference it by name.
+     */
     attachCardListeners(container) {
         if (!container) return;
-        container.querySelectorAll('.product-card__add-btn').forEach(btn => {
-            if (btn.dataset.action === 'contact') {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.location.href = '/contact';
-                });
-                return;
-            }
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof Cart !== 'undefined' && Cart.add) {
-                    Cart.add(btn.dataset.productId, 1);
-                }
-            });
-        });
+        this.bindAddToCartEvents(container);
     },
 
     /**
@@ -569,7 +598,25 @@ const Products = {
      * through to the wrapping card-link <a>.
      */
     bindAddToCartEvents(container) {
+        // ONE delegated stepper listener for the whole grid (ERR-218). The − and
+        // + move a local number and touch neither the cart nor the network; only
+        // the button below mutates, once, with the whole quantity.
+        if (typeof QtyStepper !== 'undefined') {
+            QtyStepper.bind(container, {
+                onChange: (qty, card) => {
+                    if (typeof Business !== 'undefined' && Business.syncCardQuantity) {
+                        Business.syncCardQuantity(card, qty);
+                    }
+                }
+            });
+        }
         container.querySelectorAll('.product-card__add-btn').forEach(btn => {
+            // One listener per button, ever. attachCardListeners now forwards
+            // here, so a caller that reaches for both would otherwise add the
+            // quantity twice per click — and doubling is the kind of bug a
+            // shopper only finds at the checkout total.
+            if (btn.dataset.atcBound === '1') return;
+            btn.dataset.atcBound = '1';
             if (btn.dataset.action === 'contact') {
                 btn.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -593,7 +640,12 @@ const Products = {
                     // Brand source (genuine/compatible) — feeds the cart's
                     // COMPATIBLE/GENUINE badge. May be empty on legacy cards;
                     // _isCompatible falls back to the leading-word heuristic.
-                    product_source: btn.dataset.productSource || null
+                    product_source: btn.dataset.productSource || null,
+                    // ERR-218. Cart.addItem and API.addToCart have always taken a
+                    // quantity; every card simply hard-coded one. read() returns 1
+                    // when no stepper is present, so a surface that has not been
+                    // given one behaves exactly as it did.
+                    quantity: (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1
                 };
 
                 // Add to cart (server-first for authenticated users)
@@ -601,12 +653,21 @@ const Products = {
                     await Cart.addItem(productData);
                 }
 
-                // Show feedback
+                // Show feedback. busy() stops the stepper's relabel from
+                // overwriting "Added!" if the shopper keeps tapping + .
+                if (typeof QtyStepper !== 'undefined') QtyStepper.busy(btn, true);
                 btn.textContent = 'Added!';
                 btn.classList.add('btn--success');
                 setTimeout(() => {
-                    btn.textContent = 'Add to Cart';
                     btn.classList.remove('btn--success');
+                    if (typeof QtyStepper !== 'undefined') {
+                        QtyStepper.busy(btn, false);
+                        // Back to 1: the quantity just added is spent, and a card
+                        // still reading "Add 10" invites adding ten more.
+                        QtyStepper.reset(btn);
+                    } else {
+                        btn.textContent = 'Add to Cart';
+                    }
                 }, 1500);
             });
         });

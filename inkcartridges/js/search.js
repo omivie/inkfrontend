@@ -654,6 +654,19 @@
                 card.id = `smart-ac-option-${id}-${i}`;
             });
 
+            // ERR-218 — the quantity stepper is pointer-only INSIDE the dropdown.
+            //
+            // This panel's keyboard model is aria-activedescendant on the search
+            // input: arrows and Enter are handled on the input, the cards are
+            // role="option" and are never themselves focused, and Tab closes the
+            // panel outright. A focusable control inside a row would sit outside
+            // that model and break the assumption that focus never leaves the
+            // combobox. Not a regression — today's Add-to-Cart button in this
+            // panel is equally unreachable by keyboard, and on every OTHER grid
+            // (shop, PDP, ribbons, favourites) the stepper tabs normally.
+            state.list.querySelectorAll('.product-card__qty-btn, .product-card__qty-input')
+                .forEach(el => el.setAttribute('tabindex', '-1'));
+
             // Image error-fallback parity with the /search results grid.
             // Every other card surface (shop, filters, favourites, landing,
             // checkout, cart, PDP rail) binds this; the dropdown was the lone
@@ -679,7 +692,15 @@
                 btn.addEventListener('click', () => {
                     if (typeof showToast === 'function') {
                         const name = btn.dataset.productName || 'Item';
-                        showToast(`${name} added to cart`, 'success', 2500);
+                        // Read the quantity BEFORE the add path resets the
+                        // stepper to 1, or the toast reports "added" for a
+                        // quantity nobody asked for (ERR-218).
+                        const qty = (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1;
+                        showToast(
+                            qty > 1 ? `${qty} × ${name} added to cart` : `${name} added to cart`,
+                            'success',
+                            2500
+                        );
                     }
                 }, { capture: false });
             });
@@ -859,7 +880,10 @@
 
             state.list.addEventListener('mousedown', (e) => {
                 // prevent input blur before click fires
-                if (e.target.closest('.product-card, .smart-ac__chip, .product-card__add-btn, .product-card__link, [data-clear-recent]')) {
+                // The stepper controls belong in this list (ERR-218): without
+                // them the FIRST click on − or + blurs the search input, the
+                // panel closes, and the click lands on nothing.
+                if (e.target.closest('.product-card, .smart-ac__chip, .product-card__add-btn, .product-card__qty, .product-card__qty-btn, .product-card__qty-input, .product-card__link, [data-clear-recent]')) {
                     e.preventDefault();
                 }
             });

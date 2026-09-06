@@ -15490,6 +15490,23 @@ body.page-shop {
     color: var(--color-success-green, #16a34a);
 }
 
+/* Live state: the quantity in the card's stepper has reached a bulk rung, so
+   the line stopped advertising an offer and started reporting a fact about
+   this basket (ERR-218 — Business.syncCardQuantity). The tint is what
+   separates "buy 3+ and you could pay $17.75" from "at 3 you pay $17.75", and
+   the two must not look identical. */
+.product-card__biz-price--active {
+    background-color: var(--cyan-light, #e0f2fe);
+    border-radius: var(--radius-sm, 6px);
+    padding: 4px 6px;
+    margin-left: -6px;
+    margin-right: -6px;
+}
+
+.product-card__biz-price--active .product-card__biz-amount {
+    color: var(--cyan-dark, #0369a1);
+}
+
 /* ── Cart line volume nudge ────────────────────────────────────────────── */
 
 /* "Add 3 more to reach 7+ — $22.78 each, saving $11.97 on this line."

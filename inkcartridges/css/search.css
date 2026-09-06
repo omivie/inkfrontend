@@ -866,6 +866,28 @@ mark.smart-ac__mark {
     min-height: 0;
     font-weight: 600;
 }
+
+/* Dropdown-scale quantity stepper (ERR-218). Measured, not chosen: the
+   dropdown card is 152.3px, so the CTA's row is 138.3px. A 70px stepper leaves
+   the button 64.3px, and at 12px/600 Inter "Add 100" — the widest label the
+   ceiling can produce — is ~45px against 52.3px of usable width. The desktop
+   panel is pointer-fine, so the 44px touch sizing does not apply here; the
+   ≤480px block above restores it where the pointer is coarse. */
+.smart-ac__grid .product-card__buy {
+    gap: 4px;
+}
+.smart-ac__grid .product-card__qty-btn {
+    width: 22px;
+    font-size: 14px;
+}
+.smart-ac__grid .product-card__qty-input {
+    width: 24px;
+    font-size: 11px;
+}
+.smart-ac__grid .product-card__add-btn {
+    padding-left: 6px;
+    padding-right: 6px;
+}
 /* Smart-AC dropdown cards run in a tight grid — the top-left chips
    (Save / Fits Your Printer) crowd the thumbnail in that footprint,
    so we hide them dropdown-side only. */
@@ -986,8 +1008,33 @@ mark.smart-ac__mark {
         /* Keep the 4-line clamp from the product-card-title-clamp contract;
            the horizontal row just grows taller for long names. */
     }
+    /* ERR-218 — REVERSED, deliberately.
+       This used to be `display: none`. The May-2026 mobile-parity pass (S1.1)
+       hid the per-card Add-to-Cart here on the reasoning that each row is a
+       64px thumbnail beside the title and price, tapping the row opens the PDP,
+       and the PDP's sticky buy bar handles the add. That reasoning held while
+       the only thing on offer was a single unit one PDP visit away.
+       With a quantity stepper the row can do the whole job — and this width has
+       the space the 152px desktop card does not: the text column is ~300px, so
+       [− 1 +] [Add to Cart] fits on one line under the price with the FULL
+       label, no abbreviation needed. */
     .smart-ac__grid .product-card__add-btn {
-        display: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+    }
+    .smart-ac__grid .product-card__buy {
+        margin-top: 6px;
+    }
+    /* Coarse-pointer sizing from components.css already applies; this only
+       stops the compact desktop override below from following us down here. */
+    .smart-ac__grid .product-card__qty-btn {
+        width: 36px;
+    }
+    .smart-ac__grid .product-card__qty-input {
+        width: 34px;
+        font-size: 14px;
     }
 }
 

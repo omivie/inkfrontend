@@ -3115,6 +3115,301 @@ const OrderNumber = (function () {
     return { normalise, isValid, equals, pickExact, forDisplay, era, EXAMPLE, NUMERIC, LEGACY };
 })();
 if (typeof window !== 'undefined') window.OrderNumber = OrderNumber;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * QtyStepper — the quantity control beside every Add-to-Cart button (ERR-218)
+ *
+ * Before this, every card in the storefront added exactly one unit and the
+ * shopper who wanted four clicked four times, waiting out a POST /api/cart/items
+ * AND a full cart re-read between each one. `Cart.addItem` has always honoured
+ * `product.quantity` and `API.addToCart` has always POSTed it — five card
+ * renderers simply never passed one.
+ *
+ * THE − AND + NEVER TOUCH THE CART OR THE NETWORK. They move a local number.
+ * Only the Add button mutates, once, with the whole quantity. That is strictly
+ * fewer requests than clicking Add four times, which matters: the ERR-210 work
+ * in cart.js exists because rapid repeat adds race the pricing GET and produce a
+ * "we couldn't confirm today's prices" banner against a healthy backend.
+ *
+ * WHY THIS LIVES IN utils.js, ONCE.
+ * There is no shared card renderer. products.js and shop-page.js hold two
+ * deliberately duplicated card templates (products.js says so in a comment, and
+ * warns that "the divergence always bites on the surface that ships the feature
+ * second"), and ribbons-page.js, favourites.js and cart.js's cross-sell modal
+ * hold three more. ERR-192 is the same lesson learned the expensive way: a rule
+ * was relocated instead of shared and a duplicate copy ended up 2400 lines down
+ * the same file. So the stepper is written once here and every surface CALLS it.
+ *
+ * THE LABEL IS SHORT BECAUSE THE CARD IS 162px WIDE — that is a measurement,
+ * not a guess (ERR-189/196: a constant reserving space for text is a
+ * measurement someone declined to take). Measured on the live shop grid:
+ *
+ *     shop card 162.3px → button row 140.3px
+ *     "Add to Cart" at 13px/600 Inter = 71.4px of glyphs + 24px padding = 95.4px
+ *     a usable [− n +] = 76px
+ *     95.4 + 76 + 4px gap = 175.4px needed, 140.3px available
+ *
+ * To fit "Add to Cart" beside a stepper the stepper gets 41px for three
+ * controls. So the visible label is "Add" / "Add 3". The ACCESSIBLE name is not
+ * abbreviated — ctaAriaLabel() spells out the quantity and the product, so a
+ * screen reader hears "Add 3 × LC3317BK … to cart" while the eye sees "Add 3".
+ *
+ * DO NOT reuse `.quantity-selector__btn--increase/--decrease` here. Cart.bindEvents
+ * delegates on those at the document level and assumes a `.quantity-selector`
+ * carrying a cart line's `data-item-key`; a card wearing them drives
+ * _debouncedQuantityUpdate(undefined, n).
+ */
+const QtyStepper = (function () {
+    'use strict';
+
+    // The cart is the authority on how many of one line it will hold. Reading it
+    // rather than restating it is what stops a card offering a quantity the cart
+    // line then refuses — one number, not two.
+    const FALLBACK_MAX = 100;
+
+    function ceiling() {
+        if (typeof Cart !== 'undefined' && Cart && Number.isFinite(Cart.MAX_QUANTITY)) {
+            return Cart.MAX_QUANTITY;
+        }
+        return FALLBACK_MAX;
+    }
+
+    function clamp(n) {
+        const max = ceiling();
+        const v = Math.floor(Number(n));
+        if (!Number.isFinite(v)) return 1;
+        return Math.min(max, Math.max(1, v));
+    }
+
+    /**
+     * The ONLY place the button wording exists. Same discipline as
+     * ProductColors and Business.breakLabel: one vocabulary, one function.
+     */
+    function ctaLabel(qty) {
+        const q = clamp(qty);
+        return q > 1 ? 'Add ' + q : 'Add';
+    }
+
+    /**
+     * The unabbreviated name, for assistive tech. The visible label is short
+     * because 140px is short; the accessible name has no such constraint and
+     * must not inherit the abbreviation.
+     */
+    function ctaAriaLabel(qty, productName) {
+        const q = clamp(qty);
+        const name = String(productName || '').trim();
+        const what = q > 1 ? q + ' × ' + name : name;
+        return name ? 'Add ' + what + ' to cart' : (q > 1 ? 'Add ' + q + ' to cart' : 'Add to cart');
+    }
+
+    /**
+     * @param {object} [opts]
+     * @param {number} [opts.value=1]     starting quantity
+     * @param {boolean} [opts.focusable=true]  false ⇒ tabindex="-1" on every
+     *        control. The search dropdown sets this: its keyboard model is
+     *        aria-activedescendant on the search input, cards are role="option"
+     *        and Tab closes the panel, so a focusable control inside a row would
+     *        sit outside the model entirely.
+     */
+    function markup(opts) {
+        const o = opts || {};
+        const value = clamp(o.value == null ? 1 : o.value);
+        const max = ceiling();
+        const tab = o.focusable === false ? ' tabindex="-1"' : '';
+        // type="button" is load-bearing on BOTH buttons: the search dropdown is
+        // mounted inside the search <form>, and a bare <button> defaults to
+        // type="submit" per HTML5's default-button rule, which hijacks Enter in
+        // the search input. Pinned by tests/search-enter-key-may2026.test.js.
+        // The disabled state has to be in the MARKUP, not applied afterwards by
+        // the first interaction: a freshly painted stepper sits at 1, where −
+        // does nothing, and an enabled-looking button that does nothing is the
+        // small version of the bug this whole change exists to remove.
+        const downOff = value <= 1 ? ' disabled' : '';
+        const upOff = value >= max ? ' disabled' : '';
+        return '<div class="product-card__qty" data-qty-stepper>' +
+            '<button type="button" class="product-card__qty-btn" data-step="down"' + tab + downOff +
+                ' aria-label="Decrease quantity">−</button>' +
+            '<input type="number" class="product-card__qty-input" value="' + value + '"' +
+                ' min="1" max="' + max + '" step="1" inputmode="numeric"' + tab +
+                ' aria-label="Quantity">' +
+            '<button type="button" class="product-card__qty-btn" data-step="up"' + tab + upOff +
+                ' aria-label="Increase quantity">+</button>' +
+            '</div>';
+    }
+
+    function stepperFor(el) {
+        if (!el || !el.closest) return null;
+        const scope = el.closest('.product-card__buy') ||
+                      el.closest('.product-card') ||
+                      el.closest('.favourite-item') ||
+                      el.closest('.crosssell-modal__item');
+        return scope ? scope.querySelector('.product-card__qty') : null;
+    }
+
+    /**
+     * Quantity for the add-to-cart button `el` belongs to.
+     *
+     * RETURNS 1 WHEN THERE IS NO STEPPER. A surface that has not been given one
+     * keeps behaving exactly as it does today rather than adding zero of
+     * something — absence is not zero (ERR-063/068/150).
+     */
+    function read(el) {
+        const stepper = stepperFor(el);
+        if (!stepper) return 1;
+        const input = stepper.querySelector('.product-card__qty-input');
+        return input ? clamp(input.value) : 1;
+    }
+
+    /** Back to 1 after a successful add, and re-label the button that did it. */
+    function reset(el) {
+        const stepper = stepperFor(el);
+        if (!stepper) return;
+        const input = stepper.querySelector('.product-card__qty-input');
+        if (input) input.value = '1';
+        syncButtons(stepper, 1);
+        relabel(stepper, 1);
+    }
+
+    function syncButtons(stepper, qty) {
+        const max = ceiling();
+        const down = stepper.querySelector('[data-step="down"]');
+        const up = stepper.querySelector('[data-step="up"]');
+        if (down) down.disabled = qty <= 1;
+        if (up) up.disabled = qty >= max;
+    }
+
+    function ctaFor(stepper) {
+        const scope = stepper.closest('.product-card__buy') ||
+                      stepper.closest('.product-card') ||
+                      stepper.closest('.favourite-item') ||
+                      stepper.closest('.crosssell-modal__item');
+        if (!scope) return null;
+        return scope.querySelector(
+            '.product-card__add-btn:not([data-action="contact"]), ' +
+            '.product-card__cart-btn:not([data-action="contact"]), ' +
+            '.favourite-item__add-cart, .crosssell-modal__add'
+        );
+    }
+
+    function relabel(stepper, qty) {
+        const cta = ctaFor(stepper);
+        if (!cta) return;
+        // Never fight the transient "Adding…" / "Added!" states an add path owns.
+        if (cta.dataset.qsBusy === '1') return;
+        const label = cta.querySelector('.product-card__cta-text');
+        if (label) label.textContent = ctaLabel(qty);
+        else cta.textContent = ctaLabel(qty);
+        const name = cta.dataset.productName || cta.dataset.qsName || '';
+        cta.setAttribute('aria-label', ctaAriaLabel(qty, name));
+    }
+
+    function apply(stepper, qty, onChange) {
+        const q = clamp(qty);
+        const input = stepper.querySelector('.product-card__qty-input');
+        if (input && String(input.value) !== String(q)) input.value = String(q);
+        syncButtons(stepper, q);
+        relabel(stepper, q);
+        if (typeof onChange === 'function') {
+            const card = stepper.closest('.product-card, .favourite-item, .crosssell-modal__item');
+            try { onChange(q, card); } catch (e) {
+                if (typeof DebugLog !== 'undefined') DebugLog.error('QtyStepper onChange failed', e);
+            }
+        }
+        return q;
+    }
+
+    /**
+     * ONE delegated listener per root, not one per button — a grid repaints
+     * constantly and per-button listeners leak with it.
+     *
+     * Every handler stops the event. The card body is wrapped in
+     * <a class="product-card__link">, so an un-stopped click on + navigates to
+     * the product page mid-increment.
+     */
+    function bind(root, options) {
+        const scope = root || document;
+        if (!scope || !scope.addEventListener) return;
+        if (scope.dataset && scope.dataset.qsBound === '1') return;
+        if (scope.dataset) scope.dataset.qsBound = '1';
+        const onChange = options && options.onChange;
+
+        scope.addEventListener('click', function (e) {
+            const btn = e.target.closest && e.target.closest('.product-card__qty-btn');
+            if (!btn || !scope.contains(btn)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const stepper = btn.closest('.product-card__qty');
+            if (!stepper) return;
+            const input = stepper.querySelector('.product-card__qty-input');
+            const current = input ? clamp(input.value) : 1;
+            apply(stepper, btn.dataset.step === 'up' ? current + 1 : current - 1, onChange);
+        });
+
+        // A typed value is the bulk buyer's path: 24 is four + clicks away from
+        // 20 and twenty-three from 1.
+        scope.addEventListener('input', function (e) {
+            const input = e.target.closest && e.target.closest('.product-card__qty-input');
+            if (!input || !scope.contains(input)) return;
+            e.stopPropagation();
+            const stepper = input.closest('.product-card__qty');
+            if (!stepper) return;
+            // Mid-typing an empty box is not a quantity of 1 yet — leave it be
+            // and let blur settle it, or the caret jumps while they type.
+            if (input.value === '') return;
+            apply(stepper, input.value, onChange);
+        });
+
+        scope.addEventListener('change', function (e) {
+            const input = e.target.closest && e.target.closest('.product-card__qty-input');
+            if (!input || !scope.contains(input)) return;
+            e.stopPropagation();
+            const stepper = input.closest('.product-card__qty');
+            if (stepper) apply(stepper, input.value, onChange);
+        });
+
+        // Enter inside the quantity box must not submit the search form the
+        // dropdown is mounted in, and must not navigate the card's anchor.
+        scope.addEventListener('keydown', function (e) {
+            const input = e.target.closest && e.target.closest('.product-card__qty-input');
+            if (!input || !scope.contains(input)) return;
+            if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); input.blur(); }
+        });
+    }
+
+    /**
+     * Wrap an already-rendered CTA in the buy row. Used by the surfaces that
+     * build cards as DOM nodes (shop-page, ribbons) rather than HTML strings.
+     */
+    function attach(cta, opts) {
+        if (!cta || !cta.parentNode) return null;
+        if (cta.dataset.action === 'contact') return null;
+        if (cta.closest('.product-card__buy')) return cta.closest('.product-card__buy');
+        const row = document.createElement('div');
+        row.className = 'product-card__buy';
+        cta.parentNode.insertBefore(row, cta);
+        row.insertAdjacentHTML('afterbegin', markup(opts));
+        row.appendChild(cta);
+        const q = clamp((opts && opts.value) || 1);
+        syncButtons(row.querySelector('.product-card__qty'), q);
+        relabel(row.querySelector('.product-card__qty'), q);
+        return row;
+    }
+
+    /** Mark a CTA busy so an in-flight "Adding…" is not overwritten by relabel. */
+    function busy(cta, isBusy) {
+        if (!cta) return;
+        if (isBusy) cta.dataset.qsBusy = '1';
+        else delete cta.dataset.qsBusy;
+    }
+
+    return {
+        ceiling, clamp, ctaLabel, ctaAriaLabel,
+        markup, read, reset, bind, attach, busy,
+        _apply: apply
+    };
+})();
+if (typeof window !== 'undefined') window.QtyStepper = QtyStepper;
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -3136,6 +3431,7 @@ if (typeof module !== 'undefined' && module.exports) {
         DispatchCountdown,
         CouponSuggestion,
         AdminAccess,
-        OrderNumber
+        OrderNumber,
+        QtyStepper
     };
 }

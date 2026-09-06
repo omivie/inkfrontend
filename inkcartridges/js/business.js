@@ -996,6 +996,84 @@ const Business = {
     },
 
     /**
+     * Re-resolve a decorated card's bulk line against the quantity now in its
+     * stepper (ERR-218). Called from QtyStepper's onChange, so it must be
+     * SYNCHRONOUS and cheap — it runs on every + tap.
+     *
+     * This is selection, not computation. `offerAtQuantity` picks a rung the
+     * BACKEND sent in `quantity_breaks`; no price is derived here. Same thing
+     * the PDP has done since jul2026 in ProductPage.syncVolumePricing — this is
+     * that behaviour on a card, not a second pricing model.
+     *
+     * A card with no ladder gets NOTHING ADDED. Absence is not zero: an
+     * undecorated card is one we have no bulk data for, and inventing a
+     * retail-looking "at 3 you pay $X each" line there would state as fact
+     * something we never received (ERR-063/068/150).
+     *
+     * Reads only the caches ingest()/getPricing() already filled — it issues no
+     * request of its own, so a shopper holding down + costs zero traffic.
+     *
+     * @param {Element} card  .product-card / .favourite-item
+     * @param {number}  qty
+     * @returns {boolean} true if a line was updated
+     */
+    syncCardQuantity(card, qty) {
+        if (!card || typeof card.querySelector !== 'function') return false;
+        const host = card.querySelector('.product-card__biz-price');
+        if (!host) return false; // undecorated: no ladder for this SKU, say nothing
+
+        const sku = card.getAttribute && card.getAttribute('data-sku');
+        if (!sku) return false;
+
+        const item = this._ladderCache.get(sku) || this._priceCache.get(sku);
+        const ladder = this.describeLadder(item);
+        if (!ladder) return false;
+
+        const q = Math.max(1, Math.floor(Number(qty)) || 1);
+        const rung = this.offerAtQuantity(ladder, q);
+
+        // At quantity 1 the card says what it has always said — the standing
+        // offer — so nothing below a break rewrites the headline claim.
+        const line = host.querySelector('.product-card__biz-save');
+        if (!line) return false;
+
+        const amount = host.querySelector('.product-card__biz-amount');
+
+        // Remember the standing copy ONCE — both halves of it. Restoring only
+        // the sub-line would leave the deepest rung's price sitting above the
+        // entry-rung wording, which reads as a live claim and is not one.
+        if (!host.dataset.bizQtyBase) {
+            host.dataset.bizQtyBase = line.textContent;
+            if (amount) host.dataset.bizQtyBaseAmount = amount.innerHTML;
+        }
+
+        if (q <= 1 || !rung) {
+            line.textContent = host.dataset.bizQtyBase;
+            if (amount && host.dataset.bizQtyBaseAmount != null) {
+                amount.innerHTML = host.dataset.bizQtyBaseAmount;
+            }
+            host.classList.remove('product-card__biz-price--active');
+            // Above 1 but still short of the first rung, the useful thing to say
+            // is how far off it is — not to repeat the standing offer.
+            const next0 = this.nextBreak(ladder, q);
+            if (q > 1 && next0 && next0.rung) {
+                const units = next0.unitsAway === 1 ? '1 more' : `${next0.unitsAway} more`;
+                line.textContent = `Add ${units} → ${this._money(next0.rung.businessPrice)} ea`;
+            }
+            return true;
+        }
+
+        if (amount) {
+            amount.innerHTML = Security.escapeHtml(this._money(rung.businessPrice)) +
+                '<span class="product-card__biz-unit"> ea</span>';
+        }
+        line.textContent = `At ${q} you pay ${this._money(rung.businessPrice)} ea — saving ` +
+            `${this._money(this.lineSavings(ladder, q))}`;
+        host.classList.add('product-card__biz-price--active');
+        return true;
+    },
+
+    /**
      * Decorate already-rendered product cards with their bulk price. Runs after a
      * grid renders, for every shopper, so the card renderers stay untouched.
      * No-ops instantly when nothing has a ladder.

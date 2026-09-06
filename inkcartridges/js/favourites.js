@@ -505,6 +505,8 @@ const Favourites = {
                     </div>
                 </a>
                 <div class="favourite-item__actions">
+                    <div class="product-card__buy">
+                    ${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}
                     <button type="button" class="btn btn--primary btn--sm favourite-item__add-cart"
                             data-product-id="${Security.escapeAttr(item.id)}"
                             data-product-sku="${Security.escapeAttr(item.sku)}"
@@ -513,9 +515,11 @@ const Favourites = {
                             data-product-image="${Security.escapeAttr(item.image)}"
                             data-product-brand="${Security.escapeAttr(item.brand)}"
                             data-product-source="${Security.escapeAttr(item.product_source || '')}"
+                            aria-label="${Security.escapeAttr(typeof QtyStepper !== 'undefined' ? QtyStepper.ctaAriaLabel(1, item.name) : `Add ${item.name} to cart`)}"
                             >
-                        Add to Cart
+                        ${typeof QtyStepper !== 'undefined' ? QtyStepper.ctaLabel(1) : 'Add to Cart'}
                     </button>
+                    </div>
                     <button type="button" class="favourite-item__remove" data-item-id="${Security.escapeAttr(item.id)}" aria-label="Remove from favourites">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="3 6 5 6 21 6"></polyline>
@@ -540,6 +544,19 @@ const Favourites = {
                 DebugLog.warn('[Favourites] bulk pricing overlay failed:', e && e.message));
         }
 
+        // ONE delegated stepper listener for the list (ERR-218). Favourites is
+        // the reorder surface — the one most likely to be bought in tens — so a
+        // quantity here is worth more than on any browse grid.
+        if (typeof QtyStepper !== 'undefined') {
+            QtyStepper.bind(grid, {
+                onChange: (qty, card) => {
+                    if (typeof Business !== 'undefined' && Business.syncCardQuantity) {
+                        Business.syncCardQuantity(card, qty);
+                    }
+                }
+            });
+        }
+
         // Bind add to cart buttons
         grid.querySelectorAll('.favourite-item__add-cart').forEach(btn => {
             btn.addEventListener('click', async (e) => {
@@ -556,16 +573,23 @@ const Favourites = {
                         price: parseFloat(btn.dataset.productPrice),
                         image: btn.dataset.productImage,
                         brand: btn.dataset.productBrand,
-                        product_source: btn.dataset.productSource || null
+                        product_source: btn.dataset.productSource || null,
+                        quantity: (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1
                     };
 
                     await Cart.addItem(product);
 
+                    if (typeof QtyStepper !== 'undefined') QtyStepper.busy(btn, true);
                     btn.textContent = 'Added!';
                     btn.classList.add('btn--success');
                     setTimeout(() => {
-                        btn.textContent = 'Add to Cart';
                         btn.classList.remove('btn--success');
+                        if (typeof QtyStepper !== 'undefined') {
+                            QtyStepper.busy(btn, false);
+                            QtyStepper.reset(btn);
+                        } else {
+                            btn.textContent = 'Add to Cart';
+                        }
                     }, 1500);
                 }
             });

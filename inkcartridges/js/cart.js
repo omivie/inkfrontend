@@ -2145,10 +2145,21 @@ const Cart = {
                 return;
             }
 
-            // Add to cart button
-            if (e.target.matches('.product-card__add-btn, .add-to-cart-btn')) {
+            // Add to cart button.
+            //
+            // closest(), not matches() (ERR-218): the CTA can now contain child
+            // markup, and matches() only ever fired when the click landed on the
+            // button element itself. .product-card__cart-btn joins the list too —
+            // the /shop and /ribbons cards wear that class and were outside the
+            // one handler in this file that looks global. They bind their own
+            // listeners which stopPropagation, so this stays their safety net
+            // rather than a second add.
+            const addBtn = e.target.closest(
+                '.product-card__add-btn, .product-card__cart-btn, .add-to-cart-btn'
+            );
+            if (addBtn && addBtn.dataset.action !== 'contact') {
                 e.preventDefault();
-                const btn = e.target;
+                const btn = addBtn;
                 const productData = {
                     id: btn.dataset.productId,
                     sku: btn.dataset.productSku,
@@ -2159,24 +2170,40 @@ const Cart = {
                     source: btn.dataset.productSubsystem || 'core',
                     // Brand source (genuine / compatible / remanufactured) for the
                     // COMPATIBLE/GENUINE badge — not used in the composite key.
-                    product_source: btn.dataset.productSource || null
+                    product_source: btn.dataset.productSource || null,
+                    // ERR-218 — this delegate hard-coded a single unit too.
+                    quantity: (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1
                 };
 
                 if (productData.id) {
                     await this.addItem(productData);
 
                     const originalText = btn.textContent;
+                    if (typeof QtyStepper !== 'undefined') QtyStepper.busy(btn, true);
                     btn.textContent = 'Added!';
                     btn.classList.add('btn--success');
                     setTimeout(() => {
-                        btn.textContent = originalText;
                         btn.classList.remove('btn--success');
+                        if (typeof QtyStepper !== 'undefined') {
+                            QtyStepper.busy(btn, false);
+                            QtyStepper.reset(btn);
+                            if (!btn.closest('.product-card__buy')) btn.textContent = originalText;
+                        } else {
+                            btn.textContent = originalText;
+                        }
                     }, 1500);
                 }
             }
 
-            // Quantity increase
-            const increaseBtn = e.target.closest('.quantity-selector__btn--increase');
+            // Quantity increase.
+            //
+            // Scoped to .cart-item (ERR-218). These two branches read a cart
+            // line's data-item-key off the .quantity-selector they find; anything
+            // else wearing those modifier classes would reach
+            // _debouncedQuantityUpdate(undefined, n). The card stepper
+            // deliberately uses different class names, and this guard is the
+            // belt to that pair of braces.
+            const increaseBtn = e.target.closest('.cart-item .quantity-selector__btn--increase');
             if (increaseBtn) {
                 const selector = increaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
@@ -2189,8 +2216,8 @@ const Cart = {
                 }
             }
 
-            // Quantity decrease
-            const decreaseBtn = e.target.closest('.quantity-selector__btn--decrease');
+            // Quantity decrease — same .cart-item scoping as the increase above.
+            const decreaseBtn = e.target.closest('.cart-item .quantity-selector__btn--decrease');
             if (decreaseBtn) {
                 const selector = decreaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
@@ -2917,16 +2944,17 @@ const Cart = {
                             aria-label="Contact us about ${Security.escapeAttr(p.name || 'this product')}">
                             Contact us
                           </button>`
-                        : `<button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
+                        : `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}<button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
                             data-product-id="${Security.escapeAttr(p.id || '')}"
                             data-product-sku="${Security.escapeAttr(p.sku || '')}"
                             data-product-name="${Security.escapeAttr(p.name || '')}"
                             data-product-price="${Security.escapeAttr(p.retail_price != null ? p.retail_price : '')}"
                             data-product-image="${Security.escapeAttr(img || '')}"
                             data-product-color="${Security.escapeAttr(p.color || '')}"
-                            data-product-source="${Security.escapeAttr(p.source || '')}">
-                            Add to cart
-                          </button>`}
+                            data-product-source="${Security.escapeAttr(p.source || '')}"
+                            aria-label="${Security.escapeAttr(typeof QtyStepper !== 'undefined' ? QtyStepper.ctaAriaLabel(1, p.name || '') : `Add ${p.name || 'this product'} to cart`)}">
+                            ${typeof QtyStepper !== 'undefined' ? QtyStepper.ctaLabel(1) : 'Add to cart'}
+                          </button></div>`}
                 </a>`;
         }).join('');
 
@@ -2942,6 +2970,9 @@ const Cart = {
                 </div>
             </div>
         `;
+        // ERR-218: the modal's cards get the same stepper as every other
+        // surface. The document delegate in bindEvents does the add.
+        if (typeof QtyStepper !== 'undefined') QtyStepper.bind(overlay);
         document.body.appendChild(overlay);
 
         const close = () => overlay.remove();

@@ -339,7 +339,12 @@ test('OrderNumber is actually on window, so no guard silently disables it', () =
   const utils = read(JS('utils.js'));
   assert.match(utils, /if \(typeof window !== 'undefined'\) window\.OrderNumber = OrderNumber;/,
     'utils.js must publish OrderNumber on window — the admin modules read it there');
-  assert.match(utils, /\n        OrderNumber\n?\s*\};/,
+  // Membership, not position. This used to be /\n        OrderNumber\n?\s*\};/,
+  // which only held while OrderNumber happened to be the LAST entry in the
+  // exports list — appending any new export below it failed a test about
+  // OrderNumber for a reason that had nothing to do with OrderNumber (ERR-218
+  // added QtyStepper and tripped exactly this).
+  assert.match(utils, /module\.exports\s*=\s*\{[\s\S]*?\bOrderNumber\b[\s\S]*?\};/,
     'OrderNumber must also be in module.exports so tests and probes run the real one');
 });
 

@@ -104,7 +104,7 @@ test('products.js renderCard emits no other bare cart/contact <button>', () => {
     // contact-btn — must be type="button". Scan the entire renderCard
     // template for <button class="…(add-btn|contact-btn)…> with no
     // preceding type="button".
-    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*(?:product-card__add-btn|product-card__contact-btn|product-card__cart-btn)[^"]*"/g;
+    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*(?:product-card__add-btn|product-card__contact-btn|product-card__cart-btn|product-card__qty-btn)[^"]*"/g;
     const matches = PRODUCTS_CODE.match(bareBtnRe) || [];
     assert.equal(
         matches.length, 0,
@@ -113,12 +113,33 @@ test('products.js renderCard emits no other bare cart/contact <button>', () => {
     );
 });
 
+test('utils.js QtyStepper emits no bare <button> — it renders INSIDE the search form', () => {
+    // ERR-218 put a quantity stepper beside every Add-to-Cart button, including
+    // the ones this dropdown paints. The stepper's markup lives in utils.js, not
+    // in the card renderers scanned above, so the same rule needs asserting
+    // where the markup actually is: the dropdown is mounted inside the search
+    // <form>, and a bare <button> defaults to type="submit", which would make
+    // every − and + an implicit-Enter target for the search box.
+    const UTILS = READ(JS('utils.js'));
+    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*product-card__qty-btn[^"]*"/g;
+    const matches = UTILS.match(bareBtnRe) || [];
+    assert.equal(matches.length, 0,
+        `utils.js has ${matches.length} bare <button …product-card__qty-btn> — ` +
+        `they need an explicit type="button":\n  ${matches.join('\n  ')}`);
+
+    // And prove it by running the real function, not just reading it.
+    const { QtyStepper } = require(JS('utils.js'));
+    const buttons = QtyStepper.markup({ value: 1 }).match(/<button[^>]*>/g) || [];
+    assert.equal(buttons.length, 2, 'the stepper renders exactly two buttons');
+    for (const b of buttons) assert.match(b, /type="button"/, b);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // §2 — Sibling card surfaces (shop, ribbons): defensive type="button"
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('shop-page.js in-stock cart button renders type="button"', () => {
-    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*product-card__cart-btn[^"]*"/g;
+    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*(?:product-card__cart-btn|product-card__qty-btn)[^"]*"/g;
     const matches = SHOP_CODE.match(bareBtnRe) || [];
     assert.equal(
         matches.length, 0,
@@ -135,7 +156,7 @@ test('shop-page.js in-stock cart button renders type="button"', () => {
 });
 
 test('ribbons-page.js in-stock cart button renders type="button"', () => {
-    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*product-card__cart-btn[^"]*"/g;
+    const bareBtnRe = /<button(?![^>]*\btype=)[^>]*\bclass="[^"]*(?:product-card__cart-btn|product-card__qty-btn)[^"]*"/g;
     const matches = RIBBONS_CODE.match(bareBtnRe) || [];
     assert.equal(
         matches.length, 0,

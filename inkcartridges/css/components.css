@@ -884,6 +884,22 @@
         text-align: center;
         justify-content: center;
     }
+
+    /* When a buy row is present it is the thing that goes full width; the CTA
+       inside it must stay flexible or it pushes the stepper out of the card
+       (ERR-218). The width:100% above still applies to any surface that has no
+       stepper yet, which is why it is overridden here rather than narrowed. */
+    .product-card__footer .product-card__footer-row:last-child .product-card__buy {
+        width: 100%;
+    }
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__buy .product-card__cart-btn,
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__buy .product-card__add-btn,
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__buy .product-card__add-to-cart {
+        width: auto;
+    }
 }
 
 .product-card__cart-col {
@@ -945,6 +961,157 @@
     text-align: center;
     min-height: 44px; /* WCAG 2.5.5 minimum hit target */
 }
+
+/* ── Buy row: the quantity stepper and the CTA share one line (ERR-218) ──────
+   Sizes here are answers to a measurement taken on the live shop grid, not
+   preferences (ERR-189/196 — a constant reserving space for text is a
+   measurement someone declined to take):
+
+       shop card 162.3px  →  the CTA's row is 140.3px
+       "Add to Cart" at 13px/600 Inter = 71.4px of glyphs + 24px padding = 95.4px
+       a usable [− n +]                                                  = 76px
+       95.4 + 76 + 4px gap = 175.4px needed against 140.3px available
+
+   Fitting "Add to Cart" beside a stepper would leave the stepper 41px for three
+   controls, so the VISIBLE label is "Add" / "Add 3" (QtyStepper.ctaLabel). The
+   accessible name is not abbreviated — QtyStepper.ctaAriaLabel spells out the
+   quantity and the product for assistive tech. Chosen over a stacked layout
+   because stacking measured +26px on every card, and the search dropdown it
+   also ships in is already height-capped. */
+.product-card__buy {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+}
+
+.product-card__buy .product-card__add-btn,
+.product-card__buy .product-card__cart-btn,
+.product-card__buy .product-card__add-to-cart,
+.product-card__buy .favourite-item__add-cart {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Deliberately NOT .quantity-selector: Cart.bindEvents delegates on
+   .quantity-selector__btn--increase/--decrease at the document level and
+   assumes a cart line's data-item-key. Shares the visual language, not the
+   behavioural class names. */
+.product-card__qty {
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background-color: var(--white-primary);
+}
+
+.product-card__qty-btn {
+    width: 24px;
+    padding: 0;
+    border: 0;
+    background-color: var(--color-background-alt, #f1f5f9);
+    color: var(--color-text-heading);
+    font-size: 15px;
+    font-weight: var(--font-weight-bold, 700);
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease;
+}
+
+.product-card__qty-btn:hover:not(:disabled) {
+    background-color: var(--color-border-light, #e2e8f0);
+}
+
+.product-card__qty-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.product-card__qty-input {
+    width: 26px;
+    padding: 0;
+    border: 0;
+    text-align: center;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold, 700);
+    color: var(--color-text-heading);
+    background-color: var(--white-primary);
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.product-card__qty-input::-webkit-outer-spin-button,
+.product-card__qty-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* The stepper sits inside the card's wrapping <a class="product-card__link">,
+   so it needs the same stacking treatment the other in-card controls get. */
+.product-card__qty {
+    position: relative;
+    z-index: 20;
+}
+
+/* Touch: the one-row layout and a 44px hit target cannot coexist on a
+   phone-width card, and that is arithmetic rather than taste. Measured at a
+   375px viewport, where cards are two-across at 159.5px:
+
+       inner row                                          137.5px
+       44px buttons + 26px input + border = 116px stepper
+       → the CTA is left 17.5px, a text budget of 5.5px
+       ("Add 5" needs 37px; even 34px buttons leave only 25.5px)
+
+   So where the pointer is coarse AND the card is narrow, the buy row stacks:
+   both controls go full width at 44px tall, which is the sizing the rest of
+   this file already uses (WCAG 2.5.5, pinned by mobile-parity S1.5). It costs
+   ~26px of card height, and it costs it only on touch — where cards are
+   two-across and vertical room is the cheap axis. Fine pointers keep the
+   single row the desktop measurement was made for.
+
+   The container query is nested inside the media query so a TABLET (coarse
+   pointer, wide cards) keeps the one-row layout: it is the narrowness that
+   forces the stack, not the touchscreen. */
+@media (pointer: coarse) {
+    /* min-height on the BUTTONS, not just the wrapper: a 44px wrapper with a
+       1px border on each side yields 42px children, and 42px is not 44px.
+       Measured, because the difference is invisible in the CSS. */
+    .product-card__qty-btn { width: 44px; min-height: 44px; }
+    .product-card__qty-input { width: 34px; min-height: 44px; font-size: var(--font-size-sm); }
+
+    @container pcard (max-width: 260px) {
+        .product-card__buy {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+        }
+        .product-card__buy .product-card__qty {
+            width: 100%;
+        }
+        .product-card__buy .product-card__qty-input {
+            flex: 1 1 auto;
+            width: auto;
+        }
+        .product-card__buy .product-card__add-btn,
+        .product-card__buy .product-card__cart-btn,
+        .product-card__buy .product-card__add-to-cart {
+            width: 100%;
+            min-height: 44px;
+        }
+    }
+}
+
 a.product-card__contact-btn {
     display: inline-flex;
     align-items: center;

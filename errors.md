@@ -41,6 +41,156 @@ describing the same incident.
 
 ---
 
+## ERR-218 — Buying four cartridges took four clicks and eight requests, and one of the Add buttons had never worked at all — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent a screenshot of the Brother LC3317 shop grid.
+*"i want to add the option to add multiple products at the same time instead of pressing add to
+cart one time and then having to wait for it to load to press it again. can you make some sort of +
+and - button and then maybe it says 'add 1 to cart'... 'add 10 to cart' or something in the blue add
+button. make this also inside the search bar."*
+
+**THE BACKEND HAD BEEN READY THE WHOLE TIME.** `Cart.addItem({..., quantity})` has always honoured
+a quantity (`cart.js:2715`, `:2738`), `API.addToCart(productId, quantity)` has always POSTed one
+(`api.js:2640`), and `CartAnalytics.trackAddToCart(product, qty)` has always been quantity-aware.
+Every one of the six card surfaces simply hard-coded `1`. This was a front-end-only change with no
+backend work at all.
+
+**THE REAL COST WAS REQUESTS, NOT CLICKS.** `Cart.addItem` POSTs `/api/cart/items` and then
+`await`s a full `loadFromServer()` re-read for authoritative totals. Four cartridges was four
+clicks and roughly eight requests, each with a repaint. It is now one POST:
+
+```
+  measured, localhost -> live backend, quantity 3 set on the card:
+  POST https://ink-backend-zaeq.onrender.com/api/cart/items
+  {"product_id":"d4a8446b-a187-4c2f-a399-f1d1aaae5f4e","quantity":3}      <- ONE request
+  cart line CLC3317BK  quantity 3
+```
+
+That is not merely faster, it is *less* load: the in-flight ERR-210 work in `cart.js` exists
+because rapid repeat adds race the pricing GET into a false "we couldn't confirm today's prices"
+banner — its own comments describe "five fast + clicks" and "three rapid + clicks". **The − and +
+touch neither the cart nor the network.** They move a local number; only the blue button mutates.
+
+**(a) 🚨 THE /shop RECOVERY RAIL'S ADD BUTTON HAD NEVER ONCE WORKED, AND NOTHING LOGGED IT.**
+`Products.attachCardListeners` (products.js:303) read:
+
+```js
+if (typeof Cart !== 'undefined' && Cart.add) {
+    Cart.add(btn.dataset.productId, 1);        // Cart.add DOES NOT EXIST
+}
+```
+
+The Cart module has `addItem`, `updateQuantity`, `removeItem` and `clear`. There is no `add`. So
+the guard was **always false**, the branch never ran, and the handler's `preventDefault()` +
+`stopPropagation()` swallowed the click — including stopping it reaching the document-level
+delegate in `Cart.bindEvents` that would otherwise have caught it. The shopper clicked Add to Cart
+and precisely nothing happened. It survived because exactly one surface binds it: the /shop
+zero-results "browse by printer" recovery rail (`shop-page.js:4185`).
+
+**This is the family the memory index already names: if the fallback is the only branch that ever
+runs, the guard IS the bug (ERR-167).** The fix is to stop having two add paths —
+`attachCardListeners` now forwards to `bindAddToCartEvents`, with a `data-atc-bound` guard so a
+caller reaching for both cannot double the quantity.
+
+**(b) 🚨 `business-page.js` PASSED A SKU STRING WHERE A PRODUCT OBJECT WAS EXPECTED.**
+`Cart.addItem(btn.getAttribute('data-sku'), 1)` — `addItem` takes one object and has no second
+parameter, so it read `.id`/`.sku`/`.name` off a bare string, got `undefined` for all of them and
+POSTed `product_id: undefined`. `/api/business/top-products` carries no product id at all (sku,
+name, product_url, counts), which is *why* the id had to come from somewhere. It now resolves the
+SKU through `API.getProduct()` first — the same authority `decorateReorderPrices` already uses —
+and **says so out loud** when the lookup fails, rather than failing silently a second time.
+
+**(c) THE LABEL IS SHORT BECAUSE THE CARD IS 162px WIDE. THAT IS A MEASUREMENT.**
+ERR-189/196 recorded that *a constant reserving space for text is a measurement someone declined to
+take*. So the layout was decided by measuring the live grid, not by estimating it — and the
+estimate was wrong (~190px guessed, 162.3px actual):
+
+```
+  shop card                                             162.3px
+  the CTA's row                                         140.3px
+  "Add to Cart" at 13px/600 Inter                        71.4px glyphs + 24px padding = 95.4px
+  a usable [- n +]                                       76.0px
+  95.4 + 76 + 4px gap = 175.4px needed vs 140.3px available     SHORT BY 35px
+```
+
+Fitting "Add to Cart" beside a stepper leaves the stepper 41px for three controls. So the **visible**
+label is `Add` / `Add 3` (`QtyStepper.ctaLabel`) and the **accessible** name is not abbreviated —
+`ctaAriaLabel` renders "Add 3 × LC3317BK Compatible Ink Cartridge for Brother LC3317 Black to cart".
+The alternative (stacking) measured **+26px on every card**, which the height-capped search dropdown
+cannot afford. Chosen by the owner against both numbers.
+
+**(d) ONE ROW AND A 44px TOUCH TARGET CANNOT COEXIST ON A PHONE. ALSO ARITHMETIC.** At 375px cards
+are two-across at 159.5px, an inner row of 137.5px:
+
+```
+  44px buttons + 26px input + borders = 116px stepper -> CTA gets 17.5px (text budget 5.5px)
+  40px buttons                        = 108px stepper -> CTA gets 25.5px
+  34px buttons                        =  96px stepper -> CTA gets 37.5px ("Add 5" needs 37px)
+```
+
+So under `@media (pointer: coarse)` **and** a narrow card the buy row stacks, both controls full
+width at 44×44. Nested that way round deliberately: a tablet (coarse pointer, wide cards) keeps the
+single row, because it is the *narrowness* that forces the stack, not the touchscreen. A first
+attempt put `min-height: 44px` on the stepper wrapper and measured **42px** children — a 1px border
+each side. 42px is not 44px, and the difference is invisible in the CSS.
+
+**(e) THE ≤480px RULE THAT HID THE DROPDOWN'S ADD BUTTON WAS REVERSED, DELIBERATELY.** The May-2026
+mobile-parity pass (S1.1) set `display: none` on the reasoning that tapping the row opens the PDP
+and its sticky buy bar handles the add. That held while the only thing on offer was a single unit
+one PDP visit away. The comment was **rewritten to record the reversal** rather than deleted —
+removing a fallback is a behaviour change, not cleanup (ERR-158).
+
+**(f) WHY IT IS ONE COMPONENT AND NOT A SIXTH COPY.** There is no shared card renderer: `products.js`
+and `shop-page.js` hold two *deliberately* duplicated templates — `products.js:169` says so and
+warns that "the divergence always bites on the surface that ships the feature second" — plus
+`ribbons-page.js`, `favourites.js`, cart.js's cross-sell modal and business-page.js's reorder tiles.
+ERR-192 is the same lesson learned expensively. `QtyStepper` lives once in `utils.js` (published on
+`window`, per ERR-167) and all six **call** it.
+
+**(g) THE DROPDOWN'S SIX TRAPS, ALL VERIFIED IN A BROWSER.** `type="button"` on both stepper buttons
+(the panel is mounted inside the search `<form>`; a bare `<button>` defaults to `submit` and hijacks
+Enter); the stepper added to the `mousedown` blur-guard (without it the *first* click on − blurs the
+input and closes the panel); `stopPropagation()` so the wrapping `<a>` does not navigate mid-increment;
+`tabindex="-1"` inside the dropdown only, because that panel's keyboard model is
+`aria-activedescendant` on the search input and Tab closes it — **not a regression, today's
+Add-to-Cart button there is equally unreachable by keyboard**; Enter still navigates; and card height
+is **unchanged at 409.6px**, so the two-rows-of-cards budget survives. No search-beacon change was
+needed: it is results-page-only and already excludes `target.closest('button')`.
+
+**Verified live** (localhost → live backend, 1728px and 375px):
+
+```
+  shop card    162.3px | buy row 140.3 | stepper 76 | CTA 60.3 | overflow 0 | height UNCHANGED
+  dropdown     152.3px | buy row 138.3 | stepper 70 | CTA 64.3 | overflow 0 | height 409.6 UNCHANGED
+  labels       Add -> Add 2 -> Add 3 -> Add 6 -> Add 24 -> Add
+  bulk line    2: "Add 1 more -> $17.75 ea"     3: "At 3 you pay $17.75 ea — saving $2.22"
+               6: "$17.57 ea, saving $5.52"    24: "$16.64 ea, saving $44.40"   1: restored exactly
+  dropdown     mousedown keeps focus + panel open | + does not navigate | Enter does not submit
+  OOS cards    1 contact card, 0 given a stepper | 0 add buttons anywhere without a stepper
+  touch (sim)  stepper 141.5x44, CTA 141.5x44, all targets 44x44, no horizontal scroll
+```
+
+**Fixed**: `QtyStepper` in `utils.js` (`markup`/`ctaLabel`/`ctaAriaLabel`/`read`/`reset`/`bind`/
+`attach`/`busy`/`ceiling`, ceiling read from `Cart.MAX_QUANTITY` so there is one number, not two);
+`.product-card__buy` + stepper CSS in `components.css` incl. the coarse-pointer stack; dropdown
+scale + the ≤480px reversal in `search.css`; `Business.syncCardQuantity` (selection from a
+backend-sent ladder — the front end still computes no prices, and an undecorated card gets **nothing
+invented**); the six renderers; the `Cart.bindEvents` delegate switched to `closest()` and given
+`.product-card__cart-btn`; and the cart-line quantity delegate scoped to `.cart-item` so no future
+card stepper can drive `_debouncedQuantityUpdate(undefined, n)`.
+
+**Guarded by**: `tests/qty-stepper-sep2026.test.js` — an **enrolment** test, per the ERR-150/160
+lesson that "every surface calls X" is a list nobody maintains. It asserts who participates, carries
+a **positive control**, and names its one exemption (`Cart._swapLineForPack`, an internal
+single-pack swap) rather than skipping it silently — a skip is not a pass. Plus the `type="button"`
+scanner in `tests/search-enter-key-may2026.test.js` extended to `product-card__qty-btn` and pointed
+at `utils.js`, where the markup actually lives. `npm run probe:qty-breaks` (**READ-ONLY**, mode
+printed) confirms the ladder really is on the payloads: 13/13 and 24/24 rows.
+
+**Follow-up, not silently absorbed**: `Cart._swapLineForPack` adds one pack regardless of how many
+singles the line held. Whether three singles should become three packs is a real question, but a
+pre-existing one, and not this change's to answer quietly.
+
 ## ERR-217 — The 404 page's search box put its results 289 pixels below the bottom of the window, and a decorative animation was the reason — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `inkcartridges.co.nz/print("hi")`

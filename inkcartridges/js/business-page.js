@@ -970,16 +970,64 @@
                     <p class="business-reorder__meta">${esc(it.sku)} · ordered ${esc(it.quantity_ordered)} across ${esc(it.order_count)} order${it.order_count === 1 ? '' : 's'}</p>
                     <p class="business-reorder__price" data-price-for="${esc(it.sku)}">&nbsp;</p>
                     ${buyable
-                        ? `<button type="button" class="btn btn--secondary business-reorder__add" data-sku="${esc(it.sku)}">Add to cart</button>`
+                        ? `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}<button type="button" class="btn btn--secondary business-reorder__add" data-sku="${esc(it.sku)}" data-product-name="${esc(it.name || it.sku)}">${typeof QtyStepper !== 'undefined' ? QtyStepper.ctaLabel(1) : 'Add to cart'}</button></div>`
                         : `<button type="button" class="btn btn--secondary" disabled>${esc(reason)}</button>`}
                 </article>`;
             }).join('');
 
+            if (typeof QtyStepper !== 'undefined') QtyStepper.bind(list);
+
             list.querySelectorAll('.business-reorder__add').forEach((btn) => {
-                btn.addEventListener('click', () => {
-                    // Price comes from the live cart/catalogue path — never a
-                    // historical figure re-presented as today's price.
-                    if (typeof Cart !== 'undefined' && Cart.addItem) Cart.addItem(btn.getAttribute('data-sku'), 1);
+                btn.addEventListener('click', async () => {
+                    // ERR-218 — this called Cart.addItem(sku, 1). addItem takes a
+                    // PRODUCT OBJECT and has no second parameter, so it read
+                    // .id/.sku/.name off a bare string, got undefined for all of
+                    // them and POSTed product_id: undefined. /top-products carries
+                    // no product id at all (sku, name, product_url, counts), which
+                    // is why the id had to come from somewhere — so resolve the
+                    // SKU against the live catalogue first, the same authority
+                    // decorateReorderPrices already uses for the price.
+                    if (typeof Cart === 'undefined' || !Cart.addItem) return;
+                    const sku = btn.getAttribute('data-sku');
+                    const quantity = (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1;
+                    const original = btn.textContent;
+                    btn.disabled = true;
+                    btn.textContent = 'Adding...';
+                    try {
+                        const res = await API.getProduct(sku);
+                        const prod = res && res.ok && res.data;
+                        if (!prod || !prod.id) {
+                            // Say so. A reorder button that quietly does nothing is
+                            // the exact failure this change exists to remove.
+                            btn.textContent = 'Unavailable';
+                            if (typeof showToast === 'function') {
+                                showToast(`We could not look up ${sku} just now.`, 'error');
+                            }
+                            setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+                            return;
+                        }
+                        await Cart.addItem({
+                            id: prod.id,
+                            sku: prod.sku || sku,
+                            name: prod.name || btn.dataset.productName || sku,
+                            price: prod.retail_price || 0,
+                            image: typeof storageUrl === 'function' ? storageUrl(prod.image_url) : (prod.image_url || ''),
+                            brand: (prod.brand && prod.brand.name) || '',
+                            color: prod.color || '',
+                            quantity,
+                            product_source: prod.source || null
+                        });
+                        btn.textContent = 'Added!';
+                        setTimeout(() => {
+                            btn.disabled = false;
+                            if (typeof QtyStepper !== 'undefined') QtyStepper.reset(btn);
+                            else btn.textContent = original;
+                        }, 1500);
+                    } catch (e) {
+                        if (typeof DebugLog !== 'undefined') DebugLog.error('[Business] reorder add failed', e);
+                        btn.textContent = 'Error';
+                        setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+                    }
                 });
             });
 

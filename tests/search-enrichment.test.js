@@ -316,16 +316,36 @@ test('shop-page.js createProductCard — has same enrichment wiring (canonical_u
     assert.match(src, /Contact us/, 'shop renderer must show "Contact us" CTA on OOS cards');
 });
 
-test('Products.attachCardListeners + Products.bindAddToCartEvents — handle contact buttons in BOTH binders', () => {
+test('Products contact buttons navigate to /contact, and attachCardListeners reaches a live add path', () => {
     const src = fs.readFileSync(PRODUCTS_JS_PATH, 'utf8');
-    // Both listener binders must branch on data-action="contact" and
-    // navigate to /contact (the wrapping card-link <a> would otherwise
-    // send the user to the PDP).
+    // ERR-218 changed the SHAPE of this guarantee, not the guarantee.
+    //
+    // There used to be two independent binders, each with its own contact
+    // branch, and this asserted the branch appeared twice. attachCardListeners'
+    // OTHER branch called `Cart.add(id, 1)` — a method the Cart module has
+    // never had — so its add-to-cart was dead on the one surface that used it
+    // (the /shop by-printer recovery rail). The fix was to stop having two add
+    // paths: attachCardListeners now forwards to bindAddToCartEvents.
+    //
+    // So: bindAddToCartEvents must still handle contact, and attachCardListeners
+    // must still REACH it. Both halves can fail.
     const guards = src.match(/btn\.dataset\.action\s*===\s*['"]contact['"]/g) || [];
-    assert.ok(guards.length >= 2,
-        `expected attachCardListeners + bindAddToCartEvents to handle "contact"; found ${guards.length}`);
+    assert.ok(guards.length >= 1,
+        `bindAddToCartEvents must branch on data-action="contact"; found ${guards.length}`);
     assert.match(src, /window\.location\.href\s*=\s*['"]\/contact['"]/,
         'contact handler must navigate to /contact');
+
+    const attach = src.match(/attachCardListeners\(container\)\s*\{[\s\S]*?\n    \},/);
+    assert.ok(attach, 'attachCardListeners must still exist — callers reference it by name');
+    const body = attach[0];
+    assert.ok(
+        /bindAddToCartEvents\(container\)/.test(body) ||
+        /btn\.dataset\.action\s*===\s*['"]contact['"]/.test(body),
+        'attachCardListeners must either handle contact itself or forward to the binder that does'
+    );
+    assert.doesNotMatch(body, /Cart\.add\s*\(/,
+        'attachCardListeners must never call Cart.add — it does not exist on the Cart module, '
+        + 'and the truthiness guard around it made the /shop recovery rail a dead button (ERR-218)');
 });
 
 test('api.js — exposes _normalizeRpcSearchResponse as a test hook', () => {

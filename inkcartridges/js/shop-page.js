@@ -4364,6 +4364,22 @@
                 Products.bindImageFallbacks(container);
             }
 
+            // ONE delegated quantity-stepper listener for the whole grid
+            // (ERR-218). The − and + move a local number and touch neither the
+            // cart nor the network; only the CTA mutates, once, with the whole
+            // quantity. onChange re-resolves the bulk ladder the card is already
+            // showing, so "BULK PRICE $17.75 ea" becomes a live answer to the
+            // quantity in the box rather than a standing advertisement.
+            if (typeof QtyStepper !== 'undefined') {
+                QtyStepper.bind(container, {
+                    onChange: (qty, card) => {
+                        if (typeof Business !== 'undefined' && Business.syncCardQuantity) {
+                            Business.syncCardQuantity(card, qty);
+                        }
+                    }
+                });
+            }
+
             // Bulk-price overlay, for every shopper. ingest() takes the ladder
             // straight off the payload this grid was rendered from, so the
             // overlay costs no request; the card renderer itself stays
@@ -4615,11 +4631,27 @@
                                     // inside a <form>. Bare <button> defaults to type="submit"
                                     // and would become an implicit-Enter target.
                                     // Pinned by tests/search-enter-key-may2026.test.js.
-                                    return `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
+                                    // ERR-218: the CTA shares a row with a quantity
+                                    // stepper and the visible label shortens to
+                                    // "Add" / "Add 3" — the row is 140.3px wide and
+                                    // "Add to Cart" needs 95.4px of it beside a 76px
+                                    // stepper. The aria-label keeps the full sentence.
+                                    const hasStepper = typeof QtyStepper !== 'undefined';
+                                    if (!hasStepper && typeof DebugLog !== 'undefined') {
+                                        DebugLog.error('QtyStepper missing — shop cards fall back to single-unit add (ERR-218)');
+                                    }
+                                    const ctaText = hasStepper ? QtyStepper.ctaLabel(1) : 'Add to Cart';
+                                    const ctaAria = hasStepper
+                                        ? QtyStepper.ctaAriaLabel(1, displayName)
+                                        : `Add ${displayName} to cart`;
+                                    const cta = `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
                                             data-product-id="${product.id}"
-                                            aria-label="Add ${Security.escapeAttr(displayName)} to cart">
-                                        Add to Cart
+                                            data-product-name="${Security.escapeAttr(displayName)}"
+                                            aria-label="${Security.escapeAttr(ctaAria)}">
+                                        ${Security.escapeHtml(ctaText)}
                                     </button>`;
+                                    if (!hasStepper) return cta;
+                                    return `<div class="product-card__buy">${QtyStepper.markup({ value: 1 })}${cta}</div>`;
                                 })()}
                             </div>
                         </div>
@@ -4670,6 +4702,11 @@
         // Add to cart functionality using Cart.addItem (server-first)
         async addToCart(product, button) {
             const originalText = button.textContent;
+            // ERR-218: read the stepper BEFORE the button goes busy, and hold the
+            // value — the shopper can keep tapping + while the request is in
+            // flight, and what we add must be what the label said when clicked.
+            const quantity = (typeof QtyStepper !== 'undefined') ? QtyStepper.read(button) : 1;
+            if (typeof QtyStepper !== 'undefined') QtyStepper.busy(button, true);
             button.textContent = 'Adding...';
             button.disabled = true;
 
@@ -4684,7 +4721,7 @@
                     image: typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || ''),
                     brand: product.brand?.name || '',
                     color: product.color || '',
-                    quantity: 1,
+                    quantity,
                     product_source: product.source || null,
                     // The printer hub the shopper is browsing, if any
                     // (data-tracking-capture aug2026 §1.2). `state.printer` is
@@ -4697,9 +4734,16 @@
                 button.classList.add('btn--success');
 
                 setTimeout(() => {
-                    button.textContent = originalText;
                     button.classList.remove('btn--success');
                     button.disabled = false;
+                    if (typeof QtyStepper !== 'undefined') {
+                        QtyStepper.busy(button, false);
+                        // Back to 1 — the quantity just added is spent, and a card
+                        // still reading "Add 10" invites adding ten more.
+                        QtyStepper.reset(button);
+                    } else {
+                        button.textContent = originalText;
+                    }
                 }, 1500);
             } catch (error) {
                 DebugLog.error('Add to cart error:', error);
@@ -4707,9 +4751,17 @@
                 button.classList.add('btn--error');
 
                 setTimeout(() => {
-                    button.textContent = originalText;
                     button.classList.remove('btn--error');
                     button.disabled = false;
+                    // The add FAILED, so the quantity is not spent — restore the
+                    // label the shopper chose rather than resetting to 1 and
+                    // quietly discarding what they asked for.
+                    if (typeof QtyStepper !== 'undefined') {
+                        QtyStepper.busy(button, false);
+                        button.textContent = QtyStepper.ctaLabel(QtyStepper.read(button));
+                    } else {
+                        button.textContent = originalText;
+                    }
                 }, 2000);
             }
         },
