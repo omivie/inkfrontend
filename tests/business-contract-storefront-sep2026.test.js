@@ -33,15 +33,17 @@
  *
  * `describeLadder()` is read by the PDP, the product cards, the cart nudges and
  * the Business Centre. Its output for a shopper with NO contract price must be
- * byte-identical to what it was before this change; that is asserted below
- * against the recorded live sweep rather than against a hand-written fixture.
+ * byte-identical to what it was before this change — asserted against a FROZEN
+ * capture of the pre-change implementation's own output over the production
+ * sweep, not against a fixture hand-written alongside the code, and not against
+ * `git show HEAD:` (which stops being a baseline the moment the change lands —
+ * see the note on that test).
  */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -122,30 +124,49 @@ test('getContractPrice computes nothing — every figure is the server’s', () 
 // 2. The one interpreter, unchanged for everyone without a contract
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('describeLadder is byte-identical without a contract price, over the live sweep', () => {
-  // Against the RECORDED LIVE SWEEP, not a hand-written fixture: a fixture I
-  // wrote today would agree with the code I wrote today.
-  const before = loadBusiness(execSync('git show HEAD:inkcartridges/js/business.js', { cwd: ROOT }).toString());
-  const fx = JSON.parse(read('tests/fixtures/business-pricing-sweep.json'));
+test('describeLadder is byte-identical without a contract price, against a FROZEN pre-change baseline', () => {
+  // ── WHY THIS READS A FIXTURE AND NOT `git show HEAD:…` ────────────────────
+  //
+  // It used to load the baseline out of git at test time. That worked exactly
+  // as long as the change was UNCOMMITTED — the moment ERR-221 landed, `HEAD`
+  // became the new file, `before` and `now` were the same implementation, and
+  // the comparison was against itself. It went red on commit (caught by another
+  // session within the hour), and the mode of failure is the one this repo
+  // keeps paying for: **a test that passes for the wrong reason** (ERR-181/186).
+  //
+  // Note the near-miss. Stripping the two new keys from BOTH sides would have
+  // turned it green again — and permanently vacuous, comparing the shipped code
+  // to the shipped code forever. Green would then have meant nothing at all.
+  //
+  // So the baseline is FROZEN: `describeLadder()`'s output from business.js as
+  // it stood at f2a366e, the commit before contract pricing, run over the
+  // production sweep. It cannot rot, it needs no git, and it is genuinely the
+  // OLD implementation's answer rather than a fixture written the same day as
+  // the code it validates.
+  const baseline = JSON.parse(read('tests/fixtures/ladder-baseline-pre-contract-pricing.json'));
 
-  const items = [];
-  const walk = (o) => {
-    if (!o || typeof o !== 'object') return;
-    if (Array.isArray(o)) { o.forEach(walk); return; }
-    if (Array.isArray(o.quantity_breaks) && o.retail_price != null) items.push(o);
-    Object.values(o).forEach(walk);
-  };
-  walk(fx);
-  assert.ok(items.length >= 10, `expected recorded ladders in the sweep fixture, found ${items.length}`);
+  // The baseline must be a baseline. If someone ever regenerates this file from
+  // the CURRENT code, every ladder in it gains basePrice/contractPrice, the
+  // deepEqual below compares the shipped code to itself, and this test quietly
+  // stops testing anything. Fail loudly instead.
+  assert.ok(baseline.ladders.length >= 10,
+    `expected a meaningful sample, got ${baseline.ladders.length}`);
+  for (const { ladder } of baseline.ladders) {
+    if (!ladder) continue;
+    assert.equal('basePrice' in ladder, false,
+      'the frozen baseline has been regenerated from the NEW code — it is no longer a baseline, ' +
+      'and this comparison would be vacuous. Regenerate it from f2a366e or delete this test honestly.');
+    assert.equal('contractPrice' in ladder, false, 'same — see above');
+  }
 
-  for (const item of items) {
-    const was = before.describeLadder(item);
-    const now = B.describeLadder(item);
-    if (was === null) { assert.equal(now, null, `${item.sku}: was null, now not`); continue; }
-    // Strip only the two NEW keys; everything else must match exactly.
+  for (const { input, ladder: was } of baseline.ladders) {
+    const now = B.describeLadder(input);
+    if (was === null) { assert.equal(now, null, `${input.sku}: was null, now not`); continue; }
+    assert.ok(now, `${input.sku}: the ladder disappeared`);
+    // Strip only the two NEW keys; everything else must match the old output exactly.
     const { basePrice, contractPrice, ...rest } = now;
-    assert.deepEqual(rest, was, `${item.sku}: the ladder changed for a shopper with no contract price`);
-    assert.equal(basePrice, was.retailPrice, `${item.sku}: basePrice IS retailPrice without a contract`);
+    assert.deepEqual(rest, was, `${input.sku}: the ladder changed for a shopper with no contract price`);
+    assert.equal(basePrice, was.retailPrice, `${input.sku}: basePrice IS retailPrice without a contract`);
     assert.equal(contractPrice, null);
   }
 });

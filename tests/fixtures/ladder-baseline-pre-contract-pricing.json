@@ -1,0 +1,1835 @@
+{
+ "_what": "describeLadder() output from js/business.js as it stood BEFORE contract pricing (ERR-221).",
+ "_why": "A baseline read out of git at test time is not a baseline: the moment the change is committed, HEAD becomes the new code and the comparison silently compares the implementation to itself. Frozen here so it cannot rot.",
+ "_generated_from_commit": "f2a366eb4fda97baf8d7bb84f105553a1b84be90",
+ "_generated": "2026-09-06",
+ "_source_data": "tests/fixtures/business-pricing-sweep.json (recorded from production by npm run sweep:b2b)",
+ "_regenerate": "Only ever from f2a366e. Regenerating from current code makes the test vacuous, and a guard in it will fail loudly if you do.",
+ "ladders": [
+  {
+   "input": {
+    "sku": "GDR2025BK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 191.79,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 187.95,
+      "effective_percent": 2,
+      "savings_amount": 3.84,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 186.04,
+      "effective_percent": 3,
+      "savings_amount": 5.75,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 180.79,
+      "effective_percent": 5.7,
+      "savings_amount": 11,
+      "floored": true
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 180.79,
+      "effective_percent": 5.7,
+      "savings_amount": 11,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GDR2025BK",
+    "retailPrice": 191.79,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 187.95,
+      "savings": 3.84,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 186.04,
+      "savings": 5.75,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 180.79,
+      "savings": 11,
+      "percent": 5.7,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 187.95,
+     "savings": 3.84,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 6,
+     "businessPrice": 180.79,
+     "savings": 11,
+     "percent": 5.7,
+     "floored": true
+    },
+    "collapsed": 1,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GDR233CLKCMY",
+    "found": true,
+    "is_active": true,
+    "retail_price": 223.99,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 219.51,
+      "effective_percent": 2,
+      "savings_amount": 4.48,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 217.27,
+      "effective_percent": 3,
+      "savings_amount": 6.72,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 212.49,
+      "effective_percent": 5.1,
+      "savings_amount": 11.5,
+      "floored": true
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 212.49,
+      "effective_percent": 5.1,
+      "savings_amount": 11.5,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GDR233CLKCMY",
+    "retailPrice": 223.99,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 219.51,
+      "savings": 4.48,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 217.27,
+      "savings": 6.72,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 212.49,
+      "savings": 11.5,
+      "percent": 5.1,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 219.51,
+     "savings": 4.48,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 6,
+     "businessPrice": 212.49,
+     "savings": 11.5,
+     "percent": 5.1,
+     "floored": true
+    },
+    "collapsed": 1,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GDR3000BK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 432.79,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 1,
+      "business_price": 428.46,
+      "effective_percent": 1,
+      "savings_amount": 4.33,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 2,
+      "business_price": 424.13,
+      "effective_percent": 2,
+      "savings_amount": 8.66,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 5,
+      "business_price": 411.15,
+      "effective_percent": 5,
+      "savings_amount": 21.64,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 408.79,
+      "effective_percent": 5.5,
+      "savings_amount": 24,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GDR3000BK",
+    "retailPrice": 432.79,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 428.46,
+      "savings": 4.33,
+      "percent": 1,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 424.13,
+      "savings": 8.66,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 411.15,
+      "savings": 21.64,
+      "percent": 5,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 408.79,
+      "savings": 24,
+      "percent": 5.5,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 428.46,
+     "savings": 4.33,
+     "percent": 1,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 408.79,
+     "savings": 24,
+     "percent": 5.5,
+     "floored": true
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GDR340CLBK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 362.99,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 1,
+      "business_price": 359.36,
+      "effective_percent": 1,
+      "savings_amount": 3.63,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 2,
+      "business_price": 355.73,
+      "effective_percent": 2,
+      "savings_amount": 7.26,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 5,
+      "business_price": 344.84,
+      "effective_percent": 5,
+      "savings_amount": 18.15,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 339.49,
+      "effective_percent": 6.5,
+      "savings_amount": 23.5,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GDR340CLBK",
+    "retailPrice": 362.99,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 359.36,
+      "savings": 3.63,
+      "percent": 1,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 355.73,
+      "savings": 7.26,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 344.84,
+      "savings": 18.15,
+      "percent": 5,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 339.49,
+      "savings": 23.5,
+      "percent": 6.5,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 359.36,
+     "savings": 3.63,
+     "percent": 1,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 339.49,
+     "savings": 23.5,
+     "percent": 6.5,
+     "floored": true
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GHC05BK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 486.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 1,
+      "business_price": 481.63,
+      "effective_percent": 1,
+      "savings_amount": 4.86,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 2,
+      "business_price": 478.79,
+      "effective_percent": 1.6,
+      "savings_amount": 7.7,
+      "floored": true
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 5,
+      "business_price": 478.79,
+      "effective_percent": 1.6,
+      "savings_amount": 7.7,
+      "floored": true
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 478.79,
+      "effective_percent": 1.6,
+      "savings_amount": 7.7,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GHC05BK",
+    "retailPrice": 486.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 481.63,
+      "savings": 4.86,
+      "percent": 1,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 478.79,
+      "savings": 7.7,
+      "percent": 1.6,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 481.63,
+     "savings": 4.86,
+     "percent": 1,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 3,
+     "businessPrice": 478.79,
+     "savings": 7.7,
+     "percent": 1.6,
+     "floored": true
+    },
+    "collapsed": 2,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GDK22113CL",
+    "found": true,
+    "is_active": true,
+    "retail_price": 109.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 107.3,
+      "effective_percent": 2,
+      "savings_amount": 2.19,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 106.21,
+      "effective_percent": 3,
+      "savings_amount": 3.28,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 102.92,
+      "effective_percent": 6,
+      "savings_amount": 6.57,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 101.79,
+      "effective_percent": 7,
+      "savings_amount": 7.7,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GDK22113CL",
+    "retailPrice": 109.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 107.3,
+      "savings": 2.19,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 106.21,
+      "savings": 3.28,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 102.92,
+      "savings": 6.57,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 101.79,
+      "savings": 7.7,
+      "percent": 7,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 107.3,
+     "savings": 2.19,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 101.79,
+     "savings": 7.7,
+     "percent": 7,
+     "floored": true
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GDK22606Y",
+    "found": true,
+    "is_active": true,
+    "retail_price": 106.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 104.36,
+      "effective_percent": 2,
+      "savings_amount": 2.13,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 103.3,
+      "effective_percent": 3,
+      "savings_amount": 3.19,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 100.1,
+      "effective_percent": 6,
+      "savings_amount": 6.39,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 98.99,
+      "effective_percent": 7,
+      "savings_amount": 7.5,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GDK22606Y",
+    "retailPrice": 106.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 104.36,
+      "savings": 2.13,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 103.3,
+      "savings": 3.19,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 100.1,
+      "savings": 6.39,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 98.99,
+      "savings": 7.5,
+      "percent": 7,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 104.36,
+     "savings": 2.13,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 98.99,
+     "savings": 7.5,
+     "percent": 7,
+     "floored": true
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GLC3319XLBK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 102.79,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 100.73,
+      "effective_percent": 2,
+      "savings_amount": 2.06,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 99.71,
+      "effective_percent": 3,
+      "savings_amount": 3.08,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 96.62,
+      "effective_percent": 6,
+      "savings_amount": 6.17,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 95.49,
+      "effective_percent": 7.1,
+      "savings_amount": 7.3,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GLC3319XLBK",
+    "retailPrice": 102.79,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 100.73,
+      "savings": 2.06,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 99.71,
+      "savings": 3.08,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 96.62,
+      "savings": 6.17,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 95.49,
+      "savings": 7.3,
+      "percent": 7.1,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 100.73,
+     "savings": 2.06,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 95.49,
+     "savings": 7.3,
+     "percent": 7.1,
+     "floored": true
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GLC3339XLBK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 127.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 124.94,
+      "effective_percent": 2,
+      "savings_amount": 2.55,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 123.67,
+      "effective_percent": 3,
+      "savings_amount": 3.82,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 119.84,
+      "effective_percent": 6,
+      "savings_amount": 7.65,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 119.79,
+      "effective_percent": 6,
+      "savings_amount": 7.7,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GLC3339XLBK",
+    "retailPrice": 127.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 124.94,
+      "savings": 2.55,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 123.67,
+      "savings": 3.82,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 119.84,
+      "savings": 7.65,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 119.79,
+      "savings": 7.7,
+      "percent": 6,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 124.94,
+     "savings": 2.55,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 119.79,
+     "savings": 7.7,
+     "percent": 6,
+     "floored": true
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "GLC3339XLC",
+    "found": true,
+    "is_active": true,
+    "retail_price": 142.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 139.64,
+      "effective_percent": 2,
+      "savings_amount": 2.85,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 138.22,
+      "effective_percent": 3,
+      "savings_amount": 4.27,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 134.79,
+      "effective_percent": 5.4,
+      "savings_amount": 7.7,
+      "floored": true
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 134.79,
+      "effective_percent": 5.4,
+      "savings_amount": 7.7,
+      "floored": true
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "GLC3339XLC",
+    "retailPrice": 142.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 139.64,
+      "savings": 2.85,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 138.22,
+      "savings": 4.27,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 134.79,
+      "savings": 7.7,
+      "percent": 5.4,
+      "floored": true
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 139.64,
+     "savings": 2.85,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 6,
+     "businessPrice": 134.79,
+     "savings": 7.7,
+     "percent": 5.4,
+     "floored": true
+    },
+    "collapsed": 1,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": true
+   }
+  },
+  {
+   "input": {
+    "sku": "C143ABK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 30.79,
+    "quantity_breaks": [
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 29.87,
+      "effective_percent": 3,
+      "savings_amount": 0.92,
+      "floored": false
+     },
+     {
+      "min_quantity": 4,
+      "discount_percent": 4,
+      "business_price": 29.56,
+      "effective_percent": 4,
+      "savings_amount": 1.23,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 28.63,
+      "effective_percent": 7,
+      "savings_amount": 2.16,
+      "floored": false
+     },
+     {
+      "min_quantity": 8,
+      "discount_percent": 9,
+      "business_price": 28.02,
+      "effective_percent": 9,
+      "savings_amount": 2.77,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "C143ABK",
+    "retailPrice": 30.79,
+    "breaks": [
+     {
+      "minQuantity": 3,
+      "businessPrice": 29.87,
+      "savings": 0.92,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 4,
+      "businessPrice": 29.56,
+      "savings": 1.23,
+      "percent": 4,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 28.63,
+      "savings": 2.16,
+      "percent": 7,
+      "floored": false
+     },
+     {
+      "minQuantity": 8,
+      "businessPrice": 28.02,
+      "savings": 2.77,
+      "percent": 9,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 3,
+     "businessPrice": 29.87,
+     "savings": 0.92,
+     "percent": 3,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 8,
+     "businessPrice": 28.02,
+     "savings": 2.77,
+     "percent": 9,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "C126ACMY",
+    "found": true,
+    "is_active": true,
+    "retail_price": 110.99,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 108.77,
+      "effective_percent": 2,
+      "savings_amount": 2.22,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 107.66,
+      "effective_percent": 3,
+      "savings_amount": 3.33,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 104.33,
+      "effective_percent": 6,
+      "savings_amount": 6.66,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 102.11,
+      "effective_percent": 8,
+      "savings_amount": 8.88,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "C126ACMY",
+    "retailPrice": 110.99,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 108.77,
+      "savings": 2.22,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 107.66,
+      "savings": 3.33,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 104.33,
+      "savings": 6.66,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 102.11,
+      "savings": 8.88,
+      "percent": 8,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 108.77,
+     "savings": 2.22,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 102.11,
+     "savings": 8.88,
+     "percent": 8,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "CBCI3BK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 5.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 3,
+      "discount_percent": 4,
+      "business_price": 5.27,
+      "effective_percent": 4,
+      "savings_amount": 0.22,
+      "floored": false
+     },
+     {
+      "min_quantity": 4,
+      "discount_percent": 5,
+      "business_price": 5.22,
+      "effective_percent": 4.9,
+      "savings_amount": 0.27,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 5.05,
+      "effective_percent": 8,
+      "savings_amount": 0.44,
+      "floored": false
+     },
+     {
+      "min_quantity": 8,
+      "discount_percent": 10,
+      "business_price": 4.94,
+      "effective_percent": 10,
+      "savings_amount": 0.55,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "CBCI3BK",
+    "retailPrice": 5.49,
+    "breaks": [
+     {
+      "minQuantity": 3,
+      "businessPrice": 5.27,
+      "savings": 0.22,
+      "percent": 4,
+      "floored": false
+     },
+     {
+      "minQuantity": 4,
+      "businessPrice": 5.22,
+      "savings": 0.27,
+      "percent": 4.9,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 5.05,
+      "savings": 0.44,
+      "percent": 8,
+      "floored": false
+     },
+     {
+      "minQuantity": 8,
+      "businessPrice": 4.94,
+      "savings": 0.55,
+      "percent": 10,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 3,
+     "businessPrice": 5.27,
+     "savings": 0.22,
+     "percent": 4,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 8,
+     "businessPrice": 4.94,
+     "savings": 0.55,
+     "percent": 10,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "G79L1HKCMY",
+    "found": true,
+    "is_active": true,
+    "retail_price": 7654.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 0.5,
+      "business_price": 7616.22,
+      "effective_percent": 0.5,
+      "savings_amount": 38.27,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 1,
+      "business_price": 7577.95,
+      "effective_percent": 1,
+      "savings_amount": 76.54,
+      "floored": false
+     },
+     {
+      "min_quantity": 5,
+      "discount_percent": 3,
+      "business_price": 7424.86,
+      "effective_percent": 3,
+      "savings_amount": 229.63,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 5,
+      "business_price": 7271.77,
+      "effective_percent": 5,
+      "savings_amount": 382.72,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "G79L1HKCMY",
+    "retailPrice": 7654.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 7616.22,
+      "savings": 38.27,
+      "percent": 0.5,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 7577.95,
+      "savings": 76.54,
+      "percent": 1,
+      "floored": false
+     },
+     {
+      "minQuantity": 5,
+      "businessPrice": 7424.86,
+      "savings": 229.63,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 7271.77,
+      "savings": 382.72,
+      "percent": 5,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 7616.22,
+     "savings": 38.27,
+     "percent": 0.5,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 6,
+     "businessPrice": 7271.77,
+     "savings": 382.72,
+     "percent": 5,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "CLC431XLY",
+    "found": true,
+    "is_active": true,
+    "retail_price": 29.99,
+    "quantity_breaks": [
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 29.09,
+      "effective_percent": 3,
+      "savings_amount": 0.9,
+      "floored": false
+     },
+     {
+      "min_quantity": 4,
+      "discount_percent": 4,
+      "business_price": 28.79,
+      "effective_percent": 4,
+      "savings_amount": 1.2,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 27.89,
+      "effective_percent": 7,
+      "savings_amount": 2.1,
+      "floored": false
+     },
+     {
+      "min_quantity": 8,
+      "discount_percent": 9,
+      "business_price": 27.29,
+      "effective_percent": 9,
+      "savings_amount": 2.7,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "CLC431XLY",
+    "retailPrice": 29.99,
+    "breaks": [
+     {
+      "minQuantity": 3,
+      "businessPrice": 29.09,
+      "savings": 0.9,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 4,
+      "businessPrice": 28.79,
+      "savings": 1.2,
+      "percent": 4,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 27.89,
+      "savings": 2.1,
+      "percent": 7,
+      "floored": false
+     },
+     {
+      "minQuantity": 8,
+      "businessPrice": 27.29,
+      "savings": 2.7,
+      "percent": 9,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 3,
+     "businessPrice": 29.09,
+     "savings": 0.9,
+     "percent": 3,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 8,
+     "businessPrice": 27.29,
+     "savings": 2.7,
+     "percent": 9,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "CTN1070BK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 24.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 23.76,
+      "effective_percent": 3,
+      "savings_amount": 0.73,
+      "floored": false
+     },
+     {
+      "min_quantity": 4,
+      "discount_percent": 4,
+      "business_price": 23.51,
+      "effective_percent": 4,
+      "savings_amount": 0.98,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 22.78,
+      "effective_percent": 7,
+      "savings_amount": 1.71,
+      "floored": false
+     },
+     {
+      "min_quantity": 8,
+      "discount_percent": 9,
+      "business_price": 22.29,
+      "effective_percent": 9,
+      "savings_amount": 2.2,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "CTN1070BK",
+    "retailPrice": 24.49,
+    "breaks": [
+     {
+      "minQuantity": 3,
+      "businessPrice": 23.76,
+      "savings": 0.73,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 4,
+      "businessPrice": 23.51,
+      "savings": 0.98,
+      "percent": 4,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 22.78,
+      "savings": 1.71,
+      "percent": 7,
+      "floored": false
+     },
+     {
+      "minQuantity": 8,
+      "businessPrice": 22.29,
+      "savings": 2.2,
+      "percent": 9,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 3,
+     "businessPrice": 23.76,
+     "savings": 0.73,
+     "percent": 3,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 8,
+     "businessPrice": 22.29,
+     "savings": 2.2,
+     "percent": 9,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "G712KCMY",
+    "found": true,
+    "is_active": true,
+    "retail_price": 303.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 1,
+      "business_price": 300.46,
+      "effective_percent": 1,
+      "savings_amount": 3.03,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 2,
+      "business_price": 297.42,
+      "effective_percent": 2,
+      "savings_amount": 6.07,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 5,
+      "business_price": 288.32,
+      "effective_percent": 5,
+      "savings_amount": 15.17,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 7,
+      "business_price": 282.25,
+      "effective_percent": 7,
+      "savings_amount": 21.24,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "G712KCMY",
+    "retailPrice": 303.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 300.46,
+      "savings": 3.03,
+      "percent": 1,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 297.42,
+      "savings": 6.07,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 288.32,
+      "savings": 15.17,
+      "percent": 5,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 282.25,
+      "savings": 21.24,
+      "percent": 7,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 300.46,
+     "savings": 3.03,
+     "percent": 1,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 282.25,
+     "savings": 21.24,
+     "percent": 7,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "C804XLBK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 72.99,
+    "quantity_breaks": [
+     {
+      "min_quantity": 3,
+      "discount_percent": 2,
+      "business_price": 71.53,
+      "effective_percent": 2,
+      "savings_amount": 1.46,
+      "floored": false
+     },
+     {
+      "min_quantity": 4,
+      "discount_percent": 3,
+      "business_price": 70.8,
+      "effective_percent": 3,
+      "savings_amount": 2.19,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 6,
+      "business_price": 68.61,
+      "effective_percent": 6,
+      "savings_amount": 4.38,
+      "floored": false
+     },
+     {
+      "min_quantity": 8,
+      "discount_percent": 8,
+      "business_price": 67.15,
+      "effective_percent": 8,
+      "savings_amount": 5.84,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "C804XLBK",
+    "retailPrice": 72.99,
+    "breaks": [
+     {
+      "minQuantity": 3,
+      "businessPrice": 71.53,
+      "savings": 1.46,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 4,
+      "businessPrice": 70.8,
+      "savings": 2.19,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 68.61,
+      "savings": 4.38,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 8,
+      "businessPrice": 67.15,
+      "savings": 5.84,
+      "percent": 8,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 3,
+     "businessPrice": 71.53,
+     "savings": 1.46,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 8,
+     "businessPrice": 67.15,
+     "savings": 5.84,
+     "percent": 8,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "C02BK",
+    "found": true,
+    "is_active": true,
+    "retail_price": 11.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 3,
+      "discount_percent": 4,
+      "business_price": 11.03,
+      "effective_percent": 4,
+      "savings_amount": 0.46,
+      "floored": false
+     },
+     {
+      "min_quantity": 4,
+      "discount_percent": 5,
+      "business_price": 10.92,
+      "effective_percent": 5,
+      "savings_amount": 0.57,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 10.57,
+      "effective_percent": 8,
+      "savings_amount": 0.92,
+      "floored": false
+     },
+     {
+      "min_quantity": 8,
+      "discount_percent": 10,
+      "business_price": 10.34,
+      "effective_percent": 10,
+      "savings_amount": 1.15,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "C02BK",
+    "retailPrice": 11.49,
+    "breaks": [
+     {
+      "minQuantity": 3,
+      "businessPrice": 11.03,
+      "savings": 0.46,
+      "percent": 4,
+      "floored": false
+     },
+     {
+      "minQuantity": 4,
+      "businessPrice": 10.92,
+      "savings": 0.57,
+      "percent": 5,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 10.57,
+      "savings": 0.92,
+      "percent": 8,
+      "floored": false
+     },
+     {
+      "minQuantity": 8,
+      "businessPrice": 10.34,
+      "savings": 1.15,
+      "percent": 10,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 3,
+     "businessPrice": 11.03,
+     "savings": 0.46,
+     "percent": 4,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 8,
+     "businessPrice": 10.34,
+     "savings": 1.15,
+     "percent": 10,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  },
+  {
+   "input": {
+    "sku": "G70LC",
+    "found": true,
+    "is_active": true,
+    "retail_price": 209.49,
+    "quantity_breaks": [
+     {
+      "min_quantity": 2,
+      "discount_percent": 2,
+      "business_price": 205.3,
+      "effective_percent": 2,
+      "savings_amount": 4.19,
+      "floored": false
+     },
+     {
+      "min_quantity": 3,
+      "discount_percent": 3,
+      "business_price": 203.21,
+      "effective_percent": 3,
+      "savings_amount": 6.28,
+      "floored": false
+     },
+     {
+      "min_quantity": 6,
+      "discount_percent": 6,
+      "business_price": 196.92,
+      "effective_percent": 6,
+      "savings_amount": 12.57,
+      "floored": false
+     },
+     {
+      "min_quantity": 7,
+      "discount_percent": 8,
+      "business_price": 192.73,
+      "effective_percent": 8,
+      "savings_amount": 16.76,
+      "floored": false
+     }
+    ]
+   },
+   "ladder": {
+    "sku": "G70LC",
+    "retailPrice": 209.49,
+    "breaks": [
+     {
+      "minQuantity": 2,
+      "businessPrice": 205.3,
+      "savings": 4.19,
+      "percent": 2,
+      "floored": false
+     },
+     {
+      "minQuantity": 3,
+      "businessPrice": 203.21,
+      "savings": 6.28,
+      "percent": 3,
+      "floored": false
+     },
+     {
+      "minQuantity": 6,
+      "businessPrice": 196.92,
+      "savings": 12.57,
+      "percent": 6,
+      "floored": false
+     },
+     {
+      "minQuantity": 7,
+      "businessPrice": 192.73,
+      "savings": 16.76,
+      "percent": 8,
+      "floored": false
+     }
+    ],
+    "entry": {
+     "minQuantity": 2,
+     "businessPrice": 205.3,
+     "savings": 4.19,
+     "percent": 2,
+     "floored": false
+    },
+    "best": {
+     "minQuantity": 7,
+     "businessPrice": 192.73,
+     "savings": 16.76,
+     "percent": 8,
+     "floored": false
+    },
+    "collapsed": 0,
+    "droppedAtOrAboveRetail": 0,
+    "anyFloored": false
+   }
+  }
+ ]
+}
