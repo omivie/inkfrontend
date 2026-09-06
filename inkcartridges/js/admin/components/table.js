@@ -171,16 +171,26 @@ class DataTable {
     const total = p.total || 0;
     const page = p.page || 1;
     const limit = p.limit || p.per_page || 20;
-    const totalPages = Math.ceil(total / limit) || 1;
+    // An UNKNOWN total is not a total of zero, and it is not the page size
+    // either. `/api/admin/products` returns no pagination block at all; the
+    // Products page used to substitute rows.length, so the footer read
+    // "1-100 of 100" over a 3,398-row catalogue and Next went grey — 3,298
+    // products unreachable (ERR-220). A caller that cannot count says so by
+    // passing totalUnknown, and then only `hasMore` decides whether Next lives.
+    const unknown = !!p.totalUnknown;
+    const totalPages = unknown ? (p.hasMore ? page + 1 : page) : (Math.ceil(total / limit) || 1);
     const from = ((page - 1) * limit) + 1;
-    const to = Math.min(page * limit, total);
+    const to = unknown ? from + Math.max(0, (this.data ? this.data.length : limit) - 1) : Math.min(page * limit, total);
 
     let html = '<div class="admin-pagination">';
-    html += `<span class="admin-pagination__info">${from}\u2013${to} of ${total}</span>`;
+    html += unknown
+      ? `<span class="admin-pagination__info" title="This view's data source does not report a total.">${from}\u2013${to} of many</span>`
+      : `<span class="admin-pagination__info">${from}\u2013${to} of ${total}</span>`;
     html += '<div class="admin-pagination__btns">';
     html += `<button class="admin-pagination__btn" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>\u2190 Prev</button>`;
 
-    // Page numbers (max 5 shown)
+    // Page numbers (max 5 shown). With an unknown total there is no last page to
+    // count back from, so we only ever offer the pages we can prove exist.
     const start = Math.max(1, page - 2);
     const end = Math.min(totalPages, start + 4);
     for (let i = start; i <= end; i++) {

@@ -41,6 +41,120 @@ describing the same incident.
 
 ---
 
+## ERR-220 — "Genuine" was selected and every row said Compatible; the page had been on its emergency route since a database grant changed — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: A screenshot of `/admin#products`: the Source dropdown reads
+**Genuine**, every visible row is badged **Compatible**, and a toast says *"Product search fell
+back to the backend — results may match slightly differently."*
+
+**Two facts, one bug.** `loadProducts()` has three routes. The planned-backend route sends
+`source`. The direct-Supabase route sends `source`. The FALLBACK route — the one taken when the
+Supabase leg throws — built its filters from scratch and read five of them:
+
+```js
+const filters = { search: _search, sort: _sort, order: _sortDir };
+if (_brandFilter) filters.brand = _brandFilter;
+if (_activeFilter !== '') filters.active = _activeFilter;
+```
+
+`source`, `product_type`, `has_images` and `stock_status` were never read, though
+`AdminAPI.getProducts` forwards all four and the sibling route proved the backend honours them
+(measured: 100 of 100 rows match on each). The `<select>` is rendered once and never re-synced,
+so the dropdown went on saying "Genuine" over a result set nobody had filtered. The Pack and
+Supplier filters each got an explicit *"unavailable right now — showing unfiltered results"*
+warning three lines above, written for exactly this failure mode. **Source was both droppable
+AND fixable, and got neither.**
+
+### The fallback was not the exception. It was every load.
+
+`DebugLog.warn` is a no-op off localhost (ERR-193), so the reason never reached anyone. Asking
+the database directly, signed in as the owner (`npm run probe:admin-products`):
+
+```
+the shipped selectCols, as `authenticated`  ->  403  42501 permission denied for table products
+bisecting the 31 columns                    ->  cost_price is the only one that fails
+```
+
+**The ERR-170 revoke has reached the `authenticated` role**, not just `anon`. BF-044 phase 2 asked
+for that and it landed; nothing in this repo was told. So the Products list has been taking its
+emergency route on *every single load* — and everything that route drops has been dropped
+permanently, for as long as that has been true. A fall-back that fires once in a blue moon and a
+fall-back that fires always are the same code and completely different bugs; only measurement
+tells you which one you have.
+
+**Blast radius, stated precisely so the next person does not have to guess it.** What breaks is a
+read that goes **directly** to PostgREST — anon key or signed-in JWT — naming a privileged column;
+that is the ERR-193 shape exactly. What does not break is anything through `/api/…`: the backend
+holds its own service-role credentials, still serves cost to `super_admin`, and the Orders
+supplier-cost column (`supplier_cost_snapshot` off `GET /api/admin/orders/:id`) was re-measured
+untouched at 67/67 while this was being written. Grep for `.from('products')` beside a privileged
+column, not for pages that look catalogue-shaped.
+
+### What else the emergency route was quietly getting wrong
+
+Once you know the page lives there, its other compromises stop being theoretical:
+
+- **`/api/admin/products` returns no pagination block at all** — the envelope is `{ products }`
+  and nothing else. The page substituted `{ total: data.total || rows.length }`, so the footer
+  read **"1–100 of 100"** for a catalogue of **3,398**, `Math.ceil(100/100)` gave one page, and
+  **Next was disabled**. The rows exist — `?page=2` starts at a different SKU — but *3,298
+  products were unreachable from the Products list*. An absent count had been rendered as a
+  count.
+- **Origin was inferred from a field the view never fetched.** That endpoint returns `pack_type`
+  on 100/100 rows and `supplier` / `supplier_sku` on **0/100**. `productOrigin()` read
+  `supplier_sku ? 'supplier_pack' : 'in_house_pack'`, and *absent* and *null* are indistinguishable
+  in a truthiness test while meaning opposite things — "no supplier sells this pack" versus "this
+  view never asked". 27 of the first 100 rows wore a confident **Assembled** badge derived from
+  nothing.
+- **The two guards that existed to catch exactly that had switched themselves off.** Both
+  `warnIfSourcingFieldsMissing()` and `enrichSourcingFields()` bailed out when *either* `supplier`
+  **or** `pack_type` was present — and this view sends `pack_type` on every row. So the warning
+  never fired and the repair never ran, on the one view that needed both. **A presence check must
+  ask about the field it is there to protect**, not about a neighbour.
+- **The PDF export dropped the same three filters**, so a PDF exported under "Genuine" was the
+  whole catalogue. The CSV path had it right — three copies of one filter list, and the two that
+  drifted were the two nobody re-read.
+
+### The fix
+
+One builder, `backendProductFilters()`, used by the planned leg, the fallback and the PDF export.
+`tests/admin-products-fallback-filters-sep2026.test.js` reads the `filters.*` keys out of
+`AdminAPI.getProducts` and asserts every one is produced by the builder — so a filter added to the
+API can never again reach one leg and not the other. That gate, not the source filter, is the
+actual repair; **"both legs send the same filters" is a list nobody maintains unless a test
+maintains it** (the ERR-150/160 lesson, again).
+
+What genuinely cannot cross is now *named*: Pack, Supplier, and a grouped type ("All Ribbons",
+which the backend's single-valued `product_type` cannot express — sending one arm of three would
+filter to a third of the rows and look like it worked). "Results may match slightly differently"
+is not a way to tell someone their filter did nothing.
+
+`paginationFrom()` marks an uncountable total `totalUnknown` and the table footer renders
+**"1–100 of many"** with Next alive while a full page keeps coming back. `productOrigin()` returns
+null when `supplier_sku` is absent — present-and-null still means in-house, which is the real
+distinction. And the fallback now runs `enrichSourcingFields()`, whose Supabase read names no
+privileged column and therefore still works (206, verified), so Supplier and Origin come back
+with real data instead of dashes.
+
+### Kept out of scope, deliberately
+
+Restoring the fast leg is the backend's call: it needs `cost_price` readable by the admin's own
+role again, or a narrow owner-only cost endpoint. Until then Pack, Supplier and All-Ribbons remain
+unavailable — now *stated on screen* rather than silently ignored — and the Cost column keeps
+coming from the backend, which still serves it to `super_admin`. **BF-044.**
+
+**Files**: `js/admin/pages/products.js`, `js/admin/utils/sourcing.js`,
+`js/admin/components/table.js`, `tests/admin-products-fallback-filters-sep2026.test.js`,
+`scripts/probe-admin-products-filters.mjs`.
+**Probe**: `npm run probe:admin-products` — read-only; it names the failing column, checks the
+backend honours each forwarded filter, and gates on what the PAGE does with a missing total and a
+missing supplier field, not merely on the backend's gaps.
+**Lesson**: *a fallback is a second implementation of the same screen, and nobody reviews the
+second one.* This one had drifted five filters, a row count and a badge away from the first, and
+the toast announcing it was the only thing anyone had ever read.
+
+---
+
 ## ERR-219 — The Supplier cost column was quoting a number the owner never pays — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `/admin#orders` and asked:

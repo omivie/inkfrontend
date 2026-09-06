@@ -144,10 +144,19 @@ test('selectCols keeps the product_images embed the null-filters depend on', () 
 });
 
 test('backend fallback path warns instead of silently ignoring the pack filter', () => {
-  const fallback = PRODUCTS.match(/\/\/ Fallback: use backend API[\s\S]{0,600}/);
+  // The warning moved into filtersLostToBackend() when the fallback learned to
+  // carry source/type/image/stock (ERR-220) — one message naming every filter
+  // that could not cross, instead of one toast per filter. The RULE is
+  // unchanged and still checked in both halves: the helper must name Pack, and
+  // the fallback must ask the helper and warn with the answer.
+  const fallback = PRODUCTS.match(/\/\/ Fallback: use backend API[\s\S]{0,1400}/);
   assert.ok(fallback, 'the backend fallback block must exist');
-  assert.match(fallback[0], /_packFilter\)\s*Toast\.warning/,
-    'if Supabase is down, the admin must be TOLD the pack filter was dropped — unfiltered rows under an active filter is a silent lie');
+  assert.match(fallback[0], /const lost = filtersLostToBackend\(\)[\s\S]{0,400}Toast\.warning/,
+    'if the fast leg is down, the admin must be TOLD which filters were dropped — unfiltered rows under an active filter is a silent lie');
+  const helper = PRODUCTS.match(/function filtersLostToBackend\(\)[\s\S]+?\n\}/);
+  assert.ok(helper, 'filtersLostToBackend() must exist');
+  assert.match(helper[0], /_packFilter\) lost\.push\('Pack'\)/,
+    'the pack filter must be one of the losses it names');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

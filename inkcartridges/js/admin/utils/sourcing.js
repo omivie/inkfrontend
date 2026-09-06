@@ -188,6 +188,14 @@ export const PACK_PACK_TYPES = ['value_pack', 'multipack'];
  *                                              its own code)
  *   anything else / absent                  -> null -> em-dash
  *
+ * **`supplier_sku` ABSENT is not `supplier_sku` NULL.** The two read the same in
+ * a truthiness test and mean opposite things: null is "no supplier sells this
+ * pack", absent is "this view never fetched the field". `/api/admin/products`
+ * returns pack_type on every row and supplier_sku on none, so the old
+ * `supplier_sku ? … : 'in_house_pack'` printed a confident "Assembled" badge for
+ * every pack on that view — 27 of the first 100 rows, derived from nothing
+ * (ERR-220). A row that does not carry the field gets the em-dash.
+ *
  * Evidence (live, 2026-07-28): GLC3317KCMY is a KCMY value pack with
  * supplier_sku null and its order line renders "Assembled"; GLC3317CMY is a CMY
  * value pack with supplier_sku "B3317CMY" (bought pre-boxed). 716 of 806 packs
@@ -208,6 +216,8 @@ export function productOrigin(product) {
   if (packType === 'single') return 'single';
   if (!PACK_PACK_TYPES.includes(packType)) return null;
 
+  // Absent field -> we cannot say. Only a field that IS there may answer.
+  if (!Object.prototype.hasOwnProperty.call(product, 'supplier_sku')) return null;
   const supplierSku = product.supplier_sku == null ? '' : String(product.supplier_sku).trim();
   return supplierSku ? 'supplier_pack' : 'in_house_pack';
 }

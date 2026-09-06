@@ -41,7 +41,8 @@
     "probe:analytics-dashboards": "node scripts/probe-analytics-dashboards.mjs",
     "probe:orders-supplier": "node scripts/probe-orders-supplier-columns.mjs",
     "verify:remember-me": "node scripts/verify-remember-me.mjs",
-    "probe:qty-breaks": "node scripts/probe-qty-breaks.mjs"
+    "probe:qty-breaks": "node scripts/probe-qty-breaks.mjs",
+    "probe:admin-products": "node scripts/probe-admin-products-filters.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

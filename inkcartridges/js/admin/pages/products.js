@@ -78,6 +78,10 @@ let _table = null;
 // Set when the direct-Supabase search leg fails and we silently reach for the
 // backend instead. Read (and cleared) at the fallback, which says so out loud.
 let _supabaseFellBack = false;
+/** A short, operator-readable reason for that fall-back (see supabaseFailureCause). */
+let _supabaseFellBackReason = '';
+/** One "we fell back" toast per page visit — it now happens on every load. */
+let _warnedFellBack = false;
 let _compatController = null;
 let _page = 1;
 let _search = '';
@@ -609,7 +613,12 @@ function warnIfSourcingFieldsMissing(rows) {
   if (_warnedSourcingUnavailable) return;
   if (_hiddenColumns.has('supplier') && _hiddenColumns.has('origin')) return;
   if (!Array.isArray(rows) || !rows.length) return;
-  if (rows.some((r) => r && ('supplier' in r || 'pack_type' in r))) return;
+  // The test is for the SUPPLIER fields specifically. It used to pass when
+  // EITHER supplier OR pack_type was present — and the backend list returns
+  // pack_type on every row and supplier on none (100/100 vs 0/100, measured),
+  // so the warning was permanently switched off on exactly the view that needs
+  // it, and enrichSourcingFields declined to run for the same reason (ERR-220).
+  if (rows.some((r) => r && ('supplier' in r || 'supplier_sku' in r))) return;
   _warnedSourcingUnavailable = true;
   Toast.warning('Supplier / Origin aren’t available on this filtered view — the dashes mean "not loaded", not "none".');
 }
@@ -722,6 +731,86 @@ function setupRowImageDrop(tableContainer) {
   });
 }
 
+/**
+ * A short, plain reason the fast (direct-Supabase) leg refused, for the toast.
+ *
+ * Measured 2026-09-06 (`npm run probe:admin-products`): as the signed-in admin,
+ * the shipped select returns **403 / 42501 permission denied for table
+ * products**, and bisecting the column list names `cost_price` — the ERR-170
+ * revoke has reached the `authenticated` role. So this is not a rare hiccup:
+ * the page takes the fallback on every single load, and every filter the
+ * fallback drops is dropped permanently. The backend ask is BF-044.
+ */
+function supabaseFailureCause(e) {
+  const code = e && e.code ? String(e.code) : '';
+  const msg = e && e.message ? String(e.message) : '';
+  if (code === '42501' || /permission denied/i.test(msg)) return 'the fast query was refused — permission denied';
+  if (code === '42703' || /does not exist/i.test(msg)) return 'the fast query asked for a column that is gone';
+  if (code === 'PGRST100' || /parse/i.test(msg)) return 'the fast query could not be parsed';
+  if (!msg) return '';
+  return msg.length > 60 ? `${msg.slice(0, 57)}\u2026` : msg;
+}
+
+/**
+ * Every filter `/api/admin/products` can express, built in ONE place.
+ *
+ * There are two backend legs — the planned one (margin sort / image / stock) and
+ * the fallback the Supabase leg drops into — and they used to build this object
+ * separately. The fallback's copy read `search`, `sort`, `order`, `brand` and
+ * `active` and nothing else, so with "Genuine" selected it asked for the whole
+ * catalogue and the page filled with Compatible rows under a dropdown still
+ * reading "Genuine" (ERR-220). A filter the backend supports must never reach
+ * one leg and not the other; that is what this function is for, and
+ * `tests/admin-products-fallback-filters-sep2026.test.js` holds it to the list
+ * of params `AdminAPI.getProducts` actually sends.
+ *
+ * What it deliberately does NOT send:
+ *   - a GROUPED type ("All Ribbons"). The backend's product_type takes ONE
+ *     value; sending one arm of three would filter to a third of the rows and
+ *     look like it worked. The caller warns instead.
+ *   - `pack` / `supplier`. No such params exist on this endpoint (the Supabase
+ *     leg is the only one that can answer them). The caller warns.
+ */
+function backendProductFilters() {
+  const filters = { search: _search, sort: _sort, order: _sortDir };
+  if (_brandFilter) filters.brand = _brandFilter;
+  if (_activeFilter !== '') filters.active = _activeFilter;
+  if (_sourceFilter) filters.source = _sourceFilter;
+  if (!typeFilterGroup(_typeFilter) && _typeFilter) filters.product_type = _typeFilter;
+  if (_imageFilter === 'has-images') filters.has_images = 'true';
+  else if (_imageFilter === 'no-images') filters.has_images = 'false';
+  if (_stockFilter) filters.stock_status = _stockFilter;
+  return filters;
+}
+
+/**
+ * Which of the operator's active filters cannot survive a trip to the backend.
+ * Named, always — "results may match slightly differently" is not a way to tell
+ * someone their Pack filter did nothing.
+ */
+function filtersLostToBackend() {
+  const lost = [];
+  if (_packFilter) lost.push('Pack');
+  if (_supplierFilter) lost.push('Supplier');
+  if (typeFilterGroup(_typeFilter)) lost.push('the grouped type filter');
+  return lost;
+}
+
+/**
+ * `/api/admin/products` returns `{ products: [...] }` and NO pagination block
+ * (measured 2026-09-06, `npm run probe:admin-products`). The old
+ * `{ total: data.total || rows.length }` turned that absence into a number — the
+ * footer read "1-100 of 100" for a 3,398-row catalogue and disabled Next, so
+ * 3,298 products were unreachable. An unknown total says it is unknown.
+ */
+function paginationFrom(data, rows, limit) {
+  if (data && data.pagination) return data.pagination;
+  if (data && Number.isFinite(Number(data.total))) {
+    return { total: Number(data.total), page: _page, limit };
+  }
+  return { total: null, totalUnknown: true, hasMore: rows.length >= limit, page: _page, limit };
+}
+
 async function loadProducts() {
   _table.setLoading(true);
   const LIMIT = 100;
@@ -747,21 +836,13 @@ async function loadProducts() {
   const supabaseOnlyFilter = !!_packFilter || !!_supplierFilter;
   const needsBackend = !typeGroup && !supabaseOnlyFilter && (isMarginSort || !!_imageFilter || !!_stockFilter);
   if (needsBackend) {
-    const filters = { search: _search, sort: _sort, order: _sortDir };
-    if (_brandFilter) filters.brand = _brandFilter;
-    if (_activeFilter !== '') filters.active = _activeFilter;
-    if (_imageFilter === 'has-images') filters.has_images = 'true';
-    else if (_imageFilter === 'no-images') filters.has_images = 'false';
-    if (_sourceFilter) filters.source = _sourceFilter;
-    if (_typeFilter) filters.product_type = _typeFilter;
-    if (_stockFilter) filters.stock_status = _stockFilter;
-    const data = await AdminAPI.getProducts(filters, _page, LIMIT);
+    const data = await AdminAPI.getProducts(backendProductFilters(), _page, LIMIT);
     if (!_table) return;
     if (!data) { _table.setData([], null); return; }
-    const rows = Array.isArray(data) ? data : (data.products || data.data || []);
-    const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
+    const rows = await enrichSourcingFields(Array.isArray(data) ? data : (data.products || data.data || []));
+    if (!_table) return;
     warnIfSourcingFieldsMissing(rows);
-    _table.setData(rows, pagination);
+    _table.setData(rows, paginationFrom(data, rows, LIMIT));
     loadRowExtras();
     return;
   }
@@ -889,31 +970,49 @@ async function loadProducts() {
       // Fall through to backend API — but SAY SO. The two legs are different
       // engines with different matching, so an operator who is not told the
       // result set changed hands cannot explain why the rows moved (ERR-202).
+      // DebugLog is a no-op off localhost (ERR-193), so the operator would see
+      // "fell back" and never the reason. Carry a short cause to the toast.
       window.DebugLog?.warn?.('[Products] Supabase search failed, using backend', e?.message || e);
       _supabaseFellBack = true;
+      _supabaseFellBackReason = supabaseFailureCause(e);
     }
   }
 
-  // Fallback: use backend API
-  // The backend has no color param — if the pack filter is active, say so
-  // LOUDLY rather than presenting unfiltered rows as a filtered result.
+  // Fallback: use backend API.
+  //
+  // Everything the backend CAN express goes with us (backendProductFilters);
+  // everything it cannot is named out loud. The two halves of that sentence used
+  // to be one line apart and only the second one was written.
   if (_supabaseFellBack) {
+    const cause = _supabaseFellBackReason;
     _supabaseFellBack = false;
-    Toast.warning('Product search fell back to the backend — results may match slightly differently');
+    _supabaseFellBackReason = '';
+    // Once per page visit. Since the ERR-220 measurement this fires on EVERY
+    // load (the fast leg is refused outright), and a toast on every keystroke
+    // is a toast nobody reads.
+    if (!_warnedFellBack) {
+      _warnedFellBack = true;
+      Toast.warning(`Product search fell back to the backend${cause ? ` (${cause})` : ''} — matching and ordering are the backend's, not ours.`);
+    }
   }
-  if (_packFilter) Toast.warning('Pack filter unavailable right now — showing unfiltered results');
-  // Same for the supplier filter: /api/admin/products has no `supplier` param, so
-  // these rows are NOT filtered by supplier. Never let the dropdown imply they are.
-  if (_supplierFilter) Toast.warning('Supplier filter unavailable right now — showing unfiltered results');
-  const filters = { search: _search, sort: _sort, order: _sortDir };
-  if (_brandFilter) filters.brand = _brandFilter;
-  if (_activeFilter !== '') filters.active = _activeFilter;
-  const data = await AdminAPI.getProducts(filters, _page, LIMIT);
+  // These are about the CURRENT result set, not the session, so they repeat
+  // whenever such a filter is active: the rows on screen are not filtered by it.
+  const lost = filtersLostToBackend();
+  if (lost.length) {
+    Toast.warning(`${lost.join(' and ')} ${lost.length > 1 ? 'filters are' : 'filter is'} unavailable right now — these rows are NOT filtered by ${lost.length > 1 ? 'them' : 'it'}.`);
+  }
+  const data = await AdminAPI.getProducts(backendProductFilters(), _page, LIMIT);
   if (!_table) return;
   if (!data) { _table.setData([], null); return; }
-  const rows = Array.isArray(data) ? data : (data.products || data.data || []);
-  const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
-  _table.setData(rows, pagination);
+  // The backend list omits supplier / supplier_sku entirely (0 of 100 rows,
+  // measured). Fill them from Supabase — that read needs no privileged column,
+  // so it survives the refusal that sent us here. If it comes back empty,
+  // warnIfSourcingFieldsMissing says so and Origin renders an em-dash rather
+  // than inferring "Assembled" from a field nobody fetched.
+  const rows = await enrichSourcingFields(Array.isArray(data) ? data : (data.products || data.data || []));
+  if (!_table) return;
+  warnIfSourcingFieldsMissing(rows);
+  _table.setData(rows, paginationFrom(data, rows, LIMIT));
   loadRowExtras();
 }
 
@@ -4118,7 +4217,9 @@ async function handleExport(format = 'csv') {
  */
 async function enrichSourcingFields(rows) {
   if (!Array.isArray(rows) || !rows.length) return rows;
-  if (rows.some(r => r && ('supplier' in r || 'pack_type' in r))) return rows;
+  // Same correction as warnIfSourcingFieldsMissing: `pack_type` arriving is not
+  // evidence that `supplier` did. Ask about the fields we are here to fill.
+  if (rows.some(r => r && ('supplier' in r || 'supplier_sku' in r))) return rows;
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (!sb) return rows;
 
@@ -4148,15 +4249,13 @@ async function enrichSourcingFields(rows) {
 async function exportProductsPDF() {
   Toast.info('Preparing PDF export\u2026');
   try {
-    // Fetch all products matching current filters (same logic as loadProducts)
-    const filters = { search: _search, sort: _sort, order: _sortDir };
+    // The SAME filter object the list sends (ERR-220: this copy dropped source,
+    // type and stock, so a PDF exported under "Genuine" was the whole
+    // catalogue). The only addition is the global brand selection, which the
+    // list gets from its own brand dropdown.
+    const filters = backendProductFilters();
     const globalBrands = FilterState.get('brands') || [];
-    if (_brandFilter) {
-      filters.brand = _brandFilter;
-    } else if (globalBrands.length) {
-      filters.brand = globalBrands.join(',');
-    }
-    if (_activeFilter !== '') filters.active = _activeFilter;
+    if (!_brandFilter && globalBrands.length) filters.brand = globalBrands.join(',');
 
     let all = [];
     let page = 1;
@@ -5307,6 +5406,9 @@ export default {
     _packFilter = '';
     _supplierFilter = '';
     _warnedSourcingUnavailable = false;
+    _warnedFellBack = false;
+    _supabaseFellBack = false;
+    _supabaseFellBackReason = '';
     _brands = [];
     _diagnostics = null;
     _activeProductTab = 'products';

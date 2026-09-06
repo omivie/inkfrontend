@@ -319,8 +319,17 @@ test('the supplier filter is applied in Supabase, never silently dropped', () =>
     'the filter must reach the query');
   assert.match(PRODUCTS, /supabaseOnlyFilter\s*=\s*!!_packFilter \|\| !!_supplierFilter/,
     'an active supplier filter must force the Supabase path — /api/admin/products has no supplier param');
-  assert.match(PRODUCTS, /_supplierFilter\) Toast\.warning\('Supplier filter unavailable/,
-    'the backend fallback must SAY the filter was not applied');
+  // The wording moved into filtersLostToBackend() (ERR-220): one message that
+  // names every filter the backend leg could not carry, rather than one toast
+  // each. Still checked end to end — the helper names Supplier, and the
+  // fallback warns with whatever the helper returns.
+  const helper = PRODUCTS.match(/function filtersLostToBackend\(\)[\s\S]+?\n\}/);
+  assert.ok(helper, 'filtersLostToBackend() must exist');
+  assert.match(helper[0], /_supplierFilter\) lost\.push\('Supplier'\)/,
+    'the backend fallback must SAY the supplier filter was not applied');
+  const fallback = PRODUCTS.match(/\/\/ Fallback: use backend API[\s\S]{0,1400}/);
+  assert.match(fallback[0], /const lost = filtersLostToBackend\(\)[\s\S]{0,400}Toast\.warning/,
+    'and the fallback must actually raise that warning');
 });
 
 test('the export path is honest about what it can and cannot filter/carry', () => {
