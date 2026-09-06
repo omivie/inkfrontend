@@ -18,6 +18,12 @@
     z-index: 50;
     display: none;
     overscroll-behavior: contain;
+    /* Explicit, because this panel is not always a child of a left-aligned
+       page. 404.html's `.error-page { text-align: center }` inherited straight
+       into the dropdown and centred every chip and card title, so the same
+       component read differently on that one page (ERR-217). The children that
+       are deliberately centred set it themselves and are more specific. */
+    text-align: left;
 }
 
 .smart-ac-dropdown.is-open {
@@ -693,6 +699,26 @@ mark.smart-ac__mark {
     background: var(--cyan-light, #e0f2fe);
 }
 
+/* Brand variant of the recovery tile (Sep 2026).
+
+   The zero-results "Browse by brand" rail renders the same brands /shop renders,
+   so it reuses `.drilldown-box__logo` from pages.css verbatim — the ten per-slug
+   heights AND the base `max-height: 30px` cap that keeps an unknown brand's logo
+   (Brother's PNG is 3461x809) inside the tile. Only the box itself is restyled
+   here: shorter than a text tile, since a 30px logo does not need 16px of padding
+   above and below it, and packed tighter because there are up to twenty-seven of
+   them rather than six. */
+.recovery-tile--brand {
+    min-height: 64px;
+    padding: 12px 20px;
+}
+.recovery-tile--brand:hover .drilldown-box__logo {
+    transform: scale(1.04);
+}
+.search-recovery__rail-grid--brands {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
 /* --- Responsive ----------------------------------------------------------- */
 
 @media (max-width: 640px) {
@@ -738,6 +764,16 @@ mark.smart-ac__mark {
        The fallback below covers the millisecond before JS runs and any
        no-JS preview rendering. */
     max-height: var(--smart-ac-max-height, calc(100vh - var(--smart-ac-top, 120px) - 16px));
+}
+
+/* Flipped placement — set by positionDropdown() when there is not enough
+   viewport under the input to hold a usable panel (404.html's in-page search
+   box sits mid-page; the header box never takes this branch). Anchoring by
+   `bottom` rather than `top` keeps the panel touching the input even when the
+   results are shorter than the cap. ERR-217. */
+.smart-ac-dropdown:has(.smart-ac__grid).is-above {
+    top: auto;
+    bottom: var(--smart-ac-bottom, 16px);
 }
 
 .smart-ac__grid {

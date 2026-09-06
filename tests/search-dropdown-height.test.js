@@ -153,47 +153,18 @@ test('search.js — positionDropdown is rebound on resize and scroll', () => {
 // ─── Behavioral simulation ────────────────────────────────────────────────
 
 /**
- * Simulate positionDropdown() against the current source by stubbing
- * the DOM surface it touches. This catches drift between the math and
- * the documented "fill-the-viewport-below-input" intent.
+ * positionDropdown() is simulated against the real source by
+ * tests/helpers/position-dropdown-sim.js — one copy, shared with
+ * tests/search-dropdown-viewport-fit-sep2026.test.js, because a harness that
+ * exists twice will disagree with itself. It stubs every DOM surface the
+ * function touches (rects, custom properties, classList, and
+ * document.querySelector('.site-header')) and hands back the painted box.
  */
-function simulatePositionDropdown({ innerWidth, innerHeight, inputBottom, formLeft, formWidth }) {
-    const props = {};
-    const dropdown = {
-        style: { setProperty: (k, v) => { props[k] = v; } },
-    };
-    const state = {
-        input: {
-            getBoundingClientRect: () => ({ bottom: inputBottom, top: inputBottom - 40, left: formLeft, right: formLeft + formWidth, width: formWidth, height: 40 }),
-        },
-        form: {
-            getBoundingClientRect: () => ({ left: formLeft, right: formLeft + formWidth, width: formWidth, top: inputBottom - 40, bottom: inputBottom, height: 40 }),
-        },
-        dropdown,
-    };
-    const window = { innerWidth, innerHeight };
-
-    // Read positionDropdown body and evaluate it with an injected scope.
-    const js = fs.readFileSync(JS_PATH, 'utf8');
-    const fnStart = js.indexOf('function positionDropdown(');
-    const open = js.indexOf('{', fnStart);
-    let depth = 1;
-    let i = open + 1;
-    while (i < js.length && depth > 0) {
-        if (js[i] === '{') depth++;
-        else if (js[i] === '}') depth--;
-        if (depth === 0) break;
-        i++;
-    }
-    const body = js.slice(open + 1, i);
-    const fn = new Function('state', 'window', body);
-    fn(state, window);
-    return props;
-}
+const { simulatePositionDropdown } = require('./helpers/position-dropdown-sim');
 
 test('positionDropdown — on a 1300px-tall viewport, max-height fills space below the input', () => {
     // Mirrors the screenshot the user reported: input bottom ~390px, viewport ~1300px.
-    const props = simulatePositionDropdown({
+    const { props } = simulatePositionDropdown({
         innerWidth: 1920,
         innerHeight: 1300,
         inputBottom: 390,
@@ -208,21 +179,31 @@ test('positionDropdown — on a 1300px-tall viewport, max-height fills space bel
     assert.ok(px >= 790, `max-height ${px}px must fit two rows of cards + footer (≥790px)`);
 });
 
-test('positionDropdown — short viewport falls back to a usable floor (≥280px)', () => {
-    // A user with a small/zoomed window or split-screen — never collapse to 0.
-    const props = simulatePositionDropdown({
+test('positionDropdown — short viewport keeps the panel ON SCREEN (was: a 280px floor that hung off it)', () => {
+    // ⚠️ CONTRACT CHANGED 2026-09-06 (ERR-217). This case used to assert
+    // `max-height >= 280` for a 360px-tall viewport with the input at 340 —
+    // i.e. it pinned the bug. There are 4px beneath that input; a 280px panel
+    // floored into 4px of room is not a fallback, it is a panel 276px below the
+    // fold, which is exactly how 404.html shipped its results where nobody
+    // could read them. The floor is now a PREFERENCE: honoured where it fits,
+    // and where it does not the panel flips above the input (or, if both sides
+    // are cramped, takes the larger and scrolls). The invariant that replaces
+    // it is the one a user can see — the box is inside the viewport.
+    const { box, placement } = simulatePositionDropdown({
         innerWidth: 1280,
         innerHeight: 360,
         inputBottom: 340,
         formLeft: 100,
         formWidth: 800,
     });
-    const px = parseInt(props['--smart-ac-max-height'], 10);
-    assert.ok(px >= 280, `floor must be at least 280px, got ${px}`);
+    assert.equal(placement, 'above', 'with 4px below the input, the panel must flip above it');
+    assert.ok(box.top >= 0, `panel top ${box.top} must not sit above the viewport`);
+    assert.ok(box.bottom <= 360, `panel bottom ${box.bottom} must not fall past the 360px fold`);
+    assert.ok(box.height > 0, 'panel must never collapse to zero height');
 });
 
 test('positionDropdown — large viewport scales up past the old 680px cap', () => {
-    const props = simulatePositionDropdown({
+    const { props } = simulatePositionDropdown({
         innerWidth: 2560,
         innerHeight: 1600,
         inputBottom: 200,

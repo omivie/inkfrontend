@@ -52,8 +52,27 @@ const ModernEffects = {
         // Observe all matching elements
         animateSelectors.forEach(selector => {
             document.querySelectorAll(selector).forEach(el => {
-                // Skip hero section - keep it static
-                if (el.classList.contains('hero') || el.closest('.hero')) {
+                // Skip hero section - keep it static.
+                //
+                // …and skip anything hosting a search form, for a reason that is
+                // not cosmetic (ERR-217). The reveal resolves to
+                // `transform: translateY(0)` (css/modern-effects.css), and
+                // translateY(0) is NOT `transform: none` — the element becomes
+                // the containing block AND the stacking context for every
+                // position:fixed descendant. The search dropdown positions
+                // itself in VIEWPORT coordinates (positionDropdown in
+                // js/search.js), so inside a revealed section its panel landed
+                // offset by that section's page position (155px down on 404.html,
+                // and growing as you scroll) and its z-index:50 was trapped below
+                // the header's z-index:200. Measured, not reasoned: the panel
+                // asked for top:654px and painted at 809px.
+                //
+                // Today this matches only <section class="error-page"> on
+                // 404.html — the header form lives in <header>, not a section —
+                // and it is written as a query rather than a class name so the
+                // next page that puts a search box inside a section is right by
+                // construction. Pinned by tests/search-overlay-containing-block-sep2026.test.js.
+                if (el.classList.contains('hero') || el.closest('.hero') || el.querySelector('.search-form')) {
                     el.style.opacity = '1';
                     el.style.transform = 'none';
                     return;

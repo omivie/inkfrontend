@@ -1866,6 +1866,14 @@ const SeriesCodes = (function () {
     }
 
     return {
+        // Case/whitespace canonicalisation ONLY — no grammar, no rejection.
+        //
+        // Exported for ERR-216. `series_codes` is backend-canonical and must be
+        // taken as given; the only legitimate client-side operation on it is to
+        // put two spellings of the same string into the same case. Anything that
+        // can return null for a value the backend actually emitted is a second
+        // vocabulary, and a second vocabulary drifts (ERR-157, ERR-162).
+        normalize,
         collapseYieldSuffix,
         hasYieldSuffix,
         collapseList,

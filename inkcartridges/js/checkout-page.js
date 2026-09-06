@@ -364,6 +364,51 @@
                 DebugLog.error('Checkout: discount rows exceed the deducted aggregate by '
                     + this.discountShortfall + ' — a discount is displayed that is not in the total.');
             }
+            this._renderPricingNotice();
+        },
+
+        /**
+         * The durable half of the two measurements above (ERR-210).
+         *
+         * ERR-169 taught this page to MEASURE both faults and then reported them
+         * to `DebugLog` alone — which is a no-op outside localhost, so in
+         * production checkout knew and said nothing, and `pricingDegraded` /
+         * `discountShortfall` had no reader anywhere in the repo. That is the
+         * same "the durable channel is the on-page notice" lesson the cart
+         * learned, arriving one page later and at the worst possible moment.
+         *
+         * Deliberately a twin of Cart._renderPricingNotice() rather than a
+         * shared renderer: the cart can retry and re-price, this page cannot
+         * (the backend re-prices at submit), so the calls to action differ.
+         */
+        _renderPricingNotice() {
+            const el = document.getElementById('checkout-pricing-notice');
+            if (!el) return;
+
+            const gap = Number(this.discountShortfall);
+            const hasShortfall = Number.isFinite(gap) && gap > 0;
+            if (!hasShortfall && !this.pricingDegraded) {
+                el.hidden = true;
+                el.textContent = '';
+                return;
+            }
+
+            // Security.escapeHtml and formatPrice bare, exactly as the rest of this
+            // file uses them. A `typeof` guard here would be an off-switch whose
+            // fallback never runs, and this is the one renderer that must not be
+            // the thing that fails (ERR-167).
+            if (hasShortfall) {
+                el.innerHTML = '<strong>These totals don\'t add up.</strong> '
+                    + 'A discount of ' + Security.escapeHtml(formatPrice(gap)) + ' is shown above but isn\'t coming off '
+                    + 'the total. Please go back to your cart and refresh before paying — and if it '
+                    + 'persists, contact us rather than paying this amount.';
+            } else {
+                el.innerHTML = '<strong>These prices are estimates.</strong> '
+                    + 'We couldn\'t confirm them with our pricing service just now, so any volume '
+                    + 'discount may not be shown here. Your order is priced by us when you pay, and '
+                    + 'the confirmation you receive is the amount you are charged.';
+            }
+            el.hidden = false;
         },
 
         // Update shipping cost and UI info (ETA, spend-more, split shipment)

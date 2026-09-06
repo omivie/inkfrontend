@@ -252,15 +252,70 @@
             const left = isMobile
                 ? 16
                 : Math.min(Math.max(16, Math.round(formRect.left)), window.innerWidth - width - 16);
-            const top = Math.round(inputRect.bottom + 6);
-            // Fill available viewport beneath the input so two full rows of
-            // product cards + the sticky "View all results" footer always fit.
-            // Floor at 280px so a tiny window still shows usable content.
-            const maxHeight = Math.max(280, window.innerHeight - top - 16);
-            state.dropdown.style.setProperty('--smart-ac-top', `${top}px`);
             state.dropdown.style.setProperty('--smart-ac-left', `${left}px`);
             state.dropdown.style.setProperty('--smart-ac-width', `${width}px`);
-            state.dropdown.style.setProperty('--smart-ac-max-height', `${maxHeight}px`);
+
+            // Vertical placement (ERR-217). This used to be two lines —
+            // `top = inputRect.bottom + 6` and `max-height = max(280, innerHeight
+            // - top - 16)` — which is correct for the ONLY search box that
+            // existed when it was written: the one in the header, which always
+            // has ~630px of clear viewport under it. 404.html's in-page box sits
+            // 649px down an 800px window, so "fill the space below" meant 129px,
+            // the 280px floor took over, and the panel hung 135px BELOW THE FOLD
+            // with the product titles and prices in the part you cannot reach.
+            // A floor that is larger than the space it is floored into is not a
+            // fallback, it is an off-screen panel.
+            //
+            // So: prefer below (byte-identical numbers for the header box), flip
+            // above when below is cramped and above is roomier, and never return
+            // a box that leaves the viewport. Flipping anchors by `bottom`, not
+            // by `top` minus a guessed height, so the panel stays glued to the
+            // input when the content is shorter than the cap.
+            const GAP = 6;    // input-to-panel gap
+            const EDGE = 16;  // viewport margin, top and bottom
+            const PREFERRED = 280; // two card rows + the sticky View-all footer
+
+            // A panel flipped above must stop below the sticky header, which
+            // paints over it (header z-index:200 vs dropdown z-index:50 —
+            // probed with elementFromPoint, not assumed). Math.max(0, …) covers
+            // the header having scrolled away. The typeof guard is load-bearing:
+            // tests/search-dropdown-*.test.js evaluate this function body in
+            // node with an injected scope.
+            let headerBottom = 0;
+            if (typeof document !== 'undefined' && document.querySelector) {
+                const header = document.querySelector('.site-header');
+                if (header) headerBottom = Math.max(0, Math.round(header.getBoundingClientRect().bottom));
+            }
+
+            // Round the ANCHOR first and derive the space from it, so that
+            // `anchor + max-height` lands exactly EDGE px inside the viewport.
+            // Rounding the two independently lets them disagree by a pixel, and
+            // the pixel they disagree by is always the one past the fold.
+            const topIfBelow = Math.round(inputRect.bottom + GAP);
+            const bottomIfAbove = Math.round(window.innerHeight - inputRect.top + GAP);
+            const spaceBelow = window.innerHeight - topIfBelow - EDGE;
+            const spaceAbove = window.innerHeight - bottomIfAbove - headerBottom - EDGE;
+            // Below unless above is genuinely better: only when below cannot hold
+            // a usable panel AND above holds more. Where both are cramped we take
+            // the larger and let the panel scroll — a short scrollable panel is
+            // honest, an off-screen one is not.
+            const placeBelow = spaceBelow >= PREFERRED || spaceBelow >= spaceAbove;
+
+            if (placeBelow) {
+                const top = topIfBelow;
+                state.dropdown.classList.remove('is-above');
+                state.dropdown.style.removeProperty('--smart-ac-bottom');
+                state.dropdown.style.setProperty('--smart-ac-top', `${top}px`);
+                state.dropdown.style.setProperty('--smart-ac-max-height', `${Math.max(0, spaceBelow)}px`);
+            } else {
+                // positionDropdown() re-runs on resize and scroll, so the flip
+                // has to be reversible — hence remove/removeProperty above.
+                const bottom = bottomIfAbove;
+                state.dropdown.classList.add('is-above');
+                state.dropdown.style.removeProperty('--smart-ac-top');
+                state.dropdown.style.setProperty('--smart-ac-bottom', `${bottom}px`);
+                state.dropdown.style.setProperty('--smart-ac-max-height', `${Math.max(0, spaceAbove)}px`);
+            }
         }
 
         function open() {

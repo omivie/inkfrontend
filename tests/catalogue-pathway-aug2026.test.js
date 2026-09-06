@@ -74,9 +74,14 @@ test('shop-page.js no longer filters the brand grid through a slug allowlist', (
   // The regression this replaces: `renderBrands()` applied a hardcoded ten-slug
   // array as a FILTER, so a brand in the database but not in the array rendered
   // no tile with no error anywhere. Seventeen brands were in that state.
-  const start = shopPageJs.indexOf('renderBrands(brands) {');
-  assert.notEqual(start, -1, 'renderBrands must still exist');
-  const body = shopPageJs.slice(start, shopPageJs.indexOf('_loadBrandCounts', start));
+  //
+  // Sep 2026: the rule MOVED out of renderBrands() into `_shopBrandTiles()` when a
+  // second surface (the zero-results recovery rail) started asking the same
+  // question. This test follows the rule rather than the location — and pins the
+  // delegation below, so renderBrands cannot grow its own copy back.
+  const start = shopPageJs.indexOf('_shopBrandTiles(rows = this.cache.brands) {');
+  assert.notEqual(start, -1, '_shopBrandTiles must still exist — it is the one membership rule');
+  const body = shopPageJs.slice(start, shopPageJs.indexOf('renderBrands(brands) {', start));
 
   assert.doesNotMatch(body, /const\s+preferredOrder\s*=/,
     'the hardcoded preferredOrder array must not come back — it filtered the database');
@@ -87,6 +92,23 @@ test('shop-page.js no longer filters the brand grid through a slug allowlist', (
   // Positive control: this matcher can fail, so its absence above means something.
   assert.match("const preferredOrder = ['brother']", /const\s+preferredOrder\s*=/,
     'positive control — the preferredOrder matcher works');
+});
+
+test('renderBrands DELEGATES the membership rule — it never re-grows its own copy', () => {
+  // ERR-192 removed one hardcoded brand list. The way it comes back is not someone
+  // retyping `preferredOrder`; it is a second surface quietly filtering `brands`
+  // itself because calling the shared selector was one keystroke more.
+  const start = shopPageJs.indexOf('renderBrands(brands) {');
+  assert.notEqual(start, -1, 'renderBrands must still exist');
+  const body = shopPageJs.slice(start, shopPageJs.indexOf('_loadBrandCounts(inkBrands)', start));
+
+  assert.match(body, /this\._shopBrandTiles\(brands\)/,
+    'renderBrands must ask _shopBrandTiles(), not filter the rows itself');
+  assert.doesNotMatch(body, /show_on_shop/,
+    'renderBrands must hold NO copy of the membership rule');
+
+  // Positive control — the matcher can fail.
+  assert.match('b.show_on_shop === true', /show_on_shop/, 'positive control');
 });
 
 test('catalogue-pathway.js exports no brand allowlist', () => {

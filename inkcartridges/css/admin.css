@@ -2140,6 +2140,16 @@
   font-size: 11px; font-style: italic; color: var(--text-muted); margin: 8px 2px 0;
 }
 .admin-pc-seed-note[hidden] { display: none; }
+/* ERR-216 — codes derived from the SKU that the live catalogue has no chip for.
+   Withheld from the pre-tick, so it has to READ as a caution rather than as the
+   same muted aside as the ordinary seed note; a warning styled like a whisper is
+   how the product drawer would quietly re-fragment a brand's chip grid. */
+.admin-pc-seed-note--unknown {
+  font-style: normal; color: var(--text);
+  border-left: 2px solid var(--warning, #d97706);
+  background: rgba(217, 119, 6, .07);
+  padding: 6px 8px; border-radius: 0 var(--radius) var(--radius) 0;
+}
 
 /* ---- Product Codes page (/admin#product-codes) ----------------------------
    Reuses the chip grid + tile/action classes above, which the product drawer's

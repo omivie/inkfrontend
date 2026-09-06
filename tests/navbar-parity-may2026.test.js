@@ -275,3 +275,125 @@ test('chrome lock — layout.css cache key is bumped so the fix actually ships',
     assert.equal(stale, 0,
         `${stale}/${total} HTML pages still reference layout.css?v=2c8b28f0 (the pre-fix key). Bump to v=chrome-lock-may2026 (or a later marker).`);
 });
+
+/**
+ * THE RUNTIME BEHIND THE HEADER (ERR-214, Sep 2026)
+ * =================================================
+ * Everything above proves the header MARKUP is byte-identical on every page.
+ * Nothing above proved the JavaScript that makes that markup DO anything was
+ * loaded — and for four months it was not. Ten pages
+ * (privacy/terms/returns/shipping/about/faq/contact/genuine-vs-compatible/
+ * quote/track-order) shipped the hash-locked search form and never loaded
+ * js/search.js, so typing in it did nothing at all, silently: main.js logs the
+ * miss through DebugLog, which is a no-op off localhost (ERR-193).
+ *
+ * The lesson is the split: markup parity was enforced by a test, runtime parity
+ * was a list maintained by hand, and the hand-maintained half rotted. A header
+ * can be hash-identical on 30 pages while the code animating it runs on 20.
+ * Enrolment belongs in a test (ERR-150/160), so it lives here, beside the hash.
+ *
+ * KNOWN STALE, TRACKED: the comment at js/main.js:502 still ASSERTS this rule
+ * ("loaded before /js/main.js on every page that has a search form") as though
+ * it were already true. It is not documentation of the invariant — THIS FILE is.
+ * Rewriting it moves main.js's ?v= token on all 34 pages that load it, which
+ * could not be committed cleanly while other sessions held edits in those pages;
+ * see ERR-214. If you are editing main.js anyway, fix that comment.
+ *
+ * ORDER IS ASSERTED, and the tempting reason not to is wrong. "They are all
+ * `defer`, so document order cannot matter" is false of this tree: root
+ * 404.html:259-261 loads products.js, search.js and main.js with NO `defer`
+ * attribute at all, so there document order is the only thing sequencing them.
+ * It is also one attribute-deletion away from being false anywhere else.
+ *
+ * `defer` itself is deliberately NOT asserted, for that same reason — root
+ * 404.html predates the convention, so a blanket check would go red for a
+ * reason unrelated to this contract.
+ */
+
+// Match the PATH and ignore the ?v= token. Never pin a cache-busting token in
+// a test — its whole purpose is to move (ERR-067).
+function loadsScript(html, file) {
+    return new RegExp(`<script[^>]+src="/js/${file}\\.js(\\?[^"]*)?"`).test(html);
+}
+
+// Position of the same tag, for the ordering check. -1 when absent.
+function scriptIndex(html, file) {
+    const m = new RegExp(`<script[^>]+src="/js/${file}\\.js(\\?[^"]*)?"`).exec(html);
+    return m ? m.index : -1;
+}
+
+test('every page shipping the header search form also ships the runtime behind it', () => {
+    const broken = [];
+    for (const { file } of PAGES_WITH_HEADER) {
+        const html = fs.readFileSync(file, 'utf8');
+        const missing = ['products', 'search'].filter((m) => !loadsScript(html, m));
+        if (missing.length) broken.push(`${rel(file)} -> missing ${missing.join(' + ')}`);
+    }
+    assert.deepEqual(broken, [],
+        'These pages render the search bar but never load the JS that makes it work.\n' +
+        'window.SmartSearch is defined ONLY by js/search.js, and js/search.js hard-bails\n' +
+        'to "Search is temporarily unavailable" without Products.renderCard from\n' +
+        'js/products.js. Add both <script defer> tags before /js/main.js:\n  ' +
+        broken.join('\n  '));
+});
+
+test('no page loads search.js without products.js', () => {
+    // The mirror-image failure, and the louder one: SmartSearch initialises,
+    // opens its dropdown, then paints "Search is temporarily unavailable.
+    // Please try again." at every keystroke (js/search.js:403). /business and
+    // /account/loyalty did exactly this in production.
+    const broken = ALL_HTML.filter((f) => {
+        const html = fs.readFileSync(f, 'utf8');
+        return loadsScript(html, 'search') && !loadsScript(html, 'products');
+    }).map(rel);
+    assert.deepEqual(broken, [],
+        'search.js without products.js paints "Search is temporarily unavailable."\n' +
+        'in the dropdown on every keystroke (js/search.js:403):\n  ' + broken.join('\n  '));
+});
+
+test('every customer-facing page loads the lockdown guard', () => {
+    // Same commit (61fd2f6), same nine pages, bigger blast radius: site-guard.js
+    // is what shows the login overlay when an admin enables site-wide lockdown.
+    // A page missing it stays publicly readable THROUGH a lockdown — the one
+    // state where the site is supposed to be shut. Predicate is every
+    // customer-facing page, header or not (walkHtml already skips admin/),
+    // because lockdown is not a chrome feature.
+    const broken = ALL_HTML
+        .filter((f) => !loadsScript(fs.readFileSync(f, 'utf8'), 'site-guard'))
+        .map(rel);
+    assert.deepEqual(broken, [],
+        'site-guard.js intercepts every public page when admin enables site-wide\n' +
+        'lockdown. A page without it stays publicly readable through a lockdown:\n  ' +
+        broken.join('\n  '));
+});
+
+test('products.js loads before search.js loads before main.js', () => {
+    // On the 29 pages using `defer` this is copy-paste discipline rather than
+    // correctness: deferred classic scripts execute in document order before
+    // DOMContentLoaded, and every cross-module read here happens in a
+    // DOMContentLoaded-or-later callback (main.js initSearch() reads
+    // SmartSearch; search.js renderResults() reads Products.renderCard), so
+    // nothing is dereferenced at evaluation time.
+    //
+    // On root 404.html it is correctness: those three tags carry no `defer`,
+    // so they execute where they sit.
+    //
+    // Discipline is worth pinning anyway. A page that lists them out of order
+    // is a page that did not follow the pattern, and not following the pattern
+    // is exactly how the next page ends up missing a tag altogether — which is
+    // the bug this whole block exists for.
+    const problems = [];
+    for (const { file } of PAGES_WITH_HEADER) {
+        const html = fs.readFileSync(file, 'utf8');
+        const chain = ['products', 'search', 'main'].map((n) => [n, scriptIndex(html, n)]);
+        if (chain.some(([, i]) => i < 0)) continue;   // presence is the other test's job
+        for (let i = 1; i < chain.length; i++) {
+            if (chain[i][1] < chain[i - 1][1]) {
+                problems.push(`${rel(file)} -> ${chain[i][0]}.js is loaded before ${chain[i - 1][0]}.js`);
+            }
+        }
+    }
+    assert.deepEqual(problems, [],
+        'Canonical order (html/shop.html): ...cart-analytics.js, favourites.js,\n' +
+        'products.js, search.js, main.js...\n  ' + problems.join('\n  '));
+});

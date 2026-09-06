@@ -194,6 +194,56 @@ export function deriveCodesForSku({ sku, name, productType } = {}) {
 }
 
 /**
+ * Split derived codes into the ones the live catalogue already knows and the
+ * ones it does not. (ERR-216)
+ *
+ * WHY THIS EXISTS. `deriveCodesForSku` reads a code out of a SKU, and a SKU
+ * carries the code that was current when the product was *catalogued*. When the
+ * backend re-groups a brand, those two stop agreeing: measured 2026-09-06, the
+ * compatible SKU `C20N3HK0BK` derives `20N3HK0`, a code that the Lexmark chip
+ * grid retired in favour of the platform stem `20`. Pre-ticking the derived
+ * code writes a `product_codes` override, and `API._applyManualCodes` pushes
+ * every override onto the storefront as its own chip — so each save would put
+ * one more retired MPN tile back beside the stem, re-fragmenting by hand the
+ * grid the backend had just collapsed.
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO. It does not translate `20N3HK0` into `20`.
+ * There is no client-side collapse here and there must not be: the backend owns
+ * that mapping (`src/utils/lexmarkSeries.js`) and it has refusal cases a second
+ * implementation would get wrong. This only ANSWERS A QUESTION — "does the
+ * catalogue already have a chip by this name?" — and lets the caller present
+ * the answer instead of silently acting on a guess.
+ *
+ * `unknown` is not an error and must not be dropped: a genuinely new product
+ * line starts life exactly this way. It is the difference between the operator
+ * choosing to create a chip and a form creating one on their behalf.
+ *
+ * @param {string[]} derived    codes from `deriveCodesForSku`
+ * @param {Iterable<string>} liveCodes  the live chip universe (/shop series[])
+ * @returns {{known: string[], unknown: string[]}} both normalised, order preserved
+ */
+export function partitionDerivedCodes(derived, liveCodes) {
+  const live = new Set();
+  for (const c of (liveCodes || [])) {
+    const n = normCode(c);
+    if (n) live.add(n);
+  }
+  const known = [];
+  const unknown = [];
+  for (const c of (Array.isArray(derived) ? derived : [])) {
+    const n = normCode(c);
+    if (!n) continue;
+    const bucket = live.has(n) ? known : unknown;
+    if (!bucket.includes(n)) bucket.push(n);
+  }
+  // No universe to compare against is NOT the same as "nothing matched". If the
+  // lookup shipped nothing we cannot tell known from unknown, so we refuse to
+  // call anything unknown rather than block every code on a failed read.
+  if (!live.size) return { known: [...unknown], unknown: [] };
+  return { known, unknown };
+}
+
+/**
  * The yield-suffix collapse, mirroring `SeriesCodes.collapseYieldSuffix`
  * (js/utils.js) — `LC3339XL` → `LC3339`, `604XXL` → `604`.
  *

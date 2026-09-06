@@ -239,8 +239,19 @@ test('isPricingDegraded is true only for real failures, and has a caller', () =>
 test('the degraded notice is suppressed while merely loading or pending', () => {
     const body = cartSrc.slice(cartSrc.indexOf('_renderPricingNotice(shortfall)'),
         cartSrc.indexOf('     * Initialize cart - SERVER FIRST'));
-    assert.match(body, /!this\.loading/, 'never warn while the first load is still in flight');
+    // ERR-210 widened this from `!this.loading` to `!this._isRepriceInFlight()`.
+    // `loading` only ever covered loadCart(); every post-load refresh (a
+    // debounced quantity update, a removal replay, the revalidation) was
+    // uncovered, so a fault that healed in 300ms still painted a durable
+    // warning. The original property is unchanged and is re-pinned below.
+    assert.match(body, /!this\._isRepriceInFlight\(\)/,
+        'never warn while a re-price is on its way');
     assert.match(body, /this\.items\.length > 0/, 'and never on an empty cart');
+
+    const pred = cartSrc.slice(cartSrc.indexOf('_isRepriceInFlight: function()'),
+        cartSrc.indexOf('_mutationRepriceComing: function()'));
+    assert.match(pred, /this\.loading/,
+        'and the widened predicate must still cover the first load');
 });
 
 // ─── 5. The bounded retry ──────────────────────────────────────────────────

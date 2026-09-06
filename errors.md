@@ -41,6 +41,215 @@ describing the same incident.
 
 ---
 
+## ERR-217 — The 404 page's search box put its results 289 pixels below the bottom of the window, and a decorative animation was the reason — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `inkcartridges.co.nz/print("hi")`
+— the 404 page — with `lc` typed into the big *"Try searching for what you need"* box, a wide
+squashed strip of image tiles under it, and no product names or prices anywhere. *"in the 404 error
+page it seems the search box isnt working as intended / fix the search bar to work as intended like
+on the landing page."*
+
+**IT WAS NOT A WIRING PROBLEM, AND EVERY OBVIOUS SUSPECT WAS INNOCENT.** `main.js initSearch()`
+mounts `SmartSearch` on **every** `.search-form` in the DOM; 404.html loads `products.js`,
+`search.js` and `main.js`; both pages load byte-identical CSS. The box fetched, the backend
+answered, forty cards rendered. The four modules `index.html` loads that 404.html does not
+(`seo-meta`, `landing`, `ink-finder`, `printer-data`) touch neither `.search-form` nor
+`SmartSearch`. So the same code, fed the same data, produced a broken screen on one page and a
+correct one on the other — which means the difference was not in the code but in **where the code
+was standing**.
+
+**Measured live**, `1440x800`, query `lc`, 40 cards in both panels, on the same page:
+
+```
+                     header box (worked)      in-page 404 box (broken)
+  --smart-ac-top       157px                    654px      <- what the JS asked for
+  painted at           top 157   OK             top 809    <- +155px
+  height               627px                    280px      <- the "floor"
+  bottom (fold 800)    784  on screen           1089       <- 289px BELOW THE FOLD
+```
+
+**(a) 🚨 `transform: translateY(0)` IS NOT `transform: none` — AND THE DIFFERENCE IS A COORDINATE
+SYSTEM.** `modern-effects.js` observes the literal selector `'section'` and adds `.will-animate`
+to **every section on the site**; `modern-effects.css` resolves the revealed state to
+`transform: translateY(0)`. Any non-none transform makes an element the containing block *and* the
+stacking context for its `position: fixed` descendants. `positionDropdown()` computes in **viewport**
+coordinates (`getBoundingClientRect` + `window.innerHeight`) and hands them to a `position: fixed`
+panel — so inside `<section class="error-page">` every number it produced was offset by that
+section's own page position, exactly 155px here and growing with scroll, and its `z-index: 50` was
+sealed inside the section's stacking context beneath the header's `200`. Proved both ways in the
+live page: setting `transform: none` on that section moved the panel from 809 to **655**, the value
+the JS had asked for; and `elementFromPoint` on a panel raised to `y=20` returned
+`NAV.primary-nav`, not the panel. **The animation had been there for months and the search box had
+been there for months; neither was wrong on its own. The bug was the pairing, and 404.html is the
+only page in the repo that has both** — the only `.search-form` on the site that is not in
+`<header>`.
+
+**(b) A FLOOR LARGER THAN THE SPACE IT IS FLOORED INTO IS NOT A FALLBACK, IT IS AN OFF-SCREEN
+PANEL.** Even placed correctly the panel did not fit. The math was
+`maxHeight = Math.max(280, innerHeight - top - 16)` — correct for the only search box that existed
+when it was written, the header one, which always has ~630px of clear viewport under it. The 404
+input sits 649px down an 800px window: 129px of room, floored up to 280px, and the floor became
+136px of overflow. The 280 was introduced (ERR, search-dropdown-height) so *"a tiny window still
+shows usable content"*; what it actually did on the one page where it ever engaged was guarantee
+that the content was unreachable. **The floor is now a preference: honoured where it fits, and
+where it does not the panel flips above the input** (410px of room there — stopping clear of the
+sticky header, because that paints over it). No branch may return a box that leaves the viewport;
+where both sides are cramped it takes the larger and scrolls. The old contract test asserting
+`max-height >= 280` on a 360px-tall viewport was **pinning the bug** and has been rewritten to the
+invariant a user can see.
+
+**(c) The third symptom had the same root and no one would have filed it.** `.error-page
+{ text-align: center }` inherited straight into the panel, so the dropdown's chips and card titles
+were centred on 404.html and left-aligned in all thirty headers. The dropdown now sets its own
+`text-align: left` instead of inheriting the page's.
+
+**The fix.** Three files, no HTML: `modern-effects.js` exempts any section containing a
+`.search-form` from the reveal — written as `el.querySelector('.search-form')` rather than a class
+name, so the next page that puts a search box in a section is right by construction, exactly as
+`.hero` has been exempt since the effect shipped; `search.js positionDropdown()` chooses below or
+above and rounds the **anchor** first, deriving the space from it so `anchor + max-height` lands
+exactly 16px inside the viewport rather than a rounding pixel past it; `search.css` honours the
+flipped placement and pins the text alignment.
+
+**Verification.** `npm run probe:404-search` drives a real browser at two viewports: it compares
+the custom property the JS set against the rect the browser painted, hit-tests the panel's own
+interior to prove nothing paints over it, checks a card links to a product and that Enter reaches
+`/search?q=`, **and drives the header box on the same page as a control** — which still measures
+`top 157, height 627, bottom 784`, unchanged to the pixel. 24/24. Unit side: 23 tests across
+`tests/search-dropdown-viewport-fit-sep2026.test.js` (including a sweep of 8 viewport heights x 6
+widths x 3 header heights x every input position, asserting the box never leaves the screen),
+`tests/search-overlay-containing-block-sep2026.test.js` (runs the real `initScrollAnimations()`
+against a stub DOM), and the amended height contract. Both new suites were **positive-controlled**:
+reverting the exemption fails 1, reverting the geometry fails 4.
+
+**The rule.** *When the same component works on one page and breaks on another, the difference is
+not in the component. Ask what the browser is doing to the space it sits in — and remember that a
+decorative transform silently becomes a coordinate system, a stacking context, and a viewport for
+everything fixed inside it.*
+
+---
+
+## ERR-216 — The chip grid rejected the backend's own product codes — 162 of them, across nine brands — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: My backend developer sent
+`lexmark-chip-grouping-FE-handoff-sep2026.md`, describing a collapse of Lexmark's product-code
+chips from 308 to 83 and OKI's from 73 to 70. Its first line is
+*"**TL;DR for the FE: there is nothing to build.**"* The owner asked me to
+*"read and understand the file then verify and implement the necessary code."*
+
+**(a) 🚨 THE COMMENT SAID "TRUST THE BACKEND". THE NEXT LINE RE-PARSED IT AND THREW IT AWAY.**
+`extractProductCodes` PRIORITY 0 in `js/shop-page.js` carried the comment
+*"Trust backend-supplied `series_codes` (the only path now)"* — and then ran every entry
+through `normalizeCode(raw, brand)`, a per-brand SKU/name **grammar** that returns `null`
+for anything not shaped like a SKU. Running authoritative data through a parser turns it
+into a validator, and a validator whose grammar is older than the data rejects the data.
+Measured over every distinct `series_codes` value live on nine brands:
+
+```
+brand         distinct   REJECTED   mutated
+brother          147        21         0     <- the colour strip that justified the rule: 0
+canon            101        18         0
+epson             35         3         3     <- S015336 AND S015337 both -> "S01533"
+hp               124        23         2
+lexmark           37        37         0     <- total
+oki               69        12         0
+samsung           23         6         0
+kyocera           77         0         0
+fuji-xerox       100        42         2
+                 ---       ---
+                 713       162
+```
+
+Lexmark did not break the extractor. The extractor was already dropping 125 codes on eight
+other brands; the collapse to platform stems merely made Lexmark's share **total**, and
+therefore visible.
+
+**(b) I GOT THE CONSEQUENCE WRONG FIRST, AND MEASURING CORRECTED IT.** My initial reading
+was that the un-gated "defensive SKU sweep" below PRIORITY 0 would re-derive `20N3HK0` from
+the SKU and rebuild the old 308-chip grid. Running the shipped sweep on real SKU shapes
+showed otherwise: its regex is `\b`-anchored and every live SKU carries a genuine/compatible
+marker, so there is no word boundary where the code starts.
+
+```
+brother  GLC3339BK  -> []        lexmark  G20N3HK0BK -> []
+canon    GPGI680BK  -> []        kyocera  GTK5244BK  -> []
+epson    G604BK     -> []        hp       G953XLBK   -> []
+oki      CB412BK    -> ["CB412"]   <- the only one that fires, and it is wrong
+```
+
+So the degraded path produced **nothing at all**: a `/api/shop` failure would have rendered an
+empty Lexmark chip grid under "No products found" copy with the catalogue perfectly healthy
+behind it. That is [[ERR-193]]'s shape — a failed read printing empty-shelf copy — and it was
+latent only because `/api/shop` has not failed since the backend deployed on 2026-09-03.
+
+**(c) HAND-OFF §3 DOES NOT HOLD.** It states that old links "all resolve to the same grid":
+
+```
+?code=          rows returned      the "20" chip returns 18
+20N3HK0                3
+20N3H                  6
+20N30                 18
+20N3                  18
+```
+
+They resolve, but two of them to **subsets**. Meanwhile the breadcrumb, `<title>` and canonical
+kept printing `20N3HK0` — a code appearing nowhere in the grid the visitor was looking at. Fixed
+by `_backendStemFor`, which adopts the stem **the backend stamped on the rows it just returned**.
+It derives nothing and owns no mapping, so it cannot drift from the backend's `lexmarkSeries.js`,
+and it is self-disabling four ways — most importantly, OKI `?code=711` is a no-op because those
+rows still carry `711` among their codes.
+
+**(d) THE ADMIN WOULD HAVE RE-FRAGMENTED THE GRID ONE SAVE AT A TIME.** `deriveCodesForSku`
+on the compatible SKU `C20N3HK0BK` derives `["20N3HK0", "CS431"]` — a retired MPN and a
+printer model. The product drawer pre-ticked those, and every `product_codes` override is
+pushed onto the storefront as its own chip by `_applyManualCodes`. The universe of live chips
+was built *after* the seed, so "is this code still real?" was unanswerable at the moment it
+mattered. Reordered; `partitionDerivedCodes` now pre-ticks only codes the catalogue already
+has and shows the rest unticked under a caution. The override table holds zero Lexmark rows —
+the path was armed, not yet fired.
+
+**(e) FOUR RANKED RISKS THAT MEASURED TO ZERO.** Recorded so they are not re-opened:
+`limit: 200` truncation (largest family in the entire catalogue is **32**, Canon
+`PGI680/CLI681`; Lexmark's largest is 21); `_detectTruncatedChips` silently deleting chips
+(it requires a `/` pair chip in the same brand+category, and Lexmark and OKI have **none**);
+`_applyManualCodes` pushing duplicate MPN tiles (**0** Lexmark override rows, 1 benign OKI);
+and the compat-recovery predicate going false (it compares the code param against
+`series_codes` — both are stems now, so it matches).
+
+**(f) CONSIDERED, AND REJECTED ON THE MEASUREMENT.** Hand-off §2 warns against deriving a
+display code from `series_codes`, and the PDP breadcrumb does exactly that. The obvious fix —
+use `manufacturer_part_number` — is worse: MPN is frequently an internal or OEM number rather
+than the code printed on the box (`41`→`50F0Z0E`, `5950`→`43865727`, `B401`→`IOB401`), and only
+160 of 198 Lexmark genuines carry one. The stem is closer to the box more often than the MPN is.
+**The measurement reversed the plan.** No field carries a printed display code; raised with the
+backend rather than guessed at here.
+
+**WHY IT SHIPPED UNNOTICED** — (1) the defect was invisible while the grammar happened to
+accept the data, and it had accepted MPN-shaped codes for a year; (2) a test pinned the
+defective call in place, with a stated rationale — a Brother colour strip — that **nobody had
+ever measured**, and which changes zero codes; (3) the only path that would have exposed it is
+the `/api/shop` fallback, which requires an outage to reach; (4) the hand-off's opening line
+told the reader there was nothing to check, and the endpoint it named as the chip source
+(`/api/products/series`) has **zero callers** in this frontend.
+
+**The lesson.** ***When a comment says "trust the backend" and the line beneath it re-parses
+what the backend sent, the comment records an intention and the code records the behaviour.***
+Grep for the parser, not the promise. And a risk ranked by plausibility is not a risk measured:
+four of the scariest-sounding findings here were worth exactly nothing, and the real one was
+a single function call that looked like housekeeping.
+
+**Verify**: `npm test` (`tests/lexmark-chip-grouping-sep2026.test.js`, 30 checks — a nine-brand
+census, positive controls in **both** directions on the gate, six self-disabling cases) and
+`npm run probe:chip-grouping` (24 live checks, read-only, exits 2 when it cannot look).
+
+**Files**: `js/shop-page.js`, `js/utils.js`, `js/admin/pages/products.js`,
+`js/admin/utils/catalogue-pathway.js`, `css/admin.css`,
+`tests/lexmark-chip-grouping-sep2026.test.js`, `tests/series-codes-thin-extractor-may2026.test.js`,
+`tests/product-codes.test.js`, `scripts/probe-lexmark-chip-grouping.mjs`, `package.json`,
+`lexmark-chip-grouping-FE-response-sep2026.md`.
+
+---
+
 ## ERR-215 — The menu offered a Lexmark ink cartridge we have never sold, and hid five Epson products we do sell — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: The owner sent two screenshots of
@@ -118,6 +327,138 @@ took the number it was first filed under — hence 215; the log write is now ver
 the hydration made the array look supervised for a year while nothing read the one field that
 mattered. And when a count and a filter disagree, **the filter is the product and the count is the
 opinion**: measure the outcome, never the proxy.
+
+## ERR-214 — The search box was hash-locked onto thirty pages; the code that makes it work was enrolled by hand, and ten pages never got it — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `/privacy` with `Ic` typed
+into the header search bar and nothing under it: *"the search bar isnt working in the footer
+pages. fix this so that it works as intended."*
+
+### What was actually wrong
+
+Measured live on inkcartridges.co.nz before changing anything:
+
+| Page | `typeof SmartSearch` | `typeof Products` | Dropdown | Enter |
+|---|---|---|---|---|
+| `/privacy` | `"undefined"` | `"undefined"` | never created | **worked** → `/search?q=…` |
+| `/business` | `"object"` | `"undefined"` | opened, read **"Search is temporarily unavailable. Please try again."** | worked |
+| `/shop` | `"object"` | `"object"` | product cards | worked |
+
+The bar was not dead. Enter and the magnifier routed to `/search?q=` on every page, because
+`main.js` was loaded and its submit handler ran. **Only the typeahead was dead** — and that is
+why nobody caught it: the surface that fails is the one you have to type into to see, and the
+surface that works is the one you get if you just hit Enter.
+
+`window.SmartSearch` is defined in exactly one place, `js/search.js`. Ten pages never loaded
+it: privacy, terms, returns, shipping, about, faq, contact, genuine-vs-compatible, quote,
+track-order. `main.js:509` handled the miss with `DebugLog.warn`, and **`DebugLog` is a no-op
+off localhost (ERR-193)** — so a dead search box on ten live pages announced itself to nobody
+for four months.
+
+### The actual defect: half an invariant was enforced
+
+`tests/navbar-parity-may2026.test.js` hash-locks the header markup across all 30 pages and even
+asserts the `id="site-search-form"` token is present. **The markup parity was enforced by a
+test; the runtime parity behind it was a list maintained by hand, and the hand-maintained half
+rotted.** A header can be byte-identical on 30 pages while the JS animating it runs on 20.
+`61fd2f6` rebuilt the legal pages with a new, shorter script list: it copied the header and not
+its engine.
+
+Compounding it, `main.js:502-507` *asserted the invariant as already true* — "It is loaded
+synchronously before /js/main.js on every page that has a search form, so the global is always
+defined". False on 12 of 30 pages the day it was written, and wrong about `synchronously` too
+(the tags are `defer`). **A rule stated in a comment is not a rule** (cf. ERR-207).
+
+### The second, louder failure
+
+Two pages — `/business` and `/account/loyalty` — loaded `search.js` **without** `products.js`.
+SmartSearch initialised, opened its dropdown, hit its `Products.renderCard` guard
+(`search.js:403`) and painted *"Search is temporarily unavailable. Please try again."* at every
+keystroke. Worse than the silent ten, and live.
+
+### Fix
+
+- `products.js` + `search.js` before `main.js` on the ten; `products.js` on the two.
+- **Enrolment moved into a test** (ERR-150/160), in `navbar-parity-may2026.test.js` beside the
+  header hash whose other half it is: any page whose header ships `#site-search-form` must ship
+  both scripts; no page may load `search.js` without `products.js`; and the load order is
+  pinned. Verified RED first — 12 / 2 / 9 pages — then green.
+- **DEFERRED, deliberately: the `main.js:502` comment still asserts the false rule.** Rewriting
+  it is a one-line content change to `main.js`, which forces its `?v=` token to move on **all 34
+  pages that load it** — and `checkout.html` is one of them and carries another session's
+  uncommitted edit. Committing the bump means committing their unfinished work; not committing
+  it means 12 pages disagree with 22 about `main.js`, which is exactly the split
+  `asset-cache-tokens.test.js` §1 exists to catch. **A comment fix is not worth a 34-file
+  cache-token blast radius while six sessions are live.** The test now carries the correction,
+  and the comment goes in a follow-up once the tree is quiet.
+
+### Two things I got wrong on the way
+
+1. **I tried to make the failure loud with `console.warn`.** The repo bans raw `console.*` in
+   shipped JS (`tests/console-debuglog-audit.test.js`) — it leaks into production DevTools.
+   That ban is deliberate, so *runtime* loudness is not available here: **the enrolment test is
+   the alarm**, and the `else` branch stays a `DebugLog.warn` that should now be unreachable.
+   (This edit is the one now deferred, above.)
+2. **"They are all `defer`, so order cannot matter" is false of this tree.** Root `404.html`
+   loads products/search/main with **no `defer` at all**, so document order is the only thing
+   sequencing them there. The order check is pinned; a blanket `defer` assertion is not, because
+   it would go red on that page for an unrelated reason.
+
+Also corrected mid-flight: `main.js` has an **enforced 790-line budget**
+(`tests/search-thin-frontend.test.js`), not the ~780 I was working from, and my first comment
+rewrite blew it. Rewritten length-neutral.
+
+### Carried in the same change (owner's call)
+
+`site-guard.js` — the site-wide lockdown overlay — was missing from the same nine legal pages.
+**Every other non-admin page in the repo loads it**, header or not. Enabling lockdown would have
+left `/privacy`, `/terms`, `/contact` and six more publicly readable while 21 pages were gated.
+Added, plus an enrolment test: every customer-facing page loads the guard.
+
+### Deliberately NOT done — and one claim that was wrong
+
+- `modern-effects.js` is missing from the same nine (cosmetic: scroll-fade, ripple). Its
+  `.will-animate{opacity:0}` is applied **only by the JS**, so nothing is hidden without it.
+  Fails open. Follow-up, not urgent.
+- **`analytics.js` is a one-line stub — `'use strict';` and nothing else.** I had written in the
+  plan that those nine pages "record no traffic events". That was wrong. Real tracking is
+  `traffic-tracker.js`, injected at runtime by `gtag.js`, which those pages *do* load. Adding
+  `analytics.js` would be pure churn.
+- `search-click-beacon.js` stays shop-only — `tests/search-click-beacon-aug2026.test.js` §7
+  pins `['shop.html']` and adding it elsewhere goes red. `seo-meta.js` is pinned to three
+  listing surfaces by its own test. Neither is a gap.
+
+### 🚨 `?v=` TOKENS ARE A WHOLE-TREE PROPERTY — you cannot commit a partial HTML set
+
+I nearly shipped a broken `main`. `asset-cache-tokens.test.js` reads the **working tree**, so my
+local run was green while the *committed* result would have split. A peer caught it. Simulating
+the post-commit state (HEAD for every file I don't stage, worktree for the ones I do) showed
+**8 assets** splitting — `api.js`, `utils.js`, `cart.js`, `search.js`, `search.css`,
+`mega-nav.js`, `modern-effects.js` and `main.js` — because a peer's `npm run build` had restamped
+my working copies of assets I never touched.
+
+**The rule: before committing HTML in a busy tree, simulate the merged state and diff the token
+index — do not trust a green local test run.** Then commit only files reconstructed from HEAD
+plus your own change, so no token you did not cause moves. Separating "real content edit" from
+"token churn only" (normalise `?v=[0-9a-f]{8}` and compare to HEAD) tells you exactly which files
+are safe to rebuild: here, 28 of 41 were token-churn-only, and the 13 with real edits were my 12
+plus one belonging to someone else.
+
+### Note for the next session
+
+This landed while a second Claude session was working the same tree. It had already claimed
+ERR-210 (cart pricing revalidation) and, while I was writing this entry, renumbered its own
+second incident from ERR-211 to ERR-212 in both logs — and then to ERR-213 as I wrote this.
+**Six** interactive sessions were live in this repo at once (`ListAgents`), all logging errors on
+the same day into one numbering space, so root `errors.md` briefly held two ERR-212 headings and
+then two ERR-213 headings. I stopped the race by messaging that session directly and taking 214.
+Root `errors.md` has no ERR-211 as a result; the zero-results brand-rail incident holds ERR-211
+in the agent-facing index only. **Check `ListAgents` before allocating a number, not just the
+two logs** — the logs lag the sessions. It also ran `npm run build` mid-flight. `npm run build` was
+therefore **not** used here: `main.js`'s token was restamped on its own with a targeted `sed`,
+so the diff never crossed into the other session's in-flight files.
+
+---
 
 ## ERR-213 — The pathway the owner wanted changed was not in this repo, and the page showing it was 500 pixels wide on a 2000-pixel screen — **RESOLVED** (2026-09-06)
 
@@ -212,6 +553,191 @@ declared twice. And the one fact that decided the whole shape of the work — th
 not in this repo — cost one read-only request. ***When the strings on the screen are not in the
 codebase, stop grepping and ask the server.***
 
+## ERR-211 — The no-results page browsed six brands out of twenty-seven, from a list a previous fix had already deleted once — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: the owner sent a screenshot of `/shop?search=print("hello")`
+and asked, plainly, *"instead of having these boxes to browse from can we use all the brand boxes
+found in the shop section instead"*. A UI request. What sat underneath it was a hardcoded list that
+had survived its own fix.
+
+**THE SAME DEFECT, THE SAME FILE, TWENTY-FOUR HUNDRED LINES APART.** ERR-192 (2026-08-31) deleted
+the `preferredOrder` slug array from `renderBrands()` and moved the `/shop` brand grid onto
+`brands.show_on_shop` + `sort_order`. It did not touch `renderZeroResultsRecovery()` — same file,
+same object, same page — whose rail 3 was a six-item `popular` array typed in May. From that day
+`show_on_shop` moved one surface and not the other, and **nothing in the system could say the two
+disagreed**: there was no shared function to notice, and no test that named both.
+
+**A FIX THAT RELOCATES A RULE INSTEAD OF SHARING IT LEAVES A SECOND COPY BEHIND.** The lesson is
+not "we missed a call site" — it is that ERR-192 left the answer inline in the only function that
+needed it at the time, so when a second surface needed it there was nothing to call and a literal
+list was the path of least resistance. `_shopBrandTiles()` is now the one place that answers
+*which brands do we show?*, and **both** callers are pinned: `catalogue-pathway-aug2026.test.js`
+follows the rule to its new home **and** asserts `renderBrands` *delegates*
+(`doesNotMatch(body, /show_on_shop/)`), so it cannot quietly re-grow a private copy.
+
+**TRI-STATE, BECAUSE THE OFFLINE ROWS CANNOT ANSWER THE QUESTION.** `_shopBrandTiles()` returns
+**null** when `_brandsAreOffline` — the `_staticBrandFallback()` rows carry no `show_on_shop` at
+all. Filtering rows on a field they lack renders an **empty grid**, the worst failure available to
+a shop landing page. Null is *unmeasured*, never *none*, and each surface decides for itself what
+unmeasured means (same shape as `brandShopVisibility()`; ERR-158).
+
+**THE OLD SIX TILES ARE KEPT, DEMOTED, AND LOUD.** They are the `else` branch now, behind a
+`DebugLog.error` that names *which* failure occurred — `/api/brands` unreadable vs. no row flagged
+`show_on_shop` — because the second means `/shop`'s own grid is empty too and this page is the
+second symptom, not the problem. Deleting the fallback would have been a behaviour change dressed
+as cleanup (ERR-158).
+
+**`<a>`, NOT THE `<button>` NEXT DOOR.** `renderBrands()` emits a `<button>` whose handler calls
+`navigateTo()`, which only works inside the drilldown state machine. This page is publicly indexed,
+so copying the tile verbatim would have shipped ten tiles that a middle-click, a crawler and "open
+in new tab" all silently ignore. Anchors to `/shop?brand=<slug>`, the shape `mega-nav.js:156`
+already uses. Logos reuse `.drilldown-box__logo` so the ten per-slug heights **and** the base
+`max-height` cap apply for free — without the cap an unknown brand renders at natural size
+(Brother's PNG is 3461×809).
+
+**NO COUNTS ON AN ERROR PAGE.** `_loadBrandCounts()` was deliberately *not* reused: it fires one
+`/api/products/counts` per brand, batched five at a time, against a limiter shared with the whole
+storefront — off a page the customer reached *by failing*. Measured: **0** count requests from the
+rail, 10 from `/shop`.
+
+**🚨 A TEST THAT READS COMMENTS IS NOT READING THE CODE.** Two absence assertions failed on first
+run — against the very comments that explain the absence (*"Deliberately NO per-brand count:
+`_loadBrandCounts()` would fire…"*). Every absence check now runs on comment-stripped source. A
+third (`doesNotMatch(/show_on_shop/)`) matched the diagnostic *message text*, which names the field
+on purpose ⇒ **pin the RULE (`show_on_shop\s*===|\.filter\([^)]*show_on_shop`), not the word**,
+with a positive control for each half.
+
+**Hardened while in there**: `renderBrands()` escaped its logo `src` but never
+`Security.sanitizeUrl`'d it (`mega-nav.js:157` does), and `logo_url` is admin-writable. Both
+surfaces now sanitize **before** the logo/text branch, with an **empty** fallback rather than
+`sanitizeUrl`'s default `'#'` — a rejected URL must render the brand NAME, not an `<img src="#">`
+that re-requests the page.
+
+**WHAT THE OWNER SEES TODAY IS ALMOST NOTHING, AND THAT IS THE HONEST RESULT.** Live `/api/brands`:
+**27 rows, exactly 10 with `show_on_shop === true`** — and those ten happen to be the same brands
+the old `brandInfo` map shipped. So the visible diff is six text tiles → ten logo tiles. The
+*mechanism* is what changed: the other seventeen are now one admin toggle away from appearing on
+both surfaces instead of being unreachable from this one. **Measured, not assumed** — rail slugs
+and `/shop` grid slugs compared programmatically, `IDENTICAL: true`.
+
+**Verified live** (headless Playwright against `localhost:3000`, the origin the backend's CORS
+allows — port 3100 is refused, which is itself the check that the first run was measuring nothing):
+rail title "Browse by brand", 10 logo tiles, hrefs `/shop?brand=<slug>`, 0 count requests, parity
+with `/shop` true. Brands aborted at the **browser** (`route().abort()`, never a fulfilling
+`ctx.route()`, which bypasses CORS) ⇒ the six category tiles return with the error logged.
+
+**Pinned**: `tests/search-recovery-brand-tiles-sep2026.test.js` (11) + one delegation test added to
+`catalogue-pathway-aug2026.test.js`. Full suite replayed on a clean worktree carrying **only** this
+change: **5271 pass, 0 fail**.
+
+### 🚨 `?v=` TOKENS ARE A WHOLE-TREE PROPERTY — you cannot commit a partial HTML set
+
+I nearly shipped a broken `main`. `asset-cache-tokens.test.js` reads the **working tree**, so my
+local run was green while the *committed* result would have split. A peer caught it. Simulating
+the post-commit state (HEAD for every file I don't stage, worktree for the ones I do) showed
+**8 assets** splitting — `api.js`, `utils.js`, `cart.js`, `search.js`, `search.css`,
+`mega-nav.js`, `modern-effects.js` and `main.js` — because a peer's `npm run build` had restamped
+my working copies of assets I never touched.
+
+**The rule: before committing HTML in a busy tree, simulate the merged state and diff the token
+index — do not trust a green local test run.** Then commit only files reconstructed from HEAD
+plus your own change, so no token you did not cause moves. Separating "real content edit" from
+"token churn only" (normalise `?v=[0-9a-f]{8}` and compare to HEAD) tells you exactly which files
+are safe to rebuild: here, 28 of 41 were token-churn-only, and the 13 with real edits were my 12
+plus one belonging to someone else.
+
+### Note for the next session
+
+Five other Claude sessions were live in this tree while this landed. ERR-211 was reserved for this
+incident in the ERR-214 note above, and this entry claims it. **I logged to
+`.claude/memory/errors.md` only and missed this file** — `tests/err-numbering-jul2026.test.js`
+caught it, and a peer session surfaced it before I re-ran the suite. Both logs, every time; the
+memory index is not the committed log.
+
+`npm run build` WAS run here, before I knew other sessions were mid-flight, so the `?v=` restamp
+crossed into 41 HTML files including theirs. It is content-derived and idempotent, so it is not
+destructive — but ERR-214's targeted `sed` is the better habit in a shared tree.
+
+---
+
+## ERR-210 — The cart warned "we couldn't confirm today's prices" directly above a savings row it had confirmed, and the same gate said nothing at all when the server actually refused — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `/cart` and asked to
+*"investigate this error that occurs sometimes and make sure it doesn't show unnecessarily."* The
+banner read **"We couldn't confirm today's prices — you're seeing your last saved prices, which may
+not include volume discounts"**, and it was printed directly above an Order Summary rendering
+**"You Save −$0.72"**, a correct total, and a working volume nudge.
+
+**The screenshot dated itself.** That savings row can only come from `Cart.discountAmount`, and
+only a SUCCESSFUL server parse ever sets it — `_losePricing()` nulls `serverSummary` and leaves
+`discountAmount` behind. So the cart had priced correctly and then lost it, and announced that in
+copy written for a cart that had never priced at all. The disclosure was not wrong about there
+being a fault; it was wrong about which one, and it was firing when there was none.
+
+**Three faults, all in the ERR-169 disclosure machinery.**
+
+1. **The stale-snapshot budget leaked across the whole page lifetime.** Every quantity click bumps
+   `_mutationEpoch`; a GET whose epoch moved mid-flight is discarded, re-fetched twice, then gives
+   up into `PRICING.STALE_BUDGET`. But `_staleRefetches` was reset in exactly ONE place —
+   `loadFromServer`'s success arm — while the two other success paths (`loadCart`'s guest branch
+   and `syncWithServer`) never cleared it. Three discarded snapshots *anywhere in a session* —
+   three fast `+` clicks, each legitimately racing a read — added up to the banner against a
+   perfectly healthy backend. **And a discarded snapshot is not a pricing failure at all:** the
+   server answered, we threw the answer away because our own cart moved underneath it, and a newer
+   read was usually already owed by the mutation that caused the race.
+2. **A transient failure was announced immediately and never retried.** `_retryPricingOnce` gave
+   one attempt and dead-ended; the copy then told the shopper to refresh by hand. The commonest
+   real cause is a Render cold start outliving the 15s `REQUEST_TIMEOUT_MS` and healthy again
+   seconds later. The durability listeners (`online`, `pageshow`, `visibilitychange`) already
+   existed on this exact object and replayed **removals only** — pricing had no re-read on any of
+   them. And `!this.loading` was the only in-flight suppressor, which covers `loadCart()` and
+   nothing else, so every post-load refresh could paint a durable warning for 300ms.
+3. **The sentence over-claimed.** "…may not include volume discounts" sat above a visible, non-zero
+   savings row. The real hazard in that state is different and was unnamed: subtotal recomputes
+   locally from `item.price × qty` while `discountAmount` stays frozen at the quantity it was
+   confirmed for.
+
+**The mirror image, same gate, opposite direction.** All three cart GETs read
+`if (response.ok && response.data)` with **no `else`**. `API.request()` RETURNS `{ok:false}` rather
+than throwing for 401/403/429 and for a 5xx whose body parsed as JSON (the two-5xx-shapes trap from
+ERR-188). Those responses fell straight through and left `pricingState` at whatever it already held
+— `LOCAL_ONLY` on a first load, `PENDING` after a mutation, neither of them degraded. Local prices
+on screen, notice **hidden**, and `DebugLog` a no-op in production. The banner could not be trusted
+in either direction.
+
+**Fix.** `_adoptServerSummary` is now the one place every recovery budget resets (`_staleRefetches`
+included) — episodes end where the fault ends. `_handleStaleSnapshot` settles to `PENDING`, not a
+failure, while `_mutationRepriceComing()` says another read is guaranteed; `STALE_BUDGET` **stays
+in `PRICING_DEGRADED`** because removing it would be present→absent (ERR-158) — the fix is to stop
+reaching it spuriously, not to silence it. `_losePricing` on a degraded reason now schedules a
+bounded revalidation (2s/6s/15s, three attempts, `PRICING_REVALIDATE_DELAYS`), and `online` /
+`pageshow` / `visibilitychange→visible` re-read pricing instead of only replaying removals. The
+notice gate widened from `!this.loading` to `!this._isRepriceInFlight()` — **a deferral, not a
+suppression**: every degraded reason has a retry behind it, and when the budget is spent the notice
+paints. Three new reasons (`SERVER_ERROR`, `SESSION_EXPIRED`, `RATE_LIMITED`) close the `ok:false`
+hole through one shared `_adoptCartReadFailure()`, so a new read site cannot inherit the old
+silence. Copy split four ways: shortfall (unchanged, still wins), a signed-out session gets a
+sign-in link and never the pricing sentence, priced-then-lost says *"These are your last confirmed
+prices"* and names staleness as the risk, and only a cart that never priced keeps the original
+wording — where it is true. Checkout got the same treatment: `checkout-page.js` had MEASURED both
+faults since ERR-169 and reported them to `DebugLog` alone, with no DOM reading
+`pricingDegraded`/`discountShortfall` anywhere in the repo.
+
+**Nothing is silently corrected.** The stale savings row stays on screen and is disclosed — hiding
+it would be absence-as-zero, the ERR-063/068/149 shape — and the backend still owns the money.
+
+**Tests**: `tests/cart-pricing-revalidation-sep2026.test.js` (16, behavioural — it loads the real
+cart.js and drives it through stubbed responses; the ERR-169 suite next door is source-text only
+and there had never been a test that fails a fetch and looks at the banner). It carries a positive
+control, and it needed one: the first draft's stub payload had no nested `product`, so
+`_parseServerCart` dropped every line, and an empty cart is a legitimately silent degraded state —
+four "no banner" assertions were passing because the renderer never ran.
+
+**The lesson.** ***A disclosure that fires on four different faults with one sentence is not a
+disclosure, it is a mood.*** The banner's own words were checkable against the page it was printed
+on — a savings row was right there contradicting it — and the state that produced it had been
+reachable for weeks by clicking `+` quickly. **A retry the shopper has to perform is not a retry**;
+if the copy says "try again", something in the code should already have.
 
 ## ERR-209 — The security control on the login page had never been read, and the reassuring state was the one that lied — **RESOLVED** (2026-09-05)
 

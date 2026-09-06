@@ -24,7 +24,7 @@ import { attachProductAutocomplete } from '../components/product-search.js';
 import { pgrstLike } from '../utils/pgrst.js';
 import {
   typesForCategory, defaultTypeForCategory, previewCodeForSku,
-  needsCodeOverride, mergeCodeIntoEffective, normCode,
+  needsCodeOverride, mergeCodeIntoEffective, normCode, partitionDerivedCodes,
 } from '../utils/catalogue-pathway.js';
 // Supplier + pack-origin rendering, shared verbatim with the Orders modal's
 // line-items table so the same product reads the same on both pages.
@@ -1730,6 +1730,7 @@ function buildProductModalTabs(modal, full, isOwner) {
       </div>
       <div class="admin-pc-grid" id="product-codes-grid"><span class="admin-text-muted" style="font-size:13px">Loading codes…</span></div>
       <p class="admin-pc-seed-note" id="pc-seed-note" hidden>Pre-selected from this product’s current categorisation — adjust, then Save to lock it in.</p>
+      <p class="admin-pc-seed-note admin-pc-seed-note--unknown" id="pc-unknown-seed" hidden></p>
     </div>
   `;
 
@@ -2283,6 +2284,7 @@ async function wireProductCodesSection(modal, full) {
   const addLabel   = modal.querySelector('#pc-add-label');
   const gridEl     = modal.querySelector('#product-codes-grid');
   const seedNoteEl = modal.querySelector('#pc-seed-note');
+  const unknownSeedEl = modal.querySelector('#pc-unknown-seed');
 
   const selection = new Map(); // code → code
   modal._productCodesSelection = selection;
@@ -2351,6 +2353,9 @@ async function wireProductCodesSection(modal, full) {
   let othersState = 'loading';   // loading | ready | failed
   let seeded = false;   // true when pre-selected from derivation (no saved codes)
   let loadFailed = false;
+  // ERR-216 — codes derived from the SKU that the live catalogue no longer has
+  // a chip for. Shown, never pre-ticked; ticking one creates a new chip.
+  let unknownSeed = [];
 
   // ── Load this product's codes + the brand+type code universe ───────────
   try {
@@ -2362,16 +2367,13 @@ async function wireProductCodesSection(modal, full) {
                        : Promise.resolve(null),
     ]);
 
-    const rows = Array.isArray(assigned) ? assigned : [];
-    if (rows.length) {
-      for (const c of rows) { const n = norm(c); if (n) selection.set(n, n); }
-    } else {
-      for (const n of deriveSeed()) selection.set(n, n);
-      seeded = selection.size > 0;
-    }
-
     // Code universe = the /shop drilldown chips for this brand+category
     // (getShopData's series already folds in manually-assigned codes).
+    //
+    // ERR-216 MOVED THIS ABOVE THE SEED. The seed is derived from the SKU, and
+    // a SKU carries whatever code was current when the product was catalogued.
+    // We cannot tell a live code from a retired one until we know what the
+    // catalogue actually offers today, so the universe has to be built first.
     const seen = new Map();
     const series = shop && shop.data && Array.isArray(shop.data.series) ? shop.data.series : [];
     for (const s of series) {
@@ -2386,6 +2388,27 @@ async function wireProductCodesSection(modal, full) {
           if (n.length >= 2 && !seen.has(n)) seen.set(n, 0);
         }
       }
+    }
+
+    const rows = Array.isArray(assigned) ? assigned : [];
+    if (rows.length) {
+      // An operator's saved choice is never second-guessed.
+      for (const c of rows) { const n = norm(c); if (n) selection.set(n, n); }
+    } else {
+      // ERR-216 — PRE-TICK ONLY CODES THE CATALOGUE ALREADY HAS.
+      //
+      // A derived code that no longer exists as a chip is a suggestion, not a
+      // fact. Ticking it writes a product_codes override, and every override
+      // becomes its own storefront chip (API._applyManualCodes) — so a form
+      // that silently pre-ticked `20N3HK0` would re-scatter the Lexmark grid
+      // one save at a time. Unknown codes still get a tile, unticked, so the
+      // operator can deliberately create a new line; they just no longer get
+      // created for them. `unknownSeed` drives the warning rendered below.
+      const { known, unknown } = partitionDerivedCodes(deriveSeed(), seen.keys());
+      for (const n of known) selection.set(n, n);
+      unknownSeed = unknown;
+      for (const n of unknown) if (!seen.has(n)) seen.set(n, 0);
+      seeded = selection.size > 0;
     }
     // Every currently-selected code must show as a tile even if the universe
     // lookup missed it (a manual code, a brand-slug mismatch, …).
@@ -2420,6 +2443,20 @@ async function wireProductCodesSection(modal, full) {
 
   const renderSeedNote = () => {
     if (seedNoteEl) seedNoteEl.hidden = !seeded;
+    // ERR-216 — name the codes we deliberately did NOT tick, and why. A code
+    // that was quietly withheld is indistinguishable from one that was never
+    // derived, and the operator needs to be able to tell those apart to decide
+    // whether this product really is a new line.
+    if (unknownSeedEl) {
+      const has = unknownSeed.length > 0;
+      unknownSeedEl.hidden = !has;
+      if (has) {
+        unknownSeedEl.textContent =
+          `${unknownSeed.join(', ')} — derived from the SKU, but ${unknownSeed.length === 1
+            ? 'this code is not' : 'these codes are not'} in the live catalogue for this brand. ` +
+          'Left unticked: ticking one creates a new chip on the shop page.';
+      }
+    }
   };
 
   // Per-tile action state. Only ONE tile is ever non-default at a time.

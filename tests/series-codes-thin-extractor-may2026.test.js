@@ -66,15 +66,37 @@ test('extractProductCodes reads product.series_codes (PRIORITY 0 path)', () => {
         'extractProductCodes must consume backend-supplied series_codes');
 });
 
-test('extractProductCodes normalizeCode applied to each series_codes entry', () => {
-    // The series_codes loop runs each raw entry through normalizeCode so
-    // backend "LC131CMY" → "LC131" (color-suffix strip) survives. Deleting
-    // this normalization would break the chip merge across colors.
-    assert.match(
-        SHOP_CODE,
-        /for\s*\(const\s+raw\s+of\s+product\.series_codes\)\s*\{[\s\S]{0,200}normalizeCode\(String\(raw[\s\S]{0,200}foundCodes\.add\(code\)/,
-        'each raw series_codes entry must be normalized + added to foundCodes'
-    );
+test('extractProductCodes takes each series_codes entry AS GIVEN (ERR-216)', () => {
+    // SUPERSEDED 2026-09-06. This test used to require the opposite: that each
+    // entry ran through `normalizeCode(String(raw), brand)`, justified as
+    // preserving a colour-suffix strip ("LC131CMY" -> "LC131").
+    //
+    // That justification was never measured, and it is false. Measured over all
+    // 713 distinct series_codes live across nine brands on 2026-09-06,
+    // normalizeCode CHANGED 7 and REJECTED 162 outright -- returning null, which
+    // this loop then dropped on the floor:
+    //
+    //     brother 21   canon 18   epson  3   hp 23   lexmark 37
+    //     oki     12   samsung 6  fuji-xerox 42
+    //
+    // Brother's colour strip, the stated reason for the rule, changed ZERO
+    // codes. And two of the seven changes were destructive: Epson S015336 and
+    // S015337 both collapsed to "S01533", merging two different products' codes
+    // into one that belongs to neither.
+    //
+    // normalizeCode is a per-brand SKU/NAME GRAMMAR. Running authoritative data
+    // through it makes it a validator, and a validator whose grammar is older
+    // than the data rejects the data. `series_codes` is backend-canonical: the
+    // only legitimate client-side operation is case/whitespace canonicalisation,
+    // which is what SeriesCodes.normalize does and all it does.
+    const loop = /for\s*\(const\s+raw\s+of\s+product\.series_codes\)\s*\{[\s\S]{0,900}?\n\s{16}\}/.exec(SHOP_CODE);
+    assert.ok(loop, 'the series_codes loop must still exist');
+    assert.match(loop[0], /SeriesCodes\.normalize\(raw\)/,
+        'each entry must be case-normalised only');
+    assert.doesNotMatch(loop[0], /normalizeCode\(/,
+        'the per-brand SKU grammar must never be applied to backend series_codes again');
+    assert.match(loop[0], /foundCodes\.add\(code\)/,
+        'the normalised entry must still reach foundCodes');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

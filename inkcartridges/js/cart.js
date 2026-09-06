@@ -509,9 +509,21 @@ const PRICING = {
     NO_API: 'no-api',
     LOCAL_ONLY: 'local-only',
     PENDING: 'pending',
+    // The three below close the mirror-image hole (ERR-210). `API.request()`
+    // RETURNS `{ ok: false }` rather than throwing for 401/403/429 and for a
+    // 5xx that parsed as JSON (api.js), so the three cart GETs — which all read
+    // `if (response.ok && response.data)` with no `else` — used to fall straight
+    // through those and leave `pricingState` at whatever it already was. That is
+    // LOCAL_ONLY on a first load and PENDING after a mutation, and neither is
+    // degraded: local prices on screen and the notice HIDDEN. Same gate as the
+    // false positives, pointing the other way.
+    SERVER_ERROR: 'server-error',
+    SESSION_EXPIRED: 'session-expired',
+    RATE_LIMITED: 'rate-limited',
 };
 const PRICING_DEGRADED = new Set([
     PRICING.FETCH_FAILED, PRICING.SERVER_EMPTY, PRICING.STALE_BUDGET, PRICING.NO_API,
+    PRICING.SERVER_ERROR, PRICING.SESSION_EXPIRED, PRICING.RATE_LIMITED,
 ]);
 if (typeof window !== 'undefined') window.PRICING = PRICING;
 
@@ -533,6 +545,24 @@ const Cart = {
     // Bounded one-shot re-fetch after a failed cart GET, mirroring the
     // _staleRefetches budget. Reset on every successful adoption.
     _pricingRefetches: 0,
+
+    // Has this page EVER held a server summary? (ERR-210)
+    //
+    // "We could not price this cart at all" and "we priced it, then a later
+    // refresh failed" look identical from `serverSummary === null`, and they
+    // need opposite words. In the second case the figures on screen are the
+    // server's own last-confirmed ones — `discountAmount` survives
+    // _losePricing() — so telling the shopper they "may not include volume
+    // discounts" contradicts the savings row printed directly beneath it.
+    _everPriced: false,
+
+    // Bounded auto-revalidation after a degraded episode (ERR-210). The old
+    // copy told the shopper to refresh by hand; the commonest real cause is a
+    // Render cold start that outlived REQUEST_TIMEOUT_MS and is healthy again
+    // seconds later. Attempts reset on every successful adoption.
+    _revalidateAttempts: 0,
+    _revalidateTimer: null,
+    _pricingRevalidating: false,
 
     // Conversion signals from the cart response (mobile-ux-audit-jul2026 §6):
     // { trust_signals, delivery_estimate, free_shipping_unlock, cart_saved_until }.
@@ -592,6 +622,12 @@ const Cart = {
     // Single quantity cap. Previously 99 in updateQuantity and 100 in the six
     // other places, so a programmatic set-to-100 silently became 99.
     MAX_QUANTITY: 100,
+
+    // Backoff for automatic pricing revalidation (ERR-210). Length IS the attempt
+    // budget — three tries per degraded episode, then the notice is earned.
+    // Sized around a Render cold start: the first two land inside a typical warm
+    // -up, the third gives a slow one a last chance before we tell the shopper.
+    PRICING_REVALIDATE_DELAYS: [2000, 6000, 15000],
 
     // In-memory mirror of the journal, refreshed on every read. Used as the paint
     // filter. NEVER treat this as the source of truth across an await — two tabs
@@ -970,8 +1006,15 @@ const Cart = {
         // routine cart action, and Chrome ignores it without a prior gesture anyway.
         window.addEventListener('pagehide', flush);
         // iOS Safari is unreliable on pagehide.
+        //
+        // The visible half is ERR-210: coming back to a tab is the cheapest
+        // moment to re-read a cart whose pricing we lost, and a shopper who
+        // tabbed away during a Render cold start comes back to a warm backend.
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') flush();
+            if (document.visibilityState === 'hidden') { flush(); return; }
+            if (this.isPricingDegraded()) {
+                this.revalidatePricing({ reason: 'tab-visible' }).catch(() => {});
+            }
         });
 
         // Back-button into a bfcached /cart runs no DOMContentLoaded and no init(),
@@ -983,13 +1026,26 @@ const Cart = {
             this.replayPendingOps({ reason: 'bfcache-restore' })
                 .then((r) => { this._renderRemovalNotice(r); })
                 .catch(() => {});
+            if (this.isPricingDegraded()) {
+                this.revalidatePricing({ reason: 'bfcache-restore' }).catch(() => {});
+            }
         });
 
-        // Coming back online makes every deferred removal deliverable.
+        // Coming back online makes every deferred removal deliverable — and is the
+        // single most likely moment for a lost cart price to come back (ERR-210).
+        // These listeners existed and replayed removals ONLY; pricing sat there
+        // telling the shopper to refresh by hand.
         window.addEventListener('online', () => {
             this.replayPendingOps({ reason: 'online' })
                 .then((r) => { this._renderRemovalNotice(r); })
                 .catch(() => {});
+            if (this.isPricingDegraded()) {
+                // A fresh episode: being offline is why it failed, so the spent
+                // budget was spent on a fault that no longer exists.
+                this._revalidateAttempts = 0;
+                this._pricingRefetches = 0;
+                this.revalidatePricing({ reason: 'online' }).catch(() => {});
+            }
         });
     },
 
@@ -1137,25 +1193,39 @@ const Cart = {
     },
 
     /**
-     * Render the durable disclosure for pricing we could not confirm (ERR-169).
+     * Render the durable disclosure for pricing we could not confirm (ERR-169),
+     * in the words the actual fault deserves (ERR-210).
      *
      * TWO different faults land here, and they need different words:
      *
-     *   1. DEGRADED — we have no server summary at all. Every figure on screen is
-     *      local arithmetic over cached prices, and local arithmetic has NO volume
-     *      discount in it, because the ladder only exists on the server response.
-     *      The shopper is being shown prices that checkout will beat.
+     *   1. DEGRADED — we have no server summary. Split again by whether this page
+     *      has EVER held one (`_everPriced`), because the two states look
+     *      identical from `serverSummary === null` and read as opposite things:
+     *        a. never priced: every figure on screen is local arithmetic over
+     *           cached prices, with no volume discount in it, because the ladder
+     *           only exists on the server response. Prices checkout will beat.
+     *        b. priced, then lost it: the figures ARE the server's own last
+     *           confirmed ones — `discountAmount` survives _losePricing() — so
+     *           telling this shopper their prices "may not include volume
+     *           discounts" contradicts the savings row printed right below. The
+     *           real risk here is staleness: subtotal recomputes from
+     *           `item.price * qty` while the discount stays frozen at the
+     *           quantity it was confirmed for.
      *   2. SHORTFALL — we DO have a summary, but the discount rows we are about to
      *      display sum to more than the aggregate the total deducts. A discount is
-     *      on screen that is not in the price. This is the reported symptom.
+     *      on screen that is not in the price. This is the ERR-169 symptom.
      *
-     * In both cases we state the problem and leave the numbers alone. The backend
+     * In every case we state the problem and leave the numbers alone. The backend
      * owns the money; the customer sees its figures verbatim and a mismatch is
-     * disclosed, never silently recomputed (see order-totals.js's `footing`).
+     * disclosed, never silently recomputed (see order-totals.js's `footing`). In
+     * particular the stale savings row STAYS on screen: hiding it would be
+     * absence-as-zero, the ERR-063/068/149 shape.
      *
-     * Never shown while merely in flight — `loading` and PRICING.PENDING both
-     * suppress it, or every quantity change flashes a warning. That is what the
-     * `cart-layout--syncing` class is for.
+     * Never shown while a re-price is on its way — PRICING.PENDING and
+     * _isRepriceInFlight() both hold it back, or every quantity change and every
+     * cold-start blip flashes a durable warning. That is a DEFERRAL, not a
+     * suppression: _losePricing schedules a bounded revalidation, and when that
+     * budget is spent this paints. `cart-layout--syncing` is the in-flight signal.
      *
      * @param {number} [shortfall] from computeDiscountBreakdown(); 0/absent = sound
      */
@@ -1165,7 +1235,9 @@ const Cart = {
 
         const gap = Number(shortfall);
         const hasShortfall = Number.isFinite(gap) && gap > 0;
-        const degraded = this.isPricingDegraded() && this.items.length > 0 && !this.loading;
+        const degraded = this.isPricingDegraded()
+            && this.items.length > 0
+            && !this._isRepriceInFlight();
 
         if (!degraded && !hasShortfall) {
             el.hidden = true;
@@ -1173,16 +1245,29 @@ const Cart = {
             return;
         }
 
-        // A shortfall is the more specific and more alarming of the two — it means
-        // a number on this page is wrong right now — so it wins the copy.
-        el.innerHTML = hasShortfall
-            ? '<strong>These totals don\'t add up.</strong> '
+        // A shortfall is the more specific and more alarming of the three — it
+        // means a number on this page is wrong right now — so it wins the copy.
+        if (hasShortfall) {
+            el.innerHTML = '<strong>These totals don\'t add up.</strong> '
                 + 'A discount of ' + Security.escapeHtml(formatPrice(gap)) + ' is shown below but isn\'t '
                 + 'coming off the total. Please refresh before checking out — and if it persists, '
-                + 'contact us rather than paying this amount.'
-            : '<strong>We couldn\'t confirm today\'s prices.</strong> '
+                + 'contact us rather than paying this amount.';
+        } else if (this.pricingState === PRICING.SESSION_EXPIRED) {
+            // Never the pricing sentence: nothing is wrong with the prices, and
+            // "refresh to try again" would send them round the same loop.
+            el.innerHTML = '<strong>Your sign-in has expired.</strong> '
+                + '<a href="/account/login?redirect=/cart">Sign in again</a> to see your account\'s '
+                + 'prices and saved cart. Your items are safe here in the meantime.';
+        } else if (this._everPriced) {
+            el.innerHTML = '<strong>These are your last confirmed prices.</strong> '
+                + 'We couldn\'t reach our pricing service just now, and we\'re retrying. If you\'ve '
+                + 'changed a quantity since, the savings shown may be out of date — your total is '
+                + 'recalculated at checkout either way.';
+        } else {
+            el.innerHTML = '<strong>We couldn\'t confirm today\'s prices.</strong> '
                 + 'You\'re seeing your last saved prices, which may not include volume discounts. '
                 + 'Your total will be recalculated at checkout. Refresh to try again.';
+        }
         el.hidden = false;
     },
 
@@ -1530,6 +1615,10 @@ const Cart = {
                                 this._losePricing(PRICING.LOCAL_ONLY);
                                 this.updateUI();
                             }
+                        } else {
+                            // ERR-210: the missing `else`. See loadFromServer's twin.
+                            await this._adoptCartReadFailure(response, 'loadCart(guest)');
+                            this.updateUI();
                         }
                     } catch (error) {
                         DebugLog.warn('Could not load guest cart from server:', error.message);
@@ -1623,6 +1712,10 @@ const Cart = {
                 this.saveToLocalStorage();
 
                 this.updateUI();
+            } else {
+                // ERR-210: the missing `else`. See loadFromServer's twin.
+                await this._adoptCartReadFailure(response, 'syncWithServer');
+                this.updateUI();
             }
         } catch (error) {
             DebugLog.warn('Could not sync cart with server:', error.message);
@@ -1670,7 +1763,16 @@ const Cart = {
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
                 this.loyalty = parsed.loyalty;
+                // _adoptServerSummary already resets this; kept as the local
+                // statement of the same fact for anyone reading this arm alone.
                 this._staleRefetches = 0;
+            } else {
+                // ERR-210: this arm did not exist. A 401/403/429, or a 5xx whose
+                // body parsed, resolves rather than throwing, so the whole block
+                // was skipped and pricingState kept whatever it already held —
+                // LOCAL_ONLY or PENDING, neither of them degraded. Local prices
+                // on screen, notice hidden, nothing logged in production.
+                await this._adoptCartReadFailure(response, 'loadFromServer');
             }
         } catch (error) {
             DebugLog.error('Failed to load cart from server:', error);
@@ -1692,6 +1794,18 @@ const Cart = {
         if (this._staleRefetches < 2) {
             this._staleRefetches++;
             return this.loadFromServer();
+        }
+        // A discarded snapshot is NOT a pricing failure: the server answered, we
+        // threw the answer away because our own cart moved underneath it. So if a
+        // mutation is still settling, another read is already guaranteed and the
+        // honest state is PENDING — which raises no notice. Calling this a failure
+        // is how five fast + clicks produced "we couldn't confirm today's prices"
+        // against a perfectly healthy backend. (ERR-210)
+        if (this._mutationRepriceComing()) {
+            DebugLog.warn('Cart: stale-snapshot budget spent in ' + where
+                + ', but a mutation is still going to re-read — deferring to it');
+            this._losePricing(PRICING.PENDING);
+            return;
         }
         DebugLog.warn('Cart: stale-snapshot refetch budget exhausted — keeping local items without server totals');
         this._losePricing(PRICING.STALE_BUDGET);
@@ -3142,6 +3256,18 @@ const Cart = {
         this.serverSummary = summary;
         this.pricingState = PRICING.OK;
         this._pricingRefetches = 0;
+        this._everPriced = true;
+        // Every recovery budget is PER EPISODE, and this is the one place an
+        // episode ends. `_staleRefetches` used to be reset ONLY inside
+        // loadFromServer's success arm, so the two other success paths
+        // (loadCart's guest branch and syncWithServer) never cleared it and the
+        // budget leaked across the whole page lifetime: three discarded
+        // snapshots at ANY point in a session — three rapid + clicks, each
+        // legitimately racing a GET — added up to a "we couldn't confirm today's
+        // prices" banner while the server was perfectly healthy. (ERR-210)
+        this._staleRefetches = 0;
+        this._revalidateAttempts = 0;
+        this._cancelPricingRevalidation();
         return summary;
     },
 
@@ -3162,6 +3288,10 @@ const Cart = {
             // rendered by _renderPricingNotice(); this line is for local dev.
             DebugLog.error('Cart: no server pricing (' + reason + ') — showing local estimates, '
                 + 'which do NOT include volume discounts.');
+            // A degraded state now OWES the shopper a retry before it owes them a
+            // warning (ERR-210). SESSION_EXPIRED is excluded inside the scheduler:
+            // re-reading cannot fix a signed-out session.
+            this._schedulePricingRevalidation(reason);
         }
     },
 
@@ -3173,6 +3303,152 @@ const Cart = {
      */
     isPricingDegraded: function() {
         return !this.hasServerPricing() && PRICING_DEGRADED.has(this.pricingState);
+    },
+
+    /**
+     * Is a re-price already on its way? (ERR-210)
+     *
+     * `loading` covers loadCart() and NOTHING else, so every post-load refresh —
+     * a debounced quantity update, a coupon apply, a removal replay, the
+     * revalidation below — was uncovered, and a fault that healed 300ms later
+     * still painted a durable warning in the meantime.
+     *
+     * This DEFERS the announcement, it does not suppress it: every degraded
+     * reason schedules a bounded revalidation, and when that budget is spent the
+     * notice paints from the next updateUI(). If you ever make this return true
+     * without a retry behind it, it stops being a deferral and becomes an
+     * off-switch (the ERR-167 shape). `.cart-layout--syncing` is the in-flight
+     * signal the shopper actually sees while this is true.
+     */
+    _isRepriceInFlight: function() {
+        return !!(this.loading
+            || this._pricingRevalidating
+            || this._revalidateTimer
+            || this._mutationRepriceComing());
+    },
+
+    /**
+     * Is a MUTATION going to re-read the cart on its own? (ERR-210)
+     *
+     * Narrower than _isRepriceInFlight on purpose, and the two are not
+     * interchangeable. This one answers "is a future GET guaranteed by something
+     * already in motion", which is the only thing that makes a discarded stale
+     * snapshot safe to shrug off. `loading` and `_pricingRevalidating` are
+     * deliberately NOT in here: during those, the read that was just discarded
+     * WAS the read, and nothing else is coming.
+     *
+     * Every branch below ends in a loadFromServer(): the debounce timer fires
+     * _executeQuantityUpdate, the in-flight map is inside it, removeItem reloads
+     * on confirmation, and the pending-op replay bumps the epoch and reloads.
+     */
+    _mutationRepriceComing: function() {
+        return !!(Object.keys(this._quantityDebounceTimers || {}).length > 0
+            || Object.keys(this._quantityInFlight || {}).length > 0
+            || (this._removingItems && this._removingItems.size > 0)
+            || this._replayInFlight);
+    },
+
+    /**
+     * Classify an `{ ok: false }` cart read into a PRICING reason (ERR-210).
+     *
+     * `API.request()` only THROWS for a transport failure or a 5xx whose body
+     * would not parse as JSON. Everything else — 401, 403, 429, and a 5xx that
+     * did parse — comes back as a resolved envelope, which is why these states
+     * were invisible: the three cart GETs tested `response.ok` and had no `else`.
+     */
+    _pricingReasonFor: function(response) {
+        const code = response && response.code;
+        if (code === 'UNAUTHORIZED') return PRICING.SESSION_EXPIRED;
+        if (code === 'RATE_LIMITED') return PRICING.RATE_LIMITED;
+        return PRICING.SERVER_ERROR;
+    },
+
+    /**
+     * Adopt a failed (but resolved) cart read, then try once more.
+     *
+     * The one helper all three GET sites call, so a new read site cannot quietly
+     * inherit the old no-`else` behaviour.
+     */
+    async _adoptCartReadFailure(response, where) {
+        const reason = this._pricingReasonFor(response);
+        DebugLog.warn('Cart: ' + where + ' returned a failure envelope ('
+            + (response && response.code ? response.code : 'no code') + ') — ' + reason);
+        this._losePricing(reason);
+        // A signed-out session is not a transport blip: _fetchWithAuth already
+        // spent its refresh ladder before handing us this envelope, so replaying
+        // the same GET just burns another round trip to be told the same thing.
+        if (reason === PRICING.SESSION_EXPIRED) return false;
+        return this._retryPricingOnce(where);
+    },
+
+    /**
+     * Schedule the next bounded revalidation of a degraded cart (ERR-210).
+     *
+     * Backoff 2s / 6s / 15s, three attempts per episode, reset by
+     * _adoptServerSummary. Deliberately a schedule rather than a tight loop: the
+     * fault we are usually waiting out is a Render cold start, and hammering it
+     * does not warm it faster.
+     */
+    _schedulePricingRevalidation: function(reason) {
+        if (typeof setTimeout === 'undefined') return;
+        // Nothing a re-read can fix.
+        if (reason === PRICING.SESSION_EXPIRED) return;
+        if (reason === PRICING.NO_API || typeof API === 'undefined') return;
+        if (this._revalidateTimer) return;
+        if (this._revalidateAttempts >= this.PRICING_REVALIDATE_DELAYS.length) return;
+
+        const delay = this.PRICING_REVALIDATE_DELAYS[this._revalidateAttempts];
+        this._revalidateAttempts++;
+        this._revalidateTimer = setTimeout(() => {
+            this._revalidateTimer = null;
+            this.revalidatePricing({ reason: 'backoff:' + reason });
+        }, delay);
+    },
+
+    _cancelPricingRevalidation: function() {
+        if (this._revalidateTimer && typeof clearTimeout !== 'undefined') {
+            clearTimeout(this._revalidateTimer);
+        }
+        this._revalidateTimer = null;
+    },
+
+    /**
+     * Re-read the cart for the sole purpose of recovering pricing (ERR-210).
+     *
+     * The old copy ended "Refresh to try again" and meant it literally: nothing
+     * in the page ever tried again. The durability listeners (online, pageshow,
+     * visibilitychange) already existed but replayed REMOVALS only.
+     *
+     * Returns whether pricing was recovered. A bare await that silently either
+     * worked or did not is the habit this whole area exists to break.
+     */
+    async revalidatePricing(opts) {
+        const where = (opts && opts.reason) || 'revalidate';
+        if (typeof API === 'undefined') return false;
+        if (this.hasServerPricing()) return true;
+        if (this.pricingState === PRICING.SESSION_EXPIRED) return false;
+        // A mutation already owns the next read; piling on would race it and burn
+        // the stale-snapshot budget this change exists to stop leaking.
+        if (this._pricingRevalidating || this.loading) return false;
+        if (Object.keys(this._quantityInFlight || {}).length > 0) return false;
+        if (Object.keys(this._quantityDebounceTimers || {}).length > 0) return false;
+
+        this._pricingRevalidating = true;
+        try {
+            await this.loadFromServer();
+        } catch (e) {
+            DebugLog.error('Cart: pricing revalidation threw (' + where + '):', e);
+        } finally {
+            this._pricingRevalidating = false;
+        }
+
+        const recovered = !!this.hasServerPricing();
+        DebugLog[recovered ? 'log' : 'warn']('Cart: pricing revalidation ' + where + ' — '
+            + (recovered ? 'recovered' : 'still degraded (' + this.pricingState + ')'));
+        // Paint either way: on success this clears the notice, and on the final
+        // failure it is what finally shows it.
+        this.updateUI();
+        return recovered;
     },
 
     /**

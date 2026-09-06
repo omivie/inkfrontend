@@ -422,6 +422,17 @@ function keyEvent(key, target) {
   return { key, target, preventDefault() {} };
 }
 
+// ERR-216 — the REAL partitionDerivedCodes, lifted out of the shipped module
+// rather than stubbed. The drawer uses it to decide which SKU-derived codes are
+// safe to pre-tick; a stub here would let the drawer pass a test while the
+// shipped reconciliation was broken, which is the whole failure mode this
+// guards against.
+const PATHWAY_SRC = READ('inkcartridges/js/admin/utils/catalogue-pathway.js');
+const PARTITION_DERIVED_CODES = new Function(
+  `${extractFunction(PATHWAY_SRC, 'export function normCode(').replace(/^export /, '')};
+   ${extractFunction(PATHWAY_SRC, 'export function partitionDerivedCodes(').replace(/^export /, '')};
+   return partitionDerivedCodes;`)();
+
 // The drawer's normaliser, verbatim from AdminAPI — it KEEPS "/" (ERR-061).
 const NORMALIZE = (raw) => String(raw == null ? '' : raw)
   .toUpperCase().replace(/[^A-Z0-9/]/g, '')
@@ -453,6 +464,12 @@ function loadWire() {
     'AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
     'extractBrandName', '_brands', 'productTypeLabel', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
     'describeScopes', 'describeCodesWriteError', 'paginate', 'pagerHtml', 'RIBBON_PRODUCT_TYPES',
+    // ERR-216 — the drawer now reconciles SKU-derived codes against the live
+    // chip universe before pre-ticking any of them, so the real
+    // partitionDerivedCodes has to be injected here too. Injecting the REAL one
+    // (not a stub) is the point: a stub would let the drawer pass while the
+    // shipped reconciliation was broken.
+    'partitionDerivedCodes',
     `${src}; return wireProductCodesSection;`);
   return (deps) => factory(
     { normalizeProductCode: NORMALIZE,
@@ -470,7 +487,8 @@ function loadWire() {
     DESCRIBE_SCOPES,
     deps.describeCodesWriteError || ((e) => (e && e.message) || 'unknown error'),
     PAGINATE, PAGER_HTML,
-    deps.RIBBON_PRODUCT_TYPES || ['printer_ribbon', 'typewriter_ribbon', 'correction_tape']);
+    deps.RIBBON_PRODUCT_TYPES || ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'],
+    PARTITION_DERIVED_CODES);
 }
 
 // A representative Brother ink product.

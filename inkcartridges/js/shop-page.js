@@ -1278,29 +1278,52 @@
         // =========================================
         // LEVEL LOADERS
         // =========================================
+        /**
+         * Fill `this.cache.brands` — and NOTHING else.
+         *
+         * Lifted out of loadBrands() in Sep 2026 so the zero-results recovery rail
+         * can read the same rows the /shop grid reads. loadBrands() also drives the
+         * loading skeleton, `levelBrands.hidden` and the ribbon grid, none of which
+         * exist on a search-results view; sharing the whole method would have meant
+         * either a second fetch or a second copy of the fallback rules — and a second
+         * copy of a membership rule is exactly what ERR-192 deleted.
+         *
+         * NEVER THROWS. Resolves to the rows, or to null when the navigation moved
+         * under us — in which case the caller must render nothing at all.
+         */
+        async _ensureBrandsLoaded(navVersion) {
+            const stale = () => navVersion !== undefined && this.navigationVersion !== navVersion;
+            if (this.cache.brands) return stale() ? null : this.cache.brands;
+
+            try {
+                const response = await API.getBrands();
+                if (stale()) return null;
+                if (response.ok && Array.isArray(response.data)) {
+                    this.cache.brands = response.data;
+                    this._brandsAreOffline = false;
+                    return this.cache.brands;
+                }
+            } catch (error) {
+                DebugLog.error('Failed to load brands:', error);
+                if (stale()) return null;
+            }
+
+            // BOTH failure shapes land here — a thrown request and an `ok:false`
+            // envelope. They used to be two separate copies of these three lines,
+            // one in the `if` and one in loadBrands()'s catch.
+            this.cache.brands = this._staticBrandFallback();
+            this._brandsAreOffline = true;
+            return this.cache.brands;
+        },
+
         async loadBrands(navVersion) {
             this.showLoading(true);
 
             try {
-                // Use cached brands or fetch from API
-                if (!this.cache.brands) {
-                    const response = await API.getBrands();
-                    // Check if navigation changed during fetch
-                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                const brands = await this._ensureBrandsLoaded(navVersion);
+                if (!brands) return;   // navigation moved during the fetch
 
-                    if (response.ok && Array.isArray(response.data)) {
-                        this.cache.brands = response.data;
-                        this._brandsAreOffline = false;
-                    } else {
-                        this.cache.brands = this._staticBrandFallback();
-                        this._brandsAreOffline = true;
-                    }
-                }
-
-                // Check if navigation changed before rendering
-                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-                this.renderBrands(this.cache.brands);
+                this.renderBrands(brands);
                 await this.renderRibbonBrands();
                 this.elements.levelBrands.hidden = false;
             } catch (error) {
@@ -1409,6 +1432,40 @@
             return (row && (row.logo_url || row.logo_path)) || (info && info.logo) || '';
         },
 
+        /**
+         * The brand rows /shop puts on its grid: `show_on_shop === true`, ordered by
+         * `sort_order` then name. The single answer to "which brands do we show?".
+         *
+         * Until Aug 2026 this was a hardcoded `preferredOrder` array of ten slugs used
+         * as a FILTER, so a brand present in the database but absent from the array
+         * appeared in search, in the admin and on its own product pages and rendered
+         * NO TILE on /shop, with no error anywhere. Seventeen live brands were in that
+         * state and nothing in the system could say so. The backend owns it now:
+         *
+         *   show_on_shop  bool  render a tile
+         *   sort_order    int   the order to render them in
+         *
+         * `=== true` on purpose: an ABSENT field must not read as visible.
+         *
+         * TRI-STATE, like `brandShopVisibility()` in the admin: **null** means the
+         * list we hold is the offline fallback, whose rows carry no `show_on_shop` at
+         * all. Null is "unmeasured", never "none" — a caller that filters rows lacking
+         * the field renders an empty grid, which is the worst available failure for a
+         * shop landing page. Each caller decides what unmeasured means for its surface.
+         */
+        _shopBrandTiles(rows = this.cache.brands) {
+            if (this._brandsAreOffline) return null;
+            if (!Array.isArray(rows)) return null;
+            return rows
+                .filter(b => b.show_on_shop === true)
+                .sort((a, b) => {
+                    const ao = Number.isFinite(a.sort_order) ? a.sort_order : Number.MAX_SAFE_INTEGER;
+                    const bo = Number.isFinite(b.sort_order) ? b.sort_order : Number.MAX_SAFE_INTEGER;
+                    if (ao !== bo) return ao - bo;
+                    return (a.name || '').localeCompare(b.name || '');
+                });
+        },
+
         renderBrands(brands) {
             const grid = this.elements.brandsGrid;
             grid.innerHTML = '';
@@ -1432,34 +1489,13 @@
                 if (ribbonsSection) ribbonsSection.hidden = false;
             }
 
-            // WHICH BRANDS APPEAR IS DATA, NOT A LIST IN THIS FILE.
-            //
-            // Until Aug 2026 this filtered /api/brands against a hardcoded
-            // `preferredOrder` array of ten slugs, with logos in a second hardcoded
-            // map. A brand absent from that array appeared in search, in the admin
-            // and on its own product pages, and rendered NO TILE on /shop — with no
-            // error anywhere. Seventeen live brands were in that state and nothing
-            // in the system could say so. The backend now owns the answer:
-            //
-            //   show_on_shop  bool  render a tile
-            //   sort_order    int   the order to render them in
-            //
-            // `=== true` on purpose: an ABSENT field must not read as visible. The
-            // offline fallback rows carry no `show_on_shop` at all, which is exactly
-            // why they are handled separately below rather than filtered here — a
-            // fallback that filters on a field it does not have renders an empty
-            // grid, the worst available failure for a shop landing page.
+            // WHICH BRANDS APPEAR IS DATA, NOT A LIST IN THIS FILE — and the rule
+            // lives in exactly ONE place, `_shopBrandTiles()`, because there are now
+            // TWO surfaces asking it (this grid and the zero-results recovery rail).
+            // `?? [...brands]` is the offline branch: null means the rows cannot
+            // answer the question, not that the answer is "none".
             const offline = !!this._brandsAreOffline;
-            const inkBrands = offline
-                ? [...brands]
-                : brands
-                    .filter(b => b.show_on_shop === true)
-                    .sort((a, b) => {
-                        const ao = Number.isFinite(a.sort_order) ? a.sort_order : Number.MAX_SAFE_INTEGER;
-                        const bo = Number.isFinite(b.sort_order) ? b.sort_order : Number.MAX_SAFE_INTEGER;
-                        if (ao !== bo) return ao - bo;
-                        return (a.name || '').localeCompare(b.name || '');
-                    });
+            const inkBrands = this._shopBrandTiles(brands) ?? [...brands];
 
             if (offline) {
                 // LOUD, not silent. The customer is looking at a brand list frozen at
@@ -1481,7 +1517,10 @@
                 // stopped at 9 while the grid rendered 10, and a data-driven grid
                 // has no fixed length to enumerate. Matches renderRibbonBrands().
                 box.style.animationDelay = `${i * 30}ms`;
-                const logoSrc = this.brandLogo(brandId);
+                // sanitizeUrl with an EMPTY fallback, not the default '#': `logo_url`
+                // is admin-writable, and a rejected URL has to fall through to the
+                // text tile rather than emit <img src="#">, which re-requests /shop.
+                const logoSrc = Security.sanitizeUrl(this.brandLogo(brandId), '');
                 const displayName = this.brandName(brandId) || brand.name || brandId;
                 const inner = logoSrc
                     ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`
@@ -1659,6 +1698,8 @@
             };
 
             // Check cache for category counts
+            // v5: v4 entries were built by reading an absent facet key as zero, which
+            // hid a non-empty category (ERR-215). Bumping the key retires them.
             const cacheKey = `${this.state.brand}-category-counts-v5`;
             let categoryCounts = this.cache.products[cacheKey];
 
@@ -1871,14 +1912,49 @@
                         apiParams.source = this.state.type;
                     }
 
-                    const response = await API.getShopData(apiParams);
+                    // ERR-216 — A THROWN FETCH IS ALSO AN UNAVAILABLE ENDPOINT.
+                    //
+                    // `API.request()` has two failure shapes: it RETURNS
+                    // `{ ok: false }` for a structured error, and it THROWS for a
+                    // network failure or a non-JSON body (same split as ERR-188).
+                    // Only the returned shape reached the `else` below, so on the
+                    // commonest failure of all — the request not completing — the
+                    // throw escaped to the outer catch and the client-side
+                    // fallback underneath was never reached. Verified in a browser
+                    // on 2026-09-06 by aborting /api/shop: 3 attempts, then
+                    // "Failed to load product codes", and the legacy path (which
+                    // has the data it needs — /api/products returns all 433 rows
+                    // with their stems) never ran. The fallback was dead code on
+                    // the one path it exists for.
+                    let response;
+                    try {
+                        response = await API.getShopData(apiParams);
+                    } catch (shopErr) {
+                        DebugLog.warn(
+                            `[Shop.loadProductCodes] /api/shop threw (${shopErr && shopErr.message}) — ` +
+                            'treating it as unavailable and falling through to client-side chips');
+                        response = { ok: false, error: shopErr };
+                    }
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                     if (response.ok && response.data?.series) {
                         codes = response.data.series;
+                        this._chipsDerivedFrom = 'backend';
                     } else {
                         // Endpoint failed — fall back to legacy for the rest of the session
+                        //
+                        // ERR-216: SAY SO. This flag is sticky for the whole SPA
+                        // session and silently swaps the authoritative chip grid
+                        // for a client-side reconstruction. Before the gate above
+                        // it did that by rebuilding the retired MPN vocabulary,
+                        // and nothing anywhere said the grid had changed source.
                         this._shopEndpointAvailable = false;
+                        this._chipsDegraded = true;
+                        DebugLog.warn(
+                            '[Shop.loadProductCodes] /api/shop unavailable — chip grid falls back to ' +
+                            'client-side extraction for the rest of this session ' +
+                            `(brand=${this.state.brand}, category=${this.state.category}). ` +
+                            'Chips are now derived, not backend-authoritative.');
                     }
                 }
 
@@ -1988,6 +2064,17 @@
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     codes = this.extractProductCodes(allProducts);
+                    // ERR-216 — the partial-ness belongs in the RETURN VALUE, not
+                    // only in a log line. `_chipsDerivedFrom` lets a test, a probe
+                    // or a future surface ask "where did these chips come from?"
+                    // instead of inferring it from a flag set somewhere else.
+                    this._chipsDerivedFrom = 'client-extraction';
+                    const withBackendCodes = allProducts.filter(
+                        p => Array.isArray(p.series_codes) && p.series_codes.length).length;
+                    DebugLog.warn(
+                        `[Shop.loadProductCodes] built ${codes.length} chips client-side from ` +
+                        `${allProducts.length} products (${withBackendCodes} carried backend series_codes). ` +
+                        'Backend-authoritative chips were not available.');
                 }
 
                 // Collapse XL/XXL/XXXL yield variants into their base chip so
@@ -2143,19 +2230,62 @@
                 // codes the per-brand pattern already matches; with v8 it
                 // should never fire because series_codes already covers
                 // every product the regex would match).
+                // ERR-216 — TAKE THE BACKEND'S VALUE AS GIVEN.
+                //
+                // This used to read `this.normalizeCode(raw, brand)`. That
+                // function is a per-brand SKU/NAME GRAMMAR: it exists to pull a
+                // code out of `G20N3HK0BK`, and it returns null for anything
+                // that doesn't look like one. Running authoritative data through
+                // it turns a parser into a VALIDATOR, and a validator with a
+                // grammar older than the data silently rejects the data.
+                //
+                // On 2026-09-06, measured against the live catalogue, it rejected
+                // 20 of 20 Lexmark chip stems and 2 of 10 OKI stems — every one
+                // of `20`, `54`, `C236`, `T650`, `808`, `711`, `332DN` → null —
+                // because the backend collapsed Lexmark/OKI `series_codes` from
+                // full MPNs to platform stems. The comment above already said
+                // "trust it"; the code did not. THE COMMENT AND THE CODE
+                // DISAGREED, and the code won.
+                //
+                // `SeriesCodes.normalize` canonicalises case/whitespace and
+                // NOTHING ELSE, so it can never drop a code the backend emitted.
+                // Same vocabulary as collapseChipList (utils.js) — one grammar.
+                let backendCodeCount = 0;
                 if (Array.isArray(product.series_codes) && product.series_codes.length) {
                     for (const raw of product.series_codes) {
-                        const code = this.normalizeCode(String(raw || ''), brand);
-                        if (code && code.length >= 2) foundCodes.add(code);
+                        const code = (typeof window !== 'undefined' && window.SeriesCodes)
+                            ? window.SeriesCodes.normalize(raw)
+                            : String(raw || '').trim().toUpperCase().replace(/[\s-]/g, '');
+                        if (!code) continue;
+                        // A backend code shorter than the gate is a real code we
+                        // are choosing not to show. Say so — never drop silently.
+                        if (code.length < 2) {
+                            DebugLog.warn(
+                                `[Shop.extractProductCodes] dropped 1-char backend series_code "${code}" ` +
+                                `on ${product.sku || product.id} — chip grid will not offer it`);
+                            continue;
+                        }
+                        foundCodes.add(code);
+                        backendCodeCount++;
                     }
                 }
 
-                // Defensive SKU sweep — kept intentionally un-gated so a
-                // product without series_codes (transient backend issue) still
-                // surfaces something parseable from its SKU. Backend canonical
-                // path covers this in steady state; series_codes coverage on
-                // /api/products went live with backend commit 5c99462.
-                if (pattern && sku) {
+                // Defensive SKU sweep — the safety net for a product that
+                // arrived with NO usable series_codes (transient backend issue).
+                //
+                // ERR-216 GATED IT. It used to run un-gated, and its own comment
+                // claimed that was harmless because "series_codes already covers
+                // every product the regex would match". That stopped being true
+                // the moment the backend collapsed Lexmark/OKI to stems: with
+                // PRIORITY 0 rejecting `20`, this sweep re-derived `20N3HK0`,
+                // `C236HK0` and `C540H1CG` straight back out of the SKU, so a
+                // single /api/shop failure rebuilt the entire pre-collapse
+                // 308-chip Lexmark grid client-side, with no error on screen.
+                //
+                // This is a GATE, not a deletion (the fallback still fires for
+                // the case it was written for). Removing a fallback is a
+                // behaviour change; downgrading it to last-resort is the fix.
+                if (pattern && sku && backendCodeCount === 0) {
                     pattern.lastIndex = 0;
                     const skuMatches = sku.matchAll(pattern);
                     for (const match of skuMatches) {
@@ -2452,13 +2582,25 @@
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--code';
                 box.dataset.code = code;
+                // ERR-216 — escape the label. `code` is backend-controlled text
+                // interpolated into innerHTML; the house rule is that every
+                // dynamic value goes through Security, with no exceptions
+                // earned by "it's only a product code". Reference `Security`
+                // directly — it is a bare const, NOT on window (ERR-167), so a
+                // `window.Security?.` guard here would be an off switch.
+                const label = (this.state.category === 'paper')
+                    ? this.formatPaperCodeLabel(code)
+                    : String(code).replace(/-/g, '');
+                // An absent count used to render "undefined product", and a
+                // zero rendered "0 product". Neither is a number the customer
+                // should be shown; say nothing rather than say something false.
+                const n = Number(count);
+                const countText = Number.isFinite(n) && n > 0
+                    ? `${n} product${n === 1 ? '' : 's'}`
+                    : '';
                 box.innerHTML = `
-                    <span class="drilldown-box__code">${
-                        (this.state.category === 'paper')
-                            ? this.formatPaperCodeLabel(code)
-                            : code.replace(/-/g, '')
-                    }</span>
-                    <span class="drilldown-box__count">${count} product${count > 1 ? 's' : ''}</span>
+                    <span class="drilldown-box__code">${Security.escapeHtml(label)}</span>
+                    ${countText ? `<span class="drilldown-box__count">${Security.escapeHtml(countText)}</span>` : ''}
                 `;
                 box.addEventListener('click', () => this.navigateTo('products', { code }));
                 grid.appendChild(box);
@@ -2468,6 +2610,53 @@
         // Lookup the raw yield aliases (e.g. ['604', '604XL']) that collapsed
         // into the given consolidated chip code. Returns null when no chip
         // cache is populated yet — caller falls back to a single-code request.
+        // ERR-216 — the stem the BACKEND stamped on these rows, when the code
+        // the visitor asked for is no longer one of them.
+        //
+        // WHY THIS IS NOT A CLIENT-SIDE MAPPING. The backend hand-off asked,
+        // correctly, that the frontend not reimplement its collapse — a second
+        // implementation drifts, and theirs has refusal cases (Lexmark `200` is
+        // an inkjet series and must never resolve to CS431 toner). So this does
+        // not derive anything. It READS `series_codes` off the rows the backend
+        // just returned and asks one question: "is the code I requested still a
+        // member of this family?" The answer comes entirely from backend data.
+        //
+        // IT IS SELF-DISABLING, in four separate ways:
+        //   1. any returned row still carrying the requested code → null
+        //      (this is what makes OKI `?code=711` a no-op: its rows carry
+        //      ['C710','711'], so 711 is still a member);
+        //   2. any row with no series_codes at all → null (we cannot prove it);
+        //   3. no single stem shared by EVERY row → null (ambiguous);
+        //   4. brands the backend never touched → the code is always a member,
+        //      so branch 1 fires and nothing happens.
+        // Measured 2026-09-06: fires for Lexmark `20N3HK0`→`20`; no-ops for OKI
+        // `711`, OKI `332DN`, and every Canon/HP/Epson/Brother code.
+        _backendStemFor(products, requestedCode) {
+            const norm = (v) => (typeof window !== 'undefined' && window.SeriesCodes)
+                ? window.SeriesCodes.normalize(v)
+                : String(v || '').trim().toUpperCase().replace(/[\s-]/g, '');
+            const want = norm(requestedCode);
+            if (!want || !Array.isArray(products) || products.length === 0) return null;
+
+            const sets = [];
+            for (const p of products) {
+                const codes = (Array.isArray(p && p.series_codes) ? p.series_codes : [])
+                    .map(norm).filter(Boolean);
+                if (!codes.length) return null;        // (2) cannot prove anything
+                if (codes.includes(want)) return null; // (1) still a member — leave it alone
+                sets.push(new Set(codes));
+            }
+            let shared = [...sets[0]];
+            for (let i = 1; i < sets.length; i++) shared = shared.filter(c => sets[i].has(c));
+            if (shared.length !== 1) {                 // (3) ambiguous — say so, change nothing
+                DebugLog.warn(
+                    `[Shop._backendStemFor] "${want}" is not a member of the returned rows, but they ` +
+                    `share ${shared.length} stems (${shared.join(', ') || 'none'}) — leaving the URL alone`);
+                return null;
+            }
+            return shared[0];
+        },
+
         _codeAliasesFor(collapsedCode) {
             if (!collapsedCode) return null;
             const target = String(collapsedCode).trim().toUpperCase();
@@ -2584,6 +2773,62 @@
 
                 // Check if navigation changed before rendering
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                // ERR-216 — a link written before the Sep 2026 Lexmark/OKI
+                // collapse names a code that is no longer a family. It still
+                // resolves (the backend collapses the input), but to a SUBSET:
+                // measured live, `?code=20N3HK0` returns 3 products where the
+                // `20` chip the grid now shows returns 18 — and the breadcrumb,
+                // <title> and canonical all kept saying "20N3HK0", a code that
+                // appears nowhere in the grid the visitor is looking at.
+                //
+                // Adopt the stem the backend put on the rows, then re-fetch the
+                // whole family so the page shows what the chip would have shown.
+                // updateBreadcrumb / updateTitle / updateSEO run after this in
+                // navigateTo(), so they pick up the new state.code for free.
+                if (this.state.code && mergedProducts.length) {
+                    const stem = this._backendStemFor(mergedProducts, this.state.code);
+                    if (stem) {
+                        const was = this.state.code;
+                        DebugLog.warn(
+                            `[Shop.loadProducts] "${was}" is a retired code — the rows it returned are ` +
+                            `filed under "${stem}". Adopting the backend's stem and reloading the family.`);
+                        this.state.code = stem;
+
+                        const stemCategoryConfig = this.categories.find(c => c.id === this.state.category);
+                        const stemApiCategory = stemCategoryConfig?.apiCategory || this.state.category;
+                        const stemRes = await API.getShopData({
+                            brand: this.state.brand,
+                            category: stemApiCategory,
+                            code: stem,
+                            limit: 200
+                        }).catch(() => null);
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                        if (stemRes && stemRes.ok && Array.isArray(stemRes.data?.products) && stemRes.data.products.length) {
+                            mergedProducts = stemRes.data.products;
+                            this.cache.products[`${this.state.brand}-${categoryId}-${typeKey}-products-${stem}`] = mergedProducts;
+                        } else {
+                            // Fail-soft, but not silent: we keep the narrower set
+                            // we already have rather than blanking the page, and
+                            // the URL still becomes the stem so the label matches
+                            // the grid. Partial-ness goes in the log AND the flag.
+                            this._codeStemReloadFailed = true;
+                            DebugLog.warn(
+                                `[Shop.loadProducts] adopted "${stem}" but could not reload the full family — ` +
+                                `showing the ${mergedProducts.length} row(s) "${was}" returned.`);
+                        }
+
+                        // replaceState, not pushState: this is a correction of
+                        // the address the visitor arrived on, not a navigation.
+                        // Back must return to where they came from, not to the
+                        // retired code we just rewrote.
+                        const fixed = new URLSearchParams(window.location.search);
+                        fixed.set('code', stem);
+                        history.replaceState(history.state, '',
+                            `${window.location.pathname}?${fixed.toString()}${window.location.hash}`);
+                    }
+                }
 
                 // Separate genuine and compatible — trust the API's source field
                 // (search audit, 2026-05-03; the previous name-substring fallback
@@ -3766,7 +4011,14 @@
         // Spec §2.3 — recovery rails when /smart returns no products.
         // Three rails: (1) compatible printers for SKU-shaped queries,
         // (2) cartridges-for-your-printer via /by-printer,
-        // (3) static popular categories.
+        // (3) the brand grid — the SAME tiles /shop renders, from the SAME rows.
+        //
+        // Rail 3 was a hardcoded six-item `popular` array until Sep 2026: six brands
+        // out of twenty-seven, frozen at whatever was typed here in May, while /shop
+        // three lines up the same file had already been moved onto `show_on_shop`
+        // (ERR-192). Flipping a brand's visibility in the admin moved one surface and
+        // not the other. The six tiles survive as the offline fallback below — a
+        // fallback is not deleted just because it stopped being the default (ERR-158).
         async renderZeroResultsRecovery(query, navVersion, smartData) {
             // Hide both genuine/compatible sections; we'll render our own UI.
             this.elements.compatibleSection.hidden = true;
@@ -3826,11 +4078,18 @@
                     );
                 }
                 // 'popular' rail handled below as the safety net (backend may
-                // also ship `rail.products` inline; we render the curated
-                // category tiles regardless).
+                // also ship `rail.products` inline; we render the brand grid
+                // regardless).
             }
 
-            const results = await Promise.all(railPromises);
+            // Brands load ALONGSIDE the rails, not after them. API.getBrands() is
+            // SWR-cached for five minutes and shared with /shop, so this is usually a
+            // warm hit — but a cold one must not add a serial round trip to a page the
+            // customer is already unhappy with.
+            const [results] = await Promise.all([
+                Promise.all(railPromises),
+                this._ensureBrandsLoaded(navVersion),
+            ]);
             if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
             let renderedAny = false;
@@ -3878,31 +4137,79 @@
                 }
             }
 
-            // Rail 3: popular categories — always render as the safety net.
-            const popular = [
-                { label: 'Brother Ink',   href: '/shop?brand=brother&category=ink' },
-                { label: 'HP Toner',      href: '/shop?brand=hp&category=toner' },
-                { label: 'Canon Ink',     href: '/shop?brand=canon&category=ink' },
-                { label: 'Epson Ink',     href: '/shop?brand=epson&category=ink' },
-                { label: 'Samsung Toner', href: '/shop?brand=samsung&category=toner' },
-                { label: 'OKI Toner',     href: '/shop?brand=oki&category=toner' },
-            ];
-            const popularCards = popular.map(p =>
-                `<a class="recovery-tile" href="${Security.escapeAttr(p.href)}">${Security.escapeHtml(p.label)}</a>`
-            ).join('');
-            railsHost.insertAdjacentHTML('beforeend', `
-                <section class="search-recovery__rail">
-                    <h3 class="search-recovery__rail-title">Browse popular categories</h3>
-                    <div class="search-recovery__rail-grid">${popularCards}</div>
-                </section>
-            `);
+            // Rail 3: the brand grid — always render as the safety net.
+            //
+            // Same rows, same rule, same order and same logo CSS as /shop's own grid:
+            // `_shopBrandTiles()` is the one place that answers "which brands do we
+            // show?", so one admin write to `show_on_shop` moves BOTH surfaces.
+            //
+            // Anchors, not the <button> + pushState that renderBrands() uses. That
+            // button only works inside the drilldown state machine; this page is
+            // publicly indexed and its tiles have to survive a middle-click.
+            //
+            // Deliberately NO per-brand count: _loadBrandCounts() would fire up to
+            // twenty-seven /api/products/counts requests off a page the customer
+            // reached by failing, against a rate limiter shared with the whole
+            // storefront. A count is cosmetic; getting them out of here is not.
+            const brandTiles = this._shopBrandTiles();
+            if (brandTiles && brandTiles.length > 0) {
+                const brandCards = brandTiles.map((b) => {
+                    const slug = b.slug || b.id || '';
+                    if (!slug) return '';
+                    const displayName = this.brandName(slug) || b.name || slug;
+                    // Sanitize BEFORE the branch, with '' as the fallback rather than
+                    // sanitizeUrl's default '#': a rejected URL must render the brand
+                    // NAME, not an <img src="#"> that re-requests this page.
+                    // `.drilldown-box__logo` is reused from pages.css so the per-slug
+                    // heights AND the base max-height cap apply here for free — the cap
+                    // is what keeps a logo we have no rule for (Brother's PNG is
+                    // 3461x809) from blowing the tile apart.
+                    const logoSrc = Security.sanitizeUrl(this.brandLogo(slug), '');
+                    const inner = logoSrc
+                        ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(slug)}">`
+                        : `<span class="drilldown-box__name">${Security.escapeHtml(displayName)}</span>`;
+                    return `<a class="recovery-tile recovery-tile--brand" href="/shop?brand=${encodeURIComponent(slug)}">${inner}</a>`;
+                }).filter(Boolean).join('');
+                railsHost.insertAdjacentHTML('beforeend', `
+                    <section class="search-recovery__rail">
+                        <h3 class="search-recovery__rail-title">Browse by brand</h3>
+                        <div class="search-recovery__rail-grid search-recovery__rail-grid--brands">${brandCards}</div>
+                    </section>
+                `);
+            } else {
+                // LOUD, not silent. Two ways to land here and both are worth saying
+                // out loud: /api/brands was unreadable (so these tiles are frozen at
+                // the last deploy), or it answered and NO row is flagged show_on_shop
+                // — in which case /shop's own grid is empty too and this page is the
+                // second symptom, not the problem.
+                DebugLog.error('[brands] zero-results recovery could not read the shop brand grid '
+                    + `(${this._brandsAreOffline ? '/api/brands unreadable' : 'no row has show_on_shop'})`
+                    + ' — falling back to the six hardcoded category tiles.');
+                const popular = [
+                    { label: 'Brother Ink',   href: '/shop?brand=brother&category=ink' },
+                    { label: 'HP Toner',      href: '/shop?brand=hp&category=toner' },
+                    { label: 'Canon Ink',     href: '/shop?brand=canon&category=ink' },
+                    { label: 'Epson Ink',     href: '/shop?brand=epson&category=ink' },
+                    { label: 'Samsung Toner', href: '/shop?brand=samsung&category=toner' },
+                    { label: 'OKI Toner',     href: '/shop?brand=oki&category=toner' },
+                ];
+                const popularCards = popular.map(p =>
+                    `<a class="recovery-tile" href="${Security.escapeAttr(p.href)}">${Security.escapeHtml(p.label)}</a>`
+                ).join('');
+                railsHost.insertAdjacentHTML('beforeend', `
+                    <section class="search-recovery__rail">
+                        <h3 class="search-recovery__rail-title">Browse popular categories</h3>
+                        <div class="search-recovery__rail-grid">${popularCards}</div>
+                    </section>
+                `);
+            }
 
             // Bind add-to-cart on any product cards in the by-printer rail
             if (typeof Products !== 'undefined' && Products.attachCardListeners) {
                 Products.attachCardListeners(railsHost);
             }
 
-            // If even the popular tiles didn't render (unreachable, but safe),
+            // If even the brand/category tiles didn't render (unreachable, but safe),
             // fall back to the legacy empty state.
             if (!renderedAny && railsHost.children.length === 0) {
                 panel.remove();
