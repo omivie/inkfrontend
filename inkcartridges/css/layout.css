@@ -24,8 +24,13 @@
     padding-right: var(--container-padding);
 }
 
+/* 500px, not the 800px this rule used to claim: pages.css declared
+   .container--narrow a second time at 500px and loaded later, so 500px is the
+   width every page using this class has ALWAYS rendered at. Consolidated here
+   with the value that was really in force — this changed no page's width.
+   /track-order, which needed the room, moved to --content instead. (ERR-213) */
 .container--narrow {
-    max-width: 800px;
+    max-width: 500px;
 }
 
 .container--content {

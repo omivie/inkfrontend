@@ -8268,10 +8268,10 @@ a.account-review-card__product:focus-visible {
     color: var(--color-text-muted);
 }
 
-/* Container Narrow */
-.container--narrow {
-    max-width: 500px;
-}
+/* Container Narrow — MOVED to layout.css, where every other .container--*
+   modifier lives. It was declared in BOTH files (layout.css said 800px, this
+   file said 500px) and pages.css loads later, so 500px silently won and the
+   800px rule had never once applied. One declaration, one file. (ERR-213) */
 
 
 
@@ -12304,9 +12304,19 @@ body.page-shop {
     background: #e6f6f0;
     color: #197a50;
 }
-.order-status-badge--completed {
+/* `delivered` and `completed` are the same event in two vocabularies — the
+   customer's word and the operator's — so they share one colour. Both classes
+   are needed: track-order-page.js interpolates the RAW backend status into
+   `order-status-badge--${status}`, so a status with no rule here renders as
+   transparent text in a transparent pill, not as a fallback. (ERR-213) */
+.order-status-badge--completed,
+.order-status-badge--delivered {
     background: #d4edda;
     color: #155724;
+}
+.order-status-badge--refunded {
+    background: #ede9fe;
+    color: #5b21b6;
 }
 .order-status-badge--cancelled {
     background: #fde8e8;
@@ -12440,6 +12450,47 @@ body.page-shop {
     font-weight: 500;
 }
 
+/* ── Narrow viewports ──────────────────────────────────────────────────────
+   The tracking block shipped with NO media query at all, and on a 375px phone
+   three nested paddings (.track-card 1.75rem + .tracking-detail 1.5rem, inside
+   the container's own) left the stepper 208px to draw in. Three steps need 240px
+   at the 80px minimum, so the last label clipped to "Delive" — and
+   .tracking-info-label's 120px min-width + 1rem gap left a 20-digit tracking
+   number 72px to sit in, so it ran out of the card.
+
+   Trim the nesting and stack the label over its value. The label's min-width is
+   what aligns the rows on a wide screen; in one column it has nothing to align
+   to, so it goes. (ERR-213)
+   ───────────────────────────────────────────────────────────────────────── */
+@media (max-width: 560px) {
+    .track-card {
+        padding: 1.15rem 0.9rem;
+    }
+    .tracking-detail {
+        padding: 1.15rem 0.9rem;
+    }
+    /* 3 steps x 80px = 240px, and the trimmed card still only offers ~227px.
+       The labels here are short enough to sit in 70. This does NOT try to fit
+       five — while the backend still sends five the stepper scrolls, which is
+       what overflow-x: auto is for. */
+    .timeline-step {
+        min-width: 70px;
+    }
+    .tracking-info-row {
+        flex-direction: column;
+        gap: 0.1rem;
+        margin-bottom: 0.6rem;
+    }
+    .tracking-info-label {
+        min-width: 0;
+    }
+    /* A tracking number is one unbroken 20-character token — without this it
+       cannot wrap at all and overflows however much room it is given. */
+    .tracking-info-value {
+        overflow-wrap: anywhere;
+    }
+}
+
 /* Live tracking events */
 .tracking-events {
     margin-top: 1rem;
@@ -12496,17 +12547,6 @@ body.page-shop {
     font-weight: 500;
 }
 
-/* Inline-tracking display (Jun 2026): the lookup result renders a self-contained
-   .tracking-detail card, so reset the shared #track-result success wrapper to a
-   plain left-aligned surface — otherwise the white card sits inside the green
-   centred panel (double card). */
-.track-result--tracking {
-    margin-top: 1.5rem;
-    padding: 0;
-    border: none;
-    background: transparent;
-    text-align: left;
-}
 /* "Not shipped yet" note shown when the lookup succeeds but tracking_number is null */
 .tracking-note {
     margin: 0 0 1rem;
@@ -12658,6 +12698,27 @@ body.page-shop {
     border: 1px solid var(--color-border-light, #eee);
     background: #fafafa;
     text-align: center;
+}
+
+/* Inline-tracking display (Jun 2026): the lookup result renders a self-contained
+   .tracking-detail card, so reset the shared wrapper to a plain left-aligned
+   surface — otherwise the white card sits inside the centred panel (double card).
+
+   MOVED HERE (ERR-213). It used to sit ~150 lines ABOVE `.track-result`. Both are
+   one class, so at equal specificity the later rule wins and the BASE was winning
+   every property this modifier tried to reset — `text-align: left` had never once
+   applied, and the tracking rows had always rendered centred. A modifier declared
+   before the class it modifies is not an override, it is a comment. Same shape as
+   the .container--narrow double declaration in the same change.
+
+   `padding`/`border`/`background` looked correct only because the base's values
+   are what you get anyway once .tracking-detail paints its own card on top. */
+.track-result--tracking {
+    margin-top: 1.5rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    text-align: left;
 }
 .track-result p {
     margin: 0 0 0.5rem;

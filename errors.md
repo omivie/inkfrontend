@@ -119,6 +119,100 @@ the hydration made the array look supervised for a year while nothing read the o
 mattered. And when a count and a filter disagree, **the filter is the product and the count is the
 opinion**: measure the outcome, never the proxy.
 
+## ERR-213 — The pathway the owner wanted changed was not in this repo, and the page showing it was 500 pixels wide on a 2000-pixel screen — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `/account/track-order` and
+asked to remove two steps from the customer's progress stepper — *"the Order Confirmed and the
+Processing sections… the order should be placed then the shipping is added which should trigger
+shipped."* A second screenshot of the public `/track-order` followed: *"this shouldn't be in
+iPhone ratio unless on iPhone."*
+
+**(a) THE THING TO CHANGE WAS NOT HERE.** Grepping this repo for `"Order Placed"`,
+`"Order Confirmed"`, `"In Transit"` returns **nothing but prose in comments**. `buildTimeline()`
+(`js/track-order-page.js`) maps over `data.timeline[]` and renders `step.label` verbatim; a
+test from June 2026 already pinned it against hardcoding a step count. So the five labels, the
+five steps and the "Order Confirmed" badge are all strings the backend sends, and the backend
+is a separate repo that is not on this disk.
+
+The way to find that out was to **ask the server**, which is one read-only POST:
+
+```
+POST /api/orders/track-lookup {order_number, email}
+→ timeline:[placed "Order Placed" | confirmed "Order Confirmed" | processing "Processing"
+            | shipped "Shipped — In Transit" | delivered "Delivered"]
+   status_label: "Shipped — In Transit"
+```
+
+That single request also settled *why* the two steps deserved removing, which no amount of
+reading would have: **`confirmed` fires nine seconds after `placed`** (it is the `paid`
+transition), and **`processing` returns `date: null` on every order** because no
+`processing_at` column exists — the stepper lights a dot and prints nothing under it.
+
+⇒ The deliverable for the pathway is `order-pathway-3-step-backend-brief-sep2026.md`, plus
+`scripts/probe-track-timeline.mjs` to prove it when it lands. Nothing in the frontend renderer
+changed, deliberately.
+
+**(b) THE TEMPTING FIX WAS A HALF FIX.** Filtering `confirmed`/`processing` out of the array
+client-side is four lines and would have shown three dots today. It also would have left the
+badge beside them reading **"Order Confirmed"**, because the badge is `status_label` — a
+different field — and it would have put a stepper on screen that disagreed with the order's own
+status, with nothing on the page able to reconcile them. *A renderer that starts deciding what
+the pathway is, is a second source of truth for a fact it does not own.* The new test asserts
+the renderer still draws **five** steps when handed five.
+
+**(c) 🚨 `.container--narrow` WAS DECLARED TWICE, AND THE LIVE ONE WAS THE UNDOCUMENTED ONE.**
+`layout.css:27` said `800px`. `pages.css:8272` said `500px`. Equal specificity, and pages.css
+loads later on every page — so **500px had always won and the 800px rule had never once
+applied**, since the initial commit. Five pages use the class; four are auth cards that want
+500px, and the fifth was `/track-order`, whose result card holds a horizontal stepper. That is
+the "iPhone ratio": a 500px column centred in a 2000px window.
+
+Fixing the shared class would have silently resized four login pages, so `/track-order` moved
+to the existing `container--content` (900px) instead, and the two declarations were
+consolidated into `layout.css` **at 500px — the width every page had really been rendering at,
+so no page changed width**. A test now fails if any `.container--*` modifier is declared in
+more than one stylesheet. *Two declarations of one class in two files is not a duplicate; it is
+a rule that looks live and is not, and its only symptom is a page that is the wrong size.*
+
+**(d) THE CUSTOMER'S LAST STEP COULD NOT BE SET BY HAND.** The owner said Delivered stays
+manual "for now" — but `ALL_STATUSES` (`js/admin/pages/orders.js`) offered `pending, paid,
+processing, shipped, completed, cancelled, refunded` and **no `delivered`**. The customer's
+stepper ends on **Delivered**; the operator's only terminal option was **Completed**. Two
+vocabularies for one event, on two surfaces, with nothing saying they were the same thing —
+and the word the customer reads was the one nobody could write. Added, with a `STATUS_LABELS`
+map so the dropdown stops rendering raw lowercase values.
+
+Two more gaps fell out of checking that one: **`delivered` and `refunded` had no
+`.order-status-badge--` rule**, and `track-order-page.js` interpolates the RAW status into that
+class — so those pills rendered as transparent text in a transparent pill, with no default rule
+to fall back to. And `admin/filters.js` could not filter for either, so an operator could set a
+status and then lose the order. **A status is not "supported" until it can be set, filtered and
+seen.**
+
+**(e) THE PROBE REPORTS RED, AND THAT IS THE CORRECT RESULT.**
+`npm run probe:track-timeline` fails 6 assertions against production today, because the backend
+has not changed yet. It carries the pre-change five-step payload as a **positive control that
+must fail** — a probe whose checks have quietly stopped checking otherwise reports green
+forever — and with no order configured it **skips by name** ("the timeline shape was NOT
+verified") rather than passing. The order number and customer email come from
+`TRACK_PROBE_ORDER` / `TRACK_PROBE_EMAIL`, never committed.
+
+⚠️ **`probe:shipping-info` §7 inverts the day the backend ships the `paid → shipped` edge.** It
+currently asserts that edge has occurred **zero** times — correct now, wrong afterwards. Flip
+it then, and read the green→red flip as the fix landing rather than a regression.
+
+**Files**: `inkcartridges/html/track-order.html` · `css/layout.css` · `css/pages.css` ·
+`js/track-order-page.js` (comments only) · `js/admin/pages/orders.js` · `js/admin/filters.js` ·
+`scripts/probe-track-timeline.mjs` · `tests/order-pathway-three-step-sep2026.test.js` (13) ·
+`order-pathway-3-step-backend-brief-sep2026.md`.
+
+**The lesson.** Two of the four defects here were found by *checking the thing next to the thing
+that was asked about*: nobody asked whether `delivered` was settable, or whether a CSS class was
+declared twice. And the one fact that decided the whole shape of the work — that the pathway is
+not in this repo — cost one read-only request. ***When the strings on the screen are not in the
+codebase, stop grepping and ask the server.***
+
+
 ## ERR-209 — The security control on the login page had never been read, and the reassuring state was the one that lied — **RESOLVED** (2026-09-05)
 
 **Date**: 2026-09-05 · **Context**: The owner asked a plain question — *"can you check if the

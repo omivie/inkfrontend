@@ -3253,7 +3253,35 @@ function bindModalActions(modal, order, deleteRight = null) {
   }
 }
 
-const ALL_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled', 'refunded'];
+/**
+ * The statuses an operator can move an order to.
+ *
+ * `delivered` was MISSING (ERR-213). It is the final step of the customer's own
+ * progress stepper on /track-order — the backend has always been able to light
+ * that dot — and the only terminal status this dropdown offered was `completed`.
+ * So the two surfaces used different words for the same event, and the one word
+ * the customer reads could not be set by hand at all. Until auto-delivery exists
+ * this is the manual path, so it has to be here.
+ *
+ * The labels are a RENDER, never a branch: nothing keys off the display string,
+ * and a status with no entry falls through to its own raw value rather than
+ * disappearing from the list. Same rule as the carrier registry — adding a
+ * status must not mean editing two places that can disagree.
+ */
+const ALL_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'delivered', 'completed', 'cancelled', 'refunded'];
+
+const STATUS_LABELS = Object.freeze({
+  pending: 'Pending',
+  paid: 'Paid',
+  processing: 'Processing',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  refunded: 'Refunded',
+});
+
+const statusOptionLabel = (s) => STATUS_LABELS[s] || s;
 
 function showStatusModal(order) {
   const current = (order.status || '').toLowerCase();
@@ -3286,7 +3314,7 @@ function showStatusModal(order) {
     <div class="admin-form-group">
       <label>New Status</label>
       <select class="admin-select" id="modal-status">
-        ${allowed.map(s => `<option value="${s}">${s}</option>`).join('')}
+        ${allowed.map(s => `<option value="${s}">${esc(statusOptionLabel(s))}</option>`).join('')}
       </select>
     </div>
   `;

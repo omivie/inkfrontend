@@ -68,7 +68,11 @@ const FilterState = {
   _options: {
     brands: [],
     suppliers: [],
-    statuses: ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled'],
+    // Must stay in step with ALL_STATUSES in admin/pages/orders.js — a status the
+    // Update Status modal can SET but this facet cannot FILTER is one an operator
+    // can lose track of. `delivered` and `refunded` were both settable and both
+    // missing here (ERR-213).
+    statuses: ['pending', 'paid', 'processing', 'shipped', 'delivered', 'completed', 'cancelled', 'refunded'],
     categories: [],
   },
 

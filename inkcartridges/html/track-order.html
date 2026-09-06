@@ -24,10 +24,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=3e529b3e">
+    <link rel="stylesheet" href="/css/layout.css?v=e083ef8b">
     <link rel="stylesheet" href="/css/components.css?v=18c35419">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=da83c751">
+    <link rel="stylesheet" href="/css/pages.css?v=f82dc7b9">
     <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
 </head>
 <body>
@@ -159,7 +159,12 @@
         </nav>
 
         <section class="track-page">
-            <div class="container container--narrow">
+            <!-- container--content (900px), NOT container--narrow (500px). The result
+                 card the controller injects carries a horizontal stepper and a table of
+                 courier details; at 500px the whole page reads as a phone column on a
+                 desktop and the last step label clips. The four auth cards that share
+                 --narrow keep it. (ERR-213) -->
+            <div class="container container--content">
                 <header class="track-page__header">
                     <h1 class="track-page__title">Track your order</h1>
                     <p class="track-page__lead">
@@ -226,7 +231,7 @@
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/track-order-page.js?v=60de4f15"></script>
+    <script defer src="/js/track-order-page.js?v=66fab2f4"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2d3b4ae7"></script>
 </body>

@@ -5,9 +5,23 @@
  * =====================
  * The customer enters their order number + the email used at checkout and we
  * look the order up via POST /api/orders/track-lookup, then render the result
- * RIGHT ON THE PAGE: a status badge, a progress timeline (Order placed →
- * Processing → Shipped → Delivered), the tracking number + carrier + estimated
- * delivery, a "Track with {carrier}" link, and the live courier scan history.
+ * RIGHT ON THE PAGE: a status badge, a progress timeline, the tracking number +
+ * carrier + estimated delivery, a "Track with {carrier}" link, and the live
+ * courier scan history.
+ *
+ * THE TIMELINE'S STEPS ARE THE BACKEND'S, NOT THIS FILE'S.
+ * =======================================================
+ * Every step key, label and date arrives in `data.timeline[]` and is rendered
+ * verbatim. Nothing here knows what the steps are called or how many there are,
+ * and that is deliberate — the pathway is changed on the backend and this page
+ * follows on the next response, with no deploy.
+ *
+ * As of Sep 2026 that pathway is three steps — Order Placed → Shipped — In
+ * Transit → Delivered. `Order Confirmed` and `Processing` were removed (ERR-213):
+ * `confirmed` fired nine seconds after `placed` and `processing` never carried a
+ * date at all, because no `processing_at` column exists. That sentence describes
+ * what the SERVER sends today; it is not a contract this file enforces, and it is
+ * measured by `npm run probe:track-timeline`, never asserted from here.
  *
  * This supersedes the May-2026 request-only model (where the page only queued an
  * email and showed "we'll reply within one business day"). We still keep that
@@ -290,9 +304,10 @@
 
         /**
          * Render the tracking detail card from a successful lookup payload.
-         * Every field is treated defensively — the timeline length varies
-         * (5 normal, 4 for Net-30, [placed, cancelled] when cancelled) and
-         * tracking_number / tracking_url / carrier / events may all be null.
+         * Every field is treated defensively — the timeline length VARIES by
+         * order (three on the normal path, [placed, cancelled] when cancelled,
+         * and older cached payloads may still carry five) and tracking_number /
+         * tracking_url / carrier / events may all be null.
          */
         renderTracking(data, email) {
             const esc = Security.escapeHtml;
@@ -328,7 +343,10 @@
             document.getElementById('track-result')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         },
 
-        // Progress stepper. Map over the array — never hardcode the step count.
+        // Progress stepper. Map over the array — never hardcode the step count,
+        // and never filter a step out by name. If a step should not be shown, the
+        // backend stops sending it; dropping one here would make this page and
+        // the order's own status disagree, with nothing to reconcile them.
         buildTimeline(timeline) {
             if (!Array.isArray(timeline) || !timeline.length) return '';
             const esc = Security.escapeHtml;
