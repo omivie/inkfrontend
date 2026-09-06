@@ -3,6 +3,7 @@
 **From:** frontend (`matcha/FEINK`) · **To:** backend dev (`ink-backend-zaeq`)
 **Date:** 2026-09-06 · **Tracking:** ERR-223
 **Source:** `add-to-cart-tracking-FE-handoff-sep2026.md`
+(archived with corrections at `readfirst/add-to-cart-tracking-FE-handoff-sep2026.md`)
 
 **Status: §1 is shipped and verified firing. §2 needed no code for search — it
 shipped five days ago — and the half that was genuinely missing is done. §3 is
@@ -273,8 +274,21 @@ database, so we are reporting it as **unknown, not as working**. A visitor id is
 what joins a cart across sessions to one person. If you do not store it, say so
 and we will stop sending it.
 
+### BF-060 — §1 of your hand-off still tells the next reader to send `price_snapshot * quantity`
+The doc in your repo (`docs/storefront/add-to-cart-tracking-FE-handoff-sep2026.md`)
+is unchanged, and we cannot edit it. Anyone who implements it as written ships
+the triple-value bug in §3a. **It is correct for the only case anyone tests by
+hand** — an add to an empty line, where the total *is* the delta — so it passes
+review and passes unit tests, and the number only goes wrong once it is in Google
+Ads. Please correct §1 and state in the response contract that `quantity` is the
+resulting line total. We have archived a corrected copy at
+`readfirst/add-to-cart-tracking-FE-handoff-sep2026.md` on our side, with your
+original text left intact and the corrections in a banner above it.
+
 ### Confirm whether `quantity` in the add-to-cart response is the line total
-See §3a. We have assumed line-total from production behaviour.
+See §3a. We have assumed line-total from production behaviour. **If it is meant
+to be the delta, this is a backend bug rather than a doc bug** — tell us and we
+will delete our derivation instead of maintaining it.
 
 ---
 

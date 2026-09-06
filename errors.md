@@ -43,7 +43,9 @@ describing the same incident.
 
 ## ERR-223 — The Google Ads add-to-cart tag had never fired in six months, and the obvious way to fire it reported triple the value — **RESOLVED** (2026-09-06)
 
-**Date**: 2026-09-06 · **Context**: Backend hand-off `add-to-cart-tracking-FE-handoff-sep2026.md`.
+**Date**: 2026-09-06 · **Context**: Backend hand-off, archived with its corrections marked at
+`readfirst/add-to-cart-tracking-FE-handoff-sep2026.md` (the authoritative copy lives in the backend
+repo at `docs/storefront/` and still carries the wrong formula — BF-060).
 The Google Ads account runs at ~2.2x break-even CPC and mobile converts at **1.65%** against
 desktop's **10.53%** over 90 days. Nobody could say whether mobile shoppers bounce, fail to add, or
 abandon at checkout, because the add-to-cart rung is the one that was never measured. The
