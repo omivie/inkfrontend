@@ -184,11 +184,24 @@ and it was put to them. It does **not** suppress the pings (measured above), so 
 in received requests; it does weaken attribution, which matters because the account was moved to
 Target CPA on measured CPA.
 
-**Also open, and worth more than this entry: the live Purchase conversion may have stopped firing.**
-Action 7558732273's `conversion_last_received_request_date_time` is frozen at 2026-09-03 16:11 while
-real paid orders landed 09-04 ($180.99) and 09-05 ($126.48). Not root-caused — its three dedupe
-guards read correctly, and inspection is exactly what cannot settle it. **An add-to-cart funnel is a
-diagnostic; the purchase tag is the money.**
+**The live Purchase conversion was reported as possibly dead. It is not — ADJUDICATED IN THE
+BROWSER.** Action 7558732273's `conversion_last_received_request_date_time` is frozen at 2026-09-03
+16:11 while real paid orders landed 09-04 ($180.99) and 09-05 ($126.48), which reads as a broken tag.
+Loading the real `/html/order-confirmation` with a seeded order and `?redirect_status=succeeded`:
+
+```
+GET …/pagead/conversion/18032498762/?…&label=W1laCPGzpJQcEMqwyJZD
+      &oid=PROBE-PURCHASE-TAG-1&value=123.45&currency_code=NZD   -> 200
+```
+
+It fires, `transaction_id` is populated, and Google accepts it. **What that proves and what it does
+not**: the page's conversion machinery works — guards pass, tag fires. It does NOT prove a real order
+*reaches* that page with `lastOrder` in sessionStorage; if `payment-page.js` failed to write it, or a
+redirect never landed on `/order-confirmation`, the symptom would be identical. That is the remaining
+candidate, and it is a different investigation. Most likely explanation for two orders in three days:
+no ad interaction to attribute. **Two orders is not a sample to declare a tag dead from.** *An
+add-to-cart funnel is a diagnostic; the purchase tag is the money — which is exactly why it got
+measured rather than assumed, in both directions.*
 
 **Files**: `js/gtag.js` (`ADS` registry + `AdsConversions`) · `js/cart.js` (`addItem` captures the
 confirmed payload, `priorQty`, the Ads call; `_showCrossSellModal` URL host) · `js/api.js`

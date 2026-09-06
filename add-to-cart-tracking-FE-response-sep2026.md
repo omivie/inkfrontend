@@ -299,13 +299,25 @@ Two things that matter for interpreting your data in the meantime:
 - **It does weaken attribution**, which leans on modelling — and the account was
   moved to Target CPA on the strength of measured CPA.
 
-**Separately: the live Purchase conversion may have stopped firing.** Action
-7558732273's `conversion_last_received_request_date_time` is frozen at
-2026-09-03 16:11 while real paid orders landed on 09-04 and 09-05. We have not
-root-caused it — its three dedupe guards read correctly on inspection, and
-inspection is exactly what cannot settle this. It is being tracked separately. It
-is worth more than everything in this document, and we mention it here so it is
-not lost: **an add-to-cart funnel is a diagnostic; the purchase tag is the money.**
+**Separately, and resolved: the live Purchase conversion was reported as possibly
+dead. It is not.** Action 7558732273's
+`conversion_last_received_request_date_time` is frozen at 2026-09-03 16:11 while
+real paid orders landed on 09-04 and 09-05, which reads as a broken tag. We
+loaded the real confirmation page in a browser rather than reasoning about it:
+
+```
+GET …/pagead/conversion/18032498762/?…&label=W1laCPGzpJQcEMqwyJZD
+      &oid=PROBE-PURCHASE-TAG-1&value=123.45&currency_code=NZD   -> 200
+```
+
+It fires, `transaction_id` is populated, Google accepts it. That proves the
+page's conversion machinery works; it does **not** prove that a real order
+*reaches* that page with its order in `sessionStorage`, which is the remaining
+candidate and a separate investigation. The likeliest explanation for two orders
+in three days is simply no ad interaction to attribute. We mention it because it
+is worth more than everything else in this document: **an add-to-cart funnel is a
+diagnostic; the purchase tag is the money** — which is why it was measured rather
+than assumed, in both directions.
 
 ---
 
