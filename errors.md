@@ -41,6 +41,189 @@ describing the same incident.
 
 ---
 
+## ERR-223 — The Google Ads add-to-cart tag had never fired in six months, and the obvious way to fire it reported triple the value — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: Backend hand-off `add-to-cart-tracking-FE-handoff-sep2026.md`.
+The Google Ads account runs at ~2.2x break-even CPC and mobile converts at **1.65%** against
+desktop's **10.53%** over 90 days. Nobody could say whether mobile shoppers bounce, fail to add, or
+abandon at checkout, because the add-to-cart rung is the one that was never measured. The
+`Shopping Cart` conversion action (id 7710654861) is `WEBPAGE_CODELESS` — Google's automatic event
+detection, which scrapes for a page load that an SPA add-to-cart never produces — and
+`conversion_last_conversion_date` was **empty**: not once, across 771 ad clicks in 30 days.
+
+**THE HAND-OFF'S §2 WOULD HAVE TAKEN THE SITE DOWN, AND IT LOOKED FINE FROM `curl`.** It asked for
+`headers['X-Session-Id']` in the shared fetch wrapper, on every `/api/` call. That header is not on
+`Access-Control-Allow-Headers` (BF-054, open since 2026-08-31 — this is the *second* hand-off to
+specify it). The trap is that the preflight answers **204 regardless of what is requested** — it
+does not echo the requested headers, so the status carries no information:
+
+```
+OPTIONS /api/cart/items  (Access-Control-Request-Headers: x-session-id,x-visitor-id)
+  -> 204, access-control-allow-headers: Content-Type, Authorization, X-Requested-With,
+                                        X-Request-Id, X-Guest-Session, X-Attribution-Source
+```
+
+A browser does that comparison itself and **never sends the request**. It does not degrade. In the
+*shared wrapper*, on *every* `/api/` call, that is search, catalogue, cart, checkout and payment
+down simultaneously for every customer on the first deploy — to gain an analytics column. *A
+recommendation from the team that owns the endpoint is still a claim, and the browser is the only
+thing that can adjudicate a CORS claim.* And the search half of §2 **needed no code at all**: it
+shipped on 2026-09-01 as `?sid=`/`?vid=` (ERR-194). The hand-off's "0 rows in 30 days" was a window
+of which **25 days predate the fix**.
+
+### The bug a unit test could not have caught, and a browser found in one add
+
+`data.quantity` in the add-to-cart response is the **resulting LINE TOTAL, not the amount added**.
+The hand-off's example shows `"quantity": 2` beside `"price_snapshot": 44.49`, which reads as "two
+were added". Measured in a real browser:
+
+```
+line already holds 2 · shopper adds 1 · response says quantity: 3
+  -> naive value = 96.99 x 3 = $290.97 reported to Google for a ONE-cartridge add
+```
+
+Triple the true value, into the account the owner bids real money from, silently, on **every add to
+something already in the cart** — the commonest add there is. The first browser run sent exactly
+that ping, `value=290.96999999999997`, and Google answered 200. Every unit test passed throughout:
+one add to an empty line is indistinguishable from a delta, so **only a second add to the same line
+exposes it**. The delta is now derived from the line's prior quantity, **capped at what was
+requested** (a stale-low local cart must never *inflate* a conversion) while still honouring a
+genuine stock clamp downward. Re-verified live: line 3 -> 4, Google receives `quantity: 1,
+value: 96.99`.
+
+### `Number(null)` is `0`, again
+
+The first cut wrote `Number(confirmed.price_snapshot)` and range-checked after. `Number(null)` and
+`Number('')` are both `0`, so an unreported price would have fired a confident **$0.00** conversion —
+the ERR-219/ERR-063/068 absence-as-zero shape, pointed at an ad platform. The **type** is now checked
+before any coercion. A genuine `0` still reports as `0`; an absent price fires the conversion
+**without a `value`** rather than inventing one. *The add really happened, so the funnel rung must be
+recorded — but we will not tell Google what it was worth when we do not know.* Caught by the test,
+not by review.
+
+### Two 100%-populated columns that joined to nothing
+
+The hand-off's §3 states: *"readers that count DISTINCT `session_id` are unaffected by the
+overlap."* **False.** `traffic_events.session_id` is the `ts_…` id from `traffic-tracker.js`;
+`cart_analytics_events.session_id` was a `cs_…` id that `cart-analytics.js` minted for itself in its
+own `sessionStorage` key. Both tables read 100% populated **in two unrelated id spaces**. So the
+backend's new server-written row (`ts_…`) and the beacon's row (`cs_…`) described the same add with
+two different ids, and a DISTINCT count saw **two sessions per add** — while `cart_viewed` stayed
+pure `cs_`, making `add_to_cart` the only rung of the funnel mixing id spaces. The feature intended
+to repair the funnel would have broken it in the opposite direction.
+
+***A populated column that joins to nothing is worse than a null one.*** A null is visibly missing
+and gets fixed; a populated one looks like working data and gets reported. That column had been 100%
+populated and never once joinable.
+
+### What shipped
+
+**(a) `window.AdsConversions` lives in `js/gtag.js`, not a new file.** It must exist on every page a
+shopper can add from. `cart.js` is on 33 pages; a new script would need 33 new `<script>` tags, which
+is verbatim how ERR-194 happened — `cart-analytics.js` on THREE pages behind
+`typeof CartAnalytics !== 'undefined'`, an off-switch at every real entry point, 56 events in the
+metric's whole history. `gtag.js` is already on **38 of 43** pages, a measured strict superset of the
+33, and it is a HEAD script so it is defined before any body script runs. Enrolment is a **test**,
+not a convention.
+
+**(b) The label the hand-off left as `AW-XXXXXXXXX/YYYYYYYYYYYYYYY`** is
+`AW-18032498762/e3c8CI2D3dwcEMqwyJZD`, obtained from the live account — a second label on the tag id
+already configured site-wide, never a second tag. Event name **`conversion`**, not `add_to_cart`:
+that is the form Google's own generated snippet uses, and `send_to` + label is what routes the hit.
+It stays `primary_for_goal:false` / excluded from `conversions` — a funnel diagnostic is not
+something to bid on. A test pins the **purchase** label in `order-confirmation-page.js` against the
+registry so the two can never drift; that literal was deliberately **not** moved, because it is live
+money behind three tested guards.
+
+**(c) One branch fires it, and the mechanism is a single nullable.** `Cart.addItem` has four exits.
+The internal beacon fires on three — deliberately, since in all three the item really is in the
+shopper's cart. Google Ads fires on **one**: the 2xx. `serverConfirmed` is assigned on exactly that
+branch and is null on the others, so there is no second condition to keep in sync. This also
+survives the sharp edge that `API.request` returns an `{ok:false}` envelope only for a whitelist and
+**THROWS on a plain 400**, which lands in the transport-failure catch with the item still in the
+cart. Verified live: a rejected add fires **zero** conversions.
+
+**(d) One session id.** `cart-analytics.js` now asks `TrafficTracker.getIds()`. Resolved at **send**
+time, not in `init()`: `traffic-tracker.js` is injected by `gtag.js` via `createElement('script')`,
+and a dynamically-inserted script is **async whatever `.defer` says**, so it can land after
+`DOMContentLoaded` — resolving at init would have locked *some* page loads onto the fallback, a race
+that reads as flaky data rather than as a bug. The `cs_` id survives as a **named last resort** for
+DNT and `/admin`, where `window.TrafficTracker` deliberately does not exist: an honest unjoinable id
+beats a shared lie, and removing a fallback is a behaviour change, not a cleanup (ERR-158).
+
+**(e) `POST /api/cart/items?sid=&vid=`** so the backend's own row is not `session_id: null`. Query
+param, not header (BF-054); free here because a POST is never edge-cached, so the ERR-124/159
+cache-key hazard does not apply.
+
+**(f) Found while verifying, unrelated to the hand-off: the cold-cache cross-sell had been dead in
+production.** The backend returns a **root-relative** `frequently_bought_together_url`, which the
+storefront fetched as-is — resolving it against the storefront origin, where nothing proxies `/api/`:
+`https://www.inkcartridges.co.nz/api/products/<sku>/bought-together` -> **404** versus **200** on the
+API host. It failed silently: the failure path is a bare `return` and the caller is
+`.catch(() => {})`, so the "Customers also bought" modal simply never appeared and nothing was
+logged. Now resolved against `Config.API_URL`; an absolute URL from the backend is passed through
+untouched.
+
+### Measured, not assumed
+
+Verified in a real Chrome at `localhost:3000` (**3001 is outside the backend's CORS allowlist** and
+the page silently never boots — a known false green), against the production API:
+
+- `GET https://www.googleadservices.com/pagead/conversion/18032498762/?…label=e3c8CI2D3dwcEMqwyJZD&value=193.98&currency_code=NZD` -> **200**. The tag that had never fired, fired.
+- `POST /api/cart/items?sid=ts_mtpk4j50_62ircbix&vid=3d84ec45-…` -> **201**, params on the wire.
+- `TrafficTracker.getIds().session_id === CartAnalytics.currentSessionId()` -> both `ts_mtpk4j50_62ircbix`.
+- A rejected add (bogus product id, 404) -> **0** gtag calls.
+- The cross-sell fetch now hits `ink-backend-zaeq.onrender.com/api/products/GLC3333BK/bought-together` -> **200**.
+- Every conversion ping carried `gcs=G1-0` — **consent denied** — and Google answered 200 anyway.
+
+**Deliberately reported, not fixed: Google Ads and GA4 run consent-denied for every visitor.**
+`gtag.js` reads `localStorage['cookie_consent']` and **nothing in this codebase ever writes it**;
+there is no banner. A consent UI has legal and copy surface (NZ Privacy Act, the privacy page) and
+does not belong inside an analytics change decided by a developer — that is the site owner's call,
+and it was put to them. It does **not** suppress the pings (measured above), so it explains no gap
+in received requests; it does weaken attribution, which matters because the account was moved to
+Target CPA on measured CPA.
+
+**Also open, and worth more than this entry: the live Purchase conversion may have stopped firing.**
+Action 7558732273's `conversion_last_received_request_date_time` is frozen at 2026-09-03 16:11 while
+real paid orders landed 09-04 ($180.99) and 09-05 ($126.48). Not root-caused — its three dedupe
+guards read correctly, and inspection is exactly what cannot settle it. **An add-to-cart funnel is a
+diagnostic; the purchase tag is the money.**
+
+**Files**: `js/gtag.js` (`ADS` registry + `AdsConversions`) · `js/cart.js` (`addItem` captures the
+confirmed payload, `priorQty`, the Ads call; `_showCrossSellModal` URL host) · `js/api.js`
+(`addToCart` stamps the ids; `identifySearchUrl` -> `identifyUrl`, zero callers, one name one
+meaning) · `js/cart-analytics.js` (`trafficIds`/`currentSessionId`) · 41 HTML files restamped by
+`sed`, **never `npm run build`** with other sessions in flight.
+
+**Pinned by**: `tests/ads-add-to-cart-conversion-sep2026.test.js` (31) ·
+`tests/cart-analytics-session-identity-sep2026.test.js` (14) — **45 new assertions**. One brittle
+neighbour repaired rather than relaxed: `catalog-edge-cache-jul2026.test.js` §7 sliced a **fixed
+1400 characters** from `_showCrossSellModal` and reddened when a comment pushed
+`credentials: 'omit'` past it — *a slice whose length is a magic number tests the length of the
+function, not the claim.* Now brace-matched. Suite: **5,582 tests, 0 failing**. Mutation-checked:
+sourcing the value from `retail_price`, restoring `Number(null)`, moving the tag onto the
+transport-failure branch, or reverting the shared session id each redden exactly the expected tests.
+`npm run probe:add-to-cart` (read-only; `--write` for the response shape).
+
+**Backend**: **BF-058** (put `X-Session-Id`/`X-Visitor-Id` on the allow-list; one constant,
+`USE_ID_HEADERS`, flips the day it lands) · **BF-059** (`DELETE /api/cart/items/:id` answers
+`ok:true` / `"Item removed from cart"` / `removed:0` and leaves the line in place — reproduced twice
+on fresh guest sessions; the hand-off's §3 next step is to instrument exactly that endpoint, which
+would record removals that did not happen).
+
+**Lesson**: *the response you are handed is not the response the server sends.* Every one of the
+three defects that would have shipped came from believing a document over a measurement — the header
+that "works on all GET endpoints" and fails a preflight, the `quantity` that reads as a delta and is
+a total, the two columns reported as 100% populated that were populated in different alphabets.
+
+**Trap for next time**: a probe that reddens on a *known, filed, backend-side* fault is a probe that
+is red forever and therefore ignored — taking the next real hard failure with it. BF-059 is reported
+by `probe:add-to-cart` as a **loud named note**, not a failure. The line it must never cross is going
+quiet: "not available yet" is the sentence that hid ERR-131 for a month.
+
+---
+
 ## ERR-221 — The endpoint the frontend had been waiting a month for shipped, and the code written to greet it asked for 200 rows of a list that caps at 100 — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: The backend shipped per-business-account **contract pricing**

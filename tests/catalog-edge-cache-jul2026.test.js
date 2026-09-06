@@ -421,7 +421,20 @@ test('§6 no Cache-Control or Pragma request header is set on a catalog fetch', 
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§7 the cart cross-sell fetch omits credentials', () => {
-    const fn = stripLineComments(CART_SRC.slice(CART_SRC.indexOf('_showCrossSellModal'), CART_SRC.indexOf('_showCrossSellModal') + 1400));
+    // Brace-matched rather than a fixed 1400-character window. The window was
+    // measured against the function as it stood in Jul 2026; adding a comment
+    // above the fetch pushed `credentials: 'omit'` outside it and reddened this
+    // test while the code was still correct (Sep 2026, ERR-223). A slice whose
+    // length is a magic number tests the length of the function, not the claim.
+    const _cs = CART_SRC.indexOf('async _showCrossSellModal(payload)');
+    assert.ok(_cs > 0, 'located _showCrossSellModal');
+    let _d = 0, _i = CART_SRC.indexOf('{', _cs), _end = _i;
+    for (; _i < CART_SRC.length; _i++) {
+        if (CART_SRC[_i] === '{') _d++;
+        else if (CART_SRC[_i] === '}') { _d--; if (!_d) { _end = _i; break; } }
+    }
+    const fn = stripLineComments(CART_SRC.slice(_cs, _end + 1));
+    assert.match(fn, /fetch\(/, 'and it really contains the cross-sell fetch');
     assert.match(fn, /credentials:\s*'omit'/,
         'the frequently-bought-together URL is a public catalog read; unconditional cookies were the one FE fetch that could bypass the edge for every visitor');
     assert.ok(!/credentials:\s*'include'/.test(fn), "must not send cookies on a cached catalog read");

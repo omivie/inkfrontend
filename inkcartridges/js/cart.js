@@ -2814,6 +2814,12 @@ const Cart = {
         // resurrect a DIFFERENT item whose removal landed while this add was in flight.
         const hadExisting = !!existingItem;
         const addedQty = product.quantity || 1;
+        // What this line held BEFORE the add. The server's add-to-cart response
+        // reports the resulting LINE TOTAL, so this is what turns it back into
+        // the amount actually added for the Google Ads conversion. Read here,
+        // before the local mutation two lines down, because that mutation has
+        // already changed it by the time the server answers.
+        const priorQty = existingItem ? (existingItem.quantity || 0) : 0;
 
         if (existingItem) {
             existingItem.quantity += product.quantity || 1;
@@ -2860,6 +2866,10 @@ const Cart = {
 
         // Sync to server only for core items
         let crossSellPayload = null;
+        // The server's OWN numbers for this add, or null. Set on exactly one
+        // branch — the 2xx — and it is what licenses the Google Ads conversion
+        // below. See the branch table at the bottom of this function.
+        let serverConfirmed = null;
         if (isCore && typeof API !== 'undefined') {
             try {
                 const response = await API.addToCart(product.id, product.quantity || 1);
@@ -2888,6 +2898,16 @@ const Cart = {
                     // must not.)
                     return;
                 }
+
+                // THE SERVER ACCEPTED IT. Keep its payload.
+                //
+                // This response used to be read for exactly one field and thrown
+                // away. It carries the only trustworthy version of what was
+                // actually added — `price_snapshot` (what the shopper is charged,
+                // after volume/contract pricing), the echoed `quantity` (a stock
+                // clamp lands here, not in what we asked for) and `product.sku`.
+                // Shape verified against production 2026-09-06.
+                serverConfirmed = response.data || null;
 
                 // Capture cross-sell hint from add-to-cart response.
                 // Backend returns either `frequently_bought_together` (warm cache, inline)
@@ -2943,6 +2963,39 @@ const Cart = {
         // Track analytics
         this._trackAdd(product);
 
+        /* ────────────────────────────────────────────────────────────────────
+         * GOOGLE ADS add-to-cart conversion (ERR-223).
+         *
+         * THE TWO TRACKERS DO NOT FIRE ON THE SAME SET OF BRANCHES, AND THAT IS
+         * THE POINT. `_trackAdd` counts an add the SHOPPER CAN SEE. This counts
+         * only an add the SERVER CONFIRMED, because it reports into the account
+         * the owner bids real money from.
+         *
+         *   branch                                    _trackAdd   Google Ads
+         *   ---------------------------------------   ---------   ----------
+         *   server confirmed (2xx)                     yes         YES
+         *   server rejected (!response.ok, rolled back) no         no
+         *   transport failure (item kept locally)      yes         no
+         *   non-core (cross-sell, never POSTs)         yes         no
+         *
+         * The last two are the interesting ones. In both the item really is in
+         * the shopper's cart, so the funnel must count it — but neither produced
+         * a 2xx from POST /api/cart/items, so neither is something we can tell
+         * Google happened. `serverConfirmed` is null on both, which is the whole
+         * mechanism; there is no second condition to keep in sync.
+         *
+         * Sharp edge this survives: API.request returns an {ok:false} envelope
+         * only for a whitelist of codes and THROWS for a plain 400, so a thrown
+         * 400 lands in the transport-failure catch with the item still in the
+         * cart. `serverConfirmed` is null there too.
+         * ──────────────────────────────────────────────────────────────────── */
+        if (serverConfirmed && typeof AdsConversions !== 'undefined') {
+            AdsConversions.addToCart(serverConfirmed, {
+                priorQuantity: priorQty,
+                requestedQuantity: addedQty,
+            });
+        }
+
         // Show "Customers also bought" carousel from add-to-cart response.
         // Inline products render immediately; URL fallback fetches on idle so
         // the cart-confirmation flow isn't blocked.
@@ -2973,7 +3026,26 @@ const Cart = {
                 // Sending cookies unconditionally was the one catalog fetch in
                 // the codebase that could bypass the edge for every visitor,
                 // signed in or not. Nothing here needs an identity.
-                const res = await fetch(payload.url, { credentials: 'omit' });
+                //
+                // THE URL IS ROOT-RELATIVE AND THE API IS ON ANOTHER HOST.
+                // The backend answers `frequently_bought_together_url:
+                // "/api/products/<sku>/bought-together"`. Fetching that as-is
+                // resolves it against the STOREFRONT origin — and nothing
+                // proxies /api/ there:
+                //   https://www.inkcartridges.co.nz/api/products/…  -> 404
+                //   https://api.inkcartridges.co.nz/api/products/…  -> 200
+                // so every cold-cache cross-sell died on arrival, silently: the
+                // caller is `.catch(() => {})` and the failure is a `return`,
+                // so the modal simply never appeared and nothing was logged.
+                // Found in-browser 2026-09-06 while verifying ERR-223.
+                //
+                // An ABSOLUTE url from the backend is left alone — it is
+                // already addressed, and rewriting it would be us overriding a
+                // decision the server made.
+                const crossSellUrl = /^https?:\/\//i.test(payload.url)
+                    ? payload.url
+                    : (typeof Config !== 'undefined' && Config.API_URL ? Config.API_URL : '') + payload.url;
+                const res = await fetch(crossSellUrl, { credentials: 'omit' });
                 if (!res.ok) return;
                 const json = await res.json();
                 products = json?.data?.bought_together || json?.data?.products || [];

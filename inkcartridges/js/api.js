@@ -2483,8 +2483,14 @@ const API = {
         }
     },
 
-    /** As identifySearch, for a call site that has already built its URL string. */
-    identifySearchUrl(url) {
+    /**
+     * As identifySearch, for a call site that has already built its URL string.
+     *
+     * Not search-specific despite living beside it: `POST /api/cart/items` uses
+     * it too (see addToCart), because the backend's analyticsIdentity reads
+     * ?sid=/?vid= on any request, not only a GET search.
+     */
+    identifyUrl(url) {
         try {
             const tt = typeof window !== 'undefined' ? window.TrafficTracker : null;
             return (tt && typeof tt.identifyUrl === 'function') ? tt.identifyUrl(url) : url;
@@ -2638,7 +2644,27 @@ const API = {
      * @param {number} quantity - Quantity to add
      */
     async addToCart(productId, quantity = 1) {
-        return this.post('/api/cart/items', { product_id: productId, quantity });
+        /* ANALYTICS JOIN KEY on a MUTATION (add-to-cart-tracking §2 · ERR-223).
+         *
+         * POST /api/cart/items now writes its own `add_to_cart` row into
+         * `cart_analytics_events` server-side, which is the point: the API
+         * request that creates the cart line cannot be blocked, dropped on an
+         * SPA route change, or lost when a tab backgrounds mid-tap — all of
+         * which the beacon can be, and all of which are commoner on mobile.
+         * Without an id on this request that row lands with `session_id: null`
+         * and joins to nothing, which is the whole reason the funnel reads
+         * `add_to_cart 31` under `checkout_started 80`.
+         *
+         * ?sid=/?vid=, NOT the X-Session-Id header the hand-off asked for.
+         * Re-measured 2026-09-06: the header is still absent from
+         * Access-Control-Allow-Headers (BF-054), and the preflight answers 204
+         * either way without echoing what was requested — so it looks fine from
+         * curl and a BROWSER refuses to send the request at all. On this
+         * endpoint that would mean nobody could add to cart. The param costs
+         * nothing here: a POST is never edge-cached, so the ERR-124/159
+         * cache-key hazard that governs catalog GETs does not apply.
+         */
+        return this.post(this.identifyUrl('/api/cart/items'), { product_id: productId, quantity });
     },
 
     /**
