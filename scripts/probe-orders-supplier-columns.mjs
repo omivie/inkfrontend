@@ -21,7 +21,13 @@
  *     line items; and on 2026090102, the one order in the sample sourced from
  *     two suppliers, it reported `selected_supplier: "Augmento"` with
  *     `total_supplier_cost: 27.07` for an order whose lines are DSNZ + Augmento
- *     costing $97.58. One supplier's slice, presented as the order's whole.
+ *     costing $97.58 ex-GST. One supplier's slice, presented as the order's whole.
+ *
+ * ACCEPTANCE ROWS (the column prints INCL. GST since ERR-219 — ex-GST base in
+ * brackets, which is the figure that reconciles against the Profit column):
+ *     2026090305 -> DSNZ              / $161.15  ($140.13 ex-GST)
+ *     2026090304 -> Augmento          / $113.85  ($99.00  ex-GST)
+ *     2026090102 -> DSNZ, Augmento    / $112.22  ($97.58  ex-GST)  <- multi-supplier
  *
  * A test bans the identifier in the frontend. A test cannot notice the day the
  * backend fixes it — or the day the LINE fields regress and the banned field
@@ -131,9 +137,12 @@ async function main() {
   // ── Load the SHIPPED readers ────────────────────────────────────────────
   let S;
   let P;
+  let PROFIT;
   try {
     S = await import(path.join(SITE, 'js/admin/utils/sourcing.js'));
     P = await import(path.join(SITE, 'js/admin/utils/order-profit.js'));
+    // §5b needs the engine behind the order modal's "Paid to supplier" row.
+    PROFIT = await import(path.join(SITE, 'js/admin/utils/profitability.js'));
   } catch (e) {
     console.error(`\nCannot load the shipped readers: ${e.message}`);
     process.exit(2);
@@ -388,6 +397,51 @@ async function main() {
     bad('the two cost sums have drifted',
       `${drifted} of ${compared} orders disagree. The Supplier cost column and the Profit column are\n`
       + 'quoting different costs for the same order — one of them is wrong on screen right now.');
+  }
+
+  // ── §5b THE INCL-GST FIGURE THE COLUMN ACTUALLY PRINTS ──────────────────
+  // Since ERR-219 the cell renders costInclGst, not costExGst. §5 above pins
+  // the ex-GST base to the profit engine; this pins the printed figure to
+  // computeProfitBreakdown's supplierCostInclGst — the "Paid to supplier" row
+  // inside the order modal. An owner opens a row and reads the same number
+  // twice, so these two grossing up differently is a visible defect.
+  head('5b. The printed incl-GST figure must equal the modal\'s "Paid to supplier"');
+
+  let inclCompared = 0;
+  let inclDrifted = 0;
+  let unconverted = 0;
+  for (const { order } of details) {
+    const mine = S.orderSupplierCostFromDetail(order);
+    const theirs = P.orderProfitFromDetail(order);
+    if (mine.costInclGst == null || theirs.totalCostExGst == null) continue;
+    const b = theirs.breakdown
+      || PROFIT.computeProfitBreakdown(theirs.revenueExGst ?? theirs.totalRevenueExGst, theirs.totalCostExGst, {
+        customerPaidInclGst: order.total_amount ?? order.total ?? null,
+      });
+    if (!b || b.supplierCostInclGst == null) continue;
+    inclCompared++;
+    if (Math.abs(mine.costInclGst - b.supplierCostInclGst) >= CENT) {
+      inclDrifted++;
+      console.log(`      \x1b[90m${order.order_number}: cell ${mine.costInclGst.toFixed(2)} `
+        + `vs modal "Paid to supplier" ${b.supplierCostInclGst.toFixed(2)}\x1b[0m`);
+    }
+    // A cell still printing the ex-GST sum would sail through the check above
+    // if the modal were broken the same way. This is the positive control:
+    // on a non-zero cost the two bases MUST differ.
+    if (mine.costExGst > 0 && Math.abs(mine.costInclGst - mine.costExGst) < CENT) unconverted++;
+  }
+  if (inclCompared === 0) {
+    skip('incl-GST agreement', 'no sampled order had a stateable cost AND a stateable breakdown');
+  } else if (inclDrifted === 0 && unconverted === 0) {
+    ok('the printed cost equals the modal\'s "Paid to supplier"', `${inclCompared}/${inclCompared} orders, to the cent`);
+  } else if (unconverted > 0) {
+    bad('the cell is not grossed up at all',
+      `${unconverted} of ${inclCompared} orders have costInclGst === costExGst on a non-zero cost.\n`
+      + 'The column is labelled "incl. GST" and printing the ex-GST sum — a wrong basis on screen.');
+  } else {
+    bad('the printed cost disagrees with the order modal',
+      `${inclDrifted} of ${inclCompared} orders. The list and the modal are quoting different\n`
+      + 'supplier payments for the same order — one of them is wrong on screen right now.');
   }
 
   return report();

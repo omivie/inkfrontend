@@ -29,6 +29,13 @@
  * a plausible-looking default ("Single", "unknown", blank).
  */
 
+// The ONE GST rate the admin's money maths uses. Imported rather than spelled
+// `1.15` here on purpose: `computeProfitBreakdown` grosses the same supplier
+// cost up with this exact constant to produce the order modal's "Paid to
+// supplier" row, so sharing it is what makes the Orders list cell and that row
+// agree to the cent. See orderSupplierCostFromDetail below.
+import { GST_RATE } from './profitability.js';
+
 const MISSING = '—';
 
 // These helpers run in the browser (where `Security` is a global from
@@ -294,7 +301,22 @@ export function orderSuppliersFromDetail(order) {
 }
 
 /**
- * What an ORDER cost us: Σ (supplier_cost_snapshot × qty), EX-GST.
+ * What an ORDER cost us: Σ (supplier_cost_snapshot × qty), on BOTH GST bases.
+ *
+ * ── Two bases, and which is which ──────────────────────────────────────────
+ * `supplier_cost_snapshot` is stored EX-GST, so `costExGst` is the raw sum and
+ * `costInclGst` is that grossed up by GST_RATE — the real cash that left the
+ * bank, since we pay our suppliers the GST too (and reclaim it).
+ *
+ *   - **`costInclGst` is what the Orders list renders** (ERR-219). It is the
+ *     same basis as the Total column and equals `computeProfitBreakdown`'s
+ *     `supplierCostInclGst` to the cent, which is the modal's "Paid to
+ *     supplier" row — a positive control pins those two together.
+ *   - **`costExGst` is the reconciling figure.** Profit is GST-NEUTRAL (ex-GST
+ *     on the revenue side AND the cost side), so it is `costExGst`, never
+ *     `costInclGst`, that ties out against the Profit column beside it. Its own
+ *     positive control pins it to the Profit engine's `totalCostExGst`. Neither
+ *     field is derived from the other's consumer; both come off this one sum.
  *
  * ── Why this is not read off the Profit column's result ────────────────────
  * `orderProfitFromDetail()` already sums the same numbers into
@@ -312,7 +334,7 @@ export function orderSuppliersFromDetail(order) {
  * 0 is a real recorded cost (a giveaway, a sample), and `?? 0` here is the
  * whole ERR-063/068 bug class.
  *
- * @returns {{costExGst: number|null, missingCostCount: number, itemCount: number}}
+ * @returns {{costExGst: number|null, costInclGst: number|null, missingCostCount: number, itemCount: number}}
  */
 export function orderSupplierCostFromDetail(order) {
   const items = orderItems(order);
@@ -326,8 +348,15 @@ export function orderSupplierCostFromDetail(order) {
     costExGst += snapshot * qty;
   }
 
+  // ONE unknown test feeding BOTH fields. `null` first, gross up second — and
+  // the `== null` guard below is load-bearing, not defensive: `null * 1.15` is
+  // 0 in JS, so a bare multiply would turn every UNKNOWN order into a confident
+  // "$0.00" — the whole ERR-063/068 bug class, in the one column ERR-203 built
+  // four separate em-dash branches to keep honest.
+  const exGst = (missingCostCount || !items.length) ? null : costExGst;
   return {
-    costExGst: (missingCostCount || !items.length) ? null : costExGst,
+    costExGst: exGst,
+    costInclGst: exGst == null ? null : exGst * (1 + GST_RATE),
     missingCostCount,
     itemCount: items.length,
   };

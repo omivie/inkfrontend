@@ -41,6 +41,95 @@ describing the same incident.
 
 ---
 
+## ERR-219 — The Supplier cost column was quoting a number the owner never pays — **RESOLVED** (2026-09-06)
+
+**Date**: 2026-09-06 · **Context**: The owner sent a screenshot of `/admin#orders` and asked:
+*"instead of excl gst can you incl it to the supplier cost column"*.
+
+**This was a wrong-basis bug wearing an honest label.** The column shipped ex-GST under ERR-203
+and its header said so, so nothing was lying. But an owner scanning a column headed **SUPPLIER
+COST** reads "what I paid", and what they pay DSNZ includes the GST. `supplier_cost_snapshot` is
+stored ex-GST, so the cell was printing a figure that never appears on a supplier invoice and
+never leaves the bank. Every row was understated by 15%:
+
+```
+  order        was        now        (GST portion)
+  2026090501   $78.48  -> $90.25     ($11.77)
+  2026090305   $140.13 -> $161.15    ($21.02)
+  2026090304   $99.00  -> $113.85    ($14.85)
+  2026090303   $12.00  -> $13.80     ($1.80)
+  2026090102   $97.58  -> $112.22    ($14.64)   <- the multi-supplier order
+```
+
+**THE LABEL AND THE NUMBER ARE ONE FACT AND THEY MOVE IN ONE COMMIT.** `utils/gst-basis.js`
+already says a wrong basis on an admin money figure is worse than no basis — it is how a wrong
+GST return gets filed. So `gst: GST_EXCL → GST_INCL` and the `× 1.15` landed together, and the
+test that pinned the old label was updated in the same edit rather than deleted. A relabel
+without the arithmetic, or the arithmetic without the relabel, would each have been the actual
+bug this entry is about.
+
+**`null * 1.15` IS `0` IN JAVASCRIPT.** This is the whole trap. The obvious one-liner —
+`costInclGst: costExGst * (1 + GST_RATE)` — turns every UNKNOWN order into a confident
+**"$0.00"**, which is precisely the ERR-063/068 absence-as-zero class that ERR-203 built four
+separate em-dash branches to keep out of this exact column. The guard is load-bearing, not
+defensive:
+
+```js
+  const exGst = (missingCostCount || !items.length) ? null : costExGst;
+  return {
+    costExGst: exGst,
+    costInclGst: exGst == null ? null : exGst * (1 + GST_RATE),
+    ...
+```
+
+One UNKNOWN test feeding both fields, so the two bases can never disagree about whether the
+answer is known.
+
+**THE EX-GST FIGURE IS NOT DEAD — IT IS THE ONE THAT RECONCILES.** Profit is GST-NEUTRAL
+(ex-GST on the revenue side AND the cost side), so it is `costExGst`, never the printed figure,
+that ties out against the Profit column two cells to the left. Deleting it would have left two
+money columns visibly disagreeing with nothing on screen to explain why. So `costInclGst` was
+added as a **sibling field, never a replacement**: `costExGst` keeps its exact value, its
+existing positive control is untouched, and the ex-GST base plus the GST portion are named in
+the cell's tooltip.
+
+**TWO POSITIVE CONTROLS, TWO CLAIMS.** The pre-existing one pins `costExGst` to the profit
+engine's `totalCostExGst` (live **44/44**, to the cent) — that is what makes Profit reconcile.
+The new §5b pins the **printed** `costInclGst` to `computeProfitBreakdown`'s
+`supplierCostInclGst`, which is the *"Paid to supplier"* row inside the order modal (live
+**44/44**) — an owner opens a row and must read the same number twice. That is also why
+`GST_RATE` is imported from `profitability.js` rather than spelled `1.15` locally, and why
+`trend-math.js`'s same-named `orderCostInclGst()` was **not** reused despite the name: it
+returns `0` when no line carries a cost, which is the bug above.
+
+§5b carries its own positive control — on a non-zero cost the two bases MUST differ — because a
+cell still printing the ex-GST sum would otherwise sail through the agreement check if the modal
+were broken the same way.
+
+**Files**: `js/admin/utils/sourcing.js` (`orderSupplierCostFromDetail` gains `costInclGst`),
+`js/admin/pages/orders.js` (`supplierCostCellHtml` + the `_supplier_cost` column decl),
+`js/admin/app.js` (`APP_VERSION` bump — the lazily-imported page module's only cache story;
+static imports carry no `?v=`, ERR-124, and `npm run build` must not be run with other sessions
+in flight).
+
+**Scope held deliberately**: the order modal's per-line `Cost (excl. GST)` column and every
+Profit calculation stay ex-GST and were not touched.
+
+**Pinned by**: `tests/admin-orders-supplier-columns-sep2026.test.js` (34 tests — both positive
+controls, `costInclGst` asserted beside every `costExGst` claim, and a cell contract that fails
+if the tooltip stops naming both bases) · `npm run probe:orders-supplier` §5b (READ-ONLY,
+17 checks). Mutation-checked: reverting the gross-up turns exactly 2 tests red.
+
+**NOT VERIFIED IN-BROWSER**: another Claude session held the Playwright profile for the whole of
+this work, so the on-screen header and layout were never looked at. The values above come from
+the shipped code and the live probe, not from a rendered page. Next session in this area: open
+`#orders` as owner at **port 3000** (3001 is outside the backend's CORS allowlist and the page
+silently never boots — a false green this probe was burned by once) and confirm the header reads
+`SUPPLIER COST / incl. GST`, the cancelled row still shows its em-dash rather than `$0.00`, and
+13 columns still fit (1216px at a 1512px viewport before this change).
+
+---
+
 ## ERR-218 — Buying four cartridges took four clicks and eight requests, and one of the Add buttons had never worked at all — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: The owner sent a screenshot of the Brother LC3317 shop grid.

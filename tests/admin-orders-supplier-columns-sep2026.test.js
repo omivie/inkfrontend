@@ -53,9 +53,13 @@ const CSS = read('inkcartridges/css/admin.css');
 // Both modules are ESM; this file is CJS. Load them once, lazily.
 let S;
 let P;
+let PROFIT;
 test.before(async () => {
   S = await import(path.join(SITE, 'js/admin/utils/sourcing.js'));
   P = await import(path.join(SITE, 'js/admin/utils/order-profit.js'));
+  // The engine behind the order modal's "Paid to supplier" row — the figure the
+  // list cell must now match to the cent (ERR-219).
+  PROFIT = await import(path.join(SITE, 'js/admin/utils/profitability.js'));
 });
 
 /** A line with everything recorded. */
@@ -74,6 +78,9 @@ test('a line with no recorded cost makes the ORDER total UNKNOWN, never $0', () 
     items: [line(), line({ supplier_cost_snapshot: null })],
   });
   assert.equal(r.costExGst, null, 'a partial cost total is not a cost total');
+  // `null * 1.15` is 0 in JS. An UNKNOWN that grosses up into a confident
+  // "$0.00" is the exact bug this column's four em-dash branches exist to stop.
+  assert.equal(r.costInclGst, null, 'UNKNOWN grossed up is still UNKNOWN, never $0.00');
   assert.equal(r.missingCostCount, 1);
   assert.equal(r.itemCount, 2);
 });
@@ -82,12 +89,14 @@ test('supplier_cost_snapshot undefined counts as missing too, not as 0', () => {
   const bare = { sku: 'X', qty: 1, suppliers: [{ name: 'DSNZ' }] };
   const r = S.orderSupplierCostFromDetail({ items: [bare] });
   assert.equal(r.costExGst, null);
+  assert.equal(r.costInclGst, null);
   assert.equal(r.missingCostCount, 1);
 });
 
 test('a snapshot of a GENUINE 0 is a real recorded cost — a giveaway costs $0', () => {
   const r = S.orderSupplierCostFromDetail({ items: [line({ supplier_cost_snapshot: 0, qty: 3 })] });
   assert.equal(r.costExGst, 0, '`== null` and nothing looser — `?? 0` here is the ERR-063 bug class');
+  assert.equal(r.costInclGst, 0, 'a genuine $0 cost is $0 on either basis — GST on nothing is nothing');
   assert.equal(r.missingCostCount, 0);
 });
 
@@ -95,15 +104,19 @@ test('an order with no line items is UNKNOWN, not a $0.00 order', () => {
   // The sum over nothing is 0, and "$0.00" would be a claim we never made.
   const r = S.orderSupplierCostFromDetail({ items: [] });
   assert.equal(r.costExGst, null);
+  assert.equal(r.costInclGst, null);
   assert.equal(r.itemCount, 0);
   assert.equal(r.missingCostCount, 0, 'no lines is not the same as lines with no cost');
 });
 
-test('cost is summed per unit × quantity, ex-GST', () => {
+test('cost is summed per unit × quantity, ex-GST — and grossed up for the incl-GST twin', () => {
   const r = S.orderSupplierCostFromDetail({
     items: [line({ supplier_cost_snapshot: 10, qty: 2 }), line({ supplier_cost_snapshot: 5.5, qty: 4 })],
   });
   assert.equal(r.costExGst, 42);
+  // 42 × 1.15. The list renders THIS one (ERR-219); costExGst stays because it
+  // is what reconciles against Profit.
+  assert.ok(Math.abs(r.costInclGst - 48.3) < 1e-9, `expected 48.3, got ${r.costInclGst}`);
 });
 
 test('quantity is read from qty OR quantity, whichever the payload spells', () => {
@@ -111,6 +124,7 @@ test('quantity is read from qty OR quantity, whichever the payload spells', () =
   const b = S.orderSupplierCostFromDetail({ items: [{ supplier_cost_snapshot: 7, quantity: 3 }] });
   assert.equal(a.costExGst, 21);
   assert.equal(b.costExGst, 21);
+  assert.ok(Math.abs(a.costInclGst - b.costInclGst) < 1e-9);
 });
 
 test('order_items is accepted as well as items', () => {
@@ -176,6 +190,7 @@ test('a junk order returns the empty shape rather than throwing', () => {
   for (const junk of [null, undefined, 'nope', 42, {}]) {
     assert.equal(S.orderSuppliersFromDetail(junk).itemCount, 0);
     assert.equal(S.orderSupplierCostFromDetail(junk).costExGst, null);
+    assert.equal(S.orderSupplierCostFromDetail(junk).costInclGst, null);
   }
 });
 
@@ -207,6 +222,38 @@ test('and both go UNKNOWN together when a line has no cost', () => {
   const order = { status: 'paid', total_amount: 100, items: [line(), line({ supplier_cost_snapshot: null })] };
   assert.equal(S.orderSupplierCostFromDetail(order).costExGst, null);
   assert.equal(P.orderProfitFromDetail(order).totalCostExGst, null);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3b. SECOND POSITIVE CONTROL: the cell agrees with the modal's own gross-up
+//
+// Two controls, two claims. The one above pins costExGst to the Profit engine —
+// that is what makes the Profit column reconcile. This one pins costInclGst to
+// `computeProfitBreakdown`'s supplierCostInclGst, which is the "Paid to
+// supplier" row inside the order modal. Since ERR-219 the list prints the
+// incl-GST figure, so an owner can open a row and read the same number twice;
+// if these two ever gross up differently, that is the symptom.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('the incl-GST cell equals the modal\'s "Paid to supplier" row, to the cent', () => {
+  const order = {
+    status: 'paid', total_amount: 223.97,
+    items: [
+      line({ supplier_cost_snapshot: 30.77, qty: 2, sell_price: 43.03 }),
+      line({ supplier_cost_snapshot: 12.5, qty: 3, sell_price: 20 }),
+    ],
+  };
+  const mine = S.orderSupplierCostFromDetail(order);
+  const profit = P.orderProfitFromDetail(order);
+  const b = PROFIT.computeProfitBreakdown(profit.totalRevenueExGst ?? profit.revenueExGst, profit.totalCostExGst, {
+    customerPaidInclGst: 223.97,
+  });
+  assert.ok(b, 'positive control: the breakdown must be stateable here, or this test proves nothing');
+  assert.ok(Math.abs(mine.costInclGst - b.supplierCostInclGst) < 0.005,
+    `list cell ${mine.costInclGst} vs modal "Paid to supplier" ${b.supplierCostInclGst}`);
+  // ...and it is genuinely bigger than the ex-GST base, so a silently-unconverted
+  // value cannot pass the assertion above by accident.
+  assert.ok(mine.costInclGst > mine.costExGst, 'incl-GST must exceed ex-GST on a non-zero cost');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -266,10 +313,32 @@ test('neither column is sortable — the values are not on the list payload at a
 
 test('the money column states its GST basis and the name column does not borrow one', () => {
   const costBlock = ORDERS.slice(ORDERS.indexOf("key: '_supplier_cost'"), ORDERS.indexOf("key: '_actions'"));
-  assert.match(costBlock, /gst:\s*GST_EXCL/,
+  // GST_INCL since ERR-219 — deliberately changed with the arithmetic, in the
+  // same commit. The label and the number are one fact; a stale basis on an
+  // admin money figure is how a wrong GST return gets filed (utils/gst-basis.js).
+  assert.match(costBlock, /gst:\s*GST_INCL/,
     'a money column with a blank gst slot means "basis undocumented" (utils/gst-basis.js)');
+  assert.ok(!/gst:\s*GST_EXCL/.test(costBlock),
+    'the old ex-GST basis must be gone, not sitting beside the new one');
   const nameBlock = ORDERS.slice(ORDERS.indexOf("key: '_supplier',"), ORDERS.indexOf("key: '_supplier_cost'"));
   assert.ok(!/gst:/.test(nameBlock), 'a supplier NAME is not money and must not enter the money vocabulary');
+});
+
+test('the cell renders the incl-GST field and its tooltip still names the ex-GST base', () => {
+  // The ex-GST figure is what reconciles against Profit (net of GST on both
+  // sides). If a later tidy-up drops it from the tooltip, the two money columns
+  // look like they disagree with nothing on screen to explain why — so the
+  // reconciling number has to survive somewhere, and this is where.
+  const fn = ORDERS.slice(ORDERS.indexOf('function supplierCostCellHtml'),
+    ORDERS.indexOf('function patchSourcingCells'));
+  assert.ok(/formatPrice\(costInclGst\)/.test(fn),
+    'the cell must print the incl-GST figure, not the raw ex-GST sum');
+  assert.ok(!/\+\s*formatPrice\(costExGst\)\s*$/m.test(fn),
+    'the ex-GST sum must not be what lands in the cell');
+  assert.ok(/ex-GST/.test(fn) && /incl\. GST/.test(fn),
+    'the tooltip must name BOTH bases — the one shown and the one that reconciles');
+  assert.ok(/costInclGst - costExGst/.test(fn),
+    'the GST portion is stated as the difference, never re-derived from a second constant');
 });
 
 test('both columns are owner-only, via the same named set the fan-out gates on', () => {

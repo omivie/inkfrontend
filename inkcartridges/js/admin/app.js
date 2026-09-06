@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.05-analytics-section-collapsible-nav-groups';
+const APP_VERSION = '2026.09.06-orders-supplier-cost-incl-gst';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

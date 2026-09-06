@@ -331,7 +331,13 @@ function supplierNameCellHtml(row, info) {
 }
 
 /**
- * What the order cost us, ex-GST.
+ * What the order cost us, INCL. GST — the cash that actually left the bank.
+ *
+ * Was ex-GST when the column shipped (ERR-203) and is incl-GST since ERR-219:
+ * the owner reads this column as "what I paid", and what they paid the supplier
+ * includes the GST. The ex-GST base is not lost — it is named in the tooltip,
+ * because it, not this figure, is what reconciles against the Profit column
+ * beside it (profit is GST-neutral: ex-GST on both sides).
  *
  * UNKNOWN and $0 are different answers and are rendered differently. The
  * em-dash branches each say WHY in their own words — a cell that reads "—" for
@@ -352,7 +358,7 @@ function supplierCostCellHtml(row, info) {
     return `${open('order-supplier-cost--failed', 'Cost lookup failed — reload to retry. This is NOT $0.')}${MISSING}</span>`;
   }
 
-  const { costExGst, missingCostCount, itemCount } = info.cost;
+  const { costExGst, costInclGst, missingCostCount, itemCount } = info.cost;
   if (!itemCount) {
     return `${open('order-supplier-cost--none', 'No line items recorded on this order, so there is nothing to cost.')}${MISSING}</span>`;
   }
@@ -363,8 +369,16 @@ function supplierCostCellHtml(row, info) {
     return `${open('order-supplier-cost--none', tip)}${MISSING}</span>`;
   }
 
-  return `${open('', 'What we paid our suppliers for this order, ex-GST: the sum of each line\'s cost snapshot × quantity. Excludes freight, fees and the order discount — it is a cost, not a margin.')}`
-    + formatPrice(costExGst)
+  // Both bases in the tooltip. The ex-GST figure is the one that ties out
+  // against Profit, so dropping it would leave the two money columns looking
+  // like they disagree with no way to see why.
+  const tip = `What we paid our suppliers for this order, incl. GST: `
+    + `${formatPrice(costExGst)} ex-GST + ${formatPrice(costInclGst - costExGst)} GST. `
+    + `The sum of each line's cost snapshot × quantity. Excludes freight, fees and `
+    + `the order discount — it is a cost, not a margin. The ex-GST figure is the one `
+    + `that reconciles against Profit, which is net of GST on both sides.`;
+  return `${open('', tip)}`
+    + formatPrice(costInclGst)
     + `</span>`;
 }
 
@@ -1230,11 +1244,16 @@ const COLUMNS = [
     render: (r) => supplierNameCellHtml(r, _sourcingCache.get(r.id)),
   },
   {
-    // What we PAID for it, ex-GST — deliberately a different basis from the
-    // Total beside it (incl. GST) and from Profit (net of GST), which is
-    // precisely why the header states it. A money column with a blank `gst`
-    // slot means "basis undocumented", and this one is documented.
-    key: '_supplier_cost', label: 'Supplier cost', gst: GST_EXCL,
+    // What we PAID for it, INCL. GST — the same basis as the Total beside it
+    // since ERR-219 (it was ex-GST when the column shipped under ERR-203).
+    // The header still has to state a basis, because Profit two columns over is
+    // `net of GST` and this one is not: profit nets the GST out on both sides,
+    // this figure is gross cash. A money column with a blank `gst` slot means
+    // "basis undocumented" (utils/gst-basis.js) — this one is documented, and
+    // the label moved in the same commit as the arithmetic. They never travel
+    // apart: a stale basis on an admin money figure is how a wrong GST return
+    // gets filed.
+    key: '_supplier_cost', label: 'Supplier cost', gst: GST_INCL,
     render: (r) => supplierCostCellHtml(r, _sourcingCache.get(r.id)),
     align: 'right',
   },
