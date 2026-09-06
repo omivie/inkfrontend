@@ -244,6 +244,16 @@ test('the table footer says "of many" and keeps Next alive when the total is unk
     'Next must stay clickable while more rows may exist — a disabled Next over an unknown '
     + 'total is how the catalogue looked 100 products long');
 
+  // Walking off the end of an uncountable list must say so, not print a range
+  // over an empty table.
+  const empty = render.call({
+    pagination: { total: null, totalUnknown: true, hasMore: false, page: 4, limit: 100 },
+    data: [],
+    config: {},
+  });
+  assert.match(empty, /No further products/);
+  assert.ok(!/of many/.test(empty));
+
   // Positive control: a known total still behaves exactly as it always has.
   const known = render.call({
     pagination: { total: 250, page: 3, limit: 100 },

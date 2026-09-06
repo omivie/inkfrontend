@@ -179,13 +179,20 @@ class DataTable {
     // passing totalUnknown, and then only `hasMore` decides whether Next lives.
     const unknown = !!p.totalUnknown;
     const totalPages = unknown ? (p.hasMore ? page + 1 : page) : (Math.ceil(total / limit) || 1);
+    const shown = this.data ? this.data.length : 0;
     const from = ((page - 1) * limit) + 1;
-    const to = unknown ? from + Math.max(0, (this.data ? this.data.length : limit) - 1) : Math.min(page * limit, total);
+    const to = unknown ? from + Math.max(0, shown - 1) : Math.min(page * limit, total);
 
     let html = '<div class="admin-pagination">';
-    html += unknown
-      ? `<span class="admin-pagination__info" title="This view's data source does not report a total.">${from}\u2013${to} of many</span>`
-      : `<span class="admin-pagination__info">${from}\u2013${to} of ${total}</span>`;
+    if (unknown) {
+      // An unknown total plus an empty page means we walked off the end — say
+      // that, rather than "301-301 of many" over a table with nothing in it.
+      html += shown
+        ? `<span class="admin-pagination__info" title="This view's data source does not report a total.">${from}\u2013${to} of many</span>`
+        : '<span class="admin-pagination__info">No further products</span>';
+    } else {
+      html += `<span class="admin-pagination__info">${from}\u2013${to} of ${total}</span>`;
+    }
     html += '<div class="admin-pagination__btns">';
     html += `<button class="admin-pagination__btn" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>\u2190 Prev</button>`;
 
