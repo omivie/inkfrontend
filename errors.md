@@ -41,6 +41,105 @@ describing the same incident.
 
 ---
 
+## ERR-225 — Our own CSP blocked the PayPal SDK on production, and the page logged "PayPal button initialized successfully" while it did — **RESOLVED** (2026-09-07)
+
+**Date**: 2026-09-07 · **Context**: Found while walking the mobile checkout funnel on the LIVE site
+after ERR-224, chasing an all-time figure of **0 mobile checkouts completed from 46
+`checkout_started`** (desktop: 17 of 340). Verbatim from production, at `/payment`:
+
+```
+Executing inline script violates the following Content Security Policy directive
+'script-src 'self' … https://www.paypal.com https://*.paypal.com …
+ 'sha256-0JmmTUETUXDHkK3pNmvl/MoDE5MN0DDwFCnqKmhR2Go=''.
+Either the 'unsafe-inline' keyword, a hash
+('sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk='), or a nonce is required
+to enable inline execution. The action has been blocked.
+  @ https://www.paypal.com/sdk/js?client-id=…
+```
+
+**AN ALLOWED ORIGIN IS NOT AN ALLOWED SCRIPT.** `script-src` listed
+`https://www.paypal.com`, `https://*.paypal.com` and `https://*.paypalobjects.com`, so the SDK
+**downloaded perfectly**. It then executed an **inline** script, which the same directive forbids
+with only one hash allowlisted — and that hash is the site's own, not PayPal's. `'unsafe-inline'`
+appears in `style-src` and deliberately nowhere else.
+
+**The failure was silent in the worst possible way: `payment-page.js` logged *"PayPal button
+initialized successfully"*.** The SDK's own initialisation resolved; what failed came after. So an
+entire payment method was dead at the last step of checkout, on every device, while the page
+reported success and nothing in the funnel data could distinguish it from a shopper changing their
+mind.
+
+### What shipped
+
+`inkcartridges/vercel.json` gains `'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk='` in
+`script-src`. **Both hashes are kept** — two different inline scripts, two hashes; swapping one for
+the other trades one silent breakage for another. `'unsafe-inline'` was **not** used: it would
+unblock PayPal and every other injected script on the one page where that matters most.
+
+### A hash is a fragile fix, and it is treated as one
+
+The hash covers a script **PayPal controls**. The day they ship an SDK whose inline script differs
+by a byte, the hash stops matching and PayPal breaks again — the same silent way. So
+`npm run probe:payment-csp` checks the two things that are checkable and **names the one that is
+not**:
+
+- **§1** the DEPLOYED header still carries the hash — catching drift between this repo and
+  production, which is a real state: the probe went red on its first run precisely because the fix
+  was committed but not yet deployed.
+- **§2** PayPal's SDK body still hashes to what it did when the fix was verified in a browser. A
+  change is a **NOTE, not a failure** — PayPal shipping an SDK is normal — but it is the one event
+  that can silently invalidate the fix, so it is reported rather than left to be noticed by accident.
+- **§3** says plainly that **the hash itself is unverified by any run**. The blocked script is built
+  by the SDK at runtime and is not in its body (measured: ~100KB compressed / 394,801 bytes
+  decompressed, containing no `<script` at all), so it cannot be recomputed outside a browser. A
+  green §1 means the CSP still **allows** the hash we recorded, not that PayPal still **produces**
+  it. *A skip is not a pass.*
+
+**The probe's own first baseline was wrong, and that is the lesson worth keeping.** It recorded a
+**curl**-derived hash of the *compressed* body (99,898 bytes) and compared it against **fetch**'s
+*decompressed* body (394,801) — so it could never match and it cried wolf on its first run. ***A
+baseline computed by a different tool than the checker is not a baseline***; it is a guaranteed false
+alarm, and a probe that always warns is a probe everyone learns to ignore. Re-derived with the
+probe's own fetch and verified stable across three consecutive requests.
+
+### Measured, but NOT concluded — the guest payment gate
+
+`payment-page.js:658` hard-gates the Pay button for guests:
+
+```js
+const turnstileOk = !this.isGuestCheckout || !!this.turnstileToken;
+const canPay = this.paymentElementReady && this.paymentAuthorized && turnstileOk;
+```
+
+No Turnstile token, no payment, ever. On production at 390×844 the widget rendered **zero iframes**
+and the button stayed disabled — which looks exactly like a root cause for 0-of-46.
+
+**That conclusion is NOT drawn, because the browser doing the measuring was automated and Turnstile
+exists to refuse precisely that.** It loaded (sitekey `0x4AAAAAACoGsire3IW5cBB9`, challenge-platform
+requests firing) and ran its anti-automation fingerprinting; withholding a token from Playwright is
+correct behaviour, not evidence of a defect. **Settling it needs a human on a real phone**, and the
+owner has decided to wait for organic mobile traffic instead — which is a reasonable call with one
+named blind spot recorded here: *if Turnstile is the blocker, the "first mobile `checkout_completed`"
+trigger can never fire, and its silence will look like the same absence of demand it is meant to
+measure.*
+
+### Also seen, not fixed
+
+`POST /api/checkout/guest-prefill` answers **400 Validation failed** twice on every guest checkout
+load in production (`api.inkcartridges.co.nz`). Non-fatal — the page continues — but it fires for
+every guest, on both hosts, and is reported rather than absorbed.
+
+**Files**: `inkcartridges/vercel.json` · `scripts/probe-payment-csp.mjs` (new).
+**Pinned by**: `tests/payment-csp-paypal-sep2026.test.js` (8) — the hash is present, the original
+hash survived beside it, the paypal **origins** survive too (the hash permits execution, the origin
+permits the download, and they are not substitutes), `'unsafe-inline'` is absent, and Stripe and
+Turnstile both remain allowed, because a CSP edit that breaks either takes all payment with it.
+`npm run probe:payment-csp`.
+**Lesson**: *an allowed origin is not an allowed script.* A CSP can let a vendor's file load and
+still refuse to let it run, and the vendor's own success log will not know the difference.
+
+---
+
 ## ERR-224 — The mobile checkout form was four screens below the fold, because a `flex-basis` written for a row became a height in a column — **RESOLVED** (2026-09-07)
 
 **Date**: 2026-09-07 · **Context**: Mobile converts at **1.65%** against desktop's **9.35%**, and
