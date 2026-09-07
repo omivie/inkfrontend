@@ -45,7 +45,8 @@
     "probe:qty-breaks": "node scripts/probe-qty-breaks.mjs",
     "probe:admin-products": "node scripts/probe-admin-products-filters.mjs",
     "probe:add-to-cart": "node scripts/probe-add-to-cart-tracking.mjs",
-    "probe:payment-csp": "node scripts/probe-payment-csp.mjs"
+    "probe:payment-csp": "node scripts/probe-payment-csp.mjs",
+    "probe:search-packs": "node scripts/probe-search-value-pack-ranking.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

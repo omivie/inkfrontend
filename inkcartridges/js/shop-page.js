@@ -30,31 +30,20 @@
     // back to what the dropdown promised. Pinned by
     // tests/search-results-parity-may2026.test.js.
 
-    // Lowercase + strip every non-alphanumeric char so "CT-351101", "CL511"
-    // and "165.11" all compare on their bare token. Pure (no external refs)
-    // so it stays unit-testable via the window hook below.
-    function normalizeForMatch(s) {
-        return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
-    }
-
-    // True when `product` literally contains what the user typed — the same
-    // notion of "match" the dropdown uses. Single-token queries must appear
-    // as a contiguous substring of name+sku; multi-token queries must have
-    // every token (length >= 2) present somewhere. This is the gate that
-    // separates a genuine typo ("cannon" — no literal hit anywhere in the
-    // catalog) from a mis-autocorrected valid query ("511" — hits CL511).
-    function productMatchesQuery(product, query) {
-        if (!product) return false;
-        const q = normalizeForMatch(query);
-        if (!q) return false;
-        const hay = normalizeForMatch((product.name || '') + ' ' + (product.sku || ''));
-        if (!hay) return false;
-        if (hay.includes(q)) return true;
-        const tokens = String(query == null ? '' : query)
-            .toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 2);
-        if (tokens.length > 1) return tokens.every(t => hay.includes(t));
-        return false;
-    }
+    // MOVED TO utils.js AS `SearchMatch` (ERR-226). These were private to this
+    // file, which loads on ONE page; the header typeahead runs on 34 and had no
+    // did-you-mean rule at all, so the two surfaces disagreed on the same
+    // response. `utils.js` is the only home loaded everywhere both callers run.
+    //
+    // Do NOT re-add local copies. A second copy is a second vocabulary, and a
+    // second vocabulary drifts — that is ERR-150/160, and a test now pins that
+    // neither this file nor search.js carries one.
+    //
+    // Called at CALL time only: every script here is `defer`, so shop-page.js
+    // executes before utils.js and `SearchMatch` does not exist yet at IIFE
+    // evaluation. Reference it inside functions, never at module scope.
+    const normalizeForMatch = (s) => SearchMatch.normalizeForMatch(s);
+    const productMatchesQuery = (product, query) => SearchMatch.productMatchesQuery(product, query);
 
     // Adapt a /suggest payload row to the product shape the card renderer
     // expects. Mirrors search.js's adaptForCard — /suggest sends `price` +

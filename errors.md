@@ -41,6 +41,186 @@ describing the same incident.
 
 ---
 
+## ERR-226 — The dropdown and the results page read the same response and gave the customer two different answers — **RESOLVED** (2026-09-07)
+
+**Symptom.** Type `lc` in the header search box and the dropdown offers *"Did you mean LC3333KCMY
+Compatible Ink Cartridge for Brother LC3333 KCMY 4-Pack?"* — directly above a grid row containing
+that very cartridge. Press Enter, and the results page shows no such banner at all. Same query,
+same `/api/search/smart` response, two different answers.
+
+**Cause.** The rule existed. It just lived on the wrong page.
+
+`shop-page.js` has a `did_you_mean` sanity gate: if any returned product *literally contains* what
+the customer typed, the search was honoured, so drop the correction banner rather than claim to
+have swapped a query we actually ran. It is implemented by a private function, `productMatchesQuery`.
+
+`shop-page.js` is loaded on **exactly one page** — `html/shop.html`. `search.js`, which draws the
+header typeahead, is loaded on **34**. It had no such rule at all, because the rule was not
+reachable from there.
+
+**The fix that would have been wrong.** `shop-page.js` re-exports its internals as
+`window._searchParityHelpers` for tests. Reaching for that from `search.js` —
+`window._searchParityHelpers?.productMatchesQuery ? … : fallback` — would have run its fallback on
+**33 of the 34 pages**, and only ever taken the real branch on the one page that already had the
+rule. Measured in the browser on `html/cart.html`: `window._searchParityHelpers` is `undefined`
+there. That is ERR-167 exactly — when the fallback is the only branch that ever runs, the guard IS
+the bug.
+
+**Fix.** `normalizeForMatch` + `productMatchesQuery` moved into `utils.js` as a `SearchMatch`
+module, alongside `ProductSort` / `BrandSource` / `SeriesCodes`, plus one new function
+`shouldShowCorrection(suggestion, products, query)` that states the rule once. `utils.js` is loaded
+on 41 pages — a strict superset of search.js's 34, and a test now asserts that difference is empty.
+`shop-page.js` and `search.js` both call it; neither keeps a copy.
+
+Verified live in both directions before it was written, because a suppression that only ever
+suppresses passes for the wrong reason:
+
+| query | rows literally match? | before | after |
+|---|---|---|---|
+| `lc` | yes | "Did you mean LC3333KCMY…" | suppressed |
+| `tn` | yes | "Did you mean TN3290BK…" | suppressed |
+| `cannon` | no | "Did you mean Canon" | **still shown** |
+| `brothr` | no | "Did you mean Brother" | **still shown** |
+| `epsn` | no | "Did you mean Epson" | **still shown** |
+
+**Three traps inside this one small move.**
+
+1. **`defer` is document order, and `shop.html` lists `shop-page.js` BEFORE `utils.js`.** So
+   `SearchMatch` does not exist yet when shop-page.js's IIFE evaluates. Its
+   `window._searchParityHelpers` re-export therefore goes through wrappers
+   (`(s) => SearchMatch.normalizeForMatch(s)`), never a captured reference. Capturing it is a
+   `ReferenceError` at load. Same TDZ hazard already documented at `familyKey`.
+2. **`matched_printer` was nearly folded into the shared rule.** It is a call-site concern and the
+   two surfaces apply it differently — the dropdown's zero-results branch shows a suggestion even
+   when a printer matched but its canonical URL could not be built. Folding it in silently changed
+   that branch. One question, one function.
+3. **A test that reads a comment as if it were behaviour.** The first version of the "no
+   `window.SearchMatch?.` guard" assertion matched `search.js`'s own comment *explaining* the guard
+   it refuses to use, and failed. Both that test and the probe-has-no-write-path test now strip
+   comments before checking. ERR-216 in miniature.
+
+**Files.** `inkcartridges/js/utils.js` (new `SearchMatch`), `js/shop-page.js`, `js/search.js`.
+**Test.** `tests/search-value-pack-ranking-sep2026.test.js` §3–§4.
+
+---
+
+## ERR-222 — The search dropdown recommended a product it had ranked 239th out of 367, and the row it painted was two cards short — **RESOLVED (backend, BF-057)** (2026-09-07)
+
+**Symptom.** Reported as *"the search bar looks lop-sided"*. Typing `lc` painted an LC3333 grid row
+of four cards — BK, C, M, Y — in a row designed for six. The CMY 3-pack and the KCMY 4-pack were
+missing. The dropdown was simultaneously offering *"Did you mean LC3333KCMY … 4-Pack?"*, naming one
+of the two cards it was not showing.
+
+**Cause (backend).** `sortByRelevance` used `packRank(p.pack_type)` as its **primary** sort key, so
+the comparator partitioned the entire pool before `relevance_score` or `match_tier` was ever
+consulted. For `q=lc`: all 238 singles at ranks 1–238, then all 129 value packs at 239–367.
+`CLC3333KCMY` scored 210 with `match_tier: 2` and sat below a single scoring 65 at `match_tier: 3`.
+
+The dropdown requests 40 rows and **never paginates**. So every multi-pack in the catalogue was
+invisible in typeahead for any query returning more than 40 rows — which is every query while the
+customer is still typing. Multi-packs are the highest-value SKUs on the site. `q=tn` had the same
+shape (212 rows, 66 packs, first pack at rank 147). `q=lc3333` looked fine only because 12 < 40.
+
+The investigation and brief were done by a peer session
+(`search-value-pack-ranking-backend-brief-sep2026.md`, filed as **BF-057**); this entry is the
+verification and the frontend half.
+
+**Backend fix, verified live 2026-09-07.** `pack_type` is no longer a sort key at any level.
+Results are bucketed into `(brand, seriesBase, yieldTier)` families, families are ranked by their
+best-scoring member, and a family's rows are emitted together.
+
+| | before | after |
+|---|---|---|
+| `q=lc` packs in top 40 | **0** | **12** |
+| `q=lc` first pack rank | 239 | **9** |
+| `q=tn` packs in top 40 | **0** | **10** |
+| `q=lc3333` rows | 12 | 12 (unchanged) |
+
+In a real browser the dropdown now paints **two** complete six-card rows — Compatible
+`BK C M Y CMY KCMY` and Genuine the same — in the 7-column grid. That had been predicted in the
+brief and never actually observed until now.
+
+**The acceptance criterion we withdrew, and why that matters more than the fix.** The brief's
+criterion 2 asked that no row with a worse `(match_tier, relevance_score)` outrank a row with a
+better one, across the whole result set. **That is unsatisfiable alongside family cohesion**, and
+cohesion is what we actually wanted: a family ranked by its best member necessarily carries its
+weaker members above stronger rows from lower-ranked families. Live, it fails by 37–84 inversions
+per query.
+
+The narrower sub-clause — *no `match_tier:3` single outranks a `match_tier:2` value_pack* — is
+**also** false under cohesion, and this was caught only when the new probe ran and reported it: on
+`q=lc`, `CLC3333KCMY` (tier 2, score 210) sits at rank 11 beneath four tier-3 singles scoring
+68–85 **of its own family**. That is the fix working.
+
+What is actually checkable is the ERR-222 *signature* itself: at least one pack inside the 40-row
+window, and a pool that is not partitioned (some single appears after some pack). The old
+comparator is the only thing that can produce "all singles, then all packs". The owner chose
+complete grid rows over strict score ordering on 2026-09-07. **Do not "fix" family cohesion to
+satisfy the withdrawn criterion.**
+
+**A wrong finding that was nearly filed, and the re-read that stopped it.** The backend's response
+also claimed the `/api/shop?code=` genuine-value-pack defect was closed. First measurement said
+otherwise: `?code=LC38` returned 6 rows with `GLC38CMY` missing, `?code=LC40` returned 7 with
+`GLC40CMY` missing, while `GLC40BK` — a genuine *single* carrying the identical `series_codes` —
+was served. That looked like a clean single-vs-pack proof and was on its way into a re-opened
+backend brief.
+
+Re-measured forty minutes later, on the same URLs: **7 rows with `GLC38CMY` present, 8 with
+`GLC40CMY` present** — matching the backend exactly. The first read was wrong. The peer author had
+explicitly asked for a re-run before writing (ERR-195 doctrine), and that is the only reason a
+false backend defect did not get filed. `probe:search-packs` now re-reads any §9 failure once
+before reporting it.
+
+**Three ways to get a confident wrong answer on this endpoint — all three met in one afternoon.**
+
+1. **`category=CON-INK` returns HTTP 200 with zero rows.** Product rows carry
+   `category: "CON-INK"`; `/api/shop` wants `category: "ink"`. A catalogue sweep built on the row
+   value would have reported **all 328 packs as dropped**. Caught only by a positive control.
+   ERR-075's exact shape, in a new place.
+2. **`/api/products` returns no `pagination` key, but `page=2` has 200 different SKUs.** Reading
+   `pagination?.has_next` stops after page 1 and calls it the whole catalogue. My first pull got
+   1,806 products; the real active catalogue is **4,082**. Absence read as zero.
+3. **Two reads of the same URL disagreed** (above). A single read is not a measurement here.
+
+**The action we declined, and the measurement that refutes it.** The backend asked us to retire the
+`/api/products` compat-recovery sidecar in `js/api.js` as "no longer compensating for anything".
+Running the **shipped `API.getShopData`** against the live API says otherwise:
+
+```
+epson/81N : /api/shop alone 8 rows -> getShopData 9   recovered CT081KCMY [value_pack]
+epson/73N : /api/shop alone 7 rows -> getShopData 8   recovered CT073CMY  [value_pack]
+brother/LC38, canon/PGI650        -> +0, correctly
+```
+
+Deleting it would take a value-pack card off the Epson 81N and 73N chip drilldowns — the exact
+symptom it was built for. Removing a fallback is a behaviour change, not cleanup (ERR-158).
+
+Its **comment** was the real problem and has been rewritten: it cited a 99-vs-106 measurement that
+is now 104-vs-104, and named seven SKUs of which five were deliberately deactivated on 2026-05-13
+as cross-series duplicates. Both halves false, sitting in the file as fact. A stale comment is how
+ERR-216 happened. The comment now also records that the sidecar's *other* branch — the drilldown
+series-count merge — is **dormant**: it counts only compatibles whose backend `series_codes` was
+empty, and that population is down to 40 rows catalogue-wide, every one of them `CON-RIBBON`, a
+path that never calls `getShopData`. Same function, two branches, two different truths.
+
+**Live guard.** `npm run probe:search-packs` — 30 checks including three positive controls, exit
+0/1/2, no write path. It watches one thing nothing else did: **`color` on cartridge rows**. The
+backend's own response admits `/smart` hydrated its pool without `color`, so `colorOrder()` fell
+back and the documented K→C→M→Y row order was silently degraded. Scoping that check matters —
+a first cut flagged 55 rows and every one was right to be colourless (label tape, a fax film
+refill, a waste toner unit, two maintenance boxes), so it is scoped to
+`ProductSort.accessoryTier(p) === 0`.
+
+Measured on our side, the backend's note also overstates the damage: `colorOrder` falls back to the
+product **name**, and live names end in the colour word, so the real exposure is only cartridges
+whose name carries no colour word. Pinned in the test both ways.
+
+**Files.** Backend: `src/utils/productSort.js`, `src/routes/search.js`. Frontend: `js/api.js`
+(comment), plus the ERR-226 work above. **Test.** `tests/search-value-pack-ranking-sep2026.test.js`.
+**Probe.** `scripts/probe-search-value-pack-ranking.mjs`.
+
+---
+
 ## ERR-225 — Our own CSP blocked the PayPal SDK on production, and the page logged "PayPal button initialized successfully" while it did — **RESOLVED** (2026-09-07)
 
 **Date**: 2026-09-07 · **Context**: Found while walking the mobile checkout funnel on the LIVE site

@@ -967,16 +967,44 @@ const API = {
                 source: 'compatible',
                 limit: 200
             });
-            // Sidecar fires against /api/products, NOT /api/shop. The /api/shop
-            // endpoint drops `pack_type=value_pack` rows on the source=compatible
-            // filter — the bug surfaced for PGI650 (verified 2026-05-11):
-            // /api/shop?brand=canon&category=ink&source=compatible returns 99
-            // products, /api/products with the same filter returns 106 — the
-            // missing 7 are KCMY/CMY value-packs (CPGI650KCMY, CPGI670KCMY,
-            // CCLI671KCMY, CCLI681KCMY, CPGI520KCMY, CPGI525KCMY, CPGI5KCMY).
-            // Without this swap the chip drilldown silently hides every
-            // compatible multipack — the customer hits the chip and sees only
-            // the black single, even when the catalog ships a colour pack.
+            // Sidecar fires against /api/products, NOT /api/shop, because
+            // /api/shop?code=X does not return every row whose `series_codes`
+            // contains X. Without the swap the chip drilldown silently hides
+            // those rows — the customer hits the chip and sees only some of the
+            // family, even when the catalog ships the rest.
+            //
+            // RE-MEASURED 2026-09-07 (ERR-222), because the original numbers in
+            // this comment had gone stale and a stale comment is how ERR-216
+            // happened. What it said: /api/shop?brand=canon&category=ink&
+            // source=compatible returned 99 rows against /api/products' 106,
+            // the 7 missing being KCMY/CMY value-packs. BOTH HALVES ARE NOW
+            // FALSE. Those endpoints agree exactly today (104 rows / 27 packs,
+            // identical SKU sets), and 5 of the 7 named SKUs — CPGI650KCMY,
+            // CPGI670KCMY, CPGI520KCMY, CPGI525KCMY, CPGI5KCMY — were
+            // deliberately deactivated on 2026-05-13 as cross-series PGI+CLI
+            // duplicates, with sku_redirects to the CLI* equivalents. Restoring
+            // them would put a known-duplicate KCMY card back on the grid.
+            //
+            // The backend therefore asked us to retire this sidecar. WE
+            // MEASURED INSTEAD OF AGREEING, by running this very method against
+            // the live API, and it is still recovering rows:
+            //
+            //   epson/81N  /api/shop alone 8 rows -> getShopData 9  (+CT081KCMY)
+            //   epson/73N  /api/shop alone 7 rows -> getShopData 8  (+CT073CMY)
+            //   brother/LC38, canon/PGI650        -> +0, correctly
+            //
+            // Both recoveries are value_pack rows on live chip drilldowns.
+            // Deleting this would delete those two cards. Removing a fallback is
+            // a behaviour change, not cleanup (ERR-158) — re-measure with
+            // `npm run probe:search-packs` before anyone tries again.
+            //
+            // The OTHER branch below (the drilldown series-count merge) is a
+            // different story and is now dormant: it only counts compats whose
+            // backend `series_codes` was EMPTY, and that population is down to
+            // 40 rows catalogue-wide, every one of them CON-RIBBON — a path that
+            // never calls getShopData at all (ERR-085/086). Dormant is not dead;
+            // it is the defense-in-depth path if the extractor ever regresses.
+            //
             // .catch absorbs sidecar failure so it can never reject the
             // top-level Promise.all below.
             sidecarPromise = this.getWithSWR(fbEndpoint, { anonymous: true }).catch(() => null);

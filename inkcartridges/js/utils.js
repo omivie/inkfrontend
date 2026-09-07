@@ -1887,6 +1887,102 @@ const SeriesCodes = (function () {
 if (typeof window !== 'undefined') window.SeriesCodes = SeriesCodes;
 
 // ---------------------------------------------------------------------------
+// SEARCH MATCH — one "did you mean" vocabulary, for every surface (ERR-226)
+//
+// THE QUESTION THIS MODULE ANSWERS, AND WHY IT HAS EXACTLY ONE HOME
+//
+// `/api/search/smart` returns `did_you_mean` (and `corrected_from`) alongside
+// `products[]`. Sometimes the correction contradicts the results: the customer
+// typed something the catalogue literally contains, and the endpoint offered to
+// swap it anyway. q=511 became "Lexmark MX 511"; q=lc offered "LC3333KCMY …
+// 4-Pack" while the LC3333 cards were already on screen.
+//
+// The rule for that is: if a returned row LITERALLY contains what was typed,
+// the search was honoured — do not claim to have corrected it.
+//
+// That rule lived as a private function inside shop-page.js, which loads on
+// exactly ONE page (html/shop.html). The header typeahead runs `search.js` on
+// THIRTY-FOUR pages and had no such rule at all, so on the same response
+// envelope the dropdown said "Did you mean LC3333KCMY?" while the results page
+// suppressed that exact banner. One rule, two surfaces, two answers (ERR-226).
+//
+// It lives HERE because `utils.js` is loaded on 41 pages — a strict superset of
+// search.js's 34, verified by test. Reaching it through
+// `window._searchParityHelpers?.x ? … : fallback` would have run the fallback on
+// 33 of 34 pages, which is ERR-167 exactly: when the fallback is the only branch
+// that ever runs, the guard IS the bug.
+//
+// LOAD-ORDER NOTE: in html/shop.html every script is `defer`, so they execute in
+// document order and shop-page.js runs BEFORE utils.js. Nothing may reference
+// `SearchMatch` at IIFE-evaluation time — only from inside a function, at call
+// time. shop-page.js's `window._searchParityHelpers` therefore re-exports these
+// through wrappers, never by capturing the reference.
+//
+// Pinned by tests/search-value-pack-ranking-sep2026.test.js and
+// tests/search-results-parity-may2026.test.js.
+// ---------------------------------------------------------------------------
+const SearchMatch = (function () {
+    'use strict';
+
+    // Lowercase + strip every non-alphanumeric char so "CT-351101", "CL511"
+    // and "165.11" all compare on their bare token. Pure (no external refs).
+    function normalizeForMatch(s) {
+        return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    // True when `product` literally contains what the user typed — the same
+    // notion of "match" the dropdown uses. Single-token queries must appear
+    // as a contiguous substring of name+sku; multi-token queries must have
+    // every token (length >= 2) present somewhere. This is the gate that
+    // separates a genuine typo ("cannon" — no literal hit anywhere in the
+    // catalog) from a mis-autocorrected valid query ("511" — hits CL511).
+    function productMatchesQuery(product, query) {
+        if (!product) return false;
+        const q = normalizeForMatch(query);
+        if (!q) return false;
+        const hay = normalizeForMatch((product.name || '') + ' ' + (product.sku || ''));
+        if (!hay) return false;
+        if (hay.includes(q)) return true;
+        const tokens = String(query == null ? '' : query)
+            .toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 2);
+        if (tokens.length > 1) return tokens.every(t => hay.includes(t));
+        return false;
+    }
+
+    // Should a "did you mean" correction be shown at all, given the rows that
+    // came back with it?
+    //
+    // FALSE when any returned row literally matches the raw query — the search
+    // was honoured, so a correction banner would contradict what is on screen.
+    // TRUE otherwise, including for brand/term suggestions ("Canon" for
+    // "cannon"), which name no product and are the case the feature exists for.
+    //
+    // Deliberately does NOT consider `matched_printer`. That gate is a call-site
+    // concern and the two surfaces apply it differently — the dropdown's
+    // zero-results branch shows a suggestion even when a printer matched but its
+    // URL could not be built. Folding it in here would have silently changed
+    // that branch. One question, one function.
+    //
+    // Measured live 2026-09-07 (both directions — a suppression check that only
+    // tests suppression passes for the wrong reason, ERR-181/183):
+    //   q=lc     rows match  -> suppressed
+    //   q=tn     rows match  -> suppressed
+    //   q=cannon no match    -> shown ("Canon")
+    //   q=brothr no match    -> shown ("Brother")
+    //   q=epsn   no match    -> shown ("Epson")
+    function shouldShowCorrection(suggestion, products, query) {
+        if (!suggestion) return false;
+        // No rows to contradict it (a genuine zero-result search) — show it.
+        if (!Array.isArray(products) || !products.length) return true;
+        return !products.some(p => productMatchesQuery(p, query));
+    }
+
+    return { normalizeForMatch, productMatchesQuery, shouldShowCorrection };
+})();
+
+if (typeof window !== 'undefined') window.SearchMatch = SearchMatch;
+
+// ---------------------------------------------------------------------------
 // BRAND SOURCE — genuine vs compatible, one vocabulary (ERR-157)
 //
 // NOT THE SAME THING AS `CompatSource` BELOW. Read this before using either.
@@ -3424,6 +3520,7 @@ if (typeof module !== 'undefined' && module.exports) {
         ProductName,
         ProductIdentity,
         SeriesCodes,
+        SearchMatch,
         BrandSource,
         CompatSource,
         canonicalizeCategory,

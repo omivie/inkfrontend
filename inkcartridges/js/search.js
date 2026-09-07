@@ -415,7 +415,31 @@
         function renderResults(data) {
             const list = (data && Array.isArray(data.suggestions)) ? data.suggestions : [];
             const matchedPrinter = data && data.matched_printer;
-            const didYouMean = data && data.did_you_mean;
+            const rawDidYouMean = data && data.did_you_mean;
+
+            // ONE did-you-mean vocabulary, shared with the results page
+            // (SearchMatch, utils.js, ERR-226). Do NOT inline the rule here:
+            // this dropdown and /search read the SAME response envelope, and
+            // when only one of them applied the rule they gave the customer two
+            // different answers to the same query — the dropdown offering
+            // "Did you mean LC3333KCMY … 4-Pack?" directly above the LC3333
+            // cards, while /search suppressed that exact banner.
+            //
+            // Called directly, with no `window.SearchMatch?.x ? … : fallback`
+            // guard. utils.js is loaded on every page that loads this file (41
+            // vs 34, pinned by test); a guard here would run its fallback on 33
+            // of 34 pages, which is ERR-167 — when the fallback is the only
+            // branch that ever runs, the guard IS the bug.
+            //
+            // This is also what makes the dropdown stop depending on a backend
+            // page-1 guarantee. ERR-222 was a suggestion naming a product the
+            // endpoint had ranked 239th of 367; the backend now hoists it onto
+            // page 1, but the symptom cannot return from a regression either,
+            // because a correction is only offered when nothing on screen
+            // already matches what was typed.
+            const didYouMean = SearchMatch.shouldShowCorrection(
+                rawDidYouMean, list, state.input.value.trim()
+            ) ? rawDidYouMean : null;
             state.mode = list.length ? 'results' : 'no-results';
             state.results = list;
             state.highlightIndex = -1;
@@ -484,6 +508,8 @@
                        <span class="smart-ac__top-row__arrow" aria-hidden="true">→</span>
                    </a>`
                 : '';
+            // `!matchedPrinter` stays here, exactly as before — SearchMatch
+            // deliberately does not fold it in (see its comment in utils.js).
             const dymRowHTML = didYouMean && !matchedPrinter
                 ? `<button type="button" class="smart-ac__top-row smart-ac__top-row--dym" data-dym="${escAttr(didYouMean)}">
                        <span class="smart-ac__top-row__icon" aria-hidden="true">?</span>

@@ -110,6 +110,36 @@ Two clusters worth your attention:
    query drops `pack_type` rows the way `/api/shop?source=compatible` does (the
    PGI650 case documented at `js/api.js:934`).
 
+   > **UPDATE 2026-09-07 (ERR-222) — answered, and largely fixed.**
+   >
+   > **No, the series query does not drop `pack_type` rows.** All three named
+   > value packs are served today: `?code=LC38` → 7 rows with `GLC38CMY`,
+   > `?code=LC40` → 8 with `GLC40CMY`, `?code=LC432` → 18 with `G432KCMY`.
+   > `/api/shop?source=compatible` is closed too — canon+ink now returns
+   > 104 rows / 27 packs, identical to `/api/products`.
+   >
+   > **This bucket is now 10, down from 47.** `npm run probe:catalogue-pathway`
+   > on 4,082 active products: 3,948 carry `series_codes`, **3,997 are
+   > reachable**. What remains is not pack-specific — it is rows whose
+   > `series_codes` names a code whose chip does not return them, with no
+   > alternative chip that does:
+   >
+   > | SKU | carries | chip serves instead | other code found? |
+   > |---|---|---|---|
+   > | `CT081KCMY` | `81N` | `C81NCMY`, `C81NKCMY` | no — `T081`/`081`/`81` all 0 rows |
+   > | `CT073CMY` | `73N` | `C73NKCMY`, `C73NCMY` | no |
+   > | `GCART046IICMY` / `GCART046IIKCMY` | `CART046` | the non-II packs | no — `CART046II` is 0 rows |
+   > | `GCART322IICMY` | `CART322` | the non-II packs | no |
+   > | `G72K0D0CMY` / `G72K0D0KCMY` | `72` | `G72K60*`, `G72K6X*` | no — `72K0D0` returns 15 rows, not it |
+   >
+   > Two of these (`CT081KCMY`, `CT073CMY`) are **recovered at runtime** by the
+   > `getShopData` compat sidecar, so a customer can reach them even though this
+   > probe counts them unreachable — the probe reads `/api/shop` directly and
+   > does not run the merge. **10 is therefore an upper bound on what a browser
+   > actually loses**, and it is the reason the sidecar was kept when the
+   > backend asked us to retire it. See
+   > `search-value-pack-ranking-FE-response-sep2026.md` §5.
+
 **The probe is the contract.** Anything it reports is data the backend owns. The
 frontend cannot fix any of it — it can only measure it and say so.
 
