@@ -64,6 +64,10 @@
             // Restore any saved checkout state (after auth prefill, so auth data takes priority)
             this.restoreCheckoutState();
 
+            // Mobile order-summary disclosure (ERR-224). Before the accordion so
+            // the summary is already collapsed when the form sections settle.
+            this.setupSummaryDisclosure();
+
             // Setup accordion for checkout sections
             this.setupAccordion();
 
@@ -960,6 +964,77 @@
         },
 
         // Accordion: 2 steps (Contact, Shipping). Sections only change on explicit clicks.
+        /**
+         * The order summary is FIRST on mobile and 858px tall, which put the
+         * first form field at 1,621px on an 844px viewport (ERR-224). It stays
+         * first — a shopper wants to see what they are paying before they type —
+         * and collapses to a row carrying the total.
+         *
+         * Three things this has to get right:
+         *
+         * 1. DESKTOP MUST NEVER BE COLLAPSED. Above 1024px the summary is a side
+         *    column costing no vertical space, and the toggle is display:none —
+         *    so a collapsed state there is unreachable and unrecoverable: the
+         *    summary would simply be gone with no control to bring it back. The
+         *    breakpoint is therefore re-checked on resize, not only at load.
+         *
+         * 2. THE TOTAL IS MIRRORED, NEVER RECOMPUTED. `#checkout-total` is
+         *    written from four separate places in this file as pricing resolves.
+         *    A fifth place computing its own figure is how two numbers on one
+         *    screen start disagreeing (ERR-113). A MutationObserver copies
+         *    whatever that element says, so there is no call site to remember
+         *    and no enrolment list to maintain.
+         *
+         * 3. IT SHOWS NOTHING UNTIL THERE IS SOMETHING TO SHOW. The total starts
+         *    as a skeleton; the label stays empty until real text arrives rather
+         *    than printing a placeholder $0.00 beside a real basket
+         *    (ERR-063/068, absence is not zero).
+         */
+        setupSummaryDisclosure() {
+            const summary = document.querySelector('.checkout-summary');
+            const toggle = document.getElementById('checkout-summary-toggle');
+            const totalEl = document.getElementById('checkout-total');
+            const label = document.getElementById('checkout-summary-toggle-total');
+            if (!summary || !toggle) return;
+
+            const MOBILE = '(max-width: 1024px)';
+            const isMobile = () => window.matchMedia(MOBILE).matches;
+
+            const setCollapsed = (collapsed) => {
+                summary.classList.toggle('is-collapsed', collapsed);
+                toggle.setAttribute('aria-expanded', String(!collapsed));
+            };
+
+            // Collapsed by default on mobile; always open elsewhere.
+            const applyBreakpoint = () => setCollapsed(isMobile());
+            applyBreakpoint();
+
+            toggle.addEventListener('click', () => {
+                setCollapsed(!summary.classList.contains('is-collapsed'));
+            });
+
+            // A viewport that crosses the breakpoint (rotation, desktop resize)
+            // must not leave a desktop shopper with a summary they cannot reopen.
+            try {
+                window.matchMedia(MOBILE).addEventListener('change', applyBreakpoint);
+            } catch (_) {
+                window.addEventListener('resize', applyBreakpoint);
+            }
+
+            if (!totalEl || !label) return;
+            const syncTotal = () => {
+                const text = (totalEl.textContent || '').trim();
+                // Skeleton placeholder renders as empty text — leave the label blank.
+                label.textContent = text;
+            };
+            syncTotal();
+            try {
+                new MutationObserver(syncTotal).observe(totalEl, {
+                    childList: true, characterData: true, subtree: true,
+                });
+            } catch (_) { /* no observer: the label simply stays as first seen */ }
+        },
+
         setupAccordion() {
             const form = document.getElementById('checkout-form');
             if (!form) return;

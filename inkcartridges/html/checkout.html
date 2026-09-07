@@ -24,9 +24,9 @@
     <link rel="stylesheet" href="/css/layout.css?v=e083ef8b">
     <link rel="stylesheet" href="/css/components.css?v=3cd0199f">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=5f938787">
+    <link rel="stylesheet" href="/css/pages.css?v=63d622ec">
     <link rel="stylesheet" href="/css/search.css?v=4f1bcb66">
-    <link rel="stylesheet" href="/css/checkout-compact.css?v=68530e74">
+    <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Checkout | InkCartridges.co.nz">
     <meta name="twitter:description" content="Secure checkout - InkCartridges.co.nz">
@@ -352,7 +352,22 @@
 
                     <div class="checkout-sidebar">
                         <aside class="checkout-summary">
-                        <div class="checkout-summary__inner">
+                        <!-- Mobile order-summary disclosure (ERR-224).
+                             The full summary is 858px tall and renders ABOVE the
+                             form on mobile (.checkout-sidebar { order: -1 }),
+                             which put the first field 1,621px down an 844px
+                             viewport. The summary is first on purpose — a shopper
+                             wants to see what they are paying before they type —
+                             so it stays first and collapses to its total instead
+                             of being reordered away. Hidden above 1024px, where
+                             it is a side column and costs no vertical space. -->
+                        <button type="button" class="checkout-summary__toggle" id="checkout-summary-toggle"
+                                aria-expanded="false" aria-controls="checkout-summary-inner">
+                            <span class="checkout-summary__toggle-label">Order summary</span>
+                            <span class="checkout-summary__toggle-total" id="checkout-summary-toggle-total" aria-hidden="true"></span>
+                            <svg class="checkout-summary__toggle-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                        <div class="checkout-summary__inner" id="checkout-summary-inner">
                             <h2 class="checkout-summary__heading">Order Summary</h2>
 
                             <!-- Durable disclosure for pricing we could not confirm, and for a
@@ -488,7 +503,7 @@
     <script defer src="/js/footer.js?v=6deb5ef7"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/checkout-page.js?v=ccc19a94"></script>
+    <script defer src="/js/checkout-page.js?v=7b4318d2"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
 
     <style>

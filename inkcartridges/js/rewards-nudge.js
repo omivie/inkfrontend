@@ -36,9 +36,23 @@
     var CAMPAIGN = {
         version: 1,             // bump to re-arm after a dismissal cycle
         enabled: true,
-        delayMs: 3000,          // shown ~3s after load once auth settles (owner-tuned Jul 17, was 6s)
+        delayMs: 3000,          // MINIMUM dwell before the nudge may appear (owner-tuned Jul 17, was 6s)
         dismissDays: 7,         // explicit-dismissal cooldown
-        trigger: 'timer',       // reserved for future: 'scroll' | 'exit'
+        /* 'scroll' — the visitor must have actually looked at something first.
+         *
+         * On a timer this fired 3s after load, which on mobile meant a 366x248
+         * card covering 27.5% of the first screen with ZERO product cards
+         * rendered on it (measured, /ink-cartridges at 390x844, ERR-224). Asking
+         * someone to open an account before they have seen a single product is
+         * asking at the worst possible moment, and it lands on the 64% of paid
+         * traffic that arrives on mobile.
+         *
+         * 'scroll' keeps delayMs as a floor and adds evidence: the visitor has
+         * moved down the page. If they never scroll, they never see it — which
+         * is the correct outcome, not a missed one. 'timer' still works and is
+         * what every other page can fall back to. */
+        trigger: 'scroll',      // 'timer' | 'scroll'  ('exit' reserved)
+        scrollThresholdPx: 600, // ~one mobile viewport; also cleared by a tall desktop scroll
         heading: 'Earn rewards on every order',
         body: 'Create a free account and earn 1 point for every $1 you spend (excluding shipping). 100 points = $1 off a future order.',
         ctaText: 'Create free account',
@@ -393,11 +407,56 @@
                 try {
                     if (window.Auth && Auth.isAuthenticated()) { state.bailed = true; return; }
                 } catch (_) { /* guest assumption */ }
-                setTimeout(tryShow, CAMPAIGN.delayMs);
+                scheduleByTrigger(tryShow);
             });
         } catch (err) {
             DebugLog.error('RewardsNudge init failed:', err);
         }
+    }
+
+    /**
+     * Hand `tryShow` to whichever trigger the campaign is configured for.
+     *
+     * `delayMs` is a FLOOR in both modes, never the whole condition: the auth
+     * check has to settle first, and a nudge that races the page render is the
+     * thing being fixed here.
+     *
+     * 'scroll' waits for the visitor to move down the page as well. The listener
+     * is passive and removes itself on the first qualifying scroll, so this
+     * costs nothing on a page nobody scrolls. There is deliberately NO timer
+     * fallback: a visitor who never scrolled has not looked at anything, and
+     * showing them the nudge anyway is exactly the behaviour this replaces.
+     */
+    function scheduleByTrigger(tryShow) {
+        if (CAMPAIGN.trigger !== 'scroll') {
+            setTimeout(tryShow, CAMPAIGN.delayMs);
+            return;
+        }
+
+        var floorPassed = false;
+        var fired = false;
+        var threshold = CAMPAIGN.scrollThresholdPx || 600;
+
+        function scrolledEnough() {
+            var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+            return y >= threshold;
+        }
+
+        function attempt() {
+            if (fired || !floorPassed || !scrolledEnough()) return;
+            fired = true;
+            window.removeEventListener('scroll', attempt);
+            tryShow();
+        }
+
+        setTimeout(function () {
+            floorPassed = true;
+            // A visitor who has already scrolled past the mark during the floor
+            // (a fast reader, or a restored scroll position) qualifies now.
+            attempt();
+        }, CAMPAIGN.delayMs);
+
+        window.addEventListener('scroll', attempt, { passive: true });
     }
 
     // Manual reopen hook (future "Earn points" header hint) — respects

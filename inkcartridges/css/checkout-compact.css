@@ -152,6 +152,20 @@ section.checkout-page .checkout-layout {
     flex-direction: column;
     gap: var(--spacing-md, 16px);
     align-self: start;
+    /* A GRID CHILD DEFAULTS TO min-width: auto, WHICH IS ITS MIN-CONTENT.
+     *
+     * `.checkout-layout` is the grid, and its sibling `.checkout-form-wrapper`
+     * already carries `min-width: 0` — this is the same fix, on the child that
+     * did not get it. Without it the sidebar's 390px min-content forced the
+     * single mobile column to 390.234px inside a 358px container, so the whole
+     * form ran 16px past the right edge: measured `body.scrollWidth` 406 against
+     * a 390 viewport, clipping the price and the "Edit cart" link. A truncated
+     * price on a checkout page is a trust problem, not a cosmetic one.
+     *
+     * It only bit while the summary was expanded, because a collapsed summary
+     * has no wide content to measure — which is why it reads as intermittent.
+     */
+    min-width: 0;
 }
 
 /* Progress card — white background, standalone */
@@ -1256,4 +1270,82 @@ section.checkout-page .checkout-summary__shipping-info svg {
 /* Trust signals */
 .checkout-summary__trust-item svg {
     color: var(--cyan-primary, #267FB5);
+}
+
+/* ==============================================
+   MOBILE ORDER-SUMMARY DISCLOSURE (ERR-224)
+   ==============================================
+   The order summary is deliberately FIRST on mobile (.checkout-sidebar
+   { order: -1 } above) so a shopper sees what they are paying before they
+   start typing. That intent is right; its cost was not. Measured at 390x844
+   with 8 items: the summary is 858px tall, so "first" meant the first form
+   field sat at 1,621px on an 844px viewport — four screens of scrolling before
+   checkout could begin, on the 64% of paid traffic that is mobile.
+
+   So it stays first and collapses to a single row carrying the one number that
+   does the reassuring. Expanding is one tap and the full summary is unchanged.
+   Above 1024px none of this applies: the summary is a side column and costs no
+   vertical space at all, so the toggle is display:none and the body is always
+   open — a shopper on a desktop must never be able to reach a collapsed state.
+   ============================================== */
+
+.checkout-summary__toggle {
+    display: none;
+}
+
+@media (max-width: 1024px) {
+    .checkout-summary__toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm, 8px);
+        width: 100%;
+        /* 44px minimum touch target. */
+        min-height: 48px;
+        padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+        background: #fff;
+        border: 1px solid var(--color-border, #e5e7eb);
+        border-radius: var(--radius-xl, 12px);
+        font: inherit;
+        font-weight: 600;
+        color: var(--steel-800, #1e293b);
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .checkout-summary__toggle-label {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .checkout-summary__toggle-total {
+        flex: 0 0 auto;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Empty until the totals resolve — never render an empty pill or a $0.00
+       placeholder next to a real basket (the ERR-063/068 absence-as-zero line). */
+    .checkout-summary__toggle-total:empty {
+        display: none;
+    }
+
+    .checkout-summary__toggle-chevron {
+        flex: 0 0 auto;
+        transition: transform 0.2s ease;
+    }
+
+    .checkout-summary__toggle[aria-expanded="true"] .checkout-summary__toggle-chevron {
+        transform: rotate(180deg);
+    }
+
+    /* Collapsed body. `display: none` rather than height:0 so the 858px of
+       content is genuinely out of layout, which is the entire point. */
+    .checkout-summary.is-collapsed .checkout-summary__inner {
+        display: none;
+    }
+
+    .checkout-summary.is-collapsed {
+        background: transparent;
+        border: 0;
+        padding: 0;
+    }
 }

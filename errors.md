@@ -41,6 +41,135 @@ describing the same incident.
 
 ---
 
+## ERR-224 — The mobile checkout form was four screens below the fold, because a `flex-basis` written for a row became a height in a column — **RESOLVED** (2026-09-07)
+
+**Date**: 2026-09-07 · **Context**: Mobile converts at **1.65%** against desktop's **9.35%**, and
+mobile is **64% of paid-search traffic** — currently excluded at −100% in Google Ads because it has
+never paid for itself. Mobile clicks cost **$1.24** against desktop's **$3.58**, so mobile needs
+roughly **4.4%** to be profitable; it does not need to match desktop. Diagnosed by the Google Ads
+session, which had the account but not this tree; brief in the backend repo at
+`docs/storefront/mobile-checkout-form-below-fold-sep2026.md`.
+
+**Measured on `/checkout` at 390×844 with 8 × CLC37BK, on a CLEAN profile:**
+
+```
+   97px  "Checkout" heading
+  180px  .checkout-progress    <- 400px tall to render 52px of step pills
+  596px  .checkout-sidebar     <- Order Summary, 858px, renders FIRST on mobile
+ 1621px  input[name="email"]   <- the first field anyone must fill
+        page 4082px · body.scrollWidth 406 against a 390 viewport
+```
+
+**THE FIRST MEASUREMENT DISAGREED WITH THE BRIEF, AND THE BRIEF WAS RIGHT.** A first pass put the
+email field at 0×0 inside a `display:none` accordion and the overflow at 169px — because *this
+browser profile had leftover state from earlier testing*, which marked section 1 `is-complete` and
+collapsed it. On a clean profile every number in the brief reproduced to the pixel. **A measurement
+taken in a dirty profile is not a measurement of what a customer sees**, and it very nearly produced
+a confident correction to a correct document.
+
+### Cause 1 — `flex-basis` is main-axis, and the main axis flips
+
+`pages.css` declares, for the desktop row:
+
+```css
+.checkout-progress--compact { margin: 0; flex: 0 1 400px; max-width: 400px; }
+```
+
+**The `max-width: 400px` sitting beside it is the proof of intent**: the author meant *"this bar is
+at most 400px WIDE"*, which is exactly what `flex-basis` means in a row. Sixteen lines further down,
+`@media (max-width: 768px)` turns `.cart-page__header` into `flex-direction: column` — and the same
+declaration now sizes the **main axis, which is vertical**. The bar became **400px tall to draw 52px
+of pills**, 325px of it empty, and `max-width` cannot catch it because *max-width is not a height*.
+The mobile block already reset `width` and `max-width`; it had no reason to think about `flex-basis`.
+
+Same family as ERR-217's *`transform: translateY(0)` is not `none`*: **a property whose meaning
+depends on a context declared somewhere else.** Fix is one line — `flex-basis: auto` — in a block
+that already existed.
+
+### Cause 2 — the summary is first ON PURPOSE
+
+`.checkout-sidebar { order: -1 }` at ≤1024px is an **explicit rule**, not an accident of a collapsing
+grid. Someone decided a shopper should see what they are paying before they type, and **that intent
+is right**. Its cost was not: 858px of it, ahead of the form.
+
+So the summary **stays first and collapses to a row carrying its total**, rather than being reordered
+away. Reordering would have been the smaller diff and would have thrown the reassurance out. Three
+rules make the disclosure safe: it is `display:none` by default and opts *in* at ≤1024px; the
+collapsed rule lives **inside** the media query (a stale `is-collapsed` on a desktop whose toggle is
+`display:none` would hide the summary with no control to bring it back); and the breakpoint is
+re-applied on `matchMedia` change, so rotating a phone to a tablet width cannot strand it.
+
+**The total is MIRRORED, never recomputed.** `#checkout-total` is written from four places in
+`checkout-page.js` as pricing resolves; a fifth place computing its own figure is how two numbers on
+one screen start disagreeing (ERR-113). A `MutationObserver` copies whatever that element says — one
+place, no call sites to remember, no enrolment list to maintain. It renders **nothing** until real
+text arrives rather than a placeholder `$0.00` beside a real basket (ERR-063/068).
+
+### Cause 3 — one grid child got the fix and the other did not
+
+Found while verifying the other two. `.checkout-form-wrapper` already carried `min-width: 0`;
+`.checkout-sidebar`, its sibling in the same grid, still had the default `min-width: auto` — which is
+its **min-content**. Its 390px min-content forced the single mobile column to **390.234px inside a
+358px container**, so the whole form ran 16px off-screen and clipped the price and the "Edit cart"
+link. *A truncated price on a checkout page is a trust problem, not a cosmetic one.* It only bit
+while the summary was **expanded**, because a collapsed summary has no wide content to measure, which
+is why it reads as intermittent.
+
+### Also fixed — the nudge that interrupted before anything had been seen
+
+`rewards-nudge.js` fired on a **3-second timer**. Measured on `/ink-cartridges` at 390×844: a
+366×248 card covering **27.5% of the first screen** with **zero product cards rendered**. Asking
+someone to open an account before they have seen a single product is asking at the worst possible
+moment, and it lands on the same mobile traffic.
+
+It is **not a modal** — no overlay, no focus trap, a z-600 anchored popover — so the brief's wording
+was wrong while its substance was right. The file had already anticipated the fix:
+`trigger: 'timer', // reserved for future: 'scroll' | 'exit'`. Now `trigger: 'scroll'`, with `delayMs`
+kept as a **floor** and a passive, self-removing listener. **There is deliberately no timer
+fallback**: a visitor who never scrolled has not looked at anything, and showing them the nudge
+anyway is precisely the behaviour being replaced.
+
+### Measured after (same page, same cart, same clean profile)
+
+```
+                  before    after
+  .checkout-progress   400px  ->  100px
+  .checkout-sidebar    858px  ->   80px   (collapsed; 906px expanded, one tap)
+  email field         1621px  ->  542px   <- above the fold on an 844px viewport
+  page height         4082px  -> 3004px
+  body.scrollWidth      406   ->   390    (collapsed AND expanded)
+```
+
+**Desktop is untouched and was re-measured to prove it**: at 1440×900 the toggle is hidden, the
+summary is open at 816px, the layout is still `712px 400px`, and the email field is at **329px** —
+the same figure the brief recorded before any of this. Nudge: not shown before a scroll, shown after
+passing 600px.
+
+**Files**: `css/pages.css` (`flex-basis: auto`) · `css/checkout-compact.css` (disclosure styles,
+`min-width: 0`) · `html/checkout.html` (disclosure markup) · `js/checkout-page.js`
+(`setupSummaryDisclosure`) · `js/rewards-nudge.js` (`scheduleByTrigger`) · 37 HTML restamped by
+script, **never `npm run build`** with other sessions in flight.
+
+**Pinned by**: `tests/mobile-checkout-fold-sep2026.test.js` (21). Suite **5,607, 0 failing**.
+**Mutation-checked four ways** — and two of the four initially passed against a broken build, which
+is the part worth keeping: removing the resize re-check passed because the assertion accepted the
+legacy `resize` fallback as a substitute for the primary `matchMedia` listener (the fallback only
+runs from a `catch`, i.e. essentially never); and removing `min-width: 0` passed because **the
+comment inside that very rule quotes `min-width: 0` while explaining it**. Both assertions now read
+comment-stripped source. That is the third time in two days this shape has bitten — see the
+`X-Session-Id` and `/1.15` bans in `ads-add-to-cart-conversion-sep2026`.
+
+**Lesson**: *a declaration is only as stable as the axis it is measured against.* `flex: 0 1 400px`
+was correct, deliberate and well-paired with `max-width`; nothing about it was wrong until a media
+query 16 lines away changed what "basis" meant. **Grep for the rule that flips the context, not for
+the rule that looks odd.**
+
+**Trap for next time**: the browser profile is part of the measurement. A leftover `is-complete`
+accordion state hid the email field entirely and made the first pass read as a *disagreement* with
+the brief. Clear storage, reload, and only then write the number down.
+
+---
+
 ## ERR-223 — The Google Ads add-to-cart tag had never fired in six months, and the obvious way to fire it reported triple the value — **RESOLVED** (2026-09-06)
 
 **Date**: 2026-09-06 · **Context**: Backend hand-off, archived with its corrections marked at

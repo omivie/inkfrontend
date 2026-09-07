@@ -4039,6 +4039,26 @@ body.filter-sort-open { overflow: hidden; }
     .checkout-progress--compact {
         width: 100%;
         max-width: 100%;
+        /* FLEX-BASIS IS MAIN-AXIS, AND THE MAIN AXIS JUST FLIPPED.
+         *
+         * `.checkout-progress--compact` above declares `flex: 0 1 400px` beside
+         * `max-width: 400px`, and that pairing is the proof of intent: the
+         * author meant "this bar is at most 400px WIDE", which is exactly what
+         * flex-basis means in the desktop ROW.
+         *
+         * This block turns .cart-page__header into `flex-direction: column`.
+         * The same declaration now sizes the MAIN axis, which is vertical — so
+         * the bar became 400px TALL to render 52px of step pills, and
+         * `max-width` cannot catch it because max-width is not a height.
+         * Measured at 390x844: 400px box, 325px of it empty, pushing the first
+         * checkout field to 1621px on an 844px viewport.
+         *
+         * Resetting the basis is the whole fix; width/max-width above already
+         * say what the bar should do horizontally. Same family as ERR-217's
+         * `transform: translateY(0)` is not `none` — a property whose meaning
+         * depends on a context declared somewhere else.
+         */
+        flex-basis: auto;
     }
 }
 
