@@ -102,6 +102,22 @@ baseline computed by a different tool than the checker is not a baseline***; it 
 alarm, and a probe that always warns is a probe everyone learns to ignore. Re-derived with the
 probe's own fetch and verified stable across three consecutive requests.
 
+### Verified in a real browser after deploy
+
+The probe cannot prove the hash MATCHES, only that it is allowed — so this was confirmed the one way
+it can be. Production, guest, `/payment`, after the deploy:
+
+```
+                     before fix   after fix
+  PayPal iframes          0     ->     1     (zoid-paypal-buttons-uid_…, container 56px)
+  CSP violations          1     ->     0
+  Stripe iframes          3     ->     3     (unaffected — the risk of any CSP edit here)
+  console errors          3     ->     0
+```
+
+The Pay button remains disabled for the automated browser, as expected: that is the Turnstile gate
+below, not PayPal.
+
 ### Measured, but NOT concluded — the guest payment gate
 
 `payment-page.js:658` hard-gates the Pay button for guests:
