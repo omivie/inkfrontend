@@ -9391,3 +9391,100 @@ canonical `reconciledGrossProfitInclGst`, `extrapolateWindowCogsInclGst`, `costC
 `residualCogsAfterExact`, and **3 cross-validation tests** that assert the bucket math
 equals `profitability.js` `computeOrderProfit`/`computeProfitBreakdown` and the modal's
 $32.21 / $4.83 net GST).
+
+## ERR-227 — A consent gate with no way to consent: `analytics_storage` was `denied` for every visitor since the day it shipped — **RESOLVED** (2026-09-08)
+
+**Symptom.** None. That is the entire problem. Google Analytics 4 reported traffic, pages and
+sessions on every dashboard; nothing errored, nothing was empty, and no console line ever
+mentioned consent.
+
+**Cause.** `js/gtag.js` line 9 opens every page with:
+
+```js
+gtag('consent', 'default', {
+    analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+});
+```
+
+`cookie_consent` had **one reader and zero writers**. Not "a writer on the wrong page", not "a
+writer behind a flag" — `grep -rn cookie_consent inkcartridges/` returned exactly that one line
+in the whole tree. There was no consent UI anywhere, and nothing else set the key. So the
+ternary took its right-hand branch for 100% of visitors, permanently, and GA4 ran in cookieless
+ping mode from the day the file shipped.
+
+This is the ERR-167 family — *if the fallback is the only branch that ever runs, the guard IS
+the bug* — but arrived at from the other end. There the guard was `window.Security?.x ? … :
+fallback` against a bare const. Here the condition reads a key that has no author. A gate whose
+open path is unreachable is not a gate, it is an off switch with a hinge drawn on it.
+
+**Why it survived.** Every symptom of `analytics_storage: 'denied'` looks like ordinary
+analytics. GA4 still receives cookieless pings, so sessions and pageviews keep appearing;
+they are just modelled rather than measured, and undercount. There is no red number to notice.
+It was found only while auditing the auto-appearing overlays on `/ink-cartridges` for ERR-224 —
+looking for a *banner that existed*, and finding a banner that should have and never did.
+
+**Fix.** `js/consent-banner.js`, enrolled on all 38 pages that load `gtag.js`, writes the key
+and sends `gtag('consent','update', …)`.
+
+**Three things this fix deliberately does NOT do.**
+
+1. **It never touches `ad_storage`.** Read the default call again: it declares exactly one
+   consent type. Under Consent Mode a type you never mention is granted, so `ad_storage` is
+   granted today and Google Ads conversion tracking works. Adding `ad_storage: 'denied'` —
+   which is the reflexive "make the list complete" move, and is what a consent banner usually
+   does — would have silently switched off the exact ad measurement ERR-224 exists to rescue,
+   on the ~64% of paid-search traffic that is mobile. Widening a consent banner's remit is a
+   revenue decision, not tidying. The banner's copy says *analytics* and means it.
+
+2. **It never routes storage through `setStorage()` from `utils.js`.** That helper
+   JSON-stringifies, so it would persist `"accepted"` **with quotes**, and `gtag.js` compares
+   against the bare string. The banner would vanish on click, the visitor would believe they had
+   consented, and `analytics_storage` would stay `denied` for ever — the original bug restored
+   by a refactor that reads like cleanup. `tests/consent-mode-sep2026.test.js` §2 asserts on the
+   value actually in storage, and §4 asserts the writer and the reader still agree; the
+   writer-and-reader pairing is pinned, not either half (ERR-199).
+
+3. **It is not an interstitial.** It is a slim bottom bar that measures its own rendered height
+   and reserves exactly that much `padding-bottom` on `<body>`, so it cannot cover the checkout
+   Continue button. This ships two days after ERR-224, where 400px of dead whitespace put the
+   first checkout field 1,621px down an 844px viewport; answering that with an overlay that
+   covers a phone screen would be the same mistake wearing a different hat. The height comes
+   from `getBoundingClientRect()`, never a constant — a constant reserving space for content is
+   a measurement someone declined to take (ERR-189/196).
+
+**Tests.** 21 in `tests/consent-mode-sep2026.test.js`. §2 does not grep the source; it runs
+`consent-banner.js` in a `vm` against a fake DOM and reads back what genuinely lands in storage,
+because the *value* is the bug and a grep for `localStorage.setItem` cannot see it. Six
+mutations were run and all six went red: JSON-quoting the value, adding `ad_storage`, hardcoding
+the reserved height, dropping the script from one page, removing `defer`, and leaving the bar in
+the DOM after a decision.
+
+---
+
+## ERR-224 addendum — the fix was correct and had no live probe (2026-09-08)
+
+ERR-224 shipped 21 tests and every one of them asserts on **source text**
+(`assert.match(CSS, /flex-basis:\s*auto/)` and siblings). They prove a declaration is written
+down. They cannot prove a box is the size it claims, and they stay green while: a later rule in
+any of eight stylesheets re-introduces a height on `.checkout-progress`; the disclosure JS throws
+before `setupSummaryDisclosure()` binds; the MutationObserver mirror stops firing and the
+collapsed bar disagrees with `#checkout-total`; or the horizontal overflow that clipped `$47.92`
+to `$47.9` comes back.
+
+That is the ERR-217 shape — *the old test PINNED the bug* — and ERR-224 was the only hazard in
+`MEMORY.md` without a `npm run probe:*`. The brief that prompted the fix said it in as many
+words: **measure, don't eyeball**.
+
+`npm run probe:mobile-checkout-fold` now measures the deployed site: the first field against the
+iPhone SE fold, the progress bar's real height, the collapsed sidebar, the collapsed total
+against `#checkout-total`, every element that paints past the right edge **by name**, a
+`elementFromPoint` hit-test on the Continue button, the desktop layout as a regression guard, and
+the rewards nudge's scroll gate on `/ink-cartridges`. Re-measured live before and after: email
+1,621px → **542px**, progress 400px → **100px**, sidebar 858px → **80px**, `scrollWidth` 406 →
+**390**, desktop unchanged at **329px**.
+
+A note for whoever reads this next: the fix landed at 542px, not the 438px the brief predicted,
+because the implementer kept the summary *first* as a collapsed row instead of reordering it
+below the form. The brief's number was a prediction from a DOM edit; the shipped number is a
+different and better design. **Do not "fix" 542 towards 438** — that would put the total below
+the fold and lose the reassurance the collapsed bar exists to give.

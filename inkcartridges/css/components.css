@@ -3886,3 +3886,127 @@ a.product-card__contact-btn {
 
 /* ERR-094 (Jul 2026): buttons wrap below 480px instead of clipping; .btn--large
    is fluid. See tests/text-fit-jul2026.test.js. */
+
+
+/* =============================================
+   CONSENT BANNER — analytics consent bar (ERR-227, Sep 2026)
+   =============================================
+   js/consent-banner.js writes the `cookie_consent` key that js/gtag.js has always
+   read and nothing ever set, so analytics_storage was 'denied' for every visitor
+   since it shipped.
+
+   A slim BOTTOM BAR, deliberately not an interstitial. It lands days after
+   ERR-224, where a 400px flex-basis and an 858px summary put the first checkout
+   field 1,621px down an 844px viewport; covering a phone screen with an overlay
+   would be that same mistake in a new place. It is not a dialog: no overlay, no
+   focus trap, no scroll lock.
+
+   `body.has-consent-banner` reserves --consent-banner-height (measured from the
+   rendered box by the JS, never a hardcoded constant) so the bar can never sit on
+   top of the checkout Continue button. Pinned by
+   tests/consent-mode-sep2026.test.js and measured live by
+   `npm run probe:mobile-checkout-fold`. */
+
+.consent-banner {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-popover);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md, 16px);
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    background: var(--white-primary, #fff);
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    box-shadow: 0 -2px 12px rgba(15, 23, 42, 0.08);
+    /* Off-screen until .is-open so the reveal transitions (rewards-nudge pattern). */
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+}
+
+.consent-banner.is-open {
+    transform: translateY(0);
+}
+
+.consent-banner__text {
+    flex: 1 1 auto;
+    /* A flex child defaults to min-width:auto = its min-content, which is what
+       pushed the checkout column 16px off-screen in ERR-224. Same fix here. */
+    min-width: 0;
+}
+
+.consent-banner__heading {
+    display: block;
+    font-size: var(--font-size-sm, 0.875rem);
+    color: var(--steel-800, #1e293b);
+}
+
+.consent-banner__body {
+    margin: 2px 0 0;
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.4;
+    color: var(--text-secondary, #6b7280);
+}
+
+.consent-banner__link {
+    color: var(--cyan-primary, #267FB5);
+    text-decoration: underline;
+}
+
+.consent-banner__actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: var(--spacing-sm, 8px);
+}
+
+.consent-banner__btn {
+    /* 44px minimum touch target. */
+    min-height: 44px;
+    padding: 0 var(--spacing-md, 16px);
+    border-radius: var(--radius-md, 8px);
+    font: inherit;
+    font-size: var(--font-size-sm, 0.875rem);
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.consent-banner__btn--accept {
+    background: var(--cyan-primary, #267FB5);
+    border: 1px solid var(--cyan-primary, #267FB5);
+    color: #fff;
+}
+
+.consent-banner__btn--decline {
+    background: transparent;
+    border: 1px solid var(--color-border, #e5e7eb);
+    color: var(--steel-800, #1e293b);
+}
+
+/* Reserve the bar's own measured height so nothing it covers is unreachable —
+   the checkout Continue button is the one that matters. */
+body.has-consent-banner {
+    padding-bottom: var(--consent-banner-height, 0px);
+}
+
+/* Below the tablet breakpoint the bar stacks: text over a full-width button row.
+   Keeping the buttons on one line at 390px would leave the body text a ~120px
+   column (the ERR-218 lesson — one row plus 44px targets does not fit). */
+@media (max-width: 768px) {
+    .consent-banner {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-sm, 8px);
+    }
+
+    .consent-banner__actions {
+        /* flex-basis is MAIN-AXIS and the axis just flipped to vertical (ERR-224).
+           Nothing here sets a basis, and nothing here may start to. */
+        justify-content: stretch;
+    }
+
+    .consent-banner__btn {
+        flex: 1 1 auto;
+    }
+}
