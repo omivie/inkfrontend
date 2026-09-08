@@ -707,16 +707,25 @@
                 card.id = `smart-ac-option-${id}-${i}`;
             });
 
-            // ERR-218 — the quantity stepper is pointer-only INSIDE the dropdown.
+            // ERR-218 — the quantity stepper is TAB-unreachable INSIDE the
+            // dropdown. ERR-228 corrects what this comment used to claim.
             //
             // This panel's keyboard model is aria-activedescendant on the search
             // input: arrows and Enter are handled on the input, the cards are
             // role="option" and are never themselves focused, and Tab closes the
-            // panel outright. A focusable control inside a row would sit outside
-            // that model and break the assumption that focus never leaves the
-            // combobox. Not a regression — today's Add-to-Cart button in this
-            // panel is equally unreachable by keyboard, and on every OTHER grid
-            // (shop, PDP, ribbons, favourites) the stepper tabs normally.
+            // panel outright. So the controls stay out of the tab order.
+            //
+            // What is NOT true — and this comment used to say it was — is that
+            // focus never leaves the combobox. A pointer click on the number box
+            // focuses it (QtyStepper does that focus itself, because the
+            // mousedown guard below suppresses the native one), which is the
+            // whole point: a quantity you cannot type is a quantity you cannot
+            // enter. tabindex="-1" does not block programmatic focus. Escape
+            // hands focus back to the search input — see bind().
+            //
+            // Not a regression — today's Add-to-Cart button in this panel is
+            // equally unreachable by Tab, and on every OTHER grid (shop, PDP,
+            // ribbons, favourites) the stepper tabs normally.
             state.list.querySelectorAll('.product-card__qty-btn, .product-card__qty-input')
                 .forEach(el => el.setAttribute('tabindex', '-1'));
 
@@ -941,6 +950,21 @@
                 }
             });
             state.list.addEventListener('click', onListClick);
+
+            // ERR-228 — a pointer click can now put focus in the quantity box,
+            // so Escape has to have an answer there. onKeyDown lives on the
+            // search input and never sees these keystrokes. Enter is already
+            // handled by QtyStepper (it must not submit the search form).
+            // Focus goes back to the search input rather than closing: the
+            // shopper was mid-quantity, not mid-exit, and state.input's focus
+            // handler keeps the panel open.
+            state.list.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+                if (!e.target.closest || !e.target.closest('.product-card__qty-input')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                state.input.focus();
+            });
 
             // Save recent on form submit (free-text search)
             state.form.addEventListener('submit', () => {

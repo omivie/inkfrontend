@@ -3421,6 +3421,15 @@ const QtyStepper = (function () {
      * Every handler stops the event. The card body is wrapped in
      * <a class="product-card__link">, so an un-stopped click on + navigates to
      * the product page mid-increment.
+     *
+     * ERR-228 — and "stops the event" has to mean preventDefault(). Navigation
+     * is the ANCHOR'S DEFAULT ACTION, and stopPropagation() does not cancel a
+     * default action: activation behaviour is not a bubbling listener, it runs
+     * after dispatch unless the event was canceled. This handler guarded only
+     * the two BUTTONS, so a click on the number box between them was never
+     * cancelled and the card navigated to the PDP — measured on the live
+     * dropdown AND on the /search grid, which has no blur-guard at all. Guard
+     * the ZONE, not the buttons.
      */
     function bind(root, options) {
         const scope = root || document;
@@ -3430,15 +3439,36 @@ const QtyStepper = (function () {
         const onChange = options && options.onChange;
 
         scope.addEventListener('click', function (e) {
-            const btn = e.target.closest && e.target.closest('.product-card__qty-btn');
-            if (!btn || !scope.contains(btn)) return;
+            const zone = e.target.closest && e.target.closest('[data-qty-stepper]');
+            if (!zone || !scope.contains(zone)) return;
+            // Cancel BEFORE branching: whichever part of the stepper was hit,
+            // the wrapping <a class="product-card__link"> must not navigate.
             e.preventDefault();
             e.stopPropagation();
-            const stepper = btn.closest('.product-card__qty');
-            if (!stepper) return;
-            const input = stepper.querySelector('.product-card__qty-input');
-            const current = input ? clamp(input.value) : 1;
-            apply(stepper, btn.dataset.step === 'up' ? current + 1 : current - 1, onChange);
+
+            const btn = e.target.closest('.product-card__qty-btn');
+            if (btn) {
+                const stepper = btn.closest('.product-card__qty');
+                if (!stepper) return;
+                const input = stepper.querySelector('.product-card__qty-input');
+                const current = input ? clamp(input.value) : 1;
+                apply(stepper, btn.dataset.step === 'up' ? current + 1 : current - 1, onChange);
+                return;
+            }
+
+            // Not a button: the number box itself, or the 1px wrapper around
+            // it. Place the caret ourselves, because the search dropdown
+            // preventDefaults mousedown to hold the panel open (search.js) and
+            // that also suppresses focus — the box could be clicked and never
+            // typed into. Only when focus is not already there: every other
+            // grid focuses natively at mousedown, and re-selecting would throw
+            // away the caret the shopper just placed.
+            const input = zone.querySelector('.product-card__qty-input');
+            if (input && document.activeElement !== input) {
+                input.focus();
+                // select() is legal on type="number"; setSelectionRange throws.
+                try { input.select(); } catch (_) {}
+            }
         });
 
         // A typed value is the bulk buyer's path: 24 is four + clicks away from

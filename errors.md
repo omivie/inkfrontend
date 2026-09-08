@@ -9494,3 +9494,84 @@ because the implementer kept the summary *first* as a collapsed row instead of r
 below the form. The brief's number was a prediction from a DOM edit; the shipped number is a
 different and better design. **Do not "fix" 542 towards 438** — that would put the total below
 the fold and lose the reassurance the collapsed bar exists to give.
+
+
+---
+
+## ERR-228 — The quantity box on a product card was a link to the product page — **RESOLVED** (2026-09-09)
+
+**Symptom.** "When I try to enter a quantity amount to add to cart for a product it takes me to
+the product page instead." Clicking the number box between `−` and `+` on a card in the header
+search dropdown navigated to the PDP. The `−` and `+` buttons worked. Reported with a screenshot
+of the two-column dropdown, so it read as a dropdown bug.
+
+**It was not a dropdown bug.** Measured on production before anything was written, in headless
+Chromium at 1440×900:
+
+| Surface | Click | Result |
+|---|---|---|
+| header dropdown (`ribbon`) | `.product-card__qty-input` | → `/products/oki-compatible-ml182-printer-ribbon-black/C-OKI-IO182-RIB-BK`, panel closed, `activeElement` = `BODY` |
+| `/search?q=ribbon` grid | `.product-card__qty-input` | → the same PDP, `activeElement` = `BODY` |
+
+The results grid has **no `mousedown` blur-guard at all** and failed identically. That is what
+cleared the dropdown's guard and convicted the shared component — the same click was broken on
+every grid whose stepper sits inside the card's anchor: the dropdown, `/shop` and `/search`
+(`shop-page.js`), the PDP related rail (`products.js`), the ribbon pages, and the cart's
+cross-sell modal. `favourites.js` (buy row outside the anchor) and `business-page.js` (no anchor)
+were unaffected.
+
+**Cause — one clause, and the wrong verb.** `QtyStepper.bind()` (`js/utils.js`) opened its click
+handler with:
+
+```js
+const btn = e.target.closest && e.target.closest('.product-card__qty-btn');
+if (!btn || !scope.contains(btn)) return;   // ← the number box returns HERE
+e.preventDefault();
+e.stopPropagation();
+```
+
+The `input`, `change` and `keydown` listeners beside it all call `stopPropagation()`, and none of
+them is a `click` listener, so **nothing ever called `preventDefault()` for the box.**
+
+> **`stopPropagation()` does not cancel a default action.** Navigation is the activation behaviour
+> of the wrapping `<a class="product-card__link">`. Per the DOM spec that behaviour runs *after*
+> dispatch unless the event's canceled flag is set — bubbling never reaches it, so stopping the
+> bubble stops nothing. Inside an `<a>`, only `preventDefault()` keeps you on the page.
+
+The stepper is emitted *inside* the anchor on four renderers (`products.js:202/292`,
+`shop-page.js:4571/4643`, `ribbons-page.js:933/952`, `cart.js:3081/3093`), so guarding two
+buttons out of three controls left the third one wired to the link.
+
+**Why it survived ERR-218, which introduced the stepper and knew about this exact trap.** That
+write-up names it — "`stopPropagation()` … so the wrapping `<a>` does not navigate" — and its
+live verification line reads **`+ does not navigate`**. Only the button was ever clicked. The
+component's own doc-comment said "every handler stops the event", which was true of the handlers
+that existed and silent about the control that had none. *A trap you documented is not a trap you
+tested: the check has to click every control, not the one you were thinking about.*
+
+**Fix.** `bind()`'s click handler now guards the **zone**, not the buttons: it matches
+`closest('[data-qty-stepper]')`, calls `preventDefault()` + `stopPropagation()` **before**
+branching, then either steps (button) or places the caret (box or wrapper border). The focus is
+explicit because the dropdown `preventDefault`s `mousedown` to hold the panel open, which also
+suppresses native focus — cancelling navigation without focusing would have produced the quieter
+version of the same bug, a box that can be clicked and never typed into. Focus is only moved when
+it is not already there, so the grids that focus natively at mousedown keep the caret position the
+shopper chose. `search.js` gains an Escape handler on the list (focus back to the search input —
+`onKeyDown` is bound to the search input and never sees keystrokes from the box) and its
+"focus never leaves the combobox" comment is **rewritten, not deleted**, to record the reversal.
+
+**Verification.** `npm run probe:qty-typing` — READ-ONLY, never clicks Add to Cart. It clicks the
+real box in a real browser on both surfaces and reads the URL back, and it carries a **positive
+control on each**: the card title must still open the PDP, so a guard that cancelled every click
+in the card would fail rather than pass. Against the unfixed production site it fails both
+navigation checks; against the fix it is **16/16**, with `Add 12` on the button, the unabbreviated
+`Add 12 × 100RIB OKI Compatible Printer Ribbon Black for ML182 to cart` on `aria-label`, `+`
+stepping to 13, the search box still reading `ribbon`, and both controls green.
+
+Pinned by §8 of `tests/qty-stepper-sep2026.test.js` (six tests: the zone guard, the *reason* in a
+comment so it is not "simplified" back, the focus branch, enrolment across the four
+anchor-nesting renderers with `favourites.js`/`business-page.js` named as exemptions rather than
+skipped, the Escape handler, and a positive control that the pre-fix shape fails).
+
+**Files.** `js/utils.js` (`QtyStepper.bind`) · `js/search.js` · `tests/qty-stepper-sep2026.test.js`
+· `scripts/probe-qty-typing.mjs` (new) · `package.json`.
