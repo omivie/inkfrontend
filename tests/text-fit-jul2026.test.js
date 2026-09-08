@@ -1,7 +1,7 @@
 /**
  * TEXT-FIT AUDIT — Jul 2026
  * =========================
- * A Playwright sweep (inkcartridges/scripts/fit-audit.js, `npm run audit:fit`)
+ * A Playwright sweep (scripts/fit-audit.js, `npm run audit:fit`)
  * found text overflowing its boxes on small viewports across the storefront.
  * These static assertions pin the CSS/markup fixes so they can't regress:
  *
@@ -73,9 +73,9 @@ test('T7 scrollable table wrappers carry the edge-fade scroll hint', () => {
 });
 
 test('T8 the fit-audit tool exists and is wired to npm', () => {
-    assert.ok(fs.existsSync(path.join(ROOT, 'inkcartridges/scripts/fit-audit.js')),
-        'inkcartridges/scripts/fit-audit.js must exist');
+    assert.ok(fs.existsSync(path.join(ROOT, 'scripts/fit-audit.js')),
+        'scripts/fit-audit.js must exist');
     const pkg = JSON.parse(read('package.json'));
-    assert.equal(pkg.scripts['audit:fit'], 'node inkcartridges/scripts/fit-audit.js',
+    assert.equal(pkg.scripts['audit:fit'], 'node scripts/fit-audit.js',
         'npm run audit:fit must run the fit-audit script');
 });

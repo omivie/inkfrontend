@@ -150,7 +150,7 @@ test('§2 every editable region is already in canonical form on disk', () => {
         if (M.serializeRegion(r.blocks, r.section.indent) !== r.src) drifted.push(`${r.slug}#${r.id}`);
     }
     assert.deepEqual(drifted, [],
-        'run: node inkcartridges/scripts/canonicalise-page-copy.mjs');
+        'run: node scripts/canonicalise-page-copy.mjs');
 });
 
 test('§2 canonicalising changes no prose and no bound facts', () => {
@@ -597,7 +597,7 @@ test('§7 nothing in this feature names the retired override table', () => {
         'inkcartridges/js/admin/utils/page-copy-model.js',
         'inkcartridges/js/admin/utils/page-copy-regions.js',
         'inkcartridges/js/admin/utils/page-copy-guards.js',
-        'inkcartridges/scripts/canonicalise-page-copy.mjs',
+        'scripts/canonicalise-page-copy.mjs',
         'page-copy-editor-backend-brief.md',
     ];
     for (const f of files) {

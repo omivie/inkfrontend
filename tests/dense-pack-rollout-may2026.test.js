@@ -200,9 +200,17 @@ test('§3 middleware prerender cache emits stale-while-revalidate', () => {
     // (3600s = 1h). With SWR, the first crawler hit past expiry serves stale
     // immediately AND triggers an async backend refresh, so the next hit sees
     // the fresh pack rows.
-    // Pull the Cache-Control header value out of the prerender Response so the
-    // assertion targets only the bot-prerender block, not the entire file.
-    const cc = MIDDLEWARE_SRC.match(/'Cache-Control':\s*'([^']+)'/);
+    // Pull the Cache-Control value out of the PRERENDER Response specifically.
+    //
+    // This used to be a first-match regex over the whole file, which was only
+    // ever the prerender block by accident of ordering — the comment claimed a
+    // scoping the code did not have. ERR-229 added an earlier Response (the
+    // non-web 404 guard) with its own Cache-Control and the assertion silently
+    // started reading that one instead. Anchor on X-Prerendered, which is unique
+    // to the block this test is actually about.
+    const block = MIDDLEWARE_SRC.match(/\{[^{}]*'X-Prerendered'[^{}]*\}/);
+    assert.ok(block, 'could not find the prerender Response headers block');
+    const cc = block[0].match(/'Cache-Control':\s*'([^']+)'/);
     assert.ok(cc, 'middleware must set a Cache-Control header on the prerender Response');
     const cacheValue = cc[1];
     assert.match(cacheValue, /stale-while-revalidate=\d+/,

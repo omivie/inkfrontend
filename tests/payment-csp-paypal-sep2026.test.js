@@ -44,12 +44,30 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const VERCEL = JSON.parse(fs.readFileSync(path.join(ROOT, 'inkcartridges/vercel.json'), 'utf8'));
 
 const PAYPAL_INLINE_HASH = "'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk='";
-const EXISTING_HASH = "'sha256-0JmmTUETUXDHkK3pNmvl/MoDE5MN0DDwFCnqKmhR2Go='";
+
+/**
+ * The hash this suite used to insist on keeping (ERR-230).
+ *
+ * commit df17277 added it to script-src describing it as the PayPal inline
+ * script hash. It was a wrong guess: it has never matched any inline script in
+ * this repo, at that commit or any since. ERR-225 — PayPal downloading but not
+ * running, "initialized successfully" logged over a dead payment method, 0 of 46
+ * mobile checkouts completing — happened BECAUSE that hash was wrong. 071f446
+ * then added the real one (n8Se…) and left the wrong one in place, and the test
+ * below pinned it with the comment "the original site hash must survive".
+ *
+ * So a suite written to stop a silent CSP failure was guarding a value that
+ * protected nothing, while three of the site's own inline scripts were being
+ * refused in production. It is asserted ABSENT now, and §1b below replaces the
+ * intent it was reaching for with something that can actually detect the problem.
+ */
+const RETIRED_WRONG_HASH = "'sha256-0JmmTUETUXDHkK3pNmvl/MoDE5MN0DDwFCnqKmhR2Go='";
 
 /** The Content-Security-Policy value as actually configured. */
 function csp() {
@@ -75,12 +93,54 @@ test('§1 the PayPal inline-script hash is allowlisted in script-src', () => {
         'PayPal is blocked at the last step of checkout without this hash');
 });
 
-test('§1 the pre-existing hash was not replaced by it', () => {
-    // Two different inline scripts, two hashes. Swapping one for the other
-    // trades one silent breakage for another.
+test('§1 the hash that never matched anything is gone (ERR-230)', () => {
     const s = directive('script-src');
-    assert.ok(s.includes(EXISTING_HASH), 'the original site hash must survive');
-    assert.notEqual(PAYPAL_INLINE_HASH, EXISTING_HASH);
+    assert.ok(!s.includes(RETIRED_WRONG_HASH),
+        'df17277 guessed the PayPal hash wrong; n8Se… superseded it and this one covers no script');
+    assert.notEqual(PAYPAL_INLINE_HASH, RETIRED_WRONG_HASH);
+});
+
+test('§1b EVERY executable inline script has a matching hash in script-src', () => {
+    // The assertion the old §1 was reaching for and could not make. A hash in
+    // the policy proves nothing on its own — what matters is whether the scripts
+    // we actually ship are permitted. This walks the tree, hashes each inline
+    // block the way a browser does (sha256 of the exact body, base64), and fails
+    // on any that script-src would refuse.
+    //
+    // When it caught this for the first time it found three: the homepage
+    // scroll-restoration guard, the personal-details toast helper, and the
+    // sync-report redirect — all refused in production, none logging anywhere
+    // but the console. All three are external files now, so the expected state
+    // is zero inline scripts; the test does not require that, only that whatever
+    // is inline can run.
+    const s = directive('script-src');
+    const unsafeInline = /'unsafe-inline'/.test(s);
+    const allowed = new Set([...s.matchAll(/'sha256-([A-Za-z0-9+/=]+)'/g)].map((m) => m[1]));
+
+    const htmlFiles = [];
+    (function walk(dir) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            const p = path.join(dir, e.name);
+            if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); }
+            else if (e.name.endsWith('.html')) htmlFiles.push(p);
+        }
+    })(path.join(ROOT, 'inkcartridges'));
+
+    const refused = [];
+    for (const file of htmlFiles) {
+        const html = fs.readFileSync(file, 'utf8');
+        for (const m of html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)) {
+            // ld+json is data, never executed, and not subject to script-src.
+            if (/type\s*=\s*["']application\/ld\+json/.test(m[1] || '')) continue;
+            if (!m[2].trim()) continue;
+            const hash = crypto.createHash('sha256').update(m[2], 'utf8').digest('base64');
+            if (unsafeInline || allowed.has(hash)) continue;
+            const line = html.slice(0, m.index).split('\n').length;
+            refused.push(`${path.relative(ROOT, file)}:${line} needs 'sha256-${hash}'`);
+        }
+    }
+    assert.deepEqual(refused, [],
+        `inline script(s) the deployed CSP will refuse:\n  ${refused.join('\n  ')}`);
 });
 
 test('§1 the origin allowance is still there too — the hash does not replace it', () => {

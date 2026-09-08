@@ -29,7 +29,10 @@
  *
  * NOT under inkcartridges/. `vercel.json` sets `outputDirectory: "."` with the
  * Vercel project root at `inkcartridges/`, so everything in that tree is served
- * publicly (inkcartridges/scripts/fit-audit.js is live on the web right now).
+ * publicly. That was not hypothetical: fit-audit.js sat in that tree and WAS
+ * live on the web, alongside five .sql files publishing our RLS policies, until
+ * ERR-229 moved them here (Sep 2026). `tests/public-surface-sep2026.test.js` now
+ * fails the build if anything non-web reappears under inkcartridges/.
  * Audit tooling belongs in this directory.
  *
  * ONE VOCABULARY. Every check loads the SHIPPED `ProductColors` out of

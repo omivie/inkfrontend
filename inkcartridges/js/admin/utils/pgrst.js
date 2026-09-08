@@ -47,6 +47,30 @@
  * (see its header). If you ever need a literal `%`, add a `pgrstLikeExact` that
  * escapes them with an explicit ESCAPE clause; do not change these two.
  *
+ * ── THE THIRD WILDCARD: `*` (ERR-231) ───────────────────────────────────────
+ *
+ * There is a third wildcard, it was never a decision, and quoting cannot close
+ * it. PostgREST rewrites `*` into the SQL `%` INSIDE every `ilike` filter,
+ * before the value is parsed, unconditionally and with no escape sequence — so
+ * the double quotes above, which do neutralise `,` `(` `)` `.`, do nothing here.
+ * Measured live against our own products table:
+ *
+ *     name.ilike."%TN2*BK%"  → GTN2130BK, CTN2345BK, CTN240BK
+ *     name.ilike."%TN2%BK%"  → GTN2130BK, CTN2345BK, CTN240BK   ← identical
+ *
+ * So `*` is stripped in `pgrstLike` below, and this is the ONE case where round
+ * 1's "quote, never strip" rule cannot apply. That rule earned its place because
+ * quoting *preserves* the operator's text — "(2,500 pages)" stays searchable.
+ * Nothing preserves `*`. The only choice is between an undocumented wildcard the
+ * operator never asked for and agreeing with the backend, which strips `*` from
+ * `/api/search/*` for exactly the same reason (their round-2 hand-off, §4).
+ * Agreement is the invariant this repo keeps re-learning the hard way — ERR-176
+ * and ERR-202 are both "the two halves disagreed about punctuation".
+ *
+ * Strip it in `pgrstLike`, NOT in `pgrstValue`: `*` is only special to the
+ * pattern operators. `pgrstValue` also backs `.eq` / `.in`, where a stripped `*`
+ * would corrupt an exact lookup on a SKU that legitimately contains one.
+ *
  * ── STALENESS WARNING ───────────────────────────────────────────────────────
  *
  * `js/admin/utils/*.js` are imported BARE — `APP_VERSION` cannot bust a util,
@@ -69,7 +93,9 @@ export function pgrstValue(s) {
  *     query.or(`name.ilike.${pgrstLike(q)},sku.ilike.${pgrstLike(q)}`)
  */
 export function pgrstLike(s) {
-  return pgrstValue(`%${String(s ?? '')}%`);
+  // `*` is removed, not escaped — PostgREST turns it into `%` inside ilike and
+  // offers no way to say "I meant a literal asterisk". See the header (ERR-231).
+  return pgrstValue(`%${String(s ?? '').replace(/\*/g, '')}%`);
 }
 
 /**
@@ -82,7 +108,30 @@ export function pgrstLike(s) {
  * "Walker," as a token and the other never had the comma, every returned row is
  * discarded and the picker reports "no match" for a customer that exists
  * (ERR-176's failure mode, re-entered through a different door).
+ *
+ * THE SET HERE MIRRORS WHAT THE REMOTE HALF DROPS, and `*` joined it in Sep
+ * 2026 (ERR-231) — the backend added `*` to its search escaper because PostgREST
+ * expands it to `%`, and `pgrstLike` strips it for the direct-to-Supabase
+ * searches the backend never sees. If this fold kept `*`, `queryTokens('TN*251')`
+ * would yield the token "tn*251", which cannot match any row the remote query
+ * returns — ERR-176 again, one character further along.
+ *
+ * `*` is DELETED; `, ( )` are folded to a SPACE. That asymmetry is deliberate
+ * and it is measured, not guessed. Against the live API, `TN2*130` and `TN2,130`
+ * both return GTN2130BK while `TN2 130` returns nothing — the backend deletes
+ * all three rather than spacing them. For `, ( )` the space is nonetheless the
+ * right local behaviour, because they nearly always sit next to one ("Walker,
+ * Vieland", "Acme (NZ)") so deleting or spacing gives the same tokens, and the
+ * space additionally rescues the no-space case. `*` has no such convention: it
+ * appears mid-token or not at all. And this fold is applied to the HAYSTACK as
+ * well as the query (see matchesAllTokens), so spacing `*` would fold a stored
+ * "TN*251" to "tn 251" and stop it matching the query "TN251" that the remote
+ * leg just used to fetch it. Delete, don't space.
  */
 export function foldFilterPunct(s) {
-  return String(s ?? '').replace(/[,()]/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(s ?? '')
+    .replace(/\*/g, '')
+    .replace(/[,()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

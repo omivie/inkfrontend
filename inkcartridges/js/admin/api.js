@@ -2740,7 +2740,7 @@ const AdminAPI = {
   // Fail-open by design: if the table does not exist yet, or the network is
   // down, getUiPrefs() still returns the localStorage copy and setUiPref()
   // still persists locally — the feature degrades to per-browser, never breaks.
-  // The SQL to create the table lives in inkcartridges/sql/admin_ui_prefs.sql.
+  // The SQL to create the table lives in sql/admin_ui_prefs.sql.
   _uiPrefsCache: null,    // the RESOLVED prefs object (set only once reconciled)
   _uiPrefsPromise: null,  // the in-flight getUiPrefs() promise — shared by
                           // concurrent callers so a second call can never

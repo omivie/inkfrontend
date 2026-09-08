@@ -10,7 +10,7 @@
  *   page-h-overflow  document wider than the viewport
  *
  * Usage:  npx serve inkcartridges -l 3000   (in another terminal)
- *         npm run audit:fit                  (or: node inkcartridges/scripts/fit-audit.js)
+ *         npm run audit:fit                  (or: node scripts/fit-audit.js)
  * Exit code 1 if any real finding survives the skip-list, 0 when clean.
  *
  * Known BY-DESIGN patterns are skipped (see SKIP below):

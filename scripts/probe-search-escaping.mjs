@@ -36,6 +36,17 @@ const ANON = process.env.SUPABASE_ANON_KEY
   || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';
 const JWT = process.env.SUPABASE_JWT || '';
 
+// The SHIPPED escaper, imported — never a copy of it.
+// This probe used to re-declare `pgrstLike` inline, which meant it was
+// certifying a replica: when pgrstLike started stripping `*` (ERR-231) the copy
+// here would still have passed it through and the probe would have reported the
+// old behaviour as correct. An audit that carries its own copy of the thing it
+// audits certifies code that does not exist — the same rule the colour audit
+// states in its header.
+const { pgrstLike } = await import(
+  new URL('../inkcartridges/js/admin/utils/pgrst.js', import.meta.url).href
+);
+
 console.log('probe-search-escaping — MODE: READ-ONLY (GET only; nothing is written)');
 console.log(`API: ${API}`);
 console.log(`PostgREST section: ${JWT ? 'ENABLED (SUPABASE_JWT present)' : 'SKIPPED (set SUPABASE_JWT to include it)'}\n`);
@@ -118,7 +129,6 @@ console.log('\n§4  Direct-to-PostgREST admin searches (ERR-202) — the escaper
 if (!JWT) {
   skip('PostgREST checks need an admin JWT (SUPABASE_JWT). NOT RUN — this is a skip, not a pass.');
 } else {
-  const pgrstLike = (s) => `"%${String(s ?? '').replace(/["\\]/g, (m) => '\\' + m)}%"`;
   const run = async (orExpr) => {
     const url = `${SB}/rest/v1/products?select=sku,name&or=(${encodeURIComponent(orExpr)})&limit=3`;
     const r = await fetch(url, { headers: { apikey: ANON, Authorization: `Bearer ${JWT}` } });
@@ -151,6 +161,90 @@ if (!JWT) {
   const tRows = Array.isArray(title.body) ? title.body : [];
   if (title.status === 200 && tRows.length > 0) ok(`"Black (2,500 pages)" now FINDS ${tRows.length} rows (used to 400)`);
   else bad(`"Black (2,500 pages)" → ${title.status}, ${tRows.length} rows`);
+}
+
+// ── §5. `*` — the third wildcard, and the one that cannot be escaped ───────
+// The backend's round-2 hand-off (§4) added `*` to its strip list, because
+// PostgREST rewrites `*` into the SQL `%` inside every ilike filter, before the
+// value is parsed and with no escape sequence. It then said the FE impact was
+// zero. It is not: our three admin searches go DIRECT to PostgREST, so the
+// backend's strip never sees them, and quoting does not stop the rewrite
+// (ERR-231). Both halves are pinned here so a change on either side is loud.
+console.log('\n§5  `*` — deleted by the backend, and unescapable in our own filters');
+
+async function productTotal(q) {
+  const url = `${API}/api/products?search=${encodeURIComponent(q)}&limit=3`;
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(url);
+    if (r.status === 429) { await sleep(1500 * (i + 1)); continue; }
+    let j = null; try { j = await r.json(); } catch { /* non-JSON */ }
+    return j?.data ? (j.meta?.total ?? null) : null;
+  }
+  return null;
+}
+
+{
+  // 5a. The backend DELETES `*`; it does not fold it to a space. TN2130 is a
+  // real SKU (GTN2130BK), which is what makes the two hypotheses tell apart:
+  // deletion still matches, a space does not.
+  const plain = await productTotal('TN2130');
+  const starred = await productTotal('TN2*130');
+  const spaced = await productTotal('TN2 130');
+
+  if (plain > 0) {
+    ok(`positive control: "TN2130" matches ${plain} row(s)`);
+
+    if (starred === plain) ok(`"TN2*130" ≡ "TN2130" (${starred}) — the backend DELETES \`*\``);
+    else bad(`"TN2*130" → ${starred} vs ${plain} for "TN2130". The backend's handling of \`*\` changed; `
+      + 'foldFilterPunct and pgrstLike in js/admin/utils/pgrst.js mirror it and must change with it.');
+
+    if (spaced !== plain) ok(`"TN2 130" → ${spaced}, different — deletion, not space-folding`);
+    else bad(`"TN2 130" also → ${plain}: deletion and spacing are no longer distinguishable with this `
+      + 'term, so the check above proves nothing. Pick a different probe term.');
+  } else {
+    bad(`positive control FAILED — "TN2130" matched nothing (got ${plain}); §5a concludes nothing`);
+  }
+
+  // 5b. `?q=*` must no longer mean "everything".
+  const star = await productTotal('*');
+  const empty = await productTotal('');
+  if (star !== null && star === empty) ok(`"*" ≡ empty term (${star}) — not a match-everything wildcard`);
+  else bad(`"*" → ${star}, empty term → ${empty} — \`*\` is behaving like a wildcard again`);
+}
+
+// 5c. The half the backend cannot fix: our own direct-to-PostgREST filters.
+if (!JWT) {
+  skip('§5c PostgREST `*` expansion needs SUPABASE_JWT. NOT RUN — this is a skip, not a pass.');
+} else {
+  const sel = async (filter) => {
+    const url = `${SB}/rest/v1/products?select=sku&or=(${encodeURIComponent(filter)})&limit=5`;
+    const r = await fetch(url, { headers: { apikey: ANON, Authorization: `Bearer ${JWT}` } });
+    let body = null; try { body = await r.json(); } catch { /* non-JSON */ }
+    return { status: r.status, skus: Array.isArray(body) ? body.map((x) => x.sku).sort().join(',') : '' };
+  };
+
+  const rawStar = await sel('sku.ilike."%TN2*BK%"');   // a `*` we did NOT strip
+  const percent = await sel('sku.ilike."%TN2%BK%"');   // the wildcard it becomes
+  const viaHelper = await sel(`sku.ilike.${pgrstLike('TN2*BK')}`); // the shipped escaper
+
+  if (rawStar.status !== 200 || percent.status !== 200 || viaHelper.status !== 200) {
+    bad(`§5c could not run: ${rawStar.status}/${percent.status}/${viaHelper.status}`);
+  } else if (!percent.skus) {
+    bad('§5c positive control FAILED — "%TN2%BK%" matched nothing, so the comparison proves nothing');
+  } else {
+    if (rawStar.skus === percent.skus) {
+      ok('CONFIRMED: a raw `*` inside a QUOTED ilike still expands to `%` — quoting cannot stop it');
+    } else {
+      bad('a raw `*` no longer expands to `%` inside a quoted ilike — PostgREST changed. The strip in '
+        + 'pgrstLike may now be unnecessary; re-measure before removing it.');
+    }
+    if (viaHelper.skus !== rawStar.skus) {
+      ok('the shipped pgrstLike strips `*` — admin search agrees with the storefront');
+    } else {
+      bad('the shipped pgrstLike is passing `*` through to PostgREST again — the undocumented '
+        + 'third wildcard is back (ERR-231)');
+    }
+  }
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${failures} failure(s), ${skipped} skipped.`);
