@@ -452,3 +452,114 @@ test('POSITIVE CONTROL — the pre-fix shapes fail the predicates above', () => 
     assert.doesNotMatch(preFixGuard, /product-card__qty/,
         'control: the pre-fix blur guard did NOT cover the stepper');
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8 — ERR-228: the number box is inside the card's <a>, and only
+// preventDefault() stops an anchor
+//
+// ERR-218 verified "+ does not navigate" and stopped there. The number box
+// between the two buttons was never cancelled, so clicking it navigated to the
+// PDP — measured on the live dropdown AND on the /search grid, which has no
+// mousedown blur-guard at all (that is what proves the guard innocent).
+//
+// These are source predicates. A source grep is not a measurement (ERR-224),
+// so the behaviour itself is pinned by `npm run probe:qty-typing`, which clicks
+// the real box in a real browser and reads the URL back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CLICK_HANDLER = (() => {
+    const m = UTILS.match(/scope\.addEventListener\('click', function \(e\) \{[\s\S]*?\n {8}\}\);/);
+    assert.ok(m, 'QtyStepper.bind must still register a delegated click listener');
+    return m[0];
+})();
+
+test('the click guard covers the whole stepper zone, not just the two buttons', () => {
+    assert.match(CLICK_HANDLER, /closest\('\[data-qty-stepper\]'\)/,
+        'the entry guard must be the stepper ZONE — a guard keyed on '
+        + '.product-card__qty-btn lets a click on the number box through to the '
+        + 'wrapping <a class="product-card__link">, which then navigates (ERR-228)');
+
+    // The zone guard has to come FIRST, and preventDefault has to run before the
+    // handler branches on which part was hit — an early `return` for the input
+    // is exactly the bug.
+    const zoneAt = CLICK_HANDLER.indexOf('[data-qty-stepper]');
+    const btnAt = CLICK_HANDLER.indexOf('.product-card__qty-btn');
+    const pdAt = CLICK_HANDLER.indexOf('e.preventDefault()');
+    assert.ok(zoneAt >= 0 && pdAt > zoneAt, 'preventDefault must follow the zone guard');
+    assert.ok(btnAt > pdAt,
+        'the button branch must come AFTER preventDefault, or the box goes uncancelled');
+});
+
+test('the click guard says WHY preventDefault, not stopPropagation, is the one that matters', () => {
+    // The next reader will be tempted to "simplify" this back to a button-only
+    // guard. The reason has to survive in the file, not only in errors.md.
+    assert.match(UTILS, /default action/i,
+        'QtyStepper must record that navigation is the anchor\'s DEFAULT ACTION');
+    assert.match(UTILS, /stopPropagation\(\) does not cancel a\s*\n?\s*\*?\s*default action/i,
+        'and that stopPropagation() does not cancel one — that is the whole bug');
+});
+
+test('a click on the box places the caret, because the dropdown suppresses the native one', () => {
+    // search.js preventDefaults mousedown to hold the panel open, which also
+    // suppresses focus. Cancelling navigation without focusing would leave a box
+    // that can be clicked and never typed into — a quieter version of the bug.
+    assert.match(CLICK_HANDLER, /input\.focus\(\)/,
+        'the non-button branch must focus the quantity input');
+    assert.match(CLICK_HANDLER, /document\.activeElement !== input/,
+        'focus only when it is not already there — every other grid focuses '
+        + 'natively at mousedown and re-selecting would destroy the caret');
+    assert.match(CLICK_HANDLER, /try \{ input\.select\(\); \} catch/,
+        'select() is legal on type="number" but must stay guarded');
+});
+
+test('ENROLMENT — the anchor guard lives in QtyStepper alone', () => {
+    // Every renderer that nests the stepper INSIDE the card anchor relies on
+    // bind(). None may grow its own copy of the guard: two guards on one click
+    // is how ERR-218\'s double-add nearly shipped.
+    const NESTED_IN_ANCHOR = {
+        'products.js': PRODUCTS,      // <a class="product-card__link"> wraps the buy row
+        'shop-page.js': SHOP,         // same shape, second template
+        'ribbons-page.js': RIBBONS,   // same shape
+        'cart.js': CART,              // <a class="crosssell-modal__card">
+    };
+    // Named exemptions, not a silent skip (a skip is not a pass):
+    //   favourites.js     — the buy row is OUTSIDE .favourite-item__link
+    //   business-page.js  — reorder tiles have no wrapping anchor at all
+    for (const [name, src] of Object.entries(NESTED_IN_ANCHOR)) {
+        assert.match(src, /QtyStepper\.bind\(/,
+            `${name} nests the stepper inside an anchor and must call QtyStepper.bind`);
+        assert.doesNotMatch(src, /addEventListener\('click'[^)]{0,200}product-card__qty/,
+            `${name} must not re-implement the stepper click guard — one guard, one place`);
+    }
+    for (const [name, src] of Object.entries({ 'favourites.js': FAVOURITES, 'business-page.js': BUSINESS_PAGE })) {
+        assert.match(src, /QtyStepper\.bind\(/,
+            `${name} is exempt from the anchor guard, not from binding the stepper`);
+    }
+});
+
+test('Escape has an answer while focus is in the dropdown quantity box', () => {
+    // onKeyDown is bound to the search input and never sees these keystrokes.
+    const handler = SEARCH.match(/state\.list\.addEventListener\('keydown'[\s\S]*?\n {12}\}\);/);
+    assert.ok(handler, 'the dropdown list needs its own keydown listener (ERR-228)');
+    assert.match(handler[0], /Escape/, 'it must handle Escape');
+    assert.match(handler[0], /product-card__qty-input/, 'scoped to the quantity box');
+    assert.match(handler[0], /state\.input\.focus\(\)/,
+        'focus returns to the search input — the shopper was mid-quantity, not mid-exit');
+});
+
+test('POSITIVE CONTROL — the pre-fix click handler fails the §8 predicates', () => {
+    const preFixClick = `
+        scope.addEventListener('click', function (e) {
+            const btn = e.target.closest && e.target.closest('.product-card__qty-btn');
+            if (!btn || !scope.contains(btn)) return;
+            e.preventDefault();
+            e.stopPropagation();
+        });`;
+    assert.doesNotMatch(preFixClick, /\[data-qty-stepper\]/,
+        'control: the pre-fix guard was keyed on the buttons only');
+    assert.doesNotMatch(preFixClick, /input\.focus\(\)/,
+        'control: the pre-fix handler never focused the box');
+    assert.match(preFixClick, /if \(!btn \|\| !scope\.contains\(btn\)\) return;\n\s+e\.preventDefault/,
+        'control: a click on the number box returned before preventDefault ever ran');
+});

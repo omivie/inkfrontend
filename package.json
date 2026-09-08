@@ -49,6 +49,7 @@
     "probe:mobile-checkout-fold": "node scripts/probe-mobile-checkout-fold.mjs",
     "probe:search-packs": "node scripts/probe-search-value-pack-ranking.mjs",
     "probe:search-columns": "node scripts/probe-search-dropdown-columns.mjs",
+    "probe:qty-typing": "node scripts/probe-qty-typing.mjs",
     "probe:shop-columns": "node scripts/probe-shop-source-columns.mjs"
   },
   "dependencies": {
