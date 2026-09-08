@@ -9738,6 +9738,22 @@ inline `<script>` hid the same code from the CSP and from the console audit at o
 through `DebugLog`. The toast's `innerHTML` interpolation and its inline `onclick=` (refused by
 the same directive, so the × never worked) are gone too.
 
+**One more, found in the browser and fixed here:** `connect-src` allowed
+`googletagmanager.com` in `script-src` but **not** in `connect-src`, so GTM's
+`/td` conversion beacon was being refused on production —
+`Fetch API cannot load https://www.googletagmanager.com/td?id=AW-…`. Pre-existing,
+unrelated to this change, and invisible without a browser: the tag loads, reports
+itself healthy, and its beacon is dropped. Added the origin. Verified by replaying
+production under the new header with only the **main frame's** CSP swapped — 0 GTM
+violations after, and the single remaining refusal is production's still-old
+`index.html`, i.e. ERR-230 itself, live.
+
+*Harness note, because it nearly produced a false finding:* rewriting the CSP on
+**every** document — not just the main frame — applies our policy to third-party
+iframes and invents violations that do not exist (a phantom
+`Framing 'https://www.google.com/' violates frame-ancestors 'none'`). Scope the
+route to `request.frame() === page.mainFrame()`.
+
 **Rule.** An inline `<script>` is a file that no tool can see. Externalise it. If one genuinely
 must be inline, the hash is not optional bookkeeping — `tests/payment-csp-paypal-sep2026.test.js`
 §1b now computes it for you and fails if it is missing.

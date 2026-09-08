@@ -103,6 +103,17 @@ test('§1 every file under inkcartridges/ is either a web asset or a listed exce
     + offenders.join('\n  '));
 });
 
+test('§1 no dot-directories in the web root — those are debris, never content', () => {
+  // Found by dropping a `.csp-harness/` directory in there during ERR-230's
+  // browser verification and noticing that nothing complained: its files were
+  // .html and .js, so the extension allowlist above passed them. A dot-directory
+  // is never intentional web content, and it would have deployed.
+  const stray = fs.readdirSync(WEB_ROOT, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith('.') && e.name !== '.vercel')
+    .map((e) => e.name);
+  assert.deepEqual(stray, [], 'dot-directories under inkcartridges/ are published');
+});
+
 test('§1 THE BUG: no .sql anywhere under inkcartridges/', () => {
   // .sql is in neither list above, so §1 already covers it. Named separately
   // because this is the specific thing that leaked, and a failure message that
