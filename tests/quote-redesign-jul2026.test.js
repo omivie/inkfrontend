@@ -31,6 +31,9 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const ICR = path.join(ROOT, 'inkcartridges');
 const read = (rel) => fs.readFileSync(path.join(ICR, rel), 'utf8');
+// sql/ lives at the REPO ROOT, not under inkcartridges/ — that tree is served
+// publicly and these files publish our RLS policies (ERR-229).
+const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 function stripComments(src) {
   return src
@@ -41,7 +44,7 @@ function stripComments(src) {
 const QUOTE_HTML = read('html/quote.html');
 const QUOTE_JS_RAW = read('js/quote-page.js');
 const QUOTE_JS = stripComments(QUOTE_JS_RAW);
-const QUOTE_SQL = read('sql/quote_uploads.sql');
+const QUOTE_SQL = readRoot('sql/quote_uploads.sql');
 // Policy assertions must ignore the header commentary (which *discusses*
 // select policies while forbidding them) — strip `--` comment lines.
 const QUOTE_SQL_CODE = QUOTE_SQL.split('\n')

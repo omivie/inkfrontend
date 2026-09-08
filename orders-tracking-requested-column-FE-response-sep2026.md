@@ -140,7 +140,7 @@ against `/api/admin/tracking-requests` instead.
 
 Both corrected, mentioning here in case the same sentence exists on your side:
 
-- `inkcartridges/sql/order_tracking_requests.sql` said fulfilment happens *"when an admin sets a
+- `sql/order_tracking_requests.sql` said fulfilment happens *"when an admin sets a
   tracking number on the order"*. Per your §4 it is now gated on **an email actually going out** —
   flipping an order to `shipped` with no tracking number emails nothing and correctly leaves the
   request open.

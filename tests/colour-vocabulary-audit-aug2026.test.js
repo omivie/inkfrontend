@@ -10,8 +10,11 @@
  * What it guards:
  *
  *   - The script lives OUTSIDE inkcartridges/. That tree is the Vercel project
- *     root and is served publicly — inkcartridges/scripts/fit-audit.js is
- *     fetchable on the live site right now. Audit tooling must not deploy.
+ *     root and is served publicly. fit-audit.js WAS fetchable on the live site
+ *     for months on exactly that basis, along with five .sql files publishing
+ *     our RLS policies; ERR-229 moved them out (Sep 2026) and
+ *     tests/public-surface-sep2026.test.js now enforces the rule this comment
+ *     could only state. Audit tooling must not deploy.
  *
  *   - It declares NO colour vocabulary of its own. An audit carrying its own
  *     copy of the colour list certifies a UI that does not exist; it has to

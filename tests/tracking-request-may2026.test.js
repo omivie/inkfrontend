@@ -37,6 +37,8 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const ICR = path.join(ROOT, 'inkcartridges');
 const read = (rel) => fs.readFileSync(path.join(ICR, rel), 'utf8');
+// sql/ lives at the REPO ROOT, not under inkcartridges/ (ERR-229).
+const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 // ─── Customer API ────────────────────────────────────────────────────────────
 test('api.js exposes requestOrderTracking → POST /api/orders/track-request', () => {
@@ -234,7 +236,7 @@ test('admin Settings exposes the notify_tracking_requests opt-in', () => {
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 test('SQL doc mirrors the deployed order_tracking_requests schema', () => {
-  const sql = read('sql/order_tracking_requests.sql');
+  const sql = readRoot('sql/order_tracking_requests.sql');
   assert.match(sql, /create table if not exists public\.order_tracking_requests/, 'table create missing');
   // Status is pending|fulfilled only — no dismissed.
   assert.match(sql, /status[\s\S]*check \(status in \('pending', 'fulfilled'\)\)/, 'status check constraint missing/wrong');

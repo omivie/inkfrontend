@@ -1408,7 +1408,7 @@ const API = {
 
     // ─── Manual product codes (the product_codes override table) ──────────────
     // Admins assign categorisation codes in the product drawer; they persist to
-    // the Supabase `product_codes` table (see inkcartridges/sql/product_codes.sql).
+    // the Supabase `product_codes` table (see sql/product_codes.sql).
     // This block lets the storefront honour them:
     //   (1) a product WITH manual codes has its series_codes fully overridden;
     //   (2) the codes drilldown gains a chip for any purely-manual code;

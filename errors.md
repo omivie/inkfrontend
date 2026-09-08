@@ -8594,19 +8594,19 @@ authenticated session (delete-then-insert), the same working pattern as `product
 The session is valid, non-expired, **role=`authenticated`**; SELECT works; the table exists with RLS on.
 A probe INSERT returned Postgres **`42501`** and blocked *before* the CHECK constraint (fired even on a
 lowercase value that violates `code = upper(code)`) — proving there is **no INSERT policy granting
-`authenticated` write** on the live table. i.e. `inkcartridges/sql/product_codes.sql` (which defines
+`authenticated` write** on the live table. i.e. `sql/product_codes.sql` (which defines
 `product_codes_insert_auth` / `_delete_auth` + grants) was **never fully applied** to live project
 `lmdlgldjgcanknsjrcxh` — only the table + `enable row level security` exist.
 
 **Fix:**
-1. **DB (the actual fix):** run `inkcartridges/sql/product_codes.sql` in Supabase → SQL Editor (idempotent;
+1. **DB (the actual fix):** run `sql/product_codes.sql` in Supabase → SQL Editor (idempotent;
    `drop policy if exists` + `create policy`, no data touched). Takes effect immediately, no deploy.
    The frontend cannot run DDL — only the anon key + a site-user `authenticated` JWT are available; no
    service-role key or connection string exists in this repo.
 2. **Frontend hardening (this repo):** `describeCodesWriteError(err)` in `js/admin/pages/products.js`
    maps `42501` / `/row-level security|permission denied/` to a plain-English, actionable toast
    ("…the database is missing write permission for the product_codes table. Apply
-   inkcartridges/sql/product_codes.sql in Supabase…"). Wired into both `setProductCodes` failure surfaces
+   sql/product_codes.sql in Supabase…"). Wired into both `setProductCodes` failure surfaces
    — the Save handler (~line 3260) and the brand-wide rename/delete via `applyBrandCodeChange` (~line 2135).
    Verified: the friendly message renders end-to-end while the DB is still unpatched.
 
@@ -8617,7 +8617,7 @@ admin = missing/incomplete RLS policy on live, not a session problem.
 
 **RESOLVED (2026-07-07):** Backend applied the policies to live via migration
 `104_product_codes_admin_write_policies.sql` (documented in `Downloads/product-codes-admin-editing.md`) —
-same `to authenticated` INSERT/DELETE policies + grants as `inkcartridges/sql/product_codes.sql`. Admin
+same `to authenticated` INSERT/DELETE policies + grants as `sql/product_codes.sql`. Admin
 code writes now persist. Frontend follow-up: `describeCodesWriteError` no longer tells the admin to run
 the SQL (stale advice) — a `42501` now maps to *"you don't have permission… make sure you're signed in as
 an admin,"* and `23514` (check) / `23503` (FK) / `23505` (duplicate → no-op) are mapped per the backend's
@@ -8963,25 +8963,36 @@ must send the real named params to see the true 42501). A backend migration had
 again revoked / dropped-and-recreated public functions without re-granting
 EXECUTE to `authenticated`.
 
-**Fix (permanent, this time it can't recur):** `inkcartridges/sql/analytics_function_grants.sql`
-— idempotent migration that (1) `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public
-TO authenticated, service_role` to restore data now, (2) `ALTER DEFAULT
-PRIVILEGES` for the standard creating roles, and (3) installs an **event trigger**
-`trg_grant_execute_on_public_functions` that re-grants EXECUTE on any function
-the instant it is CREATEd/ALTERed in `public`. The event trigger is the durable
-part: a future DROP+CREATE migration (which discards the ACL) is now healed in
-the same transaction, before any client can hit a 42501. Ends the recurrence.
-Applied to live project `lmdlgldjgcanknsjrcxh`; re-probed the RPCs → 200.
+**Fix as written in May 2026 — SUPERSEDED, DO NOT APPLY AS DESCRIBED. See ERR-229.**
+`sql/analytics_function_grants.sql` originally (1) `GRANT EXECUTE ON ALL FUNCTIONS
+IN SCHEMA public TO authenticated, service_role`, (2) `ALTER DEFAULT PRIVILEGES`
+for the standard creating roles, and (3) installed an **event trigger**
+`trg_grant_execute_on_public_functions` re-granting EXECUTE on any function the
+instant it was CREATEd/ALTERed. That did end this outage. It also:
+
+- swept in backend migration 165's `set_business_contract_price(...)` and
+  `remove_business_contract_price(...)` — `SECURITY DEFINER`, no internal
+  `is_owner()` guard because **the grant was the control** — which would hand
+  every signed-in customer the ability to set their own price on any product; and
+- **replaced** the live database's narrowed, allow-listed trigger from backend
+  **migration 163**, silently reverting it.
+
+The file now grants only the six analytics RPCs, by name and signature, and
+sections 2 and 3 are gone (ERR-229). **If this outage recurs, the fix is for the
+backend to re-run migration 163 — never to widen the grant from this repo.** Our
+SQL is a restore, not a durable fix.
 
 **Rule:** when the dashboard shows the self-heal banner, do NOT touch the
 frontend — the self-heal is correct and the missing KPIs (New Customers, etc.)
 *cannot be honestly reconstructed* from the order feed, so faking them is wrong.
-Diagnose with the JWT+curl recipe; the answer is always a DB grant. Apply
-`sql/analytics_function_grants.sql` — the event trigger means you only ever apply
-it once. **Probe gotcha:** an empty-`{}` RPC call returns 404 PGRST202 even when
+Diagnose with the JWT+curl recipe; the answer is always a DB grant. **The remedy
+is backend migration 163, NOT a wider grant from this repo** (ERR-229); applying
+`sql/analytics_function_grants.sql` restores the six analytics RPCs but does not
+survive the next DROP+CREATE. **It recurred a fourth time on 2026-09-09 —
+see ERR-232.** **Probe gotcha:** an empty-`{}` RPC call returns 404 PGRST202 even when
 the real problem is 42501 — always send the function's real named params.
 
-**Pinned by:** `tests/analytics-function-grants.test.js`.
+**Pinned by:** `tests/analytics-function-grants.test.js` — its contract was INVERTED in ERR-229 and now fails if the wide grant returns.
 
 ---
 
@@ -9575,3 +9586,288 @@ skipped, the Escape handler, and a positive control that the pre-fix shape fails
 
 **Files.** `js/utils.js` (`QtyStepper.bind`) · `js/search.js` · `tests/qty-stepper-sep2026.test.js`
 · `scripts/probe-qty-typing.mjs` (new) · `package.json`.
+
+---
+
+## ERR-229 — The SQL that could give any customer their own price was published on the website — **RESOLVED** (2026-09-09)
+
+**Where it came from.** The backend's round-2 security hand-off, §1: delete or neuter
+`sql/analytics_function_grants.sql`, because its
+
+```sql
+grant execute on all functions in schema public to authenticated, service_role;
+```
+
+now sweeps in migration 165's write RPCs — `set_business_contract_price(...)`, which sets an
+arbitrary negotiated price on **any product for any business account including the caller's own**,
+and `remove_business_contract_price(...)`. Both are `SECURITY DEFINER` with **no internal
+`is_owner()` guard**, because the grant *was* the control. Their hand-off called it "a loaded
+footgun … not currently applied".
+
+**It was worse than that: the file was not sitting in the repo, it was PUBLISHED.** Measured on
+production before touching anything:
+
+```
+GET https://www.inkcartridges.co.nz/sql/analytics_function_grants.sql
+    200  application/x-sql  5714 bytes
+```
+
+So were the other four. And two dev scripts:
+
+| Path | What it published |
+|---|---|
+| `/sql/analytics_function_grants.sql` | the grants, plus a written recipe for minting an `authenticated` JWT from the anon key, next to the note that the analytics RPCs are `SECURITY DEFINER` |
+| `/sql/product_codes.sql` | RLS policies — including `authenticated` holding blanket `insert, delete` `with check (true)` |
+| `/sql/admin_ui_prefs.sql` | RLS policies on an `auth.users`-keyed table |
+| `/sql/order_tracking_requests.sql` | table shape + fulfilment logic |
+| `/sql/quote_uploads.sql` | the storage-bucket policy (anon insert, no select) |
+| `/scripts/fit-audit.js`, `/scripts/canonicalise-page-copy.mjs` | internal tooling |
+
+**Root cause.** `inkcartridges/vercel.json` sets `"outputDirectory": "."` and the Vercel Root
+Directory is `inkcartridges/`, so **every file in that tree is served**. There is no
+`.vercelignore` anywhere in the repo. `sql/` was added to that tree in Jul 2026 and nobody looked
+again.
+
+**THE RULE WAS ALREADY WRITTEN DOWN. THAT IS THE ACTUAL LESSON.**
+`tests/colour-vocabulary-audit-aug2026.test.js:12` says *"The script lives OUTSIDE
+`inkcartridges/`. That tree is the Vercel project root and is served publicly — audit tooling must
+not deploy."* The same paragraph is copy-pasted into three scripts in `scripts/`. Every one of
+them was correct, none of them was a control, and `sql/` walked straight past all four. **A rule
+that lives only in a comment is a rule that is enforced only when someone happens to read it.**
+And `security-hardening-FE-response-sep2026.md:23` had already certified "nothing stray under the
+publicly-served tree" — a false sentence in a doc is worse than no sentence, because it stops the
+next person looking.
+
+**Fix.**
+1. **Moved `sql/` → repo-root `sql/`**, and `fit-audit.js` +
+   `canonicalise-page-copy.mjs` → repo-root `scripts/`. The repo root is outside the deploy —
+   *proven*, not assumed: `/scripts/probe-payment-csp.mjs` (repo root) is **404** while
+   `/scripts/fit-audit.js` (`inkcartridges/`) was **200**. Same URL prefix, opposite results, so
+   the Root Directory setting is what it is believed to be.
+2. **`stamp-versions.js`, `serve.json`, `vercel.json`, `middleware.js` cannot move** — the first is
+   the `buildCommand`, the rest are read in place. A `.vercelignore` cannot help: it filters the
+   upload *before* the build, so excluding `scripts/` breaks the deploy. `rewrites` are evaluated
+   *after* the filesystem check and never fire on a file that exists; `redirects` emit 307/308, a
+   soft-404 that still confirms the path. Legacy `routes` is the only vercel.json primitive that
+   can emit a true 404 and it cannot coexist with `redirects`/`rewrites`/`headers`/`cleanUrls`. So
+   they are denied in **`middleware.js`**, which runs ahead of static serving — that file already
+   matches `/` and returns backend HTML instead of `index.html`.
+3. **Narrowed the grant** to the six analytics RPCs by name and signature, and **deleted sections 2
+   and 3** — `ALTER DEFAULT PRIVILEGES` (every function created afterwards inherits the grant) and
+   the event trigger, which *replaced* the live DB's allow-listed trigger from backend migration
+   163 and so silently reverted it.
+
+**THE TEST WAS DEFENDING THE VULNERABILITY.** `tests/analytics-function-grants.test.js` asserted
+the blanket grant was *present*, and its docstring said in as many words: *"If someone weakens this
+migration — drops the event trigger, **narrows the grant**, or breaks idempotency — this test fails
+and the recurrence comes back."* Doing the hand-off's §1 turned the suite red. Same shape as
+ERR-217, where the old test pinned the off-screen dropdown. Inverted: it now fails if the wide
+grant, the default privileges or an event trigger ever return, and if the file reappears under
+`inkcartridges/`. Verified by negative control — **7 assertions fail against the old file, 0
+against the new one**, and two positive controls stop it passing on an empty file.
+
+**Rule.** Anything that is not a web asset belongs at the repo root. `inkcartridges/` is a
+publishing directory, not a project directory. Enforced by `tests/public-surface-sep2026.test.js`
+(extension allowlist + a short, justified exception list) and measured on the live host by
+`npm run probe:public-surface` — the probe was **red with 11 findings before the deploy**, which is
+the only reason to trust it green after. The test proves the repo; only the probe proves the
+deployment, and this project spent two months with a green repo and an exposed deployment.
+
+**Files.** `sql/*` (moved, 5) · `scripts/{fit-audit.js,canonicalise-page-copy.mjs}` (moved) ·
+`inkcartridges/middleware.js` · `package.json` · `tests/analytics-function-grants.test.js`
+(inverted) · `tests/public-surface-sep2026.test.js` (new) · `scripts/probe-public-surface.mjs`
+(new) · 8 test/comment path updates.
+
+---
+
+## ERR-230 — Three of our own inline scripts were refused in production, and the CSP hash guarding them matched nothing — **RESOLVED** (2026-09-09)
+
+**Symptom.** None. That is the entry.
+
+**What was measured.** Round 1's hand-off left "CSP / Vercel host config" as the one unaudited
+item. Auditing it: `script-src` carries no `'unsafe-inline'` and exactly two `sha256` hashes.
+Hashing every executable inline `<script>` in the tree the way a browser does:
+
+| File | Hash it needs | In the CSP? |
+|---|---|---|
+| `inkcartridges/index.html:8` — scroll-restoration guard | `sha256-O1lnHZ+8T5oEU/UzayuYPfl9plxloj8XjndwzmMxoTA=` | no |
+| `html/account/personal-details.html:314` — the whole page controller | `sha256-jHK02XDwapGcTtNzQtvwb5bwkUcb6aflyBiSeZZB3ts=` | no |
+| `html/admin/sync-report.html:11` — the redirect | `sha256-V7VQwsXoc3nqp0+7nfuH9g+X+xL1QzQYQLG0NJrxbw8=` | no |
+
+Confirmed against **production HTML**, not just the repo: the homepage served to a browser
+contains the `O1lnHZ…` script and the deployed header allows neither of its hashes. So the
+personal-details form had not saved for months, the homepage's scroll fix had never run, and the
+only trace was a console line nobody was looking at.
+
+**`'sha256-0Jmm…'` — the hash that was supposedly protecting them — has never matched anything in
+this repo.** `git log -S` puts its introduction in `df17277`, whose message says it added "the
+PayPal inline script hash". It was a **wrong guess**. ERR-225 — PayPal downloading but refused
+execution, `"PayPal button initialized successfully"` logged over a dead payment method, **0 of 46
+mobile checkouts completing** — happened *because* that guess was wrong. `071f446` then added the
+real hash (`n8Se…`) and left the wrong one in place. And
+`tests/payment-csp-paypal-sep2026.test.js` pinned it: *"the original site hash must survive"*.
+
+**So the suite written to stop a silent CSP failure was guarding a value that protected nothing,
+while three of the site's own scripts were being refused.** Second test in one day found defending
+the defect it was written to prevent (see ERR-229).
+
+**Fix.** All three scripts are **external files** now, not new hashes — hashes have to be
+recomputed on every byte change and nothing in the build enforces that, which is exactly how
+`0Jmm…` went stale; `script-src 'self'` covers `/js/` permanently and `?v=` cache-busting comes
+free. `index.html`'s stays **non-`defer`, in `<head>`** — deferred scripts run after parsing, by
+which point the browser has already restored scroll. `sync-report.html` reuses the existing
+`admin-stub-redirect.js` (generalised with `data-target`) rather than adding a fourth redirect
+file. The dead hash is gone. The test now **computes the sha256 of every inline block and fails on
+any the CSP would refuse** — the assertion the old one was reaching for; against the pre-fix tree
+it names all three with correct hashes and line numbers.
+
+Also added, none of which have a `default-src` fallback: **`base-uri 'none'`** (there is no
+`<base>` tag anywhere, and without this an injected one repoints every relative URL — including
+the action-less `<form id="payment-form">`), **`object-src 'none'`**, and **`form-action`**. Not
+bare `'self'`: PayPal's zoid layer can create a form *in our document* targeting `paypal.com` when
+a popup is blocked, and `#paypal-button-container` sits inside `<form id="payment-form">`. Those
+origins are already trusted in `script-src`/`frame-src`/`connect-src`, so allowing them as form
+targets costs nothing — the attack `form-action` stops is a post to an **attacker's** origin,
+blocked either way. ERR-225 is what economising here looks like.
+
+**And the inline block was a blind spot for a second audit.** Extracting the personal-details
+controller exposed four raw `console.warn`/`console.error` calls that had been leaking to
+production DevTools since the page was written —
+`tests/console-debuglog-audit.test.js` only walks `.js` files under `inkcartridges/js/`. **An
+inline `<script>` hid the same code from the CSP and from the console audit at once.** Routed
+through `DebugLog`. The toast's `innerHTML` interpolation and its inline `onclick=` (refused by
+the same directive, so the × never worked) are gone too.
+
+**One more, found in the browser and fixed here:** `connect-src` allowed
+`googletagmanager.com` in `script-src` but **not** in `connect-src`, so GTM's
+`/td` conversion beacon was being refused on production —
+`Fetch API cannot load https://www.googletagmanager.com/td?id=AW-…`. Pre-existing,
+unrelated to this change, and invisible without a browser: the tag loads, reports
+itself healthy, and its beacon is dropped. Added the origin. Verified by replaying
+production under the new header with only the **main frame's** CSP swapped — 0 GTM
+violations after, and the single remaining refusal is production's still-old
+`index.html`, i.e. ERR-230 itself, live.
+
+*Harness note, because it nearly produced a false finding:* rewriting the CSP on
+**every** document — not just the main frame — applies our policy to third-party
+iframes and invents violations that do not exist (a phantom
+`Framing 'https://www.google.com/' violates frame-ancestors 'none'`). Scope the
+route to `request.frame() === page.mainFrame()`.
+
+**Rule.** An inline `<script>` is a file that no tool can see. Externalise it. If one genuinely
+must be inline, the hash is not optional bookkeeping — `tests/payment-csp-paypal-sep2026.test.js`
+§1b now computes it for you and fails if it is missing.
+
+**Files.** `inkcartridges/vercel.json` · `index.html` · `html/account/personal-details.html` ·
+`html/admin/sync-report.html` · `js/scroll-restore.js` (new) ·
+`js/account-personal-details-page.js` (new) · `js/admin-stub-redirect.js` ·
+`tests/payment-csp-paypal-sep2026.test.js` · `tests/security-hardening-sep2026-round2.test.js` (new).
+
+---
+
+## ERR-231 — `*` was a third search wildcard nobody decided on, and the only one that cannot be escaped — **RESOLVED** (2026-09-09)
+
+**The hand-off said this had zero FE impact.** Its §4: the backend now strips `*` from search
+queries, because PostgREST rewrites `*` into the SQL `%` inside every `ilike` filter,
+unconditionally and with no escape sequence. *"I grepped for intentional `*` usage in search calls
+and found none, so I expect zero impact."*
+
+The grep was right and the conclusion was wrong, twice.
+
+**1. `foldFilterPunct` fell out of sync with the thing it exists to mirror.**
+`js/admin/utils/pgrst.js` strips `,()` **specifically because the backend does**, so
+`party-search.js`'s local pass agrees with the remote one. Its header says so, and names ERR-176 as
+what happens when they disagree: the picker discards a customer it was just handed. The backend
+added `*` to its strip set; we did not. `queryTokens('TN*251')` would still produce the token
+`tn*251`, which cannot match any row the remote query returns.
+
+**2. The half the backend cannot fix.** Our three admin searches go **direct to PostgREST**, so the
+backend's escaper never sees them — and quoting does not stop the rewrite. Measured live:
+
+```
+name.ilike."%TN2*BK%"  → GTN2130BK, CTN2345BK, CTN240BK
+name.ilike."%TN2%BK%"  → GTN2130BK, CTN2345BK, CTN240BK    ← identical
+```
+
+`pgrst.js:43-48` documents `%` and `_` as the two deliberate wildcards — *"a decision, not an
+oversight"*. There was a third, it was never a decision, and it is the only one that cannot be
+turned off.
+
+**Fix.** `pgrstLike` deletes `*` before quoting; `foldFilterPunct` deletes it too. **Not
+`pgrstValue`** — `*` is only special to the pattern operators, and stripping it there would corrupt
+an `.eq`/`.in` lookup on a SKU that legitimately contains one.
+
+**This is the one case round 1's "quote, never strip" rule cannot apply**, and the header now says
+why: quoting *preserves* `,()` — "Black (2,500 pages)" stays searchable. Nothing preserves `*`. The
+only choice is between an undocumented wildcard and agreeing with the backend.
+
+**Delete, don't space — and that was measured, not reasoned.** The obvious move was to add `*` to
+the existing `[,()]` character class, which folds to a **space**. Live:
+
+```
+search=TN2130   → 1 row (GTN2130BK)
+search=TN2*130  → 1 row      ← deletion
+search=TN2,130  → 1 row      ← deletion, for the comma too
+search=TN2 130  → 0 rows     ← a space is NOT what the backend does
+```
+
+`, ( )` keep folding to a space locally anyway, because they sit beside one in real text ("Walker,
+Vieland") so both give the same tokens, and the space additionally rescues "Acme(NZ)". `*` has no
+such convention. **And `foldFilterPunct` is applied to the HAYSTACK as well as the query**
+(`matchesAllTokens` folds both sides), so spacing `*` would fold a stored `"TN*251"` to `"tn 251"`
+and stop it matching the `"TN251"` query that had just fetched it.
+
+**The probe was certifying a replica.** `scripts/probe-search-escaping.mjs` re-declared its own
+local `pgrstLike` instead of importing the shipped one — so it would have passed `*` through and
+reported the old behaviour as correct, no matter what the real module did. It imports the real
+module now. *An audit that carries its own copy of the thing it audits certifies code that does not
+exist* — the rule `audit-colour-vocabulary.mjs` states in its own header, broken one directory
+away.
+
+**Rule.** When the backend changes what it strips, `foldFilterPunct` changes with it, and the probe
+measures both halves. `npm run probe:search-escaping` §5 pins all of it, including the positive
+controls that `%`/`_` still wildcard and `,()` still round-trip.
+
+**Files.** `inkcartridges/js/admin/utils/pgrst.js` · `scripts/probe-search-escaping.mjs` ·
+`tests/security-hardening-sep2026-round2.test.js`.
+
+---
+
+## ERR-232 — The admin analytics RPCs are dark again, and the hand-off said they were fine — **OPEN, backend-owned** (2026-09-09)
+
+**Status: NOT a frontend bug and NOT fixed here.** Logged because it was measured during ERR-229
+and because it changes what the next person should do about it.
+
+The round-2 hand-off, §2: *"Your direct `sb.rpc()` calls as a super-admin still work — verified
+`EXECUTE` for `authenticated` is intentionally preserved."* Measured with a real super-admin JWT
+and each function's **real named params** (`date_from`, `date_to`, `brand_filter`, …):
+
+```
+analytics_kpi_summary      403  42501 permission denied for function
+analytics_revenue_series   403  42501
+analytics_refunds_series   403  42501
+analytics_top_products     403  42501
+analytics_customer_stats   403  42501
+analytics_brand_breakdown  403  42501
+get_suppliers              403  42501   ← collateral: it is all of public, as in ERR-035
+```
+
+Controls, same JWT: `products` select → **200**; `cost_price` → 403 (correct, ERR-220). So the
+token is valid and the denial is specific to function EXECUTE. **Fourth recurrence of the
+ERR-010 / ERR-029 / ERR-035 family**, live right now. The dashboard is showing its order-feed
+self-heal banner and that is correct behaviour.
+
+**Probe gotcha, again:** an empty-`{}` call returns **404 PGRST202**, a signature mismatch, even
+when the real problem is 42501. A 404 here proves nothing. Send the real named params.
+
+**THE REMEDY CHANGED — this is why the entry exists.** Until today the answer was "paste
+`sql/analytics_function_grants.sql`", and that file's blanket grant would now also hand
+`set_business_contract_price` to every signed-in customer *and* replace the live allow-listed
+trigger from backend migration 163 (see ERR-229). **Do not do that.** The fix is for the backend to
+re-run **migration 163**. Our `sql/analytics_function_grants.sql` is now narrowed to the six
+analytics RPCs by name and is safe to apply, but it is a restore, not a durable fix — 163 is the
+part that survives a DROP+CREATE.
+
+Reported to the backend team in
+`security-hardening-round2-FE-response-sep2026.md`, along with `product_codes.sql`'s blanket
+`authenticated insert, delete with check (true)`, which is theirs.

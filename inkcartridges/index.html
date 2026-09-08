@@ -5,14 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#267FB5">
     <meta name="color-scheme" content="light">
-    <script>
-        // Disable browser scroll restoration before layout runs, so reloads
-        // always land at the top instead of the user's previous scroll position.
-        if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-        if (location.hash === '#ink-finder-heading') {
-            history.replaceState(null, '', location.pathname + location.search);
-        }
-    </script>
+    <script src="/js/scroll-restore.js?v=341aa893"></script>
     <meta name="description" content="Find the right ink cartridge for your printer in seconds. Genuine and compatible ink, toner, and printing supplies with free NZ-wide shipping over $100.">
     <meta name="robots" content="index, follow">
 

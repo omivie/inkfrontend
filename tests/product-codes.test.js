@@ -38,7 +38,7 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const READ = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
-const SQL_SRC      = READ('inkcartridges/sql/product_codes.sql');
+const SQL_SRC      = READ('sql/product_codes.sql');
 const ADMIN_API    = READ('inkcartridges/js/admin/api.js');
 const PRODUCTS_SRC = READ('inkcartridges/js/admin/pages/products.js');
 const UTIL_SRC     = READ('inkcartridges/js/admin/utils/product-codes.js');

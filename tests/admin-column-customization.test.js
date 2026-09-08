@@ -342,7 +342,7 @@ test('admin.css carries the column-picker and For-Use-In styles', () => {
 });
 
 test('the admin_ui_prefs SQL migration exists with RLS locked to the account', () => {
-  const sql = READ('inkcartridges/sql/admin_ui_prefs.sql');
+  const sql = READ('sql/admin_ui_prefs.sql');
   assert.match(sql, /create table if not exists public\.admin_ui_prefs/);
   assert.match(sql, /enable row level security/);
   assert.match(sql, /auth\.uid\(\) = user_id/, 'RLS must scope rows to the owning account');

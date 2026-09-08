@@ -5,8 +5,8 @@
  * Rewrite the EDITABLE regions of the content pages into the canonical form
  * defined by js/admin/utils/page-copy-model.js.
  *
- *   node inkcartridges/scripts/canonicalise-page-copy.mjs           # rewrite
- *   node inkcartridges/scripts/canonicalise-page-copy.mjs --check   # report only
+ *   node scripts/canonicalise-page-copy.mjs           # rewrite
+ *   node scripts/canonicalise-page-copy.mjs --check   # report only
  *
  * WHY THIS EXISTS
  * ---------------
@@ -141,7 +141,7 @@ function main() {
     }
     if (checkOnly && drifted) {
         console.error(`\n${drifted} section(s) are not in canonical form. `
-            + `Run: node inkcartridges/scripts/canonicalise-page-copy.mjs`);
+            + `Run: node scripts/canonicalise-page-copy.mjs`);
         process.exit(1);
     }
     console.log(checkOnly ? '\nAll editable regions are canonical.' : '\nDone.');

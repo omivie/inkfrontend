@@ -35,9 +35,56 @@ const BOT_PATTERN = /googlebot|adsbot-google|storebot-google|google-inspectionto
 const CATEGORY_CANONICAL = new Set(['ink', 'toner', 'ribbon', 'drums', 'label', 'paper']);
 const CATEGORY_ALIASES = { ribbons: 'ribbon', 'ink-cartridges': 'ink' };
 
+/**
+ * Paths that exist as files in the deployed tree but are not part of the website
+ * (ERR-229).
+ *
+ * `vercel.json` sets `outputDirectory: "."` with the Vercel Root Directory at
+ * `inkcartridges/`, so EVERY file in that tree is downloadable. That is not
+ * theoretical — until Sep 2026 all five of our .sql files were live at
+ * https://www.inkcartridges.co.nz/sql/*.sql (HTTP 200, application/x-sql),
+ * publishing our RLS policies, our table shapes, and a written recipe for
+ * minting an `authenticated` JWT from the anon key.
+ *
+ * The .sql files and the dev-only scripts have been MOVED to the repo root,
+ * which is outside the deploy entirely — that is the real fix, and it is proven
+ * by repo-root scripts/ returning 404 while inkcartridges/scripts/ returned 200.
+ * This denylist is the second layer, for the four files that genuinely cannot
+ * move: `scripts/stamp-versions.js` is the buildCommand, `serve.json` is read by
+ * `npx serve inkcartridges`, and `vercel.json` / `middleware.js` are Vercel's own
+ * config. `/sql/` is kept here deliberately even though the directory is gone —
+ * a second layer that only covers what the first layer already fixed is not a
+ * second layer.
+ *
+ * A `.vercelignore` cannot do this job: it filters the upload BEFORE the build,
+ * so excluding `scripts/` would break `node scripts/stamp-versions.js`. Nor can
+ * vercel.json — `rewrites` are evaluated after the filesystem check and never
+ * fire on a file that exists, and `redirects` emit 307/308, a soft-404 that
+ * still confirms the path. Middleware runs ahead of static serving (this file
+ * already matches '/' and returns backend HTML instead of index.html), so it is
+ * the only layer that can return a real 404.
+ */
+const NON_WEB_PATH = /^\/(?:sql|scripts)\/|^\/(?:serve\.json|vercel\.json|middleware\.js)$/;
+
 export default async function middleware(request) {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // Deny non-web files FIRST — before the admin gate, the category normaliser
+  // and the bot prerender. Nothing below can be reached from these paths (the
+  // matcher entries are disjoint), and putting the check anywhere else would
+  // make that a matter of reading 200 lines carefully rather than one.
+  if (NON_WEB_PATH.test(path)) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'public, max-age=0, must-revalidate',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Robots-Tag': 'noindex, nofollow',
+      },
+    });
+  }
 
   // Gate admin routes — redirect to login if no auth cookie
   if (path === '/admin' || path.startsWith('/admin/')) {
@@ -232,5 +279,13 @@ export const config = {
     '/ink-cartridges',
     '/toner-cartridges',
     '/shop',
+    // Non-web files that live in the deployed tree — see NON_WEB_PATH (ERR-229).
+    // Disjoint from every entry above, so no request can reach both the denylist
+    // and a prerender branch.
+    '/sql/:path*',
+    '/scripts/:path*',
+    '/serve.json',
+    '/vercel.json',
+    '/middleware.js',
   ],
 };
