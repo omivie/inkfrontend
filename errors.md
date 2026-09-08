@@ -9483,6 +9483,12 @@ the rewards nudge's scroll gate on `/ink-cartridges`. Re-measured live before an
 1,621px → **542px**, progress 400px → **100px**, sidebar 858px → **80px**, `scrollWidth` 406 →
 **390**, desktop unchanged at **329px**.
 
+**Proof the probe was worth writing.** ERR-224 was re-created in the live rendered page (the
+row-written `flex-basis: 400px` restored under the mobile media query, the summary un-collapsed).
+Measured: email **542 → 1,670px**, progress **100 → 400px**, sidebar **80 → 907px**. All three
+probe assertions failed. **All 21 source-grep tests passed, unchanged**, because the files they
+read were never touched. That gap is the entire reason this probe exists.
+
 A note for whoever reads this next: the fix landed at 542px, not the 438px the brief predicted,
 because the implementer kept the summary *first* as a collapsed row instead of reordering it
 below the form. The brief's number was a prediction from a DOM edit; the shipped number is a

@@ -73,7 +73,7 @@ const bad = (n, d) => { failures.push(`${n} — ${d}`); console.log(`  \x1b[31m�
 const soft = (n, d) => { notes.push(`${n} — ${d}`); console.log(`  \x1b[33m~\x1b[0m ${n}\n      ${d}`); };
 const check = (n, cond, d) => (cond ? ok(n, d) : bad(n, d));
 
-console.log('\n\x1b[1mprobe:mobile-checkout-fold — is the form actually above the fold? (ERR-224/226)\x1b[0m');
+console.log('\n\x1b[1mprobe:mobile-checkout-fold — is the form actually above the fold? (ERR-224/227)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no writes.');
 console.log(`Target: ${BASE}\n`);
 
@@ -147,9 +147,16 @@ async function seedCart(page) {
         if (qty) { qty.value = '8'; qty.dispatchEvent(new Event('change', { bubbles: true })); }
         document.querySelector('#add-to-cart-btn').click();
     });
-    await page.waitForTimeout(3000);
-    const stored = await page.evaluate(() => localStorage.getItem('inkcartridges_cart'));
-    if (!stored || stored === '[]') throw new Error('cart did not seed — the add-to-cart path itself is broken');
+    // Poll rather than sleep a guessed interval: the write lands ~1s after the
+    // click on a warm backend and later on a cold Render start, and a probe that
+    // fails on its own timing teaches nothing about the site.
+    let stored = null;
+    for (let i = 0; i < 20; i++) {
+        await page.waitForTimeout(750);
+        stored = await page.evaluate(() => localStorage.getItem('inkcartridges_cart'));
+        if (stored && stored !== '[]') break;
+    }
+    if (!stored || stored === '[]') throw new Error('cart did not seed after 15s — the add-to-cart path itself is broken');
 }
 
 /** /checkout never reaches networkidle: the payment SDKs hold connections open
