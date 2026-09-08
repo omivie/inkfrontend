@@ -778,9 +778,51 @@ mark.smart-ac__mark {
 
 .smart-ac__grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 6px;
     padding: 8px;
+}
+
+/* Two SOURCES, two COLUMNS — Compatible left, Genuine right, three cards to a
+   row in each (six across the panel). The wrapper's modifier is written by
+   search.js renderResults, not inferred here with :has(): one place counts how
+   many sources came back, so "no genuine ⇒ compatible takes the whole width"
+   is a decision in the DOM rather than a coincidence of selector matching.
+
+   --single is also what the skeleton and any single-source result set get:
+   .smart-ac__grid's own six tracks above, unwrapped. Twelve skeleton cards
+   fill exactly two rows of it. */
+.smart-ac__sections {
+    display: grid;
+}
+.smart-ac__sections--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+.smart-ac__sections--split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 16px;
+}
+.smart-ac__sections--split .smart-ac__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+/* The two columns are independent — a 6-compatible / 30-genuine query leaves
+   white space under the left one rather than trimming the right. Trimming
+   would hide rows the backend returned, which is the ERR-222 failure in a
+   different costume. */
+.smart-ac__sections--split > .smart-ac__section + .smart-ac__section {
+    border-left: 1px solid var(--color-border, #e5e7eb);
+}
+
+/* .product-card carries a flex-era `min-width: 140px; max-width: 185px`
+   (css/pages.css) that fights fixed grid tracks in both directions: the
+   min-width overflows a narrow column, the max-width leaves half-empty tracks
+   in a wide one. pages.css already neutralises both inside .product-grid at
+   ≤640px; the dropdown's tracks are explicit at every width, so neutralise it
+   here at every width too and let the track decide. */
+.smart-ac__grid .product-card {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
 }
 
 /* Row-break parity with the product/shop grid (code-yield-grouping-may2026).
@@ -798,13 +840,14 @@ mark.smart-ac__mark {
 /* Two-section split (Compatible / Genuine) mirroring the product/shop page,
    which never interleaves the two sources. Each section gets a compact badge
    header (reusing the page's global .products-section__badge--* chips) above
-   its own 7-up grid. Lighter than the page's big .products-section__title. */
+   its own grid. Lighter than the page's big .products-section__title.
+
+   The sections used to be STACKED, so the second one carried a border-top to
+   separate it from the first. They sit side by side now and the rule that drew
+   that line is gone: with --split the divider is the border-left above, and
+   with --single there is only ever one section for it to match against. */
 .smart-ac__section-head {
     padding: 8px 8px 0;
-}
-.smart-ac__section + .smart-ac__section .smart-ac__section-head {
-    border-top: 1px solid var(--color-border, #e5e7eb);
-    padding-top: 10px;
 }
 
 .smart-ac__grid .product-card {
@@ -852,6 +895,24 @@ mark.smart-ac__mark {
 .smart-ac__grid .product-card__footer-row {
     gap: 4px;
 }
+/* THE DROPDOWN CARD STACKS ITS FOOTER AT EVERY WIDTH — stated, not inherited.
+   components.css gives .product-card a container query: above 200px the last
+   footer row turns from a stacked column (price, then the buy row beneath it)
+   into a side-by-side row. Dropdown cards had never once been that wide — the
+   7-up grid pinned them at 152.3px — so nothing here ever met that threshold
+   and nothing here ever said what should happen if it did.
+   Six-across changed the width. Two 3-up columns make the card 174.3px, still
+   under the line; a 2-up column between 960px and 1023px makes it 214.9px,
+   over it. The card then handed the compact stepper a 107px row instead of a
+   200.9px one and "Add 100" clipped by 14px — a wider card producing a smaller
+   button. Price-above-button is this panel's design at every width it has ever
+   shipped, so declare it here rather than depend on the card staying narrow
+   enough for someone else's threshold to keep choosing it for us. */
+.smart-ac__grid .product-card__footer .product-card__footer-row:last-child {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
 .smart-ac__grid .product-card__price {
     font-size: 13px;
     font-weight: 700;
@@ -867,12 +928,25 @@ mark.smart-ac__mark {
     font-weight: 600;
 }
 
-/* Dropdown-scale quantity stepper (ERR-218). Measured, not chosen: the
-   dropdown card is 152.3px, so the CTA's row is 138.3px. A 70px stepper leaves
-   the button 64.3px, and at 12px/600 Inter "Add 100" — the widest label the
-   ceiling can produce — is ~45px against 52.3px of usable width. The desktop
-   panel is pointer-fine, so the 44px touch sizing does not apply here; the
-   ≤480px block above restores it where the pointer is coarse. */
+/* Dropdown-scale quantity stepper (ERR-218). Measured, not chosen — and
+   RE-measured in Sep-2026 when six-across replaced seven, because a comment
+   reserving space for text is only worth the measurement behind it.
+   `npm run probe:search-columns` relabels the real button through
+   QtyStepper.ctaLabel and reads its overflow, at every width:
+
+     viewport   layout          card      CTA box   "Add 100" clipped
+     1440       3-up column     174.3px   86.3px    0
+     1024       3-up column     151.5px   63.5px    0   ← narrowest
+     960        2-up column     214.9px   ~125px    0
+     768        2-up column     168.5px   80.5px    0
+     375        1-up, wrapped   150.5px   full row  0
+
+   The floor is the 1024px case, not the widest card: 63.5px of button against
+   the 64px "Add 100" needs. Below 1024 the grid steps down a track rather than
+   narrow it further, which is what the @media (max-width: 1023px) block above
+   is for — at 960px a third card would make it 141.3px and clip by 4px.
+   The desktop panel is pointer-fine, so the 44px touch sizing does not apply
+   here; the ≤480px block below restores it where the pointer is coarse. */
 .smart-ac__grid .product-card__buy {
     gap: 4px;
 }
@@ -963,15 +1037,63 @@ mark.smart-ac__mark {
     color: #fff;
 }
 
+/* WHERE THE COLUMN COUNT STEPS DOWN — a measurement, not a round number.
+   The compact stepper below is sized against a card floor of ~152px. Three
+   cards in a HALF panel fall through that floor before the panel itself runs
+   out of room: at a 960px viewport the split card measures 141.3px and the CTA
+   clips its own widest label ("Add 100" needs 57px into 53.3px). At 1024px it
+   is 151.5px and nothing clips. So 3-up stops at 1024, not at the ~944px the
+   arithmetic suggested — the arithmetic was checking the card against 140px,
+   and 140px is not the number that matters. Same story one step down: 2-up
+   holds to a 700px viewport (152px card) and 1-up below it.
+
+   Measured with npm run probe:search-columns, which pins 960px precisely
+   because that is where this was wrong. */
+@media (max-width: 1023px) {
+    .smart-ac__grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .smart-ac__sections--split .smart-ac__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 699px) {
+    .smart-ac__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .smart-ac__sections--split .smart-ac__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    /* Every card already starts its own row down here, so a family break adds
+       dead vertical gap and nothing else. (The ≤640px block repeats this; it
+       owns the dropdown's mobile max-height and type sizing, and is left
+       alone.) */
+    .smart-ac__grid .products-row__break {
+        display: none;
+    }
+}
+
 @media (max-width: 640px) {
     .smart-ac__grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
         padding: 8px;
     }
-    /* The (familyKey, yieldTier) row-break is a desktop 7-up affordance; in the
-       narrow 2-col / single-row mobile layouts it only adds dead vertical gaps,
-       so collapse it. */
+    /* Side by side at every width, so on a phone each column holds one card.
+       The columns are ~150px at 375px — narrow, but the alternative is burying
+       Genuine under Compatible again, which is the thing this change exists to
+       stop. */
+    .smart-ac__sections--split {
+        column-gap: 8px;
+    }
+    .smart-ac__sections--split .smart-ac__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    /* The (familyKey, yieldTier) row-break is a wide-grid affordance; in the
+       narrow mobile layouts here — 2-col single, 1-col split — every card
+       already starts its own row, so a break adds dead vertical gap and
+       nothing else. Collapse it. */
     .smart-ac__grid .products-row__break {
         display: none;
     }
@@ -988,22 +1110,28 @@ mark.smart-ac__mark {
         grid-template-columns: 1fr;
         gap: 6px;
     }
-    .smart-ac__grid .product-card__link {
+    /* SCOPED TO --single. The horizontal-thumb row below needs the full panel
+       width — 64px of thumbnail plus a ~300px text column. A --split column at
+       375px is ~150px, so the same rules there would put a 64px thumb beside
+       86px of text. Split columns keep the vertical card, at very nearly the
+       width the desktop compact card has always been (~151px vs 152.3px), so
+       the desktop compact type sizes above are already the right ones. */
+    .smart-ac__sections--single .smart-ac__grid .product-card__link {
         display: grid;
         grid-template-columns: 64px 1fr;
         align-items: center;
         gap: 10px;
     }
-    .smart-ac__grid .product-card__image-wrapper {
+    .smart-ac__sections--single .smart-ac__grid .product-card__image-wrapper {
         width: 64px;
         height: 64px;
         aspect-ratio: 1 / 1;
         flex: 0 0 64px;
     }
-    .smart-ac__grid .product-card__content {
+    .smart-ac__sections--single .smart-ac__grid .product-card__content {
         padding: 0;
     }
-    .smart-ac__grid .product-card__title {
+    .smart-ac__sections--single .smart-ac__grid .product-card__title {
         font-size: 14px;
         /* Keep the 4-line clamp from the product-card-title-clamp contract;
            the horizontal row just grows taller for long names. */
@@ -1035,6 +1163,18 @@ mark.smart-ac__mark {
     .smart-ac__grid .product-card__qty-input {
         width: 34px;
         font-size: 14px;
+    }
+    /* A split column at 375px is ~150px wide, and the coarse stepper above is
+       36 + 34 + 36 = 106px of that. [- 1 +] and [Add to Cart] cannot share the
+       ~139px line the way they do across a full-width row, so wrap: the
+       stepper keeps its 44px touch targets on one line and the button takes
+       the next one at full width. Shrinking the stepper back to the 22px
+       desktop size would fit too, and would put a 22px tap target on a phone. */
+    .smart-ac__sections--split .smart-ac__grid .product-card__buy {
+        flex-wrap: wrap;
+    }
+    .smart-ac__sections--split .smart-ac__grid .product-card__add-btn {
+        flex: 1 0 100%;
     }
 }
 

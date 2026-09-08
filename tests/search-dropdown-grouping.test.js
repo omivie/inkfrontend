@@ -4,7 +4,7 @@
  *
  * The typeahead dropdown must present products the same way the product/shop
  * grid does: up to 40 cards, grouped by cartridge code → yield → colour, with
- * each (familyKey, yieldTier) family broken onto its own 7-up row. This pins
+ * each (familyKey, yieldTier) family broken onto its own row. This pins
  * the change that drove the dropdown off the literal /api/search/suggest
  * endpoint (backend hard-capped at 24, raw order) onto /api/search/smart
  * (limit 40, full enriched envelope) and applied ProductSort.byCodeThenColor +
@@ -16,6 +16,13 @@
  * Source-grep style (mirrors the Pass-B guards in the sibling dropdown tests):
  * cheap, dependency-free, and catches a silent regression that strips the
  * grouping or reverts the endpoint/limit.
+ *
+ * SOURCE GREPS CANNOT SEE A BOX MODEL. Sep-2026 turned the two stacked
+ * sections into two side-by-side columns — Compatible left, Genuine right,
+ * three cards per row in each, six across the panel — and a grep can only
+ * confirm the rules were written, never that the browser painted two columns
+ * of three. `npm run probe:search-columns` measures the real rects (ERR-224 is
+ * the precedent: 21 green source greps over a layout that was wrong on screen).
  */
 
 'use strict';
@@ -70,9 +77,42 @@ test('search.js — renderResults injects the .products-row__break element betwe
         'dropdown must emit .products-row__break so each (familyKey, yieldTier) group starts a fresh row');
 });
 
-test('search.css — dropdown grid is 7-up to match the product page rows', () => {
-    assert.match(SEARCH_CSS, /\.smart-ac__grid\s*\{[^}]*grid-template-columns:\s*repeat\(7,\s*1fr\)/,
-        'spec: dropdown grid is 7 columns, matching the product/shop grid');
+test('search.css — dropdown grid is 6-up across the panel', () => {
+    assert.match(SEARCH_CSS, /\.smart-ac__grid\s*\{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/,
+        'spec: a single-source result set runs six cards across the 1120px panel');
+    assert.doesNotMatch(SEARCH_CSS, /grid-template-columns:\s*repeat\(7,/,
+        'the 7-up grid is gone — six across, or two three-up columns');
+});
+
+test('search.css — a split panel is two columns of three, six across in total', () => {
+    assert.match(SEARCH_CSS, /\.smart-ac__sections--split\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/,
+        'spec: --split lays the two sections side by side, Compatible left / Genuine right');
+    assert.match(SEARCH_CSS, /\.smart-ac__sections--single\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/,
+        'spec: --single gives the surviving section the whole panel width');
+    assert.match(SEARCH_CSS, /\.smart-ac__sections--split\s+\.smart-ac__grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+        'spec: three cards per row inside each column — K C M / Y CMY KCMY');
+});
+
+test('search.css — the stacked-section separator is gone, not merely unused', () => {
+    // The sections used to be stacked and the second one drew a border-top.
+    // Side by side, that rule can only ever draw a line in the wrong place —
+    // and in --single there is exactly one section for it to match against.
+    assert.doesNotMatch(SEARCH_CSS, /\.smart-ac__section \+ \.smart-ac__section \.smart-ac__section-head/,
+        'the stacked separator must be removed, not left to match nothing');
+    assert.match(SEARCH_CSS, /\.smart-ac__sections--split\s*>\s*\.smart-ac__section \+ \.smart-ac__section\s*\{[^}]*border-left/,
+        'the divider between the two columns is a border-left');
+});
+
+test('search.css — the .product-card flex legacy is neutralised inside the dropdown grid', () => {
+    // pages.css gives .product-card min-width:140px / max-width:185px from its
+    // flex era. Against explicit grid tracks the min-width overflows a narrow
+    // column and the max-width leaves a wide one half empty. pages.css already
+    // neutralises both inside .product-grid at <=640px; the dropdown's tracks
+    // are explicit at EVERY width, so it has to hold at every width here.
+    const m = SEARCH_CSS.match(/\.smart-ac__grid \.product-card \{([^}]*)\}/);
+    assert.ok(m, 'expected a .smart-ac__grid .product-card rule');
+    assert.match(m[1], /min-width:\s*0/, 'min-width must not overflow a narrow column');
+    assert.match(m[1], /max-width:\s*none/, 'max-width must not leave a wide track half empty');
 });
 
 test('search.css — grid honors the row-break (grid-column: 1 / -1, since flex-basis is ignored in a grid)', () => {
@@ -108,4 +148,44 @@ test('search.js — Compatible section renders before Genuine (page order)', () 
     assert.ok(ci !== -1 && gi !== -1, 'both section badges must be present');
     assert.ok(ci < gi,
         'spec: Compatible section composed before Genuine, matching shop.html #compatible-section before #genuine-section');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Two columns: the split/single decision
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('search.js — the split/single decision is made in JS, from the section counts', () => {
+    // Not a CSS :has(). One place counts how many sources came back, so
+    // "no genuine => compatible takes the whole width" is a decision recorded
+    // in the DOM rather than a coincidence of selector matching — and a probe
+    // measuring the painted panel can read which layout was chosen.
+    assert.match(SEARCH_JS, /const\s+sectionCount\s*=\s*\(compatibleItems\.length\s*\?\s*1\s*:\s*0\)\s*\+\s*\(genuineItems\.length\s*\?\s*1\s*:\s*0\)/,
+        'the wrapper class must be chosen from how many sections actually have rows');
+    assert.match(SEARCH_JS, /sectionCount === 2[\s\S]{0,120}smart-ac__sections--split/,
+        'two populated sections => --split');
+    assert.match(SEARCH_JS, /smart-ac__sections--single/,
+        'one populated section => --single (it takes the whole panel width)');
+    assert.doesNotMatch(SEARCH_CSS, /:has\(\.smart-ac__section/,
+        'the layout must not be inferred with :has() — search.js owns the decision');
+});
+
+test('search.js — the sections wrapper is emitted only when a section exists', () => {
+    // renderSection already returns '' for an empty group. An empty wrapper
+    // would still paint its grid gap and border above a no-results panel.
+    assert.match(SEARCH_JS, /const\s+sectionsHTML\s*=\s*sectionCount\s*\n?\s*\?/,
+        'sectionsHTML must be gated on sectionCount, not emitted unconditionally');
+});
+
+test('search.js — wrapping the sections did not disturb the painted-order contract', () => {
+    // KEYBOARD-NAV CONTRACT: state.results must stay in the order the browser
+    // paints .product-card elements, because setActive(i) highlights DOM card i
+    // while Enter navigates state.results[i]. Two visual COLUMNS do not change
+    // the DOM: it is still Compatible's cards then Genuine's, in one list.
+    const push = SEARCH_JS.indexOf('renderedOrder.push(p)');
+    const render = SEARCH_JS.indexOf('Products.renderCard(adaptForCard(p), i)');
+    assert.ok(push !== -1 && render !== -1, 'both halves of the contract must be present');
+    assert.ok(render - push > 0 && render - push < 400,
+        'renderedOrder.push must stay adjacent to the card emission it records');
+    assert.match(SEARCH_JS, /state\.results\s*=\s*renderedOrder/,
+        'state.results must be re-pointed at the painted order');
 });

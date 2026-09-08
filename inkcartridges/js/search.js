@@ -240,11 +240,12 @@
             // On mobile, center the dropdown across the viewport (not the form,
             // which is a narrow 260px centered box). 16px side margins.
             //
-            // On desktop the search input is far narrower than seven product
+            // On desktop the search input is far narrower than a row of product
             // cards, so we widen the panel to a comfortable fixed width (clamped
             // to the viewport) and keep it anchored under the input — shifting
-            // left only as much as needed to stay on-screen. This makes the
-            // dropdown read like the product/shop grid (~7 cards × 150px + gaps).
+            // left only as much as needed to stay on-screen. 1120px carries six
+            // cards across: either one six-up row, or two three-up columns when
+            // both a Compatible and a Genuine section came back.
             const DESKTOP_PANEL = 1120;
             const width = isMobile
                 ? (window.innerWidth - 32)
@@ -584,9 +585,35 @@
                     + `</div>`;
             };
 
-            const sectionsHTML =
-                renderSection(compatibleItems, 'products-section__badge--compatible', 'Compatible')
-                + renderSection(genuineItems, 'products-section__badge--genuine', 'Genuine');
+            // TWO COLUMNS, NOT TWO STACKS. Compatible is the left column and
+            // Genuine the right, three cards to a row inside each, so a full
+            // CMYK family reads `K C M` / `Y CMY KCMY` down one column and the
+            // shopper can compare the two sources for the same colour without
+            // scrolling. Stacked, the Genuine section began below the fold on
+            // essentially every query.
+            //
+            // The split/single decision is made HERE and written onto the
+            // wrapper, rather than inferred in CSS with :has(). One place
+            // counts the sources, a test can read the count, and the answer is
+            // in the DOM when the probe measures it. `renderSection` already
+            // returns '' for an empty group, so "no genuine ⇒ compatible takes
+            // the whole width" needs no second code path — only a class that
+            // says which of the two layouts is in force.
+            const sectionCount = (compatibleItems.length ? 1 : 0) + (genuineItems.length ? 1 : 0);
+            const sectionsClass = sectionCount === 2
+                ? 'smart-ac__sections smart-ac__sections--split'
+                : 'smart-ac__sections smart-ac__sections--single';
+            // Composition order is unchanged — Compatible first, matching
+            // shop.html #compatible-section before #genuine-section — which is
+            // what keeps `renderedOrder` (below) in painted-DOM order. The
+            // columns are a CSS concern; the DOM is still one ordered list, so
+            // arrow keys walk the left column and then the right.
+            const sectionsHTML = sectionCount
+                ? `<div class="${sectionsClass}">`
+                    + renderSection(compatibleItems, 'products-section__badge--compatible', 'Compatible')
+                    + renderSection(genuineItems, 'products-section__badge--genuine', 'Genuine')
+                    + `</div>`
+                : '';
             // Re-point state.results at the painted order (see the contract note
             // above). Length is unchanged — the partition and sort never drop a
             // row — so `count` in the keyboard handler stays correct either way.
