@@ -11205,6 +11205,32 @@ a.account-review-card__product:focus-visible {
     margin-bottom: var(--spacing-lg);
 }
 
+/* THE TWO SOURCES SIT SIDE BY SIDE — Compatible left, Genuine right, three
+   cards to a row in each (six across the page). Stacked, the Genuine section
+   started a full section down the page, so the two prices for the same colour
+   were never on screen together.
+
+   The modifier is written by shop-page.js _syncSourceColumns() from the two
+   sections' `hidden` state, not inferred here with :has(). That is load-bearing
+   rather than stylistic: a hidden grid ITEM leaves flow but its TRACK does not,
+   so a single-source result set would otherwise paint at half width beside an
+   empty column. --single collapses the grid to one track and the survivor takes
+   the whole width at six-up.
+
+   Do NOT give .products-section a `display` — renderProducts hides an empty
+   section with the `hidden` ATTRIBUTE, and any display declaration here would
+   override [hidden]'s display:none and paint an empty section in its column. */
+.products-sections {
+    display: grid;
+}
+.products-sections--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+.products-sections--split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: var(--spacing-lg);
+}
+
 .products-section__title {
     display: flex;
     align-items: center;
@@ -11302,11 +11328,94 @@ a.account-review-card__product:focus-visible {
     transform: translateY(-2px);
 }
 
+/* CARDS PER ROW IN THE TWO SOURCE COLUMNS.
+   SCOPED TO .products-row ON PURPOSE. The .product-card rule above is GLOBAL:
+   its flex-basis is inert in the CSS-Grid parents (ribbons, PDP related, cart,
+   bought-together, favourites, landing) but its max-width/min-width are not.
+   .products-row exists only on shop.html, so scoping here is the entire blast
+   radius — editing the base rule would resize cards on six other surfaces.
+
+   body.page-shop gives 1192px of content (1240 max-width, 24px padding below),
+   so a split column is (1192 - 24) / 2 = 584px and three cards at 33.333%
+   compute to 186.7px — the base rule's max-width: 185px binds and every card
+   lands at 185px. That cap is deliberately kept rather than raised: the card
+   carries a container query at 200px (components.css) that flips its footer
+   from price-above-button to price-BESIDE-button, and on the search dropdown a
+   card that crossed it handed the stepper a 107px row and clipped "Add 100" —
+   a wider card producing a smaller button. Staying under 185px means every
+   container query on the card resolves exactly as it does today; only the
+   number of cards in a row changes. */
+/* --single only has something to say where the base rule would paint SEVEN.
+   Below 1100px the global ladder below already steps 6 -> 5 -> 2, and a
+   full-width single section has no reason to differ from it. The min-width
+   guard is what lets that ladder keep working: these selectors are (0,3,0) and
+   the ladder's bare .product-card is (0,1,0), so an unmediated rule here would
+   win at every width and freeze a phone at six-up. */
+@media (min-width: 1100px) {
+    .products-sections--single .products-row .product-card {
+        flex: 0 0 calc(16.666% - var(--spacing-sm));
+    }
+}
+/* TWO per column is the BASE, three is the reward for a wide enough page.
+   Written this way round because the measurement says so: the card floor here
+   is ~165px (a shop card's buy row is the card minus 22px, and its stepper eats
+   80 of what is left, so the CTA gets card − 102), and three cards in a
+   half-width column only clear that from about a 1200px viewport. Below it,
+   two cards sit at the 185px cap with room to spare. Ordering it "3-up by
+   default, step down" put the fragile case first and left 1024px painting
+   150.7px cards. npm run probe:shop-columns measures every band. */
+.products-sections--split .products-row .product-card {
+    flex: 0 0 calc(50% - var(--spacing-sm) / 2);
+}
+
+@media (min-width: 1200px) {
+    .products-sections--split .products-row .product-card {
+        flex: 0 0 calc(33.333% - var(--spacing-sm));
+    }
+}
+
 /* Medium laptops: 7-card flex-basis would clamp to min-width:140px and overflow.
    Fall back to 6 cols below the comfortable 7-up threshold. */
 @media (max-width: 1099px) {
     .product-card {
         flex: 0 0 calc(16.666% - var(--spacing-sm));
+    }
+}
+
+/* Two cards in a half-width column hold their width down to about a 768px
+   viewport (170px there, against the 170px cap the <=768px block imposes).
+   Below that a column is too narrow for a pair, so it carries one. */
+@media (max-width: 767px) {
+    .products-sections--split .products-row .product-card {
+        flex: 0 0 100%;
+    }
+    /* A lone card against its 170px cap in a ~300px column would sit hard left
+       with the slack dangling right. */
+    .products-sections--split .products-row {
+        justify-content: center;
+    }
+}
+
+/* At phone widths the width cap comes off (the <=480px block below sets
+   max-width: none), so the card is its column — ~151px at 375px. That is under
+   the ~165px the CTA needs beside a 44px-target stepper, so give the button its
+   own line rather than let it ellipsise. The shipped stacked layout clips here
+   too (159.5px card, 1px); wrapping means this one does not. */
+@media (max-width: 480px) {
+    .products-sections--split .products-row .product-card {
+        flex: 0 0 100%;
+        /* The <=480px block below lifts the width cap entirely (max-width:
+           none) for the full-width 2-up phone layout. A split column at 480px
+           is 204px, which would put the card OVER the 200px container query
+           that flips its footer to price-beside-button — the trap that cost the
+           search dropdown a clipped CTA. Keep a cap, just a phone-sized one. */
+        max-width: 195px;
+    }
+    .products-sections--split .products-row .product-card__buy {
+        flex-wrap: wrap;
+    }
+    .products-sections--split .products-row .product-card__cart-btn {
+        flex: 1 0 100%;
     }
 }
 

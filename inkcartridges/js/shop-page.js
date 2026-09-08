@@ -460,6 +460,7 @@
             compatibleProducts: document.getElementById('compatible-products'),
             genuineSection: document.getElementById('genuine-section'),
             compatibleSection: document.getElementById('compatible-section'),
+            sourceSections: document.getElementById('source-sections'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
             // category-page-contract-may2026.md §2 — the page-level
@@ -4012,6 +4013,7 @@
             // Hide both genuine/compatible sections; we'll render our own UI.
             this.elements.compatibleSection.hidden = true;
             this.elements.genuineSection.hidden = true;
+            this._syncSourceColumns();
             this.elements.empty.hidden = true;
             this.elements.levelProducts.hidden = false;
 
@@ -4268,6 +4270,32 @@
             return arr;
         },
 
+        /**
+         * Compatible LEFT, Genuine RIGHT — and which of the two layouts is in
+         * force is decided HERE, in one place, rather than inferred in CSS with
+         * a :has(). One function counts how many sources actually have rows, so
+         * a test and a probe can both read the answer off the DOM.
+         *
+         * It has to be a decision rather than a side effect of the grid: the
+         * wrapper is a two-track grid, and `renderProducts` hides an empty
+         * section with the `hidden` ATTRIBUTE. A hidden grid item is removed
+         * from flow but its TRACK is not — so without this the surviving
+         * section would paint at half width beside an empty column instead of
+         * taking the whole row.
+         *
+         * Called after every `section.hidden = …` assignment, which means twice
+         * per paint (once per section). Both calls are synchronous in the same
+         * task, so the first one's half-answer never reaches the screen.
+         */
+        _syncSourceColumns() {
+            const wrap = this.elements.sourceSections;
+            if (!wrap) return;
+            const shown = ['compatibleSection', 'genuineSection']
+                .filter((k) => this.elements[k] && !this.elements[k].hidden).length;
+            wrap.classList.toggle('products-sections--split', shown === 2);
+            wrap.classList.toggle('products-sections--single', shown !== 2);
+        },
+
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
             container.innerHTML = '';
 
@@ -4288,10 +4316,12 @@
 
             if (products.length === 0) {
                 section.hidden = true;
+                this._syncSourceColumns();
                 return;
             }
 
             section.hidden = false;
+            this._syncSourceColumns();
 
             // ERR-133 — direct hits first, "also fits your machine" rows after,
             // applied AFTER the sort because this is the only place row order is

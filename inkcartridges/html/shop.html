@@ -258,21 +258,32 @@
                             <div class="color-packs-grid" id="color-packs-grid"></div>
                         </div>
 
-                        <div class="products-section" id="compatible-section">
-                            <h2 class="products-section__title" id="compatible-title">
-                                <span class="products-section__badge products-section__badge--compatible">Compatible</span>
-                                <span id="compatible-title-text">Compatible Inkjet Cartridges</span>
-                            </h2>
-                            <div class="products-row" id="compatible-products">
+                        <!-- The two sources sit SIDE BY SIDE: Compatible left,
+                             Genuine right, three cards to a row in each. The
+                             modifier class (products-sections--split /
+                             --single) is written by shop-page.js from the two
+                             sections' hidden state, so when only one source has
+                             rows the survivor takes the whole width and runs
+                             six-up. Compatible stays FIRST in the DOM:
+                             search-click-beacon.js numbers a click's position
+                             across both grids in document order. -->
+                        <div class="products-sections" id="source-sections">
+                            <div class="products-section" id="compatible-section">
+                                <h2 class="products-section__title" id="compatible-title">
+                                    <span class="products-section__badge products-section__badge--compatible">Compatible</span>
+                                    <span id="compatible-title-text">Compatible Inkjet Cartridges</span>
+                                </h2>
+                                <div class="products-row" id="compatible-products">
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="products-section" id="genuine-section">
-                            <h2 class="products-section__title" id="genuine-title">
-                                <span class="products-section__badge products-section__badge--genuine">Genuine</span>
-                                <span id="genuine-title-text">Original Inkjet Cartridges</span>
-                            </h2>
-                            <div class="products-row" id="genuine-products">
+                            <div class="products-section" id="genuine-section">
+                                <h2 class="products-section__title" id="genuine-title">
+                                    <span class="products-section__badge products-section__badge--genuine">Genuine</span>
+                                    <span id="genuine-title-text">Original Inkjet Cartridges</span>
+                                </h2>
+                                <div class="products-row" id="genuine-products">
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -311,29 +322,31 @@
                             </div>
                         </div>
                         <div class="drilldown-skeleton drilldown-skeleton--products" id="skeleton-products" hidden>
-                            <div class="products-section">
-                                <div class="skeleton skeleton--section-title"></div>
-                                <div class="products-row">
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                            <!-- Statically --split: the loading state shows the two-column
+                                 shape the loaded state will have. -->
+                            <div class="products-sections products-sections--split">
+                                <div class="products-section">
+                                    <div class="skeleton skeleton--section-title"></div>
+                                    <div class="products-row">
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                    </div>
                                 </div>
+                                <div class="products-section">
+                                    <div class="skeleton skeleton--section-title"></div>
+                                    <div class="products-row">
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                        <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
+                                    </div>
                             </div>
-                            <div class="products-section">
-                                <div class="skeleton skeleton--section-title"></div>
-                                <div class="products-row">
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                    <article class="product-card product-card--skeleton" aria-hidden="true"><div class="product-card__image-wrapper"><div class="skeleton"></div></div><div class="product-card__content"><div class="skel-line skel-line--brand"></div><div class="skel-line skel-line--title"></div><div class="skel-line skel-line--title2"></div><div class="skel-line skel-line--price"></div></div></article>
-                                </div>
                             </div>
                         </div>
                     </div>
