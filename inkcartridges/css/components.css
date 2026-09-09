@@ -4277,7 +4277,6 @@ label.form-label--checkbox {
 .cart-item .quantity-selector__btn,
 .cart-item__remove,
 .nav-menu .nav-menu__link,
-.nav-menu a,
 .breadcrumb__item a,
 /* The skip link is the FIRST control on all 43 pages and the one a keyboard or
    switch user meets before anything else. It measured 192x42 — two pixels short,
@@ -4409,7 +4408,11 @@ body.filter-sort-open .consent-banner {
 .footer-brand__logo,
 .contact-card__value,
 .shop-section-card__link,
-.legal-toc__list a {
+.legal-toc__list a,
+/* The drawer's links moved up here from the 44px group for the same reason
+   .auth-switch-btn did: at exactly 44 the measured height came back 43.x, and a
+   target that is only just big enough measures as not big enough. */
+.nav-menu a {
     display: inline-flex;
     align-items: center;
     min-height: var(--tap-min, 48px);

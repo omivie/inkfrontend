@@ -308,12 +308,19 @@ const MEASURE = (opts) => {
            really points at this element. `<input>` cannot carry a ::after hit
            area of its own (it is a replaced element), so for checkboxes and
            radios the label is the ONLY way this is ever satisfied. */
-        if (e.id) {
-            const label = document.querySelector(`label[for="${CSS.escape(e.id)}"]`);
-            if (label && visible(label)) {
-                const lr = label.getBoundingClientRect();
-                if (lr.width >= TAP_STANDARD && lr.height >= TAP_STANDARD) return;
-            }
+        // Both spellings of "this control's label". `label[for=id]` is the
+        // checkout's (a sibling), and a WRAPPING <label> is the filter sheet's
+        // (`<label class="filter-sort-option"><input …><span>In stock only</span></label>`,
+        // measured at 358x44 around a 24px box). Only the first was checked, so
+        // the sheet's eight checkboxes were reported as unreachable while their
+        // labels were comfortably over the floor.
+        const labels = [];
+        if (e.id) labels.push(document.querySelector(`label[for="${CSS.escape(e.id)}"]`));
+        labels.push(e.closest('label'));
+        for (const label of labels) {
+            if (!label || !visible(label)) continue;
+            const lr = label.getBoundingClientRect();
+            if (lr.width >= TAP_STANDARD && lr.height >= TAP_STANDARD) return;
         }
         const entry = {
             el: describe(e), rect: rectOf(e),
@@ -376,12 +383,28 @@ const MEASURE = (opts) => {
         const isFixed = getComputedStyle(el).position === 'fixed'
             || !!el.closest('.sticky-atc, .cart-sticky-bar, .filter-sort-bar, .consent-banner');
         if (!isFixed) {
-            // Just under the sticky header, not `block: 'center'`. Centring is not
-            // enough on a short viewport: at 320x568 the consent bar is 166px, and
-            // the centre of the screen can still be inside it. 140px from the top
-            // clears a bottom bar of any height this site produces.
-            const y = window.scrollY + el.getBoundingClientRect().top - 140;
-            window.scrollTo(0, Math.max(0, y));
+            /* `scrollIntoView` rather than `window.scrollTo`, because it scrolls
+               every scrollable ANCESTOR too — the mobile mega panels live inside
+               the nav drawer (mega-nav.js#moveIntoNav), which the window scroll
+               cannot reach.
+
+               `behavior: 'instant'` is load-bearing and its absence made this
+               whole check a lie. base.css:338 and modern-effects.css:52 set
+               `scroll-behavior: smooth` on the root, which makes scrolling
+               ASYNCHRONOUS — the rect is then read before it has happened.
+               Measured on production at 375x667: asked to scroll to 461,
+               window.scrollY stayed 0, the element stayed at top:601 inside the
+               consent bar, on a 5,519px document that could obviously scroll.
+               The probe then reported the site as covering its own CTA. A
+               measurement that silently did not happen is worse than one that
+               fails.
+
+               `block: 'center'` and not a fixed offset from the top: the sticky
+               header is taller than any offset worth guessing (measured: a
+               140px offset put the control under div.header-main at 320px), and
+               the centre of the viewport is clear of both the header above and
+               any docked bar below. */
+            el.scrollIntoView({ block: 'center', behavior: 'instant' });
         }
         const r = el.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) return { present: true, rect: rectOf(el), offscreen: 'zero-size' };
