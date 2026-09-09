@@ -5,6 +5,10 @@ Audited **2026-09-09**. One row per document. `sent/` is evidence-backed; `outbo
 
 Do not re-derive this audit. If you deliver something, move the file and change its row.
 
+**A row records the OUTCOME, not just the location.** Where our document *disputes* the
+incoming one it answers, the row says so — an "answered" row that hides a contradiction is
+how someone ends up implementing a fix we already measured as a no-op.
+
 ---
 
 ## `sent/` — proven received (7)
@@ -40,6 +44,22 @@ the batch, and it is the only written record of the 🔴 admin-analytics-RPC out
 | `admin-only-test-product-backend-brief-sep2026.md` | ERR-234 — carries a sequencing constraint |
 | `printer-canonicals-backend-brief-sep2026.md` | ERR-242/243, and the migration-132 green light |
 | `security-hardening-round2-FE-response-sep2026.md` | answers `security-hardening-sep2026-round2-FE-handoff.md` |
+| `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | ERR-238/239/240 — answers `inbox/fe-verification-and-remaining-gaps-sep2026.md`, **partly disputing it**: see below |
+
+**Disputed, not merely answered** — `mobile-ux-and-remaining-gaps-FE-response-sep2026.md`
+contradicts two of the three fixes `fe-verification-and-remaining-gaps-sep2026.md` proposes.
+Do not implement that inbox document as written:
+
+- Its `<input value="urban" checked>` **would have been a no-op when it was written** — the
+  page's own init un-checked every `delivery_type` radio on load (`forEach(r => r.checked = false)`),
+  so the attribute was true in the file and false in the browser. Fixed since, by ERR-235:
+  `_normaliseDeliveryType()` (`checkout-page.js:778`) now checks urban itself, and its comment
+  records the line it replaced. **Present tense matters here** — the critique is of the proposed
+  fix at the time, not of today's code.
+- Its stated failure mechanism **does not exist**: the checkout form carries `novalidate`
+  (`checkout.html:97`), so there is no HTML5 validation bubble to be rendered off-screen.
+
+Verified in this repo on 2026-09-09, not taken from the response document.
 
 ### No reply on record (30)
 
@@ -87,6 +107,9 @@ three oldest, spot-checked for the rest.
 | Doc | Note |
 |---|---|
 | `order-profit-net-of-discount-aug2026.md` | backend-authored (`**From:** backend`), was sitting at the repo root; **byte-identical** to the `~/Downloads` copy |
+| `fe-verification-and-remaining-gaps-sep2026.md` | 2026-09-08. **Two of its three fixes are disputed** — see the outbox note above before implementing any of it |
+| `FE-open-items-checklist-sep2026.md` | 2026-09-09. Answered by `outbox/printer-canonicals-backend-brief-sep2026.md`; four of its nine items were already shipped when it was written |
+| `security-hardening-sep2026-round2-FE-handoff.md` | 2026-09-08. Answered by `outbox/security-hardening-round2-FE-response-sep2026.md`. **This is the document that proves the backend dev can read this repo** — it cites `tests/security-hardening-sep2026.test.js:234` |
 
 The historical inbox is `readfirst/` at the repo root — frozen, test-pinned, not moved.
 
@@ -98,4 +121,3 @@ The historical inbox is `readfirst/` at the repo root — frozen, test-pinned, n
 |---|---|
 | `errors.md` | pinned by `tests/err-numbering-jul2026.test.js:38` |
 | `ADMIN_CENTRE_AUDIT.md` | internal documentation, not correspondence |
-| `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | **untracked, another session's in-flight work** as of this audit. It answers `fe-verification-and-remaining-gaps-sep2026.md` and belongs in `outbox/` once that session commits it. |
