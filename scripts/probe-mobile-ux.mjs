@@ -288,6 +288,21 @@ const MEASURE = (opts) => {
             return !!hit && (e === hit || e.contains(hit) || hit.contains(e));
         });
         if (covered) return;
+        /* A form control's associated `<label for=...>` is a real target: clicking
+           it activates the control. So a 24px checkbox beside a 44px label
+           CONFORMS, and reporting it would be reporting a defect that is not
+           there. This is not an exemption list — it is the actual rule, and it
+           only applies when a visible label of the right size really exists and
+           really points at this element. `<input>` cannot carry a ::after hit
+           area of its own (it is a replaced element), so for checkboxes and
+           radios the label is the ONLY way this is ever satisfied. */
+        if (e.id) {
+            const label = document.querySelector(`label[for="${CSS.escape(e.id)}"]`);
+            if (label && visible(label)) {
+                const lr = label.getBoundingClientRect();
+                if (lr.width >= TAP_STANDARD && lr.height >= TAP_STANDARD) return;
+            }
+        }
         const entry = {
             el: describe(e), rect: rectOf(e),
             minHeight: s.minHeight, minWidth: s.minWidth,
@@ -391,9 +406,9 @@ const MEASURE = (opts) => {
 };
 
 /** Poll for a condition rather than sleeping a guessed number of ms. */
-async function until(page, fn, { tries = 24, gap = 500 } = {}) {
+async function until(page, fn, { tries = 24, gap = 500, arg } = {}) {
     for (let i = 0; i < tries; i++) {
-        try { if (await page.evaluate(fn)) return true; } catch (_) { /* mid-navigation */ }
+        try { if (await page.evaluate(fn, arg)) return true; } catch (_) { /* mid-navigation */ }
         await page.waitForTimeout(gap);
     }
     return false;
@@ -489,11 +504,19 @@ try {
                     continue;
                 }
 
-                const rendered = await until(page, (sel) => {
+                /* 120, and the number is measured rather than round. The
+                   shortest legitimate page on the site is /account/forgot-password
+                   at 159 characters of main content ("Reset Your Password …
+                   Remember your password? Sign in") — a complete, correct page.
+                   The first version of this gate used 200 and failed it, which is
+                   a probe reporting a defect it invented. An empty or errored
+                   shell renders well under 120, so the gap still separates them. */
+                const MIN_MAIN_CHARS = 120;
+                const rendered = await until(page, ({ sel, min }) => {
                     const main = document.querySelector('#main-content') || document.body;
-                    const hasText = (main.innerText || '').trim().length > 200;
+                    const hasText = (main.innerText || '').trim().length > min;
                     return hasText && (!sel || !!document.querySelector(sel));
-                }, { tries: 30 }).catch(() => false);
+                }, { tries: 30, arg: { sel: route.ready || null, min: MIN_MAIN_CHARS } }).catch(() => false);
 
                 // Re-evaluate with the route's own extra selector.
                 const readyOk = route.ready
@@ -509,7 +532,7 @@ try {
                 });
 
                 /* A — content */
-                if (!rendered || m.textLength < 200 || m.errorVisible.length) {
+                if (!rendered || m.textLength < MIN_MAIN_CHARS || m.errorVisible.length) {
                     bad(`${label} · A the page rendered`,
                         m.errorVisible.length
                             ? `visible error state: ${m.errorVisible.join(', ')}`

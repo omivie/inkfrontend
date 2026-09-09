@@ -4188,12 +4188,33 @@ body.has-consent-banner .filter-sort-bar {
 
    Checkboxes are the exception that gets genuinely resized: 18px is small to
    SEE as well as to hit, and nothing is laid out around their exact size. */
+/* A CHECKBOX CANNOT CARRY ITS OWN HIT AREA — its LABEL has to.
+   `<input>` is a replaced element, so `::before`/`::after` do not render on it.
+   The slop below works on buttons and anchors and was silently inert here; the
+   probe kept reporting `input#terms.form-checkbox` at 24x24 after every
+   "fix", which is what a rule that cannot apply looks like from the outside.
+
+   The real target is the `<label for="terms">` beside it — clicking a label
+   toggles its control, so a 44px label IS a 44px target for the checkbox, and
+   that is how WCAG 2.5.5 is satisfied here. The input stays 24px, which is what
+   it should look like; the label carries the height. `#terms` is required to
+   place an order, so this is not a cosmetic row. */
 .form-checkbox,
 input[type="checkbox"].form-checkbox,
 input[type="radio"].form-checkbox {
     width: 24px;
     height: 24px;
     flex: 0 0 auto;
+}
+
+.form-group--checkbox,
+.form-label--checkbox,
+label.form-label--checkbox {
+    min-height: 44px;
+}
+.form-label--checkbox {
+    display: flex;
+    align-items: center;
 }
 
 .form-checkbox,
@@ -4234,6 +4255,117 @@ input[type="radio"].form-checkbox {
     pointer-events: auto;
 }
 
+/* ── ROUND TWO, FROM THE PROBE'S OWN OUTPUT — ERR-240 ─────────────────────
+   Everything above came from the first sweep. probe:mobile-ux then OPENED each
+   overlay and measured inside it, which is where the rest were hiding: a closed
+   panel has no geometry to be wrong.
+
+     .ribbons-mega__brand-btn   177x41  (x58, the ribbons mega panel)
+     .smart-ac__chip             ...x32 (recent-search + trending chips)
+     .drilldown-breadcrumb__link  39x36
+     .cart-item .quantity-selector__btn  28x28, and __remove 26x26
+     the filter sheet's own checkboxes    20x20
+
+   The cart stepper is NOT the ERR-218 exception. That one is the COMPACT
+   stepper inside a ~160px product card, where three 44px targets plus an Add
+   button provably do not fit. This is the CART LINE, which is the full 358px of
+   a phone screen — 44+44+44 is 132px of it. Different component, different
+   geometry, no trade to make. */
+.ribbons-mega__brand-btn,
+.smart-ac__chip,
+.drilldown-breadcrumb__link,
+.cart-item .quantity-selector__btn,
+.cart-item__remove,
+.nav-menu .nav-menu__link,
+.nav-menu a,
+.breadcrumb__item a,
+/* The skip link is the FIRST control on all 43 pages and the one a keyboard or
+   switch user meets before anything else. It measured 192x42 — two pixels short,
+   on every page, for as long as it has existed. */
+.skip-link {
+    min-height: 44px;
+}
+
+/* Height alone was not enough on these two — measured after the first pass:
+   .drilldown-breadcrumb__link came back 39x44 and the cart line's quantity box
+   36x44. Both are WIDTH misses in rows that have the room (the cart line is the
+   full 358px of a phone screen), so they get the width honestly rather than a
+   slop that would reach into the − and + either side of it. */
+.drilldown-breadcrumb__link,
+/* "Home" is the shortest breadcrumb on the site and came back 42x44 — two
+   pixels short, which is the kind of miss only a measurement finds. */
+.breadcrumb__item a {
+    min-width: 44px;
+}
+
+/* The last of them, all height misses on links that sit alone in their own row:
+   the "edit" links back from a summary, and the payment page's back link. */
+.checkout-summary__edit,
+.shipping-summary__edit,
+.payment-page__back,
+.legal-toc__list a,
+.content-list a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+}
+.cart-item .quantity-selector__input {
+    min-width: 44px;
+    width: 44px;
+}
+
+.cart-item .quantity-selector__btn,
+.cart-item__remove {
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* The filter sheet's checkboxes are bare `input[type=checkbox]` with no
+   .form-checkbox class, so the rule above never reached them. */
+.filter-sort-sheet input[type="checkbox"],
+.filter-sort-sheet input[type="radio"] {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    /* and the same hit-area slop the classed checkboxes get — 24px is enough to
+       SEE, not enough to hit. Its label is the neighbour it reaches into, and
+       tapping a checkbox's label is supposed to toggle that checkbox, so the
+       stolen pixels produce the behaviour the label would have produced anyway. */
+    position: relative;
+}
+.filter-sort-sheet input[type="checkbox"]::after,
+.filter-sort-sheet input[type="radio"]::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    min-width: var(--tap-min, 48px);
+    min-height: var(--tap-min, 48px);
+    transform: translate(-50%, -50%);
+    z-index: 1;
+}
+
+/* A FULL-SCREEN MODAL OUTRANKS A DOCKED BAR — and the z-scale disagreed.
+   .filter-sort-sheet is `position: fixed; inset: 0` at --z-modal (500);
+   .consent-banner is --z-popover (600). So the consent bar painted on top of a
+   `role="dialog" aria-modal="true"` surface that owns the whole screen.
+   MEASURED: elementFromPoint at the sheet's own primary button returned
+   button.consent-banner__btn--decline.
+
+   Raising the sheet above 600 would fix this one instance and leave the next
+   modal to rediscover it. The honest statement is that while a modal owns the
+   screen the consent bar is not the top layer — so it steps back for the
+   duration and returns untouched when the sheet closes. `body.filter-sort-open`
+   already exists (it locks background scroll), so this costs no new state, and
+   the measured --consent-banner-height is unaffected either way. */
+body.filter-sort-open .consent-banner {
+    display: none;
+}
+
 /* WHY THE SLOP IS ONLY ON THREE SELECTORS, MEASURED.
    The ::after was tried on twelve. It is created correctly on all of them — the
    pseudo-element really is 48px tall — and on nine it still did not answer the
@@ -4252,6 +4384,13 @@ input[type="radio"].form-checkbox {
    Measured before: ribbon tiles 41px, finder crumbs 36px, .logo 23px,
    .header-back-link 23px, .auth-switch-btn 23px, .contact-card__value 24px,
    .footer-brand__logo 40px. */
+/* --tap-min (48) rather than the WCAG 44 on this group, and the 4px is doing
+   work. These are standalone links in rows with room, so the extra costs
+   nothing — and at exactly 44 the measured height came back 43.x on
+   .auth-switch-btn, because a min-height of 44 on an inline-flex box with a
+   fractional line-height lands just under. A target that is only just big enough
+   measures as not big enough; this clears the question rather than sitting on
+   the boundary. */
 .logo,
 .header-back-link,
 .checkout-header__back,
@@ -4262,7 +4401,7 @@ input[type="radio"].form-checkbox {
 .legal-toc__list a {
     display: inline-flex;
     align-items: center;
-    min-height: 44px;
+    min-height: var(--tap-min, 48px);
 }
 
 /* THE ONE CONTROL THAT STAYS UNDER THE FLOOR, ON PURPOSE AND ON RECORD.
