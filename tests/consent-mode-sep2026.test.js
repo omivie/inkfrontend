@@ -117,7 +117,8 @@ test('§1 the banner tag is deferred — root 404.html does not defer its siblin
 /* ── §2 BEHAVIOUR — the file is EXECUTED, not read ──────────────────────────── */
 
 /** The smallest DOM that consent-banner.js can actually run against. */
-function makeEnv({ pathname = '/checkout', stored = null, storedVersion = null } = {}) {
+function makeEnv({ pathname = '/checkout', stored = null, storedVersion = null,
+    withCustomEvent = true } = {}) {
     const store = new Map();
     if (stored !== null) store.set('cookie_consent', stored);
     if (storedVersion !== null) store.set('cookie_consent_v', storedVersion);
@@ -164,6 +165,7 @@ function makeEnv({ pathname = '/checkout', stored = null, storedVersion = null }
     }
 
     const body = new El('body');
+    const dispatched = [];
     const document = {
         readyState: 'complete',
         body,
@@ -171,6 +173,7 @@ function makeEnv({ pathname = '/checkout', stored = null, storedVersion = null }
         createTextNode: (t) => { const e = new El('#text'); e.textContent = t; return e; },
         getElementById: (id) => body.find((e) => e.id === id),
         addEventListener: () => {},
+        dispatchEvent: (e) => { dispatched.push(e); return true; },
     };
 
     const gtagCalls = [];
@@ -189,6 +192,14 @@ function makeEnv({ pathname = '/checkout', stored = null, storedVersion = null }
         gtag: (...a) => { gtagCalls.push(a); },
         console,
     };
+    /* withCustomEvent:false reproduces the environment this file shipped with —
+       a DOM that has neither CustomEvent nor dispatchEvent. The announce() guards
+       exist for it, and a guard nobody tests is a guess. */
+    if (withCustomEvent) {
+        ctx.CustomEvent = class CustomEvent {
+            constructor(type, init) { this.type = type; this.detail = (init || {}).detail; }
+        };
+    }
     ctx.globalThis = ctx;
     vm.createContext(ctx);
     vm.runInContext(BANNER_SRC, ctx, { filename: 'consent-banner.js' });
@@ -200,7 +211,7 @@ function makeEnv({ pathname = '/checkout', stored = null, storedVersion = null }
     };
 
     return {
-        body, store, gtagCalls, click, win,
+        body, store, gtagCalls, click, win, dispatched,
         banner: () => body.find((e) => e.id === 'consent-banner'),
         raw: (k) => (store.has(k) ? store.get(k) : null),
     };
@@ -455,4 +466,103 @@ test('§5 the live height observer is actually started and stopped', () => {
         'watchSize is defined but never started');
     assert.match(BANNER, /if\s*\(unwatchSize\)/,
         'the observer outlives the bar it was observing');
+});
+
+
+/* ── §6 THE OPT-IN SURVEY IS GATED ON CONSENT (ERR-233 follow-up) ─────────────
+ *
+ * legal-config.js:125 publishes "Advertising / reviews — Google Customer Reviews
+ * opt-in survey — optional: true" to every reader of the privacy policy, and
+ * footer.js loaded it on every order regardless. The line directly above it
+ * (:124, GA4) makes the same promise and is kept, by the bar ERR-227 shipped.
+ * Two adjacent lines, one promise each, one mechanism between them.
+ *
+ * The BADGE is deliberately not gated — display-only social proof that collects
+ * nothing about the visitor. That asymmetry is the decision; these tests pin it
+ * in both directions so neither half drifts.
+ */
+
+/** The body of a named function declaration in `src`, brace-matched. */
+function functionBody(src, name) {
+    const start = src.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `no function ${name} in footer.js`);
+    let i = src.indexOf('{', start);
+    let depth = 0;
+    for (let j = i; j < src.length; j++) {
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}' && --depth === 0) return src.slice(i, j + 1);
+    }
+    assert.fail(`unbalanced braces in ${name}`);
+}
+
+test('§6 the survey is gated and the badge is NOT', () => {
+    const footer = codeOnly(FOOTER_SRC);
+
+    /* Assert the STRUCTURE, not the presence of a name. `assert.match(footer,
+       /renderSurveyIfConsented/)` was the first draft and it survived two
+       mutations: deleting the consent check from inside the function, and
+       calling gapi.load('surveyoptin') directly from renderOptIn — both leave
+       the identifier in the file. So: there is exactly ONE place the survey can
+       load, and the consent check is inside it. */
+    const loads = footer.match(/gapi\.load\('surveyoptin'/g) || [];
+    assert.equal(loads.length, 1,
+        `${loads.length} places load the survey — every one of them is a way to `
+        + 'render it without consent');
+
+    const gate = functionBody(footer, 'renderSurveyIfConsented');
+    assert.match(gate, /gapi\.load\('surveyoptin'/,
+        'the single survey load must live inside the gate');
+    assert.match(gate, /if\s*\(!analyticsAccepted\(\)\)\s*return/,
+        'the gate does not actually gate — it renders the survey for everyone');
+    // The badge render must not sit behind the gate. Slice to the END of the
+    // badge's own gapi.load block — a fixed character window runs past it into
+    // the survey call on the next line and fails for the wrong reason.
+    const from = footer.indexOf("gapi.load('ratingbadge'");
+    const badgeCall = footer.slice(from, footer.indexOf('});', from) + 3);
+    assert.doesNotMatch(badgeCall, /analyticsAccepted|renderSurveyIfConsented/,
+        'the badge collects nothing and stays on for everyone — gating it is a '
+        + 'separate decision with a review-volume cost');
+});
+
+test('§6 it asks the question EXACTLY as gtag.js asks it', () => {
+    const footer = codeOnly(FOOTER_SRC);
+    assert.match(footer, /localStorage\.getItem\('cookie_consent'\)\s*===\s*'accepted'/,
+        'a third reader of this key must not invent a fourth interpretation');
+    assert.doesNotMatch(footer, /setStorage\s*\(/,
+        'setStorage() JSON-quotes; the comparison would be false for ever');
+    assert.doesNotMatch(footer, /ad_storage|ad_user_data|ad_personalization/,
+        'gtag.js declares only analytics_storage, so ad_storage is granted and Ads '
+        + 'conversion tracking works — the ERR-224 rescue depends on it');
+});
+
+test('§6 the pairing: the banner announces and the footer listens', () => {
+    // Either half alone is dead. Without the event a shopper who accepts on the
+    // order-confirmation page — where the bar and the survey are on screen
+    // together — sees no survey until they navigate away and come back.
+    assert.match(BANNER, /'consent:change'/, 'the banner never announces its decision');
+    assert.match(codeOnly(FOOTER_SRC), /addEventListener\('consent:change'/,
+        'nothing listens for the decision');
+});
+
+test('§6 Accept announces accepted:true, Decline announces accepted:false', () => {
+    for (const [label, value, accepted] of [['Accept', 'accepted', true], ['Decline', 'declined', false]]) {
+        const env = makeEnv();
+        env.click(label);
+        const ev = env.dispatched.find((e) => e.type === 'consent:change');
+        assert.ok(ev, `${label} dispatched no consent:change`);
+        assert.equal(ev.detail.value, value);
+        assert.equal(ev.detail.accepted, accepted,
+            'the footer gates on detail.accepted — inverting it would render the '
+            + 'survey for exactly the people who refused it');
+    }
+});
+
+test('§6 a DOM without CustomEvent still dismisses the bar and stores the decision', () => {
+    // announce() is an analytics nicety inside a click handler whose real job is
+    // dismissing the bar. It must never throw. A guard nobody tests is a guess.
+    const env = makeEnv({ withCustomEvent: false });
+    env.click('Accept');
+    assert.equal(env.raw('cookie_consent'), 'accepted', 'the decision was lost');
+    assert.equal(env.banner(), null, 'the bar survived because announce() threw');
+    assert.equal(env.dispatched.length, 0, 'dispatched an event with no CustomEvent');
 });

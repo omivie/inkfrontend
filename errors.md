@@ -10015,3 +10015,42 @@ consequences and deserves its own decision; it is not folded into a layout fix.
 **Files.** `inkcartridges/css/components.css` · `inkcartridges/js/footer.js` ·
 `inkcartridges/js/consent-banner.js` ·
 `tests/consent-mode-sep2026.test.js` · `scripts/probe-consent-banner.mjs` · `package.json`.
+
+## ERR-233 addendum — the Google Reviews opt-in survey is now gated on consent (2026-09-09)
+
+**Decision, by the owner.** `js/legal-config.js:125` publishes "Advertising / reviews — Google
+Customer Reviews opt-in survey — `optional: true`" to every reader of the privacy policy, and
+`footer.js` had **zero references to consent of any kind** — no `cookie_consent`, no
+`analytics_storage` — and loaded the survey on every order.
+
+The sharp framing, and what made the decision easy: **line :124 directly above it declares
+Analytics / GA4 `optional: true` and IS kept**, by the bar ERR-227 shipped. Two adjacent lines in
+the published policy, making the same promise to the same reader, with one mechanism between
+them. The question was never "should a third-party script be gated" — it was which of two
+identical-looking promises the site actually keeps.
+
+**Gated: the survey. Not gated: the badge.** The survey is the half the policy names and the half
+that hands a customer's email to Google. The rating badge is display-only social proof that
+collects nothing about the visitor, so it keeps loading for everyone; narrowing it further has a
+review-volume cost and is a separate decision.
+
+**It asks the question exactly as `gtag.js:9` asks it** — `localStorage.getItem('cookie_consent')
+=== 'accepted'`, the bare string. This is the *third* reader of that one key, and it deliberately
+does NOT re-implement the banner's policy-version logic: a third interpretation would let this
+surface disagree with `gtag.js` about the same visitor. No `setStorage()`, and nothing here
+touches `ad_storage`.
+
+**A decision made while the survey is on screen has to count.** On order-confirmation the consent
+bar and the survey are visible together, so "decided before page load" is not the only case.
+`consent-banner.js` now dispatches `consent:change`; `footer.js` listens. Either half alone is
+dead code, so the tests pin the pairing.
+
+**Three of five mutations survived the first draft of these tests, and two were real.**
+`assert.match(FOOTER, /renderSurveyIfConsented/)` passes whether or not the function still
+contains its consent check, and passes again when a second, ungated `gapi.load('surveyoptin')` is
+added beside it — the identifier stays in the file either way. §6 now asserts the STRUCTURE:
+exactly **one** place in the file can load the survey, and the check lives inside it, found by
+brace-matching the function body. *A test that greps for a name proves a name.*
+
+**Files.** `inkcartridges/js/footer.js` · `inkcartridges/js/consent-banner.js` ·
+`tests/consent-mode-sep2026.test.js`.

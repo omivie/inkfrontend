@@ -713,20 +713,73 @@
 
       watchBadgeFootprint();
 
+      /* THE OPT-IN SURVEY IS GATED ON CONSENT. THE BADGE IS NOT.
+         --------------------------------------------------------
+         legal-config.js:125 publishes "Advertising / reviews — Google Customer
+         Reviews opt-in survey — optional: true" to every reader of the privacy
+         policy, and until now nothing made it optional: this file had zero
+         references to consent of any kind and loaded the survey on every order.
+         The line directly above it (:124, GA4) makes the same promise and IS
+         kept, by the bar ERR-227 shipped. Two adjacent lines, one promise each,
+         one mechanism between them.
+
+         The survey is the half the policy names, and the half that hands a
+         customer's email to Google. The rating badge is display-only social
+         proof that collects nothing about the visitor, so it keeps loading for
+         everyone — narrowing it further is a separate decision with a
+         review-volume cost attached, not something to fold in here.
+
+         ASK THE QUESTION EXACTLY AS gtag.js ASKS IT. js/gtag.js line 9 decides
+         analytics_storage from `localStorage.getItem('cookie_consent') ===
+         'accepted'` — the bare string, never JSON. This is the third reader of
+         that one key and it must not invent a fourth interpretation: no
+         setStorage() (it JSON-quotes and would compare false for ever), and no
+         re-implementation of the banner's policy-version logic, which would
+         make this surface disagree with gtag.js about the same visitor.
+
+         AND NOTHING HERE MAY TOUCH ad_storage. gtag.js declares only
+         analytics_storage, so under Consent Mode ad_storage is granted and Ads
+         conversion tracking works — which is what the ERR-224 mobile-checkout
+         work exists to rescue. */
+      function analyticsAccepted() {
+        try {
+          return localStorage.getItem('cookie_consent') === 'accepted';
+        } catch (_) {
+          /* Private mode / storage disabled. Not consent. */
+          return false;
+        }
+      }
+
+      var surveyRendered = false;
+      function renderSurveyIfConsented() {
+        if (surveyRendered) return;
+        if (!analyticsAccepted()) return;
+        if (!window.gapi || !window._googleReviewsOptInData) return;
+        surveyRendered = true;
+        window.gapi.load('surveyoptin', function () {
+          window.gapi.surveyoptin.render(window._googleReviewsOptInData);
+        });
+      }
+
+      /* On the order-confirmation page the consent bar and this survey are on
+         screen at the same time, so "decided before the page loaded" is not the
+         only case. consent-banner.js announces a decision the moment it is
+         made; without this listener a shopper who accepts would see no survey
+         until they navigated away and came back. */
+      document.addEventListener('consent:change', function (e) {
+        if (e && e.detail && e.detail.accepted) renderSurveyIfConsented();
+      });
+
       window.renderOptIn = function () {
-        // Badge on all pages
+        // Badge on all pages, for everyone — it collects nothing.
         window.gapi.load('ratingbadge', function () {
           window.gapi.ratingbadge.render(
             document.getElementById('google-reviews-badge'),
             { merchant_id: 5748243992, position: 'BOTTOM_RIGHT' }
           );
         });
-        // Opt-in survey on order confirmation page
-        window.gapi.load('surveyoptin', function () {
-          if (window._googleReviewsOptInData) {
-            window.gapi.surveyoptin.render(window._googleReviewsOptInData);
-          }
-        });
+        // Opt-in survey on the order-confirmation page, only with consent.
+        renderSurveyIfConsented();
       };
 
       if (!document.querySelector('script[src*="apis.google.com/js/platform.js"]')) {

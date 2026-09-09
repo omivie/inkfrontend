@@ -241,9 +241,33 @@
 
     var unwatchSize = null;
 
+    /* Announce the decision so surfaces that gate on consent can act on it the
+       moment it is made, rather than only on the next page load.
+
+       js/footer.js is the one listener today: the Google Customer Reviews
+       opt-in survey is declared `optional: true` in legal-config.js:125 and was
+       loading unconditionally. On the order-confirmation page this bar and that
+       survey are on screen together, so without an event a shopper who accepts
+       would see no survey until they navigated away and back.
+
+       Every guard here is deliberate. tests/consent-mode-sep2026.test.js runs
+       this file in a VM against a hand-rolled DOM that has no dispatchEvent and
+       no CustomEvent, and an analytics nicety must never throw into a click
+       handler whose real job is dismissing the bar. */
+    function announce(value) {
+        try {
+            if (typeof CustomEvent !== 'function') return;
+            if (!document || typeof document.dispatchEvent !== 'function') return;
+            document.dispatchEvent(new CustomEvent('consent:change', {
+                detail: { value: value, accepted: value === CONSENT.accepted }
+            }));
+        } catch (_) { /* consent never gates UX */ }
+    }
+
     function decide(value) {
         writeDecision(value);
         applyConsent(value);
+        announce(value);
         if (unwatchSize) { unwatchSize(); unwatchSize = null; }
         var el = document.getElementById(EL_ID);
         if (el && el.parentNode) el.parentNode.removeChild(el);
