@@ -115,8 +115,29 @@ surface on the site — it backs the header typeahead on every page — and 3s i
 shopper types past it. We are not asking for anything specific here; we would just rather you knew
 the baseline, because if it comes down, the preflight stops mattering at all.
 
-(For contrast, on the same host: `/api/products/popular?category=ink&limit=4` and
-`/api/shipping/options` both answer comfortably under a second.)
+**For contrast, on the same host — `/api/products/popular` is genuinely fast, and now cached:**
+
+```
+/api/products/popular?category=ink&limit=4      0.78s (REVALIDATED)   0.02s (HIT)
+                     ?category=toner&limit=4    1.35s (REVALIDATED)   0.24s (REVALIDATED)
+                     ?category=ribbons&limit=4  1.02s (REVALIDATED)   0.03s (HIT)
+```
+
+Worth noting it has moved: when we first measured it this morning it answered `DYNAMIC`, and it is
+now serving `HIT` / `REVALIDATED` off the `s-maxage=300` we were already relying on. So the new
+landing-page shelf is close to free at scale — it is not adding origin load.
+
+**And a correction, so nobody optimises the wrong thing.** A colleague measured the landing pages
+at 1.7–3.1s from `domcontentloaded` to first price and reasonably wondered whether that was
+backend-bound. On these numbers **it is not `/api/products/popular`** — that call is 0.02–1.35s.
+The landing-page time is the page load plus the other calls those pages make (`/api/brands`,
+`/api/products/counts`, `/api/site/nav`), not the shelf. The ~3.0s figure above is specific to
+`/api/search/smart` and should not be generalised to the catalogue endpoints.
+
+**Two limiters are advertised on the same response**, which confused us for a while and may confuse
+you: `ratelimit-limit: 60` (`ratelimit-policy: 60;w=60`) alongside `x-ratelimit-limit: 100`. If
+those are two different limiters rather than one described twice, it would help to know which one
+actually governs — we sized our checkout behaviour against the 100.
 
 ---
 
