@@ -132,17 +132,43 @@ test('§1 the hero exemption that came first still holds', () => {
 
 // ─── §2 The exemption is load-bearing, not decorative ──────────────────────
 
-test('§2 the reveal really does apply a transform (else the exemption is pointless)', () => {
+/* THIS TEST INVERTED ON PURPOSE — ERR-239, and the old version predicted it.
+   It used to assert the revealed state was `translateY(0)` and NOT `none`, and
+   said so explicitly: "if this ever becomes `transform: none`, the
+   containing-block trap is gone and the exemption in modern-effects.js can be
+   revisited (deliberately, not by accident)."
+
+   This is that deliberate revisit. The trap was not confined to the one section
+   the JS exemption covered. EVERY section carries .will-animate, .in-view is
+   never removed after the reveal, and `translateY(0)` is a transform, so every
+   revealed section on the site was a containing block for `position: fixed`
+   descendants — permanently. Measured on production at 390x844, /cart scrolled
+   to the bottom: the sticky Checkout bar declares `position: fixed; bottom: 0`
+   and painted at top: -1161px, anchored to the bottom of section.cart-page
+   instead of the viewport. Off-screen, on the busiest page of the funnel.
+
+   So the resting state is now `none`, which paints and interpolates identically
+   and fixes the whole class rather than one instance of it.
+
+   THE JS EXEMPTION STAYS. Removing it would be a behaviour change dressed up as
+   cleanup (ERR-158): those sections would start animating for the first time,
+   which is a separate decision from this one and nobody has asked for it. §1
+   above still pins it, and it is now defence in depth rather than the only
+   defence. */
+test('§2 the revealed state is `none`, so no section captures a fixed child', () => {
     const css = fs.readFileSync(CSS_PATH, 'utf8');
     assert.match(css, /\.will-animate\s*\{[^}]*transform:\s*translateY\(30px\)/,
-        'the resting state must still be a transform');
+        'the RESTING state must still be a real transform — that is what animates');
     const idx = css.indexOf('.will-animate.in-view');
     assert.ok(idx !== -1, '.in-view rule must exist');
     const body = css.slice(css.indexOf('{', idx), css.indexOf('}', idx));
-    assert.match(body, /transform:\s*translateY\(0\)/,
-        'the revealed state is translateY(0) — NOT `none`, which is the whole point: ' +
-        'if this ever becomes `transform: none`, the containing-block trap is gone ' +
-        'and the exemption in modern-effects.js can be revisited (deliberately, not by accident)');
+    assert.match(body, /transform:\s*none/,
+        'the REVEALED state must be `none`, not `translateY(0)`: a non-none transform ' +
+        'makes the section a containing block for every position:fixed descendant, ' +
+        'which put /cart\'s sticky Checkout bar 1,161px off-screen (ERR-239)');
+    assert.doesNotMatch(body, /transform:\s*translateY\(0\)/,
+        'and translateY(0) must not come back — it is the identity matrix, so it looks ' +
+        'like a no-op and is not one');
 });
 
 // ─── §3 The shipped markup this protects ───────────────────────────────────

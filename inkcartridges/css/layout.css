@@ -1090,27 +1090,14 @@
     transform: rotate(180deg);
 }
 
-/* Mega Panel - Push down content */
-.mega-panel {
-    background-color: var(--color-background-alt);
-    border-bottom: 1px solid var(--color-border);
-    overflow: visible;
-    position: relative;
-    z-index: 50;
-}
-
-.mega-panel[hidden] {
-    display: none;
-}
-
-.mega-panel:not([hidden]) {
-    padding: var(--spacing-xl) 0;
-    padding-bottom: var(--spacing-3xl);
-}
-
-.mega-panel__content {
-    min-height: auto;
-}
+/* The four `.mega-panel*` rules that used to sit here are gone — ERR-238.
+   `.mega-panel` matches nothing: the panels in every page's markup are
+   #brands-mega and #ribbons-mega, styled below. They were the CSS half of the
+   dead main.js#initMegaPanels handler (which tested `.mega-panel` for its
+   outside-click escape hatch and a `data-target` attribute that does not exist
+   either), and they went out with it. Deleting a rule that matches nothing is
+   safe in a way that deleting a fallback is not — there is no branch here that
+   was quietly the only one running (ERR-158/167); there was no branch at all. */
 
 /* ============================================
    BRANDS MEGA DROPDOWN

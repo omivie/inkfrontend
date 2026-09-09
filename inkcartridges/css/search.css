@@ -1110,28 +1110,34 @@ mark.smart-ac__mark {
         grid-template-columns: 1fr;
         gap: 6px;
     }
-    /* SCOPED TO --single. The horizontal-thumb row below needs the full panel
-       width — 64px of thumbnail plus a ~300px text column. A --split column at
-       375px is ~150px, so the same rules there would put a 64px thumb beside
-       86px of text. Split columns keep the vertical card, at very nearly the
-       width the desktop compact card has always been (~151px vs 152.3px), so
-       the desktop compact type sizes above are already the right ones. */
-    .smart-ac__sections--single .smart-ac__grid .product-card__link {
+    /* WAS SCOPED TO --single. It is not any more, and the reason it had to be
+       is gone — ERR-238.
+       The old note read: "A --split column at 375px is ~150px, so the same rules
+       there would put a 64px thumb beside 86px of text." True, and that was the
+       argument for leaving split columns as two narrow vertical cards on a
+       phone. Measured, those columns produced a card whose own qty stepper and
+       Add button did not fit, and the panel in the owner's screenshot is the
+       result. Below 700px --split is now ONE full-width list behind a
+       Compatible|Genuine tab bar, so the selected panel has the same ~300px
+       text column --single always had, and the same rules are correct for both.
+       Hence the shared `--rows` marker rather than a second copy of this block
+       (ERR-192: a relocated rule becomes a copy nobody keeps in step). */
+    .smart-ac__sections--rows .smart-ac__grid .product-card__link {
         display: grid;
         grid-template-columns: 64px 1fr;
         align-items: center;
         gap: 10px;
     }
-    .smart-ac__sections--single .smart-ac__grid .product-card__image-wrapper {
+    .smart-ac__sections--rows .smart-ac__grid .product-card__image-wrapper {
         width: 64px;
         height: 64px;
         aspect-ratio: 1 / 1;
         flex: 0 0 64px;
     }
-    .smart-ac__sections--single .smart-ac__grid .product-card__content {
+    .smart-ac__sections--rows .smart-ac__grid .product-card__content {
         padding: 0;
     }
-    .smart-ac__sections--single .smart-ac__grid .product-card__title {
+    .smart-ac__sections--rows .smart-ac__grid .product-card__title {
         font-size: 14px;
         /* Keep the 4-line clamp from the product-card-title-clamp contract;
            the horizontal row just grows taller for long names. */
@@ -1164,17 +1170,95 @@ mark.smart-ac__mark {
         width: 34px;
         font-size: 14px;
     }
-    /* A split column at 375px is ~150px wide, and the coarse stepper above is
-       36 + 34 + 36 = 106px of that. [- 1 +] and [Add to Cart] cannot share the
-       ~139px line the way they do across a full-width row, so wrap: the
-       stepper keeps its 44px touch targets on one line and the button takes
-       the next one at full width. Shrinking the stepper back to the 22px
-       desktop size would fit too, and would put a 22px tap target on a phone. */
-    .smart-ac__sections--split .smart-ac__grid .product-card__buy {
-        flex-wrap: wrap;
+    /* The two rules that used to sit here are gone — ERR-238.
+       They wrapped the buy row and pushed the CTA onto its own line, and the
+       reason given was "a split column at 375px is ~150px wide". Below 700px a
+       split is no longer a column: it is one full-width list behind the tab bar,
+       so the CTA has the whole panel and the wrap has nothing left to solve.
+       Leaving them would have been worse than useless — `flex-wrap: wrap` plus
+       `flex-basis: 100%` on a box the card's own container query turns into a
+       COLUMN is what produced a 38x96px "Add" button on /search (ERR-240,
+       pages.css). Same two declarations, same trap, one panel over. */
+}
+
+/* ── THE PHONE SEGMENTED CONTROL — ERR-238 ────────────────────────────────
+   Above 700px this panel is two columns, Compatible left and Genuine right,
+   and none of that changes. Below it, the two columns became two ~150px
+   columns — narrower than the card's own measured floor, which is how the
+   owner's screenshot ended up with four-line titles and a crushed stepper.
+
+   The comment this replaces argued for keeping them side by side at every
+   width: "the alternative is burying Genuine under Compatible again, which is
+   the thing this change exists to stop" (ERR-222). That instinct is right and
+   the tab bar honours it — Genuine is NAMED and COUNTED on screen, one tap
+   away, and the count is read from the payload so it is true before you look.
+   What ERR-222 was actually about was a 40-row window that never paginated,
+   which pushed value packs to position 239 of 367 where nobody could reach
+   them. A labelled tab carrying a live count is not that.
+
+   The section markup is IDENTICAL at every width — only CSS and the `hidden`
+   attribute differ — so crossing the breakpoint re-renders nothing and the
+   keyboard contract does not fork. search.js#applyActiveSource owns which
+   section is hidden and keeps state.results pointing at the visible one.
+
+   481-699px deliberately keeps the vertical card rather than the 64px thumb
+   row: the row treatment is scoped to <=480 and widening it would change
+   --single at those widths too, which is a different question from this one. */
+@media (max-width: 699px) {
+    .smart-ac__sections--split {
+        grid-template-columns: minmax(0, 1fr);
     }
-    .smart-ac__sections--split .smart-ac__grid .product-card__add-btn {
-        flex: 1 0 100%;
+    /* The divider separated two columns. There is one. */
+    .smart-ac__sections--split > .smart-ac__section + .smart-ac__section {
+        border-left: none;
+    }
+    .smart-ac__tablist {
+        display: flex;
+        gap: 4px;
+        padding: 8px 8px 0;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #fff;
+    }
+    .smart-ac__tab {
+        flex: 1 1 0;
+        min-height: var(--tap-min, 48px);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--color-text-muted, #6b7280);
+        background: var(--color-background-alt, #f3f4f6);
+        border: 1px solid var(--color-border, #e5e7eb);
+        border-radius: 999px;
+        cursor: pointer;
+    }
+    .smart-ac__tab[aria-selected="true"] {
+        color: #fff;
+        background: var(--cyan-primary, #2563eb);
+        border-color: var(--cyan-primary, #2563eb);
+    }
+    .smart-ac__tab-count {
+        font-variant-numeric: tabular-nums;
+        opacity: 0.85;
+    }
+    /* The selected panel already says which source it is, in the tab. */
+    .smart-ac__sections--split .smart-ac__section-head {
+        display: none;
+    }
+}
+
+/* The tab bar is a PHONE control. Above 700px both sections are on screen at
+   once with their own badge headings, so a tab bar would be two buttons that
+   change nothing. Hidden with display, not removed from the DOM, so crossing
+   the breakpoint costs no re-render. */
+@media (min-width: 700px) {
+    .smart-ac__tablist {
+        display: none;
     }
 }
 

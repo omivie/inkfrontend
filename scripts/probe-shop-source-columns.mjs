@@ -50,12 +50,28 @@ const CARD_CEILING = 200;
 // Expected cards per row, MEASURED. --split is 2-up by default and 3-up from
 // 1200px, dropping to 1-up under 768px. --single is left on the page's existing
 // global ladder (6 / 5 / 2), which this change deliberately does not touch.
+/* `touch` IS LOAD-BEARING AND ITS ABSENCE HID A SHIPPED DEFECT — ERR-240.
+   Every viewport here used to be created as `newContext({ viewport })` and
+   nothing else, so the pointer was FINE. The card's buy control is laid out by
+   `@container pcard (max-width: 260px)` nested inside `@media (pointer: coarse)`
+   (components.css), which means this probe was measuring a layout that no phone
+   ever gets, and reporting it green.
+   What it could not see: on a real touch device the buy box is a COLUMN, and the
+   phone rules in pages.css were written for a ROW (`flex-wrap: wrap` +
+   `flex: 1 0 100%`). flex-basis is main-axis, so it became the button's HEIGHT
+   and the button collapsed to the width of the word "Add" — 38x96px, at every
+   phone width, on every card. A probe whose emulation does not match the device
+   is not a weaker measurement, it is a measurement of something else.
+   375px now runs with the same touch emulation as probe:mobile-ux. */
 const VIEWPORTS = [
     { width: 1440, height: 900, split: 3, single: 6 },
     { width: 1280, height: 900, split: 3, single: 6 },
     { width: 1024, height: 900, split: 2, single: 6 },
     { width: 768,  height: 900, split: 2, single: 5 },
-    { width: 375,  height: 812, split: 1, single: 2 },
+    /* 2, not 1: below 699px the two source sections STACK (ERR-240), so the row
+       is the full container and carries a pair of ~175px cards instead of one
+       152px card in a half-width column that could not hold its own CTA. */
+    { width: 375,  height: 812, split: 2, single: 2, touch: true },
 ];
 
 /**
@@ -192,7 +208,10 @@ const browser = await chromium.launch();
 try {
     for (const vp of VIEWPORTS) {
         for (const [label, url] of [['/shop code drilldown', CODE_URL], ['/search results', SEARCH_URL]]) {
-            const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+            const ctx = await browser.newContext({
+                viewport: { width: vp.width, height: vp.height },
+                ...(vp.touch ? { isMobile: true, hasTouch: true, deviceScaleFactor: 3 } : {}),
+            });
             const page = await ctx.newPage();
             const loaded = await load(page, url);
             if (!loaded) {

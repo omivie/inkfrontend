@@ -3913,6 +3913,14 @@ a.product-card__contact-btn {
     right: 0;
     bottom: 0;
     z-index: var(--z-popover);
+    /* The home-indicator inset, which this bar was the only fixed bottom
+       element on the site NOT to reserve. .filter-sort-bar (pages.css:3786),
+       .sticky-atc (:3736) and .cart-sticky-bar (:14113) all already do. On a
+       notched iPhone the buttons sat in the gesture strip, where a tap is as
+       likely to send the page to the app switcher as to press Accept — and
+       since this bar is now what the other three are lifted ABOVE, its height
+       is also their offset, so getting it wrong here moved all four. */
+    padding-bottom: var(--safe-bottom);
     display: flex;
     align-items: center;
     gap: var(--spacing-md, 16px);
@@ -4028,6 +4036,275 @@ body.has-consent-banner {
    `npm run probe:consent-banner`. */
 body.has-consent-banner #google-reviews-badge {
     bottom: var(--consent-banner-height, 0px) !important;
+}
+
+/* ERR-238 — THE SAME DEFECT, THREE MORE TIMES, AND THESE THREE ARE OURS.
+   ERR-233 fixed the one fixed bottom-anchored element it happened to be looking
+   at. It is not the only one. Four elements on this site are
+   `position: fixed; bottom: 0`, and the banner sits above all of them:
+
+     .consent-banner   --z-popover  600   every page, every first visit
+     .cart-sticky-bar  --z-sticky   200   /cart — the Checkout button
+     .sticky-atc       --z-sticky   200   the PDP — the Add to Cart button
+     .filter-sort-bar  --z-sticky   200   /shop at <=768px
+
+   Measured on production at 390x844, with the banner showing — which is the
+   state EVERY first-time visitor is in, and every ad click is a first visit:
+
+     PDP   banner 696-844, .sticky-atc 777-844      → elementFromPoint at the
+           Add-to-Cart button's own centre returned button.consent-banner__btn
+     /shop banner 696-844, .filter-sort-bar 777-844 → returned
+           div.consent-banner__actions
+
+   So on a phone the top of the funnel — Add to Cart — could not be pressed
+   until consent was dismissed, and nothing said so. The comment at
+   pages.css:.filter-sort-bar asserted "only one fixed bottom bar is ever
+   present per page"; the consent banner is the counter-example on every page,
+   and no test held that claim (a rule in a comment is a coincidence, not a
+   guarantee).
+
+   `body.has-consent-banner { padding-bottom }` above cannot help these either,
+   for the reason ERR-233 already had to learn: padding reserves space in FLOW
+   and these are FIXED.
+
+   No !important here, deliberately. The Google badge needs it to beat a
+   third-party INLINE style; these three are our own rules and a plain author
+   declaration on a more specific selector already wins. Adding !important we do
+   not need would make the next person think we were fighting something.
+
+   The lift is the height consent-banner.js MEASURES from the rendered box, and
+   releaseSpace() clears the class and the property on dismissal, so all three
+   drop back to the viewport edge by themselves — the same mechanism, with no
+   second source of truth. Measured by `npm run probe:mobile-ux` (invariant F +
+   the CTA hit-test), pinned by tests/mobile-fixed-bar-stacking-sep2026.test.js. */
+body.has-consent-banner .cart-sticky-bar,
+body.has-consent-banner .sticky-atc,
+body.has-consent-banner .filter-sort-bar {
+    bottom: var(--consent-banner-height, 0px);
+}
+
+/* ── THE 16px FLOOR ON TEXT ENTRY — ERR-240 ───────────────────────────────
+   iOS Safari zooms the whole page when a focused text control computes below
+   16px, and it does NOT zoom back when the field blurs. The viewport is then
+   wider than the screen for the rest of the session: every field after the
+   first is off the side, and the shopper has to pinch back by hand between
+   each one. On a checkout form that is a per-field tax on the one flow that
+   makes money.
+
+   MEASURED on production at 390x844, not inferred — 32 distinct controls were
+   under the floor, and they were not scattered, they were whole forms:
+
+     /checkout  every field. #email #phone #first-name #last-name #address1
+                #address2 #city #region #postcode, the nine billing fields,
+                #order-notes, #coupon-code            all 15px
+     /contact   every field                            all 15.2px
+     /quote     every field                            all 15.2px
+     /cart      .quantity-selector__input, .cart-coupon__input  15px
+
+   None of them was a mistake in isolation. --font-size-sm IS 15px, and
+   `section.checkout-page .form-input { font-size: var(--font-size-sm) }` is a
+   deliberate compaction. The defect is that 15px is a legal design value and an
+   illegal INPUT value, and nothing in the stylesheet knew the difference.
+
+   So this is a floor, stated once, rather than 32 corrections that the 33rd
+   form would not inherit. It is deliberately blanket: a new form gets it free,
+   which is the whole point — "every surface remembers to do X" is a list nobody
+   maintains (ERR-150/160).
+
+   WHAT IT COSTS, said plainly: controls that were 17px (--font-size-base) on a
+   phone become 16px. That is 1px, it is still above the floor, and it buys one
+   consistent input size on mobile. Nothing on the site asks for a text control
+   larger than base.
+
+   Specificity is load-bearing. `body input:not(...)` is (0,3,2), which is what
+   it takes to beat `section.checkout-page .form-input` (0,2,1). A plain
+   `input {…}` here would be (0,0,1) and would lose to every one of the 32 rules
+   it exists to correct — present in the file, matching nothing, which is the
+   ERR-167 shape (the guard that is really an off switch).
+
+   Checkboxes, radios and ranges are excluded: they render no text, iOS does not
+   zoom for them, and they are sized by the tap-target rules below instead.
+
+   THE `:not()` CHAIN ON `select` AND `textarea` IS NOT A COPY-PASTE SLIP — it is
+   there to make the three selectors weigh the same, and it was added because the
+   first version of this rule silently half-worked. `select` and `textarea` never
+   carry a `type` attribute, so those three clauses match everything and filter
+   nothing; what they do is carry specificity. Written the obvious way —
+   `body input:not(...):not(...):not(...), body select, body textarea` — the
+   input arm is (0,3,2) and the other two are (0,0,2), which loses to
+   `.contact-form-wrapper .form-input` (0,2,0).
+   Measured after that first version shipped to a local server: every `input` on
+   /contact and /quote came up to 16px and every `select` and `textarea` on the
+   same forms stayed at 15.2px. A floor with a hole in it is worse than no floor,
+   because the pages it misses look fixed. Invariant D covers select and textarea
+   precisely so this cannot half-work again.
+
+   Held by `npm run probe:mobile-ux` invariant D, which measures the COMPUTED
+   size in a real browser at three phone widths — the only way this can be
+   checked, since the winning declaration is spread across four stylesheets. */
+@media (max-width: 1024px) {
+    body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    body select:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    body textarea:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+        font-size: 16px;
+    }
+    /* Same selectors, same reason to state it once: a field the shopper has to
+       hit with a thumb needs the height as well as the type size. /contact was
+       shipping 28px-tall inputs. textarea is excluded — it is sized by `rows`
+       and is always taller than the floor. */
+    body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    body select:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+        min-height: 44px;
+    }
+}
+
+/* ── TAP TARGETS: HIT AREA WITHOUT LAYOUT SHIFT — ERR-240 ─────────────────
+   WCAG 2.5.5 wants 44x44 CSS px; this repo's own `--tap-min` asks for 48.
+   Measured on production at 390x844, 20 distinct interactive controls were
+   under 44 in at least one dimension. The worst were not decorative:
+
+     input#terms          18x18   REQUIRED to submit an order
+     input#remember-me    18x18
+     .password-toggle     28x28   the only way to see what you typed
+     .favourite-btn       28x28   on every product card
+     .drilldown-breadcrumb__link  39x36
+     a.logo               190x23  the way back to the homepage, on all 43 pages
+
+   MOST OF THESE ARE HEIGHT-ONLY MISSES on elements whose size is doing real
+   layout work — the header logo is 23px tall because the header row is built
+   around it, and forcing it to 44 would move the brand row on every page. So
+   the hit area is extended with a centred, transparent ::after instead of by
+   resizing the box. The element paints exactly where it did; only the region
+   that answers a finger changes. `document.elementFromPoint` returns the
+   ORIGINATING element for a pseudo-element, so this is a real target to the
+   browser and to the probe, not a visual trick.
+
+   Deliberately NOT applied to the quantity stepper: its −, input and + sit
+   8px apart, and a 44px slop on each would overlap its neighbours, turning a
+   near-miss into a wrong hit. Those three are sized properly instead, by the
+   `@media (pointer: coarse)` block above (44px each, measured on the BUTTONS
+   rather than the wrapper because a 44px wrapper with 1px borders yields 42px
+   children).
+
+   Checkboxes are the exception that gets genuinely resized: 18px is small to
+   SEE as well as to hit, and nothing is laid out around their exact size. */
+.form-checkbox,
+input[type="checkbox"].form-checkbox,
+input[type="radio"].form-checkbox {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+}
+
+.form-checkbox,
+.drilldown-breadcrumb__link,
+.shop-section-card__link {
+    position: relative;
+}
+
+.form-checkbox::after,
+.drilldown-breadcrumb__link::after,
+.shop-section-card__link::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    /* 48, not 44. `--tap-min` is this repo's own floor and it is 48px, and the
+       extra 4px also settles a boundary question: a slop of exactly 44 puts the
+       hit area's edge exactly where a 44px conformance check samples, and
+       `elementFromPoint` on a boundary pixel is free to return the ancestor.
+       Measured: at 44px the slop existed and the check still failed on every one
+       of these. A target that is only just big enough measures as not big
+       enough. */
+    min-width: var(--tap-min, 48px);
+    min-height: var(--tap-min, 48px);
+    transform: translate(-50%, -50%);
+    /* Above the neighbour, not below it. A checkbox's 48px slop necessarily
+       reaches into the label sitting beside it, and at z-index 0 the label
+       painted over the slop and answered the tap instead — measured, the
+       checkbox stayed unreachable at 24x24. Lifting it is safe HERE precisely
+       because of what the neighbour is: tapping a checkbox's own label is
+       supposed to toggle that checkbox, so a slop that steals those pixels
+       produces the behaviour the label would have produced anyway. That is why
+       this is not applied to the quantity stepper, where the neighbour is a
+       different control with a different effect. */
+    z-index: 1;
+    pointer-events: auto;
+}
+
+/* WHY THE SLOP IS ONLY ON THREE SELECTORS, MEASURED.
+   The ::after was tried on twelve. It is created correctly on all of them — the
+   pseudo-element really is 48px tall — and on nine it still did not answer the
+   hit-test, because those nine sit in DENSE ROWS (the header brand row, the
+   footer brand row, the login card's link stack) where a slop that reaches
+   beyond the element's own box reaches into a SIBLING, and the sibling paints
+   over it. A hit area that a neighbour covers is not a hit area, and stacking it
+   above the neighbour would only move the mis-tap to the neighbour.
+
+   So the slop is kept for the three cases where the element sits alone in its
+   own space, and everything else takes a real minimum height below. Those rows
+   have the vertical room — a 44px link inside a 64px header row moves nothing,
+   the text stays optically centred — which is exactly why the honest fix is
+   available there and the slop was never needed.
+
+   Measured before: ribbon tiles 41px, finder crumbs 36px, .logo 23px,
+   .header-back-link 23px, .auth-switch-btn 23px, .contact-card__value 24px,
+   .footer-brand__logo 40px. */
+.logo,
+.header-back-link,
+.checkout-header__back,
+.auth-switch-btn,
+.footer-brand__logo,
+.contact-card__value,
+.shop-section-card__link,
+.legal-toc__list a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+}
+
+/* THE ONE CONTROL THAT STAYS UNDER THE FLOOR, ON PURPOSE AND ON RECORD.
+   `.product-card__qty-input` measures 34x44 — full height, 10px short on width.
+   It is the number box between the stepper's − and + buttons, and ERR-218
+   measured the arithmetic: at 375px a single row holding three 44px targets
+   plus an Add button does not fit, full stop. Widening the box takes the width
+   from the buttons either side, which are the controls people actually press;
+   ERR-228 then made the box itself focusable so it can be typed into directly.
+   So this is a measured trade, not an oversight, and probe:mobile-ux reports it
+   by name on every run rather than allow-listing it into silence — if the row
+   ever gets the room, the note is where you will see it.
+
+   An icon button with 28px of box in the corner of a card that has room for
+   more. Nothing is laid out around its exact size. */
+.favourite-btn,
+.password-toggle {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+.ink-finder__tab,
+.finder-breadcrumb__crumb,
+a.drilldown-box.drilldown-box--ribbon,
+.contact-card__value,
+.faq-question,
+.faq-item__question {
+    min-height: var(--tap-min, 48px);
+}
+
+/* A text input the shopper has to type into is not a decorative box: 28px is
+   under the floor in the one dimension a finger cares about here. Measured on
+   /contact, where the whole form sat at 28px tall. */
+.form-input,
+.form-select,
+.form-textarea,
+.contact-form-wrapper .form-input {
+    min-height: 44px;
 }
 
 /* Below the tablet breakpoint the bar stacks: text over a full-width button row.

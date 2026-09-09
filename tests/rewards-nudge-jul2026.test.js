@@ -179,7 +179,20 @@ test('interaction + auth contract', () => {
 
 test('css: layering token, reduced motion, restrained animation', () => {
     assert.ok(CSS.includes('.rewards-nudge'), 'styles present in components.css');
-    const block = CSS.slice(CSS.indexOf('REWARDS NUDGE'));
+    /* BOUNDED TO THE NUDGE'S OWN SECTION.
+       This used to be `CSS.slice(CSS.indexOf('REWARDS NUDGE'))` — from the
+       banner to the END of components.css. That is ~600 lines, and everything
+       anyone added after the nudge silently fell under a rewards-nudge test:
+       the CONSENT BANNER section, and then the ERR-240 tap-target rules, whose
+       perfectly ordinary `z-index: 1` on a hit-area pseudo-element failed an
+       assertion titled "no raw z-index numbers" that was written about a
+       popover 400 lines earlier. The file already contains ten raw z-index
+       declarations outside this range, so the rule was never global — the slice
+       was just open-ended. Bound it to the next section banner so the test
+       polices what its name says it polices. */
+    const nudgeStart = CSS.indexOf('REWARDS NUDGE');
+    const nextSection = CSS.indexOf('/* =============================================', nudgeStart + 1);
+    const block = CSS.slice(nudgeStart, nextSection === -1 ? undefined : nextSection);
     assert.ok(block.includes('var(--z-popover)'), 'must use the shared z-scale token');
     assert.ok(!/z-index:\s*\d/.test(block), 'no raw z-index numbers');
     assert.ok(block.includes('prefers-reduced-motion'), 'reduced-motion support');

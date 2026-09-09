@@ -138,9 +138,17 @@ test('search.js — positionDropdown sets --smart-ac-max-height from the live vi
 
 test('search.js — positionDropdown is rebound on resize and scroll', () => {
     const js = fs.readFileSync(JS_PATH, 'utf8');
+    /* `[^;]*` used to sit between the two halves, which quietly required the
+       whole handler to be a single semicolon-free statement. The resize handler
+       grew a second job in ERR-238 — crossing 699px swaps the search dropdown's
+       two-column split for the phone segmented control, and state.results has to
+       follow which section is visible — so it is now a block with statements in
+       it. The contract being pinned is "resize re-runs positionDropdown", not
+       "in one statement", so match the handler body instead of forbidding
+       punctuation inside it. */
     assert.match(
         js,
-        /addEventListener\(\s*['"`]resize['"`][^;]*positionDropdown\(\)/,
+        /addEventListener\(\s*['"`]resize['"`][\s\S]{0,200}?positionDropdown\(\)/,
         'resize must re-run positionDropdown so max-height tracks window resizes',
     );
     assert.match(

@@ -28,7 +28,6 @@ document.addEventListener('DOMContentLoaded', function() {
     initStickyHeader();
     initCurrentYear();
     initDropdowns();
-    initMegaPanels();
     initCartBadgeFromStorage();
     captureGclid();
 });
@@ -408,52 +407,29 @@ function initNavigation() {
 /**
  * MEGA PANELS
  * ===========
+ * There is no initMegaPanels() here any more, and there must not be one again.
+ *
+ * It used to bind a second click handler to .nav-mega-toggle and read
+ * `this.getAttribute('data-target')` to find the panel. `data-target` does not
+ * appear in any HTML in this repo — grep it — so getElementById(null) returned
+ * null and the panel half of the handler did nothing, on every page, since it
+ * was written. Its outside-click escape hatch tested for `.mega-panel`, which
+ * also matches nothing (the panels are #brands-mega and #ribbons-mega).
+ *
+ * It looked harmless because the real owner, js/mega-nav.js, is also a plain
+ * toggle, so the two agreed on the first click and on the second. They stopped
+ * agreeing the moment anyone clicked INSIDE an open panel: mega-nav.js:342
+ * correctly leaves it open (`brandsPanel.contains(e.target)`), while this file's
+ * document handler set `aria-expanded="false"` on a visibly open menu.
+ *
+ * That is not cosmetic. rewards-nudge.js:164 reads exactly that attribute to
+ * decide whether to suppress itself, so the desync let the rewards nudge fire
+ * over an open mega menu — on a phone, one overlay on top of another.
+ *
+ * mega-nav.js owns these panels: open/close, the aria state, ESC, outside
+ * click, and the mobile DOM relocation into .nav-menu so a panel scrolls with
+ * the drawer instead of being clipped by it. ERR-238.
  */
-
-function initMegaPanels() {
-    const megaToggles = document.querySelectorAll('.nav-mega-toggle');
-
-    megaToggles.forEach(function(toggle) {
-        toggle.addEventListener('click', function() {
-            const targetId = this.getAttribute('data-target');
-            const targetPanel = document.getElementById(targetId);
-            const isExpanded = this.getAttribute('aria-expanded') === 'true';
-
-            // Close all other panels first
-            megaToggles.forEach(function(otherToggle) {
-                if (otherToggle !== toggle) {
-                    otherToggle.setAttribute('aria-expanded', 'false');
-                    const otherId = otherToggle.getAttribute('data-target');
-                    const otherPanel = document.getElementById(otherId);
-                    if (otherPanel) {
-                        otherPanel.hidden = true;
-                    }
-                }
-            });
-
-            // Toggle this panel
-            if (targetPanel) {
-                const newState = !isExpanded;
-                this.setAttribute('aria-expanded', newState);
-                targetPanel.hidden = !newState;
-            }
-        });
-    });
-
-    // Close panels when clicking outside
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('.nav-mega-toggle') && !e.target.closest('.mega-panel')) {
-            megaToggles.forEach(function(toggle) {
-                toggle.setAttribute('aria-expanded', 'false');
-                const targetId = toggle.getAttribute('data-target');
-                const targetPanel = document.getElementById(targetId);
-                if (targetPanel) {
-                    targetPanel.hidden = true;
-                }
-            });
-        }
-    });
-}
 
 
 /**

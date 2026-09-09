@@ -688,10 +688,27 @@ img.loaded {
     transition: opacity 0.6s ease-out, transform 0.6s ease-out;
 }
 
+/* THE RESTING STATE IS `none`, NOT `translateY(0)` — ERR-239, and ERR-217 was
+   the same sentence about a different element.
+   `translateY(0)` is not `none`. A non-none transform makes the element a
+   CONTAINING BLOCK for every `position: fixed` descendant, and every section on
+   the site carries .will-animate, so every section became one — permanently,
+   because .in-view is never removed after the reveal.
+   Measured on production at 390x844, /cart scrolled to the bottom: the sticky
+   Checkout bar declares `position: fixed; bottom: 0` and rendered at
+   top: -1161px — 1,161px ABOVE the top of the screen, because it was anchoring
+   to the bottom of section.cart-page instead of the viewport. The one control
+   that exists to keep Checkout permanently in reach was permanently off-screen,
+   on the busiest page of the funnel, with nothing in the source to see: both
+   declarations were correct on their own.
+   The identity matrix and `none` paint identically and interpolate identically
+   (a transition to `none` animates from the identity), so this changes the
+   reveal not at all. `.hero` already had the same escape hatch below, added for
+   the same reason and never generalised. */
 .will-animate.in-view,
 .in-view {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
 }
 
 /* Hero section stays static - no animations */
