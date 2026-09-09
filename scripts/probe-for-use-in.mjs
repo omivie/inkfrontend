@@ -57,6 +57,10 @@ const ANON = process.env.PROBE_ANON_KEY
 // A floor, not an equality — admins add and remove these. A drop below it after
 // mig 132 means the migration lost lists.
 const MEASURED_FLOOR = 80;
+// 2.0s ⇒ 30 req/min against a 40/min limiter. 1.6s (37.5/min) was measured too
+// close: a live run lost two SKUs to 429s and correctly refused to certify the
+// migration on an incomplete comparison. Headroom is cheaper than a re-run.
+const PACE_MS = 2000;
 // A ribbon whose whole page is the FOR USE IN block.
 const RIBBON_PDP = '/product/star-69101-printer-ribbon';
 
@@ -82,7 +86,9 @@ async function forUseIn(sku) {
         } catch (e) {
             return { unreachable: `network: ${e.message}` };
         }
-        if (res.status === 429) { await sleep(4000); continue; }
+        // Progressive backoff. The window is 60s, so a flat retry can spend all
+        // four attempts inside the same window and give up while still limited.
+        if (res.status === 429) { await sleep(5000 + attempt * 12000); continue; }
         if (!res.ok) return { unreachable: `HTTP ${res.status}` };
         const j = await res.json().catch(() => null);
         if (!j || j.ok !== true || !j.data) return { unreachable: 'no data envelope' };
@@ -129,11 +135,11 @@ if (MODE === 'PRE-MIGRATION') {
     const missing = [], unmeasurable = [];
     for (const row of columnRows) {
         const out = await forUseIn(row.sku);
-        if (out.unreachable) { unmeasurable.push(`${row.sku} (${out.unreachable})`); await sleep(1600); continue; }
-        if (out.html == null || String(out.html).trim() === '') { missing.push(row.sku); await sleep(1600); continue; }
+        if (out.unreachable) { unmeasurable.push(`${row.sku} (${out.unreachable})`); await sleep(PACE_MS); continue; }
+        if (out.html == null || String(out.html).trim() === '') { missing.push(row.sku); await sleep(PACE_MS); continue; }
         if (out.html === row.compatible_devices_html) identical++;
         else normalised++;   // sanitiser: <br> → <br />, &nbsp; → space, trailing trim
-        await sleep(1600);   // stay under 40/min
+        await sleep(PACE_MS);   // 30/min, comfortably under the 40/min limit
     }
     console.log(`      ${identical} byte-identical, ${normalised} differing only by sanitiser normalisation`);
     if (unmeasurable.length) {
@@ -163,7 +169,7 @@ if (MODE === 'PRE-MIGRATION') {
         const out = await forUseIn(r.sku);
         if (out.unreachable) unmeasurable++;
         else if (out.html && String(out.html).trim()) withList++;
-        await sleep(1600);
+        await sleep(PACE_MS);
     }
     console.log(`      ${withList} of ${ribbons.length} ribbons carry a list; ${unmeasurable} unmeasurable`);
     if (unmeasurable) bad('some lists could not be measured', `${unmeasurable} reads failed — coverage is a floor, not a fact`);
