@@ -426,3 +426,33 @@ test('§5 the pairing: badge position and footprint publisher live together', ()
         'the publisher is defined but never started — --google-badge-width would '
         + 'stay unset and the buttons would never move');
 });
+
+test('§5 only a CORNER-SIZED badge is reserved for', () => {
+    // Google's load walks 450x150 -> 614x64 -> 86x64, and 614 holds still for
+    // three seconds — through any debounce. Publishing it put a 638px
+    // padding-right on the bar, wrapped its text and grew it 61px -> 78px on
+    // the deployed site. A 614px element is not a corner badge.
+    const footer = codeOnly(FOOTER_SRC);
+    assert.match(footer, /innerWidth/,
+        'the reserve must be refused for a badge too wide to be a corner badge');
+});
+
+test('§5 the bar keeps its height measurement LIVE, not once at show time', () => {
+    // The height is not a constant: the bar wraps, so it is 61px wide-desktop
+    // and 148px on a phone. One reader (body padding-bottom) tolerated a stale
+    // value as a cosmetic gap. The badge-lift rule spends the SAME property to
+    // move a fixed element, where stale means the overlap comes back — measured
+    // at 17px on the deployed site.
+    assert.match(BANNER, /ResizeObserver/,
+        'reserveSpace() runs once; a re-wrap leaves --consent-banner-height stale '
+        + 'and the badge drops back onto the bar');
+    assert.match(BANNER, /unwatchSize/,
+        'the observer must be released when the bar is dismissed');
+});
+
+test('§5 the live height observer is actually started and stopped', () => {
+    assert.match(BANNER, /unwatchSize\s*=\s*watchSize\(/,
+        'watchSize is defined but never started');
+    assert.match(BANNER, /if\s*\(unwatchSize\)/,
+        'the observer outlives the bar it was observing');
+});

@@ -9996,5 +9996,22 @@ opt-in survey `optional: true`, but `footer.js` loads the badge and the survey u
 ungated by any consent decision. Gating a Google merchant widget has review-collection
 consequences and deserves its own decision; it is not folded into a layout fix.
 
+**Two more defects the probe found AFTER the first deploy, and neither was reasoned to.**
+
+- **Google's 614x64 loading state defeats a debounce.** It holds still for a full three seconds,
+  so it sailed through the 400ms settle and was published as the reserve: `padding-right: 638px`
+  wrapped the bar's text and grew it **61px → 78px** on the live site. The publisher now declines
+  any badge wider than a quarter of the viewport — *a 614px element spanning 40% of the screen is
+  not a corner badge, and a bottom bar cannot meaningfully sit clear of one*. Nothing is lost by
+  declining, because the reserve is cosmetic; the lift already guarantees the click.
+- **`--consent-banner-height` was measured ONCE, and the second reader made that a bug.** The bar
+  wraps — 61px on a wide desktop, 148px on a phone — and `reserveSpace()` ran only at show time.
+  While the only consumer was `padding-bottom`, a stale value was a cosmetic gap nobody reports.
+  The lift then began spending the same property to move a fixed element, and stale became
+  overlap: the bar grew to 78px, the lift still moved the badge 61px, and **17px of the collision
+  came straight back**. `consent-banner.js` now keeps the measurement live with a ResizeObserver
+  for as long as the bar exists. *A measurement taken once is a constant with a good alibi.*
+
 **Files.** `inkcartridges/css/components.css` · `inkcartridges/js/footer.js` ·
+`inkcartridges/js/consent-banner.js` ·
 `tests/consent-mode-sep2026.test.js` · `scripts/probe-consent-banner.mjs` · `package.json`.

@@ -200,6 +200,38 @@
         } catch (_) { /* non-fatal: the bar still works, it just may overlap */ }
     }
 
+    /* ERR-233: measuring ONCE was not enough, and the second reader made that
+       visible. This bar's height is not a constant: its text wraps, so it is
+       61px on a wide desktop and 148px on a phone, and it re-wraps whenever the
+       viewport changes or anything alters its padding.
+
+       Until now the only consumer was body padding-bottom, where a stale value
+       is a cosmetic gap nobody reports. Then the badge-lift rule in
+       components.css started spending the same property to move a fixed element
+       out of the bar's way, and a stale value became an overlap: measured on the
+       deployed site, the bar grew 61px -> 78px, the lift still moved the badge
+       61px, and 17px of the collision came straight back.
+
+       So keep the measurement live for as long as the bar exists. Observing the
+       element is exact and cheap; a resize listener alone would miss a re-wrap
+       caused by anything other than the window changing size. */
+    function watchSize(el) {
+        try {
+            if (typeof ResizeObserver !== 'function') {
+                var onResize = function () { reserveSpace(el); };
+                window.addEventListener('resize', onResize);
+                return function () { window.removeEventListener('resize', onResize); };
+            }
+            var ro = new ResizeObserver(function () {
+                if (document.getElementById(EL_ID)) reserveSpace(el);
+            });
+            ro.observe(el);
+            return function () { ro.disconnect(); };
+        } catch (_) {
+            return function () {};
+        }
+    }
+
     function releaseSpace() {
         try {
             document.body.classList.remove('has-consent-banner');
@@ -207,9 +239,12 @@
         } catch (_) { /* non-fatal */ }
     }
 
+    var unwatchSize = null;
+
     function decide(value) {
         writeDecision(value);
         applyConsent(value);
+        if (unwatchSize) { unwatchSize(); unwatchSize = null; }
         var el = document.getElementById(EL_ID);
         if (el && el.parentNode) el.parentNode.removeChild(el);
         releaseSpace();
@@ -231,6 +266,7 @@
         var el = build();
         document.body.appendChild(el);
         reserveSpace(el);
+        unwatchSize = watchSize(el);
 
         /* Two-step reveal so the CSS transition runs (rewards-nudge.js pattern). */
         void el.offsetWidth;

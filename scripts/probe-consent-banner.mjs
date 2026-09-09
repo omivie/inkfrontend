@@ -191,8 +191,13 @@ async function load(ctx, { expectBadge = true } = {}) {
             window.__badgeSettle = (window.__badgeSettle && window.__badgeSettle.key === key)
                 ? { key, n: window.__badgeSettle.n + 1 }
                 : { key, n: 1 };
-            return window.__badgeSettle.n >= 8;
-        }, null, { timeout: 30000, polling: 250 })
+            /* 16 polls = 4s. Deliberately longer than the 3s that 614x64 holds
+               still for: settle on that and the probe measures a loading state,
+               which is how it first reported a 638px padding as the shipped
+               design. The final 86x64 never changes again, so a longer window
+               only makes this more certain, never flakier. */
+            return window.__badgeSettle.n >= 16;
+        }, null, { timeout: 45000, polling: 250 })
             .catch(() => { /* the caller reports what it actually found */ });
     }
     return page;

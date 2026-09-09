@@ -621,8 +621,24 @@
              yet? Before it is, the answer we publish is 0 — which is also the
              right answer on a phone, where Google renders it 0x0 for good. */
           var fixed = window.getComputedStyle(el).position === 'fixed';
-          var w = (fixed && r.height > 0) ? Math.ceil(r.width) : 0;
-          var h = (fixed && r.height > 0) ? Math.ceil(r.height) : 0;
+          var rendered = fixed && r.height > 0;
+
+          /* AND ONLY RESERVE FOR A CORNER-SIZED BADGE.
+             Google's load sequence passes through 450x150 and 614x64 on the way
+             to 86x64, and 614 holds still for a full three seconds — long enough
+             to sail through the debounce below. Measured on the deployed site,
+             publishing it put a 638px padding-right on the consent bar, wrapped
+             its text and grew the bar from 61px to 78px tall. A 614px-wide
+             element spanning 40% of the viewport is not a corner badge, and
+             there is no useful sense in which a bottom bar can "sit clear" of
+             one.
+             Nothing is lost by declining: the reserve is cosmetic. The badge is
+             already lifted off the bar by the rule in components.css, which
+             needs no measurement of Google's at all, so during that window the
+             buttons are clickable and simply keep their normal position. */
+          var isCornerSized = r.width <= (window.innerWidth || 0) / 4;
+          var w = (rendered && isCornerSized) ? Math.ceil(r.width) : 0;
+          var h = (rendered && isCornerSized) ? Math.ceil(r.height) : 0;
 
           document.documentElement.style.setProperty('--google-badge-width', w + 'px');
           document.documentElement.style.setProperty('--google-badge-height', h + 'px');
