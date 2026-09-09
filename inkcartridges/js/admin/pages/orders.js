@@ -236,6 +236,18 @@ function profitCellHtml(row, info) {
     ? 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. Invoiced sale paid by bank transfer, so no card fee.'
     : 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount.')
     + (info.absorbedApplies ? ' Absorbed courier cost (free shipping) is subtracted.' : '')
+    // Supplier freight (ERR-241), in its two states. Priced: say so and say it
+    // is an estimate when it is one. Unpriced: this number is a CEILING, and a
+    // ceiling that doesn't announce itself is just a wrong measurement.
+    + (info.supplierFreightApplies
+      ? ` Supplier freight billed by ${info.supplierFreightSuppliers.join(', ') || 'a supplier'}`
+        + `${info.supplierFreightEstimated ? ' (estimated at this zone\u2019s cheapest rate)' : ''} is subtracted.`
+      : '')
+    + (info.supplierFreightUnknown
+      ? ` This order may owe supplier freight we can't price —`
+        + ` ${info.supplierFreightUnknownReason || 'the rule could not be applied'}.`
+        + ` The figure shown is AT MOST this; the real one is the same or lower.`
+      : '')
     // Revenue here is REALISED revenue — the line sum less the order discount
     // (ERR-168). Naming the amount stops this figure looking wrong beside a Total
     // the operator can see is lower than the line prices.
@@ -245,7 +257,10 @@ function profitCellHtml(row, info) {
       : '')
     + ' Open the order for the full breakdown.';
   const lossCls = info.netProfit < 0 ? ' order-profit__amt--loss' : '';
-  return `${open('', tip)}`
+  // A visible mark, not only a tooltip: nobody hovers a column they believe.
+  const ceilingMark = info.supplierFreightUnknown
+    ? `<span class="admin-text-muted" aria-hidden="true">\u2264</span>` : '';
+  return `${open('', tip)}${ceilingMark}`
     + `<span class="order-profit__amt${lossCls}">${formatPrice(info.netProfit)}</span>`
     + marginBadge(info.netMarginPct)
     + `</span>`;
@@ -2941,12 +2956,61 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
         `<span title="${esc(courierTip)}">Courier absorbed ${muted('(free shipping) ⓘ')}</span>`,
         neg(b.absorbedShippingInclGst));
     }
-    const irdCreditSources = b.absorbedShippingApplies ? 'supplier, Stripe and courier' : 'supplier and Stripe';
+    // Supplier freight (ERR-241): what a SUPPLIER billed us for delivery because
+    // our purchase order to them fell under their free-freight threshold. A
+    // different payment from the courier row above — that one is what WE paid to
+    // deliver, this one is what the supplier charged to send it to us — so it is
+    // its own row rather than folded into either. Only when it applies.
+    if (b.supplierFreightApplies) {
+      const who = b.supplierFreightSuppliers.length
+        ? b.supplierFreightSuppliers.join(', ')
+        : 'a supplier';
+      const est = b.supplierFreightEstimated;
+      // The word "estimated" is not decoration. The parcel weight and the
+      // urban/rural flag are not on the order payload, so this is the LIGHTEST
+      // band of the zone ladder — a floor, and a heavy parcel really does cost
+      // more. Reading it as a measurement is the mistake the label prevents.
+      const freightTip = `${who} billed us freight because the goods we bought came to under $100 ex-GST. `
+        + (est
+          ? `ESTIMATED at the cheapest rate for this delivery zone — the parcel weight and urban/rural `
+            + `flag aren't on the order, so a heavier parcel costs more than this. `
+          : '')
+        + `Its GST (${formatPrice(b.supplierFreightGst)}) is reclaimed at the IRD line below.`;
+      profitBreakdownInner += pbRow(
+        `<span title="${esc(freightTip)}">Supplier freight ${muted(`(${who}${est ? ', estimated' : ''}) ⓘ`)}</span>`,
+        neg(b.supplierFreightInclGst));
+    }
+    // Freight is owed and we could not price it. This does NOT blank take-home
+    // (ERR-158: present→absent is not an upgrade) — an unpriced freight charge
+    // is bounded by the courier ladder and can only push profit DOWN, so the
+    // figure below is a CEILING. Saying so is the whole job of this row: the
+    // number stays, and it stops reading as a measurement.
+    if (profitInfo.supplierFreightUnknown) {
+      const why = profitInfo.supplierFreightUnknownReason || 'the freight rule could not be applied';
+      const freightUnknownTip = `This order may owe a supplier freight charge and we can't price it — ${why}. `
+        + `Take-home below is therefore a CEILING, not a measurement: the real figure is the same or lower, `
+        + `by at most one courier rate ($7–$30 incl-GST). Record the supplier on every line to fix it.`;
+      profitBreakdownInner += pbRow(
+        `<span title="${esc(freightUnknownTip)}">Supplier freight ${muted('(owed, not priced) ⓘ')}</span>`,
+        `<span class="admin-text-muted">${MISSING}</span>`);
+    }
+    const irdCreditSources = [
+      'supplier',
+      'Stripe',
+      b.absorbedShippingApplies ? 'courier' : null,
+      b.supplierFreightApplies ? 'supplier freight' : null,
+    ].filter(Boolean);
+    const irdCreditList = irdCreditSources.length > 1
+      ? `${irdCreditSources.slice(0, -1).join(', ')} and ${irdCreditSources[irdCreditSources.length - 1]}`
+      : irdCreditSources[0];
     profitBreakdownInner += pbRow(
-      `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your ${irdCreditSources} — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
+      `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your ${irdCreditList} — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
       neg(b.gstRemittedToIrd));
     profitBreakdownInner += `<div style="border-top:1px solid var(--border,#e5e7eb);margin:8px 0 6px"></div>`;
-    profitBreakdownInner += pbRow('<strong>Take-home profit</strong>',
+    profitBreakdownInner += pbRow(
+      profitInfo.supplierFreightUnknown
+        ? `<strong>Take-home profit</strong> ${muted('(at most)')}`
+        : '<strong>Take-home profit</strong>',
       `<strong>${formatPrice(b.netProfit)}</strong>`,
       'color:var(--success-text,#15803d)');
     profitBreakdownInner += pbRow(`Net margin ${muted('(take-home ÷ ex-GST revenue)')}`, `${b.netMarginPct.toFixed(1)}%`);

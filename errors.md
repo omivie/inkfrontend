@@ -10153,3 +10153,134 @@ the ribbon brand pages and the PDP enrich outright — the ERR-193 shape.
 `tests/admin-only-test-product-sep2026.test.js` · `tests/catalog-edge-cache-jul2026.test.js` ·
 `tests/api-subdomain-cutover-may2026.test.js` · `scripts/probe-admin-only-product.mjs` ·
 `admin-only-test-product-backend-brief-sep2026.md` · `package.json`.
+
+---
+
+## ERR-241 — Free shipping for the customer is not free freight for us: the supplier's $100 threshold is on a different number, and nothing had ever charged it — **RESOLVED** (2026-09-09)
+
+**Symptom.** The owner opened order `2026090902` — a $134.49 sale, free shipping, one Augmento
+4-pack — and asked why the profit breakdown showed no shipping cost anywhere when we had
+plainly paid to get the goods.
+
+**The two thresholds are not the same threshold.** The customer's free-shipping threshold is
+**$100 on the SELL price**. The supplier's free-freight threshold is **$100 on the GOODS COST,
+ex-GST**. Two independent tests on two different numbers, and an order sits on both sides of
+them routinely. `2026090902` sold for $134.49 (customer ships free) on goods costing $76.00
+ex-GST (Augmento still bills us the delivery). The modal reported **$37.09 take-home at 31.7%
+margin**; with the freight in it is **$31.00 at 26.5%**. Not an edge case: **49 of 63 supplier
+POs measured (78%) are under $100 ex-GST**.
+
+**Why it was invisible.** The machinery looked present. `order.shipping_absorbed` exists, and
+the modal has rendered a "Courier absorbed (free shipping)" row since ERR-149. It fires — on
+23 of 60 orders. The split is what nobody had looked at:
+
+| free-shipping order contains | `shipping_absorbed` |
+|---|---|
+| a **DSNZ** line (17 orders) | **always** `applies:true` — $7 / $12 / $22 by zone |
+| **Augmento** only (6 orders) | **always** `{applies:false}`, with no amount at all |
+
+***A cost that is charged on most of your orders does not look like a cost that is missing from
+some of them.*** Every DSNZ order in the sample was right, so the row looked healthy from every
+angle a source assertion can reach; the six orders it never appeared on had nothing on screen
+to be suspicious of. It took measuring the correlation to see the shape of the hole.
+
+**The rule (owner-confirmed).** DSNZ bills freight on **every** purchase order; Augmento is free
+at or above **$100 ex-GST** and bills below it. It is applied **per supplier**, because it is a
+per-supplier purchase order — an order total cannot express it. Measured over 86 live lines,
+**zero name more than one supplier**, so attribution is unambiguous; a line that ever does is
+refused rather than split down the middle, because an even split would put a fabricated number
+under a freight decision.
+
+**🚨 DO NOT CHARGE WHAT THE BACKEND ALREADY CHARGED.** `shipping_absorbed` is already deducted
+by the courier row. `supplierFreightForOrder` therefore drops one consignment when it applies,
+preferring the always-pays supplier — on the evidence that 23 of 23 populated rows contain a
+DSNZ line. On the one two-supplier order (`2026090102`, DSNZ $70.51 + Augmento $27.07) that
+yields the backend's $7 for DSNZ plus $7 for Augmento, which is two parcels and two bills. The
+day `shipping_absorbed` starts appearing on Augmento-only orders we would double-charge them,
+so `probe:supplier-freight` §2 re-measures the split every run: **the assumption cannot outlive
+its evidence.**
+
+**🚨 UNPRICED FREIGHT IS A CEILING, NOT A BLANK — and the first attempt got this wrong.** The
+plan said an order whose freight cannot be priced should refuse its take-home, the way a
+missing `supplier_cost_snapshot` does. Implementing it turned 25 tests red, and reading them
+showed why the analogy fails:
+
+> a missing supplier **COST** is **UNBOUNDED** and is the dominant term — no honest number can
+> be printed, so refuse. An unpriced **FREIGHT** charge is **BOUNDED** (the courier ladder tops
+> out at $30) and **DIRECTIONAL** (it can only push profit down), so the figure is a stateable
+> **ceiling**. Deleting it is present→absent — throwing away everything we do know to avoid
+> saying what we don't.
+
+So take-home stands, the modal prints a `Supplier freight (owed, not priced) —` row and labels
+the total **"(at most)"**, and the Orders list cell carries a visible `≤`. Three live orders
+land here, each with a line naming no supplier. **A test suite going red is a question, not a
+verdict** — the tests were right and the plan was wrong.
+
+**🚨 THE EXACT RATE IS NOT DERIVABLE ON THE FRONTEND.** Weight and urban/rural decide it, and
+neither is on the payload: admin `products` has **no weight column**, order items have none, and
+`delivery_type` appears only *inside* `shipping_absorbed` — i.e. only once the backend has
+already decided the cost. So the shipped fallback is the **lightest band of the zone ladder**,
+and it is labelled `estimated` on every surface that prints it. It is a floor and it understates:
+a measured south-island 0.5 kg parcel was charged **$12** against this floor's **$7**.
+`supplier-freight-backend-brief-sep2026.md` asks for the rate unconditionally; when it lands,
+the probe's `(N estimated)` count going to zero is the signal.
+
+**🚨 `ZONE_RATES` IS A CONSTANT AND MUST STAY ONE.** The obvious move — read
+`Config.settings.shipping.zones` — is an ERR-167 off switch: **`Config.settings.shipping` does
+not exist in the admin.** Only `cart.js` ever calls `Config.loadSettings()`, and config.js's own
+defaults have no `shipping` key, so the fallback would be the only branch that ever ran. The
+ladder is transcribed instead, and probe §1 re-fetches `/api/settings` and fails on drift.
+
+**A probe that found its own bug first.** §1 reported all three zones as DRIFTED on its first
+run. They had not: the live band says `max_weight_kg: null` and the shipped one says
+`maxKg: null`, and `live.max_weight_kg ?? live.maxKg` falls *through a real null* to an absent
+key — printing `undefined` against `null`. **Two spellings of "no upper bound", reported as a
+changed price list.** `??` cannot pick between two key spellings when the value is legitimately
+null; pick by which key EXISTS, then canonicalise.
+
+**Both negative controls run.** Setting Augmento's threshold to 0 (rule unreachable) turns §4
+red with *"no order in the sample owes supplier freight"*; a bogus fee turns §1 red. A green
+sweep that cannot go red is decoration.
+
+**GST is not a loss.** The owner asked whether remitting more GST than we reclaim means we lose
+money to it. No — profit is computed entirely ex-GST on both sides (`profitability.js:4-14`),
+and the $5.56 remitted on `2026090902` is the customer's money in transit, larger than the input
+credits *because we sold at a margin*. The only real cost is the timing gap between paying and
+reclaiming, which is working capital. Recording it as a loss would have been the actual error.
+No change made.
+
+**Fix.** New `utils/supplier-freight.js` (rules + ladder + resolver, no maths).
+`profitability.js` gains `supplierFreightParts()` — a deliberate MIRROR of
+`absorbedShippingParts`, not a generalisation of it, since the two answer to different owners —
+and a fourth outflow in both `computeOrderProfit` and `computeProfitBreakdown`, its GST netting
+at the IRD line. `sourcing.js` gains `supplierSlug()` and a `costBySupplier` **sibling field**
+(never a replacement — ERR-219). `order-profit.js` threads `supplierFreight` onto **both**
+`feeOpts` branches. `computeLineProfits` needed no change: it derives the order-level fee as
+`revenue − cost − profit`, so the new deduction allocates itself and `Σ lineProfits === netProfit`
+still holds. The Orders-list **Supplier cost column stays goods-only** and its ERR-219 positive
+control passes unmodified — if that test had needed editing, freight had leaked into the goods
+cost.
+
+**Scope held.** Dashboard / Financial Health P&L read `gross_profit` / `net_profit` from backend
+RPCs and do **not** include freight. `trend-math.js` cannot fix that locally: it builds COGS from
+**list** rows, which carry no `suppliers[]`, no `supplier_cost_snapshot` and no
+`shipping_absorbed` (ERR-039/203). The divergence is stated in the brief rather than papered over
+with a partial.
+
+**Verify.** `npm run probe:supplier-freight` (READ-ONLY, mode printed, 4 sections, both negative
+controls exercised) and `node --test tests/supplier-freight-sep2026.test.js` (38 tests).
+Baseline 2026-09-09 over 60 orders: `freight applied: 6 (6 estimated) | no freight owed: 51 |
+owed-but-unpriced: 3`. Acceptance: `2026090902` $37.09 → **$31.00**, 31.7% → **26.5%**, GST to
+IRD $5.56 → $4.65; `2026090701` (Augmento $110 ex-GST) **unchanged** — the over-$100 control;
+`2026090901` (DSNZ) **byte-identical** — proof the 17 DSNZ orders did not move.
+
+**Files.** `inkcartridges/js/admin/utils/supplier-freight.js` (new) ·
+`inkcartridges/js/admin/utils/profitability.js` · `inkcartridges/js/admin/utils/order-profit.js` ·
+`inkcartridges/js/admin/utils/sourcing.js` · `inkcartridges/js/admin/pages/orders.js` ·
+`tests/supplier-freight-sep2026.test.js` (new) · `tests/admin-invoice-orders.test.js` ·
+`tests/order-profit-absorbed-shipping-jul2026.test.js` ·
+`tests/admin-order-profit-column-jul2026.test.js` ·
+`tests/admin-order-profit-discount-aug2026.test.js` · `scripts/probe-supplier-freight.mjs` (new) ·
+`supplier-freight-backend-brief-sep2026.md` (new) · `package.json`.
+
+---

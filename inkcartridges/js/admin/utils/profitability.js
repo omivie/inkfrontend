@@ -22,6 +22,11 @@
  *     exactly like the supplier/Stripe lines — deducted ex-GST from profit,
  *     its GST reclaimed at the IRD line. Absent / { applies:false } ⇒ $0, so
  *     aggregates and card/invoice paths that don't pass it are unchanged.
+ *   - Supplier freight (ERR-241): the freight a SUPPLIER bills us when our
+ *     purchase order to them is under their free-freight threshold. A separate
+ *     payment from the absorbed courier above and from the goods cost itself,
+ *     so it gets its own deduction. Pass opts.supplierFreight, built by
+ *     utils/supplier-freight.js. Same GST convention, same $0-by-absence rule.
  *
  *   priceExGst    = retail_price / (1 + gstRate)        // retail_price stored incl-GST
  *   stripeFee     = retail_price * STRIPE_RATE          // per-unit; $0.30 fixed is per-order
@@ -68,6 +73,35 @@ function absorbedShippingParts(opts, gstRate = GST_RATE) {
   const inclGst = Number(a.amount_incl_gst);
   if (!Number.isFinite(inclGst) || inclGst <= 0) return { exGst: 0, gst: 0, inclGst: 0 };
   let gst = Number(a.gst_component);
+  if (!Number.isFinite(gst) || gst < 0) gst = inclGst * (gstRate / (1 + gstRate)); // GST inside a GST-incl amount
+  const exGst = inclGst - gst;
+  return { exGst, gst, inclGst };
+}
+
+/**
+ * Parse opts.supplierFreight (built by utils/supplier-freight.js) into the same
+ * three GST parts as the absorbed courier above.
+ *
+ * A DELIBERATE MIRROR of absorbedShippingParts(), not a generalisation of it.
+ * The two costs are shaped alike but answer to different owners — one is the
+ * backend's measured courier charge, the other our own rules engine's reading
+ * of a supplier's terms — and folding them into one parser is how a change to
+ * either one silently moves the other. Anchor on amount_incl_gst; derive the
+ * GST inside it when the caller does not state it (× rate/(1+rate) = × 3/23 at
+ * 15%); derive exGst by subtraction so the waterfall foots exactly.
+ *
+ * Fail-soft & LOUD-by-absence: applies!==true, or a non-finite / non-positive
+ * amount, yields all zeroes. A caller that passes nothing — every aggregate,
+ * every invoice path — is unchanged, and an order that owes freight we could
+ * not price is refused UPSTREAM (order-profit.js) rather than quietly costed
+ * at $0 here.
+ */
+function supplierFreightParts(opts, gstRate = GST_RATE) {
+  const f = (opts && typeof opts === 'object') ? opts.supplierFreight : null;
+  if (!f || typeof f !== 'object' || f.applies !== true) return { exGst: 0, gst: 0, inclGst: 0 };
+  const inclGst = Number(f.amount_incl_gst);
+  if (!Number.isFinite(inclGst) || inclGst <= 0) return { exGst: 0, gst: 0, inclGst: 0 };
+  let gst = Number(f.gst_component);
   if (!Number.isFinite(gst) || gst < 0) gst = inclGst * (gstRate / (1 + gstRate)); // GST inside a GST-incl amount
   const exGst = inclGst - gst;
   return { exGst, gst, inclGst };
@@ -136,6 +170,9 @@ export function computeProfitability(row, gstRate = GST_RATE) {
  *   opts.absorbedShipping — backend order.shipping_absorbed. When it applies,
  *                         the absorbed courier cost (ex-GST) is subtracted too.
  *                         Absent ⇒ $0, so aggregate/invoice callers are unchanged.
+ *   opts.supplierFreight — supplier-billed freight on a small purchase order
+ *                         (ERR-241), from utils/supplier-freight.js. Subtracted
+ *                         ex-GST. Absent ⇒ $0, same as above.
  *
  * Stripe fee is feeBase × stripeRate + stripeFixed, deducted ex-GST.
  */
@@ -154,7 +191,8 @@ export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
   const stripeFee = feeBase * stripeRate + stripeFixed;
   const absorbedExGst = absorbedShippingParts(opts, gstRate).exGst; // $0 unless free-ship courier absorbed
-  return rev - costExGst - stripeFee - absorbedExGst;
+  const freightExGst = supplierFreightParts(opts, gstRate).exGst;   // $0 unless a supplier billed us freight
+  return rev - costExGst - stripeFee - absorbedExGst - freightExGst;
 }
 
 /**
@@ -212,12 +250,14 @@ export function computeLineProfits(lines, opts = {}) {
  *     − supplierCostInclGst      (cost ex-GST + the GST you pay the supplier)
  *     − stripeFeeInclGst         (Stripe fee + the GST Stripe charges on it)
  *     − absorbedShippingInclGst  (free-ship courier we absorbed, if any; incl-GST)
+ *     − supplierFreightInclGst   (freight a supplier billed us, if any; incl-GST)
  *     − gstRemittedToIrd         (GST collected − GST already paid out as credits)
  *   = netProfit                  (identical to computeOrderProfit — GST nets to 0)
  *
- * The absorbed-courier line is handled exactly like the supplier/Stripe lines:
- * shown incl-GST, its GST reclaimed inside gstRemittedToIrd. Present only when
- * opts.absorbedShipping applies; otherwise all absorbedShipping* fields are 0.
+ * The absorbed-courier and supplier-freight lines are handled exactly like the
+ * supplier/Stripe lines: shown incl-GST, their GST reclaimed inside
+ * gstRemittedToIrd. Each is present only when its own opts object applies;
+ * otherwise every field of that group is 0.
  *
  * gstRemittedToIrd is both the residual that makes the waterfall foot AND the
  * true GST return figure (output tax − input tax credits) — the two are
@@ -258,12 +298,24 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   const absorbedShippingExGst = absorbed.exGst;
   const a = (opts && typeof opts === 'object') ? opts.absorbedShipping : null;
   const absorbedShippingApplies = absorbedShippingInclGst > 0;
+  // Supplier freight — what a supplier billed US for delivery because our
+  // purchase order to them was under their free-freight threshold (ERR-241).
+  // A distinct payment from both the goods cost and the absorbed courier, so it
+  // is its own outflow rather than folded into supplierCostInclGst: that figure
+  // is what the goods cost, and the Orders list column pins itself to it.
+  const freight = supplierFreightParts(opts, gstRate);
+  const supplierFreightInclGst = freight.inclGst;
+  const supplierFreightGst = freight.gst;
+  const supplierFreightExGst = freight.exGst;
+  const f = (opts && typeof opts === 'object') ? opts.supplierFreight : null;
+  const supplierFreightApplies = supplierFreightInclGst > 0;
   // Take-home is GST-neutral (the GST you pay is reclaimed) — same as computeOrderProfit.
-  const netProfit = rev - costExGst - stripeFeeExGst - absorbedShippingExGst;
+  const netProfit = rev - costExGst - stripeFeeExGst - absorbedShippingExGst - supplierFreightExGst;
   // GST collected from the customer, and what's left to remit to IRD after
   // crediting the GST already paid to supplier + Stripe + absorbed courier.
   const gstCollected = customerPaid - rev;
-  const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - absorbedShippingGst;
+  const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - absorbedShippingGst
+    - supplierFreightGst;
   const netMarginPct = (netProfit / rev) * 100;
   return {
     customerPaidInclGst: customerPaid,
@@ -283,6 +335,16 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
     absorbedShippingExGst,
     absorbedShippingZone: absorbedShippingApplies && a ? (a.zone ?? null) : null,
     absorbedShippingDeliveryType: absorbedShippingApplies && a ? (a.delivery_type ?? null) : null,
+    supplierFreightApplies,
+    supplierFreightInclGst,
+    supplierFreightGst,
+    supplierFreightExGst,
+    // An ESTIMATE must never be readable as a measurement. True while the
+    // amount comes from the lightest band of the zone ladder rather than from
+    // the backend's own weight-aware figure; the modal prints the word.
+    supplierFreightEstimated: supplierFreightApplies && f ? f.estimated === true : false,
+    supplierFreightSuppliers: supplierFreightApplies && f && Array.isArray(f.suppliers)
+      ? f.suppliers.slice() : [],
     gstRemittedToIrd,
     netProfit,
     netMarginPct,

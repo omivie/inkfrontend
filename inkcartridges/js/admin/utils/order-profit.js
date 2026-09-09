@@ -30,6 +30,27 @@
  *
  * In every one of those states `netProfit` is null, never 0.
  *
+ * ── UNPRICED SUPPLIER FREIGHT IS A QUALIFIER, NOT A SIXTH REFUSAL (ERR-241) ─
+ *
+ * An order can owe a supplier freight charge we cannot price — a line naming no
+ * supplier, a supplier with no recorded freight terms, a delivery zone with no
+ * courier rate. That does NOT blank the take-home, and the distinction from a
+ * missing `supplier_cost_snapshot` is the reason why:
+ *
+ *   a missing supplier COST is UNBOUNDED and is the dominant term. Any figure
+ *   computed without it is wrong by an unknown amount in an unknown direction,
+ *   so there is no honest number to print. Refuse.
+ *
+ *   an unpriced FREIGHT charge is BOUNDED and DIRECTIONAL — the courier ladder
+ *   tops out at $30 incl-GST, and it can only ever make take-home LOWER. So the
+ *   figure is a stateable CEILING, and deleting it would be present→absent
+ *   (ERR-158) — throwing away everything we do know to avoid saying what we
+ *   don't.
+ *
+ * So `netProfit` stands and `supplierFreightUnknown` travels beside it with the
+ * reason. Every surface that prints the number MUST print the qualifier: a
+ * silent ceiling presented as a measurement is the bug this comment prevents.
+ *
  * ── REVENUE IS NET OF THE ORDER DISCOUNT (ERR-168, Aug 2026) ────────────────
  *
  * Line items carry the price BEFORE any order-level discount. Since public
@@ -47,6 +68,8 @@
  */
 
 import { computeLineProfits, computeProfitBreakdown, orderDiscountParts, NO_PAYMENT_FEES } from './profitability.js';
+import { orderSupplierCostFromDetail } from './sourcing.js';
+import { supplierFreightForOrder } from './supplier-freight.js';
 
 export const PROFIT_STATE = {
   OK: 'ok',
@@ -149,6 +172,14 @@ function result(state, extra = {}) {
     totalCostExGst: null,
     isInvoice: false,
     absorbedApplies: false,
+    // Supplier freight (ERR-241). Consumers read the FLAGS, never the amount —
+    // the money itself lives on `breakdown`, and an order can be
+    // supplierFreightUnknown while having no breakdown at all.
+    supplierFreightApplies: false,
+    supplierFreightEstimated: false,
+    supplierFreightUnknown: false,
+    supplierFreightUnknownReason: null,
+    supplierFreightSuppliers: [],
     // Order-level discount (ERR-168). `grossRevenueExGst` is the raw line sum —
     // kept so a surface can show WHY revenue is lower than the prices above it
     // without re-summing the items itself. `discountApplies` is the gate every
@@ -293,11 +324,25 @@ export function orderProfitFromDetail(order, opts = {}) {
     && absorbedShipping.applies === true
     && Number(absorbedShipping.amount_incl_gst) > 0;
 
+  // ── Supplier freight (ERR-241) ─────────────────────────────────────────────
+  //
+  // The customer's free-shipping threshold is on the SELL price; the supplier's
+  // free-freight threshold is on the GOODS COST. Two tests, two numbers, and an
+  // order sits on both sides of them routinely — which is why this is decided
+  // from a per-supplier cost roll-up rather than from the order total.
+  //
+  // `orderSupplierCostFromDetail` is called rather than re-walking the items
+  // above: per-supplier attribution written twice is per-supplier attribution
+  // that drifts. It is a cost-side reader and cannot inherit this function's
+  // revenue-side refusals (ERR-182), which is exactly what is wanted here.
+  const sourcing = orderSupplierCostFromDetail(order);
+  const supplierFreight = supplierFreightForOrder(order, sourcing);
+
   // An invoiced sale is settled by bank transfer — there is no card processor, so
   // NO fee. Charging it Stripe's 2.65% + $0.30 invents a payment it never made.
   const feeOpts = isInvoice
-    ? { customerPaidInclGst, absorbedShipping, ...NO_PAYMENT_FEES }
-    : { customerPaidInclGst, absorbedShipping };
+    ? { customerPaidInclGst, absorbedShipping, supplierFreight, ...NO_PAYMENT_FEES }
+    : { customerPaidInclGst, absorbedShipping, supplierFreight };
 
   // Per-line profits stay valid even when a sibling line has no cost: each line is
   // (own revenue − own cost − its revenue share of the order-level fee), and that
@@ -313,6 +358,11 @@ export function orderProfitFromDetail(order, opts = {}) {
     totalCostExGst: missingCostCount ? null : totalCostExGst,
     isInvoice,
     absorbedApplies,
+    supplierFreightApplies: supplierFreight.applies === true,
+    supplierFreightEstimated: supplierFreight.applies === true && supplierFreight.estimated === true,
+    supplierFreightUnknown: supplierFreight.unknown === true,
+    supplierFreightUnknownReason: supplierFreight.unknown === true ? supplierFreight.unknownReason : null,
+    supplierFreightSuppliers: Array.isArray(supplierFreight.suppliers) ? supplierFreight.suppliers.slice() : [],
     grossRevenueExGst,
     orderDiscountInclGst: discount.inclGst,
     orderDiscountExGst: discount.exGst,

@@ -113,6 +113,30 @@ export const SUPPLIER_LABELS = {
 const NO_SUPPLIER = new Set(['unknown', 'none', 'n/a', 'na']);
 
 /**
+ * The inverse of supplierLabel(): a supplier as an ORDER LINE spells it
+ * ("DSNZ", "Augmento") reduced to the slug `products.supplier`,
+ * SUPPLIER_LABELS and SUPPLIER_FILTER_VALUES are all keyed by.
+ *
+ * Order lines carry NAMES and the products table carries SLUGS, so anything
+ * that has to reason about "which supplier is this" across both — the freight
+ * rules in utils/supplier-freight.js are the first — needs one function to
+ * cross that gap rather than a `.toLowerCase()` at each call site. Measured
+ * 2026-09-09: exactly two names appear across 86 live order lines, "DSNZ" and
+ * "Augmento", and both round-trip through here.
+ *
+ * `unknown`/`none`/`n/a` are the ABSENCE of a supplier, not a supplier, so they
+ * return null — the same rule supplierLabel() applies, from the same set.
+ *
+ * @returns {string|null} lowercase slug, or null when no supplier is recorded.
+ */
+export function supplierSlug(nameOrSlug) {
+  if (nameOrSlug == null) return null;
+  const raw = String(nameOrSlug).trim().toLowerCase();
+  if (!raw || NO_SUPPLIER.has(raw)) return null;
+  return raw;
+}
+
+/**
  * @returns {string|null} display label, or null when no supplier is recorded.
  */
 export function supplierLabel(slug) {
@@ -344,18 +368,50 @@ export function orderSuppliersFromDetail(order) {
  * 0 is a real recorded cost (a giveaway, a sample), and `?? 0` here is the
  * whole ERR-063/068 bug class.
  *
- * @returns {{costExGst: number|null, costInclGst: number|null, missingCostCount: number, itemCount: number}}
+ * ── `costBySupplier` is a SIBLING FIELD, never a replacement (ERR-219) ─────
+ * The supplier freight rules (utils/supplier-freight.js) ask a different
+ * question of the same lines: not "what did this order cost" but "what did we
+ * buy from EACH supplier", because the under-$100 free-freight threshold is a
+ * per-supplier purchase order, not an order total. Splitting that sum out here
+ * keeps ONE walk over the items; deriving it in a second function is how the
+ * two answers drift.
+ *
+ * `mixedSupplierLineCount` exists because a line CAN name more than one
+ * supplier (an in-house pack assembled from constituents) and there is no
+ * honest way to split one `supplier_cost_snapshot` between them. Measured
+ * 2026-09-09 over 86 live order lines: ZERO such lines. So this is not a case
+ * being handled — it is a case being REFUSED, loudly, if it ever appears.
+ * Inventing an even split would put a fabricated number under a freight
+ * decision.
+ *
+ * @returns {{costExGst: number|null, costInclGst: number|null, missingCostCount: number,
+ *            itemCount: number, costBySupplier: Object<string, number>,
+ *            missingSupplierCount: number, mixedSupplierLineCount: number}}
  */
 export function orderSupplierCostFromDetail(order) {
   const items = orderItems(order);
   let costExGst = 0;
   let missingCostCount = 0;
+  const costBySupplier = Object.create(null);
+  let missingSupplierCount = 0;
+  let mixedSupplierLineCount = 0;
 
   for (const item of items) {
     const snapshot = item ? item.supplier_cost_snapshot : null;
     if (snapshot == null) { missingCostCount++; continue; }
     const qty = item.qty ?? item.quantity ?? 0;
-    costExGst += snapshot * qty;
+    const lineCost = snapshot * qty;
+    costExGst += lineCost;
+
+    // Attribute the line to its supplier. De-duplicate first: an in-house pack
+    // sends one `suppliers[]` entry PER CONSTITUENT, so four Augmento entries
+    // on one line is one Augmento purchase, not four.
+    const named = Array.isArray(item.suppliers) ? item.suppliers.filter((x) => x && x.name) : [];
+    const distinct = [...new Set(named.map((x) => String(x.name)))];
+    if (!distinct.length) { missingSupplierCount++; continue; }
+    if (distinct.length > 1) { mixedSupplierLineCount++; continue; }
+    const name = distinct[0];
+    costBySupplier[name] = (costBySupplier[name] || 0) + lineCost;
   }
 
   // ONE unknown test feeding BOTH fields. `null` first, gross up second — and
@@ -369,5 +425,8 @@ export function orderSupplierCostFromDetail(order) {
     costInclGst: exGst == null ? null : exGst * (1 + GST_RATE),
     missingCostCount,
     itemCount: items.length,
+    costBySupplier,
+    missingSupplierCount,
+    mixedSupplierLineCount,
   };
 }

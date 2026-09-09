@@ -35,6 +35,8 @@ const vm = require('node:vm');
 const ADMIN = path.resolve(__dirname, '..', 'inkcartridges', 'js', 'admin');
 const PROFITABILITY = path.join(ADMIN, 'utils', 'profitability.js');
 const ORDER_PROFIT = path.join(ADMIN, 'utils', 'order-profit.js');
+const SOURCING = path.join(ADMIN, 'utils', 'sourcing.js');
+const SUPPLIER_FREIGHT = path.join(ADMIN, 'utils', 'supplier-freight.js');
 const ORDERS_PAGE = path.join(ADMIN, 'pages', 'orders.js');
 const ADMIN_CSS = path.resolve(__dirname, '..', 'inkcartridges', 'css', 'admin.css');
 
@@ -52,13 +54,28 @@ function stripEsm(src) {
     exposed.add(id);
     return `${kw} ${id}`;
   });
-  return stripped + '\n;' + [...exposed].map(id => `try { globalThis.${id} = ${id}; } catch(_) {}`).join('\n');
+  // Each module runs in its own function scope, not the shared context's top
+  // level: since ERR-241 this loader hosts four files, and both profitability.js
+  // and sourcing.js declare a module-private `const MISSING`. Two top-level
+  // consts of the same name in one vm context is a SyntaxError that names the
+  // second file, not the collision. Exports still land on globalThis, so the
+  // next module's stripped `import` resolves exactly as before.
+  return '(function(){\n' + stripped + '\n;'
+    + [...exposed].map(id => `try { globalThis.${id} = ${id}; } catch(_) {}`).join('\n')
+    + '\n})();';
 }
 
-const sandbox = { console, Math, Number, Object, Array, String, Boolean, JSON, Error, RegExp };
+// Set/Infinity joined the list when order-profit.js gained utils/sourcing.js and
+// utils/supplier-freight.js as dependencies (ERR-241): the per-supplier cost
+// roll-up de-duplicates with a Set and the zone ladder reduces from Infinity.
+const sandbox = { console, Math, Number, Object, Array, String, Boolean, JSON, Error, RegExp, Set, Infinity };
 sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
 vm.runInContext(stripEsm(fs.readFileSync(PROFITABILITY, 'utf8')), ctx, { filename: 'profitability.js' });
+// Dependency order matters: sourcing.js reads GST_RATE from profitability.js, and
+// supplier-freight.js reads supplierSlug/supplierLabel from sourcing.js.
+vm.runInContext(stripEsm(fs.readFileSync(SOURCING, 'utf8')), ctx, { filename: 'sourcing.js' });
+vm.runInContext(stripEsm(fs.readFileSync(SUPPLIER_FREIGHT, 'utf8')), ctx, { filename: 'supplier-freight.js' });
 vm.runInContext(stripEsm(fs.readFileSync(ORDER_PROFIT, 'utf8')), ctx, { filename: 'order-profit.js' });
 
 const { orderProfitFromDetail, isInvoiceOrder, PROFIT_STATE, computeProfitBreakdown } = sandbox;

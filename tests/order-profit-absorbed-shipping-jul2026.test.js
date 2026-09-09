@@ -79,8 +79,26 @@ test('the courier row sits AFTER "Paid to Stripe" and BEFORE "GST remitted to IR
 });
 
 test('the IRD-credit tooltip names the courier as a credit source when absorbed applies', () => {
-  assert.ok(/absorbedShippingApplies\s*\?\s*'supplier, Stripe and courier'\s*:\s*'supplier and Stripe'/.test(ordersSrc),
-    'IRD tooltip must add "and courier" only when absorbed applies');
+  // Was a two-way ternary until ERR-241 added a fourth reclaimable outflow
+  // (supplier freight). A fixed pair of strings cannot express four states, so
+  // the pin follows the code to a filtered list — the CONTRACT is unchanged:
+  // a credit source is named if and only if it actually applied.
+  assert.ok(/b\.absorbedShippingApplies\s*\?\s*'courier'\s*:\s*null/.test(ordersSrc),
+    'IRD tooltip must name the courier only when absorbed applies');
+  assert.ok(/b\.supplierFreightApplies\s*\?\s*'supplier freight'\s*:\s*null/.test(ordersSrc),
+    'IRD tooltip must name supplier freight only when it applies');
+  assert.ok(/\.filter\(Boolean\)/.test(ordersSrc),
+    'the credit-source list must drop the ones that did not apply, never print "null"');
+});
+
+test('supplierFreight rides on BOTH feeOpts branches, like absorbedShipping', () => {
+  // The ERR-241 mirror of the absorbedShipping pin above. A cost threaded onto
+  // only the website branch is a cost that silently vanishes on every invoiced
+  // sale — and invoiced sales are the ones with no card fee to mask the gap.
+  assert.ok(/isInvoice\s*\n?\s*\?[\s\S]{0,200}?supplierFreight[\s\S]{0,200}?:\s*\{[\s\S]{0,160}?supplierFreight/.test(profitSrc),
+    'both feeOpts branches must include supplierFreight');
+  assert.ok(/const\s+supplierFreight\s*=\s*supplierFreightForOrder\(order,\s*sourcing\)/.test(profitSrc),
+    'supplierFreight must come from the rules module, not be assembled inline');
 });
 
 // ─── 3. Owner-only gating is preserved ───────────────────────────────────────
