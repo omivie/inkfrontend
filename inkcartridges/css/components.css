@@ -4299,14 +4299,15 @@ label.form-label--checkbox {
 
 /* The last of them, all height misses on links that sit alone in their own row:
    the "edit" links back from a summary, and the payment page's back link. */
+/* --tap-min, not 44, for the same measured reason as the group above: at
+   exactly 44 these came back 43.x. */
 .checkout-summary__edit,
 .shipping-summary__edit,
 .payment-page__back,
-.legal-toc__list a,
 .content-list a {
     display: inline-flex;
     align-items: center;
-    min-height: 44px;
+    min-height: var(--tap-min, 48px);
 }
 .cart-item .quantity-selector__input {
     min-width: 44px;

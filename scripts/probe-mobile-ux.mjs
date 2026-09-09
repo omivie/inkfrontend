@@ -454,7 +454,17 @@ const MEASURE = (opts) => {
             const p = document.querySelector(opts.panel);
             if (!p) return null;
             const s = getComputedStyle(p);
-            return { overflowY: s.overflowY, scrollHeight: p.scrollHeight, clientHeight: p.clientHeight };
+            return {
+                overflowY: s.overflowY, scrollHeight: p.scrollHeight, clientHeight: p.clientHeight,
+                // In-flow or floating? A `position: fixed`/`absolute` panel has to
+                // fit the viewport, because there is nowhere else for it to be.
+                // An IN-FLOW disclosure — the checkout order summary, or a mega
+                // panel that mega-nav.js has relocated inside the nav drawer — is
+                // part of the document and is reached by scrolling like any other
+                // content. Measuring the second against the first's rule reports
+                // `top: -405` as a defect when it only means "you have scrolled".
+                inFlow: s.position === 'static' || s.position === 'relative',
+            };
         })() : null,
     };
 };
@@ -744,11 +754,19 @@ try {
                             cta: null, panel: ov.panel, overlayCta: ov.cta,
                         });
                         const pr = om.overlayPanel.rect;
+                        const inFlow = !!(om.overlayScrolls && om.overlayScrolls.inFlow);
                         const fitsX = pr.left >= -1 && pr.right <= om.innerWidth + 1;
-                        const fitsY = ov.scrolls ? pr.top >= -1 : (pr.top >= -1 && pr.bottom <= om.innerHeight + 1);
+                        // Horizontal containment is the invariant for every panel:
+                        // nothing may hang off the SIDE, because there is no
+                        // sideways scroll to recover it. Vertical containment is
+                        // only meaningful for a floating panel.
+                        const fitsY = inFlow ? true
+                            : (ov.scrolls ? pr.top >= -1 : (pr.top >= -1 && pr.bottom <= om.innerHeight + 1));
+                        const how = inFlow ? ' — in flow, reached by scrolling'
+                            : (ov.scrolls ? ' — scrolls internally' : '');
                         check(`${oLabel} opens inside the viewport`, fitsX && fitsY,
                             fitsX && fitsY
-                                ? `${pr.width}x${pr.height} at (${pr.left},${pr.top})${ov.scrolls ? ' — scrolls internally' : ''}`
+                                ? `${pr.width}x${pr.height} at (${pr.left},${pr.top})${how}`
                                 : `panel [${pr.left}…${pr.right}] x [${pr.top}…${pr.bottom}] in a ${om.innerWidth}x${om.innerHeight} viewport`);
                         if (!om.overlayCta.present) {
                             soft(`${oLabel} CTA was not hit-tested`, `no element matched ${ov.cta} inside the open panel`);
