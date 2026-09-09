@@ -2870,6 +2870,189 @@ if (typeof window !== 'undefined') window.AdminAccess = AdminAccess;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AdminPreview — may this viewer see admin-only catalogue rows? (ERR-234)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// An admin-only product must be invisible to shoppers and ordinary to admins.
+// The enforcement is the BACKEND's: public catalogue endpoints never return the
+// row, so the shared Cloudflare entry can never hold one. This module only
+// decides whether to ask the *mirror* routes (/api/admin/catalog/*) instead of
+// the public ones — see API._catalogRoute.
+//
+// WHY IT LIVES IN utils.js. It has to run on every storefront surface, and
+// utils.js is on all 41 shells that load api.js — measured, the same set. A new
+// <script> would have to be hand-added to 41 files, which is exactly how the
+// header search box sat dead on 10 pages for four months (ERR-214). Enrolment
+// by hand is a list nobody maintains; sharing a file already everywhere is not.
+//
+// WHY IT SELF-STARTS. main.js is on only 34 of those 41, so it cannot be the
+// trigger. `ensure()` is idempotent and fire-and-forget: the first catalogue
+// call starts it and does NOT wait for it. Nobody's first paint is delayed —
+// including the admin's, who gets the public grid at today's latency and a
+// re-render when 'admin-preview:ready' fires.
+//
+// FIVE TERMINAL STATES, all distinguishable. 'unknown' routes publicly, so
+// every failure mode degrades to exactly what a shopper sees:
+//
+//   anonymous   no session at all — no request is made
+//   granted     admin AND the mirror routes exist
+//   refused     signed in, not an admin (an ordinary customer; not an error)
+//   unreachable we could not get an answer (ERR-188: never rendered as 'no')
+//   unsupported admin, but the mirror routes 404 — the backend brief is unapplied
+//
+// 'unsupported' is the one that must be LOUD. An absent endpoint reported as
+// "there are no admin-only products" is the absence-as-zero defect this project
+// keeps re-learning (ERR-063/068/073/075/076/149/150). It is therefore a named
+// state, it is surfaced to the admin on screen, and the probe exits 2 on it.
+// ─────────────────────────────────────────────────────────────────────────────
+const AdminPreview = {
+    state: 'unknown',
+    role: null,
+    detail: null,
+
+    _started: false,
+    _retried: false,
+
+    /** The only question the catalogue router asks. Never true while pending. */
+    isGranted() { return this.state === 'granted'; },
+
+    /** True when we asked and could not get an answer — NOT the same as "no". */
+    isUnreachable() { return this.state === 'unreachable'; },
+
+    /** One human-readable line. Used by the on-screen notice and by tests. */
+    explain() {
+        switch (this.state) {
+            case 'granted': return 'Admin preview on — admin-only products are visible to you.';
+            case 'refused': return 'Admin preview off — this account is not an admin.';
+            case 'anonymous': return 'Admin preview off — not signed in.';
+            case 'unreachable': return 'Admin preview unavailable — could not reach /api/admin/verify. This is not a refusal.';
+            case 'unsupported': return 'Admin preview unavailable — /api/admin/catalog/* is absent. The backend brief has not been applied, so admin-only products cannot be shown. This is NOT "there are none".';
+            default: return 'Admin preview — not yet determined.';
+        }
+    },
+
+    /** Idempotent, non-blocking. Safe to call from anywhere, any number of times. */
+    ensure() {
+        if (this._started) return;
+        this._started = true;
+        // Deliberately not awaited by any caller.
+        this._run().catch(() => this._set('unreachable', { reason: 'threw' }));
+    },
+
+    async _run() {
+        // No session → no request. Anonymous shoppers, the overwhelming
+        // majority, pay nothing at all for this feature.
+        const signedIn = typeof Auth !== 'undefined'
+            && typeof Auth.isAuthenticated === 'function'
+            && Auth.isAuthenticated();
+        if (!signedIn) return this._set('anonymous');
+
+        if (typeof API === 'undefined' || typeof API.verifyAdmin !== 'function') {
+            return this._set('unreachable', { reason: 'API absent' });
+        }
+
+        let resp = null;
+        let err = null;
+        // API.request() THROWS on network failure (ERR-216) — an unguarded call
+        // here would take the catalogue down with it.
+        try { resp = await API.verifyAdmin(); } catch (e) { err = e; }
+
+        const outcome = (typeof AdminAccess !== 'undefined')
+            ? AdminAccess.classify(resp, err)
+            : { state: 'unreachable' };
+
+        if (outcome.state === 'unreachable') {
+            // One retry, then stop. ERR-188 forbids reading this as a refusal,
+            // and a retry storm helps nobody.
+            if (!this._retried) {
+                this._retried = true;
+                this._set('unreachable', outcome);
+                setTimeout(() => { this._started = false; this.ensure(); }, 4000);
+                return;
+            }
+            return this._set('unreachable', outcome);
+        }
+        if (outcome.state !== 'granted') return this._set(outcome.state, outcome);
+
+        // Verified admin. Now: do the mirror routes actually exist? Until the
+        // backend brief lands they do not, and we must say so rather than
+        // quietly showing an admin a shopper's catalogue.
+        this.role = outcome.role || null;
+        let probe = null;
+        try { probe = await API.get('/api/admin/catalog/shop?limit=1'); } catch (e) { probe = null; }
+
+        if (probe && probe.ok) return this._set('granted', outcome);
+
+        // MEASURED, not assumed: on a 404 API.request() returns
+        // `{ ok:false, error, code:'NOT_FOUND' }` and carries NO `status` field
+        // at all (api.js:411). A check for `probe.status === 404` would never
+        // once have fired — the absent-vs-null trap of ERR-199. Ask the field
+        // that is actually there.
+        if (probe && probe.code === 'NOT_FOUND') {
+            return this._set('unsupported', { code: probe.code });
+        }
+        // Anything else (401/403/5xx/threw) is "we could not look", never "no".
+        return this._set('unreachable', { stage: 'capability', status: probe && probe.status, code: probe && probe.code });
+    },
+
+    _set(state, detail) {
+        this.state = state;
+        this.detail = detail || null;
+        try {
+            window.dispatchEvent(new CustomEvent('admin-preview:change', {
+                detail: { state, role: this.role, explain: this.explain() }
+            }));
+            if (state === 'granted') {
+                window.dispatchEvent(new CustomEvent('admin-preview:ready', {
+                    detail: { role: this.role }
+                }));
+            }
+        } catch (_) { /* no window (tests) */ }
+
+        if (state === 'unsupported' || (state === 'unreachable' && this._retried)) {
+            if (typeof DebugLog !== 'undefined' && DebugLog.error) DebugLog.error('[AdminPreview]', this.explain());
+            this._notify();
+        }
+        return state;
+    },
+
+    /**
+     * A one-line notice, shown ONLY to a viewer the server already called an
+     * admin. Raw console.* is banned here and DebugLog is a no-op off localhost
+     * (ERR-193), so without this the failure would be genuinely silent in
+     * production — which is the exact shape of ERR-227 and ERR-230.
+     */
+    _notify() {
+        try {
+            if (typeof document === 'undefined' || !document.body) return;
+            if (document.getElementById('admin-preview-notice')) return;
+            const el = document.createElement('div');
+            el.id = 'admin-preview-notice';
+            el.setAttribute('role', 'status');
+            el.textContent = this.explain();
+            // Individual style properties, never cssText/setAttribute('style'),
+            // so the CSP's style-src cannot refuse this (ERR-230).
+            el.style.position = 'fixed';
+            el.style.left = '12px';
+            el.style.bottom = '12px';
+            el.style.zIndex = '2147483000';
+            el.style.maxWidth = 'min(420px, calc(100vw - 24px))';
+            el.style.padding = '10px 12px';
+            el.style.borderRadius = '8px';
+            el.style.background = '#7f1d1d';
+            el.style.color = '#fff';
+            el.style.font = '500 12px/1.45 system-ui, -apple-system, sans-serif';
+            el.style.cursor = 'pointer';
+            el.title = 'Click to dismiss';
+            el.addEventListener('click', () => el.remove());
+            document.body.appendChild(el);
+        } catch (_) { /* never let a notice break a page */ }
+    }
+};
+if (typeof window !== 'undefined') window.AdminPreview = AdminPreview;
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ProductIdentity — can a shopper tell these two cards apart?
 // ═════════════════════════════════════════════════════════════════════════════
 //
@@ -3536,6 +3719,57 @@ const QtyStepper = (function () {
 })();
 if (typeof window !== 'undefined') window.QtyStepper = QtyStepper;
 
+/**
+ * DeliveryArea — the single rule that reads "urban" or "rural" off an address.
+ *
+ * NZ Rural Delivery addresses carry an "RD <n>" token ("123 Someplace Road,
+ * RD 2, Kaiwaka"). Rural freight is roughly double urban — $7 vs $14 in
+ * Auckland, $12/$20 and $22/$30 elsewhere (js/shipping.js FEES) — so being
+ * wrong costs real money in one direction and a lost sale in the other.
+ *
+ * A DELIBERATE PORT. The same regex lives in js/admin/utils/invoice-quote.js
+ * (deliveryHintFromDraft). That file is an ES module whose suite runs it in a
+ * vm sandbox with every `import` line STRIPPED, so it cannot import this one.
+ * It is the same trade already taken for Business.formatPercent — see
+ * admin-invoice-quote-aug2026.test.js §4, "a 53 KB script tag to import one
+ * five-line formatter is the wrong trade". The two copies are held together by
+ * a test that extracts both literals and compares them character for
+ * character. THAT TEST is what stops them drifting, not this comment.
+ *
+ * IT ONLY EVER UPGRADES. classify() answers 'rural' or 'urban' to keep parity
+ * with the admin helper's contract, but checkout asks looksRural(), which is
+ * true ONLY on a positive match. The absence of a rural token is not evidence
+ * of an urban address — and urban is already the default, so silence needs no
+ * vote. Reading absence as a value is the shape behind ERR-063/068/073/075/
+ * 076/149/150.
+ */
+const DeliveryArea = {
+    URBAN: 'urban',
+    RURAL: 'rural',
+
+    /* Character-for-character the literal in admin/utils/invoice-quote.js.
+       The third alternative is subsumed by the second; it is kept because
+       the copies are pinned as EQUAL, and "tidying" one side breaks that. */
+    RURAL_RE: /\brd\s*\d\b|\brural\b|\brural\s+delivery\b/i,
+
+    /** True only on a positive rural signal. Never infers urban from silence. */
+    looksRural(text) {
+        return typeof text === 'string' && this.RURAL_RE.test(text);
+    },
+
+    /** 'rural' | 'urban' — parity with deliveryHintFromDraft's contract. */
+    classify(text) {
+        return this.looksRural(text) ? this.RURAL : this.URBAN;
+    },
+
+    /** 'rural' | 'urban' | null. null means "nothing to read", NOT "urban". */
+    classifyOrNull(text) {
+        if (typeof text !== 'string' || !text.trim()) return null;
+        return this.classify(text);
+    }
+};
+if (typeof window !== 'undefined') window.DeliveryArea = DeliveryArea;
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -3559,6 +3793,7 @@ if (typeof module !== 'undefined' && module.exports) {
         CouponSuggestion,
         AdminAccess,
         OrderNumber,
-        QtyStepper
+        QtyStepper,
+        DeliveryArea
     };
 }

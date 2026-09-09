@@ -491,6 +491,21 @@
         // INITIALIZATION
         // =========================================
         async init() {
+            // Re-run the current level once admin preview turns on (ERR-234).
+            //
+            // Admin preview resolves over the network and is deliberately never
+            // awaited before first paint, so an admin's first grid is the public
+            // one — without an admin-only product in it. This repaints when the
+            // answer arrives. One shot: it re-enters loadCurrentLevel through the
+            // normal navigationVersion guard, so a repaint that lands after the
+            // shopper has navigated away is discarded like any other stale load.
+            try {
+                window.addEventListener('admin-preview:ready', () => {
+                    this.navigationVersion++;
+                    this.loadCurrentLevel(this.navigationVersion);
+                }, { once: true });
+            } catch (_) { /* no window (tests) */ }
+
             // Parse URL params to restore state
             this.parseURLState();
 
@@ -1456,6 +1471,90 @@
                 });
         },
 
+        /* ── Popular products on the category landings (ERR-236) ─────────────
+         *
+         * FE category id -> the name /api/products/popular answers to.
+         *
+         * MEASURED 2026-09-09, not assumed: `ink`, `toner`, `ribbons`, `drums`
+         * and `paper` answer 200 with real rows; every other spelling is a hard
+         * 400 — INCLUDING two of our own internal ids, `consumable` (the
+         * backend calls it `drums`) and `label_tape` (no popular route at all).
+         *
+         * So this is a vocabulary translation between two systems, not a list
+         * of what we stock. `npm run audit:types` already counts six type
+         * vocabularies in this repo, which is exactly why this one lives in a
+         * single place with a test on it. A category absent from this map asks
+         * for nothing and shows nothing — it never fires a request we know will
+         * 400.
+         */
+        POPULAR_CATEGORY_API: { ink: 'ink', toner: 'toner', consumable: 'drums', paper: 'paper' },
+        POPULAR_ROW_LIMIT: 4,
+
+        /**
+         * Paint the shelf above the brand picker on a category landing.
+         *
+         * /ink-cartridges and /toner-cartridges are where Google Ads lands and
+         * both rendered a brand chooser and not one price. The endpoint was
+         * live the whole time; nothing was asking it.
+         *
+         * IT HIDES RATHER THAN EMPTIES. If the read fails or returns nothing,
+         * the section stays `hidden` and the page is exactly what it is today —
+         * never an empty shelf over a working catalogue. ERR-193 printed
+         * empty-shelf copy on 63 brand pages for 44 hours after one failed
+         * read, so a failure here is LOUD in the log and INVISIBLE on the page,
+         * in that order.
+         */
+        async renderPopularRow(category, label) {
+            const section = document.getElementById('popular-row');
+            const grid = document.getElementById('popular-row-grid');
+            if (!section || !grid) return;
+
+            const hide = () => { section.hidden = true; grid.innerHTML = ''; };
+            if (!category) { hide(); return; }
+
+            const apiCategory = this.POPULAR_CATEGORY_API[category];
+            if (!apiCategory) {
+                DebugLog.warn(`[popular] no /api/products/popular category maps to "${category}" — shelf not shown`);
+                hide();
+                return;
+            }
+
+            // A shopper who navigates on while this is in flight must not have
+            // the shelf painted over the level they actually landed on. Same
+            // reason loadCurrentLevel carries a nav version.
+            const token = (this._popularRowToken = (this._popularRowToken || 0) + 1);
+
+            let rows = [];
+            try {
+                const resp = await API.getPopularProducts({ category: apiCategory, limit: this.POPULAR_ROW_LIMIT });
+                if (resp && resp.ok && resp.data && Array.isArray(resp.data.products)) {
+                    rows = resp.data.products;
+                } else {
+                    DebugLog.error(`[popular] /api/products/popular?category=${apiCategory} was unreadable — `
+                        + 'this landing page is showing its brand picker with no products, which is '
+                        + 'the state ERR-236 exists to fix.');
+                }
+            } catch (e) {
+                DebugLog.error(`[popular] /api/products/popular?category=${apiCategory} threw — `
+                    + 'landing page falls back to the brand picker alone:', e.message);
+            }
+
+            if (token !== this._popularRowToken) return;
+            if (!rows.length || typeof Products === 'undefined') { hide(); return; }
+
+            const title = document.getElementById('popular-row-title');
+            if (title) title.textContent = label ? `Popular ${label} right now` : 'Popular right now';
+
+            grid.innerHTML = Products.renderCards(rows);
+            // All three binds. The zero-results rail calls only the middle one
+            // and its cards silently lose image retry and the bulk-price
+            // overlay; this row does not copy that omission.
+            Products.bindImageFallbacks(grid);
+            Products.attachCardListeners(grid);
+            Products.decorateBusinessPricing(grid, rows);
+            section.hidden = false;
+        },
+
         renderBrands(brands) {
             const grid = this.elements.brandsGrid;
             grid.innerHTML = '';
@@ -1467,16 +1566,27 @@
             // tile clicks straight to the chip grid for brand + category.
             const categoryPicker = !this.state.brand && !!this.state.category;
             const ribbonsSection = document.getElementById('ribbons-section');
-            const sectionTitle = this.elements.levelBrands?.querySelector('.shop-section-card__title');
+            // Scoped to the card that HOLDS THE BRAND GRID, not to "the first
+            // .shop-section-card__title inside #level-brands". Those were the
+            // same element until ERR-236 put the popular-products shelf above
+            // it, at which point the unscoped query would have relabelled the
+            // shelf "Choose a brand to see ink cartridges" and left the brand
+            // picker with the wrong heading — a positional selector quietly
+            // meaning something else the moment anything moves.
+            const sectionTitle = grid.closest('.shop-section-card')?.querySelector('.shop-section-card__title');
             if (categoryPicker) {
                 // Keys are the INTERNAL tab ids (see this.categories).
                 const labels = { ink: 'ink cartridges', toner: 'toner', consumable: 'drums & supplies', label_tape: 'label tape', paper: 'photo paper' };
                 const label = labels[this.state.category] || `${this.state.category} products`;
                 if (sectionTitle) sectionTitle.textContent = `Choose a brand to see ${label}`;
                 if (ribbonsSection) ribbonsSection.hidden = true;
+                this.renderPopularRow(this.state.category, label);
             } else {
                 if (sectionTitle) sectionTitle.textContent = 'Select your ink cartridge or toner brand';
                 if (ribbonsSection) ribbonsSection.hidden = false;
+                // Bare /shop knows no category. Inventing one to have something
+                // to show would be a guess printed as a recommendation.
+                this.renderPopularRow(null);
             }
 
             // WHICH BRANDS APPEAR IS DATA, NOT A LIST IN THIS FILE — and the rule

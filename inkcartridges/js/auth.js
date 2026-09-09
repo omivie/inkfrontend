@@ -191,6 +191,18 @@ const Auth = {
                 const isNowAuthenticated = this.isAuthenticated();
                 if (isNowAuthenticated) this._setAuthCookie(); else this._clearAuthCookie();
 
+                // Identity changed → drop any admin-mirrored catalogue responses
+                // (ERR-234). API._swrCache is in-memory with a 60s TTL, so an
+                // admin who signs out in place could otherwise keep seeing
+                // admin-only rows on this page for up to a minute. Cheap to do
+                // on every transition, and correct in both directions: signing
+                // IN also needs the public entries dropped so the mirror is
+                // consulted. AdminPreview re-resolves on the next catalogue read.
+                if (wasAuthenticated !== isNowAuthenticated && typeof API !== 'undefined'
+                    && typeof API.purgeCatalogCache === 'function') {
+                    API.purgeCatalogCache();
+                }
+
                 // Handle sign in events - sync data
                 if (event === 'SIGNED_IN' || (isNowAuthenticated && !wasAuthenticated)) {
                     // CRITICAL: Sync account profile first (creates profile if first login)

@@ -2,6 +2,19 @@
      * PAYMENT PAGE - Stripe Integration
      * Modern payment processing with Stripe Elements
      */
+    /**
+     * Stripe's minimum charge for NZD, in cents (docs.stripe.com/currencies,
+     * verified 2026-09-09: "0.50 NZD"). Below this Stripe rejects the
+     * PaymentIntent with `amount_too_small` — and it does so at CONFIRM time,
+     * which is after the customer has already authorised. ERR-234.
+     *
+     * The admin test product is priced at exactly this floor, so any discount
+     * applied to a test-only cart makes it unchargeable. The backend is asked to
+     * refuse discounts on such a cart in the brief §6; this constant is the
+     * frontend's loud guard for whatever slips through.
+     */
+    const STRIPE_MIN_NZD_CENTS = 50;
+
     const PaymentPage = {
         // State
         cartItems: [],
@@ -373,7 +386,21 @@
             // Create Elements with deferred intent (no client_secret needed yet).
             // Shared appearance/fonts so the Express Checkout Element (separate
             // instance) matches the card form visually.
-            const totalCents = Math.round(this.totals.total * 100) || 100; // minimum 1 NZD
+            // `|| 100` is a LOAD-BEARING LIE at a zero total: 0 is falsy, so a $0
+            // cart silently mounted a card form quoting $1.00 (ERR-234). It stays
+            // for the "server totals not loaded yet" case it was written for, but a
+            // total that is present and genuinely below Stripe's floor is now
+            // refused where the customer can see it, rather than by Stripe after
+            // they have authorised.
+            const totalCents = Math.round(this.totals.total * 100) || 100;
+            if (this.totals.total > 0 && totalCents < STRIPE_MIN_NZD_CENTS) {
+                this.showError(
+                    `This order totals ${formatPrice(this.totals.total)}, which is below the `
+                    + `${formatPrice(STRIPE_MIN_NZD_CENTS / 100)} minimum a card payment can be charged. `
+                    + 'Please add another item or contact us to complete this order.'
+                );
+                return;
+            }
             const fonts = [
                 { cssSrc: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap' }
             ];
@@ -482,7 +509,12 @@
 
             // No valid total yet (server totals failed to load) — never show a live
             // wallet button that would confirm against the $1 fallback amount.
-            if (!(this.totals.total > 0)) {
+            //
+            // The test is now against Stripe's NZD floor rather than zero (ERR-234):
+            // a total that is present but below 50c cannot be charged either, and a
+            // wallet sheet that fails at confirm is worse than an absent one. NaN
+            // fails this comparison and removes the button, which is the safe side.
+            if (!(Math.round(this.totals.total * 100) >= STRIPE_MIN_NZD_CENTS)) {
                 wrapper.remove();
                 return;
             }

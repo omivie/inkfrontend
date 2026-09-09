@@ -98,7 +98,32 @@
             return n;
         },
 
+        /**
+         * Re-run the page once admin preview turns on (ERR-234).
+         *
+         * An admin's FIRST load necessarily takes the public route: preview
+         * resolves over the network and we refuse to block first paint on it
+         * (ERR-124 removed exactly that wait, and a test pins it removed). So an
+         * admin opening an admin-only product gets a 404 first, and would sit on
+         * "Product not found" forever without this.
+         *
+         * One shot, and only when nothing loaded — a page that already rendered
+         * must never be yanked out from under the reader.
+         */
+        _armAdminPreviewRetry() {
+            if (this._adminRetryArmed) return;
+            this._adminRetryArmed = true;
+            try {
+                window.addEventListener('admin-preview:ready', () => {
+                    if (this.product || this._adminRetried) return;
+                    this._adminRetried = true;
+                    this.init();
+                }, { once: true });
+            } catch (_) { /* no window (tests) */ }
+        },
+
         async init() {
+            this._armAdminPreviewRetry();
             const params = new URLSearchParams(window.location.search);
             let sku = params.get('sku');
             this._productType = params.get('type') || null; // 'ribbon' or null
@@ -253,20 +278,28 @@
                     }
                 } catch (_) { /* non-critical — fall back to the backend series_codes */ }
 
-                // Gate test products — active test products are visible to all; inactive only to super admins.
+                // Hide an admin-only product from anyone the server has not called
+                // an admin (ERR-234). LIVE since 2026-09-09; it was dormant from
+                // ERR-124 until the uncached admin catalogue mirror gave admin
+                // preview a route that cannot poison the shared edge cache.
                 //
-                // DORMANT since ERR-124 (2026-07-28), deliberately kept. The product
-                // read is now anonymous, so the backend never returns an inactive
-                // TEST-/admin_only product in the first place and this branch's
-                // positive case is unreachable — a super admin can no longer preview
-                // one here. That is the accepted trade: /api/products/:sku is
-                // edge-cached and a bearer token does NOT change the cache key, so
-                // fetching one with admin rights could store it in the SHARED public
-                // entry. The gate stays because it costs nothing and must be live
-                // again the moment admin preview returns via the uncached
-                // /api/admin/products/:sku endpoint (BF-013) — deleting it would
-                // silently ship unlisted products to shoppers when that lands.
-                if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
+                // THIS IS THE SECOND LOCK, NOT THE LOCK. The enforcement that
+                // matters is server-side: the public /api/products/:sku never
+                // returns an admin-only row, so a shopper 404s before reaching
+                // this line. What this catches is the row arriving anyway — a
+                // backend filter regressing, or a cached response from before the
+                // filter landed. A second lock is worth having precisely because
+                // the first one is somebody else's deploy.
+                //
+                // `!this.product.active` is GONE from the condition. It was one of
+                // three permanently-false terms this gate carried: `admin_only` has
+                // never existed as a column (measured 2026-09-09: PostgREST answers
+                // 42703), and `isCachedSuperAdmin()` is a hard `return false` stub.
+                // Requiring an admin-only product to ALSO be inactive would mean the
+                // live test product — which must be active to be purchasable — was
+                // visible to everyone. Admin-only is now sufficient on its own.
+                if (this._isTestProduct(this.product)
+                    && !(typeof AdminPreview !== 'undefined' && AdminPreview.isGranted())) {
                     this.showError('Product not found');
                     return;
                 }

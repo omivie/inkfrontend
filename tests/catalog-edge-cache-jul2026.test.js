@@ -514,9 +514,42 @@ test('§9 every public catalog/search/ribbon read uses getPublic', () => {
         const body = stripLineComments(methodBody(API_SRC, sig));
         assert.match(body, /this\.getPublic\(/,
             `${sig} is a public read on a path Cloudflare may cache — it must not attach a bearer token`);
-        assert.ok(!/this\.get\(/.test(body),
-            `${sig} must not also use the authenticated getter`);
+
+        // A helper MAY also reach the admin catalogue mirror (ERR-234). That is
+        // the single sanctioned reason to call the authenticated getter from
+        // here, and it is safe only because the mirror is a different path
+        // prefix that is never edge-cached — the public URL below still goes out
+        // tokenless. So the rule is no longer "never call this.get()", it is
+        // "never hand this.get() a public path".
+        if (/this\.get\(/.test(body)) {
+            assert.match(body, /_catalogRoute\(/,
+                `${sig} calls the authenticated getter, which is only allowed via _catalogRoute (ERR-234)`);
+            // `[,)]` so a caller may pass options alongside — what matters is that
+            // the ROUTED endpoint is the first argument, not that it is the only one.
+            assert.match(body, /this\.get\([A-Za-z_$][\w$]*\.endpoint\s*[,)]/,
+                `${sig} must pass the ROUTED endpoint to the authenticated getter, never an endpoint it built itself`);
+            assert.ok(!/this\.get\(\s*(['"`]|\/api)/.test(body),
+                `${sig} must never hand a literal path to the authenticated getter — that is the token-on-a-cached-URL bug ERR-124 fixed`);
+        }
     }
+});
+
+test('§9 _catalogRoute is identity for everyone who is not a verified admin (ERR-234)', () => {
+    const body = stripLineComments(methodBody(API_SRC, '_catalogRoute(endpoint)'));
+    // The default has to be the endpoint it was handed, untouched. Anything else
+    // and a shopper could be routed at an admin path, or an admin's row could
+    // reach a cacheable URL.
+    assert.match(body, /if \(!preview \|\| typeof preview\.isGranted !== 'function'\)[\s\S]{0,120}anonymous: true/,
+        'no AdminPreview on the page must mean the public route');
+    assert.match(body, /if \(!preview\.isGranted\(\)\) return \{ endpoint: ep, anonymous: true \};/,
+        'anything short of a granted admin must mean the public route');
+    assert.match(body, /if \(ep\.startsWith\('\/api\/admin\/'\)\) return \{ endpoint: ep, anonymous: false \};/,
+        'routing an already-mirrored endpoint again must not downgrade it to anonymous and 401 the admin');
+    // The query string must survive verbatim: a param would live inside the
+    // edge-cache key family, which is exactly what the path swap avoids.
+    assert.match(body, /const query = q === -1 \? '' : ep\.slice\(q\);/,
+        'the query string must be carried through untouched so CATALOG_PARAM_ORDER still holds');
+    assert.match(body, /mirrored \+ query/, 'the rewrite is path-only');
 });
 
 test('§9 waitlistStatus stays mounted but is never CALLED, and says why', () => {
@@ -562,12 +595,40 @@ test('§9 every bare fetch to the API sets credentials explicitly', () => {
         'state the credentials mode on every API fetch — an unstated default is how a cookie silently starts bypassing the edge cache');
 });
 
-test('§9 the dormant admin-preview gate is kept and explained, not deleted', () => {
-    // The gate's positive case is unreachable while the product read is
-    // anonymous. Deleting it would ship unlisted products to shoppers the moment
-    // admin preview returns via BF-013.
-    assert.match(PDP_SRC, /_isTestProduct\(this\.product\)\s*&&\s*!this\.product\.active/,
-        'the inactive test-product gate must remain in place');
-    assert.match(PDP_SRC, /DORMANT since ERR-124[\s\S]{0,900}BF-013/,
-        'and must carry the note explaining why it is currently unreachable and when it becomes live again');
+test('§9 the admin-preview gate is LIVE and blocks non-admins (ERR-234)', () => {
+    // This test used to assert the gate was DORMANT and carried a note saying so.
+    // The property it was defending — "deleting this would ship unlisted products
+    // to shoppers the moment admin preview returns" — is unchanged and is now
+    // asserted directly instead of via the comment. Admin preview HAS returned,
+    // through the uncached /api/admin/catalog/* mirror, so keeping the old
+    // dormancy note would have meant leaving a false comment in the file to keep
+    // a test green. That is the ERR-216 failure mode, not a passing test.
+    assert.match(PDP_SRC, /_isTestProduct\(this\.product\)/,
+        'the test-product gate must remain in place');
+    assert.match(PDP_SRC, /_isTestProduct\(this\.product\)[\s\S]{0,160}AdminPreview\.isGranted\(\)/,
+        'the gate must consult AdminPreview — otherwise it is unreachable again');
+
+    // `!this.product.active` is deliberately GONE. Requiring an admin-only
+    // product to ALSO be inactive would have exposed the live test product,
+    // which must be active to be purchasable.
+    assert.ok(!/_isTestProduct\(this\.product\)\s*&&\s*!this\.product\.active/.test(PDP_SRC),
+        'admin-only must be sufficient on its own to hide a product from a non-admin');
+
+    // MUTATION CONTROL. Flipping the negation must break this test and only this
+    // test — a gate that reads `isGranted()` without the `!` hides the product
+    // from the admin and shows it to everyone else.
+    const mutated = PDP_SRC.replace(
+        /&&\s*!\(typeof AdminPreview !== 'undefined' && AdminPreview\.isGranted\(\)\)/,
+        "&& (typeof AdminPreview !== 'undefined' && AdminPreview.isGranted())");
+    assert.notEqual(mutated, PDP_SRC, 'the mutation must actually apply — otherwise this control proves nothing');
+    assert.ok(!/&&\s*!\(typeof AdminPreview[\s\S]{0,60}isGranted\(\)\)/.test(mutated),
+        'and it must remove the negation the gate depends on');
+});
+
+test('§9 _isTestProduct treats an ABSENT admin_only as not-admin-only (ERR-234)', () => {
+    const body = stripLineComments(methodBody(PDP_SRC, '_isTestProduct(product)'));
+    assert.match(body, /product\.admin_only === true/,
+        'strict === true: absent and null are not false, and a truthy check would catch strings');
+    assert.match(body, /startsWith\('TEST-'\)/,
+        'the SKU prefix stays as the fallback for rows written before the column existed');
 });

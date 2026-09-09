@@ -10054,3 +10054,102 @@ brace-matching the function body. *A test that greps for a name proves a name.*
 
 **Files.** `inkcartridges/js/footer.js` · `inkcartridges/js/consent-banner.js` ·
 `tests/consent-mode-sep2026.test.js`.
+
+---
+
+## ERR-234 — The admin-only test product had a gate, a shipping rule and a banner, but no column, no endpoint and no way to be seen — **PARTLY RESOLVED, backend-owned** (2026-09-09)
+
+**Symptom.** The owner asked for a product only admins can see, buyable like any other, at
+"0 cost at all", for testing. The reasonable expectation was that this was new work. It was
+not: three pieces of machinery for exactly this feature already shipped, and **not one of
+them could ever fire.**
+
+| Machinery | Where | Depended on |
+|---|---|---|
+| `_isTestProduct()` | `js/product-detail-page.js:2813` | `admin_only === true` |
+| PDP visibility gate | `js/product-detail-page.js:256` | the above, **and** `isCachedSuperAdmin()` |
+| Free shipping for a test cart | `js/checkout-page.js:430,469` | a `TEST-` SKU prefix |
+| "Test Order" banner | `js/order-confirmation-page.js:343` | `orders.is_test_order` |
+
+**Cause. `products.admin_only` has never existed.** Measured against live PostgREST with a
+positive and a negative control, which is the only way to tell an empty result from an absent
+field:
+
+```
+select=sku,admin_only        -> 400  42703  column products.admin_only does not exist
+select=sku,is_active         -> 200  [{"sku":"GS0720560BK","is_active":true}]   positive control
+select=sku,zzz_not_a_column  -> 400  42703  ...does not exist                   negative control
+sku=ilike.TEST-*             -> 200  []
+```
+
+So the gate carried **three permanently-false terms**, not one: `admin_only` (a column that
+does not exist, so `undefined === true`), `isCachedSuperAdmin()` (a hard `return false` stub
+since the client-side role cache was removed), and `!this.product.active`. Three dead
+constants wearing the clothes of a feature.
+
+**Why it survived.** Each piece was individually plausible and individually correct-looking,
+and the gate was pinned by a test that asserted the **comment** rather than the behaviour
+(`catalog-edge-cache-jul2026.test.js` §9 matched `/DORMANT since ERR-124[\s\S]{0,900}BF-013/`).
+A guard whose condition can never be true is indistinguishable, from the inside, from a guard
+that simply has not had anything to guard yet — **and it passes every test you can write
+about it.** The way to tell them apart is to ask the database whether the field exists, with a
+control query beside it.
+
+**The second defect, live in production the whole time.** `_isTestProductCart()` zero-rated
+shipping *in the browser* while the backend re-prices at `POST /api/orders` and has never
+known what `TEST-` means — so for such a cart the displayed total was not the charged total.
+It also matched on `name.includes('admin test')`: **a price rule keyed on operator-editable
+product text**, so a real product called "…Admin Test Page Yield…" would have shipped free.
+Both are now gone; `cart.js:12` says the frontend never computes prices, and it now doesn't.
+
+**Design.** The public catalogue is edge-cached and **a bearer token does not change
+Cloudflare's cache key** (ERR-124), so "attach a token when the viewer is an admin" is not
+available — it is how an admin's view of a hidden row reaches a shared public entry. Instead
+the backend mirrors five catalogue routes under `/api/admin/catalog/*`, admin-gated and
+`no-store`, and `API._catalogRoute()` swaps **the path and never the query**, because a query
+param lives inside the cache-key family. Public URLs stay tokenless and never contain the row.
+
+A client-side merge was designed first and rejected: it would have meant reimplementing the
+backend's filter, rank, paginate and dedupe semantics in the browser, and `/search`
+(`shop-page.js:3465`) is already a reconciliation of two backend opinions — the scar tissue of
+ERR-133/144/222/226. A third, browser-authored opinion there was the riskiest change available.
+
+**Enrolment is in a test, not in a list.** Fourteen storefront call sites across nine files
+read the catalogue; enrolling each by hand is the failure ERR-150/160 records twice. The
+router is applied at five transports inside `api.js` plus `search.js`'s raw fetch, and
+`admin-only-test-product-sep2026.test.js` §3 fails if any of them stops consulting it.
+
+**Two tests were restated rather than relaxed.** `catalog-edge-cache-jul2026.test.js` §9 and
+`api-subdomain-cutover-may2026.test.js` §4 both forbade a bearer token outright. The property
+they defend — *no token on a URL Cloudflare caches* — is intact and now asserted precisely:
+a token is permitted only on the mirror branch, only via `_catalogRoute`, only with the routed
+endpoint, and the tests additionally assert no token is attached outside that branch. Keeping
+the old dormancy comment to keep a green bar would have left a knowingly false comment in the
+file, which is the ERR-216 failure mode, not a passing test.
+
+**Price.** "0 cost at all" is not purchasable: Stripe's published NZD minimum is **0.50**
+(docs.stripe.com/currencies, verified 2026-09-09), and a $0 total silently mounted a card form
+quoting $1.00 via `Math.round(total*100) || 100`. The product is $0.50 — exactly the floor,
+which also means **any discount makes it unchargeable**, and that failure would otherwise
+surface only after the customer authorised. `STRIPE_MIN_NZD_CENTS` now refuses it visibly.
+
+**Still open, and the feature does not work until it lands.**
+`admin-only-test-product-backend-brief-sep2026.md`: the column, exclusion from every public
+read *and* the facet counts, the sitemap and Google Shopping feed, RLS covering the four
+direct anon PostgREST reads, the mirror routes, **write-path refusal** (`POST /api/cart/items`
+takes a bare `product_id`, so hiding the row from listings does nothing on its own),
+backend-side test-cart shipping, `is_test_order`, and analytics exclusion including the
+ERR-197 cash-basis interaction. `npm run probe:admin-only` exits **2** until then — "could not
+look" is not "looked and it was fine".
+
+**Sequencing constraint.** `admin_only` must not enter any PostgREST select before the column
+exists: PostgREST answers `400/42703`, not an empty set, so a premature filter would take down
+the ribbon brand pages and the PDP enrich outright — the ERR-193 shape.
+
+**Files.** `inkcartridges/js/api.js` · `inkcartridges/js/utils.js` ·
+`inkcartridges/js/auth.js` · `inkcartridges/js/search.js` · `inkcartridges/js/shop-page.js` ·
+`inkcartridges/js/product-detail-page.js` · `inkcartridges/js/checkout-page.js` ·
+`inkcartridges/js/payment-page.js` · `inkcartridges/js/admin/pages/products.js` ·
+`tests/admin-only-test-product-sep2026.test.js` · `tests/catalog-edge-cache-jul2026.test.js` ·
+`tests/api-subdomain-cutover-may2026.test.js` · `scripts/probe-admin-only-product.mjs` ·
+`admin-only-test-product-backend-brief-sep2026.md` · `package.json`.

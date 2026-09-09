@@ -1363,7 +1363,7 @@ function openCreateProductModal(context = null) {
     ${sourcingFieldsHtml(formGroup)}
     <div class="admin-form-row">
       ${formGroup('Active', toggleHtml('edit-active', true))}
-      <div class="admin-form-group"></div>
+      ${isOwner ? formGroup('Admin only', toggleHtml('edit-admin-only', false)) : '<div class="admin-form-group"></div>'}
     </div>
   `;
 
@@ -1552,6 +1552,13 @@ function openCreateProductModal(context = null) {
       internal_notes: val('edit-admin-notes') || null,
     };
     if (isOwner) data.cost_price = parseFloat(val('edit-cost-price')) || null;
+    // admin_only (ERR-234) — sent ONLY when the owner actually ticked it, never
+    // as a default `false`. The column does not exist yet on the backend, so an
+    // unconditional field would put a brand-new key on every product create the
+    // day this ships. Ticking the box is a deliberate act; failing on it is
+    // therefore a visible failure of that act, not a silent break of everyone
+    // else's workflow.
+    if (isOwner && chk('edit-admin-only')) data.admin_only = true;
 
     const saveBtn = modal.querySelector('[data-action="create"]');
     saveBtn.disabled = true;
@@ -1709,7 +1716,7 @@ function buildProductModalTabs(modal, full, isOwner) {
     ${sourcingFieldsHtml(formGroup, full)}
     <div class="admin-form-row">
       ${formGroup('Active', toggleHtml('edit-active', full.is_active !== false), 'is_active')}
-      <div class="admin-form-group"></div>
+      ${isOwner ? formGroup('Admin only', toggleHtml('edit-admin-only', full.admin_only === true), 'admin_only') : '<div class="admin-form-group"></div>'}
     </div>
   `;
 
@@ -4000,6 +4007,16 @@ function bindProductModalActions(modal, product) {
       tags: tagsArr,
       internal_notes: val('edit-admin-notes'),
     };
+
+    // admin_only (ERR-234). On EDIT the field must be able to go both ways —
+    // an owner has to be able to turn it off again — but only once the record
+    // being edited actually carries the key, so an ordinary product save stays
+    // byte-identical until the backend column exists.
+    if (AdminAuth.isOwner() && Object.prototype.hasOwnProperty.call(product || {}, 'admin_only')) {
+      data.admin_only = chk('edit-admin-only');
+    } else if (AdminAuth.isOwner() && chk('edit-admin-only')) {
+      data.admin_only = true;
+    }
 
     if (AdminAuth.isOwner()) {
       data.cost_price = numVal('edit-cost-price');

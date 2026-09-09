@@ -255,6 +255,33 @@ const API = {
             headers['X-Guest-Session'] = guestSession;
         }
 
+        // ANALYTICS IDENTITY — DECLARED PER-HELPER, never global (BF-054 closed).
+        //
+        // The backend added X-Session-Id / X-Visitor-Id to
+        // Access-Control-Allow-Headers on 2026-09-08. Re-measured here
+        // 2026-09-09 against all three origins (apex, www, localhost:3000) WITH
+        // A NEGATIVE CONTROL: a bogus header name is not echoed back, so this is
+        // a real static allow-list and not a preflight that agrees with whatever
+        // it is asked — which is the exact trap ERR-223 recorded and the reason
+        // the note that used to sit here said curl could not adjudicate it.
+        //
+        // WHY THIS IS OPT-IN AND NOT APPLIED TO EVERY REQUEST. Either of these
+        // headers makes a GET non-simple, so the browser preflights it, and the
+        // CORS-preflight cache is keyed by FULL URL. Stamping them here
+        // unconditionally would add an OPTIONS round-trip to the Render origin
+        // for every distinct catalog and typeahead URL on the site — a
+        // site-wide latency regression bought with analytics. So enrolment is
+        // declared by the helper that wants it, exactly like `anonymous: true`
+        // above: a new identified endpoint is a decision, not an accident.
+        //
+        // Endpoints that WRITE an analytics row and are not edge-cached opt in.
+        // Edge-cached catalog reads (/api/products, /api/brands) do not: they
+        // answer from Cloudflare without reaching origin, so the header would
+        // buy nothing there and cost a preflight.
+        if (options.identify) {
+            this.identifyHeaders(headers);
+        }
+
         try {
             // noRetry is a request()-level flag (not a fetch option): callers like
             // the address-autocomplete suggestion endpoints opt out of the GET
@@ -263,7 +290,7 @@ const API = {
             // amplified one keystroke into up to 6 requests while both address
             // providers were down, draining the global limiter that also covers
             // POST /api/user/address).
-            const { noRetry, anonymous: _anon, ...fetchOpts } = options;
+            const { noRetry, anonymous: _anon, identify: _identify, ...fetchOpts } = options;
             const response = await this._fetchWithAuth(url, { ...fetchOpts, headers }, {
                 ...(noRetry ? { noRetry: true } : {}),
                 anonymous,
@@ -794,6 +821,75 @@ const API = {
     },
 
     /**
+     * The five public catalogue paths the backend mirrors under an admin-gated,
+     * uncached prefix, and nothing else (ERR-234).
+     *
+     * Deliberately an exact-match table rather than a prefix rewrite. A blanket
+     * `/api/products*` rule would also capture `/api/products/:sku/related` and
+     * `/api/products/printer/:slug`, which the backend does NOT mirror — and a
+     * request to a mirror route that does not exist would 404 an admin's page
+     * where the public route would have worked. Silence on a route nobody
+     * implemented is precisely how ERR-166 ran for months.
+     */
+    _mirrorCatalogPath(path) {
+        switch (path) {
+            case '/api/shop': return '/api/admin/catalog/shop';
+            case '/api/products': return '/api/admin/catalog/products';
+            case '/api/search/smart': return '/api/admin/catalog/search/smart';
+            case '/api/search/suggest': return '/api/admin/catalog/search/suggest';
+            default: break;
+        }
+        // /api/products/<sku> — a single trailing segment only, so
+        // /api/products/<sku>/related is left on the public route.
+        const m = /^\/api\/products\/([^/]+)$/.exec(path);
+        return m ? `/api/admin/catalog/products/${m[1]}` : null;
+    },
+
+    /**
+     * Should this catalogue read go to the public route or the admin mirror?
+     *
+     * Returns `{ endpoint, anonymous }`. The DEFAULT — and the answer for every
+     * visitor who is not a verified admin looking at a mirrored path — is the
+     * endpoint it was given, byte-identical, `anonymous: true`.
+     *
+     * WHY THE PATH AND NOT A PARAM. ERR-124: Cloudflare keys the edge cache on
+     * the full URL and a bearer token does not change that key, so an admin's
+     * view of a hidden product could be written into the SHARED public entry.
+     * A query param (`?admin=1`) lives inside that key family and would be one
+     * cache rule away from doing exactly that. A separate, never-cached path
+     * prefix cannot: the public URL stays tokenless and its response never
+     * contains the row, because the public handler never returns it.
+     *
+     * The query string is passed through untouched, so CATALOG_PARAM_ORDER's
+     * canonical serialisation is unaffected.
+     */
+    _catalogRoute(endpoint) {
+        const ep = String(endpoint == null ? '' : endpoint);
+
+        // An /api/admin/ path always needs a token. Stated first so the function
+        // is idempotent: routing an already-mirrored endpoint a second time must
+        // never downgrade it to anonymous and 401 the admin.
+        if (ep.startsWith('/api/admin/')) return { endpoint: ep, anonymous: false };
+
+        const preview = (typeof window !== 'undefined') ? window.AdminPreview : null;
+        if (!preview || typeof preview.isGranted !== 'function') {
+            return { endpoint: ep, anonymous: true };
+        }
+        // Idempotent, non-blocking, and never awaited: the caller gets the
+        // public route now, and a re-render when 'admin-preview:ready' fires.
+        if (typeof preview.ensure === 'function') preview.ensure();
+        if (!preview.isGranted()) return { endpoint: ep, anonymous: true };
+
+        const q = ep.indexOf('?');
+        const path = q === -1 ? ep : ep.slice(0, q);
+        const query = q === -1 ? '' : ep.slice(q);
+        const mirrored = this._mirrorCatalogPath(path);
+        return mirrored
+            ? { endpoint: mirrored + query, anonymous: false }
+            : { endpoint: ep, anonymous: true };
+    },
+
+    /**
      * The REAL number of products behind a brand+category link.
      *
      * WHY THIS IS NOT `getShopData`. Two reasons, both measured (ERR-215):
@@ -831,6 +927,26 @@ const API = {
     _swrCache: new Map(),
     _swrInflight: new Map(),
     SWR_TTL_MS: 60000,
+
+    /**
+     * Drop every cached catalogue response, and re-arm admin preview (ERR-234).
+     *
+     * Called when the signed-in identity changes. The SWR cache is keyed on the
+     * endpoint, so public and admin-mirror responses never share an entry — but
+     * they do share a page, and a 60s TTL outlives a sign-out. Whoever the
+     * viewer is now, they should be answered by a fresh read.
+     */
+    purgeCatalogCache() {
+        this._swrCache.clear();
+        this._swrInflight.clear();
+        const preview = (typeof window !== 'undefined') ? window.AdminPreview : null;
+        if (preview) {
+            preview.state = 'unknown';
+            preview.role = null;
+            preview._started = false;
+            preview._retried = false;
+        }
+    },
 
     /**
      * Fetch an endpoint with stale-while-revalidate semantics.
@@ -908,7 +1024,13 @@ const API = {
         // the default never applied. Removing it changes nothing at runtime but
         // stops implying that omitting `limit` and passing `limit=20` are the
         // same request — at the edge they are two different keys.
-        return this.getWithSWR(this.catalogEndpoint('/api/products', filters), { anonymous: true });
+        const ep = this.catalogEndpoint('/api/products', filters);
+        // Admin mirror when, and only when, the viewer is a verified admin and
+        // the mirror route exists (ERR-234). Everyone else takes the line below,
+        // unchanged.
+        const route = this._catalogRoute(ep);
+        if (!route.anonymous) return this.getWithSWR(route.endpoint, { anonymous: false });
+        return this.getWithSWR(ep, { anonymous: true });
     },
 
     /**
@@ -958,7 +1080,14 @@ const API = {
             && params.source !== 'genuine'
             && !params.search);
 
-        const primaryPromise = this.getWithSWR(shopEndpoint, { anonymous: true });
+        // Admin mirror (ERR-234) — same rule as getProducts. The sidecar below
+        // deliberately stays on the public route: it is a compat-recovery fetch
+        // whose rows are merged for ranking, and an admin-only row has no
+        // business entering that merge.
+        const shopRoute = this._catalogRoute(shopEndpoint);
+        const primaryPromise = shopRoute.anonymous
+            ? this.getWithSWR(shopEndpoint, { anonymous: true })
+            : this.getWithSWR(shopRoute.endpoint, { anonymous: false });
         let sidecarPromise = null;
         if (eligibleForRecovery) {
             const fbEndpoint = this.catalogEndpoint('/api/products', {
@@ -1953,11 +2082,28 @@ const API = {
      * an uncached /api/admin/ endpoint — see the backend brief.
      */
     async _rawJsonFetch(endpoint) {
-        const url = `${Config.API_URL}${endpoint}`;
+        // Both call sites — the PDP's /api/products/:sku and the search-smart
+        // SKU fallback — funnel through here, so this is the one place the
+        // admin mirror has to be applied for either of them (ERR-234).
+        const route = this._catalogRoute(endpoint);
+        const url = `${Config.API_URL}${route.endpoint}`;
         const headers = { 'Content-Type': 'application/json' };
+
+        // The mirror is admin-gated and never edge-cached, so it is the one
+        // catalogue read that must carry a token. The public route below stays
+        // exactly as tokenless as ERR-124 requires.
+        if (!route.anonymous) {
+            try {
+                const token = await this.getToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+            } catch (_) { /* fall through tokenless; the mirror will 401 */ }
+        }
 
         let res;
         try {
+            // 'omit' on BOTH paths: the public read must never carry a cookie,
+            // and the mirror authenticates by bearer token alone — a cookie
+            // would add a dimension the backend could vary on for nothing.
             res = await fetch(url, { method: 'GET', headers, credentials: 'omit' });
         } catch (err) {
             return { kind: 'network-error', error: err && err.message };
@@ -2004,6 +2150,29 @@ const API = {
      */
     async getBoughtTogether(sku) {
         return this.getPublic(`/api/products/${encodeURIComponent(sku)}/bought-together`);
+    },
+
+    /**
+     * The most-bought products in one category — the ad landing pages' shelf.
+     *
+     * ERR-236: /ink-cartridges, /toner-cartridges and /ribbons are where Google
+     * Ads lands (`buy ink cartridges` alone is 53% of spend) and all three
+     * painted a brand chooser and not one price. This endpoint has been live
+     * and answering correctly the entire time — measured 2026-09-09, 200 with
+     * real rows on all three categories, cost_price stripped, quantity_breaks
+     * present. Nothing on the frontend was asking it.
+     *
+     * getWithSWR + catalogEndpoint, deliberately. The response IS edge-cached
+     * (measured the same day: `s-maxage=300, stale-while-revalidate=600`,
+     * `vary: Origin, Accept-Encoding`), so the URL is the cache key and two
+     * spellings of one question are two entries — the ERR-124/159 hazard.
+     * catalogEndpoint fixes the param order; `anonymous: true` keeps identity
+     * off an entry that is shared with every other visitor.
+     *
+     * @param {object} params - { category: 'ink'|'toner'|'ribbons', limit }
+     */
+    async getPopularProducts(params = {}) {
+        return this.getWithSWR(this.catalogEndpoint('/api/products/popular', params), { anonymous: true });
     },
 
     /**
@@ -2463,26 +2632,39 @@ const API = {
         //  `searchConfig` was never defined anywhere; the fallback was the
         //  only branch ever taken. Inlined to its actual value.)
         //
-        // ANALYTICS JOIN KEY (data-tracking-capture aug2026 §1.1). ?sid=/?vid=
-        // carry the traffic beacon's own session/visitor ids so a search can be
-        // joined to the order it produced. Header transport is CORS-blocked —
-        // see the block comment in traffic-tracker.js. `identifyQuery` returns
-        // the object untouched when there is no id to add (DNT, /admin, private
-        // browsing), so no empty param is ever emitted, and the pair sorts into
-        // catalogEndpoint's deterministic extras tail.
+        // ANALYTICS JOIN KEY (data-tracking-capture aug2026 §1.1) — BOTH
+        // transports, on purpose. ?sid=/?vid= carry the traffic beacon's own
+        // session/visitor ids so a search can be joined to the order it
+        // produced, and `identify: true` below now also sends them as
+        // X-Session-Id / X-Visitor-Id, which the backend's CORS allow-list
+        // finally accepts (measured 2026-09-09, see request()).
+        //
+        // THE PARAMS STAY. They were the only transport for six months and
+        // `search_analytics` still shows 915 rows with zero session ids over
+        // five days, which means the params are not what the backend reads on
+        // this route — or that table is fed from somewhere else entirely. Until
+        // that is known, dropping a transport to add one would be trading a
+        // measured unknown for an unmeasured hope (ERR-158: removing a fallback
+        // is a behaviour change, not cleanup). `identifyQuery` returns the
+        // object untouched when there is no id to add (DNT, /admin, private
+        // browsing), so no empty param is ever emitted.
         //
         // ⚠️ If /api/search/smart is ever added to the Cloudflare Cache Rule,
         // these params become part of the cache key and shatter the shared entry
         // one visitor at a time. probe:data-capture §2 fails the moment
-        // cf-cache-status stops saying DYNAMIC, precisely so that is caught
-        // before it ships. Flip to headers (BF-054) first.
+        // cf-cache-status stops saying DYNAMIC. The HEADER does not have that
+        // problem — it is not part of the cache key — so that is the day to
+        // drop the params and keep the header, not before.
         const endpoint = this.catalogEndpoint('/api/search/smart', this.identifySearch({
             q: query,
             limit: opts.limit ?? 24,
             page: opts.page,
             include: opts.include || 'compat,description'
         }));
-        return this.getPublic(endpoint);
+        // Admin mirror (ERR-234). getPublic below is unchanged for everyone else.
+        const route = this._catalogRoute(endpoint);
+        if (!route.anonymous) return this.get(route.endpoint, { identify: true });
+        return this.getPublic(endpoint, { identify: true });
     },
 
     /**
@@ -2528,6 +2710,26 @@ const API = {
     },
 
     /**
+     * Stamp X-Session-Id / X-Visitor-Id onto a headers object, in place.
+     *
+     * The same null-safe forwarder shape as identifyUrl, to the same single
+     * owner of the vocabulary (js/traffic-tracker.js). The tracker validates
+     * against ID_PATTERN and suppresses its own collision sentinels before it
+     * hands anything back, so a malformed or shared id is never sent — it is
+     * not sanitised into something plausible, it is simply absent.
+     *
+     * Returns the object it was given, so a caller can spread it.
+     */
+    identifyHeaders(headers) {
+        const target = headers || {};
+        try {
+            const tt = typeof window !== 'undefined' ? window.TrafficTracker : null;
+            if (tt && typeof tt.identifyHeaders === 'function') tt.identifyHeaders(target);
+        } catch (_) { /* an id we cannot read is a gap, never an error */ }
+        return target;
+    },
+
+    /**
      * Literal-match CONTROL SET for the results page. NOT the dropdown's feed.
      *
      * The search-bar dropdown calls /api/search/smart (js/search.js), not this.
@@ -2564,7 +2766,11 @@ const API = {
         try {
             // ?sid=/?vid= — the analytics join key (see identifySearch).
             const params = this.identifySearch(new URLSearchParams({ q: query, limit: String(limit) }));
-            const res = await this.getPublic(`/api/search/suggest?${params}`);
+            // Admin mirror (ERR-234); getPublic stays the path for everyone else.
+            const suggestRoute = this._catalogRoute(`/api/search/suggest?${params}`);
+            const res = suggestRoute.anonymous
+                ? await this.getPublic(`/api/search/suggest?${params}`, { identify: true })
+                : await this.get(suggestRoute.endpoint, { identify: true });
             if (res && res.ok && res.data && Array.isArray(res.data.suggestions)) {
                 return res.data.suggestions;
             }

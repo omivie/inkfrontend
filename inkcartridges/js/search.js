@@ -171,7 +171,15 @@
     // reason the backend misidentified this surface's feed (ERR-144).
     async function fetchSmart(query, signal) {
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
-        const plain = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
+        // Admin mirror (ERR-234). This is the header dropdown — the surface the
+        // owner most wants an admin-only product to appear on — and it is a raw
+        // fetch that never enters API.request, so it has to route itself. The
+        // fallback keeps the public path when api.js has not loaded yet.
+        const path = `${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
+        const route = (typeof API !== 'undefined' && typeof API._catalogRoute === 'function')
+            ? API._catalogRoute(path)
+            : { endpoint: path, anonymous: true };
+        const plain = `${base}${route.endpoint}`;
         // ?sid=/?vid= — the analytics join key (data-tracking-capture aug2026
         // §1.1). This is the highest-volume search surface on the site, and it
         // is a raw fetch that never enters API.request, so it has to ask for the
@@ -181,8 +189,34 @@
         const url = (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyUrl)
             ? window.TrafficTracker.identifyUrl(plain)
             : plain;
-        // Public search read — cookies explicitly omitted (ERR-124).
-        const res = await fetch(url, { signal, credentials: 'omit' });
+        // Public search read — cookies explicitly omitted (ERR-124). The admin
+        // mirror authenticates by bearer token instead; cookies stay off both.
+        const headers = {};
+        if (!route.anonymous && typeof API !== 'undefined' && typeof API.getToken === 'function') {
+            try {
+                const t = await API.getToken();
+                if (t) headers['Authorization'] = `Bearer ${t}`;
+            } catch (_) { /* fall through tokenless; the mirror will 401 */ }
+        }
+        // X-Session-Id / X-Visitor-Id as well as the ?sid=/?vid= above.
+        //
+        // The backend's CORS allow-list gained both on 2026-09-08 (verified
+        // 2026-09-09 with a negative control — see api.js request()). This
+        // surface is a raw fetch that never enters API.request, so the
+        // per-helper `identify: true` enrolment there does not reach it and it
+        // has to ask for itself, exactly as it already does for the URL params.
+        //
+        // THE COST, MEASURED, because a header on a GET is never free: it makes
+        // the request non-simple, so the browser preflights it, and the
+        // CORS-preflight cache is keyed by full URL — a typeahead query is a new
+        // URL every time, so effectively every search pays one. Measured against
+        // api.inkcartridges.co.nz on 2026-09-09: OPTIONS ~280ms against a GET
+        // that is already ~3.0s, so ~9%. That is the trade, and it is one line
+        // to reverse if it ever stops being worth it.
+        if (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyHeaders) {
+            window.TrafficTracker.identifyHeaders(headers);
+        }
+        const res = await fetch(url, { signal, credentials: 'omit', headers });
         let json = null;
         try { json = await res.json(); } catch (_) { /* non-JSON body — leave null */ }
         if (!res.ok || !json || !json.ok) {

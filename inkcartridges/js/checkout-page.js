@@ -45,8 +45,7 @@
 
         // Initialize checkout page
         async init() {
-            // Clear any browser-autocompleted delivery type — user must select manually
-            document.querySelectorAll('input[name="delivery_type"]').forEach(r => r.checked = false);
+            this._normaliseDeliveryType();
 
             await this.loadCart();
             await this.checkGuestCheckoutFlag();
@@ -425,15 +424,34 @@
             this.totals.total = this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) - (this.totals.b2bDiscount || 0) + this.totals.shipping;
             this.updateTotalsDisplay();
             this.updateShippingInfo();
+            // Labels for BOTH areas, memoised on (region, cart). Not awaited: the
+            // total must not wait on a price that only decorates the choice.
+            this._refreshDeliveryPrices();
         },
 
         /**
-         * Check if cart contains ONLY test products (SKU starts with TEST- or name contains "admin test")
+         * Does this cart contain ONLY admin-only test products?
+         *
+         * LABELLING ONLY (ERR-234). This must never move a number. It used to
+         * zero-rate shipping in fetchShippingFromAPI while the backend re-priced
+         * the same cart at POST /api/orders knowing nothing about `TEST-` — so
+         * the total we displayed and the total we charged disagreed. `cart.js:12`
+         * is explicit: the frontend never computes prices. Free shipping for a
+         * test cart is the backend's to grant, and it is asked for in
+         * admin-only-test-product-backend-brief-sep2026.md §6.
+         *
+         * The `name.includes('admin test')` arm is also gone. Product names are
+         * operator-editable data, so a real product called "…Admin Test Page
+         * Yield…" would have silently priced itself differently — a rule keyed
+         * on a string nobody owns.
+         *
+         * `admin_only` is authoritative; the `TEST-` SKU prefix is the fallback
+         * for a line that predates the flag.
          */
         _isTestProductCart() {
             return this.cartItems.length > 0 && this.cartItems.every(item =>
-                (item.sku || '').toUpperCase().startsWith('TEST-') ||
-                (item.name || '').toLowerCase().includes('admin test')
+                item.admin_only === true ||
+                (item.sku || '').toUpperCase().startsWith('TEST-')
             );
         },
 
@@ -466,12 +484,14 @@
             const postalCode = document.getElementById('postcode')?.value || '';
             const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
 
-            // Test products get free shipping automatically
-            if (this._isTestProductCart()) {
-                this.totals.shipping = 0;
-                this._shippingResult = { fee: 0, tier: 'test-free', zone: '', zoneLabel: '', freeShipping: true, deliveryType: deliveryType, reason: 'Test product — free shipping' };
-                return;
-            }
+            // A test cart takes the SAME shipping path as any other cart (ERR-234).
+            //
+            // This used to `return` here with `shipping = 0`. The backend re-prices
+            // at POST /api/orders and has never known what `TEST-` means, so the
+            // figure shown here was not the figure charged. Until the backend
+            // zero-rates it (brief §6), a test purchase costs $0.50 plus real
+            // shipping — and the displayed total equals the charged total, which is
+            // the property worth keeping.
 
             // Try backend API for accurate weight-based rates (skip if no region selected)
             if (region && typeof API !== 'undefined' && this.cartItems.length > 0) {
@@ -720,9 +740,173 @@
             // Delivery type (urban/rural) change recalculates shipping
             document.querySelectorAll('input[name="delivery_type"]').forEach(input => {
                 input.addEventListener('change', () => {
+                    // A `change` event on a radio only ever comes from a person:
+                    // assigning `.checked` in script does not fire one. So this is
+                    // the honest place to record that the shopper has decided, and
+                    // from here nothing auto-selects over the top of them.
+                    this._deliveryTypeUserChosen = true;
+                    this._deliveryTypeAuto = false;
+                    this._announceDeliveryNotice('');
                     document.getElementById('delivery-type-section')?.classList.remove('needs-attention');
                     this.updateShippingCost();
                 });
+            });
+
+            // The address is evidence about the delivery area. Re-read it whenever
+            // it changes, including the parts an autocomplete fills in.
+            ['address1', 'address2', 'city'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', () => this._applyRuralHint());
+            });
+        },
+
+        /* ── Delivery area (ERR-235) ───────────────────────────────────────────
+         *
+         * Urban is pre-selected in the markup and normalised here on every load.
+         * That is not a new opinion about shipping: fetchShippingFromAPI has
+         * always read `...:checked')?.value || 'urban'` and quoted the urban rate
+         * before anyone touched the control, and so do the sessionStorage
+         * handoff, payment-page.js twice, account.js, js/shipping.js and the
+         * backend's own Joi `.default('urban')`. The page was already DISPLAYING
+         * an urban quote and then refusing to accept the state it was displaying.
+         *
+         * The line this replaced was `forEach(r => r.checked = false)`, whose
+         * stated purpose was to defeat browser autofill. That purpose is KEPT —
+         * autofill must never silently land on Rural, which costs the shopper
+         * double. What is dropped is the EMPTY state, not the defence.
+         */
+        _normaliseDeliveryType() {
+            const radios = document.querySelectorAll('input[name="delivery_type"]');
+            if (!radios.length) return;
+            radios.forEach(r => { r.checked = (r.value === DeliveryArea.URBAN); });
+            this._deliveryTypeUserChosen = false;
+            this._deliveryTypeAuto = false;
+        },
+
+        /** Select an area. Returns false when it was already selected. */
+        _setDeliveryType(value, { auto = false } = {}) {
+            const target = document.querySelector(`input[name="delivery_type"][value="${value}"]`);
+            if (!target || target.checked) return false;
+            target.checked = true;
+            this._deliveryTypeAuto = auto;
+            document.getElementById('delivery-type-section')?.classList.remove('needs-attention');
+            return true;
+        },
+
+        _announceDeliveryNotice(text) {
+            const el = document.getElementById('delivery-type-notice');
+            if (!el) return;
+            el.textContent = text || '';
+            el.hidden = !text;
+        },
+
+        /**
+         * Let the address pick the delivery area — upgrading only, never over a
+         * person, and always out loud.
+         *
+         * "RD 2" in a New Zealand address means Rural Delivery and roughly
+         * doubles the freight. One rule decides it: DeliveryArea in utils.js,
+         * the same literal admin/utils/invoice-quote.js reads, pinned equal by
+         * test.
+         *
+         * SYMMETRIC ON PURPOSE. If we set Rural from an address and the shopper
+         * then edits the RD token away, we put it back. An automatic choice that
+         * cannot be automatically withdrawn is a typo that overcharges forever.
+         * We only ever withdraw a choice WE made — `_deliveryTypeAuto`.
+         *
+         * And it is ANNOUNCED. Moving a price-affecting field silently is
+         * indistinguishable from a bug, which is the whole ERR-063/149/150
+         * family; the change belongs in the UI, not only in the payload.
+         */
+        _applyRuralHint() {
+            if (this._deliveryTypeUserChosen) return;
+
+            const text = ['address1', 'address2', 'city']
+                .map(id => document.getElementById(id)?.value || '')
+                .join(' ')
+                .trim();
+            const match = text ? DeliveryArea.RURAL_RE.exec(text) : null;
+
+            if (match) {
+                if (this._setDeliveryType(DeliveryArea.RURAL, { auto: true })) {
+                    this._announceDeliveryNotice(
+                        'We read "' + match[0] + '" in your address and selected Rural delivery, '
+                        + 'which costs more than Urban. Change it above if that is not right.');
+                    this.updateShippingCost();
+                }
+                return;
+            }
+
+            if (this._deliveryTypeAuto && this._setDeliveryType(DeliveryArea.URBAN)) {
+                this._announceDeliveryNotice('');
+                this.updateShippingCost();
+            }
+        },
+
+        /**
+         * Put a price on each delivery area — the BACKEND's price.
+         *
+         * Both figures come from POST /api/shipping/options, one call per area,
+         * so each is weight-aware and free-shipping-aware for THIS cart. The
+         * frontend never computes a price (cart.js:12); it asks twice and prints
+         * the answers. Memoised on (region, cart) so flipping between the two
+         * areas costs nothing — the prices are a property of the cart, not of
+         * which one is selected.
+         *
+         * A figure we could not get stays EMPTY, and `:empty { display: none }`
+         * removes the line. Empty reads as "not known yet"; "$0.00" would read as
+         * "free". Absence is not zero.
+         */
+        async _refreshDeliveryPrices() {
+            const labels = document.querySelectorAll('.delivery-type-option__price');
+            if (!labels.length) return;
+
+            const clear = () => labels.forEach(el => { el.textContent = ''; });
+            const region = document.getElementById('region')?.value || '';
+            if (!region || !this.cartItems.length || typeof API === 'undefined') {
+                this._deliveryPriceKey = null;
+                clear();
+                return;
+            }
+
+            const key = region + '|' + this.cartItems.map(i => `${i.id}x${i.quantity}`).join(',');
+            if (this._deliveryPriceKey === key) return;
+            this._deliveryPriceKey = key;
+
+            const items = this.cartItems.map(item => ({ product_id: item.id, quantity: item.quantity }));
+            const ask = async (deliveryType) => {
+                try {
+                    const resp = await API.getShippingOptions({
+                        cart_total: this.totals.subtotal,
+                        items,
+                        region,
+                        delivery_type: deliveryType
+                    });
+                    if (!resp.ok || !resp.data) return null;
+                    const option = resp.data.selected || resp.data.options?.[0];
+                    return (option && option.fee != null && Number.isFinite(Number(option.fee)))
+                        ? Number(option.fee)
+                        : null;
+                } catch (e) {
+                    DebugLog.warn(`Delivery-area price lookup failed for ${deliveryType}:`, e.message);
+                    return null;
+                }
+            };
+
+            const [urban, rural] = await Promise.all([
+                ask(DeliveryArea.URBAN), ask(DeliveryArea.RURAL)
+            ]);
+
+            if (urban == null && rural == null) {
+                // Nothing was answered — do not hold the key, so the next
+                // recalculation tries again instead of caching a silence.
+                this._deliveryPriceKey = null;
+            }
+
+            const priced = { urban, rural };
+            labels.forEach(el => {
+                const fee = priced[el.dataset.deliveryPrice];
+                el.textContent = fee == null ? '' : (fee === 0 ? 'FREE' : formatPrice(fee));
             });
         },
 
@@ -820,6 +1004,17 @@
                         el.value = state[field];
                     }
                 });
+
+                // The delivery area rides in `checkoutData` as `deliveryType`
+                // (see the save at the end of handleContinueToPayment) and was
+                // never read back, so a shopper who reached /payment and tapped
+                // back silently lost a price-affecting choice and got Urban
+                // again. It is a deliberate choice once restored, so nothing
+                // auto-selects over it.
+                if (state.deliveryType) {
+                    this._setDeliveryType(state.deliveryType);
+                    this._deliveryTypeUserChosen = true;
+                }
 
                 // Restore billing toggle (invert sameAsShipping → differentBilling)
                 const differentBillingCb = document.getElementById('different-billing');
@@ -1992,7 +2187,14 @@
                         const container = field.closest('.delivery-type-options') || field.closest('.form-group');
                         if (container) {
                             container.classList.add('is-error');
-                            if (!container.querySelector('.form-error')) {
+                            // Ask the element we APPEND to, not the one we search
+                            // from. This read `container.querySelector` while
+                            // appending to `container.parentElement`, so the guard
+                            // could never see the message it had just created and
+                            // stacked a fresh "Please select an option" on every
+                            // failed click. The sibling copy in
+                            // _validateAccordionSection always had this right.
+                            if (!container.parentElement.querySelector('.form-error')) {
                                 const errorMsg = document.createElement('div');
                                 errorMsg.className = 'form-error';
                                 errorMsg.textContent = 'Please select an option';
@@ -2382,7 +2584,18 @@
                 }
             });
 
-            // Do NOT auto-select delivery type — user must choose urban/rural manually
+            // A saved address now carries a REAL delivery_type. It used to carry
+            // 'urban' unconditionally — account.js read a radio group that does
+            // not exist on the addresses form and fell through to `|| 'urban'`
+            // every time (ERR-235), which is why this line used to refuse it.
+            // The control exists now, so the value means something.
+            if (address.delivery_type) {
+                this._setDeliveryType(address.delivery_type);
+            }
+            // Still let the address text speak: it can upgrade Urban to Rural on
+            // an RD token, and it will not override the value above unless the
+            // address itself says rural.
+            this._applyRuralHint();
 
             this.updateShippingCost();
         },
@@ -2446,7 +2659,13 @@
         // checkout and the account addresses modal can't drift.
         initAddressAutocomplete() {
             if (typeof AddressAutocomplete === 'undefined') return;
-            const onApply = () => this.updateShippingCost?.();
+            const onApply = () => {
+                // An autocomplete apply is an address change; it just does not
+                // fire `change` on the inputs it fills. Read the RD token here
+                // too or a rural address picked from the dropdown reads as urban.
+                this._applyRuralHint?.();
+                this.updateShippingCost?.();
+            };
             AddressAutocomplete.attach('address1', {
                 line1: 'address1',
                 line2: 'address2',

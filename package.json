@@ -25,6 +25,7 @@
     "probe:chip-grouping": "node scripts/probe-lexmark-chip-grouping.mjs",
     "probe:catalogue-pathway": "node scripts/probe-catalogue-pathway.mjs",
     "probe:lookalike": "node scripts/probe-lookalike-rows.mjs",
+    "probe:supplier-freight": "node scripts/probe-supplier-freight.mjs",
     "probe:supplier-prices": "node scripts/probe-supplier-prices.mjs",
     "probe:ribbon-brands": "node scripts/probe-ribbon-brands.mjs",
     "verify:business": "node scripts/verify-business-centre.mjs",
@@ -52,7 +53,9 @@
     "probe:search-packs": "node scripts/probe-search-value-pack-ranking.mjs",
     "probe:search-columns": "node scripts/probe-search-dropdown-columns.mjs",
     "probe:qty-typing": "node scripts/probe-qty-typing.mjs",
-    "probe:shop-columns": "node scripts/probe-shop-source-columns.mjs"
+    "probe:shop-columns": "node scripts/probe-shop-source-columns.mjs",
+    "probe:admin-only": "node scripts/probe-admin-only-product.mjs",
+    "probe:mobile-ux": "node scripts/probe-mobile-ux.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

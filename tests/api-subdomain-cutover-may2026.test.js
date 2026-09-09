@@ -188,10 +188,32 @@ test('§4 the raw JSON read is anonymous by contract — no token, no cookies', 
     /credentials:\s*['"]omit['"]/,
     '_rawJsonFetch must unconditionally omit cookies — /api/products/:sku is edge-cached'
   );
-  assert.ok(
-    !/Authorization/.test(fn),
-    '_rawJsonFetch must not attach a bearer token: it does not change Cloudflare\'s cache key, so an authed body could land in the SHARED public entry (ERR-124)'
-  );
+  // A token is permitted on ONE path and one only: the admin catalogue mirror
+  // (ERR-234), which is a different prefix that is never edge-cached. The rule
+  // this test defends is unchanged — no token may ride a URL Cloudflare caches —
+  // but the public URL is now chosen by _catalogRoute rather than being the only
+  // URL this function can build, so the assertion has to say which URL it means.
+  if (/Authorization/.test(fn)) {
+    assert.match(
+      fn,
+      /const route = this\._catalogRoute\(endpoint\);/,
+      '_rawJsonFetch may only reach a tokened URL through _catalogRoute'
+    );
+    assert.match(
+      fn,
+      /if \(!route\.anonymous\) \{[\s\S]{0,200}Authorization/,
+      'the token must be attached ONLY on the non-anonymous (mirror) branch'
+    );
+    assert.match(
+      fn,
+      /\$\{Config\.API_URL\}\$\{route\.endpoint\}/,
+      'and the URL must come from the routed endpoint, never the raw one'
+    );
+    assert.ok(
+      !/headers\['Authorization'\]\s*=\s*`Bearer/.test(fn.replace(/if \(!route\.anonymous\)[\s\S]*?\n        \}/, '')),
+      'no token may be attached outside that branch'
+    );
+  }
 });
 
 // ───────────────────────────────────────────────────────────────────────────
