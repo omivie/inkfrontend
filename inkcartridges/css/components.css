@@ -4324,6 +4324,17 @@ label.form-label--checkbox {
 
 /* The filter sheet's checkboxes are bare `input[type=checkbox]` with no
    .form-checkbox class, so the rule above never reached them. */
+/* And the sheet's labels carry the target, for the same reason the checkout's
+   do: an <input> is a replaced element and cannot host a ::after hit area. The
+   ::after below is kept because it costs nothing and documents the attempt, but
+   the LABEL is what actually makes these reachable. */
+.filter-sort-sheet label,
+.filter-sort-sheet .filter-sort-sheet__option {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+}
+
 .filter-sort-sheet input[type="checkbox"],
 .filter-sort-sheet input[type="radio"] {
     width: 24px;

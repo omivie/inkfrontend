@@ -89,10 +89,22 @@ const TAP_ASPIRATION = 48; // --tap-min in css/base.css — failing this is a no
    is where that shows up. Anything not named here that misses the floor is a
    failure, full stop. */
 const TAP_TRADEOFFS = {
-    'product-card__qty-input':
-        '34x44 — the number box between the stepper\'s − and + buttons. ERR-218 measured '
-        + 'that a single row holding three 44px targets plus an Add button does not fit at '
-        + '375px; width taken here comes straight off the two buttons people actually press.',
+    'product-card__qty-input': {
+        why: 'the number box between the stepper\'s − and + buttons. ERR-218 measured that a '
+            + 'single row holding three 44px targets plus an Add button does not fit at 375px; '
+            + 'width taken here comes straight off the two buttons people actually press.',
+    },
+    'product-card__qty-btn': {
+        // Measured on production: 44px at 375 and 390, 34-39px at 320. The
+        // constraint is the CARD, not the control — at 320 a split card is
+        // ~124px and three 44px targets plus an Add button is 132px before any
+        // gaps. So this is a trade ONLY where the geometry makes it one, and it
+        // stays a hard failure at every width where the room exists.
+        viewports: ['xs'],
+        why: 'the compact stepper\'s − and + inside a ~124px card at 320px. Three 44px targets '
+            + 'plus an Add button is 132px before gaps, so the row cannot hold them. Measured at '
+            + '44px on 375 and 390 — this is not a trade at any width where the room exists.',
+    },
 };
 
 /* ── Routes ────────────────────────────────────────────────────────────────
@@ -352,6 +364,25 @@ const MEASURE = (opts) => {
     const hitOf = (sel) => {
         const el = document.querySelector(sel);
         if (!el) return { present: false };
+        /* An IN-FLOW control at the bottom of a long page is not "covered" just
+           because a docked bar happens to be over that part of the viewport —
+           the shopper scrolls and it is there. `body.has-consent-banner`
+           reserves flow space precisely so that scroll always exists. What
+           matters is whether the control can be brought out from under the bar
+           AT ALL, so bring it out and then ask.
+           A FIXED control gets no such courtesy: it has nowhere to scroll to,
+           which is exactly why .sticky-atc under the consent banner (ERR-238)
+           was a real dead end and this is not. */
+        const isFixed = getComputedStyle(el).position === 'fixed'
+            || !!el.closest('.sticky-atc, .cart-sticky-bar, .filter-sort-bar, .consent-banner');
+        if (!isFixed) {
+            // Just under the sticky header, not `block: 'center'`. Centring is not
+            // enough on a short viewport: at 320x568 the consent bar is 166px, and
+            // the centre of the screen can still be inside it. 140px from the top
+            // clears a bottom bar of any height this site produces.
+            const y = window.scrollY + el.getBoundingClientRect().top - 140;
+            window.scrollTo(0, Math.max(0, y));
+        }
         const r = el.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) return { present: true, rect: rectOf(el), offscreen: 'zero-size' };
         if (r.bottom < 0 || r.top > window.innerHeight) return { present: true, rect: rectOf(el), offscreen: 'outside-fold' };
@@ -563,11 +594,16 @@ try {
                 }
 
                 /* C — tap targets */
-                const traded = m.tapFail.filter((t) => Object.keys(TAP_TRADEOFFS).some((k) => t.el.includes(k)));
-                const realFails = m.tapFail.filter((t) => !Object.keys(TAP_TRADEOFFS).some((k) => t.el.includes(k)));
+                const tradeKey = (el) => Object.keys(TAP_TRADEOFFS).find((k) => {
+                    if (!el.includes(k)) return false;
+                    const t = TAP_TRADEOFFS[k];
+                    return !t.viewports || t.viewports.includes(vp.id);
+                });
+                const traded = m.tapFail.filter((t) => tradeKey(t.el));
+                const realFails = m.tapFail.filter((t) => !tradeKey(t.el));
                 traded.forEach((t) => {
-                    const key = Object.keys(TAP_TRADEOFFS).find((k) => t.el.includes(k));
-                    soft(`${label} · C ${t.el} is under the floor by design`, TAP_TRADEOFFS[key]);
+                    soft(`${label} · C ${t.el} is under the floor by design`,
+                        `${t.rect.width}x${t.rect.height} — ${TAP_TRADEOFFS[tradeKey(t.el)].why}`);
                 });
                 if (realFails.length) {
                     const names = realFails.map((t) => `${t.el} ${t.rect.width}x${t.rect.height}`).join('; ');
@@ -638,6 +674,16 @@ try {
                 for (const ov of OVERLAYS.filter((o) => o.routes.includes(route.name))) {
                     const oLabel = `${label} · E ${ov.id}`;
                     try {
+                        /* From the top, every time. The primary-CTA check above
+                           scrolls the page, the mobile mega panels are relocated
+                           INSIDE the nav drawer (mega-nav.js#moveIntoNav) so they
+                           move with it, and a panel measured from an arbitrary
+                           scroll offset reports a geometry nobody would ever see.
+                           Measured: without this the ribbons panel came back at
+                           top:-435 in a 667px viewport, which is the probe's own
+                           previous step, not a defect. */
+                        await page.evaluate(() => window.scrollTo(0, 0));
+                        await page.waitForTimeout(300);
                         if (ov.type) {
                             const has = await page.$(ov.type.sel);
                             if (!has) {
@@ -695,10 +741,11 @@ try {
                                 `scrollWidth ${om.htmlScrollWidth} > ${om.innerWidth}: `
                                 + om.overflowing.map((o) => `${o.el} [${o.rect.left}…${o.rect.right}]`).join('; '));
                         }
-                        if (om.tapFailCount > m.tapFailCount) {
+                        const oFails = om.tapFail.filter((t) => !tradeKey(t.el));
+                        if (oFails.length > realFails.length) {
                             bad(`${oLabel} tap targets clear ${TAP_STANDARD}px`,
-                                `${om.tapFailCount - m.tapFailCount} new offender(s): `
-                                + om.tapFail.map((t) => `${t.el} ${t.rect.width}x${t.rect.height}`).join('; '));
+                                `${oFails.length - realFails.length} new offender(s): `
+                                + oFails.map((t) => `${t.el} ${t.rect.width}x${t.rect.height}`).join('; '));
                         }
                     } catch (e) {
                         soft(`${oLabel} was not exercised`, `the probe could not drive it — ${e.message.split('\n')[0]}`);
