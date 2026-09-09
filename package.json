@@ -45,6 +45,7 @@
     "probe:qty-breaks": "node scripts/probe-qty-breaks.mjs",
     "probe:admin-products": "node scripts/probe-admin-products-filters.mjs",
     "probe:add-to-cart": "node scripts/probe-add-to-cart-tracking.mjs",
+    "probe:public-surface": "node scripts/probe-public-surface.mjs",
     "probe:payment-csp": "node scripts/probe-payment-csp.mjs",
     "probe:mobile-checkout-fold": "node scripts/probe-mobile-checkout-fold.mjs",
     "probe:search-packs": "node scripts/probe-search-value-pack-ranking.mjs",

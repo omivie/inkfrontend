@@ -192,6 +192,34 @@ test('§2 the admin gate still redirects, and still lets a cookied request throu
   assert.equal(cookied, undefined, 'a cookied /admin must fall through to the SPA, not 404');
 });
 
+// ── §2b. Every probe is actually reachable ────────────────────────────────
+
+test('§2b every scripts/probe-*.mjs is registered as an npm script, and vice versa', () => {
+  // probe:public-surface was written, committed, and then silently lost from
+  // package.json when a concurrent session reconciled the same file. The script
+  // file was still there; only the one line that made it runnable was gone, and
+  // nothing failed — `npm run probe:public-surface` just said "Missing script".
+  //
+  // "Every probe is registered" is a list nobody maintains unless a test holds
+  // it, which is the same lesson as the volume-pricing enrolment (ERR-150/160).
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const registered = new Set(
+    Object.values(pkg.scripts || {})
+      .map((cmd) => (cmd.match(/scripts\/([\w-]+\.mjs)/) || [])[1])
+      .filter(Boolean)
+  );
+  const onDisk = fs.readdirSync(path.join(ROOT, 'scripts'))
+    .filter((n) => n.startsWith('probe-') && n.endsWith('.mjs'));
+
+  const unreachable = onDisk.filter((n) => !registered.has(n));
+  assert.deepEqual(unreachable, [],
+    'these probes exist but no npm script runs them, so nobody will:\n  ' + unreachable.join('\n  '));
+
+  const missingFile = [...registered].filter((n) => !fs.existsSync(path.join(ROOT, 'scripts', n)));
+  assert.deepEqual(missingFile, [],
+    'these npm scripts point at a file that does not exist:\n  ' + missingFile.join('\n  '));
+});
+
 // ── §3. The rule is stated where someone would look for it ─────────────────
 
 test('§3 the SQL that survived still documents why it is not in the web root', () => {

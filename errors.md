@@ -9673,6 +9673,16 @@ publishing directory, not a project directory. Enforced by `tests/public-surface
 the only reason to trust it green after. The test proves the repo; only the probe proves the
 deployment, and this project spent two months with a green repo and an exposed deployment.
 
+**Postscript — the probe was silently unrunnable for a while.** `probe:public-surface`
+was written and committed, and then its one line in `package.json` disappeared when a
+concurrent session reconciled the same file. The script file was still there; only the
+line that made it runnable was gone, and nothing failed — `npm run probe:public-surface`
+just answered *"Missing script"*. **A probe nobody can run is a probe that does not
+exist**, and "every probe is registered" is a list nobody maintains. `§2b` of
+`tests/public-surface-sep2026.test.js` now holds every `scripts/probe-*.mjs` to having an
+npm script, and every npm script to having a file. Same lesson as ERR-150/160: put
+enrolment in a test.
+
 **Files.** `sql/*` (moved, 5) · `scripts/{fit-audit.js,canonicalise-page-copy.mjs}` (moved) ·
 `inkcartridges/middleware.js` · `package.json` · `tests/analytics-function-grants.test.js`
 (inverted) · `tests/public-surface-sep2026.test.js` (new) · `scripts/probe-public-surface.mjs`
