@@ -577,6 +577,126 @@
       window.___gcfg = { lang: 'en_NZ' };
       var originalOptIn = window.renderOptIn;
 
+      /* ERR-233 — publish the badge's FOOTPRINT so other fixed UI can sit clear
+         of it.
+         ------------------------------------------------------------------
+         Google's platform.js pins this div to the bottom-right corner at
+         z-index 2147483647 (the 32-bit maximum — nothing can be layered above
+         it), and it covered 70 of the 86px of the consent banner's Accept
+         button, which was therefore unclickable on every desktop. The fix is
+         for the bar to reserve the badge's width, and the width has to be
+         MEASURED: 86px is Google's number to change, not ours.
+
+         This is published from here, next to the render call, because this is
+         the code that creates the badge. The consent banner spends
+         --google-badge-width in CSS and needs to know nothing about Google.
+
+         TIMING IS THE WHOLE DIFFICULTY. The mount div is in the footer template
+         above, so it exists immediately at 0x0, and platform.js is async: Google
+         sizes it to 86x64 roughly 1.4s later. A single measurement taken now
+         reads 0 and fixes nothing. So we OBSERVE the element rather than
+         measuring it once — and we observe the element rather than hooking a
+         render callback, because ratingbadge.render is called from two branches
+         below and a hook on one of them would drift from the other.
+
+         The 0-width case is not a failure and must not be treated as one:
+         Google renders the badge 0x0 on narrow viewports, so the observer firing
+         with width 0 is how mobile correctly reserves nothing, with no
+         breakpoint anywhere in this file. */
+      function publishBadgeFootprint(el) {
+        try {
+          if (!el) return;
+          var r = el.getBoundingClientRect();
+
+          /* GATE ON position:fixed, NOT on the width being non-zero.
+             Until platform.js styles it, this mount is an ordinary empty
+             block-level div sitting in the footer: HEIGHT 0 but FULL WIDTH.
+             `npm run probe:consent-banner` caught this publishing
+             --google-badge-width: 1512px for the ~1.4s before Google arrives,
+             which put a 1536px padding-right on the consent bar and squeezed its
+             contents to nothing. A zero-height element is not a widget, and its
+             width is not a measurement of anything.
+             Google makes the badge `position: fixed` when it renders it, so that
+             is the honest question to ask: is this the floating corner widget
+             yet? Before it is, the answer we publish is 0 — which is also the
+             right answer on a phone, where Google renders it 0x0 for good. */
+          var fixed = window.getComputedStyle(el).position === 'fixed';
+          var w = (fixed && r.height > 0) ? Math.ceil(r.width) : 0;
+          var h = (fixed && r.height > 0) ? Math.ceil(r.height) : 0;
+
+          document.documentElement.style.setProperty('--google-badge-width', w + 'px');
+          document.documentElement.style.setProperty('--google-badge-height', h + 'px');
+        } catch (_) {
+          /* Never let a measurement throw into the footer. Leaving the property
+             unset is the honest outcome: the CSS falls back to 0px, which is
+             correct, because a badge we cannot measure is a badge that is not
+             there. */
+        }
+      }
+
+      /* Google does not size this badge once. Traced against the live site, the
+         box goes:
+
+             0.0s   1512x0    position:static   (our empty mount div)
+             1.0s   2x2       fixed, iframe parked at top:-10000px
+             3.0s   450x150
+             3.5s   614x64
+             6.5s   86x64     final
+
+         Publishing every one of those would walk the consent bar's padding-right
+         from 26px to 474px to 638px and back to 110px over three and a half
+         seconds, sliding the buttons across the screen while someone is reaching
+         for them. So settle first and publish once: only a size that has held
+         still is worth spending.
+
+         Waiting costs nothing, because the padding is not what makes the button
+         clickable — the badge-lift rule in components.css does that from the
+         moment the bar appears, and it needs no measurement of Google's at all.
+         This half is the layout, and layout can afford to wait for a real
+         number rather than react to a loading animation. */
+      var settleTimer;
+      function publishWhenSettled(el) {
+        clearTimeout(settleTimer);
+        settleTimer = setTimeout(function () { publishBadgeFootprint(el); }, 400);
+      }
+
+      function watchBadgeFootprint() {
+        var el = document.getElementById('google-reviews-badge');
+        if (!el) return;
+        publishWhenSettled(el);
+
+        if (typeof ResizeObserver === 'function') {
+          /* Fires on every step of the sequence above, and again on the
+             86 -> 0 transition when the viewport narrows to a phone. The
+             debounce collapses each burst to its resting value. */
+          try {
+            new ResizeObserver(function () { publishWhenSettled(el); }).observe(el);
+            return;
+          } catch (_) { /* fall through to the poll */ }
+        }
+
+        /* No ResizeObserver: poll for the CONDITION with a deadline, never sleep
+           a guessed interval and hope Google has finished by then. */
+        var deadline = Date.now() + 15000;
+        var last = null;
+        var timer = setInterval(function () {
+          var r = el.getBoundingClientRect();
+          var key = Math.round(r.width) + 'x' + Math.round(r.height);
+          /* Same rule as the debounce above: publish a size only once it has
+             held still for a tick, so the 450 -> 614 -> 86 walk never reaches
+             the bar. Runs to the deadline rather than stopping at the first
+             stable value, because 2x2 holds still for two seconds before Google
+             expands it. */
+          if (key === last) publishBadgeFootprint(el);
+          last = key;
+          if (Date.now() > deadline) clearInterval(timer);
+        }, 400);
+
+        window.addEventListener('resize', function () { publishWhenSettled(el); });
+      }
+
+      watchBadgeFootprint();
+
       window.renderOptIn = function () {
         // Badge on all pages
         window.gapi.load('ratingbadge', function () {

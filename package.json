@@ -47,6 +47,7 @@
     "probe:add-to-cart": "node scripts/probe-add-to-cart-tracking.mjs",
     "probe:public-surface": "node scripts/probe-public-surface.mjs",
     "probe:payment-csp": "node scripts/probe-payment-csp.mjs",
+    "probe:consent-banner": "node scripts/probe-consent-banner.mjs",
     "probe:mobile-checkout-fold": "node scripts/probe-mobile-checkout-fold.mjs",
     "probe:search-packs": "node scripts/probe-search-value-pack-ranking.mjs",
     "probe:search-columns": "node scripts/probe-search-dropdown-columns.mjs",
