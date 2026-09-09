@@ -2153,7 +2153,7 @@ const API = {
     },
 
     /**
-     * The admin-authored "FOR USE IN" machine list for one product (ERR-241).
+     * The admin-authored "FOR USE IN" machine list for one product (ERR-243).
      *
      * Replaces a direct PostgREST read of `products.compatible_devices_html`
      * with the anon key. That read was bulk-dumpable: drop the `sku=eq.` filter

@@ -53,11 +53,16 @@ function loadUtilsHelpers() {
     // we can `with`/eval the helpers in a tiny sandbox.
     const slugifySrc = UTILS.match(/function\s+slugifyBrand\s*\([\s\S]*?\n\}/)[0];
     const buildSrc = UTILS.match(/function\s+buildPrinterUrl\s*\([\s\S]*?\n\}\n/)[0];
+    // buildPrinterUrl routes its slug through PrinterSlug.canonical (ERR-242),
+    // so the sandbox needs the real table. Injecting it rather than stubbing it
+    // is deliberate: these five payload-shape tests then also prove the
+    // duplicate-slug mapping survives every shape a caller passes in.
+    const printerSlugSrc = UTILS.match(/const PrinterSlug = \{[\s\S]*?\n\};/)[0];
     // eslint-disable-next-line no-new-func
-    const factory = new Function(`${slugifySrc}\n${buildSrc}\nreturn { slugifyBrand, buildPrinterUrl };`);
+    const factory = new Function(`${printerSlugSrc}\n${slugifySrc}\n${buildSrc}\nreturn { slugifyBrand, buildPrinterUrl, PrinterSlug };`);
     return factory();
 }
-const { slugifyBrand, buildPrinterUrl } = loadUtilsHelpers();
+const { slugifyBrand, buildPrinterUrl, PrinterSlug } = loadUtilsHelpers();
 
 // ────────────────────────────────────────────────────────────────────────
 // Item 1 — /brand/<slug> 301-redirects to /shop?brand=<slug>

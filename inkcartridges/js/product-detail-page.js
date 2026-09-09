@@ -239,10 +239,24 @@
 
                 this.product = response.data;
 
-                // Enrich products from Supabase (description, compatibility, related products).
+                // The "FOR USE IN" list, in flight ALONGSIDE the Supabase enrich
+                // below rather than after it (ERR-243). Both are needed before
+                // render, so awaiting them in series would have made the cutover
+                // cost a round trip; started here, it costs none.
+                const forUseInPromise = this._fetchForUseIn(sku);
+
+                // Enrich products from Supabase (description, related products).
                 // Also pull `id` so we can honour the manual product_codes override below.
+                //
+                // `compatible_devices_html` is DELIBERATELY NOT in this select
+                // (ERR-243). It is the admin-authored machine list, and read this
+                // way it was bulk-dumpable — drop the `sku=eq.` filter and every
+                // list came back in one request, with the anon key that ships in
+                // the page. It now comes from /api/products/:sku/for-use-in above.
+                // Backend migration 132 drops the column; do not re-add it here,
+                // and note the request will simply stop returning it when they do.
                 try {
-                    const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=id,description_html,compatible_devices_html,related_product_skus&limit=1`;
+                    const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=id,description_html,related_product_skus&limit=1`;
                     const enrichResp = await fetch(enrichUrl, {
                         headers: {
                             'apikey': Config.SUPABASE_ANON_KEY,
@@ -255,11 +269,12 @@
                         if (extra) {
                             if (this.product.id == null) this.product.id = extra.id;
                             if (this.product.description_html == null) this.product.description_html = extra.description_html;
-                            if (this.product.compatible_devices_html == null) this.product.compatible_devices_html = extra.compatible_devices_html;
                             if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
                         }
                     }
                 } catch (_) { /* non-critical enrichment */ }
+
+                await forUseInPromise;
 
                 // Honour the manual product_codes override on the PDP. The /shop merge
                 // (api.js _applyManualCodes) only runs on getShopData, so a singly-loaded
@@ -1684,14 +1699,81 @@
             return false;
         },
 
+        /**
+         * Fetch the "FOR USE IN" list, and record WHICH of three things happened.
+         *
+         * ERR-243. This replaced a direct PostgREST read of
+         * `products.compatible_devices_html` with the page's anon key. That read
+         * answered `null` for a product with no list and `null` for a read that
+         * failed, and the renderer could not tell them apart — on a ribbon PDP,
+         * which shows NOTHING without this copy (ERR-086), both painted an
+         * identical blank page. That is ERR-193's shape exactly: a failed read
+         * printing the empty-shelf copy, on 63 pages, for 44 hours, silently.
+         *
+         * So the three outcomes are kept distinct and the state is recorded:
+         *
+         *   'ok'          the endpoint returned a list        → render it
+         *   'none'        the endpoint returned null          → there IS no list
+         *   'unavailable' 429 / 5xx / network / bad envelope  → WE DO NOT KNOW
+         *
+         * 'unavailable' is not 'none'. Absence-as-zero is the family behind
+         * ERR-063/068/073/075/076/149/150 and it is refused here.
+         *
+         * The state is mirrored onto <html data-for-use-in> because there is no
+         * other alarm available: raw `console.*` is banned (ERR-214) and
+         * `DebugLog` is a no-op off localhost (ERR-193), so in production the
+         * attribute IS the signal, and `npm run probe:for-use-in` is what reads
+         * it. One retry first — the 40/min limiter is the likeliest cause and it
+         * clears in under a minute.
+         */
+        async _fetchForUseIn(sku) {
+            const set = (state, html) => {
+                this._forUseIn = { state, html: html || null };
+                try { document.documentElement.setAttribute('data-for-use-in', state); } catch (_) { /* no DOM */ }
+                return this._forUseIn;
+            };
+
+            const ask = async () => {
+                // API.request() THROWS on network failure rather than answering a
+                // falsy envelope (ERR-216: the same assumption made a fallback
+                // dead code), so the try/catch is load-bearing, not decorative.
+                try {
+                    const resp = await API.getForUseIn(sku);
+                    if (!resp || resp.ok !== true || !resp.data) return { failed: true };
+                    // hasOwnProperty, not `?? null`: ABSENT and null are different
+                    // answers and only one of them means "no list" (ERR-199).
+                    if (!Object.prototype.hasOwnProperty.call(resp.data, 'for_use_in_html')) return { failed: true };
+                    return { failed: false, html: resp.data.for_use_in_html };
+                } catch (_) {
+                    return { failed: true };
+                }
+            };
+
+            let out = await ask();
+            if (out.failed) out = await ask();
+
+            if (out.failed) {
+                if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                    DebugLog.warn('for-use-in unavailable after retry', { sku });
+                }
+                return set('unavailable', null);
+            }
+            const html = typeof out.html === 'string' && out.html.trim() ? out.html : null;
+            return set(html ? 'ok' : 'none', html);
+        },
+
         async renderCompatiblePrinters(info) {
-            // If product has admin-provided compatible devices HTML, render into left column
-            if (info.compatible_devices_html) {
-                const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
+            // The admin-authored machine list, from /api/products/:sku/for-use-in
+            // (ERR-243). `_fetchForUseIn` ran in parallel with the Supabase enrich
+            // during load, so this is already resolved; the `|| {}` covers a
+            // renderer called on a path that did not load (tests, re-render).
+            const forUseIn = this._forUseIn || {};
+
+            if (forUseIn.state === 'ok' && forUseIn.html) {
                 const html = `
-                    <div class="product-compat-devices">
+                    <div class="product-compat-devices" data-for-use-in-state="ok">
                         <h2 class="product-compat-devices__title">FOR USE IN:</h2>
-                        <div class="product-compat-devices__content">${info.compatible_devices_html}</div>
+                        <div class="product-compat-devices__content">${forUseIn.html}</div>
                     </div>`;
                 const leftCol = document.getElementById('ribbon-col-left');
                 if (leftCol) {
@@ -1701,9 +1783,43 @@
                 return;
             }
 
+            // COULD NOT ASK — and for a ribbon this block is the page's substance,
+            // so say so rather than painting a blank that reads as "fits nothing".
+            // Non-ribbons fall through to the compatibility fallbacks below and
+            // lose nothing, so they get no notice.
+            if (forUseIn.state === 'unavailable' && info.category === 'ribbon') {
+                const html = `
+                    <div class="product-compat-devices" data-for-use-in-state="unavailable">
+                        <h2 class="product-compat-devices__title">FOR USE IN:</h2>
+                        <div class="product-compat-devices__content">
+                            <p>We couldn't load the machine list for this ribbon just now.</p>
+                            <button type="button" class="btn btn--secondary" id="for-use-in-retry">Try again</button>
+                        </div>
+                    </div>`;
+                const leftCol = document.getElementById('ribbon-col-left');
+                if (leftCol) {
+                    leftCol.insertAdjacentHTML('beforeend', html);
+                    document.getElementById('ribbon-detail-columns').hidden = false;
+                    const retry = document.getElementById('for-use-in-retry');
+                    if (retry) {
+                        retry.addEventListener('click', async () => {
+                            retry.disabled = true;
+                            retry.textContent = 'Loading…';
+                            await this._fetchForUseIn(info.sku);
+                            const block = retry.closest('.product-compat-devices');
+                            if (block) block.remove();
+                            await this.renderCompatiblePrinters(info);
+                        });
+                    }
+                }
+                return;
+            }
+
             // Ribbons are OWNER-MANUAL (ribbon-manual directive, ERR-086): the
             // "FOR USE IN" block is only ever the admin-written
-            // compatible_devices_html above. With no such copy we show NOTHING —
+            // list from /api/products/:sku/for-use-in (ERR-243), handled above.
+            // With no such copy — state 'none', meaning the endpoint ANSWERED and
+            // said there is no list — we show NOTHING;
             // never auto-derive a compatible-printer list from the backend
             // product_compatibility join (that fallback runs below for
             // non-ribbons only). Search still indexes ribbon compatibility

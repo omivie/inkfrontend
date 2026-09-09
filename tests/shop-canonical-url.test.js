@@ -59,15 +59,29 @@ test('shop-page.js lowercases brand/category/printer_slug in canonical', () => {
     // /shop?brand=canon as separate URLs.
     assert.match(SHOP_JS, /const\s+lc\s*=\s*\(v\)\s*=>\s*\(v\s*==\s*null\s*\?\s*v\s*:\s*String\(v\)\.toLowerCase\(\)\)/,
         'shop-page.js must define an lc() lowercaser for canonical params');
-    assert.match(SHOP_JS, /params\.set\(\s*['"]brand['"]\s*,\s*lc\(brand\)\s*\)/,
+    // ERR-242 widened the source expression: a printer URL with no explicit
+    // ?brand= now recovers the brand from state.printerBrand, because the
+    // unbranded form is not a canonical shape (middleware.js gates the printer
+    // prerender on brandSlug && printerSlug). The lc() wrap — which is what
+    // this test is actually about — is unchanged on both inputs.
+    assert.match(SHOP_JS, /params\.set\(\s*['"]brand['"]\s*,\s*lc\(brand \|\| printerBrand\)\s*\)/,
         'canonical brand param must be lowercased');
+    assert.match(SHOP_JS, /const printerBrand = printerSlug \? \(this\.state\.printerBrand \|\| brand \|\| null\) : null;/,
+        'a printer canonical must carry a brand= when one is known (ERR-242)');
     // IA reorg Jul 2026: the canonical category is translated from the
     // internal tab id to the backend's canonical slug (consumable→drums etc.)
     // before being lowercased.
     assert.match(SHOP_JS, /params\.set\(\s*['"]category['"]\s*,\s*lc\(this\.CATEGORY_CANONICAL_BY_INTERNAL\[category\]\s*\|\|\s*category\)\s*\)/,
         'canonical category param must be canonicalized then lowercased');
-    assert.match(SHOP_JS, /params\.set\(\s*['"]printer_slug['"]\s*,\s*lc\(this\.state\.printer\)\s*\)/,
-        'canonical printer_slug must be lowercased');
+    // ERR-242: the slug is lowercased FIRST and then routed through
+    // PrinterSlug.canonical, which maps a duplicate spelling onto the one we
+    // advertise and is identity for everything else. Both properties matter, so
+    // both are pinned — an lc() that ran after the map would be a silent bug,
+    // because the map's keys are lower-case.
+    assert.match(SHOP_JS, /PrinterSlug\.canonical\(lc\(this\.state\.printer\)\)/,
+        'canonical printer_slug must be lowercased BEFORE PrinterSlug.canonical maps it');
+    assert.match(SHOP_JS, /params\.set\(\s*['"]printer_slug['"]\s*,\s*printerSlug\s*\)/,
+        'canonical printer_slug param must come from the canonicalised slug');
 });
 
 test('shop-page.js preserves code casing in canonical (PG-540, not pg-540)', () => {
@@ -136,6 +150,10 @@ test('shop-page.js builds canonical that includes printer_slug when state.printe
     // /shop?printer_slug=brother-mfc-j480dw would render but the canonical
     // would point at /shop (or a stale brand URL), causing it to be folded
     // into a higher-level canonical in Google's eyes.
-    assert.match(SHOP_JS, /if\s*\(this\.state\.printer\)\s*params\.set\(\s*['"]printer_slug['"]\s*,\s*lc\(this\.state\.printer\)\s*\)/,
+    assert.match(SHOP_JS, /if\s*\(printerSlug\)\s*params\.set\(\s*['"]printer_slug['"]\s*,\s*printerSlug\s*\)/,
         'canonical builder must add printer_slug to canonical params when state.printer is set');
+    // ...and printerSlug must be derived from state.printer, so the guard above
+    // cannot be satisfied by some unrelated variable that happens to be truthy.
+    assert.match(SHOP_JS, /const printerSlug = this\.state\.printer\s*\n?\s*\?/,
+        'printerSlug must derive from this.state.printer');
 });
