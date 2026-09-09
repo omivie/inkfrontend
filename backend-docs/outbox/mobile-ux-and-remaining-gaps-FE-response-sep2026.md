@@ -14,17 +14,31 @@ number appears, it was read off a browser, not inferred from CSS.
 
 ## 1. Two of your suggested fixes could not have worked
 
-### `<input ... value="urban" checked>` would have been un-checked before paint
+### `<input ... value="urban" checked>` would have been a no-op — *when it was written*
 
-`js/checkout-page.js:49` is the first statement of `init()`:
+**Stated in the past tense on purpose; the code has since changed.** At the time
+your report landed, the first statement of `init()` was:
 
 ```js
 document.querySelectorAll('input[name="delivery_type"]').forEach(r => r.checked = false);
 ```
 
-It runs unconditionally, to defeat browser autofill. A `checked` attribute in the
-markup is cleared before the page settles. The fix as written would have changed
-the DOM and nothing else.
+It ran unconditionally, to defeat browser autofill, so a `checked` attribute in
+the markup was cleared before the page settled. The fix as written would have
+changed the DOM and nothing else — and a source grep would have certified it as
+shipped, because the attribute really would have been there.
+
+**This is fixed, and not by adding the attribute.** `init()` now calls
+`_normaliseDeliveryType()` (`js/checkout-page.js:778`), which sets the default in
+the one place that also owns the clearing:
+
+```js
+radios.forEach(r => { r.checked = (r.value === DeliveryArea.URBAN); });
+```
+
+So Urban is pre-selected and the autofill-clearing behaviour did not have to be
+argued with. If you go looking for the `r.checked = false` line to confirm the
+critique, it is not there any more — that is the fix, not a contradiction.
 
 ### There is no HTML5 validation bubble to be off-screen
 
