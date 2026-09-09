@@ -868,7 +868,12 @@ test('§10 shipping hygiene', async (t) => {
   });
 
   await t.test('the FE response to the backend is written', () => {
-    const resp = path.join(ROOT, 'orders-tracking-requested-column-FE-response-sep2026.md');
+    // Backend correspondence moved out of the repo root into backend-docs/ (2026-09-09).
+    // The doc has to exist SOMEWHERE durable, not at one hard-coded path — so accept
+    // either home rather than re-breaking this test the next time it is filed as sent.
+    const resp = ['backend-docs/outbox', 'backend-docs/sent', '.']
+      .map((d) => path.join(ROOT, d, 'orders-tracking-requested-column-FE-response-sep2026.md'))
+      .find((f) => fs.existsSync(f)) || path.join(ROOT, 'backend-docs/outbox/orders-tracking-requested-column-FE-response-sep2026.md');
     assert.ok(fs.existsSync(resp), 'the dismiss endpoint has to be asked for somewhere durable');
     assert.match(READ(resp), /dismiss/i);
   });
