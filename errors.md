@@ -9881,3 +9881,120 @@ part that survives a DROP+CREATE.
 Reported to the backend team in
 `security-hardening-round2-FE-response-sep2026.md`, along with `product_codes.sql`'s blanket
 `authenticated insert, delete with check (true)`, which is theirs.
+
+---
+
+## ERR-233 — The consent bar's Accept button was covered by our own Google Reviews badge, so the only visitor who could answer it was the one saying no — **RESOLVED** (2026-09-09)
+
+**Symptom.** "I am unable to press the accept button for the cookies." Reported by the owner
+with a screenshot in which the bar looks completely normal: both buttons drawn, both the right
+size, both fully visible, Accept in its blue.
+
+**Cause.** Two elements, each correct on its own, occupying the same 70 pixels.
+
+`js/footer.js:583` renders the Google Customer Reviews badge into our own
+`<div id="google-reviews-badge">` with `position: 'BOTTOM_RIGHT'`. Google's `platform.js` then
+styles **our** div inline:
+
+```
+position: fixed; right: 0px; bottom: 0px; z-index: 2147483647;
+```
+
+Measured on the live site at 1512x806:
+
+| | box |
+|---|---|
+| Google badge | x 1415-1501, y 742-806 |
+| **Accept** | **x 1399-1485**, y 754-798 |
+| Decline | x 1303-1391, y 754-798 |
+
+**70 of Accept's 86px sat underneath the badge**, and `document.elementFromPoint` at the
+button's own centre returned `IFRAME#I0_…`, not the button. Decline's right edge is 1391, which
+is 24px clear of the badge, so it kept working perfectly. **Exactly one of the two buttons was
+dead, and it was the one that says yes.**
+
+The bar's existing defence does not apply: `body.has-consent-banner { padding-bottom }` reserves
+space in DOCUMENT FLOW, and the badge is `position: fixed`. It never touched it.
+
+**A bigger z-index was never available.** 2147483647 is the maximum 32-bit signed integer. There
+is no number above it. This is the first bug here where the obvious fix is not merely wrong but
+arithmetically impossible, and it is worth remembering the shape: *when a third party takes
+INT_MAX, layering is off the table and the only remaining move is to not be in that space.*
+
+**Why it survived.** ERR-227 shipped this bar three days earlier with a test file that
+deliberately EXECUTES the banner in a VM rather than grepping it — and it still could not see
+this, because nothing about either element's source is wrong. `consent-banner.js` is correct.
+The badge loader is correct. The CSS is correct. **The bug was the pairing**, which is the
+ERR-217 shape exactly ("the animation was fine, the search box was fine — the BUG WAS THE
+PAIRING") and the ERR-216 lesson about grepping for the parser rather than the promise: there
+was no promise to grep. Two files that have never mentioned each other cannot be checked against
+each other by reading either one.
+
+And the failure was silent in the way that matters most: a visitor who wanted analytics ON could
+not say so, so the population that reaches `analytics_storage: 'granted'` is *exactly* the
+population that never sees the badge. That lands back where ERR-227 started — denied for
+everyone, with nothing anywhere saying so.
+
+**Fix — two halves, and only the first is load-bearing.**
+
+1. **`css/components.css` lifts the badge off the bar** while the bar is open:
+
+   ```css
+   body.has-consent-banner #google-reviews-badge {
+       bottom: var(--consent-banner-height, 0px) !important;
+   }
+   ```
+
+   **The `!important` IS the fix.** An author `!important` declaration is the only thing in the
+   cascade that beats a non-important inline style, and Google re-asserts `bottom: 0px` inline
+   on resize — verified, our rule still wins. Delete the keyword and the button goes dead again
+   with no visible change to this file. The value is the height `consent-banner.js` already
+   MEASURES from the rendered box, and `releaseSpace()` removes it on dismissal, so the badge
+   drops back to the corner by itself.
+
+2. **`js/footer.js` publishes the badge's measured width** as `--google-badge-width`, which
+   `.consent-banner` spends as `padding-right`, moving both buttons left of the corner
+   (Decline 1303→1220, Accept 1399→1316). Cosmetic: half 1 already guarantees the click.
+
+**Three things measurement caught that reasoning had wrong.**
+
+- **The mount div is FULL WIDTH before Google touches it.** `<div id="google-reviews-badge">` is
+  an ordinary empty block element in the footer — height 0, **width 1512**. The first draft
+  published `--google-badge-width: 1512px`, which put a **1536px** `padding-right` on the bar and
+  crushed its contents for the ~1.4s before Google arrived. A zero-height element is not a
+  widget and its width measures nothing. The publisher now gates on `position: fixed`, which is
+  the honest question: *is this the floating corner widget yet?*
+- **Google sizes the badge FIVE times, not once.** Traced live: `1512x0 static` → `2x2` (inner
+  iframe parked off-screen at `top:-10000px`) → `450x150` → `614x64` → `86x64`, finishing at
+  6.5s. Publishing each step walks the bar's padding 26 → 474 → 638 → 110px, sliding the buttons
+  under a reaching cursor. The publisher debounces and spends only a size that has held still.
+- **Waiting for "the badge" is three wrong conditions before it is a right one.** `width > 0`
+  returns instantly (the full-width mount). `position:fixed && height > 0` returns on the 2x2
+  placeholder. "Unchanged for 2.5s" ALSO returns on the placeholder, because 2x2 holds still for
+  two full seconds. The signal that separates placeholder from badge is not any size — it is
+  Google **parking the inner iframe at `top:-10000px`** while it loads. `probe-consent-banner`
+  waits for the unpark, then for the box to settle, and asserts no size anywhere: the final box
+  is 86x64 headless and 450x150 headed, and pinning either would measure the browser.
+
+**The probe, and why the tests are not enough.** `tests/consent-mode-sep2026.test.js` §5 pins the
+rule, the `!important`, the `calc()` and the publisher — four source assertions, all
+mutation-tested (drop the `!important`, hardcode the padding, move the badge to `BOTTOM_LEFT`,
+delete the publisher call: each turns the suite red). One of them passed a mutation first time,
+because `/watchBadgeFootprint\(\)/` is satisfied by `function watchBadgeFootprint() {` — it is
+anchored to a bare invocation statement now. But no source assertion can see two boxes overlap.
+`npm run probe:consent-banner` asks the browser the one question that was false: **is the thing
+painted at Accept's centre the Accept button?**
+
+**The probe carries a positive control, and it earns its keep immediately.** Against
+`localhost:3000` Google serves a 2x2 stub — the badge only renders at full size on the registered
+merchant domain — so every geometry assertion passes for want of anything to collide with. That
+is not a green run, it is an unexercised one, and it says so by name in the "not exercised"
+block. **A skip is not a pass.**
+
+**Out of scope, logged here.** `js/legal-config.js:125` declares the Google Customer Reviews
+opt-in survey `optional: true`, but `footer.js` loads the badge and the survey unconditionally,
+ungated by any consent decision. Gating a Google merchant widget has review-collection
+consequences and deserves its own decision; it is not folded into a layout fix.
+
+**Files.** `inkcartridges/css/components.css` · `inkcartridges/js/footer.js` ·
+`tests/consent-mode-sep2026.test.js` · `scripts/probe-consent-banner.mjs` · `package.json`.

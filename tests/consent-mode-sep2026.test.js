@@ -41,6 +41,7 @@ const INK = path.join(ROOT, 'inkcartridges');
 const BANNER_SRC = fs.readFileSync(path.join(INK, 'js', 'consent-banner.js'), 'utf8');
 const GTAG_SRC = fs.readFileSync(path.join(INK, 'js', 'gtag.js'), 'utf8');
 const CSS = fs.readFileSync(path.join(INK, 'css', 'components.css'), 'utf8');
+const FOOTER_SRC = fs.readFileSync(path.join(INK, 'js', 'footer.js'), 'utf8');
 
 /** Source with comments removed. An assertion must never be satisfied by the
  *  prose explaining the thing it is checking for (the ERR-224 lesson). */
@@ -333,4 +334,95 @@ test('§4 gtag.js declares only analytics_storage in its consent default', () =>
     const dflt = GTAG_SRC.slice(GTAG_SRC.indexOf("gtag('consent', 'default'"), GTAG_SRC.indexOf('});'));
     assert.doesNotMatch(dflt, /ad_storage/,
         'if this ever declares ad_storage, the banner must be revisited deliberately');
+});
+
+
+/* ── §5 THE GOOGLE REVIEWS BADGE OVERLAP (ERR-233) ───────────────────────────
+ *
+ * The bar shipped with a working "no" and a broken "yes". Google's platform.js
+ * pins OUR #google-reviews-badge div (footer.js renders it 'BOTTOM_RIGHT') to
+ * the bottom-right corner with an INLINE style at z-index 2147483647 — the
+ * 32-bit maximum, so no z-index of ours can ever be layered over it. Measured
+ * live at 1512x806: badge x1415-1501 against Accept x1399-1485, so 70 of
+ * Accept's 86px were underneath and elementFromPoint at the button's own centre
+ * returned Google's iframe. Decline (right edge 1391) was clear, so exactly one
+ * button was dead and the bar looked fine.
+ *
+ * These are source assertions and they cannot see a rendered box — that is what
+ * `npm run probe:consent-banner` is for. What they CAN do is stop the two
+ * silent regressions: dropping the !important, and replacing the measurement
+ * with the number it happens to produce today.
+ */
+
+test('§5 the CSS lifts the badge clear of the bar by the MEASURED height', () => {
+    const m = CSS.match(/body\.has-consent-banner\s+#google-reviews-badge\s*\{([^}]*)\}/);
+    assert.ok(m, 'nothing moves the Google badge off the consent bar — Accept is '
+        + 'unclickable on desktop without this rule');
+    assert.match(m[1], /bottom:\s*var\(--consent-banner-height/,
+        'must spend the height consent-banner.js measures, never a constant');
+});
+
+test('§5 that rule keeps its !important — it is the entire fix', () => {
+    // An author !important is the ONLY declaration that beats a non-important
+    // inline style, and Google re-asserts `bottom: 0px` inline on resize. Drop
+    // it and the button goes dead again with no visible change in the source.
+    const m = CSS.match(/body\.has-consent-banner\s+#google-reviews-badge\s*\{([^}]*)\}/);
+    assert.match(m[1], /!important/,
+        'without !important Google\'s inline bottom:0 wins and Accept is covered again');
+});
+
+test('§5 the bar reserves the badge width as a variable, never a hardcoded 86px', () => {
+    // codeOnly() first: the comment above this rule NAMES the 86px it forbids,
+    // and an assertion must never be decided by the prose explaining it.
+    const bare = codeOnly(CSS);
+    const rule = bare.slice(bare.indexOf('.consent-banner {'));
+    const decls = rule.slice(0, rule.indexOf('}'));
+    assert.match(decls, /padding-right:\s*calc\([^;]*var\(--google-badge-width/,
+        'the buttons must move left by the width footer.js measures');
+    assert.doesNotMatch(decls, /86px/,
+        '86px is Google\'s number to change, not ours — measure it');
+});
+
+test('§5 footer.js publishes --google-badge-width from a measured rect', () => {
+    const footer = codeOnly(FOOTER_SRC);
+    assert.match(footer, /--google-badge-width/,
+        'the CSS spends this property; nothing sets it');
+    assert.match(footer, /getBoundingClientRect\(\)/,
+        'the width must come from the rendered box (ERR-189/196)');
+    assert.doesNotMatch(footer, /--google-badge-width'\s*,\s*'?\d+px/,
+        'a literal width — that is the measurement declined again');
+});
+
+test('§5 the publisher survives the badge arriving ~1.4s AFTER the bar', () => {
+    // The mount div is in the footer template, so it exists immediately at 0x0
+    // and platform.js sizes it later. A single measurement at footer-paint time
+    // reads 0 and fixes nothing, so the element has to be observed.
+    const footer = codeOnly(FOOTER_SRC);
+    assert.match(footer, /ResizeObserver/,
+        'a one-shot measurement reads 0 — the badge is not sized yet');
+    assert.match(footer, /setInterval|requestAnimationFrame/,
+        'no fallback for a browser without ResizeObserver');
+    assert.match(footer, /Date\.now\(\)\s*\+\s*\d+/,
+        'the fallback must be a bounded poll on the condition, not an unbounded '
+        + 'loop and not a single guessed sleep');
+});
+
+test('§5 the pairing: badge position and footprint publisher live together', () => {
+    // Neither half means anything alone. If someone moves the badge to
+    // BOTTOM_LEFT, this fails and makes them revisit the banner — enrolment
+    // lives in a test, never in a list nobody maintains (ERR-214).
+    const footer = codeOnly(FOOTER_SRC);
+    const positions = footer.match(/position:\s*'BOTTOM_[A-Z]+'/g) || [];
+    assert.ok(positions.length > 0, 'the badge render lost its position option');
+    for (const p of positions) {
+        assert.equal(p, "position: 'BOTTOM_RIGHT'",
+            `badge moved to ${p} — the consent bar reserves space on the RIGHT; `
+            + 'move the reserved side too or Accept goes under it again');
+    }
+    // Anchored to a bare invocation STATEMENT. `/watchBadgeFootprint\(\)/` alone
+    // is satisfied by `function watchBadgeFootprint() {` — it passed a mutation
+    // that deleted the call, which is the whole failure this test exists for.
+    assert.match(footer, /^\s*watchBadgeFootprint\(\);\s*$/m,
+        'the publisher is defined but never started — --google-badge-width would '
+        + 'stay unset and the buttons would never move');
 });

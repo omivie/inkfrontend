@@ -3917,12 +3917,21 @@ a.product-card__contact-btn {
     align-items: center;
     gap: var(--spacing-md, 16px);
     padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    /* Sit clear of the Google Customer Reviews badge in the bottom-right corner.
+       footer.js measures that badge and publishes --google-badge-width; unset
+       (gapi blocked) or 0px (mobile, where Google renders the badge 0x0)
+       collapses this back to the plain 16px. Never hardcode 86px here: the width
+       is Google's to change, not ours. Must stay AFTER the shorthand above. */
+    padding-right: calc(var(--spacing-md, 16px) + var(--google-badge-width, 0px) + var(--spacing-sm, 8px));
     background: var(--white-primary, #fff);
     border-top: 1px solid var(--color-border, #e5e7eb);
     box-shadow: 0 -2px 12px rgba(15, 23, 42, 0.08);
     /* Off-screen until .is-open so the reveal transitions (rewards-nudge pattern). */
     transform: translateY(100%);
-    transition: transform 0.25s ease;
+    /* padding-right is animated so the badge's late arrival (~1.4s, async
+       platform.js) slides the buttons across rather than teleporting them 94px
+       out from under the pointer. */
+    transition: transform 0.25s ease, padding-right 0.2s ease;
 }
 
 .consent-banner.is-open {
@@ -3988,6 +3997,37 @@ a.product-card__contact-btn {
    the checkout Continue button is the one that matters. */
 body.has-consent-banner {
     padding-bottom: var(--consent-banner-height, 0px);
+}
+
+/* ERR-233: the Accept button could not be clicked, on every desktop, for as long
+   as this bar has existed.
+
+   Google's platform.js styles OUR #google-reviews-badge div (footer.js renders it
+   `position: 'BOTTOM_RIGHT'`) with an inline `position:fixed; right:0; bottom:0`
+   at z-index 2147483647. That is the 32-bit signed maximum, so there is no
+   z-index we can write that sits above it — the fix cannot be a bigger number.
+   Measured on the live site at 1512x806: the badge box was x1415-1501 and the
+   Accept button x1399-1485, so 70 of Accept's 86px were underneath it and
+   document.elementFromPoint at the button's own centre returned Google's iframe.
+   Decline (right edge 1391) was clear, which is why exactly one of the two
+   buttons was dead and it looked like nothing was wrong.
+
+   `body.has-consent-banner { padding-bottom }` above does not help: it reserves
+   space in document flow and the badge is position:fixed.
+
+   !important IS LOAD-BEARING. An author !important declaration is the only thing
+   that beats a non-important inline style, and Google re-asserts `bottom: 0px`
+   inline on resize. Remove it and the button silently goes dead again with no
+   visible change in this file. Verified in a browser: the badge moves to
+   y=681 (clear of the 61px bar) and survives a resize event.
+
+   The value is the height consent-banner.js already MEASURES from the rendered
+   box (never a constant — ERR-189/196), and releaseSpace() removes both the class
+   and the property on dismissal, so the badge drops back to the corner by itself.
+   Pinned by tests/consent-mode-sep2026.test.js and measured by
+   `npm run probe:consent-banner`. */
+body.has-consent-banner #google-reviews-badge {
+    bottom: var(--consent-banner-height, 0px) !important;
 }
 
 /* Below the tablet breakpoint the bar stacks: text over a full-width button row.
