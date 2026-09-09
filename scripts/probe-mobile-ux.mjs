@@ -482,6 +482,7 @@ async function until(page, fn, { tries = 24, gap = 500, arg } = {}) {
 /** Put one line in the cart THROUGH THE REAL UI, never by writing storage.
  *  Returns null on success, or the reason it could not — a cart that will not
  *  seed is reported by name, never swallowed into "the page did not render". */
+let seedSucceededOnce = false;
 async function seedCart(page) {
     try {
         await page.goto(`${BASE}/p/${SKU}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -491,12 +492,23 @@ async function seedCart(page) {
         // Poll rather than sleep a guessed interval: the write lands ~1s after the
         // click on a warm backend and later on a cold Render start, and a probe
         // that fails on its own timing teaches nothing about the site.
-        for (let i = 0; i < 20; i++) {
+        // 40 x 750ms. The first version allowed 15s and timed out on the THIRD
+        // cart-dependent route of a run while the first two had seeded in about
+        // a second each — i.e. the backend was rate-limiting or cold, not broken.
+        for (let i = 0; i < 40; i++) {
             await page.waitForTimeout(750);
             const stored = await page.evaluate(() => localStorage.getItem('inkcartridges_cart'));
-            if (stored && stored !== '[]') return null;
+            if (stored && stored !== '[]') { seedSucceededOnce = true; return null; }
         }
-        return `the cart did not seed within 15s from /p/${SKU} — the add-to-cart path itself may be broken`;
+        // Say only what the evidence supports. "The add-to-cart path is broken"
+        // is a much stronger claim than "it did not answer this time", and if it
+        // answered a minute ago in this same run, the first claim is false.
+        return seedSucceededOnce
+            ? `the cart did not seed within 30s from /p/${SKU}, but it DID seed earlier in this run — `
+              + 'so this is backend rate-limiting or a cold start, not the add-to-cart path. This page '
+              + 'was not measured with a line in it.'
+            : `the cart did not seed within 30s from /p/${SKU}, and it has not seeded at all this run — `
+              + 'the add-to-cart path itself may be broken.';
     } catch (e) {
         return `could not seed the cart — ${e.message.split('\n')[0]}`;
     }
