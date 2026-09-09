@@ -253,8 +253,17 @@ test('§5 both delivery prices come from the backend, one quote each', () => {
     assert.match(fn, /API\.getShippingOptions\(/,
         'the figures are quoted by POST /api/shipping/options for THIS cart — weight-aware and '
         + 'free-shipping-aware. cart.js:12 is explicit that the frontend never computes prices');
-    assert.match(fn, /ask\(DeliveryArea\.URBAN\), ask\(DeliveryArea\.RURAL\)/,
-        'one call per area, so neither label is inferred from the other');
+    assert.match(fn, /priced\[selected\] = Number\.isFinite\(this\.totals\.shipping\)/,
+        'the SELECTED area reuses the figure already on screen, so its label and the shipping '
+        + 'line in the totals are the same number by construction');
+    assert.match(fn, /priced\[other\] = await ask\(other\)/,
+        'and only the OTHER area costs a request');
+    assert.equal((fn.match(/await ask\(/g) || []).length, 1,
+        'EXACTLY ONE extra POST. Asking for both made three calls to /api/shipping/options per '
+        + 'recalculation where there had been one — on a rate-limited endpoint, on the checkout '
+        + 'page, for a decoration. Measured on production: the limiter tripped, both labels came '
+        + 'back empty AND the primary quote fell through to the client-side estimate. A '
+        + 'decorative call must never be able to starve the load-bearing one (ERR-096).');
     assert.doesNotMatch(fn, /[*/]\s*1\.15|\+\s*fee|fee\s*\*/,
         'no arithmetic on a fee — printing a number we derived is the same defect as inventing one');
 });
@@ -267,6 +276,10 @@ test('§5 a price we could not get renders EMPTY, never zero', () => {
         'and a real zero from the backend is honestly FREE');
     assert.match(fn, /this\._deliveryPriceKey = null;/,
         'a failed lookup must not be cached, or one blip freezes the labels for the session');
+    // Partial-ness is honest: one label can be known while the other is not.
+    assert.match(fn, /if \(priced\[other\] == null\)/,
+        'only the counterpart can fail now, and its label stays empty while the selected one '
+        + 'stays true — a partial answer rendered as a partial answer');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

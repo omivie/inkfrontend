@@ -846,12 +846,27 @@
         /**
          * Put a price on each delivery area — the BACKEND's price.
          *
-         * Both figures come from POST /api/shipping/options, one call per area,
-         * so each is weight-aware and free-shipping-aware for THIS cart. The
-         * frontend never computes a price (cart.js:12); it asks twice and prints
-         * the answers. Memoised on (region, cart) so flipping between the two
-         * areas costs nothing — the prices are a property of the cart, not of
-         * which one is selected.
+         * ONE EXTRA REQUEST, NOT TWO. The selected area's fee is the number
+         * already on screen (`this.totals.shipping`, just set by the awaited
+         * fetchShippingFromAPI above), so only the OTHER area is asked for.
+         *
+         * The first draft asked for both, which made three POSTs to
+         * /api/shipping/options per recalculation where there had been one — on
+         * a rate-limited endpoint, on the checkout page, for a decoration. That
+         * is ERR-096's shape (retries amplified one keystroke into six requests
+         * and drained the shared per-IP limiter that also covers POST
+         * /api/user/address), and it showed up immediately: probing production
+         * tripped the limiter and BOTH labels came back empty while the primary
+         * quote fell through to the client-side estimate. A decorative call must
+         * never be able to starve the load-bearing one.
+         *
+         * Reusing the displayed figure also makes a disagreement impossible: the
+         * selected area's label and the shipping line in the totals are now the
+         * same number by construction, not by two calls happening to agree.
+         *
+         * Memoised on (region, cart) so flipping between the areas costs
+         * nothing — the two prices are a property of the cart, not of which one
+         * is selected.
          *
          * A figure we could not get stays EMPTY, and `:empty { display: none }`
          * removes the line. Empty reads as "not known yet"; "$0.00" would read as
@@ -893,17 +908,21 @@
                 }
             };
 
-            const [urban, rural] = await Promise.all([
-                ask(DeliveryArea.URBAN), ask(DeliveryArea.RURAL)
-            ]);
+            const selected = document.querySelector('input[name="delivery_type"]:checked')?.value
+                || DeliveryArea.URBAN;
+            const other = selected === DeliveryArea.RURAL ? DeliveryArea.URBAN : DeliveryArea.RURAL;
 
-            if (urban == null && rural == null) {
-                // Nothing was answered — do not hold the key, so the next
-                // recalculation tries again instead of caching a silence.
+            const priced = {};
+            // The area the shopper is on is already priced, on screen, above.
+            priced[selected] = Number.isFinite(this.totals.shipping) ? this.totals.shipping : null;
+            priced[other] = await ask(other);
+
+            if (priced[other] == null) {
+                // The counterpart was not answered — do not hold the key, so the
+                // next recalculation tries again instead of caching a silence.
+                // Its label stays EMPTY; the other one is still true.
                 this._deliveryPriceKey = null;
             }
-
-            const priced = { urban, rural };
             labels.forEach(el => {
                 const fee = priced[el.dataset.deliveryPrice];
                 el.textContent = fee == null ? '' : (fee === 0 ? 'FREE' : formatPrice(fee));
