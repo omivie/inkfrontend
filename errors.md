@@ -10442,6 +10442,28 @@ Rural and says so; removing the token puts it back; a hand-picked Urban survives
 a **positive control** — with the group force-cleared the page still refuses to advance and still
 flags the section. *The fix is a sensible default, not the removal of a rule.*
 
+**Addendum (same day) — the labels tripled the requests, and PRODUCTION is what said so.**
+`probe:checkout-delivery` was 16/16 against a local server and **2 failures against production**:
+both price labels empty. The cause was not the feature. All three POSTs to
+`/api/shipping/options` answered **429 RATE_LIMITED**, and the primary quote had quietly fallen
+through to the client-side estimate while the labels — correctly — rendered nothing rather than
+inventing a number.
+
+The defect was mine: pricing both areas independently made **three** calls to that endpoint per
+recalculation where there had been one, on the checkout page, for a decoration. That is ERR-096's
+shape exactly (retries amplified one keystroke into six requests and drained the shared per-IP
+limiter that also covers `POST /api/user/address`). ***A decorative call must never be able to
+starve the load-bearing one.***
+
+Now the selected area reuses `this.totals.shipping` — the figure already on screen — and only the
+**other** area costs a request. Three become two, and the selected label can no longer disagree
+with the shipping line in the totals: they are the same number *by construction* rather than by two
+calls happening to agree. The test pins `await ask(` at exactly one occurrence.
+
+**This is the ERR-233 lesson in a new place: a green localhost run means NOT EXERCISED.** Local and
+production differ in host, in warmth, and — decisively here — in which rate-limit bucket you are
+in. Re-verified against production after the limiter this probing tripped had cooled: 16/16.
+
 **Files.** `html/checkout.html` · `html/account/addresses.html` · `css/checkout-compact.css` ·
 `js/checkout-page.js` · `js/account.js` · `js/utils.js` (`DeliveryArea`) ·
 `tests/checkout-delivery-area-sep2026.test.js` (new) ·
@@ -10593,6 +10615,28 @@ it now asserts there is exactly **one** stamp in the file and that that one is g
 **Open, for the backend.** Whether `search_analytics` rows now arrive with a `session_id`, and
 which transport delivered it. That is the only thing that closes this, and it cannot be measured
 from here.
+
+**Addendum — the entanglement that nearly shipped, and it was not the one we guarded against.**
+Four sessions shared this working tree today. We all committed with
+`git commit --only <paths>` specifically to avoid sweeping each other's files. It worked, and it
+was not enough: git commits file **content**, not hunks, so a shared file carries whatever is on
+disk — and worse, a peer's FEATURE spanned two files while my commit took only one of them.
+
+My commit included `js/search.js`, which now emits the phone segmented control's tab bar. The CSS
+that hides it above 700px lives in `css/search.css`, which was **not** in my commit. Pushing mine
+alone would have rendered two unstyled buttons above the results **on every desktop width** — a
+visible regression on the widest surface, from a change whose entire point was the phone. The full
+suite was green with that defect in it, because no test asserts *"the markup this file emits is
+styled by a file it does not mention"*.
+
+> `git commit --only <paths>` protects you from committing someone else's FILES, and does nothing
+> about someone else's FEATURE spanning two files. The entanglement we both guarded against was
+> content-level. The one that nearly shipped was dependency-level.
+
+Caught by the peer who owned the other half, who then committed it so the pair was whole, and both
+were pushed together after verifying at HEAD that the emitter and its `@media (min-width: 700px)
+{ display: none }` were in the same tree. This is the ERR-233/ERR-217 shape — *the bug was the
+PAIRING* — arriving through a completely different door.
 
 **Files.** `js/traffic-tracker.js` · `js/api.js` · `js/search.js` ·
 `tests/search-session-identity-aug2026.test.js` · `tests/ads-add-to-cart-conversion-sep2026.test.js` ·
