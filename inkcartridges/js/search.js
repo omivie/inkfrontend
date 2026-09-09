@@ -258,6 +258,26 @@
             highlightIndex: -1,
             isOpen: false,
             mode: 'empty', // 'empty' | 'skeleton' | 'results' | 'no-results' | 'error'
+            // PHONE SEGMENTED CONTROL (ERR-238). Which source's panel is showing
+            // below 700px: 'compatible' | 'genuine' | null (null = not a split
+            // result, so there are no tabs and both sections are visible).
+            //
+            // It lives HERE, on the instance, and not in the markup, because
+            // renderResults() replaces state.list.innerHTML on every debounced
+            // keystroke. Read off the old DOM it would reset to Compatible
+            // mid-word, which is the one thing a shopper would notice.
+            activeSource: null,
+            // Painted cards per source, so switching tabs can re-point
+            // state.results at the cards the shopper can actually SEE. Arrowing
+            // into a hidden section and pressing Enter would open a product that
+            // is not on screen — the ERR-144 failure in a new costume.
+            renderedBySource: { compatible: [], genuine: [] },
+            // The full painted order, both sections. Kept because widening the
+            // viewport back past 699px has to restore it — recomputing from the
+            // DOM would work until the day the DOM and the payload disagree, and
+            // that disagreement is exactly what the keyboard-nav contract exists
+            // to prevent.
+            renderedAll: [],
             _outsideHandler: null,
         };
 
@@ -308,7 +328,17 @@
             // input when the content is shorter than the cap.
             const GAP = 6;    // input-to-panel gap
             const EDGE = 16;  // viewport margin, top and bottom
-            const PREFERRED = 280; // two card rows + the sticky View-all footer
+            /* Two card rows + the sticky View-all footer. On a phone the
+               segmented control adds a tab bar above them, so the same content
+               needs more room and a gap that "fits" 280px would in fact hold the
+               tab bar, one row and the footer.
+               MEASURED off the rendered box, never a constant: a number written
+               here to reserve space for something that has a height is a
+               measurement somebody declined to take (ERR-189/196). offsetHeight
+               is 0 when the tab bar is display:none above 700px, which is
+               exactly right — no tabs, no reservation. */
+            const tablist = state.list && state.list.querySelector('.smart-ac__tablist');
+            const PREFERRED = 280 + (tablist ? tablist.offsetHeight : 0);
 
             // A panel flipped above must stop below the sticky header, which
             // paints over it (header z-index:200 vs dropdown z-index:50 —
@@ -367,6 +397,91 @@
             state.input.setAttribute('aria-expanded', 'false');
             state.input.removeAttribute('aria-activedescendant');
             state.highlightIndex = -1;
+            // A new session starts on Compatible. Deliberately NOT reset in
+            // onInput/runSearch — see state.activeSource.
+            state.activeSource = null;
+        }
+
+        /* Below this width the two sources are a segmented control over ONE
+           full-width list instead of two side-by-side columns. 699 is not a new
+           number: it is the boundary search.css already measured for this panel
+           and pages.css now uses for the results grid, so the two surfaces step
+           together. */
+        const SEGMENTED_MQ = '(max-width: 699px)';
+        function isSegmented() {
+            return !!state.activeSource
+                && typeof window.matchMedia === 'function'
+                && window.matchMedia(SEGMENTED_MQ).matches;
+        }
+
+        /**
+         * Show the selected source (segmented, phone) or both (columns, wider),
+         * then re-tag the cards and re-point state.results at what is VISIBLE.
+         *
+         * state.results must always be the cards the shopper can see, in paint
+         * order, because setActive(i) highlights DOM card i while Enter
+         * navigates to state.results[i]. Hiding a section without re-pointing it
+         * would let an arrow key highlight nothing and Enter open a product that
+         * is not on screen — which is ERR-144 again, in a new costume.
+         *
+         * The inactive section is hidden with the `hidden` ATTRIBUTE rather than
+         * a CSS class: it has to leave the a11y tree and the tab order too, not
+         * just the paint.
+         */
+        function applyActiveSource() {
+            const wrap = state.list.querySelector('.smart-ac__sections');
+            const segmented = isSegmented();
+            if (wrap) {
+                wrap.setAttribute('data-active-source', segmented ? state.activeSource : '');
+                wrap.querySelectorAll('.smart-ac__section').forEach((sec) => {
+                    const mine = sec.getAttribute('data-source');
+                    if (segmented && mine !== state.activeSource) sec.hidden = true;
+                    else sec.hidden = false;
+                });
+            }
+            state.list.querySelectorAll('.smart-ac__tab').forEach((t) => {
+                const on = t.getAttribute('data-source') === state.activeSource;
+                t.setAttribute('aria-selected', String(on && segmented));
+                t.setAttribute('tabindex', on ? '0' : '-1');
+            });
+            state.results = segmented
+                ? (state.renderedBySource[state.activeSource] || [])
+                : state.renderedAll;
+            let i = 0;
+            state.list.querySelectorAll('.smart-ac__section').forEach((sec) => {
+                if (sec.hidden) {
+                    // Strip the nav attributes from cards nobody can reach, so a
+                    // stale data-index can never be arrowed onto.
+                    sec.querySelectorAll('.product-card').forEach((card) => {
+                        card.removeAttribute('data-index');
+                        card.removeAttribute('role');
+                        card.removeAttribute('aria-selected');
+                    });
+                    return;
+                }
+                sec.querySelectorAll('.product-card').forEach((card) => {
+                    card.setAttribute('role', 'option');
+                    card.setAttribute('aria-selected', 'false');
+                    card.setAttribute('data-index', String(i));
+                    card.id = `smart-ac-option-${id}-${i}`;
+                    i++;
+                });
+            });
+            state.highlightIndex = -1;
+            state.input.removeAttribute('aria-activedescendant');
+        }
+
+        /** Switch tabs: re-show, re-tag, re-measure, and say what happened. */
+        function setActiveSource(source) {
+            if (!source || source === state.activeSource) return;
+            if (!state.renderedBySource[source] || !state.renderedBySource[source].length) return;
+            state.activeSource = source;
+            applyActiveSource();
+            // Content height changed, and when the panel is placed ABOVE the
+            // input its anchor changes with it.
+            positionDropdown();
+            const n = state.renderedBySource[source].length;
+            setLive(`Showing ${n} ${source} result${n === 1 ? '' : 's'}`);
         }
 
         function setActive(i) {
@@ -388,6 +503,9 @@
         function renderEmpty() {
             state.mode = 'empty';
             state.results = [];
+            state.renderedAll = [];
+            state.renderedBySource = { compatible: [], genuine: [] };
+            state.activeSource = null;
             state.highlightIndex = -1;
             const recent = getRecent();
 
@@ -430,6 +548,9 @@
         function renderSkeleton() {
             state.mode = 'skeleton';
             state.results = [];
+            state.renderedAll = [];
+            state.renderedBySource = { compatible: [], genuine: [] };
+            state.activeSource = null;
             state.list.setAttribute('role', 'listbox');
             let cards = '';
             for (let i = 0; i < 12; i++) {
@@ -592,8 +713,9 @@
             // Fixed 2026-08-04 alongside ERR-144.
             const renderedOrder = [];
 
-            const renderSection = (items, badgeClass, label) => {
+            const renderSection = (items, badgeClass, label, source) => {
                 if (!items.length) return '';
+                const startedAt = renderedOrder.length;
                 const sorted = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
                     ? ProductSort.byCodeThenColor(items)
                     : items;
@@ -613,7 +735,9 @@
                     return (breaks.has(i) ? '<div class="products-row__break" aria-hidden="true"></div>' : '')
                         + Products.renderCard(adaptForCard(p), i);
                 }).join('');
-                return `<div class="smart-ac__section">`
+                state.renderedBySource[source] = renderedOrder.slice(startedAt);
+                return `<div class="smart-ac__section" data-source="${source}" role="tabpanel"`
+                    + ` id="smart-ac-panel-${id}-${source}" aria-labelledby="smart-ac-tab-${id}-${source}">`
                     + `<div class="smart-ac__section-head"><span class="products-section__badge ${badgeClass}">${label}</span></div>`
                     + `<div class="product-grid smart-ac__grid">${cards}</div>`
                     + `</div>`;
@@ -634,24 +758,63 @@
             // the whole width" needs no second code path — only a class that
             // says which of the two layouts is in force.
             const sectionCount = (compatibleItems.length ? 1 : 0) + (genuineItems.length ? 1 : 0);
-            const sectionsClass = sectionCount === 2
+            // `--rows` is the SHARED marker for the phone presentation (the 64px
+            // horizontal-thumb row). Both variants carry it so one rule body
+            // serves both instead of a second copy — ERR-192 is what a relocated
+            // rule costs when it becomes a copy 2,400 lines away in the same file.
+            const rowsClass = ' smart-ac__sections--rows';
+            const sectionsClass = (sectionCount === 2
                 ? 'smart-ac__sections smart-ac__sections--split'
-                : 'smart-ac__sections smart-ac__sections--single';
+                : 'smart-ac__sections smart-ac__sections--single') + rowsClass;
+
+            // Which tab is showing. Only a two-source result has tabs at all, so
+            // a kept 'genuine' is always valid by construction — sectionCount
+            // counts POPULATED sections and renderSection returns '' for an
+            // empty group, so a source with zero rows is already --single.
+            if (sectionCount !== 2) {
+                state.activeSource = null;
+            } else if (!state.activeSource) {
+                state.activeSource = 'compatible';
+            }
+            state.renderedBySource = { compatible: [], genuine: [] };
             // Composition order is unchanged — Compatible first, matching
             // shop.html #compatible-section before #genuine-section — which is
             // what keeps `renderedOrder` (below) in painted-DOM order. The
             // columns are a CSS concern; the DOM is still one ordered list, so
             // arrow keys walk the left column and then the right.
+            // THE PHONE TAB BAR. Rendered only for a two-source result, and
+            // only ever VISIBLE below 700px (CSS decides that; the markup is the
+            // same at every width so nothing re-renders on resize and the
+            // keyboard contract does not fork).
+            //
+            // Counts come from the two `.length` reads that already computed
+            // sectionCount — not from counting .product-card nodes, which would
+            // also sweep up the .products-row__break divs and make the label a
+            // function of layout rather than of the payload.
+            const tab = (source, label, n) => `<button type="button" role="tab"`
+                + ` class="smart-ac__tab" id="smart-ac-tab-${id}-${source}"`
+                + ` data-source="${source}"`
+                + ` aria-controls="smart-ac-panel-${id}-${source}"`
+                + ` aria-selected="${state.activeSource === source}"`
+                + ` tabindex="${state.activeSource === source ? '0' : '-1'}">`
+                + `${label} <span class="smart-ac__tab-count">${n}</span></button>`;
+            const tabsHTML = sectionCount === 2
+                ? `<div class="smart-ac__tablist" role="tablist" aria-label="Result source">`
+                    + tab('compatible', 'Compatible', compatibleItems.length)
+                    + tab('genuine', 'Genuine', genuineItems.length)
+                    + `</div>`
+                : '';
             const sectionsHTML = sectionCount
-                ? `<div class="${sectionsClass}">`
-                    + renderSection(compatibleItems, 'products-section__badge--compatible', 'Compatible')
-                    + renderSection(genuineItems, 'products-section__badge--genuine', 'Genuine')
+                ? tabsHTML + `<div class="${sectionsClass}" data-active-source="${state.activeSource || ''}">`
+                    + renderSection(compatibleItems, 'products-section__badge--compatible', 'Compatible', 'compatible')
+                    + renderSection(genuineItems, 'products-section__badge--genuine', 'Genuine', 'genuine')
                     + `</div>`
                 : '';
             // Re-point state.results at the painted order (see the contract note
             // above). Length is unchanged — the partition and sort never drop a
             // row — so `count` in the keyboard handler stays correct either way.
             state.results = renderedOrder;
+            state.renderedAll = renderedOrder;
             // Spec (search-dropdown-routing.md, "Three-handler invariant"):
             // the "View all results" footer ALWAYS goes to /search?q=<query>,
             // independent of matched_printer. Branching on matched_printer here
@@ -733,13 +896,9 @@
                 viewAllLink.addEventListener('click', () => saveRecent(q));
             }
 
-            // Tag each card for keyboard navigation + a11y
-            state.list.querySelectorAll('.product-card').forEach((card, i) => {
-                card.setAttribute('role', 'option');
-                card.setAttribute('aria-selected', 'false');
-                card.setAttribute('data-index', String(i));
-                card.id = `smart-ac-option-${id}-${i}`;
-            });
+            // Tag each card for keyboard navigation + a11y, and point
+            // state.results at the cards that are actually on screen.
+            applyActiveSource();
 
             // ERR-218 — the quantity stepper is TAB-unreachable INSIDE the
             // dropdown. ERR-228 corrects what this comment used to claim.
@@ -979,11 +1138,24 @@
                 // The stepper controls belong in this list (ERR-218): without
                 // them the FIRST click on − or + blurs the search input, the
                 // panel closes, and the click lands on nothing.
-                if (e.target.closest('.product-card, .smart-ac__chip, .product-card__add-btn, .product-card__qty, .product-card__qty-btn, .product-card__qty-input, .product-card__link, [data-clear-recent]')) {
+                if (e.target.closest('.product-card, .smart-ac__chip, .smart-ac__tab, .product-card__add-btn, .product-card__qty, .product-card__qty-btn, .product-card__qty-input, .product-card__link, [data-clear-recent]')) {
                     e.preventDefault();
                 }
             });
+            // THE TABS. Click first — and note `.smart-ac__tab` is in the
+            // mousedown guard above: without it the first tap blurs the search
+            // input, the panel closes, and the click lands on nothing. That is
+            // byte-for-byte the ERR-218 failure the stepper controls are in that
+            // list to prevent.
+            state.list.addEventListener('click', (e) => {
+                const t = e.target.closest('.smart-ac__tab');
+                if (!t) return;
+                e.preventDefault();
+                setActiveSource(t.getAttribute('data-source'));
+                t.focus();
+            });
             state.list.addEventListener('click', onListClick);
+
 
             // ERR-228 — a pointer click can now put focus in the quantity box,
             // so Escape has to have an answer there. onKeyDown lives on the
@@ -1000,6 +1172,51 @@
                 state.input.focus();
             });
 
+            /* ORDER MATTERS HERE, and only to a test — but the test is right.
+               tests/qty-stepper-sep2026.test.js reads the FIRST
+               `state.list.addEventListener('keydown'` in this file and asserts it is
+               the quantity-box Escape handler (ERR-228). Registering the tab handler
+               above it made that test read this block instead and fail, which is the
+               test doing its job: it pins WHICH listener owns the qty box, and a
+               second keydown listener appearing first is exactly the kind of change
+               that could quietly take it over. Behaviour is identical either way —
+               both early-return on a target they do not own — so the handler goes
+               second and the contract stays readable. */
+            /* Tab keyboard, on the LIST rather than the input. The panel's
+               arrow-key model (ArrowDown/Up + Enter over state.results) lives on
+               state.input via onKeyDown and is never reached while a tab has
+               focus, so nothing is stolen from it — and ArrowDown from a tab
+               hands straight back to that model rather than inventing a second
+               one. Roving tabindex, per the ARIA tabs pattern. */
+            state.list.addEventListener('keydown', (e) => {
+                const t = e.target.closest && e.target.closest('.smart-ac__tab');
+                if (!t) return;
+                const tabs = Array.from(state.list.querySelectorAll('.smart-ac__tab'));
+                const i = tabs.indexOf(t);
+                let next = null;
+                if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
+                else if (e.key === 'ArrowLeft') next = tabs[i <= 0 ? tabs.length - 1 : i - 1];
+                else if (e.key === 'Home') next = tabs[0];
+                else if (e.key === 'End') next = tabs[tabs.length - 1];
+                else if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setActiveSource(t.getAttribute('data-source'));
+                    return;
+                } else if (e.key === 'ArrowDown') {
+                    // Into the results, using the panel's own one model.
+                    e.preventDefault();
+                    state.input.focus();
+                    if (state.results.length) setActive(0);
+                    return;
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    state.input.focus();
+                    return;
+                } else return;
+                e.preventDefault();
+                if (next) { setActiveSource(next.getAttribute('data-source')); next.focus(); }
+            });
+
             // Save recent on form submit (free-text search)
             state.form.addEventListener('submit', () => {
                 saveRecent(state.input.value.trim());
@@ -1010,7 +1227,16 @@
             };
             document.addEventListener('click', state._outsideHandler);
 
-            window.addEventListener('resize', () => { if (state.isOpen) positionDropdown(); });
+            // Crossing 699px swaps the phone segmented control for the
+            // two-column split and back. The MARKUP is identical either way, so
+            // nothing re-renders — but which section is visible changes, and
+            // state.results has to follow or the keyboard model would be walking
+            // a section the shopper can no longer see (ERR-238).
+            window.addEventListener('resize', () => {
+                if (!state.isOpen) return;
+                if (state.activeSource) applyActiveSource();
+                positionDropdown();
+            });
             window.addEventListener('scroll', () => { if (state.isOpen) positionDropdown(); }, { passive: true });
         }
 

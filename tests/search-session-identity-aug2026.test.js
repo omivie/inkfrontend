@@ -186,21 +186,106 @@ test('§2 identifyBody stamps the POST field names, not the query ones', () => {
         { q: 'a', sku: 'B', session_id: 'ts_s', visitor_id: 'v_v' });
 });
 
-test('§2 the id HEADERS are off, and nothing in js/ sets them', () => {
+test('§2 the id HEADERS are ON — BF-054 closed 2026-09-08', () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and it was right to.
+    // Until 2026-09-08 X-Session-Id / X-Visitor-Id were absent from the
+    // backend's Access-Control-Allow-Headers, and a browser does not degrade
+    // there — it fails the preflight and never sends the search at all. The
+    // assertion was "off, and nothing in js/ sets them", and it was load-bearing.
+    //
+    // The backend shipped the allow-list. Re-measured against production
+    // 2026-09-09 on all three origins WITH A NEGATIVE CONTROL (a bogus header
+    // name is not echoed back, so it is a real static list and not a preflight
+    // that agrees with anything — the ERR-223 trap). `npm run probe:data-capture`
+    // §1 is the live check and now fails if the allow-list ever loses them again.
     const tt = loadTracker({ session: 'ts_s', visitor: 'v_v' });
-    assert.equal(tt._useIdHeaders(), false,
-        'X-Session-Id / X-Visitor-Id are not on the backend CORS allow-list; turning this on ' +
-        'does not degrade search, it takes it down');
-    assert.deepEqual(tt.identifyHeaders({}), {});
+    assert.equal(tt._useIdHeaders(), true,
+        'the CORS allow-list carries both headers now; the switch is the one line that turns ' +
+        'six months of anonymous search data back on');
+    assert.deepEqual(tt.identifyHeaders({}),
+        { 'X-Session-Id': 'ts_s', 'X-Visitor-Id': 'v_v' });
 
+    // It stamps IN PLACE onto whatever it is given, so a caller that already
+    // built an Authorization header does not lose it.
+    assert.deepEqual(tt.identifyHeaders({ Authorization: 'Bearer x' }),
+        { Authorization: 'Bearer x', 'X-Session-Id': 'ts_s', 'X-Visitor-Id': 'v_v' });
+});
+
+test('§2 an unusable id sends NO header rather than a placeholder one', () => {
+    // Validate, never sanitise. A shared or malformed id is worse than none:
+    // no id is an honest gap, a shared one is a lie with a number on it.
+    for (const bad of ['anon', 'ts_fallback']) {
+        const tt = loadTracker({ session: bad, visitor: bad });
+        assert.deepEqual(tt.identifyHeaders({}), {},
+            `the ${bad} collision sentinel must never reach a header`);
+    }
+    const malformed = loadTracker({ session: 'has space', visitor: 'v_ok' });
+    const headers = malformed.identifyHeaders({});
+    assert.equal(headers['X-Session-Id'], undefined,
+        'an id failing ID_PATTERN is omitted, not trimmed into something plausible');
+    assert.equal(headers['X-Visitor-Id'], 'v_ok', 'and the good one still goes');
+});
+
+test('§2 the header vocabulary has exactly ONE owner in js/', () => {
+    // The scan below is unchanged from when this feature was OFF — but it now
+    // asserts something different and still worth having. api.js and search.js
+    // both send these headers; neither spells them, because both call
+    // TrafficTracker.identifyHeaders(). One file names the header, so there is
+    // one place to change if the backend ever renames it, and no call site can
+    // drift to a near-miss spelling (ERR-216: grep for the parser, not the promise).
     const files = fs.readdirSync(path.join(INK, 'js')).filter((f) => f.endsWith('.js'));
     const offenders = files.filter((f) => {
-        if (f === 'traffic-tracker.js') return false;   // owns the (disabled) switch
+        if (f === 'traffic-tracker.js') return false;   // owns the vocabulary
         return /['"`]X-(Session|Visitor)-Id['"`]/i.test(JS(f));
     });
     assert.deepEqual(offenders, [],
-        'a custom header on a cross-origin GET turns it into a preflighted request that the ' +
-        'backend refuses — the search never fires');
+        'no file may spell the header itself — call TrafficTracker.identifyHeaders()');
+
+    // Positive control: the scan can actually find the literal it hunts for.
+    assert.match(JS('traffic-tracker.js'), /['"`]X-Session-Id['"`]/,
+        'sanity — the owner really does contain the literal, so an empty offender ' +
+        'list means "nobody else spells it", not "the regex matches nothing"');
+});
+
+test('§2 the header is enrolled PER-HELPER in api.js, never applied globally', () => {
+    // A custom header makes a GET non-simple, so the browser preflights it, and
+    // the CORS-preflight cache is keyed by FULL URL. Stamping every request
+    // would add an OPTIONS round-trip per distinct catalog and typeahead URL on
+    // the site. Enrolment is a declared option — the same contract as
+    // `anonymous: true` — so a new identified endpoint is a decision.
+    const api = JS('api.js');
+    assert.match(api, /if \(options\.identify\) \{\s*\n\s*this\.identifyHeaders\(headers\);/,
+        'request() must stamp the ids only when the caller asked for it');
+    // "Not global" stated so it can actually fail: there is exactly ONE stamp
+    // in the whole file, and the assertion above proves that one is guarded.
+    // (An earlier draft of this test used a /^\s*this\.identifyHeaders/m
+    // negative — which matched the guarded line itself and could never fail.)
+    const stamps = api.match(/this\.identifyHeaders\(headers\)/g) || [];
+    assert.equal(stamps.length, 1,
+        'an unconditional second stamp would preflight every catalog GET on the site');
+
+    // And the two search helpers are the ones that asked.
+    const smart = api.slice(api.indexOf('async smartSearch('), api.indexOf('async searchSuggest('));
+    assert.match(smart, /identify: true/,
+        '/api/search/smart writes the search_analytics row — it must carry the id');
+    const suggest = api.slice(api.indexOf('async searchSuggest('));
+    assert.match(suggest.slice(0, 2000), /identify: true/,
+        '/api/search/suggest too');
+});
+
+test('§2 the header typeahead stamps the ids on its own raw fetch', () => {
+    // search.js:fetchSmart never enters API.request, so the per-helper enrolment
+    // does not reach it. It is also the highest-volume search surface on the
+    // site — leaving it out would leave most search_analytics rows anonymous
+    // while the test suite looked green (ERR-150/160: "every surface calls X"
+    // is a list nobody maintains, so the enrolment lives HERE).
+    const search = JS('search.js');
+    const fn = search.slice(search.indexOf('async function fetchSmart('));
+    const body = fn.slice(0, fn.indexOf('\n    }'));
+    assert.match(body, /TrafficTracker\.identifyHeaders\(headers\)/,
+        'the typeahead must ask for the ids itself');
+    assert.ok(body.indexOf('identifyHeaders') < body.indexOf('await fetch('),
+        'and it must do so BEFORE the fetch, or the headers object is already spent');
 });
 
 // ─────────────────────────────────────────────────────────────────────────

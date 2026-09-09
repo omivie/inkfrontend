@@ -126,19 +126,35 @@ await Promise.all([req(`${PROD}/api/search/smart?q=warm&limit=1`), req(`${RENDER
 // ── §1 CORS ────────────────────────────────────────────────────────────────
 head('§1  CORS — can the browser send what the handoff asked for?');
 {
+    // BF-054 CLOSED 2026-09-08. This block used to assert the headers were NOT
+    // allowed and softly note the day they were. That day came, the frontend
+    // now DEPENDS on them (traffic-tracker.js USE_ID_HEADERS, api.js's
+    // per-helper `identify: true`, search.js's typeahead), and a browser does
+    // not degrade if they go away — it fails the preflight and takes site
+    // search down. So this is a hard check now, in the opposite direction.
     for (const [label, base] of [['prod (api.inkcartridges.co.nz)', PROD], ['render origin', RENDER]]) {
         const pre = await preflight(`${base}/api/search/smart?q=x`, 'GET', 'x-session-id,x-visitor-id');
         const allowH = (pre.headers.get('access-control-allow-headers') || '').toLowerCase();
         const hasIds = allowH.includes('x-session-id') && allowH.includes('x-visitor-id');
-        if (hasIds) {
-            soft(`${label}: id HEADERS are now allowed`,
-                'BF-054 has landed. traffic-tracker.js USE_ID_HEADERS can be flipped to true — '
-                + 'headers survive an edge-cache hit, query params do not reach the origin on one.');
-        } else {
-            check(!hasIds, `${label}: X-Session-Id / X-Visitor-Id are NOT allowed (BF-054 open)`,
-                'unexpected');
-            console.log(`      allow-headers: ${allowH || '(none)'}`);
-        }
+        check(hasIds, `${label}: X-Session-Id / X-Visitor-Id ARE allowed (BF-054 closed)`,
+            `allow-headers: ${allowH || '(none)'}\n`
+            + '      ⇒ the frontend sends both on /api/search/smart and /suggest. Without them '
+            + 'in this list the browser fails the preflight and NEVER SENDS THE SEARCH — this is '
+            + 'not a lost analytics column, it is site search down. Revert '
+            + 'traffic-tracker.js USE_ID_HEADERS to false immediately, then talk to the backend.');
+
+        // NEGATIVE CONTROL — the reason the line above can be believed.
+        // A preflight that answers 204 to everything proves nothing (ERR-223:
+        // "a preflight 204s whatever you ask ⇒ curl can't adjudicate CORS"). If
+        // a header nobody has ever heard of also comes back allowed, this
+        // endpoint is echoing the request and the check above is worthless.
+        const bogus = await preflight(`${base}/api/search/smart?q=x`, 'GET', 'x-totally-bogus-header');
+        const bogusAllow = (bogus.headers.get('access-control-allow-headers') || '').toLowerCase();
+        check(!bogusAllow.includes('x-totally-bogus-header'),
+            `${label}: the allow-list is a real list, not an echo of the request`,
+            `asking for x-totally-bogus-header returned it as allowed (${bogusAllow}). This `
+            + 'endpoint echoes Access-Control-Request-Headers, so the assertion above measures '
+            + 'nothing at all — the only way to know whether the id headers work is a real browser.');
     }
     const pre = await preflight(`${PROD}/api/admin/quick-orders/${UNMATCHABLE_UUID}/outcome`, 'PATCH');
     const allowM = (pre.headers.get('access-control-allow-methods') || '').toUpperCase();

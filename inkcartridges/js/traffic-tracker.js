@@ -317,31 +317,49 @@
      *    than no id: no id is an honest gap, a shared one is a lie with a number
      *    on it.
      *
-     * TRANSPORT — measured against production 2026-08-31, and it is NOT what the
-     * handoff recommends. `X-Session-Id` / `X-Visitor-Id` are absent from the
-     * backend's CORS allow-list:
+     * TRANSPORT — BF-054 is CLOSED, and this note used to say the opposite.
      *
-     *   OPTIONS /api/search/smart  (Access-Control-Request-Headers: x-session-id)
+     * Measured 2026-08-31, when it was true: `X-Session-Id` / `X-Visitor-Id`
+     * were absent from Access-Control-Allow-Headers, so a browser did not
+     * degrade — it failed the preflight and NEVER SENT THE SEARCH AT ALL.
+     * Taking that handoff's "works on all GET search endpoints" at face value
+     * would have broken site search for every customer to gain an analytics
+     * column. That is why the switch below shipped OFF with the reasoning
+     * attached rather than as a TODO.
+     *
+     * Re-measured 2026-09-09, after the backend shipped the allow-list:
+     *
+     *   OPTIONS /api/shop  (Access-Control-Request-Headers: x-session-id,x-visitor-id)
      *     → 204, Access-Control-Allow-Headers:
      *       Content-Type,Authorization,X-Requested-With,X-Request-Id,
-     *       X-Guest-Session,X-Attribution-Source          ← neither id header
+     *       X-Guest-Session,X-Attribution-Source,X-Session-Id,X-Visitor-Id
      *
-     * A browser does not degrade there — it fails the preflight and NEVER SENDS
-     * THE SEARCH AT ALL. Taking the handoff's "default, works on all GET search
-     * endpoints" at face value would have broken site search for every customer
-     * to gain an analytics column. So GET search uses the documented ?sid=/?vid=
-     * fallback instead, which is free here: /api/search/smart and /suggest both
-     * answer `cf-cache-status: DYNAMIC` on both hosts, so the extra params
-     * fragment no edge cache (the ERR-124/159 hazard does not bite). The POST
-     * click beacon carries them in its body, as specified.
+     *   ...on https://inkcartridges.co.nz, https://www.inkcartridges.co.nz AND
+     *   http://localhost:3000 — all three, because an allow-list that only
+     *   covers www is a header that works in production and not in dev.
      *
-     * USE_ID_HEADERS is the one-line switch for the day the allow-list gains
-     * them. Leave it false until `npm run probe:data-capture` says otherwise —
-     * flipping it early does not degrade, it takes search down.
+     * WITH A NEGATIVE CONTROL, which is the whole reason to trust it: asking
+     * for `x-totally-bogus-header` returns the SAME list, unchanged. The
+     * preflight is not echoing what it is asked. That distinction is exactly
+     * what ERR-223 recorded ("a preflight 204s whatever you ask ⇒ curl can't
+     * adjudicate CORS") — a preflight that answers 204 to everything proves
+     * nothing, and this one demonstrably does not.
+     *
+     * BOTH TRANSPORTS RUN NOW. ?sid=/?vid= stay on the two search helpers: they
+     * were the only transport for six months and `search_analytics` still shows
+     * 915 rows with ZERO session ids over five days, so they are evidently not
+     * what the backend reads on that route. Dropping them to add the header
+     * would trade a measured unknown for an unmeasured hope. When the header is
+     * confirmed landing rows, the params come off — and not before (ERR-158).
+     *
+     * The header is enrolled PER-HELPER in api.js `request()`, never globally:
+     * it makes a GET non-simple, and the CORS-preflight cache is keyed by full
+     * URL, so a blanket stamp would add an OPTIONS round-trip per distinct
+     * catalog and typeahead URL on the site.
      * ────────────────────────────────────────────────────────────────────── */
     const ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
     const COLLIDING_IDS = ['anon', 'ts_fallback'];
-    const USE_ID_HEADERS = false; // BF-054 — see probe:data-capture §1
+    const USE_ID_HEADERS = true; // BF-054 closed 2026-09-08 — see probe:data-capture §1
 
     /** The id, or null. Null means "we don't know", and nothing is sent. */
     function usableId(value) {
@@ -403,8 +421,14 @@
     }
 
     /**
-     * Headers, for the day BF-054 lands. Returns {} today so a caller that
-     * spreads it is already written correctly and needs no edit later.
+     * Stamp the ids onto a headers object, in place, and return it.
+     *
+     * This returned `{}` unchanged for six months while BF-054 was open, so
+     * every call site was already written correctly and none of them needed
+     * editing when the allow-list landed — the switch above was the only edit.
+     * It still returns the object untouched whenever there is no usable id
+     * (DNT, /admin, private browsing, a sentinel), so an unknown visitor sends
+     * no header rather than a placeholder one.
      */
     function identifyHeaders(headers) {
         const target = headers || {};

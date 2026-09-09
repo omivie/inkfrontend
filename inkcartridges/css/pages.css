@@ -3908,8 +3908,14 @@ body.filter-sort-open { overflow: hidden; }
     .filter-sort-bar:not([hidden]) {
         display: block;
     }
-    /* Keep the PDP-style sticky bars from colliding: the listing never shows
-       .sticky-atc, so only one fixed bottom bar is ever present per page. */
+    /* This used to claim "only one fixed bottom bar is ever present per page".
+       It was not true and nothing checked it: .consent-banner is also
+       `position: fixed; bottom: 0`, at --z-popover (600) against this bar's
+       --z-sticky (200), and it is present on every page on a first visit. It
+       covered this bar's button outright — measured, ERR-238. The lift now
+       lives with the banner that causes it (components.css,
+       `body.has-consent-banner`), and `npm run probe:mobile-ux` invariant F
+       holds the no-overlap claim that this comment used to only assert. */
 }
 
 /* Mobile product detail layout fixes (iPhone) */
@@ -11231,6 +11237,38 @@ a.account-review-card__product:focus-visible {
     column-gap: var(--spacing-lg);
 }
 
+/* PHONES GET ONE COLUMN — ERR-240, and the split's own measurement is what says so.
+   The two-column split was chosen with a stated CTA floor for this surface:
+   "the card floor here is ~165px (a shop card's buy row is the card minus 22px,
+   and its stepper eats 80 of what is left)". A half-width column on a phone is
+   nowhere near it — measured on production:
+
+       viewport  320   375   390   430
+       card      124   152   159   179     (against a 165px floor)
+
+   So the split is invalid at phone widths by the criterion it was designed
+   against. Every one of those cards is a column too narrow to hold its own buy
+   control, which is why the CTA was the first thing to break there.
+
+   This is NOT the ERR-222 "Genuine gets buried" hazard. That was about the
+   search dropdown, where a 40-row window that never paginates pushed value
+   packs to position 239-367 and they became unreachable. This is a full results
+   PAGE: both sections keep their own badge heading, both are complete, both
+   paginate, and stacking them is what this page did before the split shipped.
+   Genuine is one scroll away with its name on it, not hidden.
+
+   Stacked, the row is the full container, so the card ladder below gives two
+   ~175px cards per row instead of one 159px card per column — more product on
+   screen AND a card that clears its own floor. 699px matches the boundary
+   search.css already measured for the dropdown, so the two surfaces step
+   together instead of at two invented numbers. */
+@media (max-width: 699px) {
+    .products-sections--split {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: var(--spacing-xl);
+    }
+}
+
 .products-section__title {
     display: flex;
     align-items: center;
@@ -11385,7 +11423,10 @@ a.account-review-card__product:focus-visible {
 /* Two cards in a half-width column hold their width down to about a 768px
    viewport (170px there, against the 170px cap the <=768px block imposes).
    Below that a column is too narrow for a pair, so it carries one. */
-@media (max-width: 767px) {
+/* 700-767px: still two columns (the stack starts at 699), and a half-width
+   column there is too narrow for a pair, so it carries one. Below 700 the block
+   above has made the row full width and the two-up rule takes over. */
+@media (min-width: 700px) and (max-width: 767px) {
     .products-sections--split .products-row .product-card {
         flex: 0 0 100%;
     }
@@ -11402,21 +11443,51 @@ a.account-review-card__product:focus-visible {
    own line rather than let it ellipsise. The shipped stacked layout clips here
    too (159.5px card, 1px); wrapping means this one does not. */
 @media (max-width: 480px) {
+    /* The sections are STACKED below 699px now (see the block up at
+       .products-sections--split), so this row is the full container, not a
+       half-width column. Two-up is therefore the same layout the --single
+       sections get here, which is the point: one phone grid, not two.
+
+       Measured at 390px: a 358px row gives 175px cards. That clears the ~165px
+       CTA floor this surface was designed against AND stays under the 200px
+       `@container pcard` threshold that flips the card footer to
+       price-beside-button — the trap that cost the search dropdown a clipped
+       CTA at 214.9px. The 195px cap keeps that true up to 430px. */
     .products-sections--split .products-row .product-card {
-        flex: 0 0 100%;
-        /* The <=480px block below lifts the width cap entirely (max-width:
-           none) for the full-width 2-up phone layout. A split column at 480px
-           is 204px, which would put the card OVER the 200px container query
-           that flips its footer to price-beside-button — the trap that cost the
-           search dropdown a clipped CTA. Keep a cap, just a phone-sized one. */
+        flex: 0 0 calc(50% - var(--spacing-sm) / 2);
         max-width: 195px;
     }
-    .products-sections--split .products-row .product-card__buy {
-        flex-wrap: wrap;
-    }
-    .products-sections--split .products-row .product-card__cart-btn {
-        flex: 1 0 100%;
-    }
+    /* THESE TWO DECLARATIONS USED TO LIVE HERE AND THEY BROKE THE BUTTON — ERR-240.
+       They were:
+           .product-card__buy   { flex-wrap: wrap; }
+           .product-card__cart-btn { flex: 1 0 100%; }
+       and they are ROW thinking. `flex-wrap: wrap` + `flex-basis: 100%` is the
+       idiom for "push this item onto its own line" in a ROW. This box is not a
+       row here: components.css `@container pcard (max-width: 260px)` inside
+       `@media (pointer: coarse)` makes .product-card__buy a COLUMN, and a split
+       phone card is ~159px, comfortably inside that query.
+
+       In a column, flex-basis is the HEIGHT (ERR-224, the identical sentence,
+       three weeks earlier and two files away). So `flex: 1 0 100%` sized the
+       button to the full height of the buy box, and `flex-wrap: wrap` then put
+       it on a flex LINE of its own whose cross-size is the item's own
+       max-content width. `align-items: stretch` stretches to the LINE, not the
+       container, so the button stopped at the width of the word "Add".
+
+       Measured on production before the fix — and note it is a CONSTANT, which
+       is the tell that no percentage was resolving against the viewport:
+
+           viewport   320   375   390   430
+           card       124   152   159   179
+           Add button  38x96 at every single one
+
+       A 38px-wide, 96px-tall button with "Add" broken across three lines, on
+       the buy control of every card on /search and /shop at every phone width.
+
+       The container query already does this correctly on its own: it stacks the
+       column, sets the qty row to width:100% and the button to width:100% with
+       min-height:44px. It needed no help. Removing the help is the fix — the
+       card keeps its own line for the CTA because the column gives it one. */
 }
 
 /* Shop / search / brand / printer pages: trim outer gutters so 7 cards fit
@@ -12147,7 +12218,15 @@ body.page-shop {
     .shop-section-card .shop-products__grid,
     .shop-section-card .related-products__grid,
     .shop-section-card .color-packs-grid,
-    .shop-section-card .ribbon-products-grid {
+    .shop-section-card .ribbon-products-grid,
+    /* ERR-236: the landing-page popular shelf. It MUST be in this list. The
+       rule below gives cards in a grid parent `max-width: none; width: 100%`,
+       which is right for a 2-up track and wrong for a 1-up one: measured at
+       390px the shelf's cards came out 324px, past the 200px container query
+       on .product-card, which flips the footer to price-BESIDE-button and
+       clips the Add label. A wider card producing a smaller button — the
+       ERR-218 shape. 2-up puts them at ~167px, inside the window. */
+    .shop-section-card .popular-row__grid {
         grid-template-columns: repeat(2, 1fr);
         gap: var(--spacing-sm);
     }

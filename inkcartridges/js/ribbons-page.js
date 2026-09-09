@@ -120,10 +120,61 @@ const RibbonsPage = {
             if (levelProducts) levelProducts.hidden = true;
             this.elements.empty.hidden = true;
             if (this.elements.error) this.elements.error.hidden = true;
+            // The landing state — a brand A-Z list and, until ERR-236, not one
+            // price on a page Google Ads pays to reach. showLevel is the single
+            // choke point for this page's two states, so enrolling here means
+            // every path in (init, popstate, pageshow, "back to brands") gets
+            // the shelf, rather than three call sites and a fourth that forgets.
+            this.renderPopularRow();
         } else {
             if (levelBrands) levelBrands.hidden = true;
             if (levelProducts) levelProducts.hidden = false;
         }
+    },
+
+    POPULAR_ROW_LIMIT: 4,
+
+    /**
+     * Popular ribbons, above the brand picker (ERR-236).
+     *
+     * A deliberate twin of ShopPage.renderPopularRow — /ribbons is a separate
+     * page with a separate controller and its own card renderer, so it cannot
+     * inherit that one. Both call Products.renderCards and both bind all three
+     * hooks; a test asserts the pair stays in step.
+     *
+     * Hides rather than empties, for the reason ERR-193 records: a failed read
+     * that paints empty-shelf copy is worse than one that changes nothing.
+     */
+    async renderPopularRow() {
+        const section = document.getElementById('popular-row');
+        const grid = document.getElementById('popular-row-grid');
+        if (!section || !grid) return;
+
+        const hide = () => { section.hidden = true; grid.innerHTML = ''; };
+        const token = (this._popularRowToken = (this._popularRowToken || 0) + 1);
+
+        let rows = [];
+        try {
+            const resp = await API.getPopularProducts({ category: 'ribbons', limit: this.POPULAR_ROW_LIMIT });
+            if (resp && resp.ok && resp.data && Array.isArray(resp.data.products)) {
+                rows = resp.data.products;
+            } else {
+                DebugLog.error('[popular] /api/products/popular?category=ribbons was unreadable — '
+                    + '/ribbons is showing its brand picker with no products.');
+            }
+        } catch (e) {
+            DebugLog.error('[popular] /api/products/popular?category=ribbons threw — '
+                + '/ribbons falls back to the brand picker alone:', e.message);
+        }
+
+        if (token !== this._popularRowToken) return;
+        if (!rows.length || typeof Products === 'undefined') { hide(); return; }
+
+        grid.innerHTML = Products.renderCards(rows);
+        Products.bindImageFallbacks(grid);
+        Products.attachCardListeners(grid);
+        Products.decorateBusinessPricing(grid, rows);
+        section.hidden = false;
     },
 
     // =========================================

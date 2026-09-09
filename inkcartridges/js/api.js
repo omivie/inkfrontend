@@ -2153,6 +2153,36 @@ const API = {
     },
 
     /**
+     * The admin-authored "FOR USE IN" machine list for one product (ERR-241).
+     *
+     * Replaces a direct PostgREST read of `products.compatible_devices_html`
+     * with the anon key. That read was bulk-dumpable: drop the `sku=eq.` filter
+     * and every list came back in one request, with a key that ships in the
+     * page. The data now lives in `product_compat_devices` (backend mig 131),
+     * RLS on, service-role only, and this endpoint is its only door.
+     *
+     * `getPublic` is REQUIRED here, not stylistic. The endpoint is edge-cached —
+     * measured `s-maxage=300, stale-while-revalidate=600`, `cf-cache-status:
+     * HIT` — so a bearer token or X-Guest-Session on it is the ERR-124/159
+     * hazard: one shared cache entry, per-visitor headers.
+     *
+     * That cache is also what makes the 40/min/IP limiter (`forUseInLimiter`)
+     * a non-issue for real traffic: a 45-request burst against one SKU never
+     * reached the origin and `ratelimit-remaining` did not move. It is only a
+     * problem for a tool that walks many DISTINCT skus — see probe:for-use-in,
+     * which paces itself and treats a 429 as a failure, never as "no data".
+     *
+     * Answers `{ ok:true, data:{ sku, for_use_in_html } }`, where a null
+     * `for_use_in_html` means "this product has no list" — which is the common
+     * case: only 91 of ~4,000 products have one.
+     *
+     * @param {string} sku - Product SKU
+     */
+    async getForUseIn(sku) {
+        return this.getPublic(`/api/products/${encodeURIComponent(sku)}/for-use-in`);
+    },
+
+    /**
      * The most-bought products in one category — the ad landing pages' shelf.
      *
      * ERR-236: /ink-cartridges, /toner-cartridges and /ribbons are where Google

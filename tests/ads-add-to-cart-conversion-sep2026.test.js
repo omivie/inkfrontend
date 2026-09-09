@@ -538,16 +538,34 @@ test('§5 POST /api/cart/items carries ?sid=/?vid=', () => {
     assert.match(API_SRC, /return this\.post\(this\.identifyUrl\('\/api\/cart\/items'\), \{ product_id: productId, quantity \}\);/);
 });
 
-test('§5 and it does NOT use the X-Session-Id header the hand-off asked for', () => {
-    // BF-054, re-measured 2026-09-06: the header is absent from
-    // Access-Control-Allow-Headers, and a browser fails the preflight and never
-    // sends the request. On this endpoint that means nobody can add to cart.
-    assert.doesNotMatch(API_CODE, /X-Session-Id/,
-        'a browser fails the preflight and never sends the request at all');
-    assert.doesNotMatch(API_CODE, /X-Visitor-Id/);
-    // Positive control: the ban is real, not an artefact of over-stripping.
+test('§5 the cart POST KEEPS ?sid=/?vid= now that the header works too', () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and it was right to. Until
+    // 2026-09-08 the header was absent from Access-Control-Allow-Headers, a
+    // browser failed the preflight and never sent the request, and on THIS
+    // endpoint that meant nobody could add to cart. BF-054 is now closed
+    // (verified against production 2026-09-09 with a negative control) and
+    // api.js sends the ids on its two search helpers.
+    //
+    // The cart POST is still not switched over, and that is deliberate. A POST
+    // already preflights, so the header would cost nothing here — but ?sid= is
+    // MEASURABLY working on this endpoint (server-side add_to_cart rows are
+    // landing with session ids), and swapping a transport that demonstrably
+    // works for one not yet confirmed on this route is a behaviour change, not
+    // cleanup (ERR-158).
+    const start = API_CODE.indexOf('async addToCart(');
+    assert.notEqual(start, -1, 'addToCart must still exist');
+    const addToCart = API_CODE.slice(start, API_CODE.indexOf('},', start));
+    assert.doesNotMatch(addToCart, /identify\s*:\s*true/,
+        'the cart POST does not enrol in the header transport — ?sid= is what lands its rows');
+    assert.match(addToCart, /identifyUrl\('\/api\/cart\/items'\)/,
+        'and it still carries the query-param join key');
+
+    // Positive control: the ban is scoped to this function, not an artefact of
+    // over-stripping — the header really is used elsewhere in the same file.
+    assert.match(API_CODE, /if \(options\.identify\)/,
+        'api.js must still have the per-helper header enrolment this test is scoped around');
     assert.match(API_SRC, /X-Session-Id/,
-        'api.js must still EXPLAIN in a comment why the header is not used');
+        'api.js must still EXPLAIN its transport choice in a comment, not only in a commit message');
 });
 
 test('§5 identifyUrl is a forwarder to the one owner of the id vocabulary', () => {

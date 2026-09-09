@@ -517,12 +517,117 @@ if (typeof window !== 'undefined') {
  * @param {{ allowUnbranded?: boolean }} [opts]
  * @returns {string|null} Canonical URL or null when required fields are missing.
  */
+/**
+ * PrinterSlug — the ONE place that knows two printer URLs are the same printer.
+ * ===========================================================================
+ *
+ * ERR-242. `printer_models` holds some physical printers under more than one
+ * row, because the supplier feeds spell them differently. Each row used to
+ * carry only its own slice of the cartridges, so one URL looked healthy and its
+ * twin looked like an unsupported printer. The backend then unioned the link
+ * sets — and THAT is what created the SEO problem: `sitemap-printers.xml`
+ * selects on `product_compatibility!inner`, so the previously-empty twin used
+ * to be excluded automatically. Now it has links, so it qualifies, and both
+ * spellings are submitted to Google as separate pages with identical content.
+ *
+ * MEASURED, not read off a hand-off — the hand-off (`duplicate-printer-urls-FE-
+ * handoff-sep2026.md`) was never delivered and the checklist that cited it said
+ * 21 pairs. Derived instead from the live sitemap (4,088 URLs) on 2026-09-09:
+ * FIFTEEN pairs, each verified against /api/products/printer/:slug as two
+ * distinct printer_models rows returning IDENTICAL product sets.
+ *
+ * THE MATCHING RULE IS NARROW ON PURPOSE: same brand, and the slugs are equal
+ * after stripping every non-alphanumeric character. Nothing fuzzier is safe.
+ * Edit distance was tried and produced 17,686 "pairs" — `brother-dcp-130c` and
+ * `brother-dcp-135c` are one character apart and are DIFFERENT PRINTERS. A
+ * canonical between those two would actively destroy a working page. So the map
+ * below is explicit and hand-checked, never computed at runtime.
+ *
+ * WINNER = the manufacturer's own spelling. That was the site owner's call, and
+ * it is the SEO decision the backend explicitly left to us ("merging changes
+ * URLs, which is an SEO decision rather than a data one, and it is yours").
+ * `oki-ml182` is the one pair with independent corroboration: it is the only
+ * twin the site's own printer picker lists. The two Fuji Xerox names were
+ * checked against FUJIFILM's own support site, which spells them "DocuPrint
+ * C1190 FS" and "DocuPrint CM505 da" — with the space.
+ *
+ * ONE COPY. ERR-187/192: a hardcoded brand array reached six copies in this
+ * repo, one of them in CSS, and relocating a rule instead of sharing it left a
+ * stale duplicate 2,400 lines down the same file. `tests/printer-slug-canonical-
+ * sep2026.test.js` fails if a second copy of this table appears anywhere.
+ *
+ * THIS IS ONLY HALF THE FIX, and the half we own. Googlebot does not read the
+ * SPA on these URLs: `middleware.js` prerenders them to the backend, and the
+ * backend writes that page's <link rel="canonical"> — measured self-referential
+ * on both twins. What this module buys is the other real signal: every INTERNAL
+ * link the site emits now points at the winner. The prerender canonical and the
+ * sitemap are the backend's, and are asked for in
+ * printer-canonicals-backend-brief-sep2026.md.
+ *
+ * Accepting a loser slug keeps working, deliberately: both rows return the same
+ * products, so this changes which URL we ADVERTISE, never what a visitor who
+ * lands on one is shown.
+ */
+const PrinterSlug = {
+    /** loser slug → winner slug. Lower-case both sides. */
+    DUPLICATES: {
+        // Brother HL-L3230CDW — "HLL-3230" is a feed typo.
+        'brother-hll-3230cdw': 'brother-hl-l3230cdw',
+        // Epson EcoTank — one word; "EC OTANK" is a mis-split.
+        'epson-ec-otank-et-2850': 'epson-ecotank-et-2850',
+        // Fuji Xerox ApeosPort — the `---` is a slug artefact of " - ".
+        'fuji-xerox-apeosport---vii-c3321': 'fuji-xerox-apeosport-vii-c3321',
+        'fuji-xerox-apeosport---vii-c4421': 'fuji-xerox-apeosport-vii-c4421',
+        // Fuji Xerox DocuPrint C1190 FS / CM505 da — manufacturer uses the space.
+        'fuji-xerox-docuprint-c1190fs': 'fuji-xerox-docuprint-c1190-fs',
+        'fuji-xerox-docuprint-cm505da': 'fuji-xerox-docuprint-cm505-da',
+        // HP LaserJet — one word.
+        'hp-laser-jet-enterprise-m651': 'hp-laserjet-enterprise-m651',
+        // HP Smart Tank — two words.
+        'hp-smarttank-300': 'hp-smart-tank-300',
+        'hp-smarttank-400': 'hp-smart-tank-400',
+        'hp-smarttank-6000': 'hp-smart-tank-6000',
+        'hp-smarttank-7000': 'hp-smart-tank-7000',
+        'hp-smarttank-7300': 'hp-smart-tank-7300',
+        'hp-smarttank-7600': 'hp-smart-tank-7600',
+        // OKI MC362dn / ML182 — no space in the manufacturer's name.
+        'oki-mc-362dn': 'oki-mc362dn',
+        'oki-ml-182': 'oki-ml182',
+    },
+
+    /**
+     * The slug we advertise for this printer.
+     *
+     * IDENTITY for anything not in the table — which is 4,058 of the 4,088 live
+     * printer URLs. A slug this map has never heard of is not a duplicate; it is
+     * just a printer, and it must come back unchanged. Returns the input as-is
+     * (not '') for a non-string, so a caller's own null-check still governs.
+     */
+    canonical(slug) {
+        if (typeof slug !== 'string' || !slug) return slug;
+        return this.DUPLICATES[slug.toLowerCase()] || slug;
+    },
+
+    /** True when `slug` is a spelling we have chosen to stop advertising. */
+    isDuplicate(slug) {
+        return typeof slug === 'string' && Object.prototype.hasOwnProperty.call(this.DUPLICATES, slug.toLowerCase());
+    },
+};
+
+if (typeof window !== 'undefined') {
+    window.PrinterSlug = PrinterSlug;
+}
+
+
 function buildPrinterUrl(printer, opts) {
     if (!printer || typeof printer !== 'object') return null;
-    const slug = printer.slug || printer.printer_slug
+    const rawSlug = printer.slug || printer.printer_slug
         || (printer.printer_models && printer.printer_models.slug)
         || '';
-    if (!slug) return null;
+    if (!rawSlug) return null;
+    // Every internal link the site emits points at the winning spelling
+    // (ERR-242). Identity for the 4,058 slugs that are not duplicates.
+    const slug = PrinterSlug.canonical(rawSlug);
 
     const nested = printer.printer_models || printer.printer || null;
     let brandSlug = printer.brand_slug
@@ -3779,6 +3884,7 @@ if (typeof module !== 'undefined' && module.exports) {
         storageUrl,
         esc, escAttr,
         buildPrinterUrl,
+        PrinterSlug,
         ProductColors,
         ProductSort,
         ProductName,

@@ -22,11 +22,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=e083ef8b">
-    <link rel="stylesheet" href="/css/components.css?v=8d64dfbc">
-    <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=63d622ec">
-    <link rel="stylesheet" href="/css/search.css?v=4f1bcb66">
+    <link rel="stylesheet" href="/css/layout.css?v=52ca6c3c">
+    <link rel="stylesheet" href="/css/components.css?v=6d0f1d39">
+    <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
+    <link rel="stylesheet" href="/css/pages.css?v=f88f1dcf">
+    <link rel="stylesheet" href="/css/search.css?v=6aaf67b9">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Checkout | InkCartridges.co.nz">
@@ -207,13 +207,14 @@
                                     <label class="form-label">Select Delivery Area <span class="required">*</span></label>
                                     <div class="delivery-type-options">
                                         <label class="delivery-type-option">
-                                            <input type="radio" name="delivery_type" value="urban" class="delivery-type-option__radio" required>
+                                            <input type="radio" name="delivery_type" value="urban" class="delivery-type-option__radio" required checked>
                                             <span class="delivery-type-option__icon-wrap">
                                                 <svg class="delivery-type-option__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="9" height="14"/><rect x="11" y="3" width="11" height="18"/><line x1="6" y1="11" x2="6" y2="11"/><line x1="6" y1="15" x2="6" y2="15"/><line x1="15" y1="7" x2="15" y2="7"/><line x1="15" y1="11" x2="15" y2="11"/><line x1="15" y1="15" x2="15" y2="15"/></svg>
                                             </span>
                                             <span class="delivery-type-option__content">
                                                 <span class="delivery-type-option__name">Urban</span>
                                                 <span class="delivery-type-option__desc">City / town address</span>
+                                                <span class="delivery-type-option__price" data-delivery-price="urban"></span>
                                             </span>
                                             <span class="delivery-type-option__check" aria-hidden="true"></span>
                                         </label>
@@ -225,10 +226,12 @@
                                             <span class="delivery-type-option__content">
                                                 <span class="delivery-type-option__name">Rural</span>
                                                 <span class="delivery-type-option__desc">Rural delivery route</span>
+                                                <span class="delivery-type-option__price" data-delivery-price="rural"></span>
                                             </span>
                                             <span class="delivery-type-option__check" aria-hidden="true"></span>
                                         </label>
                                     </div>
+                                    <p class="delivery-type-notice" id="delivery-type-notice" role="status" aria-live="polite" hidden></p>
                                     <p class="delivery-type-attention-text">Please select your delivery area to continue</p>
                                     <p class="delivery-type-hint">Urban: city/town address &nbsp;·&nbsp; Rural: rural delivery route. Affects shipping cost.</p>
                                 </div>
@@ -498,8 +501,8 @@
     <script defer src="/js/cart.js?v=c446face"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/products.js?v=969d1f69"></script>
-    <script defer src="/js/search.js?v=52f58f48"></script>
-    <script defer src="/js/main.js?v=8eed1d93"></script>
+    <script defer src="/js/search.js?v=93f4714f"></script>
+    <script defer src="/js/main.js?v=7bae8728"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=3e9b6eea"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>

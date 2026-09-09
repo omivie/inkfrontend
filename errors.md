@@ -41,6 +41,41 @@ describing the same incident.
 
 ---
 
+## ERR-240 — Every text field on the site zoomed the page on an iPhone, and the Add button on /search was 38 pixels wide — **RESOLVED** (2026-09-09)
+
+- **Date**: 2026-09-09 · **Context**: the owner sent a 390x844 screenshot of the header search dropdown and said "there are major problems with phone ui and ux". There were, and none of them were the dropdown alone. The phone had never been measured: all five mobile test files (`mobile-parity-may2026`, `mobile-ux-audit-jul2026`, `account-mobile-nav-jul2026`, `mobile-nav-scroll-jul2026`, `mobile-checkout-fold-sep2026`) are source-text greps, and the one probe that measures real boxes measures a single page.
+- **Three defects, all measured on production at 390x844, none visible in the source**:
+  1. **The 16px floor.** 32 distinct text controls computed below 16px — every field on `/checkout` (15px), every field on `/contact` and `/quote` (15.2px), plus the cart quantity and coupon inputs. Under 16px iOS Safari zooms the page on focus and does **not** zoom back, so from the first field onward the viewport is wider than the screen and every later field is off the side. Nothing was individually wrong: `--font-size-sm` IS 15px and `section.checkout-page .form-input { font-size: var(--font-size-sm) }` is a deliberate compaction. 15px is a legal design value and an illegal input value, and no rule knew the difference.
+  2. **A 38x96px "Add" button** on every `/search` and `/shop` card, at 320, 375, 390 and 430px alike — a constant, which is the tell that no percentage was resolving. `.product-card__buy` is a flex COLUMN under `@container pcard (max-width: 260px)` (components.css, inside `@media (pointer: coarse)`), and pages.css applied `flex-wrap: wrap` + `flex: 1 0 100%` to it. That is ROW thinking: flex-basis is main-axis, so it became the button's HEIGHT, `flex-wrap` put it on a line of its own, and `align-items: stretch` stretched it to that line's cross-size — the width of the word "Add". **This is ERR-224's exact sentence, three weeks later and two files away.**
+  3. **20 interactive controls under 44x44** (WCAG 2.5.5), including `#terms` at 18x18 — a checkbox that is *required* to place an order — `#remember-me`, the password reveal, the favourite button on every card, and `a.logo` at 23px tall on all 43 pages.
+- **Why the existing probe could not see #2**: `scripts/probe-shop-source-columns.mjs` created its contexts as `newContext({ viewport })` and nothing else, so the pointer was **fine**. The rules that break are nested inside `@media (pointer: coarse)`. It was measuring a layout no phone ever gets and reporting it green. *A probe whose emulation does not match the device is not a weaker measurement, it is a measurement of something else.*
+- **Fix**: one 16px floor rule in components.css for `input`/`select`/`textarea` at <=1024px — and the `:not()` chain is repeated on all three arms **to equalise specificity**, because the first version had it only on `input` ((0,3,2) vs (0,0,2)) and half-worked: every `input` on /contact and /quote came up to 16px while every `select` and `textarea` stayed at 15.2px. *A floor with a hole in it is worse than no floor, because the pages it misses look fixed.* The two row-thinking declarations were deleted, not adjusted — the container query already stacks the column correctly and needed no help. Tap targets took a 48px hit-area `::after` where the control sits alone, and a real `min-height` where a slop would reach into a sibling that paints over it (measured: the `::after` was created on all twelve and still failed on nine, for exactly that reason). `probe:shop-source-columns` now emulates touch at 375px.
+- **Verified**: `npm run probe:mobile-ux` (new), plus the tap/type sweeps re-run against the fix — 20 sub-44 controls down to 1, 32 sub-16px controls down to 0. The one that remains is `.product-card__qty-input` at 34x44, **reported by name on every run rather than allow-listed**: ERR-218 measured that a row holding three 44px targets plus an Add button does not fit at 375px, so width taken there comes off the two buttons people actually press.
+- **Lesson**: a design token is scoped to a medium. 15px is a fine caption and an illegal input; `flex-basis: 100%` is "own line" in a row and "full height" in a column. Both defects are the same mistake — a value that is correct in the context it was written for, carried into a context that reverses its meaning. And **check what your instrument is emulating before you trust it**: the fine-pointer probe is why #2 shipped.
+
+## ERR-239 — The cart's sticky Checkout bar was 1,161 pixels above the top of the screen, and a decorative animation was the reason — **RESOLVED** (2026-09-09)
+
+- **Date**: 2026-09-09 · **Context**: found by `probe:mobile-ux` invariant F while measuring which fixed bars overlap on a phone. `.cart-sticky-bar` declares `position: fixed; bottom: 0`. Measured on production at 390x844 with `/cart` scrolled to the bottom, it painted at **top: -1161px** — entirely off-screen, above the viewport.
+- **Root cause**: `modern-effects.css` set the revealed state of the scroll animation to `transform: translateY(0)`. **`translateY(0)` is not `none`.** A non-none transform makes an element a containing block for every `position: fixed` descendant, `.in-view` is never removed after the reveal, and every `<section>` on the site carries `.will-animate` — so every section was permanently a containing block, and the cart's bar was anchoring to the bottom of `section.cart-page` instead of the viewport. Both declarations were correct in isolation; **the bug was the pairing**, which is the same shape as ERR-217 and ERR-233.
+- **This was predicted, in writing, by the test that had to change.** `tests/search-overlay-containing-block-sep2026.test.js` §2 asserted the revealed state was `translateY(0)` and *not* `none`, and said: "if this ever becomes `transform: none`, the containing-block trap is gone and the exemption in modern-effects.js can be revisited (deliberately, not by accident)." ERR-217 had fixed one instance of this trap with a narrow JS exemption for sections containing a search form. The trap was never confined to that one section.
+- **Fix**: the revealed state is `transform: none`. It paints identically and interpolates identically (a transition to `none` animates from the identity matrix), so the reveal is unchanged — and the whole class of bug goes, not one instance. **The JS exemption stays**: removing it would be a behaviour change dressed as cleanup (ERR-158) — those sections would start animating for the first time, which nobody asked for. It is now defence in depth rather than the only defence, and §1 still pins it.
+- **Verified**: measured before/after on a local server (`transform: none` on the revealed section), full suite 5837 pass. §2 of the containing-block test was inverted deliberately and now also asserts `translateY(0)` does not come back.
+- **Lesson**: **the identity matrix looks like a no-op and is not one.** Any `transform` value other than `none` — including one that moves nothing — changes what `position: fixed` means for every descendant. When a test tells you in its own failure message what the deliberate future change looks like, read it before assuming your change is wrong.
+
+## ERR-238 — A first-time visitor on a phone could not press Add to Cart: our own consent banner was painted over it — **RESOLVED** (2026-09-09)
+
+- **Date**: 2026-09-09 · **Context**: ERR-233 had just fixed the consent bar covering its own Accept button, by lifting the one fixed bottom-anchored element it happened to be looking at. There are four.
+- **Root cause**: `.consent-banner` is `position: fixed; bottom: 0` at `--z-popover` (600). So are `.cart-sticky-bar`, `.sticky-atc` (the PDP Add to Cart) and `.filter-sort-bar`, all at `--z-sticky` (200). The banner painted over all three, and the only thing lifted out of its way was `#google-reviews-badge`. `body.has-consent-banner { padding-bottom }` cannot help them for the reason ERR-233 already had to learn once: **padding reserves space in FLOW and these are FIXED**.
+- **Measured on production at 390x844, with the banner showing — the state every first-time visitor is in, and every ad click is a first visit**:
+  - PDP: banner 696-844, `.sticky-atc` 777-844 → `document.elementFromPoint` at the Add-to-Cart button's own centre returned `button.consent-banner__btn`.
+  - `/shop`: banner 696-844, `.filter-sort-bar` 777-844 → returned `div.consent-banner__actions`.
+- So the **top of the funnel** was unreachable on a phone until consent was dismissed, and nothing said so. `probe:mobile-checkout-fold` missed it because it checks the *checkout* Continue button, which is in flow, where `padding-bottom` genuinely does work.
+- **A comment was standing in for a test**: `pages.css` asserted "only one fixed bottom bar is ever present per page". The consent banner is the counter-example on every page, and nothing checked it. *A rule in a comment in the only function that honours it is a coincidence.*
+- **Fix**: `body.has-consent-banner` now offsets all three by `var(--consent-banner-height)` — the height `consent-banner.js` measures from the rendered box, so there is no second source of truth and `releaseSpace()` drops them back on dismissal. **No `!important`**, deliberately: the Google badge needs it to beat a third-party inline style, these are our own rules and a more specific selector already wins; adding one we do not need would suggest we were fighting something. The banner also now reserves `--safe-bottom`, which it was the only fixed bottom element on the site not to.
+- **Shipped alongside**: the phone segmented control for the search dropdown (the owner's screenshot). Below 700px the Compatible/Genuine split was two ~150px columns — under the card's own measured floor. It is now a `Compatible (n) | Genuine (n)` tab bar over one full-width list. This honours what ERR-222 was protecting (Genuine is NAMED and COUNTED on screen, one tap away) without the 150px columns: ERR-222 was about a 40-row window that never paginated and buried packs at position 239 of 367, which a labelled tab carrying a live count is not. Measured at 390px: card 340px (was ~150), Add button 152x46 (was crushed), tabs 48px. **Desktop is untouched** — 1440px still renders two 551px columns with the tab bar `display: none`. Also deleted `main.js#initMegaPanels`, 44 lines that read a `data-target` attribute present in no HTML in the repo and a `.mega-panel` class that matches nothing; it desynced `aria-expanded` on a visibly-open menu, which `rewards-nudge.js` reads to decide whether to suppress itself.
+- **Verified**: `npm run probe:mobile-ux` (new, 26 routes x 3 phone viewports, read-only, exit-code triad, every skip named). After the fix the PDP hit-test returns the Add-to-Cart button. Full suite 5837 pass.
+- **Lesson**: **fixing the instance is not fixing the class.** ERR-233 lifted one element out of the banner's way and stopped; the same defect was live three more times, on the pages that make the money. When you find an element that has to clear a fixed bar, ask what else is anchored to that edge — and put the answer in a probe, not a comment.
+
 ## ERR-226 — The dropdown and the results page read the same response and gave the customer two different answers — **RESOLVED** (2026-09-07)
 
 **Symptom.** Type `lc` in the header search box and the dropdown offers *"Did you mean LC3333KCMY
@@ -10154,6 +10189,7 @@ the ribbon brand pages and the PDP enrich outright — the ERR-193 shape.
 `tests/api-subdomain-cutover-may2026.test.js` · `scripts/probe-admin-only-product.mjs` ·
 `admin-only-test-product-backend-brief-sep2026.md` · `package.json`.
 
+
 ---
 
 ## ERR-241 — Free shipping for the customer is not free freight for us: the supplier's $100 threshold is on a different number, and nothing had ever charged it — **RESOLVED** (2026-09-09)
@@ -10284,3 +10320,255 @@ IRD $5.56 → $4.65; `2026090701` (Augmento $110 ex-GST) **unchanged** — the o
 `supplier-freight-backend-brief-sep2026.md` (new) · `package.json`.
 
 ---
+
+## ERR-235 — The checkout quoted an urban shipping rate and then refused to accept the state it was quoting, and a phone could not get past it — **RESOLVED** (2026-09-09)
+
+**Symptom.** Mobile: **0 completed checkouts against 36 starts over 120 days**. In the two days
+after ERR-224 fixed the mobile layout, mobile finally *reached* checkout — 5 starts on 09-07, 2 on
+09-08 — and still completed **zero**, while desktop in the same window did 18 → 2. Mobile is ~64%
+of the market and is currently excluded from every Google Ads campaign at -100% because it cannot
+convert.
+
+**Cause.** Neither `delivery_type` radio carried `checked`, both carried `required`, and three
+separate hand-rolled gates refused to advance without a selection:
+
+| | |
+|---|---|
+| `checkout-page.js:219` | `isDetailsComplete()` — the progress indicator never completes |
+| `checkout-page.js:1140` | `_validateAccordionSection()` — the per-section Continue |
+| `checkout-page.js:2075` | `handleContinueToPayment()` — a hard `return` before any validation |
+
+Meanwhile **every price on the page was already being quoted as urban.**
+`fetchShippingFromAPI():467` reads `...:checked')?.value || 'urban'` and runs on cart load, so
+`#checkout-shipping` and `#checkout-total` showed the urban figure before the shopper touched the
+control. So did `sessionStorage.checkoutData`, `payment-page.js` twice, `account.js`,
+`js/shipping.js` and the backend's own `Joi.string().valid('urban','rural').default('urban')`.
+
+**The page displayed an urban quote and then refused to accept the state it was displaying.**
+
+**The hand-off's proposed fix was a no-op, and its diagnosis was wrong.** Both are worth recording.
+
+1. *"Pre-select Urban: `<input value="urban" ... checked>`"* — `init()`'s **first statement** was
+   `document.querySelectorAll('input[name="delivery_type"]').forEach(r => r.checked = false)`. The
+   attribute would have been true in the file and false in the browser on every single load. A
+   source grep would have certified that fix. Only a browser can say what a radio's state is after
+   the page settles, which is why `probe:checkout-delivery` exists and asserts *exactly one is
+   checked* rather than *the markup says checked*.
+2. *"HTML5 constraint validation on an unchecked radio group reports against an element that may be
+   off-screen"* — `checkout.html:97` is `<form ... novalidate>` and `reportValidity()` is called
+   nowhere in the file. Native validation never ran. The real gate at `:2075` already expands the
+   accordion, adds `.needs-attention` and calls `scrollIntoView` — which is the *alternative* fix
+   the hand-off offered, already shipped. **A second session measuring the same page independently
+   reached both conclusions**, which is the only reason to trust either.
+
+**Fix.**
+
+- Urban is pre-selected in the markup and **normalised on every load** by `_normaliseDeliveryType()`.
+  The replaced line's real purpose is kept: autofill must never silently land on Rural, which costs
+  the shopper double. What is dropped is the EMPTY state, not the defence.
+- **Both prices are now on screen, and they are the backend's.**
+  `.delivery-type-option__price` had been styled in `checkout-compact.css:865` since the control
+  shipped and **no element had ever carried it** — the shopper was asked to choose between two
+  prices they could not see. Each label is one `POST /api/shipping/options` for this cart, so both
+  are weight-aware and free-shipping-aware; the frontend computes nothing (`cart.js:12`). A figure
+  we could not get renders EMPTY and `:empty { display: none }` removes the line — `$0.00` would
+  read as *free*.
+- **The address picks the area, upgrading only, never over a person, and never silently.** "RD 2"
+  is the New Zealand Rural Delivery convention. The rule is `DeliveryArea` in `utils.js`, and it is
+  **symmetric**: a Rural we set from an address is withdrawn when the RD token is edited away. *An
+  automatic choice that cannot be automatically withdrawn is a typo that overcharges forever.* Every
+  switch is announced in an `aria-live` region **naming the token it matched**, so a wrong guess is
+  obvious to the shopper rather than mysterious.
+- Only a real interaction can set `_deliveryTypeUserChosen`: assigning `.checked` in script does not
+  fire `change`, so that flag can only be set by a person, and after that the address stops voting.
+- `restoreCheckoutState()` now restores `deliveryType`. It had always ridden in `checkoutData` and
+  was never read back, so a shopper who reached `/payment` and tapped back silently lost a
+  price-affecting choice.
+
+**Two further defects found on the way.**
+
+- `validateFormFields():1995` read `container.querySelector('.form-error')` while appending to
+  `container.parentElement`. The guard could never see the message it had just created, so a fresh
+  "Please select an option" stacked on **every** failed click. The sibling copy in
+  `_validateAccordionSection` always had it right. *Ask the element you append to.*
+- **`account.js` had been storing every saved address as urban, forever.** `:1592` and `:1718`
+  queried `input[name="delivery_type"]` and `html/account/addresses.html` **had no such input**, so
+  `:1718` fell through to `|| 'urban'` on every save — and `checkout-page.js:2385` refused to reuse
+  the value, correctly, because it was known to be fiction. This is the ERR-167 shape: *when the
+  fallback is the only branch that ever runs, the guard is the bug.* The control now exists on that
+  form, uses the same one rule, and checkout trusts it again.
+
+**ONE rural rule, in two files, pinned equal.** The regex also lives in
+`admin/utils/invoice-quote.js:149`. That file is an ES module whose suite runs it in a `vm` sandbox
+with every `import` **stripped**, so it cannot import the shared copy — the same trade already
+taken for `Business.formatPercent` (`admin-invoice-quote-aug2026.test.js` §4). The two copies are
+held together by a test that extracts **both literals and compares them character for character**,
+then runs both through one case table. Mutation-tested: "tidying" the redundant third alternative
+out of one side reddens it.
+
+**Mobile had at least two independent blockers.** ERR-234 (a peer session, same day) found the
+consent banner painting over the sticky Add-to-Cart and Checkout bars on a first visit — which is
+every ad click. Fixing either one alone would still have shown zero conversions. Neither is "the"
+cause; a funnel with two walls needs both removed before the number moves.
+
+**Verified.** `npm run probe:checkout-delivery` at 390x844: exactly one radio checked and it is
+urban; Urban **$7.00** / Rural **$14.00** read off the two backend quotes; an `RD 2` address selects
+Rural and says so; removing the token puts it back; a hand-picked Urban survives an RD address. And
+a **positive control** — with the group force-cleared the page still refuses to advance and still
+flags the section. *The fix is a sensible default, not the removal of a rule.*
+
+**Files.** `html/checkout.html` · `html/account/addresses.html` · `css/checkout-compact.css` ·
+`js/checkout-page.js` · `js/account.js` · `js/utils.js` (`DeliveryArea`) ·
+`tests/checkout-delivery-area-sep2026.test.js` (new) ·
+`tests/address-autocomplete-shared-jul2026.test.js` · `scripts/probe-checkout-delivery.mjs` (new) ·
+`package.json`.
+
+---
+
+## ERR-236 — The three pages Google Ads pays to reach showed a brand chooser and not one price — **RESOLVED** (2026-09-09)
+
+**Symptom.** Measured on production, after full render:
+
+```
+/ink-cartridges
+  h1      "Shop Ink Cartridges & Toner NZ"
+  h2      "Choose a brand to see ink cartridges"
+  prices  0
+```
+
+`/toner-cartridges` and `/ribbons` the same. **`buy ink cartridges` is 53% of all Google Ads
+spend** and lands here.
+
+**Cause.** `GET /api/products/popular?category=…` had been live and correct the whole time — 200
+with real rows, `cost_price` stripped, `quantity_breaks` included, shaped exactly like `/api/shop`.
+**Nothing on the frontend was asking it.** `grep -n popular js/api.js` returned zero hits. A
+category landing with no brand renders `#level-brands` (a brand picker); `#level-products` is
+`hidden` on that path. The ad click met a chooser instead of a shelf.
+
+**Two structural facts the hand-off missed.**
+
+- **`/ribbons` is a different page.** `vercel.json` rewrites `/ink-cartridges`, `/toner-cartridges`
+  and `/search` onto `html/shop.html`, but `/ribbons` onto **`html/ribbons.html`** — a separate
+  controller with its own card renderer. A row added to one is not inherited by the other, so it is
+  written twice and a test asserts the pair stays in step.
+- **The endpoint's category vocabulary is not ours.** Measured: `ink`, `toner`, `ribbons`, `drums`
+  and `paper` answer 200; **our own internal ids `consumable` and `label_tape` are a hard 400.**
+  Passing `this.state.category` straight through would have 400'd on the drums landing. One
+  `POPULAR_CATEGORY_API` map (`consumable → drums`), and a category absent from it asks for nothing
+  rather than firing a request we know will fail. `npm run audit:types` already counts six type
+  vocabularies in this repo; this is the seventh boundary and it lives in one place.
+
+**Fix.** `API.getPopularProducts()` via `getWithSWR(catalogEndpoint(...), { anonymous: true })` —
+the response **is** edge-cached (`s-maxage=300, stale-while-revalidate=600`), so the URL is the
+cache key and two spellings of one question are two entries. The row renders above the brand picker
+inside `#level-brands`, and calls `Products.renderCards` plus **all three** binds. The zero-results
+recovery rail calls `attachCardListeners` only, so its cards silently lose image retry and the
+bulk-price overlay; this row does not copy that omission.
+
+**It hides rather than empties.** ERR-193 printed empty-shelf copy on 63 brand pages for 44 hours
+after one failed read. A failure here is LOUD in the log and INVISIBLE on the page, in that order.
+
+**Found by the probe, not by the tests: a wider card produced a smaller button — again.** The row
+is a `.shop-section-card` containing a `.product-grid`. At 390px, `pages.css`'s
+`@media (max-width: 600px)` gives cards in a grid parent `max-width: none; width: 100%` — correct
+for a 2-up track, wrong for a 1-up one, and the shelf's class was not in the sibling rule's list of
+grids that go 2-up. **Measured 324px** (340 on `/ribbons`), past the **200px container query** on
+`.product-card`, which flips the footer to price-beside-button and clips the Add label. That is the
+ERR-218 shape exactly. Adding the class to the 2-up list gives 158px / 166px. *The two rules sit 20
+lines apart and are only wrong together: a grid that gets `max-width: none` without
+`repeat(2, 1fr)` gets a full-width card.*
+
+**Verified.** `npm run probe:landing-popular`, 32 assertions across all three landings at 1440x900
+and 390x844: shelf visible, 4 cards each, prices **16 / 12 / 12** where all three were 0, every card
+inside `[150, 200)`, shelf above the brand picker, an Add button and a `data-sku` on every card, no
+horizontal overflow. Plus a **control**: bare `/shop` must NOT show the shelf — it knows no category,
+and inventing one would print a guess as a recommendation. *A probe that only looks at pages where
+the feature is on cannot tell "correctly scoped" from "on everywhere".*
+
+**One trap this created and the same probe caught.** `renderBrands()` read
+`levelBrands.querySelector('.shop-section-card__title')` — the brand card's `h2` **only because
+nothing had ever sat above it**. The shelf does now, and the unscoped query would have relabelled
+the shelf "Choose a brand to see ink cartridges" and left the brand picker with the wrong heading.
+Scoped to the card that holds the brand grid. *A positional selector quietly means something else
+the moment anything moves.*
+
+**Files.** `js/api.js` · `js/shop-page.js` · `js/ribbons-page.js` · `html/shop.html` ·
+`html/ribbons.html` · `css/pages.css` (one selector) ·
+`tests/landing-popular-products-sep2026.test.js` (new) · `scripts/probe-landing-popular.mjs` (new) ·
+`package.json`.
+
+---
+
+## ERR-237 — Six months of search analytics were anonymous because the only transport that could carry an id was CORS-blocked; the block is gone — **RESOLVED** (2026-09-09)
+
+**Symptom.** `search_analytics`: **915 rows over five days, 0 with a `session_id`.** No search on
+the site could be joined to the order it produced.
+
+**Cause, and why the previous answer was right.** `X-Session-Id` / `X-Visitor-Id` were absent from
+the backend's `Access-Control-Allow-Headers`. A browser does not degrade there — **it fails the
+preflight and never sends the search at all.** Taking the original hand-off's "works on all GET
+search endpoints" at face value would have taken site search down for every customer to gain an
+analytics column. So `traffic-tracker.js` shipped `USE_ID_HEADERS = false` **with the measurement
+and the reasoning attached**, a written `identifyHeaders()` that returned `{}`, and `?sid=`/`?vid=`
+on the two search helpers instead.
+
+That is why this change was one line in the tracker and no edits at any call site: **every caller
+had already been written for the day the allow-list landed.**
+
+**The backend shipped it 2026-09-08.** Re-measured 2026-09-09 on all three origins — apex, `www`
+and `http://localhost:3000`, because an allow-list that only covers `www` is a header that works in
+production and not in dev.
+
+**With a negative control, which is the only reason to believe it.** Asking for
+`x-totally-bogus-header` returns the **same list, unchanged** — the preflight is not echoing what
+it is asked. ERR-223 recorded the trap ("a preflight 204s whatever you ask ⇒ curl can't adjudicate
+CORS"); a preflight that answers 204 to everything proves nothing. `probe:data-capture` §1 now
+asserts both directions and is a **hard** check, because the frontend depends on the header and
+losing it is not a lost column, it is site search down.
+
+**Enrolment is declared per-helper, never global — and that is a measurement, not a preference.** A
+custom header makes a GET non-simple, so the browser preflights it, and the **CORS-preflight cache
+is keyed by full URL**. Stamping every request would add an OPTIONS round-trip to origin for every
+distinct catalog and typeahead URL on the site. Measured against `api.inkcartridges.co.nz`: OPTIONS
+**~280ms** against a GET already **~3.0s**, so ~9% on the surface that opts in, and pure waste on
+edge-cached catalog reads that answer from Cloudflare without reaching origin at all. So
+`options.identify` is the contract, exactly like `anonymous: true` beside it: a new identified
+endpoint is a decision, not an accident of path matching.
+
+`search.js:fetchSmart` is stamped directly — it never enters `API.request`, and it is the
+highest-volume search surface on the site. Leaving it out would have left most rows anonymous while
+the suite looked green (ERR-150/160: *"every surface calls X" is a list nobody maintains*), so the
+enrolment lives in a test.
+
+**Both transports run.** `?sid=`/`?vid=` stay on the two search helpers. They were the only
+transport for six months and produced **zero** session ids, which means either the backend does not
+read them on that route or `search_analytics` is fed from somewhere else entirely. Until that is
+known, dropping a transport to add one would trade a measured unknown for an unmeasured hope
+(ERR-158: *removing a fallback is a behaviour change, not cleanup*). The cart POST keeps `?sid=`
+alone, because there it is measurably landing rows.
+
+**TWO TESTS FORBADE THIS, AND BOTH WERE RIGHT WHEN WRITTEN.**
+`search-session-identity-aug2026.test.js` §2 asserted the headers were off and nothing in `js/` set
+them; `ads-add-to-cart-conversion-sep2026.test.js` §5 asserted `api.js` contained no such header at
+all, pinning its explanatory comment as a positive control. Both were inverted deliberately, with
+their strictness kept and their positive controls kept — the ERR-229 lesson in reverse: *read a
+test's docstring before assuming your change is wrong, then invert it on purpose.*
+
+One assertion survived unchanged and now means something better: no file in `js/` may spell the
+header itself. `api.js` and `search.js` both send it; neither names it, because both call
+`TrafficTracker.identifyHeaders()`. **The scan flipped from "the feature is off" to "the vocabulary
+has one owner"** without a character changing.
+
+**Verified in a browser, because curl cannot adjudicate CORS.** On an allowed origin the header is
+sent, the preflight passes, `/api/search/smart` returns 200, and the real header typeahead paints
+its dropdown with prices and bulk pricing. An early draft of the new test also had a negative
+control that could never fail — `/^\s*this\.identifyHeaders/m` matched the guarded line itself — so
+it now asserts there is exactly **one** stamp in the file and that that one is guarded.
+
+**Open, for the backend.** Whether `search_analytics` rows now arrive with a `session_id`, and
+which transport delivered it. That is the only thing that closes this, and it cannot be measured
+from here.
+
+**Files.** `js/traffic-tracker.js` · `js/api.js` · `js/search.js` ·
+`tests/search-session-identity-aug2026.test.js` · `tests/ads-add-to-cart-conversion-sep2026.test.js` ·
+`scripts/probe-data-capture.mjs`.

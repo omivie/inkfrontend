@@ -763,8 +763,22 @@ const AccountPage = {
                     city: 'address-city',
                     region: 'address-region',
                     postcode: 'address-postcode'
-                });
+                }, { onApply: () => this._applyAddressRuralHint() });
             }
+
+            // Delivery area (ERR-235). Same one rule as checkout — DeliveryArea
+            // in utils.js. A `change` on a radio only ever comes from a person,
+            // so it is the honest place to stop auto-selecting over them.
+            document.querySelectorAll('#address-delivery-type input[name="delivery_type"]').forEach(input => {
+                input.addEventListener('change', () => {
+                    this._addressDeliveryUserChosen = true;
+                    this._setAddressDeliveryNotice('');
+                });
+            });
+            ['address-line1', 'address-line2', 'address-city'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', () => this._applyAddressRuralHint());
+            });
         }
 
         // Delete modal
@@ -1551,6 +1565,49 @@ const AccountPage = {
     /**
      * Open address modal (add or edit)
      */
+    /**
+     * Read the delivery area off the address the customer is typing.
+     *
+     * Until ERR-235 this form had NO delivery-area control at all, while
+     * saveAddress() read `input[name="delivery_type"]:checked` and fell through
+     * to `|| 'urban'` on every single save — so every address in every account
+     * was stored as urban whatever the truth was, and checkout refused to trust
+     * the value precisely because it was known to be fiction. The control exists
+     * now; this keeps it honest without making the customer think about it.
+     *
+     * Upgrades only, never over a person, and never silently — the same three
+     * rules the checkout copy follows.
+     */
+    _applyAddressRuralHint() {
+        if (this._addressDeliveryUserChosen) return;
+        if (typeof DeliveryArea === 'undefined') return;
+
+        const text = ['address-line1', 'address-line2', 'address-city']
+            .map(id => document.getElementById(id)?.value || '')
+            .join(' ')
+            .trim();
+        const match = text ? DeliveryArea.RURAL_RE.exec(text) : null;
+        const want = match ? DeliveryArea.RURAL : DeliveryArea.URBAN;
+
+        // Only ever withdraw a choice WE made.
+        if (!match && !this._addressDeliveryAuto) return;
+
+        const target = document.querySelector(`#address-delivery-type input[name="delivery_type"][value="${want}"]`);
+        if (!target || target.checked) return;
+        target.checked = true;
+        this._addressDeliveryAuto = !!match;
+        this._setAddressDeliveryNotice(match
+            ? `We read "${match[0]}" in this address and set it to Rural delivery, which costs more than Urban.`
+            : '');
+    },
+
+    _setAddressDeliveryNotice(text) {
+        const el = document.getElementById('address-delivery-notice');
+        if (!el) return;
+        if (!el.dataset.defaultText) el.dataset.defaultText = el.textContent;
+        el.textContent = text || el.dataset.defaultText;
+    },
+
     openAddressModal(addressId = null) {
         const modal = document.getElementById('address-modal');
         if (!modal) return;
@@ -1588,8 +1645,11 @@ const AccountPage = {
                 document.getElementById('address-postcode').value = address.postal_code || '';
                 document.getElementById('address-phone').value = address.phone || '';
                 document.getElementById('address-default').checked = address.is_default || false;
+                // Scoped to the modal. Before ERR-235 this queried the whole
+                // document for a group that existed nowhere on this page, so it
+                // matched nothing and quietly did nothing.
                 const deliveryType = address.delivery_type || 'urban';
-                const deliveryRadio = document.querySelector(`input[name="delivery_type"][value="${deliveryType}"]`);
+                const deliveryRadio = document.querySelector(`#address-delivery-type input[name="delivery_type"][value="${deliveryType}"]`);
                 if (deliveryRadio) deliveryRadio.checked = true;
             }
         } else {
@@ -1599,6 +1659,13 @@ const AccountPage = {
             this.editingAddressId = null;
             form.reset();
         }
+
+        // Fresh modal, fresh delivery-area state: nothing has been chosen by
+        // hand yet, and nothing has been chosen automatically either.
+        this._addressDeliveryUserChosen = false;
+        this._addressDeliveryAuto = false;
+        this._setAddressDeliveryNotice('');
+        if (!addressId) this._applyAddressRuralHint();
 
         modal.hidden = false;
         document.body.style.overflow = 'hidden';
@@ -1715,7 +1782,9 @@ const AccountPage = {
         const isFirstAddress = !wasEditing && (!this.addresses || this.addresses.length === 0);
         const shouldBeDefault = isFirstAddress || document.getElementById('address-default').checked;
 
-        const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
+        // Scoped to the modal, and it finally reads a control that exists: this
+        // line used to fall through to 'urban' on every save (ERR-235).
+        const deliveryType = document.querySelector('#address-delivery-type input[name="delivery_type"]:checked')?.value || 'urban';
 
         const addressData = {
             recipient_name: `${firstName} ${lastName}`.trim(),

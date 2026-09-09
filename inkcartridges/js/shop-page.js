@@ -5113,11 +5113,34 @@
             if (isCategoryOnly && category && categoryLandings[lc(category)]) {
                 canonical = `${BASE}${categoryLandings[lc(category)]}`;
             } else {
+                // Printer URLs, two corrections (ERR-242).
+                //
+                // 1. THE SLUG. `printer_models` holds some printers under two
+                //    spellings, and since the backend unioned their link sets both
+                //    twins ship in sitemap-printers.xml with identical content.
+                //    PrinterSlug.canonical (utils.js) names the winner; it is
+                //    identity for the 4,058 slugs that are not duplicates.
+                // 2. THE BRAND. A bare ?printer_slug= with no brand= used to
+                //    canonical to ITSELF, even though middleware.js only treats
+                //    the BRANDED form as a canonical shape (it gates the printer
+                //    prerender on brandSlug && printerSlug) and buildPrinterUrl
+                //    refuses to emit the unbranded form for indexable links.
+                //    `printerBrand || brand` is the same recovery this file
+                //    already uses at :3236 and :3351.
+                //
+                // Neither is the whole fix and this one is not even the half Google
+                // reads: on these URLs middleware prerenders to the backend, which
+                // writes its own canonical. See printer-canonicals-backend-brief.
+                const printerSlug = this.state.printer
+                    ? (typeof PrinterSlug !== 'undefined' ? PrinterSlug.canonical(lc(this.state.printer)) : lc(this.state.printer))
+                    : null;
+                const printerBrand = printerSlug ? (this.state.printerBrand || brand || null) : null;
+
                 const params = new URLSearchParams();
-                if (brand)                params.set('brand',        lc(brand));
+                if (brand || printerBrand) params.set('brand',       lc(brand || printerBrand));
                 if (category)             params.set('category',     lc(this.CATEGORY_CANONICAL_BY_INTERNAL[category] || category));
                 if (code)                 params.set('code',         code);
-                if (this.state.printer)   params.set('printer_slug', lc(this.state.printer));
+                if (printerSlug)          params.set('printer_slug', printerSlug);
                 if (this.state.search)    params.set('q',            this.state.search);
                 const qs = params.toString() ? '?' + params.toString() : '';
                 canonical = `${BASE}/shop${qs}`;

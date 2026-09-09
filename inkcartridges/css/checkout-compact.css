@@ -862,10 +862,37 @@ section.checkout-page .payment-authorization {
     white-space: nowrap;
 }
 
+/* The price of each delivery area, filled from the quote we already hold.
+   ERR-235: this class has been styled since the control shipped and no element
+   ever carried it, so the shopper was asked to choose between two prices they
+   could not see. It sits INSIDE .delivery-type-option__content — a flex COLUMN
+   (pages.css) — and not in the option row, because both stylesheets lay that
+   row out with nowrap text and two options share a 390px phone. A price beside
+   the label grows the row; a price under it grows the height. */
 .delivery-type-option__price {
     font-weight: var(--font-weight-semibold, 600);
+    font-size: 0.8125rem;
+    color: var(--color-text, #0f172a);
     white-space: nowrap;
-    margin-left: auto;
+}
+
+/* Empty until the quote resolves. An empty price says "not known yet"; a
+   "$0.00" would say "free", and absence is not zero (ERR-063/149/150). */
+.delivery-type-option__price:empty {
+    display: none;
+}
+
+/* Announcement when the address itself picked the delivery area. A silent
+   switch of a price-affecting field is indistinguishable from a bug. */
+.delivery-type-notice {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--color-primary-bg, #f0f7fc);
+    border: 1px solid var(--color-primary-light, #bae0f5);
+    color: var(--color-primary-dark, #1a5f87);
+    font-size: 0.8125rem;
+    line-height: 1.4;
 }
 
 /* Delivery type icon */

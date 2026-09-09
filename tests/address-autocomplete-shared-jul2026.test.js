@@ -259,8 +259,25 @@ test('checkout wires both address inputs through AddressAutocomplete.attach with
         'shipping address1 must be attached');
     assert.match(CHECKOUT_SRC, /AddressAutocomplete\.attach\(\s*['"]billing-address1['"]/,
         'billing address1 must be attached');
-    assert.match(CHECKOUT_SRC, /onApply\s*=\s*\(\)\s*=>\s*this\.updateShippingCost/,
+    // onApply was a one-expression arrow until ERR-235 gave it a second job:
+    // reading the rural-delivery token out of the address the shopper just
+    // picked from the dropdown. An autocomplete apply assigns .value directly
+    // and fires no `change`, so if onApply does not do it, a rural address
+    // chosen from the dropdown is quoted and charged as urban.
+    //
+    // So this asserts the CONTRACT — what onApply must DO — instead of the
+    // shape it happened to have. Both calls are load-bearing; dropping either
+    // is the bug this test exists to catch.
+    const onApplyBody = CHECKOUT_SRC.match(/const onApply\s*=\s*\(\)\s*=>\s*\{([\s\S]*?)\};/);
+    assert.ok(onApplyBody, 'checkout must define an onApply hook for autocomplete fills');
+    assert.match(onApplyBody[1], /this\.updateShippingCost/,
         'autocomplete fill must still refresh the shipping cost via onApply');
+    assert.match(onApplyBody[1], /this\._applyRuralHint/,
+        'autocomplete fill must re-read the delivery area — it fires no change event');
+
+    // Positive control: the matcher above is capable of failing.
+    assert.doesNotMatch(onApplyBody[1], /this\.updateBillingCost/,
+        'sanity — the captured body is the real one, not an empty match');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
