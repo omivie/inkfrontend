@@ -37,7 +37,7 @@ either names it or cites a `BF-`/`ERR-` number that originates in it.
 
 ## `outbox/` — written, no reply on record (36)
 
-### ⏳ Never delivered — written 2026-09-09, after the last incoming doc (6)
+### ⏳ Never delivered — written 2026-09-09/10, after the last incoming doc (7)
 
 These are the **live open asks**. `BACKEND-ASKS-INDEX-sep2026.md` is the cover note for
 the batch, and it is the only written record of the 🔴 admin-analytics-RPC outage (ERR-232).

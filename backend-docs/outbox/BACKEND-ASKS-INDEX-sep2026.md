@@ -1,7 +1,7 @@
 # Backend asks — one index, 2026-09-09
 
-Five frontend sessions worked this repo today and each wrote its own hand-off.
-**This file restates nobody's measurements.** It says what is open, who measured
+Several frontend sessions worked this repo over 2026-09-09/10 and each wrote its own
+hand-off. **This file restates nobody's measurements.** It says what is open, who measured
 it, and which document carries the numbers — so nothing has to be reconstructed
 by reading five briefs, and so the one item that sits in *none* of them is
 visible.
@@ -60,6 +60,8 @@ vs new-source — 91 rows, 87 byte-identical, 4 differing only by your sanitiser
 | 8 | `/api/search/smart` takes ~3.0s | `fe-backend-asks-sep2026.md` §4 | ERR-237 |
 | 9 | **BF-021 — `PATCH` is not in `Access-Control-Allow-Methods`** (`GET,POST,PUT,DELETE,OPTIONS`). The quick-order outcome modal is built, correct and unreachable from a browser. Note `quick_orders` is empty in production | `fe-backend-asks-sep2026.md` §6 | earlier rounds |
 | 10 | Rate limiter advertises 30 but 429s at 21 with `limit: 20`; `offshore_bounce_views_excluded` absent from `/catalog/brands`; `/acquisition/search-terms` should emit `null` not `0` for `paid_*` while Ads is unconnected; four decoy params on `/catalog/products` mean there is no pagination | `analytics-dashboards-FE-response-sep2026.md` | ERR-204 |
+| 11 | **The phone.** Two of the three fixes in your `fe-verification-and-remaining-gaps-sep2026.md` could not have worked as written — read §1 before implementing either. Tap targets, iOS input zoom and the checkout gate, all measured on real viewports | `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | ERR-238/239/240 |
+| 12 | Round-2 security: §1 done and worse than you thought, §4's "zero impact" does not hold, §5's CSP item was not clean — and one thing you certified as working is broken and is yours | `security-hardening-round2-FE-response-sep2026.md` | ERR-229…232 |
 
 ---
 
