@@ -41,3 +41,6 @@ audit-output/*
 # One-off PDFs and ad-hoc reports dumped at the repo root
 /*.pdf
 /*-report.html
+
+# Generated backend-doc bundles — the generator is committed, the output is not
+backend-docs/bundles/
