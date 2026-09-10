@@ -9,6 +9,13 @@ Do not re-derive this audit. If you deliver something, move the file and change 
 incoming one it answers, the row says so — an "answered" row that hides a contradiction is
 how someone ends up implementing a fix we already measured as a no-op.
 
+**And it records the TENSE.** A row can go stale between being written and being read: the
+code a dispute rests on gets fixed, and the dispute — still phrased in the present — outlives
+the thing it disputed. A reader who then greps for the broken line finds nothing and concludes
+the row was wrong, when it was simply *finished*. So date a claim, or write it in the past
+tense and name the fix. This is not hypothetical: it happened to the one dispute recorded
+below, within a day of it being filed.
+
 ---
 
 ## `sent/` — proven received (7)
@@ -50,16 +57,22 @@ the batch, and it is the only written record of the 🔴 admin-analytics-RPC out
 contradicts two of the three fixes `fe-verification-and-remaining-gaps-sep2026.md` proposes.
 Do not implement that inbox document as written:
 
-- Its `<input value="urban" checked>` **would have been a no-op when it was written** — the
-  page's own init un-checked every `delivery_type` radio on load (`forEach(r => r.checked = false)`),
-  so the attribute was true in the file and false in the browser. Fixed since, by ERR-235:
-  `_normaliseDeliveryType()` (`checkout-page.js:778`) now checks urban itself, and its comment
-  records the line it replaced. **Present tense matters here** — the critique is of the proposed
-  fix at the time, not of today's code.
+- Its `<input value="urban" checked>` **would have been a no-op when it was written** — at that
+  point `init()` un-checked every `delivery_type` radio on load (`forEach(r => r.checked = false)`),
+  to defeat autofill, so the attribute was true in the file and false in the browser. **A source
+  grep would have certified it as shipped.** Fixed since, by ERR-235, and not by adding the
+  attribute: `_normaliseDeliveryType()` (`checkout-page.js:778`) sets the default in the one place
+  that also owns the clearing. Grepping for `r.checked = false` today finds nothing — *that is the
+  fix, not a contradiction*.
 - Its stated failure mechanism **does not exist**: the checkout form carries `novalidate`
-  (`checkout.html:97`), so there is no HTML5 validation bubble to be rendered off-screen.
+  (`checkout.html:97`) and `reportValidity()` is called nowhere in `checkout-page.js`, so there is
+  no HTML5 validation bubble to be rendered off-screen. The observation ("nothing visibly happens")
+  is right, the cause is not — a custom gate runs instead, and it is visible.
 
-Verified in this repo on 2026-09-09, not taken from the response document.
+Verified in this repo on 2026-09-09 and re-verified 2026-09-10, not taken from the response
+document. The response document was itself re-tensed in `e9d1ddc` after the first of these two
+claims went stale between its writing and its filing — it now carries the past tense and points
+at the code that exists.
 
 ### No reply on record (30)
 
