@@ -1,97 +1,96 @@
 -- =============================================================================
--- analytics_function_grants — restore EXECUTE on the SIX analytics RPCs
+-- analytics_function_grants — RETIRED. THIS FILE GRANTS NOTHING. (ERR-247)
 -- =============================================================================
 --
--- ⚠️  READ THIS BEFORE YOU WIDEN ANYTHING. ⚠️
+-- ⚠️  DO NOT RE-ADD A GRANT HERE, AND DO NOT ASK THE BACKEND TO APPLY THEIR
+--     MIGRATION 172. THE BROWSER NO LONGER NEEDS EXECUTE ON ANY OF THESE. ⚠️
 --
--- Until Sep 2026 this file did three things, and two of them were a loaded gun:
+-- WHAT THIS FILE USED TO DO
 --
---     grant execute on all functions in schema public to authenticated, service_role;
+--   grant execute on function
+--     public.analytics_kpi_summary(...), public.analytics_revenue_series(...),
+--     public.analytics_refunds_series(...), public.analytics_top_products(...),
+--     public.analytics_customer_stats(...), public.analytics_brand_breakdown(...)
+--   to authenticated, service_role;
 --
--- `all functions in schema public` is not a synonym for "the analytics ones".
--- Backend migration 165 added write RPCs that are deliberately revoked to
--- `service_role` only, and they have NO internal is_owner() guard because THE
--- GRANT *WAS* THE CONTROL — they are only ever reached through the admin API,
--- which does its own authorisation:
+-- It existed because the admin Dashboard called those six RPCs DIRECTLY from
+-- the browser with the signed-in admin's `authenticated` JWT. Every few weeks a
+-- backend migration DROPped and re-CREATEd a function (which discards its ACL)
+-- or revoked EXECUTE, the dashboard went dark with `42501 permission denied for
+-- function`, and someone pasted this file back in. Four recurrences on the
+-- record: ERR-010, ERR-029, ERR-035, ERR-232.
 --
---     set_business_contract_price(...)     an arbitrary negotiated price on ANY
---                                          product for ANY business account,
---                                          including the caller's own. $0.01 goods.
---     remove_business_contract_price(...)  delete another account's pricing.
+-- WHY IT IS GONE RATHER THAN FIXED AGAIN
 --
--- One paste of the old section 1 handed both to every signed-in customer.
--- Sections 2 and 3 made it durable: ALTER DEFAULT PRIVILEGES so every FUTURE
--- function inherited the grant, plus an event trigger that re-granted EXECUTE on
--- ANY function the moment it was created or altered. Running the old file also
--- REPLACED the live database's narrowed trigger (backend migration 163,
--- `allowlist_function_execute_grant_trigger`), silently reverting it.
+-- The fourth recurrence was not a regression. The grant was revoked ON PURPOSE
+-- on 2026-09-07, after a plain customer account read the live P&L
+-- (revenue 24189.36 / gross_profit 5124.29 / aov 167.98 / total_customers 135)
+-- straight out of PostgREST with the publishable anon key plus its own JWT. The
+-- guard inside the functions read
 --
--- Sections 2 and 3 are gone. Do not reintroduce them. This file now grants
--- exactly the six functions the admin Dashboard calls, by name and signature.
+--     auth.uid() IS NOT NULL AND NOT is_owner()
 --
--- IF THE DASHBOARD 42501s AGAIN, THE FIX IS TO RE-RUN BACKEND MIGRATION 163 —
--- NOT TO WIDEN THIS GRANT. 163 installs the allow-listed trigger that re-grants
--- only these six on DDL. That is the durable fix, and it lives in the backend
--- repo where the functions themselves are defined.
+-- which SKIPS ITSELF when uid is null, so an anonymous caller fell straight
+-- through. The bodies were hardened afterwards (they now fail closed); the ACL
+-- was deliberately never put back.
 --
--- WHY THIS EXISTS (ERR-010 / ERR-029 / ERR-035, recurring):
---   The admin Dashboard's live KPIs (Gross Profit, Gross Margin, New Customers,
---   Returning %, Refund Rate) and the Trends/Forecast COGS line are powered by
---   Supabase RPCs: analytics_kpi_summary, analytics_revenue_series,
---   analytics_brand_breakdown, analytics_refunds_series, analytics_customer_stats,
---   analytics_top_products (called from js/admin/api.js with the admin's
---   `authenticated` JWT).
+-- Granting `authenticated` is about six times wider than the need, and every
+-- previous round of this was closed exactly that way — which is why there was a
+-- fourth. So the backend built the seven server-side routes instead, each
+-- behind `requireAdmin` + service_role, and this repo moved onto them:
 --
---   These functions are SECURITY DEFINER and gate access internally (backend
---   migration 166 hardened the is_owner() guard inside five of them), so by
---   design `authenticated` must hold EXECUTE on them. A backend DB migration
---   periodically runs `REVOKE EXECUTE ... FROM PUBLIC` (or DROPs + re-CREATEs the
---   functions, which discards their ACL) WITHOUT re-granting. The result:
---   every RPC returns `42501 permission denied for function`, the analytics
---   layer goes dark, and the dashboard falls back to its order-feed self-heal
---   ("Live analytics service is unavailable" banner; Gross Profit etc. show —).
+--   analytics_kpi_summary      GET /api/admin/analytics/kpi-summary
+--   analytics_revenue_series   GET /api/admin/analytics/revenue-series
+--   analytics_refunds_series   GET /api/admin/analytics/refunds-series
+--   analytics_customer_stats   GET /api/admin/analytics/customer-stats
+--   analytics_top_products     GET /api/admin/analytics/top-products-rpc
+--   analytics_brand_breakdown  GET /api/admin/analytics/brand-breakdown
+--   get_suppliers              GET /api/admin/analytics/suppliers
 --
---   Expect the Supabase advisor to keep warning about the `authenticated`
---   EXECUTE grant on these six. The advisor cannot see the in-function guard.
---   The grant is deliberate. Do not "clean it up".
+-- Verified from this repo on 2026-09-12 with a real owner JWT, and with the
+-- control that matters — each function called with its REAL named params,
+-- because an empty `{}` answers 404 PGRST202 (signature mismatch) and a 404
+-- here proves NOTHING:
 --
---   Diagnosis recipe: mint an `authenticated` JWT
---   (POST /auth/v1/token?grant_type=password with the anon key), then curl an
---   RPC with its real named params (`date_from`, `date_to`, `brand_filter`, …).
---   42501 for `authenticated` while table reads return 200 == revoked function
---   EXECUTE. It is ALWAYS a DB grant, never a frontend bug — the rpc() helper in
---   js/admin/api.js sends the user JWT correctly.
+--   POST /rest/v1/rpc/analytics_kpi_summary      -> 403  42501 permission denied
+--   POST /rest/v1/rpc/analytics_brand_breakdown  -> 403  42501 permission denied
+--   POST /rest/v1/rpc/get_suppliers              -> 403  42501 permission denied
+--   GET  /api/admin/analytics/<all seven>        -> 200  with real data
 --
---   PROBE GOTCHA: an empty-`{}` RPC call returns 404 PGRST202 (signature
---   mismatch) even when the real problem is 42501. A 404 here proves NOTHING.
---   Always send the function's real named params.
+-- WHAT A GRANT HERE WOULD COST NOW
 --
--- Idempotent — safe to run more than once.
+-- `get_suppliers` was handing the supplier list to ANONYMOUS callers until
+-- backend migration 173 (2026-09-10) — only the revoked ACL was holding it
+-- shut. And backend migration 165 added two SECURITY DEFINER write RPCs with no
+-- internal guard, because the grant WAS the control:
 --
--- LOCATION: this file lives at repo-root `sql/`, NOT under `inkcartridges/`.
---   That tree is the Vercel project root with `outputDirectory: "."`, so anything
---   in it is served publicly — this file was downloadable at
+--   set_business_contract_price(...)     an arbitrary negotiated price on ANY
+--                                        product for ANY business account
+--   remove_business_contract_price(...)  delete another account's pricing
+--
+-- The safety of granting these lives in the FUNCTION BODY, not in the ACL, and
+-- backend migration 163 installs an event trigger that re-grants the six
+-- automatically on any CREATE/ALTER. So a future redeploy that drops a gate
+-- re-opens the P&L with no migration diff to show for it. That risk is only
+-- worth carrying if the browser needs the grant. It does not.
+--
+-- IF THE DASHBOARD GOES DARK AGAIN, IT IS NOT THIS.
+-- Check `GET /api/admin/analytics/*` with an owner bearer token. A 401 is an
+-- expired sign-in, a 403 is the route's own authorisation, and a 429 is the
+-- 20-per-minute limiter that sits on this whole path prefix — all three are
+-- reported by name in the UI now (AdminAPI.analyticsHealthSnapshot, ERR-247).
+-- None of them is fixed by SQL in this repo.
+--
+-- LOCATION: repo-root `sql/`, NOT under `inkcartridges/`. That tree is the
+--   Vercel project root with `outputDirectory: "."`, so anything in it is
+--   served publicly — this file was downloadable at
 --   https://www.inkcartridges.co.nz/sql/analytics_function_grants.sql until
---   ERR-229 (Sep 2026). Never move it back.
+--   ERR-229 (Sep 2026). Never move it back. The file is kept (rather than
+--   deleted) precisely so this explanation is what the next person finds when
+--   they go looking for the grant.
 --
--- HOW TO APPLY:  Supabase dashboard → SQL Editor → paste this file → Run.
---               (or `supabase db execute`, or the MCP apply_migration tool)
 -- Project: lmdlgldjgcanknsjrcxh
+-- Pinned by tests/analytics-function-grants.test.js.
 -- =============================================================================
 
--- ── Restore EXECUTE on the six analytics RPCs — and ONLY those six ───────────
--- Named with full signatures so this cannot silently widen if an overload with
--- a different arity is added later.
-grant execute on function
-  public.analytics_kpi_summary(text, text, text, text, text),
-  public.analytics_revenue_series(text, text, text, text),
-  public.analytics_refunds_series(text, text, text),
-  public.analytics_top_products(text, text, text, integer),
-  public.analytics_customer_stats(text, text, text),
-  public.analytics_brand_breakdown(text, text, text, text, text)
-to authenticated, service_role;
-
--- ── Reload PostgREST's schema cache so the grant is visible immediately ──────
--- (PostgREST caches the schema; without this the fix can lag by up to its
---  cache-refresh interval.)
-notify pgrst, 'reload schema';
+-- Intentionally no executable SQL below this line.

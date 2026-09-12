@@ -27,13 +27,32 @@
  * wrong thing for four months and stayed green the whole time — the same shape
  * as ERR-217, where the old test pinned the off-screen dropdown.
  *
- * So the contract is now inverted. This suite fails if the wide grant, the
- * default privileges, or the event trigger EVER come back, and it fails if the
- * file returns to the publicly-served tree.
+ * So the contract was inverted. This suite fails if the wide grant, the default
+ * privileges, or the event trigger EVER come back, and it fails if the file
+ * returns to the publicly-served tree.
+ *
+ * ── INVERTED A SECOND TIME, 2026-09-12 (ERR-247) ───────────────────────────
+ *
+ * §3 used to assert that the file still GRANTED the six by name, `to
+ * authenticated, service_role`. That was right while the browser called those
+ * RPCs directly. It no longer does: all seven now reach the dashboard through
+ * `requireAdmin` + service_role routes (GET /api/admin/analytics/*), so the
+ * narrow grant is not narrow-enough-and-necessary, it is unnecessary.
+ *
+ * Read that as the lesson it is, not as this file being flaky. §3 was CORRECT
+ * WHEN WRITTEN, exactly like the two tests ERR-237 had to invert. What changed
+ * is the world, and the test moved after it — which is the whole point of
+ * pinning a contract rather than a constant. The measurement that authorises
+ * this inversion is in the SQL file's header and in errors.md ERR-247: with a
+ * real owner JWT and each function's REAL named params, all three sampled RPCs
+ * answer 403/42501 while all seven routes answer 200 with data.
+ *
+ * The §4 positive controls survive both inversions untouched, because "nothing
+ * dangerous found" and "nothing found" are still not the same answer.
  *
  * Run with: node --test tests/analytics-function-grants.test.js
  *
- * Logged as errors.md ERR-229. Prior incidents: ERR-010 / ERR-029 / ERR-035.
+ * Logged as errors.md ERR-229, then ERR-247. Prior: ERR-010 / 029 / 035 / 232.
  */
 
 'use strict';
@@ -134,35 +153,48 @@ test('§2 the two migration-165 write RPCs are never granted', () => {
   }
 });
 
-// ── §3. …but it must still do its job ───────────────────────────────────────
+// ── §3. …and now it must grant NOTHING AT ALL ──────────────────────────────
 
-test('§3 grants EXECUTE on each of the six analytics RPCs, by name', () => {
-  const sql = flat();
-  assert.match(sql, /grant\s+execute\s+on\s+function/, 'must still grant the analytics RPCs');
-  for (const fn of ALLOWED_FUNCTIONS) {
-    assert.ok(sql.includes(`public.${fn}(`), `${fn} must be granted with an explicit signature`);
-  }
-  assert.match(sql, /to\s+authenticated,\s*service_role/, 'both roles still need EXECUTE');
-});
-
-test('§3 the allow-list is EXACTLY six functions — no quiet additions', () => {
-  // Every `public.<name>(` in executable SQL must be one of the six. This is the
-  // assertion that catches a seventh function being slipped into the list.
-  const named = [...flat().matchAll(/public\.([a-z0-9_]+)\s*\(/g)].map((m) => m[1]);
-  const unique = [...new Set(named)];
-  assert.deepEqual(
-    unique.slice().sort(),
-    ALLOWED_FUNCTIONS.slice().sort(),
-    `executable SQL names ${unique.length} function(s); expected exactly the six analytics RPCs`
+test('§3 THE SECOND INVERSION: no EXECUTE grant survives in executable SQL', () => {
+  // The browser reads analytics over GET /api/admin/analytics/* now. A grant
+  // here would hand `authenticated` EXECUTE on SECURITY DEFINER functions for
+  // a caller that has no use for it — and mig 163's event trigger would then
+  // keep re-granting them on every CREATE/ALTER.
+  assert.doesNotMatch(
+    flat(),
+    /grant\s+execute\s+on\s+function/,
+    'the grant was retired in ERR-247 — the dashboard no longer calls these RPCs from the browser'
   );
+  assert.doesNotMatch(flat(), /\bgrant\s+execute\b/, 'no EXECUTE grant of any shape');
 });
 
-test('§3 reloads the PostgREST schema cache so the grant is visible immediately', () => {
-  assert.match(flat(), /notify pgrst, 'reload schema'/);
+test('§3 no analytics function is named in executable SQL, by any spelling', () => {
+  // The §2 checks are about DANGEROUS statements. This one is about the file
+  // doing nothing at all: with the grant gone, an executable line naming one of
+  // these is by definition something nobody decided to add.
+  const sql = flat();
+  const named = [...sql.matchAll(/public\.([a-z0-9_]+)\s*\(/g)].map((m) => m[1]);
+  assert.deepEqual(named, [], `executable SQL still names ${named.join(', ')}`);
+  for (const fn of ALLOWED_FUNCTIONS) {
+    assert.ok(!sql.includes(`${fn}(`), `${fn} must not appear in executable SQL`);
+  }
 });
 
-test('§3 targets the documented Supabase project so it is applied to the right DB', () => {
-  assert.match(loadSql(), /lmdlgldjgcanknsjrcxh/);
+test('§3 no schema reload either — there is nothing left to make visible', () => {
+  assert.doesNotMatch(flat(), /notify pgrst/, 'nothing is granted, so nothing needs a cache reload');
+});
+
+test('§3 every retired RPC is named in the PROSE, with its replacement route', () => {
+  // The file is kept rather than deleted so that this explanation is what the
+  // next person finds when they go looking for the grant. If the header stops
+  // naming the replacements, the file has become a blank where a footgun was,
+  // and the next outage gets "fixed" by pasting the grant back.
+  const sql = loadSql();
+  for (const fn of ALLOWED_FUNCTIONS.concat(['get_suppliers'])) {
+    assert.ok(sql.includes(fn), `the header must still name ${fn} and where it went`);
+  }
+  assert.match(sql, /\/api\/admin\/analytics\//, 'the header must name the replacement routes');
+  assert.match(sql, /172/, 'the header must say migration 172 is never to be applied');
 });
 
 // ── §4. Positive controls — the suite must not pass on an empty file ────────
@@ -171,16 +203,44 @@ test('§4 positive control — the file is real, not empty or truncated', () => 
   // Without this, deleting the file's contents would turn every doesNotMatch
   // above green. "Nothing dangerous found" and "nothing found" are not the same
   // answer, and only one of them is a pass.
+  //
+  // 🚨 THE CONTROL HAD TO CHANGE SHAPE WITH THE CONTRACT (ERR-247). It used to
+  // read `executableSql(sql).trim().length > 100` — "there is still real SQL
+  // here" — which was a perfect emptiness check while the file's job was to run
+  // a grant. Now the file's job is to run NOTHING, so that assertion fails on a
+  // correct file and, worse, the thing it was protecting against (an emptied
+  // file silencing every doesNotMatch) is now indistinguishable from success by
+  // that measure. The guard therefore moves onto the PROSE, which is what this
+  // file now exists to carry. Delete the explanation and this suite goes red —
+  // which is the only way "the grant is gone" stays different from "the file is
+  // gone", and the next person to hit a 42501 finds the reasoning instead of a
+  // blank where a footgun used to be.
   const sql = loadSql();
-  assert.ok(sql.length > 1000, `migration is suspiciously short (${sql.length} bytes)`);
-  assert.ok(executableSql(sql).trim().length > 100, 'file has no executable SQL left in it');
+  assert.ok(sql.length > 2000, `file is suspiciously short (${sql.length} bytes)`);
+  const commentary = sql
+    .split('\n')
+    .filter((line) => line.trim().startsWith('--'))
+    .join('\n');
+  assert.ok(
+    commentary.trim().length > 1500,
+    `the explanation is the file's remaining job; only ${commentary.trim().length} bytes of it left`
+  );
+  // And the emptiness check the §2/§3 doesNotMatch assertions actually need:
+  // prove the matcher still sees the file, by matching something that IS there.
+  assert.match(sql, /analytics_function_grants/, 'the file must still identify itself');
 });
 
 test('§4 positive control — the header still warns the next reader off widening', () => {
-  // The remedy for a 42501 recurrence is backend migration 163, not a wider
-  // grant. If that sentence is ever edited out, the footgun is one helpful
-  // person away from being reloaded.
+  // A 42501 from a browser RPC is no longer a thing this repo can cause OR fix:
+  // the dashboard does not make that call any more. What the header must keep
+  // saying is (a) what a wide grant would expose, and (b) where to actually
+  // look when analytics goes dark, so nobody reaches for SQL again.
   const sql = loadSql();
-  assert.match(sql, /migration 163/i, 'header must point the recurrence fix at backend migration 163');
   assert.match(sql, /set_business_contract_price/, 'header must name what a wide grant would expose');
+  assert.match(sql, /42501/, 'header must still name the error someone will be googling');
+  assert.match(sql, /migration 163/i, 'header must explain the event trigger that re-grants on DDL');
+  assert.match(
+    sql, /401|403|429/,
+    'header must point a dark dashboard at the ROUTE\u2019s own answers, not at a grant'
+  );
 });

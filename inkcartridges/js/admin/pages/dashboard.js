@@ -2177,11 +2177,24 @@ function recoverProfitFromSeries(cur, grossProfitSeries, netProfitSeries) {
   if (netRebuilt) {
     const fees = numOrNull(cur.stripe_fees);
     const opex = numOrNull(cur.operating_expenses);
+    // Supplier freight is the FOURTH term (ERR-251). The backend's identity is
+    // `gross_profit − net_profit = stripe_fees + operating_expenses + supplier_freight`
+    // — verified against the live RPC 2026-09-10, $2,210.76 − (−$56.06) = $2,266.82 =
+    // $170.68 + $1,593.50 + $502.64, exact to the cent.
+    //
+    // 🚨 AND IT IS READ AS UNKNOWN, NEVER AS ZERO. `numOrNull` is the whole point: the
+    // range total was $502.64 over 30 days, so treating an absent field as $0 would
+    // rebuild a net profit HALF A THOUSAND DOLLARS too healthy and stamp "Rebuilt" on it
+    // as if that were a provenance claim. That is ERR-063/068 absence-as-zero with the
+    // headline figure on it. A missing freight term disqualifies the primary formula and
+    // drops through to the backend's own per-bucket net below, which already has freight
+    // inside it.
+    const freight = numOrNull(cur.supplier_freight);
     // PRIMARY: kpi-summary's own formula off its own range-exact scalars. Deliberately
     // preferred over summing the series — `Σ series` carries per-bucket rounding (~1c per
     // bucket), while these scalars are rounded once for the whole range.
-    if (gross != null && fees != null && opex != null) {
-      net = gross - fees - opex;
+    if (gross != null && fees != null && opex != null && freight != null) {
+      net = gross - fees - opex - freight;
     } else {
       // FALLBACK: the backend's per-bucket net. Costs a few cents of rounding, but it is a
       // real published figure and beats leaving the tile blank.
@@ -2428,7 +2441,7 @@ function renderKpiStrip(d) {
       tooltip: 'First-time buyers in the range.' },
     {
       label: 'Returning %', value: cc.returning_pct != null ? `${cc.returning_pct}%` : null,
-      raw: cc.returning_pct, prev: cp.returning_pct, tooltip: 'Share of buyers who had ordered before. Requires analytics_customer_stats.',
+      raw: cc.returning_pct, prev: cp.returning_pct, tooltip: 'Share of buyers who had ordered before. Requires GET /api/admin/analytics/customer-stats.',
     },
     {
       // No `gst`: the denominator is incl-GST revenue but no basis is documented

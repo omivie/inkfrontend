@@ -593,6 +593,39 @@ const PrinterSlug = {
         // OKI MC362dn / ML182 — no space in the manufacturer's name.
         'oki-mc-362dn': 'oki-mc362dn',
         'oki-ml-182': 'oki-ml182',
+        // Printronix 103.23 — the 16th pair, and the only one we could not see
+        // from the sitemap (ERR-249). The trailing full stop is a data-entry
+        // artefact, confirmed as two real rows via
+        // /api/printers/search?q=103.23 (model_name "103.23" and "103.23.").
+        //
+        // ⚠️ NEITHER SPELLING IS SITEMAPPED, AND THAT IS NOT A BUG TO FIX HERE.
+        // The sitemap's slug-shape gate rejects the `.`, so both have always
+        // been excluded — verified 2026-09-12: 0 hits for either in
+        // sitemap-printers.xml, while the brand's other printers
+        // (printronix-p300, printronix-30-day) are present. This entry is
+        // therefore PRERENDER-ONLY: it makes our internal links and the SPA
+        // canonical agree with the prerenderer, which is the surface Googlebot
+        // actually reads (ERR-242). The durable fix is renaming the slug
+        // server-side via a slug_redirects hop.
+        //
+        // AND IT IS WORSE THAN UN-SITEMAPPED (measured 2026-09-12, ERR-253):
+        // the products route refuses BOTH spellings outright, so neither page
+        // can render a catalogue at all —
+        //
+        //   GET /api/products/printer/printronix-103.23   → 400 VALIDATION_FAILED
+        //   GET /api/products/printer/printronix-103.23.  → 400 VALIDATION_FAILED
+        //   "Printer slug must contain only lowercase letters, numbers,
+        //    hyphens, and underscores"
+        //
+        // The `.` is illegal to the API's own validator, not just to the
+        // sitemap's gate. So this canonical consolidates two DEAD urls: it is
+        // correct, it costs nothing, and it rescues no page. That raises the
+        // slug rename from a tidy-up to the actual fix, and it is asked for by
+        // name in the FE response to the 2026-09-10 action list. Meanwhile
+        // shop-page.js's isBadPrinterSlug() already treats VALIDATION_FAILED
+        // the same as NOT_FOUND, so a visitor meets the unsupported-printer
+        // state rather than a blank page.
+        'printronix-103.23.': 'printronix-103.23',
     },
 
     /**

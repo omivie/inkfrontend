@@ -7108,3 +7108,52 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .inv-account-notice--warn {
   background: var(--yellow-dim); color: var(--yellow-text); font-weight: 600;
 }
+
+/* ── For Use In panel — read-only since ERR-244 ─────────────────────────────
+   The machine list moved out of `products` (backend migration 132) into a
+   service-role-only table, and no admin route can write it yet. The panel
+   reads through GET /api/products/:sku/for-use-in and never offers a Save,
+   because the product PUT answers 200 for the field and discards it.
+   Three states are painted, and they must look different from each other:
+   a failed read that looks like an empty list is what ERR-243 was about.
+   Tokens only — `--bg-subtle` and `--text-primary` are NOT defined in this
+   file, and several suites scan it for exactly that (a var() fallback still
+   counts as a use). */
+.admin-fui__notice {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--yellow-text);
+  background: var(--yellow-dim);
+  color: var(--text-secondary);
+}
+.admin-fui__box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--surface-raised);
+  min-height: 96px;
+  max-height: 420px;
+  overflow: auto;
+}
+.admin-fui__pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+/* `unavailable` is a REFUSAL, not an empty list, and must never be mistaken
+   for one — it gets its own colour and its own Try again. */
+.admin-fui__fail {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.admin-fui__fail strong { color: var(--text); }
+.admin-fui__fail .admin-btn { margin-left: 6px; vertical-align: baseline; }

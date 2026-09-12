@@ -60,6 +60,7 @@
     "probe:mobile-ux": "node scripts/probe-mobile-ux.mjs",
     "probe:printer-canonicals": "node scripts/probe-printer-canonicals.mjs",
     "probe:for-use-in": "node scripts/probe-for-use-in.mjs",
+    "probe:mig132-admin": "node scripts/probe-mig132-admin.mjs",
     "bundle:backend": "node scripts/bundle-backend-outbox.mjs"
   },
   "dependencies": {

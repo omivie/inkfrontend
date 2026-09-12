@@ -386,7 +386,7 @@ async function loadRefundAnalytics() {
   if (!data) {
     const charts = _container.querySelectorAll('.admin-chart-box');
     charts.forEach(c => {
-      c.innerHTML = `<div class="admin-empty" style="height:100%"><div class="admin-empty__text" data-tooltip="Requires analytics_refunds_series RPC">${MISSING} Analytics data unavailable</div></div>`;
+      c.innerHTML = `<div class="admin-empty" style="height:100%"><div class="admin-empty__text" data-tooltip="Requires GET /api/admin/analytics/refunds-series (ERR-247: the direct RPC transport was retired)">${MISSING} Analytics data unavailable</div></div>`;
     });
     return;
   }

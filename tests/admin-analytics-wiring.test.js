@@ -3,25 +3,51 @@
  * ================================================================
  *
  * Pins the Jun-2026 ERR-010 permanent fix: the admin dashboard's headline
- * analytics now route through the backend's service-role HTTP wrappers
- * (/api/admin/analytics/*) FIRST, falling back to the fragile direct Supabase
- * RPCs only when the HTTP layer is unreachable.
+ * analytics route through the backend's service-role HTTP wrappers
+ * (/api/admin/analytics/*).
  *
- * Why this exists: the direct RPCs (analytics_kpi_summary, …) depend on a
- * `GRANT EXECUTE TO authenticated` that backend redeploys keep dropping, so
- * they intermittently 403 ("permission denied for function") and the dashboard
- * silently blanks. Verified live 2026-06-04: analytics_customer_stats was 403
- * while the HTTP /kpi-summary returned a healthy { current, previous }.
+ * Why this exists: the direct RPCs (analytics_kpi_summary, …) depended on a
+ * `GRANT EXECUTE TO authenticated` that backend redeploys kept dropping, so
+ * they intermittently 403'd ("permission denied for function") and the
+ * dashboard silently blanked. Verified live 2026-06-04: analytics_customer_stats
+ * was 403 while the HTTP /kpi-summary returned a healthy { current, previous }.
+ *
+ * ── THE RPC FALLBACK IS GONE (ERR-247, 2026-09-12) ─────────────────────────
+ *
+ * Two tests here used to assert that each method DROPS TO THE DIRECT RPC when
+ * HTTP comes back empty. They were right for fifteen months and they are wrong
+ * now, because the arm they pinned can no longer return anything: the grant was
+ * revoked ON PURPOSE on 2026-09-07 after a plain customer account read the live
+ * P&L out of PostgREST, and the backend has asked us never to restore it.
+ * Measured 2026-09-12 with an owner JWT and each function's REAL named params
+ * (an empty `{}` answers 404 PGRST202 and proves nothing):
+ *
+ *     POST /rest/v1/rpc/analytics_kpi_summary      403  42501
+ *     POST /rest/v1/rpc/analytics_brand_breakdown  403  42501
+ *     POST /rest/v1/rpc/get_suppliers              403  42501
+ *     GET  /api/admin/analytics/<all seven>        200  with data
+ *
+ * So the two tests are INVERTED rather than deleted, and they now pin the
+ * stronger property: the RPC transport is not merely unused, it is unreachable
+ * from these methods. Deleting them would have left nothing standing guard over
+ * a `return rpc(...)` line creeping back in the next time someone sees a blank
+ * chart — which is exactly how ERR-010/029/035/232 kept recurring.
+ *
+ * Removing a fallback is a behaviour change, not cleanup (ERR-158). What the
+ * dead arm still contributed was the FACT of a failure, and `rpc()` was
+ * swallowing even that into `null`. §9 below pins the replacement: the reason
+ * is recorded by name, so a blank panel can say why.
  *
  * These tests assert:
  *   1. analyticsQuery maps FilterState params → date_from/brand_filter/…
  *   2. normalizeKpiSummary handles BOTH the live { current, previous } shape
  *      and the spec-doc metric-keyed shape, and preserves `fallback`.
  *   3. adaptCustomerSummary folds /summary/customers → { current, previous }.
- *   4. getDashboardKPIs prefers HTTP and falls back to the RPC.
+ *   4. getDashboardKPIs uses HTTP and has NO RPC arm left (ERR-247).
  *   5. getCustomerStats fills New Customers from /summary/customers when the
  *      RPC's grant is dropped (returning % honestly stays absent).
  *   6. getTopProducts always returns an array (tolerating { products: [...] }).
+ *   9. every failure is named, not swallowed into a bare null.
  *
  * Run with: node --test tests/admin-analytics-wiring.test.js
  */
@@ -184,13 +210,21 @@ test('getDashboardKPIs uses the HTTP wrapper when it is healthy', async () => {
   assert.match(calls[0], /date_from=2026-05-05/);
 });
 
-test('getDashboardKPIs falls back to the direct RPC when HTTP is empty', async () => {
+test('getDashboardKPIs NEVER reaches for the RPC — the arm is gone (ERR-247)', async () => {
+  // Inverted from "falls back to the direct RPC when HTTP is empty". The stub
+  // below would serve a healthy { current: { revenue: 42 } } over raw fetch —
+  // i.e. it is a POSITIVE CONTROL for the old behaviour. If any RPC arm ever
+  // comes back, this test fails with 42 instead of null, which names the
+  // regression precisely rather than just going red.
+  let rpcHits = 0;
   installGlobals({
     apiGet: async () => ({ ok: true, data: { rows: [], fallback: true } }), // no current → unusable
-    fetchImpl: async () => fakeResponse({ body: { current: { revenue: 42 }, previous: {} } }),
+    fetchImpl: async () => { rpcHits += 1; return fakeResponse({ body: { current: { revenue: 42 }, previous: {} } }); },
   });
   const out = await AdminAPI.getDashboardKPIs(params({ from: '2026-05-05', to: '2026-06-04' }));
-  assert.equal(out.current.revenue, 42);
+  assert.equal(rpcHits, 0, 'no raw fetch may be made — the browser does not call these RPCs any more');
+  assert.notEqual(out?.current?.revenue, 42, 'a 42 here means the RPC fallback is back');
+  assert.equal(out, null, 'an unusable HTTP payload is null, and the reason is in analyticsHealthSnapshot()');
 });
 
 test('getDashboardKPIs returns null when both sources are down', async () => {
@@ -224,15 +258,26 @@ test('getCustomerStats reconstructs New Customers from /summary/customers when t
   assert.ok(httpCalls.some(p => p.includes('/summary/customers')));
 });
 
-test('getCustomerStats prefers the RPC when its grant is intact', async () => {
+test('getCustomerStats reads the ROUTE, never the RPC, even for returning_pct', async () => {
+  // Inverted from "prefers the RPC when its grant is intact". Its grant is not
+  // intact and will not be: analytics_customer_stats was locked to the service
+  // role long before its five siblings. `returning_pct` is the field that only
+  // this endpoint carries, so asserting it comes back over HTTP is what proves
+  // the route is a full replacement rather than a partial one — the tile stays
+  // honest ("—") only when the data genuinely is not there.
+  let rpcHits = 0;
   installGlobals({
-    apiGet: async () => { throw new Error('/summary/customers should not be hit'); },
-    fetchImpl: async () => fakeResponse({ body: { current: { new_customers: 5, returning_pct: 40 }, previous: {} } }),
+    apiGet: async (path) => {
+      assert.match(path, /\/customer-stats\?/);
+      return { ok: true, data: { current: { new_customers: 5, returning_pct: 40 }, previous: {} } };
+    },
+    fetchImpl: async () => { rpcHits += 1; throw new Error('no RPC may be attempted'); },
   });
   const out = await AdminAPI.getCustomerStats(params({ from: '2026-05-05', to: '2026-06-04' }));
+  assert.equal(rpcHits, 0, 'the RPC transport must not be touched');
   assert.equal(out.current.new_customers, 5);
   assert.equal(out.current.returning_pct, 40);
-  assert.equal(out._summaryFallback, undefined);
+  assert.equal(out._summaryFallback, undefined, '/summary/customers is only for when the route cannot answer');
 });
 
 // =====================================================================

@@ -73,6 +73,7 @@ const notes = [];
 const ok = (n) => { pass++; console.log(`  \x1b[32m✓\x1b[0m ${n}`); };
 const bad = (n, d) => { failures.push(`${n} — ${d}`); console.log(`  \x1b[31m✗\x1b[0m ${n}\n      ${d}`); };
 const soft = (n, d) => { notes.push(`${n} — ${d}`); console.log(`  \x1b[33m~\x1b[0m ${n}\n      ${d}`); };
+const check = (cond, name, detail) => (cond ? ok(name) : bad(name, detail));
 const cannotRun = (m) => { console.log(`\n\x1b[33m▲ probe could not run\x1b[0m — ${m}`); process.exit(2); };
 
 console.log('\n\x1b[1mprobe:add-to-cart — Google Ads conversion + the analytics join key (ERR-223)\x1b[0m');
@@ -140,14 +141,28 @@ const run = async () => {
         const hasSession = lower.includes('x-session-id');
         const hasVisitor = lower.includes('x-visitor-id');
         console.log(`    allow-headers: ${allow || '(none)'}`);
-        if (!hasSession && !hasVisitor) {
-            ok('X-Session-Id / X-Visitor-Id absent — USE_ID_HEADERS must stay false (BF-054)');
-        } else {
-            soft('BF-054 MAY HAVE LANDED',
-                `the allow-list now contains ${[hasSession && 'X-Session-Id', hasVisitor && 'X-Visitor-Id'].filter(Boolean).join(' + ')}. `
-                + 'Headers survive an edge-cache hit and query params do not, so flip USE_ID_HEADERS in '
-                + 'js/traffic-tracker.js and re-run. Reported as a NOTE, not a failure: nothing is broken today.');
-        }
+        // ── BF-054 LANDED 2026-09-08. THIS ASSERTION IS INVERTED. ───────────
+        //
+        // It used to assert the two id headers were ABSENT and that
+        // `USE_ID_HEADERS` must stay false — correct while the allow-list did
+        // not carry them, because a browser does not DEGRADE on a disallowed
+        // header, it fails the preflight and never sends the request at all.
+        //
+        // The backend shipped them on 2026-09-08, `traffic-tracker.js` set
+        // USE_ID_HEADERS = true, and search rows started carrying session ids
+        // the next day (2026-09-09: 75 of 176; 2026-09-10: 15 of 23 — against
+        // 0 of 686 across the three days before). So this file was left
+        // asserting the opposite of what the code now depends on: still green,
+        // because it softened rather than failed, but measuring nothing.
+        //
+        // Losing these headers again is NOT a lost analytics column — it is
+        // site search down. Hence a hard check. Re-measured 2026-09-12.
+        check(hasSession && hasVisitor,
+            'X-Session-Id + X-Visitor-Id are allowed — BF-054 stays closed',
+            `the allow-list is missing ${[!hasSession && 'X-Session-Id', !hasVisitor && 'X-Visitor-Id'].filter(Boolean).join(' + ')}. `
+            + 'A browser does not degrade here: it fails the preflight and never sends the request. '
+            + 'Set USE_ID_HEADERS = false in js/traffic-tracker.js IMMEDIATELY, then talk to the '
+            + `backend. Got: ${allow || '(none)'}`);
     } catch (e) {
         cannotRun(`preflight unreachable: ${e.message}. A cold Render instance can take ~50s on first hit.`);
     }

@@ -35,6 +35,36 @@
  * This is a static source check (the repo has no jsdom). It pins the wiring so
  * the fix cannot silently regress.
  *
+ * ── ONE OF THE TWO COLUMNS IS GONE (ERR-244, 2026-09-12) ──────────────────
+ *
+ * Backend migration 132 DROPPED `products.compatible_devices_html` on
+ * 2026-09-10. The machine list moved to `product_compat_devices` (RLS,
+ * service-role only), readable at GET /api/products/:sku/for-use-in.
+ *
+ * That turned layer 2 of the fix above into the bug it was built to prevent.
+ * `persistRichTextColumns` sent BOTH columns in ONE `update(patch)`, and
+ * PostgREST refuses the whole statement for a single unknown name:
+ *
+ *     {"code":"42703","message":"column products.compatible_devices_html does not exist"}
+ *
+ * So `description_html`'s repair — the ONLY thing keeping <b>/<i>/<u>/<a>
+ * alive past the backend sanitiser — died with it. Silently: the failure was
+ * reported through DebugLog.warn, a no-op off localhost (ERR-193). Every
+ * product save from 2026-09-10 was quietly stripping the operator's
+ * formatting, which is the EXACT SYMPTOM this suite was written for in May.
+ *
+ * Four tests below asserted the two-column shape. They were right for four
+ * months and they are wrong now, so they are inverted rather than deleted —
+ * and the property they now pin is STRONGER: one statement per column, so a
+ * name that dies takes only itself with it. Deleting them would leave nothing
+ * standing between here and a re-batched update the next time someone tidies
+ * the loop.
+ *
+ * The "For Use In" editor is read-only for the same reason: no admin route
+ * can write the new table (measured 2026-09-10 — every plausible path 404s
+ * against a control where /api/admin/orders 401s), and the product PUT
+ * answers 200 for the field and discards it.
+ *
  * Run: node --test tests/rich-text-persist-may2026.test.js
  */
 
@@ -57,12 +87,16 @@ const PRODUCTS_SRC = READ('inkcartridges/js/admin/pages/products.js');
 // 1. The rich-text column manifest
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('RICH_TEXT_PRODUCT_COLUMNS lists both rich-text product columns', () => {
+test('RICH_TEXT_PRODUCT_COLUMNS lists description_html — and NOT the dropped column', () => {
   const m = API_SRC.match(/const\s+RICH_TEXT_PRODUCT_COLUMNS\s*=\s*\[([^\]]+)\]/);
   assert.ok(m, 'RICH_TEXT_PRODUCT_COLUMNS const must be defined in api.js');
   const body = m[1];
   assert.match(body, /'description_html'/, 'must include description_html');
-  assert.match(body, /'compatible_devices_html'/, 'must include compatible_devices_html');
+  // Inverted (ERR-244). The column was dropped by backend migration 132; a
+  // name in this list that the schema does not have is not a harmless leftover,
+  // it is a 42703 that kills the statement its live siblings ride in.
+  assert.doesNotMatch(body, /'compatible_devices_html'/,
+    'compatible_devices_html was DROPPED by backend mig 132 — naming it here 42703s the repair write');
 });
 
 test('the manifest is documented with the backend-sanitiser root cause', () => {
@@ -73,6 +107,10 @@ test('the manifest is documented with the backend-sanitiser root cause', () => {
   const lead = m[1];
   assert.match(lead, /sanitiser|sanitizer/i, 'comment must name the backend sanitiser');
   assert.match(lead, /strips/i, 'comment must say the backend strips tags');
+  // And now also WHY the manifest shrank, so the next reader does not "restore"
+  // the missing column on the reasonable-looking theory that it was lost.
+  assert.match(lead, /ERR-244/, 'comment must explain why compatible_devices_html left the list');
+  assert.match(lead, /132/, 'comment must name the migration that dropped it');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,8 +144,51 @@ test('persistRichTextColumns() only writes columns present on the payload', () =
   assert.match(body, /RICH_TEXT_PRODUCT_COLUMNS/, 'must iterate the column manifest');
   assert.match(body, /hasOwnProperty\.call\(\s*data\s*,\s*col\s*\)/,
     'must gate each column on data.hasOwnProperty(col)');
-  assert.match(body, /if\s*\(\s*!Object\.keys\(patch\)\.length\s*\)\s*return/,
-    'must early-return when the payload carries no rich-text columns');
+  // Was: `if (!Object.keys(patch).length) return` — the early-return of a
+  // single assembled patch. There is no single patch any more (ERR-244); the
+  // equivalent guard is on the filtered column list.
+  assert.match(body, /if\s*\(\s*!cols\.length\s*\)/,
+    'must short-circuit when the payload carries no rich-text columns');
+});
+
+test('🚨 ERR-244: ONE STATEMENT PER COLUMN — a dead name must take only itself', () => {
+  // THE REGRESSION THIS SUITE NOW EXISTS TO PREVENT.
+  //
+  // A single `update({a, b})` is a JOINT claim about the schema: PostgREST
+  // refuses it entirely if either name is unknown. When migration 132 dropped
+  // `compatible_devices_html`, that one dead name stopped `description_html`
+  // from being repaired at all — reinstating the very May-2026 bug this file
+  // was written for, with no symptom, for two days.
+  //
+  // Batching the loop back up would look like a tidy-up and would re-arm it.
+  const body = persistFnBody();
+  assert.match(body, /for\s*\(const col of cols\)/, 'must loop the columns');
+  assert.match(body, /const patch = \{ \[col\]: /,
+    'each update() must carry exactly ONE column, built inside the loop');
+  const updates = (body.match(/\.update\(/g) || []).length;
+  assert.equal(updates, 1, 'exactly one .update() call, inside the per-column loop');
+  assert.ok(
+    body.indexOf('.update(') > body.indexOf('for (const col of cols)'),
+    'the update must be INSIDE the loop, not a batched one before it'
+  );
+});
+
+test('🚨 ERR-244: a failed repair is reported by column, not as a bare false', () => {
+  // The old function answered `false` for "no Supabase client", "the write
+  // failed" and — indistinguishably — was never called at all. The operator's
+  // formatting had just been stripped and nothing on screen said so, because
+  // DebugLog is a no-op off localhost (ERR-193). Partial-ness belongs in the
+  // RETURN VALUE and in the UI, not only in a log.
+  const body = persistFnBody();
+  for (const key of ['attempted', 'written', 'failed', 'skipped']) {
+    assert.ok(body.includes(key), `the result must report \`${key}\``);
+  }
+  assert.match(API_SRC, /function describeRichTextRepair\(/,
+    'there must be ONE owner for the operator-facing sentence');
+  assert.match(PRODUCTS_SRC, /describeRichTextRepair\(/,
+    'and the product page must actually show it');
+  const shown = (PRODUCTS_SRC.match(/describeRichTextRepair\(/g) || []).length;
+  assert.ok(shown >= 2, 'both the create and the edit save handlers must report it');
 });
 
 test('persistRichTextColumns() is non-fatal — never throws past the caller', () => {
@@ -115,7 +196,7 @@ test('persistRichTextColumns() is non-fatal — never throws past the caller', (
   assert.match(body, /try\s*\{/, 'must wrap the Supabase write in try/catch');
   assert.match(body, /catch\s*\(/, 'must catch Supabase write failures');
   assert.match(body, /DebugLog\.warn/, 'must log failures rather than surface them');
-  // The function returns a boolean, never re-throws.
+  // The function returns a RESULT OBJECT (ERR-244), never re-throws.
   assert.doesNotMatch(body, /throw\s/, 'persistRichTextColumns must not throw');
 });
 
@@ -240,13 +321,35 @@ test('products.js imports rich-text-editor.js under the same URL as page-copy.js
 // 6. The product save still sends both rich-text fields through the drawer
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('the product drawer save still emits description_html + compatible_devices_html', () => {
+test('the product drawer save still emits description_html from the editor', () => {
   // Both the create and the edit save handlers must put the editor output on
   // the payload — persistRichTextColumns only repairs keys that are present.
   const occurrences = (PRODUCTS_SRC.match(/description_html:\s*modal\._descEditor\?\.getValue\(\)/g) || []).length;
   assert.ok(occurrences >= 2,
     'both the create and edit handlers must send description_html from the editor');
-  const compatOcc = (PRODUCTS_SRC.match(/compatible_devices_html:\s*modal\._compatEditor\?\.getValue\(\)/g) || []).length;
-  assert.ok(compatOcc >= 2,
-    'both the create and edit handlers must send compatible_devices_html from the editor');
+});
+
+test('🚨 ERR-244: the save must NOT send compatible_devices_html any more', () => {
+  // Inverted. It is not merely useless now — it is actively dishonest.
+  // Measured 2026-09-12 with an owner JWT against ADMIN-INK-001:
+  //
+  //   PUT /api/admin/products/:id  {"compatible_devices_html": "<b>x</b>"}  → 200
+  //   PUT /api/admin/products/:id  {"for_use_in_html": "<b>x</b>"}          → 200
+  //
+  // Both accepted, both discarded — the ERR-151 decoy signature. Sending a
+  // field we have measured as ignored manufactures the appearance of a save,
+  // and an editor whose Save silently drops the operator's typing is strictly
+  // worse than no editor: they walk away believing the work is done.
+  assert.ok(
+    !/compatible_devices_html:\s*modal\._compatEditor/.test(PRODUCTS_SRC),
+    'the dropped column must not be sent — the PUT 200s and discards it'
+  );
+  assert.ok(
+    !/_compatEditor\s*=\s*new RichTextEditor/.test(PRODUCTS_SRC),
+    'and no editable rich-text editor may be mounted for a field that cannot be saved'
+  );
+  // Positive control: the OTHER editor must still be mounted, or this test
+  // would pass just as well on a file where both editors had been deleted.
+  assert.match(PRODUCTS_SRC, /_descEditor\s*=\s*new RichTextEditor/,
+    'the description editor must still exist — this is a targeted removal, not a purge');
 });

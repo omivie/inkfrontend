@@ -23,6 +23,9 @@
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
 import { ANALYTICS_TABS, ANALYTICS_TAB_IDS, ANALYTICS_DEFAULT_TAB, analyticsTabLabel } from '../utils/analytics-tabs.js';
+// Why an analytics panel is blank, by name (ERR-247). Bare '../api.js' — a
+// `?v=` token here would load a SECOND copy of the module (see app.js).
+import { analyticsHealthSnapshot, describeAnalyticsFailure } from '../api.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -51,7 +54,7 @@ function kpiCard({ label, value, raw, prevRaw, missingTip, sub }) {
     html += `<div class="admin-kpi__value">${esc(value)}</div>`;
     html += delta(raw, prevRaw);
   } else {
-    html += missing(missingTip || 'Requires analytics RPC endpoint');
+    html += missing(missingTip || 'Requires GET /api/admin/analytics/* (ERR-247: the direct RPC transport was retired).');
   }
   if (sub) html += `<div class="admin-kpi__sub">${esc(sub)}</div>`;
   html += '</div>';
@@ -235,7 +238,14 @@ async function renderTabContent() {
 
 function renderBrandTable(data) {
   if (!data?.brands?.length) {
-    return `<div class="admin-empty"><div class="admin-empty__text" data-tooltip="Requires analytics_brand_breakdown RPC">Brand data unavailable</div></div>`;
+    // ERR-247: there is no `analytics_brand_breakdown` RPC in this app any more
+    // — the browser reads GET /api/admin/analytics/brand-breakdown. Naming a
+    // transport we retired sends the next reader to check a grant that is
+    // deliberately revoked. Say which endpoint, and say WHY it is blank: an
+    // empty table and a refused request must not read the same.
+    const why = describeAnalyticsFailure(analyticsHealthSnapshot()['brand-breakdown']?.res);
+    const tip = why || 'No brand had revenue in this range.';
+    return `<div class="admin-empty"><div class="admin-empty__text" data-tooltip="${esc(tip)}">${esc(why ? 'Brand data could not be read' : 'No brand revenue in this range')}</div></div>`;
   }
   let html = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
     <th>Brand</th><th class="cell-right">Revenue</th><th class="cell-right">vs Prior</th><th class="cell-right">Orders</th>

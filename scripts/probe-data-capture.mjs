@@ -156,35 +156,123 @@ head('§1  CORS — can the browser send what the handoff asked for?');
             + 'endpoint echoes Access-Control-Request-Headers, so the assertion above measures '
             + 'nothing at all — the only way to know whether the id headers work is a real browser.');
     }
+    // ── BF-021 LANDED 2026-09-10. THIS FLIPPED FROM A NOTE TO A HARD CHECK. ──
+    //
+    // It used to assert PATCH was ABSENT, and softly note it if it ever showed
+    // up. That was right while nothing depended on it. Three live admin writes
+    // depend on it now, and each is the ONLY verb its route answers:
+    //
+    //     PATCH /api/admin/quick-orders/:id/outcome
+    //     PATCH /api/admin/invoices/:id/status
+    //     PATCH /api/admin/business/accounts/:id
+    //
+    // A method missing from that list is one the BROWSER refuses to send: the
+    // preflight still answers 204, every curl and server-side test passes, and
+    // the real UI is dead. That is how BF-021 lasted from 2026-07-30 to
+    // 2026-09-10 — six weeks — with nobody able to point at a failing request.
+    // So losing it again must be a red probe, not a quiet one.
+    //
+    // Measured 2026-09-12: GET,POST,PUT,PATCH,DELETE,OPTIONS.
     const pre = await preflight(`${PROD}/api/admin/quick-orders/${UNMATCHABLE_UUID}/outcome`, 'PATCH');
     const allowM = (pre.headers.get('access-control-allow-methods') || '').toUpperCase();
-    if (allowM.includes('PATCH')) {
-        soft('PATCH is now allowed by CORS — BF-021 has landed',
-            'The quick-order outcome modal starts working with no code change. The loud blocked '
-            + 'state in quick-order.js retires itself.');
-    } else {
-        ok('PATCH is NOT an allowed method (BF-021, open since 2026-07-30)');
-        console.log(`      allow-methods: ${allowM || '(none)'}`);
-        console.log('      ⇒ PATCH /api/admin/quick-orders/:id/outcome is unreachable from a browser.');
-    }
+    check(allowM.includes('PATCH'),
+        `PATCH is an allowed method — BF-021 stays closed (allow-methods: ${allowM || '(none)'})`,
+        'PATCH has DISAPPEARED from Access-Control-Allow-Methods. This is not a lost analytics '
+        + 'column: the quick-order outcome modal, the invoice status toggle and the business '
+        + 'account manage drawer all stop working in the browser, while curl and every '
+        + 'server-side test keep passing. Three admin writes are dead until it is restored. '
+        + `Got: ${allowM || '(none)'}`);
+
+    // NEGATIVE CONTROL — the only reason to believe the line above.
+    // A preflight that echoes whatever it is asked would "allow" PATCH no matter
+    // what the server actually does (ERR-223: a preflight 204s whatever you ask,
+    // so curl cannot adjudicate CORS on its own).
+    const bogusPre = await preflight(`${PROD}/api/admin/quick-orders/${UNMATCHABLE_UUID}/outcome`, 'BOGUSVERB');
+    const bogusAllowM = (bogusPre.headers.get('access-control-allow-methods') || '').toUpperCase();
+    check(!bogusAllowM.includes('BOGUSVERB'),
+        'the allow-methods list is a real static list, not an echo (BOGUSVERB not returned)',
+        `asking for BOGUSVERB returned it as allowed (${bogusAllowM}). This endpoint echoes `
+        + 'Access-Control-Request-Method, so the PATCH assertion above measures nothing at all.');
 }
 
 // ── §2 Edge cache ──────────────────────────────────────────────────────────
-head('§2  Edge cache — the assumption that makes ?sid=/?vid= free');
+head('§2  Edge cache — search IS cached now, so the URL must stay shared');
 {
+    // ── THIS SECTION USED TO ASSERT THE EXACT OPPOSITE, AND IT WAS RIGHT TO ──
+    //
+    // It asserted `cf-cache-status: DYNAMIC` on both search endpoints, with the
+    // failure text "the endpoint is now served from the shared cache, so
+    // sid/vid have become part of the cache key". That was a tripwire, not a
+    // preference: while search was uncached the params cost nothing, and the
+    // day it became cached they would start shattering the shared entry one
+    // visitor at a time.
+    //
+    // The tripwire fired. BF-039 closed on 2026-09-10 and this probe went red
+    // before any hand-off reached us. The params came off the two search
+    // helpers the same day (ERR-253), so the section now guards the state that
+    // replaced it — which takes TWO assertions, because either alone is
+    // satisfiable by a mistake:
+    //
+    //   (a) the endpoints really are cached — else we removed a transport for
+    //       a benefit that does not exist;
+    //   (b) our own code really does keep the URL clean — else (a) is true and
+    //       we are still paying full price for it.
+    //
+    // ***A CACHE THAT EXISTS AND A CACHE KEY WE SHARE ARE DIFFERENT CLAIMS.***
     for (const [label, url] of [
         ['/api/search/smart', `${PROD}/api/search/smart?q=brother%20lc3319&limit=2`],
         ['/api/search/suggest', `${PROD}/api/search/suggest?q=lc33&limit=3`],
     ]) {
-        const r = await req(url);
-        const cf = (r.headers.get('cf-cache-status') || '').toUpperCase();
-        check(cf === 'DYNAMIC' || cf === '',
-            `${label} is not edge-cached (cf-cache-status: ${cf || 'absent'})`,
-            `cf-cache-status is ${cf}. The endpoint is now served from the shared cache, so `
-            + 'sid/vid have become part of the cache key and are shattering it one visitor at a '
-            + 'time. Move the ids to headers (BF-054) BEFORE this ships, or drop them from this '
-            + 'endpoint. This is ERR-124/159 in reverse.');
+        // A colo fills per edge node, so one request proves nothing either way:
+        // measured MISS → HIT → MISS → HIT on a fresh query, `age: 0` on both
+        // hits. Ask until it hits or we run out of patience.
+        let cf = '';
+        let hits = 0;
+        for (let i = 0; i < 6; i++) {
+            const r = await req(url);
+            cf = (r.headers.get('cf-cache-status') || '').toUpperCase();
+            if (cf === 'HIT' || cf === 'REVALIDATED' || cf === 'STALE' || cf === 'UPDATING') { hits++; break; }
+            await new Promise((r2) => setTimeout(r2, 400));
+        }
+        check(hits > 0,
+            `${label} IS edge-cached (reached cf-cache-status: ${cf})`,
+            `${label} never reached a cache HIT in 6 attempts (last: ${cf || 'absent'}). Either `
+            + 'the Cloudflare Cache Rule has stopped matching /api/search/ — in which case every '
+            + 'search is back on a ~2.3s origin and is spending from a 30/min bucket — or the '
+            + 'origin has stopped sending s-maxage. npm run audit:edge-cache splits those two.');
     }
+
+    // (b) — and this half is a SOURCE check on purpose. The network cannot tell
+    // you what your own code sends; only the code can. A browser run would be
+    // better still, which is why probe:mobile-ux exists, but a grep here is the
+    // cheap guard that catches a re-added param the day it lands.
+    const SEARCH_ID_PARAM = /\/api\/search\/[a-z]+[^`'"\n]*[?&](sid|vid)=/;
+    for (const rel of ['api.js', 'search.js', 'quote-page.js']) {
+        const src = codeOnly(readJs(rel));
+        check(!SEARCH_ID_PARAM.test(src) && !/identifySearch\(/.test(src),
+            `${rel} puts no sid/vid in a /api/search/ URL`,
+            `${rel} is building a /api/search/ URL that carries sid= or vid=, or is calling the `
+            + 'retired identifySearch() helper. The URL is the edge cache key: a per-visitor '
+            + 'param gives every visitor a private entry and hands back a measured 60x '
+            + '(MISS 3.39s vs HIT 0.057s). Use { identify: true } — the header is not part of '
+            + 'the key. POST /api/cart/items is the one place the param is still correct.');
+    }
+
+    // POSITIVE CONTROL for the check above. If `codeOnly` or the regex is
+    // broken, the three assertions pass by accident — which is the family of
+    // failure that let 22,251 characters of source go unexamined across this
+    // repo's suites. So prove the matcher can still see a violation.
+    check(SEARCH_ID_PARAM.test("fetch(`/api/search/smart?q=${q}&sid=abc`)"),
+        'the sid-in-URL matcher can still detect a violation (positive control)',
+        'the regex guarding the cache key no longer matches a known-bad URL, so the three '
+        + 'assertions above cannot fail and mean nothing.');
+
+    // And the cart POST must have KEPT its param — the scope control.
+    check(/identifyUrl\('\/api\/cart\/items'\)/.test(codeOnly(readJs('api.js'))),
+        'POST /api/cart/items still carries ?sid= — this change was scoped to search',
+        'the cart POST has lost identifyUrl. It is not edge-cached and the param is the '
+        + 'transport that measurably lands its rows; removing it as "unused" loses cart '
+        + 'attribution entirely.');
 }
 
 // ── §3 Are the params honoured? ────────────────────────────────────────────

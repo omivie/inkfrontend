@@ -2,6 +2,7 @@
  * Products & SKUs Page — Full CRUD with image management
  */
 import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
+import { describeRichTextRepair } from '../api.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -22,6 +23,10 @@ import {
 import { SUPPLIER_LABELS, PACK_PACK_TYPES } from '../utils/sourcing.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
 import { pgrstLike } from '../utils/pgrst.js';
+// For Use In is READ-ONLY since ERR-244 — the column moved to its own table
+// (backend mig 132) and no admin write route replaced it. One owner for the
+// markup, the copy, the read and the three states.
+import { forUseInPanelHtml, wireForUseInPanel } from '../utils/for-use-in.js';
 import {
   typesForCategory, defaultTypeForCategory, previewCodeForSku,
   needsCodeOverride, mergeCodeIntoEffective, normCode, partitionDerivedCodes,
@@ -854,7 +859,14 @@ async function loadProducts() {
       // supplier / supplier_sku / pack_type feed the Supplier + Origin columns.
       // pack_type and supplier_sku are BOTH required: origin is derived from the
       // pair (a pack with no supplier code is one we assemble) — see utils/sourcing.js.
-      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, supplier, supplier_sku, pack_type, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug), product_images(path, is_primary, sort_order)';
+      // `compatible_devices_html` was removed from this list in ERR-244.
+      // Backend migration 132 dropped the column on 2026-09-10 and PostgREST
+      // refuses the ENTIRE statement for one unknown name (42703 / 400) — so
+      // this select died on every load, and ERR-220's fallback took over
+      // silently: filters dropped, `total` fabricated from `rows.length`
+      // ("1–100 of 100" of 3,398). A column list is only as live as its
+      // deadest member. `npm run probe:mig132-admin` now checks each name.
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, supplier, supplier_sku, pack_type, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug), product_images(path, is_primary, sort_order)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -1095,7 +1107,9 @@ async function openProductDrawer(product) {
   modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
 
   // Fetch full product data — merge with list data so Supabase-only fields
-  // (description_html, compatible_devices_html) aren't lost
+  // (description_html) aren't lost. compatible_devices_html left this sentence
+  // with ERR-244: backend migration 132 dropped it, so it is not a field either
+  // source can carry any more.
   const apiData = await AdminAPI.getProduct(product.id);
   const full = apiData ? { ...product, ...apiData } : product;
   const isOwner = AdminAuth.isOwner();
@@ -1379,13 +1393,10 @@ function openCreateProductModal(context = null) {
     </div>
   `;
 
-  const forUseInHtml = `
-    <div class="admin-form-group">
-      <label>Compatible Devices / For Use In</label>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Paste text or HTML listing compatible devices. Formatting is preserved as-is on the product page.</p>
-      <div id="compat-editor-mount"></div>
-    </div>
-  `;
+  // Create modal: the same read-only panel, and on create there is not even a
+  // SKU to read yet — the panel says so rather than offering an empty editor
+  // whose contents would be dropped by the POST (ERR-244).
+  const forUseInHtml = forUseInPanelHtml(esc);
 
   const advancedHtml = `
     ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" placeholder="e.g. 300">`)}
@@ -1405,13 +1416,10 @@ function openCreateProductModal(context = null) {
       minHeight: 400,
     });
   }
-  const compatMount = modal.querySelector('#compat-editor-mount');
-  if (compatMount) {
-    modal._compatEditor = new RichTextEditor(compatMount, {
-      placeholder: 'Paste or type compatible devices\u2026',
-      minHeight: 400,
-    });
-  }
+  // No SKU exists yet on create, so readForUseIn reports `unavailable` with the
+  // reason "no SKU on this product yet" \u2014 which is the honest answer, and the
+  // notice above it already explains the field cannot be written from here.
+  wireForUseInPanel(modal, null, esc);
 
   // Unlock the brand. The pathway pre-filled it, but a product genuinely
   // belonging to another brand must not be un-saveable — a lock with no way out
@@ -1544,7 +1552,10 @@ function openCreateProductModal(context = null) {
       weight_kg: parseFloat(val('edit-weight')) || null,
       is_active: chk('edit-active'),
       description_html: modal._descEditor?.getValue() || null,
-      compatible_devices_html: modal._compatEditor?.getValue() || null,
+      // compatible_devices_html is NOT sent (ERR-244). The column was dropped by
+      // backend migration 132 and the PUT still answers 200 for it — accepted and
+      // discarded. Sending a field we know is ignored manufactures the appearance
+      // of a save. The panel is read-only and says why.
       meta_title: val('edit-meta-title') || null,
       meta_description: val('edit-meta-desc') || null,
       page_yield: parseInt(val('edit-page-yield'), 10) || null,
@@ -1567,6 +1578,12 @@ function openCreateProductModal(context = null) {
     try {
       const result = await AdminAPI.createProduct(data);
       const newProduct = result?.product ?? result;
+      // Same rule as the edit drawer: a rich-text repair that did not land is
+      // the operator's formatting quietly gone, and it must be said out loud
+      // (ERR-244). Reported before the success toast so it cannot be missed
+      // under it.
+      const createRepairNote = describeRichTextRepair(result?._richTextRepair);
+      if (createRepairNote) Toast.error(createRepairNote);
       const codeNote = await landProductUnderCode(newProduct, ctx, { sku, name, productType: data.product_type });
       closeCreate();
       invalidateDiagCache();
@@ -1806,14 +1823,11 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
   `;
 
-  // For Use In panel (Rich Text)
-  let forUseInHtml = `
-    <div class="admin-form-group">
-      <label>Compatible Devices / For Use In</label>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Paste text or HTML listing compatible devices. Formatting is preserved as-is on the product page.</p>
-      <div id="compat-editor-mount"></div>
-    </div>
-  `;
+  // For Use In panel — READ-ONLY since ERR-244. The column this used to edit was
+  // dropped by backend migration 132 and no admin write route replaced it; the
+  // product PUT still answers 200 for the field and discards it. One owner for
+  // the markup, the copy and the read: js/admin/utils/for-use-in.js.
+  let forUseInHtml = forUseInPanelHtml(esc);
 
   // Product Codes panel — its own tab. Shows the product's brand + type, then
   // its own chips followed by every other code in the catalogue; the admin
@@ -1900,14 +1914,13 @@ function buildProductModalTabs(modal, full, isOwner) {
       minHeight: 400,
     });
   }
-  const compatDevMount = modal.querySelector('#compat-editor-mount');
-  if (compatDevMount) {
-    modal._compatEditor = new RichTextEditor(compatDevMount, {
-      initialValue: full.compatible_devices_html || '',
-      placeholder: 'Paste or type compatible devices\u2026',
-      minHeight: 400,
-    });
-  }
+  // For Use In: read the live list through GET /api/products/:sku/for-use-in.
+  // NOT from `full` \u2014 the column it used to come from no longer exists
+  // (ERR-244), and `full.compatible_devices_html` is now permanently undefined,
+  // which would have rendered an empty editor that looks exactly like "this
+  // product has no list". Fire-and-paint; the panel owns its own three states
+  // and its own retry, so a slow or refused read never blocks the modal.
+  wireForUseInPanel(modal, full.sku, esc);
 
   // Wire tab switching
   tabsEl.addEventListener('click', (e) => {
@@ -3999,7 +4012,10 @@ function bindProductModalActions(modal, product) {
       ...sourcingPayload(val),
       is_active: chk('edit-active'),
       description_html: modal._descEditor?.getValue() || null,
-      compatible_devices_html: modal._compatEditor?.getValue() || null,
+      // compatible_devices_html is NOT sent (ERR-244). The column was dropped by
+      // backend migration 132 and the PUT still answers 200 for it — accepted and
+      // discarded. Sending a field we know is ignored manufactures the appearance
+      // of a save. The panel is read-only and says why.
       meta_title: val('edit-meta-title'),
       meta_description: val('edit-meta-desc'),
       page_yield: numVal('edit-page-yield'),
@@ -4036,6 +4052,14 @@ function bindProductModalActions(modal, product) {
       if (result?.manual_overrides) {
         product.manual_overrides = result.manual_overrides;
       }
+
+      // The rich-text repair runs AFTER the backend write and can fail on its
+      // own (ERR-244). It used to report through DebugLog, which is a no-op off
+      // localhost — so the operator's bold/italic/underline/links could vanish
+      // from a field they had just edited with nothing on screen to say so.
+      // Partial-ness belongs in the UI, not only in a log.
+      const repairNote = describeRichTextRepair(result?._richTextRepair);
+      if (repairNote) Toast.error(repairNote);
 
       // Persist ribbon-brand assignments (product_ribbon_brands junction).
       // Gated on _ribbonBrandsLoaded so a failed initial load can never be

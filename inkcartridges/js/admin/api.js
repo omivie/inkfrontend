@@ -275,7 +275,64 @@ function productWriteError(resp, fallbackMessage) {
 // round-trips losslessly. The customer PDP reads these same columns directly
 // from Supabase (product-detail-page.js), so the formatting reaches the
 // storefront intact. See errors.md ERR-034.
-const RICH_TEXT_PRODUCT_COLUMNS = ['description_html', 'compatible_devices_html'];
+//
+// ERR-244 — WHY THIS LIST IS ONE NAME SHORT. It used to carry
+// `compatible_devices_html` too; backend migration 132 dropped that column on
+// 2026-09-10. Removing it is not a tidy-up, it is what makes the remaining
+// column work: the writer below used to send both names in ONE `update()`, the
+// dead one answered 42703, and PostgREST refuses the whole statement — so
+// `description_html`'s repair died with it and every save silently re-stripped
+// the operator's <b>/<i>/<u>/<a>, reported only through DebugLog.warn, a no-op
+// off localhost (ERR-193). One statement per column now. Do not re-add it, and
+// do not re-batch the loop.
+//
+// (Restated so it survives next to the const: this manifest exists BECAUSE the
+// backend's PUT/POST sanitiser strips <b>, <i>, <u> and <a> — the exact tags
+// the rich-text toolbar emits — so the columns are re-written to Supabase
+// directly afterwards. See errors.md ERR-034, and ERR-244 for migration 132.)
+const RICH_TEXT_PRODUCT_COLUMNS = ['description_html'];
+
+/**
+ * Hang a rich-text repair outcome off a write's return value without changing
+ * that value's shape for anyone already reading it.
+ *
+ * The key is non-enumerable so it cannot leak into a JSON.stringify of the
+ * product, a form re-hydrate, or a deepEqual in a test that predates it. The
+ * repair is a fact ABOUT the write, not a field OF the product.
+ */
+function attachRepairOutcome(payload, repair) {
+  const target = (payload && typeof payload === 'object') ? payload : { _empty: true };
+  try {
+    Object.defineProperty(target, '_richTextRepair', {
+      value: repair, enumerable: false, configurable: true, writable: true,
+    });
+  } catch (_) { /* frozen payload — the write still succeeded */ }
+  return payload && typeof payload === 'object' ? payload : target;
+}
+
+/**
+ * Operator-facing sentence for a rich-text repair that did not fully land, or
+ * null when there is nothing to say.
+ *
+ * Named here rather than in the page so the two product editors (the drawer and
+ * the full-page form) cannot drift into two different explanations of the same
+ * failure — the ERR-187/192 shape, where one rule grew six copies.
+ */
+function describeRichTextRepair(repair) {
+  if (!repair || repair.ok) return null;
+  if (repair.failed && repair.failed.length) {
+    const cols = repair.failed.join(', ');
+    return `The product saved, but its formatting did not: ${cols} could not be written back, `
+      + 'so bold, italic, underline and links in that field have been stripped by the server’s '
+      + 'sanitiser. Re-apply the formatting and save again; if it keeps happening, the column may '
+      + 'have been dropped server-side (ERR-244).';
+  }
+  if (repair.skipped) {
+    return `The product saved, but its rich-text formatting was not written back (${repair.skipped}). `
+      + 'Check the description before relying on it.';
+  }
+  return null;
+}
 
 // ===========================================================================
 // Admin analytics — resilient HTTP wiring (ERR-010 permanent fix, Jun 2026)
@@ -290,7 +347,10 @@ const RICH_TEXT_PRODUCT_COLUMNS = ['description_html', 'compatible_devices_html'
 // (Probed live 2026-06-04: analytics_customer_stats was 403 right then.)
 //
 // The backend now exposes a service-role HTTP wrapper for every one of these
-// under /api/admin/analytics/* (see Downloads/analytics-api-spec.md). The
+// under /api/admin/analytics/… (see Downloads/analytics-api-spec.md). The
+// (… not `*`: a slash-star inside a `//` line opens a block comment for every
+//  source-stripping test that reads this file, silently deleting live code
+//  from what it asserts against — ERR-154.) The
 // wrapper holds its own grants — immune to the authenticated-role GRANT being
 // dropped — and falls back to a JS-computed equivalent server-side, flagging
 // `data.fallback = true`. So we route through HTTP FIRST and keep the direct
@@ -529,6 +589,148 @@ function analyticsHttpGetShared(path, signal) {
   return p;
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+ * AnalyticsHealth — where a retired RPC fallback's honesty went (ERR-247)
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Six analytics methods used to end `return rpc('analytics_…')`. That arm is
+ * dead: `authenticated` has no EXECUTE on any of them and is not getting it
+ * back. Measured 2026-09-12 with an owner JWT and each function's REAL named
+ * params (an empty `{}` answers 404 PGRST202 and proves nothing):
+ *
+ *     POST /rest/v1/rpc/analytics_kpi_summary      403  42501 permission denied
+ *     POST /rest/v1/rpc/analytics_brand_breakdown  403  42501 permission denied
+ *     POST /rest/v1/rpc/get_suppliers              403  42501 permission denied
+ *     GET  /api/admin/analytics/<each of the 7>    200  with real data
+ *
+ * The grant was revoked ON PURPOSE on 2026-09-07, after a plain customer read
+ * the live P&L straight from PostgREST. The backend now asks us never to apply
+ * the re-grant migration, and has put all seven behind `requireAdmin` +
+ * service_role instead. So the browser needs EXECUTE on a SECURITY DEFINER
+ * function for nothing at all, and this class of outage — ERR-010 / 029 / 035 /
+ * 232, four recurrences — has nothing left to recur over.
+ *
+ * REMOVING A FALLBACK IS A BEHAVIOUR CHANGE, NOT CLEANUP (ERR-158). What the
+ * fallback actually contributed at the end was not data — it could not return
+ * any — it was the fact that SOMETHING had gone wrong. `rpc()` swallows its
+ * error and returns `null`, and `null` renders as an empty chart, so even that
+ * was being thrown away. The upgrade is silent → LOUD, never present → absent:
+ * the transport goes, and the reason it failed is recorded here by name where a
+ * page can render it.
+ *
+ * Not a cache and not a retry — a record of the last answer per endpoint, so a
+ * dashboard can say "the analytics service refused (403)" instead of drawing an
+ * empty axis that looks like a quiet week.
+ */
+/**
+ * A loud envelope for the SEVEN retired-RPC endpoints — sourced from
+ * `window.API.get`, not from a raw fetch.
+ *
+ * WHY NOT `analyticsHttpGetLoud`, WHICH ALREADY RETURNS THIS SHAPE. Because it
+ * does its own `fetch()`, and that skips everything `API.request()` does on the
+ * way past — in particular the ONE-SHOT 401 TOKEN REFRESH. These seven are the
+ * dashboard's headline panels and an admin leaves that page open for hours, so
+ * an access token expiring underneath it is the common case, not the exotic
+ * one. Routing through `API.get` means it refreshes and retries; routing around
+ * it means the KPI strip empties and says "sign in again" to someone who is
+ * signed in. `analyticsHttpGetLoud` keeps its raw fetch for the ERR-204
+ * catalogue/acquisition endpoints, which need `meta` un-stapled and are the
+ * reason it exists — two different jobs, two functions, both documented.
+ *
+ * `API.request()` hands back an `{ok:false, code}` ENVELOPE (it does not throw)
+ * for exactly the cases worth naming — 429/RATE_LIMITED, 403/FORBIDDEN,
+ * 401/UNAUTHORIZED, 404/NOT_FOUND, 5xx — so the mapping below is a translation,
+ * not a guess. Anything else throws and lands in the catch.
+ *
+ *   { ok: true, data }                            success
+ *   { ok: false, rateLimited: true, retryAfter }  429
+ *   { ok: false, status }                         a named refusal
+ *   { ok: false, aborted: true }                  the filter changed under us
+ *   { ok: false, network: true, message }         transport failure
+ */
+async function analyticsHttpGetNamed(path, signal) {
+  const STATUS_FOR = { RATE_LIMITED: 429, FORBIDDEN: 403, UNAUTHORIZED: 401, NOT_FOUND: 404 };
+  try {
+    if (signal?.aborted) return { ok: false, aborted: true };
+    const resp = await window.API.get(path, { signal });
+    if (resp && resp.ok === false) {
+      if (resp.code === 'RATE_LIMITED') {
+        const secs = Number(resp.retry_after);
+        return { ok: false, rateLimited: true, retryAfter: Number.isFinite(secs) && secs > 0 ? secs : 60 };
+      }
+      return { ok: false, status: resp.status || STATUS_FOR[resp.code] || null, code: resp.code || null };
+    }
+    return { ok: true, data: resp?.data ?? null, meta: resp?.meta ?? null };
+  } catch (e) {
+    if (e?.name === 'AbortError') return { ok: false, aborted: true };
+    if (e?.status) return { ok: false, status: e.status, code: e.code || null };
+    DebugLog.warn(`[AdminAPI] analytics GET ${path} failed:`, e.message);
+    return { ok: false, network: true, message: e.message };
+  }
+}
+
+/**
+ * Dedupe + 20s TTL over analyticsHttpGetNamed, for the same reason
+ * analyticsHttpGetShared exists: all seven of these sit under a 20-per-minute
+ * limiter (measured `ratelimit-limit: 20` on every one, 2026-09-12) and the
+ * dashboard fans out ~16 requests in a single paint. Failures are never cached.
+ */
+const _namedInFlight = new Map();
+const _namedCache = new Map();
+
+function analyticsNamedShared(path, signal) {
+  const hit = _namedCache.get(path);
+  if (hit && (Date.now() - hit.at) < ANALYTICS_TTL_MS) return Promise.resolve(hit.value);
+  const pending = _namedInFlight.get(path);
+  if (pending) return pending;
+  const p = analyticsHttpGetNamed(path, signal).then((res) => {
+    _namedInFlight.delete(path);
+    if (res && res.ok) _namedCache.set(path, { at: Date.now(), value: res });
+    return res;
+  }).catch((e) => { _namedInFlight.delete(path); throw e; });
+  _namedInFlight.set(path, p);
+  return p;
+}
+
+const _analyticsHealth = new Map();
+
+/** Record one endpoint's outcome. Returns `res` so it can wrap a call inline. */
+function noteAnalyticsHealth(key, res) {
+  if (res && res.aborted) return res;   // a filter changed under us: not news
+  _analyticsHealth.set(key, { at: Date.now(), res });
+  return res;
+}
+
+/** One sentence for a failed analytics read, or null when it succeeded. */
+function describeAnalyticsFailure(res) {
+  if (!res || res.ok) return null;
+  if (res.aborted) return null;
+  if (res.rateLimited) {
+    return `Analytics is rate-limited (20 requests a minute across this section). `
+      + `Try again in ${Math.max(1, Math.round(res.retryAfter || 60))}s.`;
+  }
+  if (res.network) return 'The analytics service could not be reached. Nothing is wrong with your data.';
+  if (res.status === 401) return 'Your sign-in expired. Sign in again to load analytics.';
+  if (res.status === 403) {
+    return 'The analytics service refused this request (403). Your account may not be permitted '
+      + 'to read it — this is an access answer, not an empty result.';
+  }
+  if (res.status) return `The analytics service answered ${res.status}. This is not an empty result.`;
+  return 'Analytics could not be read. This is not the same as there being no data.';
+}
+
+/**
+ * The health of every analytics endpoint asked for so far: `{ key: {at, res,
+ * message} }`. Read by pages that want to explain a blank panel.
+ */
+function analyticsHealthSnapshot() {
+  const out = {};
+  for (const [key, entry] of _analyticsHealth) {
+    out[key] = { at: entry.at, res: entry.res, message: describeAnalyticsFailure(entry.res) };
+  }
+  return out;
+}
+
 /** Build a query string, dropping empties, for the Sep-2026 analytics endpoints.
  *  These take `from`/`to` — NOT the `date_from`/`date_to` that analyticsQuery()
  *  emits — so they deliberately do not route through it (same reason
@@ -548,8 +750,22 @@ function catalogQueryString(opts = {}) {
 /**
  * Product columns the ribbon admin reads. Deliberately EXCLUDES every
  * cost-bearing column — cost_price, profit_ex_gst, margin_pct — see ERR-170.
+ *
+ * `compatible_devices_html` WAS in this list and had to come out (ERR-244).
+ * Backend migration 132 DROPPED that column on 2026-09-10, and PostgREST does
+ * not skip a column it cannot find — it refuses the whole statement:
+ *
+ *     {"code":"42703","message":"column products.compatible_devices_html does not exist"}  400
+ *
+ * So one dead name here took every other column with it and the ribbon admin
+ * read nothing at all. The machine list now lives in `product_compat_devices`
+ * (RLS, service-role only) behind GET /api/products/:sku/for-use-in.
+ *
+ * A column list is a JOINT claim about the schema: it is only as live as its
+ * deadest member. `npm run probe:mig132-admin` asserts every name in here still
+ * resolves, so the next drop is caught by a probe rather than by an operator.
  */
-const RIBBON_PRODUCT_COLS = 'id, sku, brand_id, name, manufacturer_part_number, retail_price, compare_price, stock_quantity, low_stock_threshold, stock_status, color, color_hex, page_yield, barcode, category, weight_kg, image_url, product_type, is_active, is_featured, is_reviewed, reviewed_at, reviewed_by_email, import_locked, source, pack_type, supplier, supplier_sku, description, description_html, compatible_devices_html, related_product_skus, slug, meta_title, meta_description, meta_keywords, tags, internal_notes, ribbon_brand_id, created_at, updated_at';
+const RIBBON_PRODUCT_COLS = 'id, sku, brand_id, name, manufacturer_part_number, retail_price, compare_price, stock_quantity, low_stock_threshold, stock_status, color, color_hex, page_yield, barcode, category, weight_kg, image_url, product_type, is_active, is_featured, is_reviewed, reviewed_at, reviewed_by_email, import_locked, source, pack_type, supplier, supplier_sku, description, description_html, related_product_skus, slug, meta_title, meta_description, meta_keywords, tags, internal_notes, ribbon_brand_id, created_at, updated_at';
 
 const AdminAPI = {
   // ---- Orders ----
@@ -934,96 +1150,96 @@ const AdminAPI = {
   },
 
   // ---- Dashboard Analytics ----
-  // Each method hits the resilient backend HTTP wrapper first (service-role
-  // grants survive redeploys + server-side fallback) and only drops to the
-  // direct Supabase RPC if the HTTP layer is unreachable. See the block comment
-  // above `analyticsQuery` for the ERR-010 rationale.
+  //
+  // ONE TRANSPORT: `requireAdmin` + service_role, over HTTP. The direct
+  // Supabase RPC arm that used to sit under each of these was retired in
+  // ERR-247 — `authenticated` holds EXECUTE on none of these functions and is
+  // deliberately never getting it back (see the AnalyticsHealth block above for
+  // the measurements and the reasoning). Every failure is recorded by name via
+  // noteAnalyticsHealth() so a blank panel can explain itself instead of
+  // looking like a quiet week.
 
   async getDashboardKPIs(filterParams, signal) {
     const qs = analyticsQuery(filterParams);
-    const http = normalizeKpiSummary(
-      await analyticsHttpGet(`/api/admin/analytics/kpi-summary?${qs}`, signal)
-    );
-    if (http?.current?.revenue != null) return http;
-    // HTTP missing/empty → direct RPC (covers backend-down, grant-healthy).
-    const { from, to } = Object.fromEntries(filterParams);
-    const rpcData = normalizeKpiSummary(await rpc('analytics_kpi_summary', {
-      date_from: from, date_to: to,
-      brand_filter: filterParams.get('brands') || null,
-      supplier_filter: filterParams.get('suppliers') || null,
-      status_filter: filterParams.get('statuses') || null,
-    }, signal));
-    return rpcData ?? http;
+    const res = noteAnalyticsHealth('kpi-summary',
+      await analyticsHttpGetNamed(`/api/admin/analytics/kpi-summary?${qs}`, signal));
+    return res.ok ? normalizeKpiSummary(res.data) : null;
   },
 
   async getRevenueSeries(filterParams, signal) {
     const qs = analyticsQuery(filterParams);
-    const http = await analyticsHttpGet(`/api/admin/analytics/revenue-series?${qs}`, signal);
-    if (Array.isArray(http?.series) || Array.isArray(http)) return http;
-    const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_revenue_series', {
-      date_from: from, date_to: to,
-      brand_filter: filterParams.get('brands') || null,
-      supplier_filter: filterParams.get('suppliers') || null,
-    }, signal);
+    const res = noteAnalyticsHealth('revenue-series',
+      await analyticsHttpGetNamed(`/api/admin/analytics/revenue-series?${qs}`, signal));
+    return res.ok ? res.data : null;
   },
 
+  /**
+   * Brand breakdown — the only one of the seven that had NO server-side route,
+   * which is the sole reason the dashboard called any RPC directly at all. The
+   * backend built `GET /api/admin/analytics/brand-breakdown` for exactly this.
+   *
+   * 🚨 THE SHAPE IS `{ brands: [...] }`, AND IT MUST STAY THAT WAY.
+   * `renderBrandTable()` (pages/analytics.js) reads `data.brands.length`, so
+   * returning the bare array here — the obvious "unwrap it" move — renders
+   * "Brand data unavailable" over a perfectly good payload. The old RPC
+   * happened to produce the same object because `rpc()` unwraps a
+   * single-element RETURNS TABLE result, i.e. the object shape was an accident
+   * of the transport we just removed. Measured live 2026-09-12: the route
+   * answers `{brands:[…]}`. A bare array is tolerated and re-wrapped rather
+   * than passed through, so a future backend reshape cannot blank the table.
+   *
+   * It sits under the 20/min limiter (`ratelimit-limit: 20`) with the other
+   * six, so it goes through the SHARED getter — the dashboard's fan-out cannot
+   * afford a second uncached request for the same panel.
+   */
   async getBrandBreakdown(filterParams, metric = 'revenue', signal) {
-    const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_brand_breakdown', {
-      date_from: from, date_to: to, metric,
-      supplier_filter: filterParams.get('suppliers') || null,
-      status_filter: filterParams.get('statuses') || null,
-    }, signal);
+    const qs = analyticsQuery(filterParams, { metric });
+    const res = noteAnalyticsHealth('brand-breakdown',
+      await analyticsNamedShared(`/api/admin/analytics/brand-breakdown?${qs}`, signal));
+    if (!res.ok) return null;
+    const d = res.data;
+    if (Array.isArray(d)) return { brands: d };
+    if (d && Array.isArray(d.brands)) return d;
+    return d ?? null;
   },
 
   async getRefundAnalytics(filterParams, signal) {
     const qs = analyticsQuery(filterParams);
-    const http = await analyticsHttpGet(`/api/admin/analytics/refunds-series?${qs}`, signal);
-    if (Array.isArray(http?.series) || Array.isArray(http)) return http;
-    const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_refunds_series', {
-      date_from: from, date_to: to,
-      brand_filter: filterParams.get('brands') || null,
-    }, signal);
+    const res = noteAnalyticsHealth('refunds-series',
+      await analyticsHttpGetNamed(`/api/admin/analytics/refunds-series?${qs}`, signal));
+    return res.ok ? res.data : null;
   },
 
   async getCustomerStats(filterParams, signal) {
-    // Prefer the HTTP wrapper (migration 092, Jun 2026). The direct
-    // analytics_customer_stats RPC is deliberately locked to the service role,
-    // so a browser .rpc() call 403s BY DESIGN — calling it first just burns a
-    // request and a console error. The wrapper returns the same rich shape
-    // ({ current, previous } with returning_pct) the KPI strip consumes.
-    const http = await analyticsHttpGet(`/api/admin/analytics/customer-stats?${analyticsQuery(filterParams)}`, signal);
+    // The direct analytics_customer_stats RPC was locked to the service role
+    // long before the other five — a browser .rpc() here 403'd BY DESIGN, and
+    // the comment that used to sit at this spot said so. ERR-247 simply brought
+    // the other six into line with it.
+    const res = noteAnalyticsHealth('customer-stats',
+      await analyticsHttpGetNamed(`/api/admin/analytics/customer-stats?${analyticsQuery(filterParams)}`, signal));
+    const http = res.ok ? res.data : null;
     if (http?.current && (http.current.new_customers != null || http.current.returning_pct != null)) {
       return http;
     }
-    // Fallbacks for an old cached payload / wrapper outage: the direct RPC (if
-    // its grant is somehow intact), then /summary/customers (New Customers only,
-    // no returning_pct — that tile honestly stays "—").
-    const { from, to } = Object.fromEntries(filterParams);
-    const rpcData = await rpc('analytics_customer_stats', {
-      date_from: from, date_to: to,
-      brand_filter: filterParams.get('brands') || null,
-    }, signal);
-    if (rpcData?.current?.new_customers != null || rpcData?.current?.returning_pct != null) {
-      return rpcData;
-    }
-    const summary = await analyticsHttpGet('/api/admin/analytics/summary/customers', signal);
-    return adaptCustomerSummary(summary) ?? http ?? rpcData;
+    // /summary/customers is a DIFFERENT ENDPOINT, not a different transport for
+    // the same one, so it stays: it carries New Customers but no returning_pct,
+    // and that tile then honestly reads "—" rather than guessing. This is the
+    // distinction ERR-158 is about — the arm removed above could not return
+    // data at all; this one can.
+    const sum = noteAnalyticsHealth('summary/customers',
+      await analyticsHttpGetNamed('/api/admin/analytics/summary/customers', signal));
+    return adaptCustomerSummary(sum.ok ? sum.data : null) ?? http;
   },
 
   async getTopProducts(filterParams, signal) {
     const qs = analyticsQuery(filterParams, { result_limit: 10 });
-    const http = await analyticsHttpGet(`/api/admin/analytics/top-products-rpc?${qs}`, signal);
-    if (Array.isArray(http)) return http;
-    if (Array.isArray(http?.products)) return http.products;  // tolerate { products: [...] }
-    const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_top_products', {
-      date_from: from, date_to: to,
-      brand_filter: filterParams.get('brands') || null,
-      result_limit: 10,
-    }, signal);
+    const res = noteAnalyticsHealth('top-products-rpc',
+      await analyticsHttpGetNamed(`/api/admin/analytics/top-products-rpc?${qs}`, signal));
+    if (!res.ok) return null;
+    const d = res.data;
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d?.products)) return d.products;  // tolerate { products: [...] }
+    return null;
   },
 
   // ---- Dashboard graph series (paired-row redesign, Jun 2026) ----
@@ -1429,9 +1645,14 @@ const AdminAPI = {
       const resp = await window.API.put(`/api/admin/products/${productId}`, data);
       if (resp && resp.ok === false) throw productWriteError(resp, 'Update failed');
       // Repair the rich-text columns the backend sanitiser strips. The product
-      // itself saved fine above, so this is intentionally non-fatal.
-      await this.persistRichTextColumns(productId, data);
-      return resp?.data ?? null;
+      // itself saved fine above, so this is intentionally non-fatal — but
+      // "non-fatal" is not "unreported" (ERR-244). A failed repair means the
+      // operator's Bold/Italic/Underline/Link are gone from a field they just
+      // edited, and the only previous trace was a DebugLog line nobody sees in
+      // production. The outcome rides back on the payload so the page can say
+      // so; a caller that ignores it is at worst where we already were.
+      const repair = await this.persistRichTextColumns(productId, data);
+      return attachRepairOutcome(resp?.data ?? null, repair);
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateProduct failed:', e.message);
       throw e;
@@ -1478,8 +1699,16 @@ const AdminAPI = {
       const result = resp?.data ?? resp;
       // Repair the rich-text columns the backend sanitiser strips on create.
       const newId = result?.product?.id ?? result?.id;
-      if (newId) await this.persistRichTextColumns(newId, data);
-      return result;
+      if (!newId) {
+        // No id means the repair never ran. That is not the same answer as
+        // "it ran and worked", so it must not return the same shape (ERR-244).
+        return attachRepairOutcome(result, {
+          attempted: [], written: [], failed: [], ok: false,
+          skipped: 'the create response carried no product id — rich text was never repaired',
+        });
+      }
+      const repair = await this.persistRichTextColumns(newId, data);
+      return attachRepairOutcome(result, repair);
     } catch (e) {
       DebugLog.warn('[AdminAPI] createProduct failed:', e.message);
       throw e;
@@ -1837,8 +2066,22 @@ const AdminAPI = {
   },
 
   // ---- Suppliers ----
-  async getSuppliers() {
-    return rpc('get_suppliers');
+  //
+  // Was `rpc('get_suppliers')`. That function carried the OLD fail-open guard
+  // (`auth.uid() IS NOT NULL AND NOT is_owner()`, which skips itself when uid is
+  // null) and was handing the supplier list to ANONYMOUS callers — only the
+  // revoked ACL was holding it shut. Backend migration 173 brought it in line
+  // with its six siblings; this route is how we reach it now (ERR-247).
+  //
+  // Measured 2026-09-12: the route answers `{ok:true,data:[]}` and the
+  // `suppliers` table is genuinely empty, so an empty supplier filter is real
+  // data and not a swallowed failure. Worth stating, because the RPC returned
+  // `null` on a 403 and an empty filter looked identical either way.
+  async getSuppliers(signal) {
+    const res = noteAnalyticsHealth('suppliers',
+      await analyticsNamedShared('/api/admin/analytics/suppliers', signal));
+    if (!res.ok) return null;
+    return Array.isArray(res.data) ? res.data : (res.data?.suppliers ?? null);
   },
 
   // ---- Brands: write path (owner / super_admin only) ----
@@ -2699,30 +2942,55 @@ const AdminAPI = {
    * @returns {Promise<boolean>}
    */
   async persistRichTextColumns(productId, data) {
-    if (!productId || !data) return false;
-    const patch = {};
-    for (const col of RICH_TEXT_PRODUCT_COLUMNS) {
-      if (Object.prototype.hasOwnProperty.call(data, col)) {
-        patch[col] = data[col] == null ? null : data[col];
-      }
+    const result = { attempted: [], written: [], failed: [], skipped: null, ok: false };
+    if (!productId || !data) {
+      result.skipped = 'no product id or payload';
+      return result;
     }
-    if (!Object.keys(patch).length) return false;
+    const cols = RICH_TEXT_PRODUCT_COLUMNS.filter(
+      (col) => Object.prototype.hasOwnProperty.call(data, col)
+    );
+    if (!cols.length) {
+      // Nothing to repair is a genuine pass: a bulk price edit touches no
+      // rich text, and reporting that as a failure would cry wolf on the
+      // commonest write in the admin.
+      result.skipped = 'payload carries no rich-text column';
+      result.ok = true;
+      return result;
+    }
     const sb = this._sb();
     if (!sb) {
+      result.skipped = 'no Supabase client';
+      result.failed = cols.slice();
       DebugLog.warn('[AdminAPI] rich-text repair skipped — no Supabase client');
-      return false;
+      return result;
     }
-    try {
-      const { error } = await sb.from('products').update(patch).eq('id', productId);
-      if (error) {
-        DebugLog.warn('[AdminAPI] rich-text repair failed:', error.message);
-        return false;
+
+    // ONE STATEMENT PER COLUMN (ERR-244). A single combined `update()` is a
+    // joint claim about the schema, and PostgREST refuses the whole statement
+    // for one unknown name (42703). That is how a column dropped by backend
+    // migration 132 silently stopped `description_html` from ever being
+    // repaired. Per-column, a name that dies takes only itself with it — and
+    // the caller is TOLD which one, rather than being handed a bare `false`
+    // that reads the same as "nothing to do".
+    for (const col of cols) {
+      result.attempted.push(col);
+      const patch = { [col]: data[col] == null ? null : data[col] };
+      try {
+        const { error } = await sb.from('products').update(patch).eq('id', productId);
+        if (error) {
+          result.failed.push(col);
+          DebugLog.warn(`[AdminAPI] rich-text repair failed for ${col}:`, error.message);
+        } else {
+          result.written.push(col);
+        }
+      } catch (e) {
+        result.failed.push(col);
+        DebugLog.warn(`[AdminAPI] rich-text repair threw for ${col}:`, e.message);
       }
-      return true;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] rich-text repair threw:', e.message);
-      return false;
     }
+    result.ok = result.failed.length === 0;
+    return result;
   },
 
   // ─── Per-admin UI preferences ──────────────────────────────────────────────
@@ -4839,7 +5107,7 @@ const AdminAPI = {
   // =========================================================================
   // Admin — Expense Management (Jul 2026). Dedicated Finance → Expenses page.
   //
-  // The CRUD/status surface at /api/admin/expenses/* is LIVE (backend shipped
+  // The CRUD/status surface at /api/admin/expenses/… is LIVE (backend shipped
   // Jul 2026: full CRUD + pay/unpay/skip/pause/resume/end + occurrences +
   // summary; owner-only; 30/min reads, 10/min writes).
   //
@@ -5276,4 +5544,10 @@ export {
   // Pure analytics-shape helpers — exported for unit tests (see
   // tests/admin-analytics-wiring.test.js).
   analyticsQuery, normalizeKpiSummary, adaptCustomerSummary,
+  // ONE owner for the "your formatting did not save" sentence, so the drawer
+  // and the full-page editor cannot drift (ERR-244).
+  describeRichTextRepair, RICH_TEXT_PRODUCT_COLUMNS, RIBBON_PRODUCT_COLS,
+  // Why an analytics panel is blank, by name (ERR-247). A page that draws an
+  // empty axis without consulting these is back to calling a refusal a quiet week.
+  analyticsHealthSnapshot, describeAnalyticsFailure,
 };

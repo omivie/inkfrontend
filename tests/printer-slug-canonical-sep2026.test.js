@@ -54,8 +54,24 @@ const SHOP_JS = fs.readFileSync(path.join(JS_DIR, 'shop-page.js'), 'utf8');
 
 const { PrinterSlug, buildPrinterUrl } = require(path.join(JS_DIR, 'utils.js'));
 
-/** The 15 measured pairs: [loser, winner]. Kept here INDEPENDENTLY of the
- *  implementation so the test is a second opinion, not an echo of the table. */
+/** The 16 measured pairs: [loser, winner]. Kept here INDEPENDENTLY of the
+ *  implementation so the test is a second opinion, not an echo of the table.
+ *
+ *  The 16th (Printronix) arrived from the backend on 2026-09-10 and is the one
+ *  we could not have found ourselves: our discovery ran off the live sitemap,
+ *  and the sitemap's slug-shape gate rejects the `.`, so NEITHER spelling has
+ *  ever been in it. Confirmed independently 2026-09-12 via
+ *  /api/printers/search?q=103.23 — two rows, model_name "103.23" and "103.23.".
+ *
+ *  Also settled that day: the backend's grouping rule counted 21 groups where
+ *  we counted 15, and the six-group difference was NOT ours to adopt. Five of
+ *  the extra six differ only by a trailing `+`, which is part of the model name
+ *  — LQ-300 vs LQ-300+, M880z vs M880z+ are different printers. Verified as
+ *  distinct live rows (`epson-1600k3` AND `epson-1600k3+`;
+ *  `hp-color-laserjet-m880z`, `…m880z+` AND `…m880z+nfc`). Canonicalising those
+ *  would not consolidate a duplicate, it would delete a working page — the same
+ *  objection as brother-dcp-130c / brother-dcp-135c, with a different
+ *  character. §5 pins the refusal so nobody "completes" the table later. */
 const MEASURED_PAIRS = [
     ['brother-hll-3230cdw',              'brother-hl-l3230cdw'],
     ['epson-ec-otank-et-2850',           'epson-ecotank-et-2850'],
@@ -72,20 +88,21 @@ const MEASURED_PAIRS = [
     ['hp-smarttank-7600',                'hp-smart-tank-7600'],
     ['oki-mc-362dn',                     'oki-mc362dn'],
     ['oki-ml-182',                       'oki-ml182'],
+    ['printronix-103.23.',               'printronix-103.23'],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
 // §1  The table itself
 // ─────────────────────────────────────────────────────────────────────────
 
-test('§1 all 15 measured losers map to their winner', () => {
+test('§1 all 16 measured losers map to their winner', () => {
     for (const [loser, winner] of MEASURED_PAIRS) {
         assert.equal(PrinterSlug.canonical(loser), winner,
             `${loser} must canonical to ${winner}`);
     }
 });
 
-test('§1 the table holds exactly the 15 measured pairs — no more, no fewer', () => {
+test('§1 the table holds exactly the 16 measured pairs — no more, no fewer', () => {
     const actual = Object.entries(PrinterSlug.DUPLICATES).sort();
     const expected = MEASURED_PAIRS.map(([l, w]) => [l, w]).sort();
     assert.deepEqual(actual, expected,
@@ -273,4 +290,62 @@ test('§6 a printer canonical carries a brand', () => {
     // does not consider canonical.
     assert.match(SHOP_JS, /const printerBrand = printerSlug \? \(this\.state\.printerBrand \|\| brand \|\| null\) : null;/);
     assert.match(SHOP_JS, /if \(brand \|\| printerBrand\) params\.set\('brand',\s*lc\(brand \|\| printerBrand\)\)/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// §5  The five pairs we REFUSED, and why they must stay refused (ERR-249)
+// ─────────────────────────────────────────────────────────────────────────
+
+test('§5 a trailing + is NEVER canonicalised away — those are different printers', () => {
+    // The backend's own rule, shipped 2026-09-10: two slugs are the same
+    // machine when they differ only in SEPARATORS (hyphen, underscore, space)
+    // plus a trailing full stop. `+` is preserved, because it is part of the
+    // model name. Verified live the same week — both spellings exist as
+    // separate rows in /api/printers/search, and a third (`…m880z+nfc`) proves
+    // the suffix carries meaning rather than being noise.
+    //
+    // This is the objection that saved five pages. Our own grouping rule
+    // ("strip every non-alphanumeric") would have merged all five, and only
+    // missed them by accident: encodeURIComponent writes `+` as `%2B`, so
+    // normalising the URL string rather than the slug left `…k32b` and they
+    // never grouped. An accident is not a safeguard — hence this test.
+    const PLUS_PAIRS = [
+        ['epson-300',                'epson-300+'],
+        ['epson-1600k3',             'epson-1600k3+'],
+        ['epson-1900k2',             'epson-1900k2+'],
+        ['hp-color-laserjet-m880z',  'hp-color-laserjet-m880z+'],
+        ['hp-colour-laserjet-m880z', 'hp-colour-laserjet-m880z+'],
+    ];
+    for (const [bare, plus] of PLUS_PAIRS) {
+        assert.equal(PrinterSlug.canonical(bare), bare,
+            `${bare} is a real printer and must canonical to itself`);
+        assert.equal(PrinterSlug.canonical(plus), plus,
+            `${plus} is a DIFFERENT real printer — canonicalising it deletes a working page`);
+        assert.ok(!PrinterSlug.isDuplicate(plus), `${plus} must never be treated as a duplicate`);
+    }
+});
+
+test('§5 the Printronix pair is prerender-only, and the table says so', () => {
+    // A reader who checks the sitemap for printronix-103.23 finds nothing and
+    // could reasonably conclude the entry is wrong. The comment beside it has
+    // to explain that absence, or this pair looks like a mistake forever.
+    assert.equal(PrinterSlug.canonical('printronix-103.23.'), 'printronix-103.23');
+    const block = UTILS_SRC.slice(
+        Math.max(0, UTILS_SRC.indexOf("'printronix-103.23.'") - 1400),
+        UTILS_SRC.indexOf("'printronix-103.23.'")
+    );
+    assert.match(block, /sitemap/i, 'the entry must explain why neither spelling is sitemapped');
+    assert.match(block, /prerender/i, 'and which surface it actually serves');
+});
+
+test('§5 whole-value matching — a slug that is a PREFIX of another is not a hit', () => {
+    // Measured 2026-09-12 while checking the prerendered HTML: the page for
+    // oki-mc-362dn contains the string "oki-mc-362dn" once, and that occurrence
+    // is inside `oki-mc-362dnw` — a different printer. Any check that greps for
+    // a slug as a substring will report a duplicate link that is not there, or
+    // miss one that is. ERR-198, same shape: no value may be a prefix of another.
+    assert.equal(PrinterSlug.canonical('oki-mc-362dnw'), 'oki-mc-362dnw',
+        'a longer model that merely STARTS WITH a loser slug must be untouched');
+    assert.ok(!PrinterSlug.isDuplicate('oki-mc-362dnw'));
+    assert.equal(PrinterSlug.canonical('printronix-103.23.x'), 'printronix-103.23.x');
 });
