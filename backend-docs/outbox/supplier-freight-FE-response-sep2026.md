@@ -168,6 +168,52 @@ deliberately unpriceable consignment on a staging dataset would do it.
 - Browser-verified against the real ESM modules and the live `2026090902` payload: $24.92,
   21.3%, waterfall footing to the cent on four outflows.
 
+## 8. Addendum, 2026-09-12 — the two aggregate surfaces, and a re-run at 60 orders
+
+Everything above was written when the order-level half had landed. Two aggregate surfaces
+had not, and §5's table row claiming the P&L was "reading it" was ahead of the code. Both
+are in now (commit `0e9ab7a`), so that row is true as of this addendum rather than as of
+the table.
+
+**The P&L had stopped accounting for its own bottom line.** `pages/financial-health.js` is
+the only surface in our admin that lays gross → net out line by line, and it listed Revenue
+/ COGS / Gross / Stripe / Opex / Net. The gap between the last two silently held **$502.64**
+— an owner could subtract every printed row from gross profit and not arrive at net. It now
+carries `Supplier Freight (excl. GST)` between Operating Expenses and Net Profit, and the
+test asserts the rows **reconcile** your identity rather than merely that the row exists.
+
+**Our bucket cash waterfall had the same hole.** `utils/trend-math.js` accounted for COGS +
+opex + Stripe + GST and no freight. It now carries a freight term and — the part that would
+have been quietly wrong — treats freight as the **fourth reclaimable GST input credit**,
+alongside COGS and Stripe. Without that, each bucket remits GST on money it never kept.
+
+**One thing your payload made easy that we want to acknowledge.** `trend-math` builds from
+**list** rows, and the ERR-241 brief told you it could not see freight at all because the
+list carried no `suppliers[]`, no `supplier_cost_snapshot` and no `shipping_absorbed`. You
+put the whole envelope on every list row — measured 60/60 — and that is what closed it. It
+was not on our ask list; it is the item that unblocked the surface we had documented as
+unfixable.
+
+**A naming hazard, offered as feedback rather than a complaint.** `supplier_freight` and
+`supplier_freight_incl_gst` differ by 15% ($502.64 vs $578.00), sit on the same object, and
+are both plain numbers. Our two surfaces need *different* ones — the P&L is an ex-GST
+statement, the waterfall is incl-GST cash — and either field is silently accepted where the
+other belongs. We pinned each with its own test. If you add more paired ex/incl figures,
+that suffix is carrying a lot of weight.
+
+**Re-run at 60 orders (the numbers above were a 40-order sample).** `freight applied: 58
+(0 estimated)`, tile identity holds, three paths SKIPPED by name. §6 grew with the sample
+and found one more instance of each finding in §3: **49 of 52** consignments agree, two
+disagree because a line names no supplier (`20260821000002`, `20260815000003` — both
+Augmento, backend $18.41/$13.15 vs our $2.63), and `INV-3276` is still the zero-goods-cost
+case. So §3a is at least two orders, not one — the question there about how many of the
+~3,398 orders carry a line with no `suppliers[]` entry is the one we would most like
+answered.
+
+Suite is now **5,993 pass / 0 fail / 19 skipped** of 6,012.
+
+---
+
 Thank you for the response document — §0 was right that it needed reading first, and the
 containment measurement only exists because you said plainly that keeping both would
 double-charge.
