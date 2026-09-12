@@ -580,6 +580,17 @@ test('the profit engine deducts freight and NOT the absorbed courier', () => {
 test('the page does no freight maths of its own', () => {
   // The engine owns the arithmetic; the page renders it. A rate or a threshold
   // appearing here means the derivation grew back somewhere new.
+  //
+  // KNOWN WEAKNESS, LEFT DELIBERATELY: this bans the CHARACTERS `0.15 / 1.15`
+  // rather than an OPERATION on a value, so it will also fire on PROSE — the
+  // first time someone adds a footnote or a worked example to orders.js quoting
+  // a GST fraction, this goes red on a documentation change, which is a
+  // confusing place to land. Banning a number catches sentences; banning an
+  // operation catches the bug. Left as-is because orders.js carries no such
+  // prose today and a green guard is not worth churning; if you are reading
+  // this because it just failed on a comment you added, THAT is why — rewrite
+  // it to forbid arithmetic on the freight value rather than relaxing it.
+  // (Failure mode identified by wire-backend-supplier-freight.)
   assert.ok(!/supplierFreightForOrder/.test(ordersSrc), 'orders.js must not resolve freight itself');
   assert.ok(!/\b(0\.15\s*\/\s*1\.15|free_threshold_ex_gst\s*[<>])/.test(ordersSrc),
     'no GST extraction or threshold comparison in the page');

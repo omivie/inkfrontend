@@ -868,10 +868,31 @@ function drawPerformanceOverview(d) {
   // ***TWO FIELDS DIFFERING ONLY BY A SUFFIX ARE TWO CHANCES TO BE QUIETLY 15%
   // WRONG*** — and this band would have accepted either one without complaint.
   //
-  // Known and NOT changed here: `fees` and `opex` in this same band are the
-  // backend's ex-GST figures. That mixture predates this change and is not mine
-  // to silently re-base; it is recorded so the next reader does not have to
-  // re-derive which terms are which.
+  // 🚨 THE REST OF THIS BAND IS MIXED, AND ONE TERM CANNOT BE FIXED YET.
+  // DO NOT "TIDY" IT UNIFORM — that is wrong in both directions:
+  //
+  //   COGS     incl-GST (grossed up above)      cash out
+  //   freight  incl-GST (grossed up here)       cash out
+  //   fees     ex-GST, the backend's figure     ← BLOCKED, see below
+  //   opex     ex-GST, and CORRECTLY so         ← already per-row GST-netted
+  //
+  // There is no GST line in `parts` below to net anything back, so each term's
+  // basis has to be right on its own.
+  //
+  // `fees` is blocked on the SAME open question as hand-off §6, which the owner
+  // deferred pending a real Stripe payout. Under our 2026-05-17 convention
+  // (2.65% + $0.30 is ex-GST and Stripe adds 15%) the cash figure is
+  // `fees × 1.15` and this band is ~$25.60/30d short. Under the backend's
+  // convention the published rate already includes GST, `stripe_fees` IS the
+  // cash figure, and grossing it up would be the bug. ***THE CORRECT BASIS FOR
+  // THIS TERM IS DOWNSTREAM OF THE PAYOUT LINE*** — for the $134.49 charge on
+  // 2026090902, does the Stripe fee read $3.86 or $3.36? One check answers both
+  // that and this.
+  //
+  // `opex` must NOT be grossed up at all: expense-math's `pnlCost()` already
+  // nets GST PER ROW off `gst_claimable`, and foreign / GST-free expenses hit
+  // the P&L at full value. A blanket x1.15 would invent input credits that do
+  // not exist. (Linkage identified by wire-backend-supplier-freight.)
   const freightByBucket = order.map(b => {
     const ex = numOrNull(byBucket.get(b)?.freight);
     return ex == null ? null : ex * COST_GST_GROSS_UP;
