@@ -35,6 +35,33 @@ either names it or cites a `BF-`/`ERR-` number that originates in it.
 
 ---
 
+## 📬 ANSWERED — the 2026-09-10 round came back (2026-09-12)
+
+**The seven "never delivered" documents below were read.** Three backend documents arrived on
+2026-09-10 and are now in `inbox/`:
+
+| Incoming | Answers | Our reply |
+|---|---|---|
+| `fe-backend-asks-action-list-sep2026.md` | the six FE asks, as an action list | `outbox/fe-backend-asks-action-list-FE-response-sep2026.md` |
+| `fe-backend-asks-backend-response-sep2026.md` | the full reasoning behind the action list | (same reply — it is one round) |
+| `fe-verification-round-backend-response-sep2026.md` | printer canonicals, analytics, ERR-232 | (same reply, plus ERR-247/249) |
+
+**⚠️ THE TWO INCOMING DOCUMENTS CONTRADICT EACH OTHER, AND THE WRONG ONE LOOKS SAFE.**
+`fe-verification-round-backend-response-sep2026.md` §6 says *"You can drop your client-side
+mapping whenever suits"* for `/api/products/popular`. `fe-backend-asks-action-list-sep2026.md`
+§4 says the opposite and is right: `consumable` is now **accepted** and resolves to **no
+filter**, so dropping the map puts ink and toner on a drums shelf with a 200 and no error.
+Measured 2026-09-12 by reading `product_type` on the returned rows. The action list is the
+later document and supersedes. **Do not implement §6 of the verification-round document.**
+
+Three further statements in the incoming round did not survive measurement, and the reply
+carries all three with their evidence: the detail read-back path is `data.order.delivery_type`
+and not `data.delivery_type`; the search rate limits are per endpoint (30/30/120/120) and not
+one 30/min limiter across the prefix; and `delivery_type` being *live* is not it being
+*populated* (null on 166 of 167).
+
+---
+
 ## `outbox/` — written, no reply on record (36)
 
 ### ⏳ Never delivered — written 2026-09-09/10, after the last incoming doc (7)

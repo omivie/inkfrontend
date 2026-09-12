@@ -13,10 +13,15 @@
  *       is not an allowed method. The first would have taken site search down
  *       (a browser fails the preflight and never sends the request); the second
  *       is BF-021, and it makes the new quick-order outcome endpoint unreachable.
- *   §2  Edge cache. ?sid=/?vid= are only free because /api/search/smart answers
- *       cf-cache-status: DYNAMIC. If it is ever added to the Cloudflare Cache
- *       Rule those params become part of the cache key and shatter the shared
- *       entry one visitor at a time — the ERR-124/159 failure in reverse. This
+ *   §2  Edge cache. This section used to assert cf-cache-status: DYNAMIC on the
+ *       two search endpoints, as a tripwire: while search was uncached the
+ *       ?sid=/?vid= params cost nothing, and the day it became cached they
+ *       would shatter the shared entry one visitor at a time. THE TRIPWIRE
+ *       FIRED — BF-039 closed 2026-09-10 and this probe went red before any
+ *       hand-off reached us. The params came off the two search helpers the
+ *       same day (ERR-253), and the section now guards the state that replaced
+ *       it, in both directions: the endpoints must really be cached, and our
+ *       own code must really keep the URL clean. This
  *       section FAILS the moment DYNAMIC stops being true, which is the point.
  *   §3  Are the params honoured, or a decoy? Measured honestly: they are
  *       INDISTINGUISHABLE from a decoy from outside (ERR-151), and this says so
@@ -196,6 +201,24 @@ head('§1  CORS — can the browser send what the handoff asked for?');
 }
 
 // ── §2 Edge cache ──────────────────────────────────────────────────────────
+/**
+ * Read a shipped source file with its comments removed.
+ *
+ * Comments removed because the files this checks deliberately EXPLAIN the
+ * pattern they no longer use — api.js carries a tombstone naming the retired
+ * identifySearch helper, search.js says why the params are gone. A ban that
+ * also bans its own explanation is a ban nobody can document.
+ *
+ * This is the same scanner the test suite uses (tests/helpers/strip-comments.js)
+ * rather than a second copy, because a replica of an escaper is how ERR-231's
+ * probe came to certify something other than the shipped rule. Inlined as a
+ * dynamic import so the probe still runs if tests/ is ever pruned from a
+ * deployment checkout.
+ */
+const stripJsComments = (await import('../tests/helpers/strip-comments.js')).default;
+const readJs = (rel) => fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', rel), 'utf8');
+const codeOnly = (src) => stripJsComments(src);
+
 head('§2  Edge cache — search IS cached now, so the URL must stay shared');
 {
     // ── THIS SECTION USED TO ASSERT THE EXACT OPPOSITE, AND IT WAS RIGHT TO ──
