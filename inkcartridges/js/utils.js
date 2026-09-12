@@ -2981,7 +2981,7 @@ if (typeof window !== 'undefined') window.AdminAccess = AdminAccess;
 // An admin-only product must be invisible to shoppers and ordinary to admins.
 // The enforcement is the BACKEND's: public catalogue endpoints never return the
 // row, so the shared Cloudflare entry can never hold one. This module only
-// decides whether to ask the *mirror* routes (/api/admin/catalog/*) instead of
+// decides whether to ask the *mirror* routes (/api/admin/catalog/…) instead of
 // the public ones — see API._catalogRoute.
 //
 // WHY IT LIVES IN utils.js. It has to run on every storefront surface, and
@@ -3155,6 +3155,91 @@ const AdminPreview = {
     }
 };
 if (typeof window !== 'undefined') window.AdminPreview = AdminPreview;
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AdminOnlyRefusal — the backend refusing an admin-only product (ERR-246)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ONE VOCABULARY, read in four places: the cart's add path, the pre-checkout
+// validation, both order-creation paths, and the checkout discount controls.
+// Written once here for the reason CompatSource and BrandSource exist (ERR-135,
+// ERR-157): four copies of a switch on a string literal is four chances for one
+// of them to go quietly out of date, and the one that rots is always the one
+// nobody looks at.
+//
+// THE TWO CODES ARE RULES, NOT FAILURES. `admin-only-test-product-FE-handoff-
+// sep2026.md` §4 commits to:
+//
+//     403 ADMIN_ONLY_PRODUCT   this product is not for sale to you
+//     400 MIXED_TEST_CART      a test product may not share a cart
+//
+// on POST /api/cart/items, POST /api/cart/validate and POST /api/orders. Neither
+// will start working if the shopper tries again, so nothing here may be routed
+// into a retry, a "saved locally, will sync" message, or a proceed-anyway.
+//
+// THE MESSAGE IS THE BACKEND'S WHEN IT SENT ONE. The audience is genuinely
+// mixed: the owner testing the buy pipeline, and — per the brief's §5 — anyone
+// who has learned the product's UUID, since POST /api/cart/items takes a bare
+// product_id. The server knows which of those is asking and we do not, so its
+// wording wins; ours is the neutral fallback that confirms nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+const AdminOnlyRefusal = {
+    /** The codes, in one place. `is()` is the only thing that should read them. */
+    CODES: ['ADMIN_ONLY_PRODUCT', 'MIXED_TEST_CART'],
+
+    /**
+     * Is this the backend refusing an admin-only product?
+     *
+     * Takes either shape a caller can be holding: the {ok:false, code} envelope
+     * api.js returns for these two codes, or a thrown Error carrying `.code`.
+     * Both are read so neither channel can go dark — the same two-shape rule as
+     * isB2BCouponExcluded() in checkout-page.js, and for the same reason.
+     *
+     * @param {object|Error|null} source
+     * @returns {boolean}
+     */
+    is(source) {
+        if (!source || typeof source !== 'object') return false;
+        const code = source.code;
+        return typeof code === 'string' && this.CODES.indexOf(code) !== -1;
+    },
+
+    /** True only for the mixed-cart rule, which has a different remedy. */
+    isMixed(source) {
+        return !!source && typeof source === 'object' && source.code === 'MIXED_TEST_CART';
+    },
+
+    /**
+     * What to show. The backend's own sentence when it sent one, ours otherwise.
+     *
+     * The fallbacks state the rule and offer the remedy, and neither confirms
+     * that a hidden product exists — "isn't available to buy" is true whether
+     * the reader is the owner or a stranger holding a guessed UUID.
+     *
+     * @param {object|Error|null} source
+     * @returns {string}
+     */
+    text(source) {
+        const server = (source && typeof source === 'object')
+            ? (typeof source.error === 'string' && source.error.trim() ? source.error.trim()
+                : (typeof source.message === 'string' && source.message.trim() ? source.message.trim() : ''))
+            : '';
+        if (server) return server;
+        return this.isMixed(source)
+            ? 'A test product has to be ordered on its own. Remove the other items from your cart, or remove the test product.'
+            : 'That product isn\u2019t available to buy from the shop.';
+    },
+
+    /**
+     * The line shown beside the coupon and points controls on a cart that is
+     * entirely admin-only. LABELLING ONLY — it must never move a number. The
+     * frontend does not price carts (cart.js:12) and the browser-side test-cart
+     * shipping rule was deleted in ERR-234 precisely because it did.
+     */
+    DISCOUNT_HINT: 'Discounts don\u2019t apply to a test product \u2014 it\u2019s priced at the card minimum.'
+};
+if (typeof window !== 'undefined') window.AdminOnlyRefusal = AdminOnlyRefusal;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3898,6 +3983,7 @@ if (typeof module !== 'undefined' && module.exports) {
         DispatchCountdown,
         CouponSuggestion,
         AdminAccess,
+        AdminOnlyRefusal,
         OrderNumber,
         QtyStepper,
         DeliveryArea

@@ -2062,6 +2062,29 @@ const Cart = {
                 this.validationErrors = errors;
 
                 return { valid, errors, priceChanges };
+            } else if (typeof AdminOnlyRefusal !== 'undefined' && AdminOnlyRefusal.is(response)) {
+                // A REFUSAL IS NOT AN OUTAGE, AND IT MUST NOT BE THROWN (ERR-246).
+                //
+                // Everything else on this branch is infrastructure — auth,
+                // Turnstile, a 5xx — and is rethrown deliberately so the caller's
+                // catch can let the shopper through, because checkout re-validates
+                // before charging and a flaky validate call must not strand them.
+                //
+                // ADMIN_ONLY_PRODUCT and MIXED_TEST_CART are the opposite kind of
+                // answer: the server understood perfectly and said no, and it will
+                // say no again at POST /api/orders. Rethrowing them here would
+                // walk the shopper to a checkout that cannot complete and fail
+                // them after they have typed a card in. `blocked` is returned
+                // rather than thrown so bindCheckoutButton can stop, which is the
+                // one thing the catch arm is built never to do.
+                this.validationState = 'blocked';
+                this.validationErrors = [AdminOnlyRefusal.text(response)];
+                return {
+                    valid: false,
+                    blocked: true,
+                    errors: this.validationErrors.slice(),
+                    priceChanges: []
+                };
             } else {
                 // Non-ok API response = infrastructure error (auth, Turnstile, server failure).
                 // Stock/availability errors always come via data.issues in an ok: true response.
@@ -2104,6 +2127,17 @@ const Cart = {
             // Price changes require explicit acknowledgment before proceeding.
             try {
                 const result = await self.validateCart();
+
+                // The server refused this cart outright (ERR-246). Not advisory,
+                // not retryable, and the only outcome of this handler that must
+                // NOT navigate: POST /api/orders enforces the same rule, so
+                // /checkout is a dead end with a card form on it.
+                if (result.blocked) {
+                    if (typeof showToast === 'function') {
+                        showToast(result.errors[0] || 'This cart can\u2019t be checked out.', 'error', 7000);
+                    }
+                    return;
+                }
 
                 // Show stock/availability warnings as toasts (advisory only)
                 if (result.errors && result.errors.length > 0) {
@@ -2886,8 +2920,31 @@ const Cart = {
                     this._mutationEpoch++;
                     this.saveToLocalStorage();
                     this.updateUI();
+
+                    // An admin-only product the server will not sell (ERR-246).
+                    //
+                    // This branch is reached AT ALL only because api.js gives
+                    // ADMIN_ONLY_PRODUCT and MIXED_TEST_CART an envelope. Before
+                    // that, MIXED_TEST_CART was a plain 400, api.js THREW, and the
+                    // throw landed in the transport catch at the bottom of this
+                    // function — which keeps the item, saves it, and tells the
+                    // shopper it will sync when the connection comes back. It
+                    // would never have synced: the server was not down, it was
+                    // saying no. Losing that distinction is ERR-063's family.
+                    //
+                    // The toast gets the longer dwell because the mixed-cart copy
+                    // carries a remedy the shopper has to act on, and a 3s toast
+                    // is not long enough to read an instruction.
+                    const refused = (typeof AdminOnlyRefusal !== 'undefined')
+                        && AdminOnlyRefusal.is(response);
                     if (typeof showToast === 'function') {
-                        showToast(API.extractErrorMessage(response, 'Failed to add item to cart'), 'error');
+                        showToast(
+                            refused
+                                ? AdminOnlyRefusal.text(response)
+                                : API.extractErrorMessage(response, 'Failed to add item to cart'),
+                            'error',
+                            refused ? 7000 : undefined
+                        );
                     }
                     // NO add_to_cart here, deliberately: the server refused, the
                     // line was rolled back, and the shopper's cart does not

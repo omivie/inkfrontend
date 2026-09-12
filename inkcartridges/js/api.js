@@ -413,6 +413,30 @@ const API = {
                     return withRid({ ok: false, error: errorMsg, code: errorCode });
                 }
 
+                // An admin-only product refused on the write path (ERR-234/244).
+                //
+                // THESE ARE RULES, NOT FAILURES — the same shape as the branch
+                // above, and they are here for the same reason. Without this
+                // branch `MIXED_TEST_CART` (a plain 400) falls through to the
+                // throw at the bottom of this function, and cart.js addItem()
+                // catches it in the TRANSPORT-failure arm: the shopper is told
+                // "Item saved locally. It will sync when connection is restored."
+                // and the item STAYS in the cart. It never syncs. Nothing is
+                // broken — the server simply will not take it. That is precisely
+                // how B2B_COUPON_EXCLUDED behaved before it got its branch
+                // (ERR-139), arriving a second time through the same door.
+                //
+                // MATCHED ON THE CODE, NEVER ON THE STATUS. The backend's answer
+                // puts ADMIN_ONLY_PRODUCT at 403 and MIXED_TEST_CART at 400. The
+                // 403 branch below would already carry the former, but only by
+                // accident of its status; the latter has no such luck. Keying
+                // both to the code means neither depends on a number we do not
+                // own, and a backend that swaps the two cannot silently reopen
+                // the throwing path.
+                if (errorCode === 'ADMIN_ONLY_PRODUCT' || errorCode === 'MIXED_TEST_CART') {
+                    return withRid({ ok: false, error: errorMsg, code: errorCode });
+                }
+
                 // Forbidden — caller decides between "verify email", "B2B only",
                 // or generic deny. Backend's specific code wins when present.
                 if (response.status === 403 || errorCode === 'FORBIDDEN') {
@@ -4087,7 +4111,7 @@ const API = {
         return this.get(`/api/products/${encodeURIComponent(sku)}/waitlist/status`);
     },
 
-    // Unaffected: /api/account/* is outside the edge-cached prefixes.
+    // Unaffected: /api/account/… is outside the edge-cached prefixes.
     async getAccountWaitlist() {
         return this.get('/api/account/waitlist');
     },

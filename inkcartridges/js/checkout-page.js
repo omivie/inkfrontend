@@ -1564,11 +1564,57 @@
             }
         },
 
+        /**
+         * Say so when this cart cannot take a discount because every line is an
+         * admin-only test product (ERR-246).
+         *
+         * LABELLING AND DISABLING ONLY — IT MOVES NO NUMBER. The frontend does
+         * not price carts (cart.js:12), and the browser-side "test carts ship
+         * free" rule was deleted in ERR-234 precisely because it did: it zeroed
+         * shipping in the browser while the backend re-priced the same cart, so
+         * the total shown was not the total charged. This is the opposite kind of
+         * change — it explains a refusal the backend is going to make anyway
+         * (handoff §4: coupon, loyalty, volume ladder and contract price are all
+         * refused on a test cart) and touches `this.totals` nowhere.
+         *
+         * WHY DISABLE AND NOT JUST HINT. The product is priced at $0.50, exactly
+         * Stripe's NZD floor, so any discount at all makes the order
+         * unchargeable — and Stripe refuses `amount_too_small` at CONFIRM time,
+         * after the customer has authorised. An input that can only produce that
+         * outcome is not a choice worth offering. This mirrors
+         * lockCouponForBusinessAccount() above, deliberately, down to the
+         * `form-hint` class and the id guard.
+         */
+        noteTestCartDiscounts(couponInput, couponBtn) {
+            if (!this._isTestProductCart()) return false;
+            if (typeof AdminOnlyRefusal === 'undefined') return false;
+
+            if (couponInput) couponInput.disabled = true;
+            if (couponBtn) couponBtn.disabled = true;
+
+            const host = couponInput && (couponInput.closest('.coupon-form') || couponInput.parentElement);
+            if (host && host.parentElement && !document.getElementById('coupon-test-cart')) {
+                const msg = document.createElement('p');
+                msg.className = 'form-hint coupon-form__blocked';
+                msg.id = 'coupon-test-cart';
+                msg.setAttribute('data-testid', 'coupon-test-cart');
+                msg.textContent = AdminOnlyRefusal.DISCOUNT_HINT;
+                host.parentElement.insertBefore(msg, host.nextSibling);
+            }
+            return true;
+        },
+
         setupCouponHandler() {
             const couponInput = document.querySelector('.coupon-form__input');
             const couponBtn = document.querySelector('.coupon-form__btn');
 
             if (!couponInput || !couponBtn) return;
+
+            // An all-test cart takes no discount of any kind. Checked before the
+            // guest and business locks because it is the narrower rule and it
+            // wants its own wording — "sign in to use coupon codes" would be a
+            // lie here, since signing in would not help.
+            if (this.noteTestCartDiscounts(couponInput, couponBtn)) return;
 
             // Guests cannot use coupons
             if (typeof Auth !== 'undefined' && !Auth.isAuthenticated()) {
@@ -1978,7 +2024,11 @@
                 if (input) { input.min = String(minPts || 0); input.max = String(maxPts || 0); input.step = '100'; }
 
                 const couponApplied = !!self.appliedCoupon;
-                const canRedeem = maxPts > 0 && !couponApplied;
+                // ERR-246 — the same rule as the coupon field. Folded into
+                // canRedeem rather than applied once on setup, because render()
+                // re-runs on every cart refresh and would hand the buttons back.
+                const testCart = self._isTestProductCart();
+                const canRedeem = maxPts > 0 && !couponApplied && !testCart;
                 if (applyBtn) applyBtn.disabled = !canRedeem;
                 if (maxBtn) maxBtn.disabled = !canRedeem;
                 if (input) input.disabled = !canRedeem;
@@ -1991,6 +2041,7 @@
                 }
 
                 if (lo.stale_notice) setFb(lo.stale_notice, 'err');
+                else if (testCart) setFb(typeof AdminOnlyRefusal !== 'undefined' ? AdminOnlyRefusal.DISCOUNT_HINT : '', null);
                 else if (couponApplied) setFb('Remove your coupon to use points.', null);
                 else if (applied > 0) setFb(lo.message || 'Points applied to this order.', 'ok');
                 else if (maxPts === 0 && balance > 0 && minPts && balance < minPts) setFb(`Earn ${minPts - balance} more points to redeem.`, null);

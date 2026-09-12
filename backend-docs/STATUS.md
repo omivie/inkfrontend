@@ -48,7 +48,8 @@ the batch, and it is the only written record of the 🔴 admin-analytics-RPC out
 | `BACKEND-ASKS-INDEX-sep2026.md` | the index over the batch + ERR-232, the live 403 outage |
 | `fe-backend-asks-sep2026.md` | ERR-235/236/237 asks; BF-021 re-raised |
 | `supplier-freight-backend-brief-sep2026.md` | ERR-241 |
-| `admin-only-test-product-backend-brief-sep2026.md` | ERR-234 — carries a sequencing constraint |
+| `admin-only-test-product-backend-brief-sep2026.md` | ERR-234 — carries a sequencing constraint. **ANSWERED** by `inbox/admin-only-test-product-FE-handoff-sep2026.md` (2026-09-09); still **unshipped** as of 2026-09-12 (column, RLS, routes, seed row all absent — measured) |
+| `admin-only-test-product-FE-response-sep2026.md` | ERR-246 — answers their §2 with **B**, and measured two of their claims false: the edge serves an `Authorization` request the anonymous cached body, and the `TEST-`/`ADMIN-` prefix guard has never been observed firing (`ADMIN-INK-001` exists but is inactive, and an inactive non-prefixed control 404s identically). Four asks open |
 | `printer-canonicals-backend-brief-sep2026.md` | ERR-242/243, and the migration-132 green light |
 | `security-hardening-round2-FE-response-sep2026.md` | answers `security-hardening-sep2026-round2-FE-handoff.md` |
 | `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | ERR-238/239/240 — answers `inbox/fe-verification-and-remaining-gaps-sep2026.md`, **partly disputing it**: see below |
@@ -115,13 +116,14 @@ three oldest, spot-checked for the rest.
 
 ---
 
-## `inbox/` — from the backend (1)
+## `inbox/` — from the backend (5)
 
 | Doc | Note |
 |---|---|
 | `order-profit-net-of-discount-aug2026.md` | backend-authored (`**From:** backend`), was sitting at the repo root; **byte-identical** to the `~/Downloads` copy |
 | `fe-verification-and-remaining-gaps-sep2026.md` | 2026-09-08. **Two of its three fixes are disputed** — see the outbox note above before implementing any of it |
 | `FE-open-items-checklist-sep2026.md` | 2026-09-09. Answered by `outbox/printer-canonicals-backend-brief-sep2026.md`; four of its nine items were already shipped when it was written |
+| `admin-only-test-product-FE-handoff-sep2026.md` | 2026-09-09. Answers `outbox/admin-only-test-product-backend-brief-sep2026.md`. A **design reply, not a delivery** — nothing in it had shipped when it was filed, verified 2026-09-12. Answered by `outbox/admin-only-test-product-FE-response-sep2026.md`; **its §2 recommendation was declined on a measurement** |
 | `security-hardening-sep2026-round2-FE-handoff.md` | 2026-09-08. Answered by `outbox/security-hardening-round2-FE-response-sep2026.md`. **This is the document that proves the backend dev can read this repo** — it cites `tests/security-hardening-sep2026.test.js:234` |
 
 The historical inbox is `readfirst/` at the repo root — frozen, test-pinned, not moved.

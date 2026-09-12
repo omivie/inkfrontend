@@ -948,6 +948,16 @@
                     throw new Error('Your loyalty points balance changed, so the points discount is no longer valid. Please return to your cart to re-apply your points, then try again.');
                 }
 
+                // An admin-only product reached the order endpoint (ERR-246).
+                // Terminal: the same rule refused it at POST /api/cart/items and
+                // at POST /api/cart/validate, so there is nothing to retry and no
+                // second payment method that would work. Say what it is and stop,
+                // rather than letting it fall to the generic "failed to create
+                // order" that reads like a hiccup and invites another attempt.
+                if (typeof AdminOnlyRefusal !== 'undefined' && AdminOnlyRefusal.is(orderResponse)) {
+                    throw new Error(AdminOnlyRefusal.text(orderResponse));
+                }
+
                 if (errorCode === 'DUPLICATE_ORDER') {
                     const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};
                     const existingOrder = details.order_number;
@@ -1388,7 +1398,10 @@
                     if (!response.ok) {
                         const errorCode = response.code || '';
                         DebugLog.error('[PayPal] API returned error:', errorCode, response.error);
-                        if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
+                        if (typeof AdminOnlyRefusal !== 'undefined' && AdminOnlyRefusal.is(response)) {
+                            // ERR-246 — terminal, same as the Stripe path above.
+                            throw new Error(AdminOnlyRefusal.text(response));
+                        } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                             throw new Error('Your order total is below the minimum. Please add more items.');
                         } else if (errorCode === 'DISPOSABLE_EMAIL') {
                             self.resetTurnstile();

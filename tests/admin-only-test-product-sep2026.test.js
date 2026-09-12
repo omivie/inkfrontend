@@ -43,6 +43,8 @@ const SEARCH_SRC = read('inkcartridges/js/search.js');
 const AUTH_SRC = read('inkcartridges/js/auth.js');
 const SHOP_SRC = read('inkcartridges/js/shop-page.js');
 const ADMIN_PRODUCTS_SRC = read('inkcartridges/js/admin/pages/products.js');
+const CART_SRC = read('inkcartridges/js/cart.js');
+const PROBE_SRC = read('scripts/probe-admin-only-product.mjs');
 const PKG = JSON.parse(read('package.json'));
 
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -446,4 +448,403 @@ test('§9 the probe is registered in package.json — one nobody can run does no
 test('§9 the probe lives at the repo root, not under the published web root (ERR-229)', () => {
   assert.ok(!fs.existsSync(path.join(ROOT, 'inkcartridges/scripts/probe-admin-only-product.mjs')),
     'inkcartridges/ is served publicly — a probe that reads .env must never live there');
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §10 — the refusal contract (ERR-246)
+//
+// The backend's handoff (admin-only-test-product-FE-handoff-sep2026.md §4)
+// commits to 403 ADMIN_ONLY_PRODUCT and 400 MIXED_TEST_CART on POST
+// /api/cart/items, POST /api/cart/validate and POST /api/orders.
+//
+// WHY THE 400 IS THE DANGEROUS ONE. api.js returns an {ok:false} envelope for a
+// whitelist of codes and THROWS for every other 400. cart.js:addItem catches a
+// throw in its TRANSPORT-failure arm, which keeps the item, saves it, and tells
+// the shopper "Item saved locally. It will sync when connection is restored."
+// It would never sync — the server was not down, it was saying no. That is
+// ERR-139 (B2B_COUPON_EXCLUDED) arriving a second time through the same door.
+//
+// So these tests EXECUTE api.js's real error mapping rather than grepping for a
+// code literal, and they carry both controls the house rules ask for: a negative
+// control proving the whitelist was not simply opened, and a mutation control
+// proving the new branch is the thing doing the work.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Load the real api.js in a vm whose fetch answers one canned response. */
+function loadApiWithResponse(status, body, src) {
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {} },
+    fetch: async () => ({
+      ok: status < 400,
+      status,
+      headers: { get: () => null },
+      json: async () => body,
+    }),
+    DebugLog: { log() {}, warn() {}, error() {} },
+    Config: { API_URL: 'http://x', SUPABASE_URL: 'http://x', SUPABASE_ANON_KEY: 'k', settings: {} },
+    Auth: { isAuthenticated: () => false, getSession: async () => null },
+    location: { hostname: 'localhost', href: 'http://localhost/', search: '' },
+    navigator: { onLine: true, userAgent: 'node' },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    document: { cookie: '', addEventListener() {}, querySelector: () => null },
+    setTimeout, clearTimeout, AbortController, URLSearchParams, TextEncoder,
+    performance: { now: () => 0 },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(src || API_SRC, sandbox, { filename: 'api.js' });
+  assert.equal(typeof sandbox.API, 'object', 'api.js must evaluate to an API object');
+  return sandbox.API;
+}
+
+test('§10 both refusal codes come back as an envelope and are NEVER thrown', async () => {
+  for (const [status, code] of [[403, 'ADMIN_ONLY_PRODUCT'], [400, 'MIXED_TEST_CART']]) {
+    const API = loadApiWithResponse(status, { ok: false, error: { code, message: 'Refused.' } });
+    let res, threw = null;
+    try { res = await API.post('/api/cart/items', {}); } catch (e) { threw = e; }
+    assert.equal(threw, null, `${status} ${code} must not throw — a throw lands in the transport-failure arm`);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, code, 'the backend’s own code must survive, not be flattened to FORBIDDEN');
+    assert.equal(res.error, 'Refused.', 'and its message, because the server knows who is asking and we do not');
+  }
+});
+
+test('§10 NEGATIVE CONTROL — an unrelated plain 400 still throws', async () => {
+  // Without this, a change that simply stopped throwing for every 400 would make
+  // the test above pass while quietly turning fourteen callers' error handling
+  // inside out. The whitelist has to stay a whitelist.
+  const API = loadApiWithResponse(400, { ok: false, error: { code: 'SOMETHING_ELSE', message: 'Nope.' } });
+  await assert.rejects(() => API.post('/api/cart/items', {}), /Nope\./);
+});
+
+test('§10 MUTATION CONTROL — delete the branch and MIXED_TEST_CART throws again', async () => {
+  // Proves the branch is load-bearing rather than decorative, and pins the exact
+  // failure it prevents. If this test ever passes with the branch present, the
+  // envelope is coming from somewhere else and §10's first test is a coincidence.
+  const mutated = API_SRC.replace(
+    /if \(errorCode === 'ADMIN_ONLY_PRODUCT' \|\| errorCode === 'MIXED_TEST_CART'\) \{[\s\S]*?\n                \}\n/,
+    ''
+  );
+  assert.notEqual(mutated, API_SRC, 'the mutation must actually remove something');
+  const API = loadApiWithResponse(400, { ok: false, error: { code: 'MIXED_TEST_CART', message: 'On its own.' } });
+  const MUT = loadApiWithResponse(400, { ok: false, error: { code: 'MIXED_TEST_CART', message: 'On its own.' } }, mutated);
+  const kept = await API.post('/api/cart/items', {});
+  assert.equal(kept.code, 'MIXED_TEST_CART');
+  await assert.rejects(() => MUT.post('/api/cart/items', {}),
+    'without the branch a plain-400 refusal throws, which is the bug this shipped to fix');
+});
+
+test('§10 the codes are matched on the CODE, never on the status', () => {
+  // The handoff puts ADMIN_ONLY_PRODUCT at 403 and MIXED_TEST_CART at 400. The
+  // 403 branch below would carry the former by accident of its status; keying to
+  // the code means a backend that swaps the two cannot reopen the throwing path.
+  const code = codeOnly(API_SRC);
+  assert.match(code, /errorCode === 'ADMIN_ONLY_PRODUCT' \|\| errorCode === 'MIXED_TEST_CART'/,
+    'one branch, both codes, read off errorCode');
+  assert.doesNotMatch(code, /response\.status === 403 && errorCode === 'ADMIN_ONLY_PRODUCT'/,
+    'never gate a refusal code on a status number we do not own');
+});
+
+test('§10 AdminOnlyRefusal is ONE vocabulary, exported, and reachable off window (ERR-167)', () => {
+  // ERR-167: utils.js declares bare `const`s, so half the guards in this repo
+  // read `window.X?.y` against a name that was never on window and silently took
+  // the fallback branch forever. Check the assignment line exists, not just the
+  // const.
+  assert.match(UTILS_SRC, /if \(typeof window !== 'undefined'\) window\.AdminOnlyRefusal = AdminOnlyRefusal;/,
+    'the window assignment is what makes every typeof guard in cart/checkout/payment real');
+
+  const { AdminOnlyRefusal } = require(path.join(ROOT, 'inkcartridges/js/utils.js'));
+  assert.ok(AdminOnlyRefusal, 'and it must be on module.exports so this test can run it');
+
+  assert.deepEqual(AdminOnlyRefusal.CODES, ['ADMIN_ONLY_PRODUCT', 'MIXED_TEST_CART']);
+  assert.equal(AdminOnlyRefusal.is({ code: 'ADMIN_ONLY_PRODUCT' }), true);
+  assert.equal(AdminOnlyRefusal.is({ code: 'MIXED_TEST_CART' }), true);
+  assert.equal(AdminOnlyRefusal.is({ code: 'FORBIDDEN' }), false, 'a generic 403 is not this rule');
+  assert.equal(AdminOnlyRefusal.is(null), false);
+  assert.equal(AdminOnlyRefusal.is('MIXED_TEST_CART'), false, 'a bare string is not an envelope');
+
+  const err = Object.assign(new Error('thrown'), { code: 'MIXED_TEST_CART' });
+  assert.equal(AdminOnlyRefusal.is(err), true, 'a thrown Error carrying .code is the second shape');
+
+  assert.equal(AdminOnlyRefusal.isMixed({ code: 'MIXED_TEST_CART' }), true);
+  assert.equal(AdminOnlyRefusal.isMixed({ code: 'ADMIN_ONLY_PRODUCT' }), false,
+    'the two rules have different remedies and must not share copy');
+
+  // The server's wording wins; ours is the neutral fallback.
+  assert.equal(AdminOnlyRefusal.text({ code: 'ADMIN_ONLY_PRODUCT', error: 'Admins only.' }), 'Admins only.');
+  assert.match(AdminOnlyRefusal.text({ code: 'MIXED_TEST_CART' }), /on its own/i);
+  assert.match(AdminOnlyRefusal.text({ code: 'ADMIN_ONLY_PRODUCT' }), /available to buy/i);
+  assert.doesNotMatch(AdminOnlyRefusal.text({ code: 'ADMIN_ONLY_PRODUCT' }), /admin/i,
+    'the fallback must not confirm to a stranger that a hidden product exists');
+});
+
+test('§10 the cart’s refusal branch runs BEFORE the "saved locally" arm can see it', () => {
+  // Index ordering rather than presence: both strings exist in addItem() and the
+  // whole defect was which one a refusal reached.
+  const code = codeOnly(CART_SRC);
+  const refusal = code.indexOf('AdminOnlyRefusal.is(response)');
+  const local = code.indexOf('Item saved locally');
+  assert.ok(refusal > 0, 'addItem must consult AdminOnlyRefusal on the server-rejected path');
+  assert.ok(local > 0, 'and the transport-failure copy must still be there for real outages');
+  assert.ok(refusal < local,
+    'the refusal is handled on the !response.ok path, which returns before the catch arm exists');
+});
+
+test('§10 validateCart returns a terminal `blocked` instead of throwing', () => {
+  // EXECUTED. A refusal thrown here is caught by bindCheckoutButton's
+  // proceed-anyway arm, which walks the shopper to a checkout that cannot
+  // complete and fails them after they have typed a card in.
+  const body = liftMethod(CART_SRC, 'async validateCart(acknowledgePriceChanges)');
+  const { AdminOnlyRefusal } = require(path.join(ROOT, 'inkcartridges/js/utils.js'));
+
+  const run = async (response) => {
+    const sandbox = {
+      AdminOnlyRefusal,
+      DebugLog: { log() {}, warn() {}, error() {} },
+      Auth: { getTurnstileToken: async () => null },
+      API: {
+        validateCart: async () => response,
+        extractErrorMessage: (r, fb) => (r && r.error) || fb,
+      },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`globalThis.Cart = { validationState: 'unknown', validationErrors: [], ${body} };`, sandbox);
+    return sandbox.Cart;
+  };
+
+  return (async () => {
+    for (const code of ['ADMIN_ONLY_PRODUCT', 'MIXED_TEST_CART']) {
+      const Cart = await run({ ok: false, code, error: 'Refused.' });
+      const out = await Cart.validateCart();
+      assert.equal(out.valid, false);
+      assert.equal(out.blocked, true, `${code} must be terminal, not retried`);
+      // Compared element-wise, not deepEqual: the array is built inside the vm
+      // realm, so its prototype is a different Array and a strict deep compare
+      // fails on two lists that are identical.
+      assert.equal(out.errors.length, 1);
+      assert.equal(out.errors[0], 'Refused.', 'and it carries the server’s own sentence');
+      assert.equal(Cart.validationState, 'blocked');
+    }
+
+    // NEGATIVE CONTROL: a genuine infrastructure failure must still throw, or the
+    // proceed-anyway arm stops working and a flaky validate call strands shoppers.
+    const Cart = await run({ ok: false, code: 'RATE_LIMITED', error: 'Slow down.' });
+    await assert.rejects(() => Cart.validateCart(), /Slow down\./,
+      'an outage is not a refusal and must keep reaching the catch that lets them through');
+  })();
+});
+
+test('§10 bindCheckoutButton stops on `blocked` before the advisory warnings', () => {
+  const code = codeOnly(CART_SRC);
+  const blocked = code.indexOf('if (result.blocked)');
+  const advisory = code.indexOf('result.errors && result.errors.length > 0');
+  const navigate = code.indexOf("window.location.href = '/checkout'");
+  assert.ok(blocked > 0, 'the handler must read the terminal state');
+  assert.ok(blocked < advisory, 'a refusal is not a stock warning and must not be toasted as advisory');
+  assert.ok(blocked < navigate, 'and it must be decided before the navigation line is reached');
+});
+
+test('§10 both order-creation paths refuse terminally', () => {
+  const code = codeOnly(PAYMENT_SRC);
+  const hits = code.match(/AdminOnlyRefusal\.is\(/g) || [];
+  assert.ok(hits.length >= 2,
+    'Stripe and PayPal create orders on separate code paths — ERR-225 is what one-path-only costs');
+  assert.match(code, /AdminOnlyRefusal\.is\(orderResponse\)/, 'the Stripe path');
+  assert.match(code, /AdminOnlyRefusal\.is\(response\)/, 'the PayPal path');
+});
+
+test('§10 the discount hint is LABELLING — it assigns to no total', () => {
+  // ERR-234 deleted a browser-side rule that zero-rated shipping on a test cart
+  // while the backend re-priced the same cart, so the total shown was not the
+  // total charged. This replacement must never be able to do that again.
+  const code = codeOnly(CHECKOUT_SRC);
+  const start = code.indexOf('noteTestCartDiscounts(couponInput, couponBtn)');
+  assert.ok(start > 0, '_isTestProductCart must finally have a caller');
+  const end = code.indexOf('setupCouponHandler()', start);
+  const fn = code.slice(start, end);
+  assert.doesNotMatch(fn, /this\.totals/, 'a labelling function must not touch totals');
+  assert.doesNotMatch(fn, /shipping\s*=/, 'and must not price shipping — that is the ERR-234 rule');
+  assert.match(fn, /AdminOnlyRefusal\.DISCOUNT_HINT/, 'one hint, from the one vocabulary');
+
+  // Loyalty is folded into canRedeem rather than disabled once on setup, because
+  // render() re-runs on every cart refresh and would hand the buttons back.
+  assert.match(code, /const canRedeem = maxPts > 0 && !couponApplied && !testCart;/,
+    'the points controls must honour the same rule, inside render()');
+});
+
+test('§10 _isTestProductCart still reads the flag and the SKU, never a product NAME', () => {
+  // Re-asserted here because §10 gave it a caller: a rule keyed on
+  // operator-editable text is what ERR-234 removed, and it now has consequences
+  // for what the shopper is shown rather than only for a dead function.
+  const { AdminOnlyRefusal } = require(path.join(ROOT, 'inkcartridges/js/utils.js'));
+  assert.ok(AdminOnlyRefusal, 'sanity: the vocabulary loads');
+
+  const body = liftMethod(CHECKOUT_SRC, '_isTestProductCart()');
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(`globalThis.make = (items) => ({ cartItems: items, ${body} });`, sandbox);
+  const isTest = (items) => sandbox.make(items)._isTestProductCart();
+
+  assert.equal(isTest([]), false, 'an empty cart is not a test cart');
+  assert.equal(isTest([{ sku: 'TEST-ADMIN-001' }]), true);
+  assert.equal(isTest([{ sku: 'test-admin-001' }]), true, 'case-insensitive on the prefix');
+  assert.equal(isTest([{ admin_only: true, sku: 'C02BK' }]), true, 'the flag is authoritative');
+  assert.equal(isTest([{ sku: 'TEST-ADMIN-001' }, { sku: 'C02BK' }]), false, 'a mixed cart is not an all-test cart');
+  assert.equal(isTest([{ name: 'HP 02 Admin Test Page Yield Black' }]), false,
+    'a real product whose NAME contains "admin test" must never be priced differently');
+  assert.equal(isTest([{ admin_only: false, sku: 'C02BK' }]), false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §11 — the probe measures the edge, and does it where the hazard lives
+//
+// MEASURED BY HAND 2026-09-10 on api.inkcartridges.co.nz: warm a catalogue URL
+// anonymously, then repeat it carrying an admin bearer — cf-cache-status: HIT,
+// serving `public, s-maxage=300`. The same authed request against the Render
+// origin answers `private, no-store`. The origin's guard is real and is never
+// consulted, which is why _catalogRoute swaps the PATH rather than trusting a
+// header, and why §0b of the probe exists.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('§11 the probe measures the CDN host, not whatever API_BASE happens to be', () => {
+  // A cache assertion against the Render origin is green because every /api/*
+  // path there answers DYNAMIC — nothing is cached, so nothing was exercised.
+  // That is the ERR-233 failure mode: a green localhost stub proving nothing.
+  assert.match(PROBE_SRC, /const EDGE = process\.env\.EDGE_BASE \|\| 'https:\/\/api\.inkcartridges\.co\.nz'/,
+    'the edge host must be its own constant, defaulting to the CDN');
+  assert.match(PROBE_SRC, /edge=\$\{EDGE\}/, 'and it must be printed in the banner with the others');
+  assert.match(PROBE_SRC, /which is the ORIGIN — §0b is the edge measurement/,
+    '§3 must say so when it measured the origin instead of the edge');
+});
+
+test('§11 §0b runs BEFORE the column gate — a section that cannot run is not a section', () => {
+  // The column does not exist yet, so an edge measurement gated behind it would
+  // be a hundred lines nobody has ever executed. §0b needs neither the column
+  // nor the seed row: it measures the transport.
+  const edgeSection = PROBE_SRC.indexOf('§0b the edge');
+  const gate = PROBE_SRC.indexOf('CANNOT RUN${C.x} — the backend brief has not been applied');
+  assert.ok(edgeSection > 0, 'the edge section must exist');
+  assert.ok(gate > 0, 'and the deferred column gate must still be there');
+  assert.ok(edgeSection < gate, '§0b has to execute before the probe gives up on the column');
+  assert.match(PROBE_SRC, /§0b above DID run and its readings are real/,
+    'and the give-up message must distinguish what ran from what did not');
+});
+
+test('§11 §0b refuses to conclude anything if it never observed a cache HIT', () => {
+  // A skip is not a pass. If the instrument never saw the edge cache anything,
+  // every "not cached" reading below it is true for the wrong reason.
+  assert.match(PROBE_SRC, /could not warm a cache entry[\s\S]{0,200}nothing in this section was measured/,
+    'the warm-failure branch must say what it failed to measure');
+  const warnIdx = PROBE_SRC.indexOf('could not warm a cache entry');
+  const push = PROBE_SRC.indexOf("findings.push('__CANNOT_RUN__')", warnIdx);
+  assert.ok(push > warnIdx && push - warnIdx < 400,
+    'and it must push __CANNOT_RUN__ so the verdict exits 2 rather than 0');
+  assert.match(PROBE_SRC, /the instrument works/, 'the positive control must be reported when it passes');
+});
+
+test('§11 the mirror’s ANONYMOUS refusal must be no-store too', () => {
+  // Measured: this zone caches 4xx — /api/shop?limit=1 answered 400 with
+  // cf-cache-status: HIT. A cacheable 401 on a mirror route would be served to
+  // the admin who came next, and the mirror would fail exactly the way a
+  // header-only fix fails.
+  assert.match(PROBE_SRC, /REFUSES anonymously without no-store/,
+    'the refusal path needs its own assertion, not just the 200 path');
+  assert.match(PROBE_SRC, /a cached refusal would be served to the next admin/,
+    'and the reason has to be written down where the assertion is');
+});
+
+test('§11 the seed row’s empty answer is reported as ambiguous, never as a pass', () => {
+  // `200 []` from anon PostgREST means EITHER "never created" OR "created and
+  // correctly hidden". One value, two meanings is the ERR-243 shape; the
+  // resolution is to name both and let the admin leg decide.
+  assert.match(PROBE_SRC, /EITHER it was never created OR RLS is hiding it correctly/,
+    'both readings must be printed, because the probe genuinely cannot tell them apart');
+  assert.doesNotMatch(PROBE_SRC, /pass\(`?anon PostgREST says/,
+    'and neither reading may be scored as a pass');
+});
+
+test('§11 no source this feature owns can blind codeOnly() with a stray /*', () => {
+  // MET WHILE WRITING §0b, and it is worth generalising.
+  //
+  // A `//` line containing a path glob — `every /api/… path`, written with an
+  // asterisk — is harmless to JavaScript and catastrophic to this repo's
+  // comment-stripper: the `/*` opens a block-comment match that runs to the
+  // next `*/` and silently deletes live code from what every codeOnly()
+  // assertion is reading. It ate 1.1KB of the probe including
+  // `const FAST = process.argv...`, and 1.9KB of utils.js including
+  // `const AdminPreview = {` and its whole state block — which means a source
+  // assertion about those lines could only ever have passed vacuously.
+  //
+  // Scoped to the files this change owns. search.js and js/admin/api.js carry
+  // the same defect today and are being edited by other sessions; they are
+  // reported to those sessions rather than fixed from here.
+  const OWNED = {
+    'inkcartridges/js/api.js': API_SRC,
+    'inkcartridges/js/utils.js': UTILS_SRC,
+    'inkcartridges/js/cart.js': CART_SRC,
+    'inkcartridges/js/checkout-page.js': CHECKOUT_SRC,
+    'inkcartridges/js/payment-page.js': PAYMENT_SRC,
+    'scripts/probe-admin-only-product.mjs': PROBE_SRC,
+  };
+  const strays = [];
+  for (const [name, src] of Object.entries(OWNED)) {
+    src.split('\n').forEach((line, i) => {
+      const slash = line.indexOf('//');
+      const block = line.indexOf('/*');
+      if (slash >= 0 && block > slash) strays.push(`${name}:${i + 1} — ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(strays, [],
+    'a /* inside a // comment opens a block comment for every codeOnly() reader:\n  ' + strays.join('\n  '));
+
+  // POSITIVE CONTROL: the detector must actually fire on the shape it is for.
+  const planted = ['// a glob like /api/x/' + '* in prose'];
+  const found = planted.filter((line) => {
+    const slash = line.indexOf('//');
+    const block = line.indexOf('/*');
+    return slash >= 0 && block > slash;
+  });
+  assert.equal(found.length, 1, 'the detector must catch a planted stray, or it proves nothing');
+});
+
+test('§11 no comment in the probe can blind codeOnly() (met while writing §0b)', () => {
+  // A `//` line containing a path glob — `every /api/* path` — is harmless to
+  // JavaScript and catastrophic to this repo's comment-stripper: the `/*` opens a
+  // block-comment match that runs to the next `*/` and silently deletes live code
+  // from what every codeOnly() assertion is reading. It ate 1.1KB here, including
+  // `const FAST = process.argv...`, and the only symptom was one assertion in
+  // this file failing for a reason that looked unrelated.
+  //
+  // Guarded by size: no block comment may exceed the header docstring, which is
+  // the longest legitimate one in the file.
+  const matches = PROBE_SRC.match(/\/\*[\s\S]*?\*\//g) || [];
+  const longest = matches.reduce((a, m) => Math.max(a, m.length), 0);
+  const header = (PROBE_SRC.match(/^#![^\n]*\n(\/\*\*[\s\S]*?\*\/)/) || [])[1] || '';
+  assert.ok(header.length > 500, 'sanity: the header docstring is the long one');
+  assert.equal(longest, header.length,
+    'a `/*` outside a real comment is swallowing code — check for a path glob in a // line');
+});
+
+test('§11 the probe is still READ-ONLY, behaviourally and not by flag name', () => {
+  // Copied from tests/for-use-in-cutover-sep2026.test.js §5: assert the absence
+  // of write capability, not the absence of a --record string.
+  const code = codeOnly(PROBE_SRC);
+  assert.doesNotMatch(code, /writeFileSync|createWriteStream|appendFileSync|\bfs\.write/,
+    'a probe that can write may be green only because it overwrote what it compared against');
+  const verbs = code.match(/method:\s*'(\w+)'/g) || [];
+  for (const v of verbs) {
+    assert.match(v, /'GET'|'POST'/, 'only GETs and the sign-in POST');
+  }
+  assert.equal((code.match(/method:\s*'POST'/g) || []).length, 1,
+    'exactly one POST in the file: the Supabase sign-in');
+  const argv = code.match(/process\.argv\S*/g) || [];
+  assert.deepEqual(argv, ["process.argv.includes('--fast');"],
+    'the only flag this probe reads is --fast, which changes pacing and nothing else');
+  // Positive controls, so the comment-stripper cannot pass everything by
+  // stripping too much.
+  assert.match(code, /cf-cache-status/, 'the stripped source must still contain the real measurement');
+  assert.match(PROBE_SRC, /MODE: READ-ONLY/, 'the mode must be PRINTED on every run, never assumed');
 });
