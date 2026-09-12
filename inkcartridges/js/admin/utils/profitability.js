@@ -22,7 +22,7 @@
  *     from profit, its GST reclaimed at the IRD line. Absent / {applies:false}
  *     ⇒ $0, so aggregates and card/invoice paths that don't pass it are
  *     unchanged.
- *   - Absorbed courier: NO LONGER A DEDUCTION (ERR-251). opts.absorbedShipping
+ *   - Absorbed courier: NO LONGER A DEDUCTION (ERR-255). opts.absorbedShipping
  *     is still parsed, and its zone/delivery-type/amount are still returned for
  *     LABELLING, but it does not reduce take-home and its GST is not credited
  *     at the IRD line. It was double-charging: measured over 115 order-samples,
@@ -196,7 +196,7 @@ export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
     ? paid
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
   const stripeFee = feeBase * stripeRate + stripeFixed;
-  // Supplier freight is the ONLY courier-side deduction (ERR-251). The absorbed
+  // Supplier freight is the ONLY courier-side deduction (ERR-255). The absorbed
   // courier is the same parcel and is already inside this figure; deducting
   // both was the double-charge the migration removed.
   const freightExGst = supplierFreightParts(opts, gstRate).exGst;   // $0 unless a supplier billed us freight
@@ -297,7 +297,7 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   // Supplier — paid the cost plus the GST on it.
   const supplierCostGst = costExGst * gstRate;
   const supplierCostInclGst = costExGst + supplierCostGst;
-  // Absorbed courier — PARSED FOR LABELLING, NOT DEDUCTED (ERR-251).
+  // Absorbed courier — PARSED FOR LABELLING, NOT DEDUCTED (ERR-255).
   //
   // 🚨 THESE THREE AMOUNTS DO NOT APPEAR IN `netProfit` OR IN `gstRemittedToIrd`
   // BELOW, AND THAT IS DELIBERATE. Until 2026-09-12 they did, alongside supplier
@@ -399,7 +399,7 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
     supplierFreightInclGst,
     supplierFreightGst,
     supplierFreightExGst,
-    // `supplierFreightEstimated` IS GONE ON PURPOSE (ERR-251). There is nothing
+    // `supplierFreightEstimated` IS GONE ON PURPOSE (ERR-255). There is nothing
     // left to estimate: the backend publishes the figure for every order, so a
     // flag meaning "we guessed this" has no true value to hold. It was the name
     // of a defect, not a state. Do not reintroduce it to mean something else.

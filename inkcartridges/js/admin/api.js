@@ -398,7 +398,7 @@ function normalizeKpiSummary(data) {
 
   // 🚨 THIS LIST IS AN ALLOW-LIST, AND ANYTHING NOT NAMED IS SILENTLY DROPPED.
   //
-  // `supplier_freight` joined it on 2026-09-12 (ERR-251), and the reason is
+  // `supplier_freight` joined it on 2026-09-12 (ERR-255), and the reason is
   // nastier than a missing tile. This branch only runs on the METRIC-KEYED
   // shape, and per the backend's own response §2 that is precisely what their
   // kpi-summary RPC-ERROR FALLBACK returns. So the path that drops the key is

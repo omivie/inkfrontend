@@ -147,7 +147,7 @@ const LIVE_CURRENT = {
   // NOTE ON VINTAGE: this is a real kpi-summary capture from JULY 2026, before
   // `supplier_freight` existed, so the field is deliberately absent and
   // 1591.20 − 178.65 − 1071.69 === 340.86 still balances on three terms. Tests
-  // that exercise the SCALAR rebuild path must add it explicitly (ERR-251) —
+  // that exercise the SCALAR rebuild path must add it explicitly (ERR-255) —
   // absent freight now refuses that path rather than treating it as $0.
 };
 
@@ -409,7 +409,7 @@ test('real gross + NULL net now recovers net (the hole this upgrade closes)', ()
   assert.ok(r, 'must recover');
   assert.equal(r.grossRebuilt, false, 'gross was real — do not claim it was rebuilt');
   assert.equal(r.netRebuilt, true);
-  // Four terms since ERR-251: gross − stripe_fees − operating_expenses − supplier_freight.
+  // Four terms since ERR-255: gross − stripe_fees − operating_expenses − supplier_freight.
   assert.equal(round(r.net), round(1591.20 - 178.65 - 1071.69 - cur.supplier_freight));
   assert.equal(round(r.net), 340.86);
 });

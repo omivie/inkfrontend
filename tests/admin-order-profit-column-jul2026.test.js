@@ -190,7 +190,7 @@ test('isInvoiceOrder honours channel > payment_method > INV- prefix', () => {
   assert.equal(isInvoiceOrder({ order_number: '20260728000001', payment_method: 'stripe' }), false);
 });
 
-test('🚨 absorbed courier does NOT reduce take-home — supplier freight does (ERR-251)', () => {
+test('🚨 absorbed courier does NOT reduce take-home — supplier freight does (ERR-255)', () => {
   // INVERTED 2026-09-12. The absorbed courier and the supplier freight are the
   // same parcel off the same ladder, and deducting both double-charged it on
   // 24 of 70 live orders. `absorbedApplies` still reports the fact for the UI;

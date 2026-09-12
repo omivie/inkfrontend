@@ -240,7 +240,7 @@ function profitCellHtml(row, info) {
     ? 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. Invoiced sale paid by bank transfer, so no card fee.'
     : 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount.')
     // NO absorbed-courier clause. It is the same parcel as the freight below and
-    // is no longer deducted (ERR-251); saying it was subtracted would describe
+    // is no longer deducted (ERR-255); saying it was subtracted would describe
     // an outflow the number does not contain.
     //
     // Supplier freight, from the backend. No "estimated" qualifier survives —
@@ -3016,7 +3016,7 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     }
     // Absorbed courier (free-shipping order): a real cost we paid, shown incl-GST
     // like the lines above; its GST is netted at the IRD line below. Only when it applies.
-    // THE "COURIER ABSORBED" ROW IS GONE, AND ITS ABSENCE IS THE FIX (ERR-251).
+    // THE "COURIER ABSORBED" ROW IS GONE, AND ITS ABSENCE IS THE FIX (ERR-255).
     //
     // It used to render here, deducting `shipping_absorbed` alongside supplier
     // freight. That double-charged one parcel. `shipping_absorbed` is the

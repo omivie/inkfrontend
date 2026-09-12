@@ -61,7 +61,7 @@ test('computeLineProfits and computeProfitBreakdown both receive feeOpts (not a 
 
 // ─── 2. The Courier absorbed row — guarded, and correctly positioned ─────────
 
-test('🚨 the "Courier absorbed" ROW IS GONE, and nothing deducts it (ERR-251)', () => {
+test('🚨 the "Courier absorbed" ROW IS GONE, and nothing deducts it (ERR-255)', () => {
   // THIS TEST WAS INVERTED ON 2026-09-12, DELIBERATELY. It used to require the
   // row. The row was double-charging: `shipping_absorbed` is the outbound parcel
   // RATE and `supplier_freight` prices the same parcel off the same ladder.
@@ -113,7 +113,7 @@ test('the IRD-credit tooltip names the courier as a credit source when absorbed 
   // a credit source is named if and only if it actually applied.
   // 'courier' is NO LONGER a credit source: its cost is no longer deducted, so
   // its GST is no longer reclaimed here. Naming it would promise a credit the
-  // arithmetic does not take (ERR-251).
+  // arithmetic does not take (ERR-255).
   assert.ok(!/\?\s*'courier'\s*:\s*null/.test(ordersSrc),
     'the IRD tooltip must not name the courier as a credit source any more');
   assert.ok(/b\.supplierFreightApplies\s*\?\s*'supplier freight'\s*:\s*null/.test(ordersSrc),
@@ -128,7 +128,7 @@ test('supplierFreight rides on BOTH feeOpts branches, like absorbedShipping', ()
   // sale — and invoiced sales are the ones with no card fee to mask the gap.
   assert.ok(/isInvoice\s*\n?\s*\?[\s\S]{0,200}?supplierFreight[\s\S]{0,200}?:\s*\{[\s\S]{0,160}?supplierFreight/.test(profitSrc),
     'both feeOpts branches must include supplierFreight');
-  // Takes the ORDER and nothing else since ERR-251 — the per-supplier cost
+  // Takes the ORDER and nothing else since ERR-255 — the per-supplier cost
   // roll-up was an input to a threshold WE applied, and the backend applies it.
   assert.ok(/const\s+supplierFreight\s*=\s*supplierFreightForOrder\(order\)/.test(profitSrc),
     'supplierFreight must come from the freight module, not be assembled inline');

@@ -302,7 +302,7 @@ test('the worked example: 2026090902 lands at $24.92 / 21.3%', () => {
   //   revenue ex-GST 116.95, goods ex-GST 76.00,
   //   Stripe 134.49 × 2.65% + 0.30 = 3.86 (deducted as the 2026-05-17
   //   convention has it — handoff §6's ÷1.15 was DECLINED by the owner
-  //   pending a real Stripe invoice; see the ERR-251 entry),
+  //   pending a real Stripe invoice; see the ERR-255 entry),
   //   supplier freight 12.17 ex-GST.
   //   116.95 − 76.00 − 3.86 − 12.17 = 24.92, margin 21.3%.
   const info = orderProfitFromDetail(mkOrder());

@@ -49,7 +49,7 @@ record exists ⇒ UNANSWERED, not undelivered.*
 | `analytics-dashboards-FE-response-sep2026.md` | 2026-09-03 | **the "evidence it was NOT read" row is superseded** — §4 concedes the 80-char truncation point and §5 ships all four asks |
 | `security-hardening-round2-FE-response-sep2026.md` | 2026-09-09 | §1's ACL table and migration 173 answer it directly |
 | `admin-only-test-product-backend-brief-sep2026.md` | 2026-09-09 | answered by `inbox/admin-only-test-product-FE-handoff-sep2026.md` (see ERR-246) |
-| `supplier-freight-backend-brief-sep2026.md` | 2026-09-09 | answered in the same round (ERR-241 follow-up) |
+| `supplier-freight-backend-brief-sep2026.md` | 2026-09-09 | answered by `inbox/supplier-freight-backend-response-sep2026.md` + `inbox/supplier-freight-FE-handoff-sep2026.md`, both 2026-09-10. **All three asks delivered.** Implemented 2026-09-12 (ERR-255); replied in `outbox/supplier-freight-FE-response-sep2026.md`, which **declines their §6** |
 | `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | 2026-09-09 | delivered with the batch; **its dispute stands unaddressed** — see below |
 
 **Still disputed, and NOT resolved by their reply.** Our mobile-UX response
@@ -88,9 +88,9 @@ one 30/min limiter across the prefix; and `delivery_type` being *live* is not it
 
 ---
 
-## `outbox/` — written, no reply on record (29)
+## `outbox/` — written, no reply on record (33)
 
-### ⏳ Never delivered — written after the last incoming doc (1)
+### ⏳ Never delivered — written after the last incoming doc (2)
 
 The 2026-09-09/10 batch that used to sit here was **all delivered and answered** —
 those eight rows moved to `sent/` on 2026-09-12. What remains is the reply to the
@@ -99,6 +99,7 @@ document that proved it.
 | Doc | Carries |
 |---|---|
 | `fe-verification-round-FE-response-sep2026.md` | answers `inbox/fe-verification-round-backend-response-sep2026.md` section by section. Accepts their §1 ask (the dashboard is off the analytics RPCs entirely), **declines half of §6 with the measurement**, and carries two 🔴 items of our own: the migration-132 fallout in our admin (ours, not theirs) and **BF-062** — no admin route can write a machine list, while the product PUT answers 200 for the field and discards it |
+| `supplier-freight-FE-response-sep2026.md` | answers BOTH 2026-09-10 supplier-freight documents. **Confirms their whole model** and re-measures it (the `shipping_absorbed` ⊆ `supplier_freight` containment, 115 order-samples, 0 counter-examples). **DECLINES their §6** — the Stripe-fee ÷1.15 reconciles to the cent but proves what the backend does, not what Stripe charges; the owner ruled to check a real payout first, so the ~$0.48/order divergence is documented rather than closed. Carries **two data asks**: one order where THEIR goods cost is the more complete one (ours understates a live column), and one where `goods_cost_ex_gst` is `0` on a populated line — harmless on `always_billed`, a wrong billing decision the day it lands on Augmento |
 
 **Read this before touching `/api/products/popular` mappings.** Their §6 invites us
 to drop the client-side category map. `consumable` means **"Drums & Supplies"** to
@@ -167,7 +168,7 @@ three oldest, spot-checked for the rest.
 
 ---
 
-## `inbox/` — from the backend (5)
+## `inbox/` — from the backend (7)
 
 | Doc | Note |
 |---|---|
@@ -177,6 +178,9 @@ three oldest, spot-checked for the rest.
 | `admin-only-test-product-FE-handoff-sep2026.md` | 2026-09-09. Answers `outbox/admin-only-test-product-backend-brief-sep2026.md`. A **design reply, not a delivery** — nothing in it had shipped when it was filed, verified 2026-09-12. Answered by `outbox/admin-only-test-product-FE-response-sep2026.md`; **its §2 recommendation was declined on a measurement** |
 | `security-hardening-sep2026-round2-FE-handoff.md` | 2026-09-08. Answered by `sent/security-hardening-round2-FE-response-sep2026.md`. **This is the document that proves the backend dev can read this repo** — it cites `tests/security-hardening-sep2026.test.js:234` |
 | `fe-verification-round-backend-response-sep2026.md` | 2026-09-10. **The delivery record for the whole 09-09/10 batch** — answers eight of our documents section by section. Ships their §1–§7; holds the `authenticated` grant (migration 172) and asks us never to apply it. Answered by `outbox/fe-verification-round-FE-response-sep2026.md`. Six of its seven sections were verified against production and hold; the two corrections are recorded there |
+
+| `supplier-freight-FE-handoff-sep2026.md` | 2026-09-10. The wiring checklist for `supplier_freight`. **Its §1 is the load-bearing part** — delete the FE estimator BEFORE reading the new field, because running both double-charges. Implemented 2026-09-12 (ERR-255). **Its §6 was declined**; everything else shipped |
+| `supplier-freight-backend-response-sep2026.md` | 2026-09-10. The reasoning and measurements behind the checklist above, and the delivery record for `sent/supplier-freight-backend-brief-sep2026.md`. **Every measurable claim in it was re-verified against the live API and held** — the `delivery_type_basis` and `supplier_basis` spreads reproduce exactly. Two corrections are in our reply: its §2 envelope sample shows the wrong `supplier_basis` for `2026090902`, and its §6 reconciliation proves what the BACKEND does, not what Stripe charges |
 
 The historical inbox is `readfirst/` at the repo root — frozen, test-pinned, not moved.
 

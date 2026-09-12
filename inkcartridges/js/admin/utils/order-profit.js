@@ -178,7 +178,7 @@ function result(state, extra = {}) {
     supplierFreightUnknown: false,
     supplierFreightUnknownReason: null,
     supplierFreightSuppliers: [],
-    // ONE ceiling gate, two causes (ERR-251): freight we could not state at all,
+    // ONE ceiling gate, two causes (ERR-255): freight we could not state at all,
     // and a freight total the backend reports as incomplete. Both mean take-home
     // is an upper bound; no surface should have to remember which is which.
     supplierFreightCeiling: false,

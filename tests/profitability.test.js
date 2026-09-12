@@ -345,7 +345,7 @@ test('supplier freight DOES drop take-home, by its ex-GST amount', () => {
 });
 
 test('🚨 BOTH present charges ONCE — the exact shape that was double-charging', () => {
-  // 24 of 70 live orders carry both blocks. Before ERR-251 this order lost
+  // 24 of 70 live orders carry both blocks. Before ERR-255 this order lost
   // $20.86 of take-home for one $12 parcel.
   const freightOnly = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
     customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES,

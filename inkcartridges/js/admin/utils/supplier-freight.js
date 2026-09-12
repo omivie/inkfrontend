@@ -2,7 +2,7 @@
  * Supplier freight — what a SUPPLIER bills us to send a purchase order, read
  * from the backend's `order.supplier_freight` envelope.
  *
- * ── This module no longer decides anything about money (ERR-251) ────────────
+ * ── This module no longer decides anything about money (ERR-255) ────────────
  *
  * Until 2026-09-12 it did. It held the per-supplier terms (DSNZ always pays,
  * Augmento free at $100 ex-GST), a transcription of the courier ladder, and a

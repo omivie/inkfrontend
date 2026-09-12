@@ -4,7 +4,7 @@
  * figure, once, and agreeing with the dashboard about it?
  * =============================================================================
  *
- * WHY THIS EXISTS, AND WHY IT CHANGED SHAPE (ERR-241 → ERR-251)
+ * WHY THIS EXISTS, AND WHY IT CHANGED SHAPE (ERR-241 → ERR-255)
  * -------------------------------------------------------------
  * It used to check a rule the FRONTEND applied: per-supplier terms and a
  * transcribed copy of the courier ladder. Both are deleted. The backend now

@@ -173,7 +173,7 @@ test('🚨 normalizeKpiSummary carries supplier_freight through the metric-keyed
   // returns. Its `net_profit` already has freight deducted server-side, so
   // losing the freight key here renders a net profit with nothing to explain it
   // and makes dashboard.js's rebuild over-state net by the whole freight bill —
-  // $502.64 over the last 30 live days (ERR-251).
+  // $502.64 over the last 30 live days (ERR-255).
   //
   // The live payload uses {current, previous} and returns before this branch,
   // so this cannot be exercised against production. That is why it is pinned

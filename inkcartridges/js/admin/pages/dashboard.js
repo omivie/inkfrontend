@@ -752,7 +752,7 @@ function buildOverviewBuckets(d) {
   merge(npList, (r) => numOrNull(r.net_profit), 'netProfit');
   merge(npList, (r) => numOrNull(r.stripe_fees), 'fees');
   merge(npList, (r) => numOrNull(r.operating_expenses), 'opex');
-  // The fourth term (ERR-251). `net_profit` above ALREADY has freight deducted
+  // The fourth term (ERR-255). `net_profit` above ALREADY has freight deducted
   // server-side, so this is here to be RENDERED as a cost band — never to be
   // subtracted again. Measured live: net_profit_series buckets carry
   // supplier_freight on every row.
@@ -849,7 +849,7 @@ function drawPerformanceOverview(d) {
   });
   // Stripe fees per bucket — shipped by the backend on net_profit_series since migration 118.
   const feesByBucket = order.map(b => numOrNull(byBucket.get(b)?.fees));
-  // Supplier freight per bucket (ERR-251), from the same series. It is already
+  // Supplier freight per bucket (ERR-255), from the same series. It is already
   // inside the backend's `net_profit`; it is added to the COST band below so
   // the cost line and the profit line describe the same arithmetic. Leaving it
   // out made the cost line understate by $502.64 over the last 30 days while
@@ -2194,7 +2194,7 @@ function recoverProfitFromSeries(cur, grossProfitSeries, netProfitSeries) {
   if (netRebuilt) {
     const fees = numOrNull(cur.stripe_fees);
     const opex = numOrNull(cur.operating_expenses);
-    // Supplier freight is the FOURTH term (ERR-251). The backend's identity is
+    // Supplier freight is the FOURTH term (ERR-255). The backend's identity is
     // `gross_profit − net_profit = stripe_fees + operating_expenses + supplier_freight`
     // — verified against the live RPC 2026-09-10, $2,210.76 − (−$56.06) = $2,266.82 =
     // $170.68 + $1,593.50 + $502.64, exact to the cent.
@@ -2438,7 +2438,7 @@ function renderKpiStrip(d) {
       alert: netProfitShown != null && netProfitShown < 0, stackNext: true,
       gst: GST_EXCL,
       // Supplier freight is a COMPONENT of net profit, not a peer KPI, so it
-      // rides here rather than taking a tenth grid cell (ERR-251). It is the
+      // rides here rather than taking a tenth grid cell (ERR-255). It is the
       // reason the last 30 days went from +$446.58 to −$56.06, and a tile that
       // shows the new number without the term that moved it invites the owner
       // to go looking for a bug.

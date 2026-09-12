@@ -95,7 +95,7 @@ const LIVE_CURRENT = {
   gross_profit: null,          // ← the defect
   stripe_fees: 171.11,
   operating_expenses: 0,
-  // Supplier freight is the FOURTH term in the backend's identity (ERR-251).
+  // Supplier freight is the FOURTH term in the backend's identity (ERR-255).
   // Present here because the live payload carries it on every call; the test
   // below pins what happens when it ISN'T.
   supplier_freight: 96.40,
@@ -121,7 +121,7 @@ test('rebuilds gross profit by summing the backend’s own weekly buckets', () =
 test('rebuilds net profit with kpi-summary’s own formula: gross − fees − opex − freight', () => {
   // Verified to the cent against four un-poisoned weeks of live data before being
   // relied on (e.g. 2026-06-15: 205.39 − 19.55 − 0 === 185.84, the backend's own net).
-  // Supplier freight joined the identity on 2026-09-12 (ERR-251) — the backend's own
+  // Supplier freight joined the identity on 2026-09-12 (ERR-255) — the backend's own
   // reconciliation is gross − net = stripe + opex + supplier_freight, verified against
   // the live RPC at 2210.76 − (−56.06) = 170.68 + 1593.50 + 502.64, exact to the cent.
   const r = recoverProfitFromSeries(LIVE_CURRENT, LIVE_SERIES);
