@@ -55,6 +55,7 @@
  */
 
 import fs from 'node:fs';
+import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -129,6 +130,12 @@ console.log('No --record mode exists. This probe writes nothing.\n');
 await Promise.all([req(`${PROD}/api/search/smart?q=warm&limit=1`), req(`${RENDER}/api/search/smart?q=warm&limit=1`)]);
 
 // ── §1 CORS ────────────────────────────────────────────────────────────────
+// THIS PROBE IS A WRITER (ERR-254). Every GET to /api/search/ has the backend
+// write a `search_analytics` row, fire-and-forget, so the MODE: READ-ONLY
+// banner above is true of this repo and false of their database. Said out
+// loud rather than left to the reader.
+printSearchAnalyticsNotice();
+
 head('§1  CORS — can the browser send what the handoff asked for?');
 {
     // BF-054 CLOSED 2026-09-08. This block used to assert the headers were NOT

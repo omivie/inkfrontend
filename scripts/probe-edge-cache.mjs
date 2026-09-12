@@ -77,6 +77,8 @@ const MARKDOWN = process.argv.includes('--markdown');
 const QUIET = JSON_OUT || MARKDOWN;
 
 /** Pause between the two requests, so the edge has a moment to store the first. */
+import { printSearchAnalyticsNotice, probeQuery } from './lib/probe-search-notice.mjs';
+
 const SETTLE_MS = 600;
 /** A cold POP can MISS twice in a row; give a cacheable endpoint one more go. */
 // Raised from 2 to 5 on 2026-09-12 (ERR-253). A colo fills per EDGE NODE, not
@@ -117,12 +119,17 @@ const ENDPOINTS = [
     // MISS 3.39s then HIT 0.057s. This row FLIPPED from header-only to cached,
     // which is exactly the change this probe exists to notice, and it noticed
     // it before anyone told us.
-    { path: '/api/search/smart?q=LC133&limit=3', expect: 'cached',
+    // SYNTHETIC TERMS, not real SKUs (ERR-254). This probe asks whether a URL is
+    // STORED, which does not depend on whether the query matched anything — so it
+    // can afford a `zzprobe_` term, and a term that costs the backend a row in
+    // its live top-search-terms list to answer a question that did not need one
+    // is pollution we chose. The two rows below used to be `LC133` and `lc73xl`.
+    { path: `/api/search/smart?q=${encodeURIComponent(probeQuery('edgecache'))}&limit=3`, expect: 'cached',
       note: 'BF-039 closed 2026-09-10 — Cache Rule now matches /api/search/' },
     // Its sibling, added the same day. The two search endpoints are separately
     // reachable and separately cacheable, so one row cannot speak for both —
     // and /suggest is the one the typeahead hits hardest.
-    { path: '/api/search/suggest?q=lc73xl&limit=5', expect: 'cached',
+    { path: `/api/search/suggest?q=${encodeURIComponent(probeQuery('edgecache'))}&limit=5`, expect: 'cached',
       note: 'BF-039 closed 2026-09-10 — measured MISS, MISS, HIT' },
     { path: '/api/site/nav', expect: 'header-only',
       note: 'BF-040 — public, max-age=3600 but still DYNAMIC. STILL OPEN, and it is '
@@ -263,6 +270,10 @@ function markdownTable(rows) {
 async function main() {
     say(`\n  edge-cache probe · ${API_BASE}`);
     say('  GET only — never HEAD (ERR-159)\n');
+    // THIS PROBE IS A WRITER (ERR-254). Two of the rows below are
+    // /api/search/ URLs, and every GET to those makes the backend write a
+    // `search_analytics` row. 'GET only' is a statement about OUR side.
+    printSearchAnalyticsNotice();
 
     const rows = [];
     let transportFailures = 0;

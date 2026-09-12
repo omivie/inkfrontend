@@ -54,6 +54,31 @@ per colo. A fresh query in AKL gave us `MISS → HIT → MISS → HIT` with `age
 Nothing to fix — but any probe of yours that fetches twice and expects `MISS → HIT` will
 report a false negative about half the time. Ours now retries to five.
 
+### 🚨 The consequence of the cache that we think you have not costed yet
+
+**`search_analytics` on `/smart` and `/suggest` is now a count of cache MISSES, not a count
+of searches.** A HIT never reaches your origin — we confirmed it two ways: `age` climbs, and
+`ratelimit-remaining` is frozen at the MISS's value and replayed rather than decremented. So
+`logSearchAnalytics()` cannot be running on a hit.
+
+That is not a bug in the cache. It is a change in the meaning of a table, and it landed in the
+same week that table was being used to demonstrate ERR-237 was closed. The sample is now
+**biased toward novel and rare queries** — precisely the ones that miss — and away from the
+popular repeated ones. Any "top search terms" or volume figure drawn from it after
+2026-09-10 is measuring something different from the same figure before it.
+
+Three options as we see them, and we have no stake in which:
+
+1. **Accept the sample and label it.** Cheapest. The column stops being a census and becomes
+   a sample of first-time queries; anything that aggregates it says so.
+2. **Move the write off the cached path** — an uncached beacon, or `Cache-Control` carve-out
+   for the logging side.
+3. **Treat `POST /api/search/click` as the census**, since it is uncacheable by method and
+   already carries identity in its body.
+
+Flagging it rather than choosing, because it is your data model. But it should not be found
+later by someone puzzling over a step change in the weekly numbers.
+
 ### The one thing that was not a deletion
 
 Three of our four call sites simply lost the param. The fourth, our quote page, had the
@@ -225,6 +250,17 @@ was worth the round on its own.
 
 ---
 
+## One more, smaller, that we found while measuring
+
+`/shop` fires up to **27** `GET /api/products/counts` requests per landing (batched five at a
+time) against the 60/min anonymous catalogue budget — roughly 45% of a minute's allowance in a
+single page load, before `/api/products/popular`, `/api/brands` and `/api/site/nav` are
+counted. A single `?brands=a,b,c` form would make it one request.
+
+This is ours to fix and we are not asking you to do anything — but if `counts` ever grows a
+multi-brand parameter, tell us, because we would use it the same day. Our zero-results rail
+already opts out of the fan-out for exactly this reason.
+
 ## Two asks back
 
 **1. Rename the Printronix slug.** We added `printronix-103.23.` → `printronix-103.23` to our
@@ -251,6 +287,24 @@ because our probe went red, not because anyone told us — which is the probe wo
 is three endpoints now sitting in the same half-landed state.
 
 ---
+
+## A disclosure, and a one-line ask
+
+**Our "read-only" probes have been writing to your `search_analytics` table.** Nine scripts on
+our side GET `/api/search/*`, every one of those GETs has you write a row, and every one of
+those scripts printed a banner saying it could not write anything. It is true of our
+repository and false of your database.
+
+Measured: `zzqqxnotaproduct9987` appears **6 times** in your live top-search-terms for the
+week. That is a zero-result control query in one of our probes. Six of the site's "searches"
+that week were us — during the period we were citing that table back at you as evidence.
+
+Fixed on our side: synthetic control terms now carry a `zzprobe_` prefix from one owner, and a
+test pins that enrolment. Real product terms cannot be prefixed without measuring something
+else, so those rows stay indistinguishable from organic and we are not pretending otherwise.
+
+**The ask: exclude `query LIKE 'zzprobe%'` from your aggregates**, and treat those six rows as
+ours rather than as a shopper hunting a product that does not exist.
 
 ## One correction of our own, for the record
 
