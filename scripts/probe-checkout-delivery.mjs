@@ -27,10 +27,16 @@
  *   F  POSITIVE CONTROL: the gate still exists. If the group is cleared, the
  *      page still refuses to advance. Proving the dead end is gone is worth
  *      nothing if the safety net was simply deleted with it.
+ *   G  THE RECORD vs THE QUOTE (ERR-248). The value the browser would put in
+ *      the order payload is a real area, and is NULL rather than a fabricated
+ *      'urban' when no control is selected; and omitting delivery_type does not
+ *      change the quoted fee, with rural-vs-urban as the positive control that
+ *      the endpoint reads the field at all.
  *
  * Nothing here creates an order. It seeds a guest cart through the real UI
  * (never by writing storage), fills the shipping form, and reads state; it
- * never proceeds past /checkout.
+ * never proceeds past /checkout. §G POSTs to /api/shipping/options, which
+ * quotes and does not write.
  *
  * Usage:  npm run probe:checkout-delivery
  *         PROBE_BASE=http://localhost:3000 npm run probe:checkout-delivery
@@ -267,6 +273,110 @@ try {
         check('and it says which section needs attention', attention,
             'the .needs-attention state on #delivery-type-section is what points the shopper at '
             + 'the control; a silent refusal is the original bug wearing a different hat');
+    }
+
+
+    // ── G  THE RECORD vs THE QUOTE (ERR-248) ─────────────────────────────────
+    //
+    // The backend removed its own `Joi...default('urban')` from order-create so
+    // that a client which says nothing records NULL rather than a guess. We then
+    // had to stop our own payload handing the same guess back. Two claims need
+    // measuring, and neither can be read off the source:
+    //
+    //   1. what the browser would actually put in the order payload, and
+    //   2. the backend's "Nothing about what a customer is charged changed" —
+    //      which was CITED to us, not measured, and a citation is not a
+    //      measurement.
+    //
+    // (2) is checked against the QUOTE endpoint, which is the only place the
+    // question can be asked without creating an order. Nothing here POSTs to
+    // /api/orders.
+    head('G  the record refuses to invent, and the quote still prices');
+    {
+        // RELOAD FIRST. Section F above deliberately clears the radio group to
+        // prove the gate still holds, and _normaliseDeliveryType() only runs on
+        // init — so inheriting F's page would measure F's sabotage and report it
+        // as the site's normal state. It did, on the first run of this section:
+        // `recorded=null` looked exactly like a live bug. A probe's own sequence
+        // is part of the measurement.
+        await page.goto(`${BASE}${CHECKOUT}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForSelector('#checkout-form', { timeout: 30000 });
+        await page.waitForTimeout(2500);
+        await fillShipping(page, URBAN_ADDRESS.address1);
+        await page.waitForTimeout(900);
+
+        // The exact expression checkout-page.js now stores into checkoutData.
+        const recorded = await page.evaluate(() =>
+            document.querySelector('input[name="delivery_type"]:checked')?.value || null);
+        check('with the page in its normal state, a REAL area is recorded',
+            recorded === 'urban' || recorded === 'rural',
+            `recorded=${JSON.stringify(recorded)}. _normaliseDeliveryType() leaves exactly one `
+            + 'radio checked, so the value that reaches the order is the one the shopper was shown.');
+
+        // Now the state the null branch exists for: no control at all. This is
+        // the case where the OLD code invented 'urban' and the column would have
+        // recorded a guess indistinguishable from a stated answer.
+        const cleared = await page.evaluate(() => {
+            document.querySelectorAll('input[name="delivery_type"]').forEach((r) => { r.checked = false; });
+            return document.querySelector('input[name="delivery_type"]:checked')?.value || null;
+        });
+        check('with NO area selected, the record is null — not a fabricated "urban"',
+            cleared === null,
+            `cleared=${JSON.stringify(cleared)}. Measured 2026-09-12: orders.delivery_type is live `
+            + '(order 2026091201 recorded "urban", basis "recorded") and null on the other 166 of '
+            + '167, so every order from here is either an honest record or a permanent guess.');
+
+        // Put the page back before anything else reads it.
+        await page.evaluate(() => {
+            const urban = document.querySelector('input[name="delivery_type"][value="urban"]');
+            if (urban) urban.checked = true;
+        });
+
+        // (2) The quote, asked both ways from the page's own origin so the real
+        // CORS path is exercised. ctx.route() is never registered in this file —
+        // it bypasses CORS and would make a transport claim meaningless.
+        const quote = await page.evaluate(async () => {
+            const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
+            const cart = JSON.parse(localStorage.getItem('inkcartridges_cart') || '[]');
+            const items = cart.map((i) => ({ product_id: i.id, quantity: i.quantity }));
+            const subtotal = cart.reduce((n, i) => n + (Number(i.price) || 0) * (Number(i.quantity) || 0), 0);
+            const ask = async (extra) => {
+                const r = await fetch(`${base}/api/shipping/options`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cart_total: subtotal, items, region: 'auckland', ...extra }),
+                });
+                const j = await r.json().catch(() => null);
+                const opt = j && j.data && (j.data.selected || (j.data.options || [])[0]);
+                return { status: r.status, fee: opt ? opt.fee : null };
+            };
+            return {
+                withUrban: await ask({ delivery_type: 'urban' }),
+                omitted: await ask({}),
+                withRural: await ask({ delivery_type: 'rural' }),
+            };
+        });
+
+        if (quote.withUrban.status !== 200 || quote.omitted.status !== 200) {
+            soft('the quote endpoint could not be read both ways',
+                `urban=${quote.withUrban.status} omitted=${quote.omitted.status}. Without both, the `
+                + '"nothing a customer is charged changed" claim stays unmeasured — a skip is not a pass.');
+        } else {
+            check('omitting delivery_type does not change the quoted fee',
+                quote.omitted.fee === quote.withUrban.fee,
+                `omitted=${quote.omitted.fee} urban=${quote.withUrban.fee}. The backend keeps its `
+                + 'QUOTE-side default even though order-create lost its record-side one; that is what '
+                + 'makes omission safe on the payload. If these ever diverge, the omission is no '
+                + 'longer free and the checkout must send the shown area explicitly.');
+            // Positive control: a probe that proves two numbers are equal has
+            // proved nothing unless a third number can differ.
+            check('POSITIVE CONTROL: rural still quotes higher than urban',
+                quote.withRural.fee != null && quote.withUrban.fee != null
+                    && quote.withRural.fee > quote.withUrban.fee,
+                `rural=${quote.withRural.fee} urban=${quote.withUrban.fee}. If these were equal the `
+                + 'equality above would be an endpoint that ignores delivery_type entirely, not a '
+                + 'safe default — and the whole rural feature would be decorative.');
+        }
     }
 
     await ctx.close();

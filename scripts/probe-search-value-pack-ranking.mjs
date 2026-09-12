@@ -103,6 +103,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { probeQuery, SEARCH_ANALYTICS_NOTICE } from './lib/probe-search-notice.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -246,6 +247,10 @@ async function main() {
     say('\n  \x1b[1mSEARCH VALUE-PACK RANKING PROBE\x1b[0m — can a customer see a multi-pack in typeahead?');
     say('  ' + '═'.repeat(74));
     say('  MODE: \x1b[1mREAD-ONLY\x1b[0m (no write path, no baseline file, no credentials)');
+    // ...to this repo. NOT to the backend's database — see ERR-254. This probe
+    // put six rows into production `search_analytics` before anyone noticed,
+    // and they surfaced in the live top-search-terms list.
+    say('  ' + SEARCH_ANALYTICS_NOTICE.replace(/\n      /g, '\n         '));
     say(`  PACE: \x1b[1m${DELAY_MS}ms between requests\x1b[0m`);
     say(`  API : ${API_BASE}`);
     say(`  LIMIT: ${LIMIT} — the dropdown's own constant; it never paginates\n`);
@@ -258,7 +263,11 @@ async function main() {
     //    meaningless if the endpoint answers non-empty to anything.
     say('\n\x1b[1m2. Positive controls — can this endpoint say "no"?\x1b[0m');
     let ctl;
-    try { ctl = await envelope(smartUrl('zzqqxnotaproduct9987')); }
+    // SYNTHETIC, so it carries the sentinel: this exact string was found six
+    // times in the live top-search-terms list on 2026-09-12 (ERR-254). The
+    // term's text is arbitrary — only its zero-result-ness is load-bearing —
+    // so prefixing it costs the check nothing and makes the row excludable.
+    try { ctl = await envelope(smartUrl(probeQuery('notaproduct9987'))); }
     catch (e) { cannotRun(`positive control unreadable — ${e.message}`); }
     if ((ctl.products || []).length === 0) {
         ok('nonsense query returns zero rows — presence checks below mean something');

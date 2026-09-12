@@ -1784,6 +1784,17 @@ const AccountPage = {
 
         // Scoped to the modal, and it finally reads a control that exists: this
         // line used to fall through to 'urban' on every save (ERR-235).
+        //
+        // THIS `|| 'urban'` STAYS, and that is not an oversight. The order-create
+        // payload dropped its own (payment-page.js, ERR-247) because the backend
+        // removed its Joi default so that "we did not ask" could be told from
+        // "they said urban". That argument does not reach here: an address is a
+        // preference the customer manages in a modal that always asks — the urban
+        // radio carries `checked` in addresses.html and `form.reset()` restores
+        // it — so there is no silence for this fallback to mistranslate. The
+        // consumer already handles a null anyway (checkout-page.js guards
+        // `if (address.delivery_type)` before preselecting). Changing it would be
+        // a behaviour change on a table the backend did not change, not cleanup.
         const deliveryType = document.querySelector('#address-delivery-type input[name="delivery_type"]:checked')?.value || 'urban';
 
         const addressData = {

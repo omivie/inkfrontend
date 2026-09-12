@@ -47,6 +47,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { SEARCH_ANALYTICS_NOTICE } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'https://ink-backend-zaeq.onrender.com';
@@ -63,6 +64,7 @@ const soft = (n, d) => { notes.push(`${n} — ${d}`); console.log(`  \x1b[33m~\x
 
 console.log('\n\x1b[1mprobe:qty-breaks — bulk ladder presence on card payloads (ERR-218)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no writes of any kind.');
+console.log(SEARCH_ANALYTICS_NOTICE);
 console.log(`Backend: ${BASE}\n`);
 
 async function getJson(url) {

@@ -51,6 +51,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { SEARCH_ANALYTICS_NOTICE } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.API_BASE || 'https://api.inkcartridges.co.nz';
@@ -228,7 +229,12 @@ const NEGATIVE_CONTROL = 'lc233';
 
 async function main() {
     say(`\n\x1b[1mRibbon "FOR USE IN" typeahead audit\x1b[0m — ${BASE}`);
-    say(`ERR-144 · backend 99d798b · handoff ribbon-for-use-in-typeahead-FE-handoff-aug2026.md\n`);
+    say(`ERR-144 · backend 99d798b · handoff ribbon-for-use-in-typeahead-FE-handoff-aug2026.md`);
+    // Every query below is a REAL ribbon term — the results are the measurement,
+    // so none of them can carry the `zzprobe_` sentinel without measuring
+    // something else. They land in the backend's top-search-terms looking like
+    // organic traffic, and saying so is the only honest option left (ERR-254).
+    say(SEARCH_ANALYTICS_NOTICE + '\n');
 
     // ── §1 the backend's own acceptance claims ──────────────────────────────
     say('§1  Backend acceptance claims (independently re-run)');

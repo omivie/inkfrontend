@@ -869,7 +869,27 @@
                 },
                 shipping_tier: this.checkoutData.shippingTier || '',
                 shipping_zone: this.checkoutData.shippingZone || '',
-                delivery_type: this.checkoutData.deliveryType || 'urban',
+                // OMITTED, NEVER GUESSED. The backend removed its own
+                // `Joi.string().valid('urban','rural').default('urban')` from
+                // order-create on 2026-09-10, at our request, so that a client
+                // which says nothing records NULL instead of a fabricated
+                // 'urban'. `|| 'urban'` here would have handed that default
+                // straight back from the other side of the wire and made the
+                // backend's change a no-op — we would have stopped backfilling
+                // the past and started fabricating the future instead.
+                //
+                // THE KEY IS OMITTED RATHER THAN SENT AS null. "A client that
+                // sends nothing now records NULL" is what the backend
+                // documented and therefore what is tested; an explicit
+                // `delivery_type: null` has to survive a Joi `.valid()` list
+                // that names only two strings, and we have not measured that it
+                // does. Absence is the path with a stated contract.
+                //
+                // checkout-page.js stores `null` (not `undefined`) for the same
+                // reason in reverse: that object is JSON in sessionStorage,
+                // where an `undefined` key disappears and cannot be told from
+                // one that was never written.
+                ...(this.checkoutData.deliveryType ? { delivery_type: this.checkoutData.deliveryType } : {}),
                 estimated_shipping: this.checkoutData.estimatedShipping ?? null,
                 save_address: this.checkoutData.saveAddress !== false,
                 customer_notes: this.checkoutData.orderNotes || '',
@@ -1376,7 +1396,12 @@
                         },
                         shipping_tier: self.checkoutData.shippingTier || '',
                         shipping_zone: self.checkoutData.shippingZone || '',
-                        delivery_type: self.checkoutData.deliveryType || 'urban',
+                        // Omitted, never guessed — the twin of the Stripe payload
+                        // above, where the reasoning is written out in full. The
+                        // two payloads have to agree: an order that records a
+                        // delivery type on one rail and not the other would be a
+                        // fact about the payment method, not about the address.
+                        ...(self.checkoutData.deliveryType ? { delivery_type: self.checkoutData.deliveryType } : {}),
                         estimated_shipping: self.checkoutData.estimatedShipping ?? null,
                         save_address: self.checkoutData.saveAddress !== false,
                         customer_notes: self.checkoutData.orderNotes || '',

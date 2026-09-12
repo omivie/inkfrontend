@@ -31,6 +31,7 @@
  */
 
 const API = process.env.API_URL || 'https://ink-backend-zaeq.onrender.com';
+import { SEARCH_ANALYTICS_NOTICE, probeQuery } from './lib/probe-search-notice.mjs';
 const SB = 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const ANON = process.env.SUPABASE_ANON_KEY
   || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';
@@ -48,6 +49,7 @@ const { pgrstLike } = await import(
 );
 
 console.log('probe-search-escaping — MODE: READ-ONLY (GET only; nothing is written)');
+console.log(SEARCH_ANALYTICS_NOTICE);
 console.log(`API: ${API}`);
 console.log(`PostgREST section: ${JWT ? 'ENABLED (SUPABASE_JWT present)' : 'SKIPPED (set SUPABASE_JWT to include it)'}\n`);
 
@@ -78,7 +80,12 @@ console.log('§1  /api/search/smart — the injection the backend fixed');
   if (base.n > 0) ok(`baseline "TN251" → ${base.total} rows`);
   else bad(`baseline "TN251" returned nothing (status ${base.status}) — probe cannot judge the rest`);
 
-  for (const inj of ['zzqqxnonexistent,sku.eq.GTN251BK', 'zzqqxnonexistent,or(sku.eq.GTN251BK)']) {
+  // SYNTHETIC, so they carry the sentinel (ERR-254). Only the leading token's
+  // match-nothing-ness is load-bearing here; the rest is the injection payload
+  // and is untouched. `zzprobe_` makes the rows these create excludable from
+  // the backend's own analytics with one `query NOT LIKE 'zzprobe%'`.
+  for (const inj of [probeQuery('nonexistent') + ',sku.eq.GTN251BK',
+                     probeQuery('nonexistent') + ',or(sku.eq.GTN251BK)']) {
     const r = await search('smart', inj);
     if (r.n === 0) ok(`injected filter is inert: ${JSON.stringify(inj)} → 0 rows`);
     else bad(`INJECTION LIVE: ${JSON.stringify(inj)} → ${r.n} rows (${r.rows.map((x) => x.sku).join(',')})`);

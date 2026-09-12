@@ -2419,6 +2419,43 @@
                 const phoneNumber = rawPhone.replace(/^\+\d{1,3}\s?/, '');
                 const fullPhone = phoneNumber ? `${phoneCountry} ${phoneNumber}` : '';
 
+                // THE RECORD, NOT THE QUOTE — and the difference is the whole point.
+                //
+                // The backend removed its own Joi `.default('urban')` from
+                // order-create (2026-09-10) so that a client which says nothing
+                // records NULL instead of a guess. That was OUR ask, argued on
+                // exactly this ground: "'urban' there is not a fact, it is a
+                // guess that will look like data forever." A `|| 'urban'` here
+                // hands that guess straight back one order at a time, and
+                // recorded-urban stops being distinguishable from assumed-urban
+                // the moment it ships. Measured 2026-09-12: the column is live
+                // (order 2026091201 recorded `urban`, basis `recorded`) and null
+                // on the other 166, so the window to get this right is open now
+                // and closes a little with every order.
+                //
+                // THE QUOTE SITES KEEP THEIR `|| 'urban'` ON PURPOSE — line 485
+                // (`POST /api/shipping/options`), `ask()` in
+                // _refreshDeliveryPrices(), Shipping.calculate(), account.js and
+                // shipping-rates.js. Those answer "what would this cost", where
+                // urban is the conservative figure and matches the backend's own
+                // quote default. Nothing a customer is charged changes here:
+                // `POST /api/orders` re-prices server-side regardless.
+                //
+                // In practice this is a dead branch, and that is the argument for
+                // it rather than against it. _normaliseDeliveryType() leaves
+                // exactly one radio checked on every load (ERR-235) and both
+                // carry `required`, so validateFormFields() cannot pass the
+                // submit with none selected. It fires only when the control is
+                // missing outright — a broken page, which is precisely when
+                // inventing a value does the most damage and is least visible.
+                const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || null;
+                if (!deliveryType) {
+                    DebugLog.error('[checkout] submitting with NO delivery_type checked. Recording nothing rather '
+                        + 'than inventing "urban": the order will carry NULL and the admin will say "not recorded". '
+                        + 'The radio group is absent or was un-checked after _normaliseDeliveryType() ran — that is '
+                        + 'the bug to chase, not the null.');
+                }
+
                 // Build checkout data object to pass to payment page
                 const checkoutData = {
                     // Contact
@@ -2449,7 +2486,11 @@
                     // Shipping tier and zone (for backend)
                     shippingTier: this._shippingResult?.tier || 'standard',
                     shippingZone: this._shippingResult?.zone || '',
-                    deliveryType: document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban',
+                    // null, never 'urban' — see the block above. `null` and not
+                    // `undefined` because this object round-trips through
+                    // sessionStorage as JSON, where `undefined` keys vanish and
+                    // payment-page.js could not tell "not asked" from "not saved".
+                    deliveryType: deliveryType,
                     estimatedShipping: this.totals.shipping,
                     // Terms accepted
                     termsAccepted: document.getElementById('terms')?.checked || false,
