@@ -79,11 +79,11 @@ const CSS = (rel) => fs.readFileSync(path.join(ROOT, 'css', rel), 'utf8');
  * assertion. Block comments first — the naive line-comment-first order eats the
  * `//` inside a URL and corrupts the rest of the file (the ERR-124 trap).
  */
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 const CART_SRC = JS('cart.js');
 const CART_CODE = stripComments(CART_SRC);

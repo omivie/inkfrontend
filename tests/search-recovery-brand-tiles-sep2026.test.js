@@ -54,11 +54,11 @@ const searchCss = read(path.join(SITE, 'css', 'search.css'));
  * _loadBrandCounts() would fire…"). A test that a prose edit can break is not
  * measuring the code.
  */
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/^\s*\/\/.*$/gm, ' ');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 /** The body of renderZeroResultsRecovery(), which is where rail 3 lives. */
 function recoveryBody() {

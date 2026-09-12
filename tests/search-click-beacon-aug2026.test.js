@@ -54,11 +54,11 @@ const SEARCH_SRC = JS('search.js');
 // assertion. NOTE: never put a slash-star sequence inside a fixture string in
 // this file — it opens a fake block comment and silently voids everything
 // below it (ERR-154 cost 2.7kB of real code to exactly that).
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/[^\n]*/g, '');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 const BEACON_CODE = stripComments(BEACON_SRC);
 const SHOP_CODE = stripComments(SHOP_SRC);
 const PRODUCTS_CODE = stripComments(PRODUCTS_SRC);

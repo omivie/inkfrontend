@@ -73,9 +73,11 @@ const SHOP_SRC = READ(JS('shop-page.js'));
 const CC2_SRC = READ(JS('admin/pages/cc2-packs.js'));
 const ORDER_DETAIL_SRC = READ(JS('order-detail-page.js'));
 
-function stripComments(src) {
-    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. familyKey — one yield vocabulary

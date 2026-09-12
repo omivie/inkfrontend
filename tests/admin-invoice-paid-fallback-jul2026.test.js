@@ -580,8 +580,29 @@ test('§6 the operator is told ONCE per session, not once per click', () => {
   s.api.announceFallbackOnce();
   const infos = s.toasts.filter((t) => t.type === 'info');
   assert.equal(infos.length, 1, 'a per-click nag would train the operator to ignore it');
-  assert.match(infos[0].m, /BF-021/, 'it names the bug so it can actually be chased');
+
+  // USED TO REQUIRE /BF-021/ — "it names the bug so it can actually be chased".
+  // That was right while the bug was open: every run of this fallback meant
+  // PATCH was missing from Access-Control-Allow-Methods, and naming it was the
+  // only way anyone would chase a one-line server config.
+  //
+  // BF-021 closed 2026-09-10 (verified on the wire 2026-09-12, three origins,
+  // with the bogus-header negative control). The fallback itself STAYS — it was
+  // built to retire itself and now simply stops being entered, which is the
+  // design claim being collected on, and removing it would be a behaviour
+  // change dressed as cleanup (ERR-158).
+  //
+  // What changes is the meaning of reaching this line: it is now a SURPRISE.
+  // So the toast must stop asserting a cause that is fixed, and must instead
+  // tell the operator that seeing it at all is worth reporting — otherwise a
+  // genuine regression in the allow-list reads as the familiar known issue and
+  // nobody says anything. ***A MESSAGE THAT EXPLAINS A FIXED DEFECT TRAINS
+  // PEOPLE TO IGNORE ITS RETURN.***
+  assert.doesNotMatch(infos[0].m, /BF-021/,
+    'BF-021 is closed; the toast must not still name it as the cause');
   assert.match(infos[0].m, /saved/i, 'and reassures them the change did land');
+  assert.match(infos[0].m, /not expected|say so|report/i,
+    'reaching this path is now unexpected, and the operator is the alarm');
 });
 
 test('§6 the toggle announces the fallback and repaints from the server', () => {
@@ -674,13 +695,11 @@ test('§7b a silent server failure says so instead of inventing a cause', () => 
  * code comments both need to, or the lesson is unrecorded) while the strings an
  * operator can actually read stay clean.
  */
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((l) => !/^\s*\/\//.test(l))
-    .join('\n');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 test('§8 no operator-facing copy blames an unbuilt backend for a live route', () => {
   // Probed warm on 2026-07-31, all 401 (route live) — never 404:

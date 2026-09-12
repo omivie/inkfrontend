@@ -40,9 +40,9 @@ const vm      = require('node:vm');
 const ROOT    = path.resolve(__dirname, '..');
 const SRC     = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'admin', 'pages', 'pending-changes.js'), 'utf8');
 
-function stripComments(s) {
-    return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-}
+// ONE owner (ERR-253) — the local copy removed block comments first, so a line
+// comment containing a starred path deleted live code. tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 const CODE = stripComments(SRC);
 
 // ─────────────────────────────────────────────────────────────────────────────

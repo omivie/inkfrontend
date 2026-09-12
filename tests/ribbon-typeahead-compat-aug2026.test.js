@@ -102,11 +102,11 @@ const API_SRC = JS('api.js');
 // Strip comments so a literal inside a comment can't satisfy a source assertion.
 // NOTE: never put a slash-star sequence inside a fixture string in this file —
 // it opens a fake block comment here and silently voids every assertion below.
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/[^\n]*/g, '');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 const SHOP_CODE = stripComments(SHOP_SRC);
 const SEARCH_CODE = stripComments(SEARCH_SRC);
 const API_CODE = stripComments(API_SRC);

@@ -176,6 +176,8 @@ const FILES_TO_SCAN = [
 // ─────────────────────────────────────────────────────────────────────────
 // Strip JS/CSS comments + HTML comments before scanning. Forbidden phrases
 // in code comments are intentional guard prose, not user-visible copy.
+const sharedStripComments = require('./helpers/strip-comments');
+
 function stripComments(src, ext) {
     let s = src;
     if (ext === '.js' || ext === '.css') {
@@ -183,12 +185,14 @@ function stripComments(src, ext) {
         // forbidden phrases, not an utterance of them — without this it
         // matches itself and legal-config.js can never pass its own sweep.
         s = s.replace(/BANNED_CLAIM_PATTERNS:\s*\[[\s\S]*?\n\s*\],/, '');
-        // Block comments first, then line comments. Naive but sufficient
-        // — we're scanning static repo source, not preserving semantics.
-        s = s.replace(/\/\*[\s\S]*?\*\//g, '');
-        if (ext === '.js') {
-            s = s.replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
-        }
+        // ONE PASS, NOT TWO REGEXES (ERR-253). This used to remove block
+        // comments first and line comments second, which meant a line comment
+        // containing a starred path opened a block comment and deleted every
+        // character up to the next terminator — 22,251 of them across the
+        // suite when it was measured. A forbidden-copy sweep is exactly the
+        // kind of test that must never be handed a string with holes in it:
+        // a banned phrase sitting in a deleted region passes silently.
+        s = sharedStripComments(s);
     } else if (ext === '.html') {
         s = s.replace(/<!--[\s\S]*?-->/g, '');
     }

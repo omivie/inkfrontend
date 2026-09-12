@@ -194,18 +194,47 @@ test('§3 nothing falls back to PUT — the fallback would write into a void', (
  * documents the rule it is checking — the banned sentence is quoted verbatim in
  * the comment above the branch, on purpose.
  */
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
-test('§3 the blocked message names BF-021 and never says "not available yet"', () => {
+test('§3 the blocked message stops naming BF-021, and still never says "not available yet"', () => {
+    // THE FIRST ASSERTION USED TO BE `/BF-021/.test(branch)`, and it was right
+    // to be. While PATCH was missing from Access-Control-Allow-Methods, a bare
+    // transport failure here had exactly one cause and naming it was what let
+    // anyone act on it.
+    //
+    // BF-021 closed 2026-09-10 (verified on the wire 2026-09-12, three origins,
+    // bogus-header negative control). A stale diagnosis is worse than none: it
+    // is confidently wrong and it sends an operator to the backend for their
+    // own dropped connection. So the name goes and the SUBSTANCE stays — the
+    // request was not sent, so nothing was written.
     const idx = PAGE_SRC.indexOf('err.transportBlocked');
     assert.notEqual(idx, -1);
-    const branch = stripComments(PAGE_SRC.slice(idx, idx + 1600));
-    assert.ok(/BF-021/.test(branch), 'name the blocker so it can be found and fixed');
-    assert.ok(/Nothing was changed/i.test(branch), 'the operator must know their number was not stored');
+    const branch = stripComments(PAGE_SRC.slice(idx, idx + 2600));
+
+    // Scoped to what the OPERATOR reads, not to the whole branch. The developer
+    // log beside it legitimately names BF-021 in order to say the failure is
+    // NOT that — a closed defect is worth naming to a developer precisely so
+    // the next person does not re-diagnose it, and banning the token outright
+    // would forbid the useful sentence along with the harmful one.
+    // Concatenation joined back up first. The copy is written as adjacent
+    // string literals for line length, so the rendered sentence "nothing was
+    // changed" exists only after the `' + '` seams are closed — a raw grep for
+    // the phrase fails on source that is perfectly correct, and would push the
+    // next person to reword working copy to satisfy a test.
+    const shown = (branch.match(/showError\((?:[\s\S]*?)\);/g) || [])
+        .join('\n')
+        .replace(/'\s*\+\s*'/g, '');
+    assert.ok(shown.length > 40, 'positive control: the showError call must be inside the slice');
+    assert.ok(!/BF-021/.test(shown),
+        'BF-021 is closed; the operator-facing copy must not still blame it');
+    assert.ok(/nothing\s+was\s+changed/i.test(shown),
+        'the operator must know their number was not stored');
+    assert.ok(/try again/i.test(shown),
+        'and that retrying is safe — which is what "not sent" buys them');
     // ERR-131's real damage was not the wrong URL — it was the toast reading
     // "isn't available yet (backend endpoint pending)" over a route that was
     // answering 401 the whole time, which made a broken feature look like an

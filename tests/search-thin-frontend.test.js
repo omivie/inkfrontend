@@ -34,13 +34,11 @@ const READ = (rel) => fs.readFileSync(JS(rel), 'utf8');
 // mentions of code patterns we're about to forbid (e.g. a comment reading
 // "the previous `.from('printer_models')` lookup was deleted" should not
 // trigger a regex that bans the live call).
-function stripComments(src) {
-    return src
-        // Block comments — non-greedy
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        // Line comments — to end of line
-        .replace(/\/\/[^\n]*/g, '');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 // Cached source reads. The *_CODE variants have comments stripped.
 // Note: js/search-normalize.js was deleted 2026-05-11 once backend shipped

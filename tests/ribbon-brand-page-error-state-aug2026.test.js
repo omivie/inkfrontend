@@ -133,11 +133,11 @@ function loadPage() {
 }
 
 /** Drop line comments so an assertion greps live code, not the fix's own notes. */
-function stripComments(src) {
-    return src.split('\n')
-        .filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'))
-        .join('\n');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 /** Slice a function body out of the source so a grep can be scoped to it. */
 function bodyOf(src, startMarker, endMarker) {
@@ -398,7 +398,19 @@ test('§4 DebugLog alone is not treated as telemetry — it is a no-op off local
     // event_type=catalogue_load_failed answers 400 VALIDATION_FAILED,
     // "event_type" must be one of [pageview, click]. A call that cannot succeed
     // is not instrumentation — it is the DebugLog mistake one layer up.
-    const live = stripComments(body);
+    // THE CODE, NOT THE DOCBLOCK (ERR-253). `body` starts INSIDE a `/**` block,
+    // so the slice has no comment opener in it and no comment stripper — correct
+    // or otherwise — can tell that its first thirty lines are prose. The
+    // docblock's whole job here is to name `TrafficTracker` and say why it is
+    // NOT called, so scanning it for that name asks the opposite question.
+    //
+    // This passed for years only because the old two-regex stripper was eating
+    // the region wholesale (a `//` comment containing a starred path opened a
+    // phantom block comment), so `doesNotMatch` was matching against a hole.
+    // ***A SLICE THAT BEGINS MID-COMMENT IS NOT SOURCE, AND AN ASSERTION OVER A
+    // HOLE CANNOT FAIL.***
+    const live = stripComments(bodyOf(PAGE_SRC, '    reportLoadFailure(surface, res) {', '    // ========='));
+    assert.match(live, /gtag\(/, 'positive control: the code slice really does contain the call we allow');
     assert.doesNotMatch(live, /TrafficTracker/,
         'the first-party tracker cannot carry this event yet (hard 400) — shipping the call would record nothing while looking instrumented');
     assert.doesNotMatch(live, /['"]click['"]/,

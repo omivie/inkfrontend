@@ -128,11 +128,11 @@ test('§2 issue_type is optional in the UI — "Prefer not to say" is a real cho
 });
 
 /** Strip comments so a scan cannot match the prose documenting the rule. */
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 test('§2 the customer is never asked for the supplier', () => {
     // The server fills it from the order line's own cost snapshot. Asking would

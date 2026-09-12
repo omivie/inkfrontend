@@ -126,29 +126,11 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
  * does, and every one of these files discusses carriers by name in prose, so the
  * scan has to tell a sentence from a branch.
  */
-function stripComments(src) {
-  let out = '';
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
-    if (c === '/' && d === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; continue; }
-    if (c === '"' || c === "'" || c === '`') {
-      const q = c; out += c; i++;
-      while (i < n) {
-        if (src[i] === '\\') { out += src[i] + (src[i + 1] || ''); i += 2; continue; }
-        out += src[i];
-        if (src[i] === q) { i++; break; }
-        i++;
-      }
-      continue;
-    }
-    out += c; i++;
-  }
-  return out;
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 /** Every carrier the registry ships today, by display name and by code. */
 const CARRIER_LITERALS = [

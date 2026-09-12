@@ -39,12 +39,11 @@ const ROOT = path.resolve(__dirname, '..');
 const ICR = path.join(ROOT, 'inkcartridges');
 const read = (rel) => fs.readFileSync(path.join(ICR, rel), 'utf8');
 
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 const DETAIL_JS_SRC   = read('js/order-detail-page.js');
 const DETAIL_HTML_SRC = read('html/account/order-detail.html');

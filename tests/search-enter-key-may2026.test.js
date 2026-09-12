@@ -42,16 +42,11 @@ const JS   = (rel) => path.join(ROOT, 'inkcartridges', 'js', rel);
 const HTML = (rel) => path.join(ROOT, 'inkcartridges', 'html', rel);
 const READ = (p)   => fs.readFileSync(p, 'utf8');
 
-function stripComments(src) {
-    // Strip line comments FIRST so URL fragments like `/api/search/*` inside
-    // `// …` don't trick the block-comment regex into eating the rest of the
-    // file. Then strip block comments. This is naive (it doesn't honour
-    // string literals) but the JS we scan never contains `/*` or `*/` inside
-    // a string at module scope.
-    return src
-        .replace(/\/\/[^\n]*/g, '')
-        .replace(/\/\*[\s\S]*?\*\//g, '');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 const PRODUCTS_SRC = READ(JS('products.js'));
 const SHOP_SRC     = READ(JS('shop-page.js'));

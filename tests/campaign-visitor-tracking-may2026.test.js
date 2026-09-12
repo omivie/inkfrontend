@@ -54,11 +54,11 @@ const TRACKER_SRC = READ('inkcartridges/js/traffic-tracker.js');
 const WT_SRC = READ('inkcartridges/js/admin/pages/website-traffic.js');
 const ADMIN_CSS = READ('inkcartridges/css/admin.css');
 
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/[^\n]*/g, '');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sandbox harness for the tracker IIFE

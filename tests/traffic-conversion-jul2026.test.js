@@ -84,11 +84,11 @@ const SECURITY_STUB = {
  * documents the rule it is checking. Deliberately naive — it only needs to be
  * right on the well-formed files in this repo, not on adversarial input.
  */
-function stripComments(src) {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
+// stripComments now has ONE owner (ERR-253). Every test file used to carry its
+// own two-regex copy that removed block comments first, so a line comment
+// containing a starred path silently deleted live code — 22,251 characters of
+// it across 35 suites. See tests/helpers/strip-comments.js.
+const stripComments = require('./helpers/strip-comments');
 
 /** A stand-in element with just the surface the renderers touch. */
 function makeEl() {
