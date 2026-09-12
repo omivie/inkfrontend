@@ -345,12 +345,60 @@
      * adjudicate CORS") — a preflight that answers 204 to everything proves
      * nothing, and this one demonstrably does not.
      *
-     * BOTH TRANSPORTS RUN NOW. ?sid=/?vid= stay on the two search helpers: they
-     * were the only transport for six months and `search_analytics` still shows
-     * 915 rows with ZERO session ids over five days, so they are evidently not
-     * what the backend reads on that route. Dropping them to add the header
-     * would trade a measured unknown for an unmeasured hope. When the header is
-     * confirmed landing rows, the params come off — and not before (ERR-158).
+     * ONE TRANSPORT ON SEARCH NOW — THE HEADER. The note above used to end
+     * "when the header is confirmed landing rows, the params come off — and not
+     * before (ERR-158)". Both halves of that condition arrived on 2026-09-10,
+     * and this is the record of them (ERR-253).
+     *
+     *   1. THE HEADER LANDS ROWS, AND THE PARAMS NEVER COULD. The backend
+     *      measured the switch-on: smart searches went 0 session ids on 09-05
+     *      through 09-08, then 37 of 115 on 09-09 — the day the allow-list
+     *      deployed. And the reason the params produced nothing for six months
+     *      was never CORS: `validate(schema, 'query')` runs Joi with
+     *      `stripUnknown: true` and REPLACES `req.query` with the validated
+     *      value, and `sid`/`vid` were in none of the three search schemas, so
+     *      they were deleted before the handler read them. Two independent
+     *      faults, one per transport, presenting as one symptom. Carrying both
+     *      until an answer arrived is the only reason we did not drop the
+     *      working half to keep the broken one.
+     *
+     *   2. /api/search/* IS NOW EDGE-CACHED, which is the condition the note
+     *      below this one named in advance. Measured here 2026-09-10 against
+     *      api.inkcartridges.co.nz on a cold query:
+     *
+     *        GET /api/search/smart?q=hp305xl   MISS  3.39s
+     *        GET /api/search/smart?q=hp305xl   HIT   0.057s      ← 60x
+     *        GET /api/search/suggest?q=lc73xl  MISS, MISS, HIT
+     *
+     *      Cloudflare's cache key is the URL and EXCLUDES custom request
+     *      headers. A per-visitor `?sid=` therefore gives every visitor their
+     *      own cache entry and hands all of that back, one visitor at a time.
+     *      The header cannot do that, because it is not in the key.
+     *
+     *      SECOND, INDEPENDENT REASON, measured the same day: an edge HIT does
+     *      not reach the origin, so it does not spend rate-limit budget.
+     *      `ratelimit-remaining` went 29 → 28 across two MISSes and did not
+     *      move across two HITs. Shattering the cache key would push every
+     *      search to a 2.3s origin AND spend from the search bucket.
+     *
+     *      THE BUCKET IS PER ENDPOINT, NOT PER PREFIX. The backend's own
+     *      response document says "/api/search/* is governed by ONE limiter,
+     *      30/min". Measured 2026-09-12, it is not:
+     *
+     *        /api/search/smart        ratelimit-policy: 30;w=60
+     *        /api/search/by-printer   ratelimit-policy: 30;w=60
+     *        /api/search/suggest      ratelimit-policy: 120;w=60
+     *        /api/search/autocomplete ratelimit-policy: 120;w=60
+     *
+     *      None of them carry `x-ratelimit-*` — the global /api/ limiter really
+     *      does skip /search/. Never port a number from one of these to
+     *      another; the tight one is the dropdown's.
+     *
+     * WHAT STAYED. `identifyQuery()` and `identifyUrl()` below are NOT dead and
+     * must not be tidied away: POST /api/cart/items still carries `?sid=`, it is
+     * not edge-cached, and it is the transport that measurably lands ITS rows
+     * (pinned by ads-add-to-cart-conversion-sep2026 §5). This change is scoped
+     * to the two search endpoints and nothing else.
      *
      * The header is enrolled PER-HELPER in api.js `request()`, never globally:
      * it makes a GET non-simple, and the CORS-preflight cache is keyed by full

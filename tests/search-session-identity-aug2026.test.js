@@ -44,6 +44,13 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '..');
 const INK = path.join(ROOT, 'inkcartridges');
 const JS = (rel) => fs.readFileSync(path.join(INK, 'js', rel), 'utf8');
+// CODE ONLY. Every "this must not appear" assertion below runs through this,
+// because the files it reads deliberately EXPLAIN the patterns they no longer
+// use — api.js carries a tombstone naming identifySearch, search.js says why
+// the params are gone. A ban that also bans its own explanation is a ban
+// nobody can document (ERR-253).
+const stripComments = require('./helpers/strip-comments');
+const CODE = (rel) => stripComments(JS(rel));
 
 /**
  * Run traffic-tracker.js in a scripted browser and hand back its window export.
@@ -149,7 +156,8 @@ test('§1 a half-known identity still joins (partial beats nothing)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// §2  Transport — params, never headers
+// §2  Transport — the tracker's own stamping functions (both still exist:
+//     the cart POST uses the params, search uses the header)
 // ─────────────────────────────────────────────────────────────────────────
 
 test('§2 identifyQuery stamps sid/vid onto a params object', () => {
@@ -292,24 +300,77 @@ test('§2 the header typeahead stamps the ids on its own raw fetch', () => {
 // §3  Every customer-initiated search carries the key
 // ─────────────────────────────────────────────────────────────────────────
 
-test('§3 API.smartSearch and API.searchSuggest identify their queries', () => {
-    const api = JS('api.js');
+test('§3 the two search helpers identify by HEADER, and put NOTHING in the URL', () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and it was right to. Until
+    // 2026-09-10 both helpers called `this.identifySearch(...)` to stamp
+    // ?sid=/?vid= onto the query, because that was the only transport we had
+    // any evidence for and the header was CORS-blocked.
+    //
+    // Two things changed on the same day, and either alone would have been
+    // enough (ERR-253):
+    //
+    //   1. The params were measured to have never delivered a row. The backend
+    //      runs Joi with stripUnknown over req.query and REPLACES it, and the
+    //      search schemas never listed sid/vid — so they were deleted before
+    //      the handler read them. The header, by contrast, took session ids
+    //      from 0/115 to 37/115 on the day its allow-list shipped.
+    //   2. /api/search/ joined the Cloudflare Cache Rule. The cache key is the
+    //      URL and excludes custom request headers, so a per-visitor param
+    //      gives every visitor a private entry. Measured cold: MISS 3.39s then
+    //      HIT 0.057s on the shared URL.
+    //
+    // So the URL must now be clean and the header must remain. Both halves are
+    // asserted, because dropping the param without keeping the header is the
+    // failure this file has always existed to prevent.
+    const api = CODE('api.js');
     const smart = api.slice(api.indexOf('async smartSearch('), api.indexOf('async searchSuggest('));
-    assert.ok(/catalogEndpoint\('\/api\/search\/smart', this\.identifySearch\(/.test(smart));
+    assert.doesNotMatch(smart, /identifySearch\(/,
+        'smartSearch must not put the ids in the URL — the URL is the edge cache key');
+    assert.match(smart, /identify: true/,
+        'and it must still send them as headers, or six months of anonymous rows come back');
 
-    const suggest = api.slice(api.indexOf('async searchSuggest('));
-    assert.ok(/this\.identifySearch\(new URLSearchParams/.test(suggest.slice(0, 900)));
+    const suggest = api.slice(api.indexOf('async searchSuggest('), api.indexOf('async searchSuggest(') + 1400);
+    assert.doesNotMatch(suggest, /identifySearch\(/, '/api/search/suggest is edge-cached too');
+    assert.match(suggest, /identify: true/);
+
+    // The forwarder itself is gone, so there is no half-live path to fall into.
+    assert.doesNotMatch(api, /^\s*identifySearch\(params\) \{/m,
+        'identifySearch had exactly these two callers; it must not linger as dead code');
 });
 
-test('§3 the header dropdown — the highest-volume surface — identifies its raw fetch', () => {
-    const src = JS('search.js');
-    assert.ok(src.includes('window.TrafficTracker.identifyUrl'),
+test('§3 the header dropdown — the highest-volume surface — stamps the header on its raw fetch', () => {
+    const src = CODE('search.js');
+    assert.ok(src.includes('window.TrafficTracker.identifyHeaders'),
         'search.js is a raw fetch that never enters API.request, so it must ask for the ids ' +
         'itself; anything added in api.js does not reach it');
+    assert.ok(!src.includes('window.TrafficTracker.identifyUrl'),
+        'and it must not put them in the URL — this is the surface that generates the most ' +
+        'distinct cache keys, so it is the one a per-visitor param hurts most');
 });
 
-test('§3 the quote page identifies its product lookup', () => {
-    assert.ok(JS('quote-page.js').includes('window.TrafficTracker.identifyUrl'));
+test('§3 the quote page SWAPPED its transport — it did not merely lose one', () => {
+    // The trap in this change. quote-page.js is the only one of the four call
+    // sites that had identifyUrl and NO header stamp at all: it is a raw fetch,
+    // so api.js's per-helper `identify: true` never reached it. Deleting the
+    // param here without adding the header would not have fallen back to
+    // anything — a real customer typing a real quote line would have gone
+    // anonymous, silently, with this suite still green.
+    const src = CODE('quote-page.js');
+    assert.ok(src.includes('window.TrafficTracker.identifyHeaders'),
+        'the header stamp must have been ADDED here in the same change');
+    assert.ok(!src.includes('window.TrafficTracker.identifyUrl'),
+        'and the param stamp removed');
+});
+
+test('§3 the cart POST keeps ?sid= — this change is scoped to search', () => {
+    // The negative control for §3. POST /api/cart/items is not edge-cached and
+    // the param is the transport that measurably lands its rows, so it must be
+    // untouched. If a later tidy-up deletes identifyUrl as "unused", this fails.
+    const api = CODE('api.js');
+    assert.match(api, /identifyUrl\('\/api\/cart\/items'\)/,
+        'the cart POST still carries the query-param join key');
+    assert.match(api, /^\s*identifyUrl\(url\) \{/m,
+        'and the forwarder it needs is still defined');
 });
 
 test('§3 the click beacon carries the ids in its body', () => {
@@ -357,13 +418,31 @@ test('§4 the product-detail recovery lookups are deliberately NOT identified', 
 // §5  Edge-cache safety — the assumption that makes params free
 // ─────────────────────────────────────────────────────────────────────────
 
-test('§5 the cache hazard is documented where the params are added', () => {
-    // /api/search/smart answers cf-cache-status: DYNAMIC today, so sid/vid cost
-    // nothing. If it is ever added to the Cloudflare Cache Rule they become part
-    // of the cache key and shatter the shared entry one visitor at a time —
-    // which is the ERR-124/159 failure in reverse. probe:data-capture fails the
-    // moment DYNAMIC stops being true.
+test('§5 the cache-key reasoning is recorded where the URL is built', () => {
+    // THIS ASSERTION COULD NOT FAIL, AND IT SPENT WEEKS THAT WAY (ERR-253).
+    //
+    // It used to slice with the end marker 'return this.getPublic(endpoint);'.
+    // That line stopped existing the day `{ identify: true }` was added to it,
+    // so indexOf returned -1, and `slice(start, -1)` runs to one character
+    // short of END OF FILE. The "smartSearch" it then searched for "Cache Rule"
+    // was most of api.js. Any mention anywhere would have satisfied it.
+    //
+    // Same family as the negative control in ERR-237 that matched the guarded
+    // line itself. The fix is to make the slice prove it found its own end.
     const api = JS('api.js');
-    const smart = api.slice(api.indexOf('async smartSearch('), api.indexOf('return this.getPublic(endpoint);'));
-    assert.ok(/Cache Rule/.test(smart) && /cf-cache-status|DYNAMIC/.test(smart));
+    const start = api.indexOf('async smartSearch(');
+    assert.notEqual(start, -1, 'smartSearch must exist');
+    const end = api.indexOf('async searchSuggest(', start);
+    assert.ok(end > start, 'the slice must terminate at a marker that really exists');
+    const smart = api.slice(start, end);
+
+    // Positive control: the slice is the function, not the file.
+    assert.ok(smart.length < 12000,
+        `the smartSearch slice should be one function, got ${smart.length} characters — `
+        + 'if this blows up, the end marker has drifted again and the assertions below mean nothing');
+
+    assert.match(smart, /cache key/i,
+        'the reason the ids are NOT in this URL must be written where the URL is built');
+    assert.match(smart, /MISS|HIT|edge-cached/,
+        'and it must carry the measurement, not just the claim');
 });

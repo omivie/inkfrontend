@@ -79,7 +79,14 @@ const QUIET = JSON_OUT || MARKDOWN;
 /** Pause between the two requests, so the edge has a moment to store the first. */
 const SETTLE_MS = 600;
 /** A cold POP can MISS twice in a row; give a cacheable endpoint one more go. */
-const HIT_RETRIES = 2;
+// Raised from 2 to 5 on 2026-09-12 (ERR-253). A colo fills per EDGE NODE, not
+// per colo, so consecutive requests can land on different nodes and each one
+// misses until it has filled: measured on a fresh query in AKL,
+// MISS → HIT → MISS → HIT, with `age: 0` on both hits. Two attempts therefore
+// report a genuinely-cached endpoint as header-only roughly half the time, and
+// a probe that cries wolf on a coin flip is a probe people stop running.
+// `attempts` is printed, so the cost of the raise stays visible.
+const HIT_RETRIES = 5;
 
 const say = (...a) => { if (!QUIET) console.log(...a); };
 
@@ -103,15 +110,40 @@ const ENDPOINTS = [
     { path: '/api/products?page=1&limit=1', expect: 'cached',
       note: 'second catalog shape, proves param order is part of the key' },
 
-    { path: '/api/search/smart?q=LC133&limit=3', expect: 'header-only',
-      note: 'BF-039 — cacheable header, Cache Rule does not match /api/search/*' },
+    // ✅ BF-039 CLOSED 2026-09-10. The origin had been asking the edge to cache
+    // search for five minutes all along; the Cache Rule listed
+    // /api/search/popular where it should have said /api/search/ — a
+    // seven-character edit, no code. Measured here on a cold query:
+    // MISS 3.39s then HIT 0.057s. This row FLIPPED from header-only to cached,
+    // which is exactly the change this probe exists to notice, and it noticed
+    // it before anyone told us.
+    { path: '/api/search/smart?q=LC133&limit=3', expect: 'cached',
+      note: 'BF-039 closed 2026-09-10 — Cache Rule now matches /api/search/' },
+    // Its sibling, added the same day. The two search endpoints are separately
+    // reachable and separately cacheable, so one row cannot speak for both —
+    // and /suggest is the one the typeahead hits hardest.
+    { path: '/api/search/suggest?q=lc73xl&limit=5', expect: 'cached',
+      note: 'BF-039 closed 2026-09-10 — measured MISS, MISS, HIT' },
     { path: '/api/site/nav', expect: 'header-only',
-      note: 'BF-040 — public, max-age=3600 but still DYNAMIC' },
+      note: 'BF-040 — public, max-age=3600 but still DYNAMIC. STILL OPEN, and it is '
+          + 'the negative control for the two rows above: if this ever reads cached '
+          + 'at the same time they do, the probe has stopped discriminating' },
 
-    { path: '/api/ribbons', expect: 'uncached',
-      note: 'BF-019, re-verified with real GETs 2026-08-12 — genuinely no-store' },
-    { path: '/api/printers/trending?limit=5', expect: 'uncached',
-      note: 'BF-019 — search.js fetches this on every page load' },
+    // ⚠️ BF-019 HALF-LANDED, AND THE HALF THAT LANDED IS THE INVISIBLE ONE.
+    // These two used to answer `private, no-store` — genuinely uncacheable at
+    // the origin. Measured 2026-09-12 they now send the full
+    // `public, max-age=0, s-maxage=300, stale-while-revalidate=600`, while
+    // Cloudflare still says DYNAMIC. So the origin fix shipped and the Cache
+    // Rule did not, which is precisely the state this probe splits into its
+    // own expectation rather than collapsing into pass/fail. Nobody told us;
+    // the row changed under us and the run went red, which is the design
+    // working.
+    { path: '/api/ribbons', expect: 'header-only',
+      note: 'BF-019 — origin turned cacheable by 2026-09-12 (was no-store); Cache Rule '
+          + 'still does not match it' },
+    { path: '/api/printers/trending?limit=5', expect: 'header-only',
+      note: 'BF-019 — same shift; search.js fetches this on every page load, so the '
+          + 'Cache Rule gap costs one origin hit per page' },
     { path: '/api/settings', expect: 'uncached',
       note: 'BF-014' },
     { path: '/api/schema/site', expect: 'uncached',

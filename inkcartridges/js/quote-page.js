@@ -385,7 +385,12 @@
         var items = [];
         var active = -1;
         var controller = null;
-        var debounceMs = 250; // matches search.js — backend bucket is 120 req/min/IP
+        // Matches search.js. The number this comment used to cite (120 req/min/IP)
+        // is the limiter on /api/search/suggest and /autocomplete; THIS picker
+        // calls /api/search/smart, which is 30/min. Measured 2026-09-12:
+        // ratelimit-policy 30;w=60 on smart and by-printer, 120;w=60 on suggest
+        // and autocomplete (ERR-253).
+        var debounceMs = 250;
 
         var run = (typeof Utils !== 'undefined' && Utils.debounce)
             ? Utils.debounce(query, debounceMs)
@@ -475,15 +480,29 @@
     // arrive under data.products (fallback data.suggestions — see search.js).
     function fetchSmartItems(q, signal) {
         var base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
-        var plain = base + '/api/search/smart?q=' + encodeURIComponent(q) + '&limit=6';
-        // ?sid=/?vid= — the analytics join key (data-tracking-capture aug2026
-        // §1.1). A quote line typed by a real customer is a real search; it
-        // joins to the quote's order the same way the header dropdown does.
-        var url = (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyUrl)
-            ? window.TrafficTracker.identifyUrl(plain)
-            : plain;
+        var url = base + '/api/search/smart?q=' + encodeURIComponent(q) + '&limit=6';
+        // THE IDS MOVED FROM THE URL TO A HEADER (ERR-253), AND THIS CALL SITE
+        // HAD TO GAIN THE HEADER IN THE SAME EDIT.
+        //
+        // Until 2026-09-10 this line read `TrafficTracker.identifyUrl(plain)`
+        // and there was no header stamp anywhere in this file. /api/search/* is
+        // edge-cached now and Cloudflare's cache key is the URL, so the param
+        // had to come off — but deleting it alone would NOT have fallen back to
+        // the header, because unlike `API.request()` (which enrols per helper
+        // via `identify: true`) and unlike search.js (which stamps its own raw
+        // fetch), this raw fetch asked for nothing. A quote line typed by a real
+        // customer is a real search, and it would have gone anonymous silently,
+        // with every test still green.
+        //
+        // ***A DELETION AND A SWAP LOOK THE SAME IN A DIFF AND ARE NOT THE SAME
+        // CHANGE.*** Three call sites lost the param; this is the one that also
+        // had to gain something.
+        var headers = {};
+        if (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyHeaders) {
+            window.TrafficTracker.identifyHeaders(headers);
+        }
         // Public search read — cookies explicitly omitted (ERR-124).
-    return fetch(url, { signal: signal, credentials: 'omit' }).then(function (res) {
+    return fetch(url, { signal: signal, credentials: 'omit', headers: headers }).then(function (res) {
             return res.json().then(function (json) {
                 if (!res.ok || !json || !json.ok) return [];
                 var data = json.data || {};

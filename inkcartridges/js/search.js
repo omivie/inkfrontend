@@ -35,8 +35,41 @@
     // their "Fits <model>" chip from 2026-07-30 (ERR-133), months before
     // /suggest learned to.
     const ENDPOINT = '/api/search/smart';
-    // 250ms debounce — backend bucket is 120 req/min/IP; a fast typer hammering
-    // backspace at <250ms intervals can still trip it, so we err on the safe side.
+    // 250ms debounce.
+    //
+    // THIS COMMENT USED TO SAY "backend bucket is 120 req/min/IP". Re-measured
+    // 2026-09-10 against api.inkcartridges.co.nz and the real number is FOUR
+    // TIMES SMALLER (ERR-253):
+    //
+    //   GET /api/search/smart   →  ratelimit-limit: 30, ratelimit-policy: 30;w=60
+    //                              and NO x-ratelimit-* at all
+    //
+    // AND THE LIMIT IS PER ENDPOINT, NOT PER PREFIX. The backend's response
+    // document says "one limiter, 30/min, across /api/search/*". Measured
+    // 2026-09-12, it is four numbers, not one:
+    //
+    //   /api/search/smart        30;w=60    ← THIS FILE
+    //   /api/search/by-printer   30;w=60
+    //   /api/search/suggest      120;w=60
+    //   /api/search/autocomplete 120;w=60
+    //
+    // The old 120 in this comment was real — it is just the limit on a
+    // DIFFERENT endpoint than the one this file calls. None of the four carry
+    // `x-ratelimit-*`; the global /api/ limiter (100) skips /search/, and
+    // /api/products/popular is the endpoint that carries both (60 + 100).
+    // Do not port a number between any of them.
+    //
+    // 250ms STAYS, because the thing that actually pays the bill changed in our
+    // favour on the same day: /api/search/* is edge-cached now, and a
+    // cf-cache-status HIT never reaches the origin, so it never decrements the
+    // bucket. Measured: ratelimit-remaining 29 → 28 across two MISSes, and
+    // unmoved across two HITs. A repeated or backspaced-into query is free at
+    // the edge, and QUERY_CACHE below makes it free locally as well — so the
+    // 30/min bucket is only spent on genuinely new queries.
+    //
+    // ***A MEASUREMENT TAKEN ONCE IS A CONSTANT WITH A GOOD ALIBI.*** The 120
+    // was true of something at some point and nothing re-checked it for months.
+    // probe:data-capture now asserts the 30 so this cannot go stale silently.
     const DEBOUNCE_MS = 250;
     const MIN_QUERY_LENGTH = 2;
     const LIMIT = 40;
@@ -169,7 +202,76 @@
     // Named for the endpoint it actually calls. It was `fetchSuggest` until
     // 2026-08-04 — a name left over from the pre-/smart dropdown, and half the
     // reason the backend misidentified this surface's feed (ERR-144).
+    /* QUERY_CACHE — the same answer, not asked twice (ERR-253).
+     * ---------------------------------------------------------------------
+     * A typeahead re-fetches on every settled keystroke, so "tn2445" backspaced
+     * to "tn244" and retyped is three requests for two distinct answers. Until
+     * 2026-09-10 each of those cost a ~2.3s origin round trip AND one token from
+     * a bucket we had wrongly recorded as 120/min and measured at 30.
+     *
+     * The edge now absorbs most of that — a repeat query is a 0.057s HIT that
+     * never reaches the origin and never decrements the limiter. This cache is
+     * the same idea one layer closer: it also skips the CORS preflight, which
+     * the edge cannot help with because the preflight cache is keyed on the full
+     * URL and a typeahead URL changes every keystroke.
+     *
+     * TTL IS DELIBERATELY THE EDGE'S OWN `s-maxage=300`. A shorter TTL would not
+     * make the data fresher — the edge is already serving an entry up to five
+     * minutes old — it would only re-pay the preflight. So this cannot show a
+     * shopper anything staler than the shared cache already can.
+     *
+     * WHAT IS NOT CACHED: failures. An error throws before the store, so a
+     * rate-limited or network-failed search is retried rather than remembered
+     * as an empty shelf — [[ribbon-brand-pages]] printed empty-shelf copy for
+     * 44 hours from exactly that mistake. A genuine zero-result answer IS
+     * cached: it is a real answer, and it is the most expensive one the backend
+     * produces (the zero-result rescue ladder measures p50 3,341ms against
+     * 2,173ms with results).
+     *
+     * Module-scoped, so it is per page load and per tab. Nothing persists.
+     */
+    const QUERY_CACHE_MAX = 24;
+    const QUERY_CACHE_TTL_MS = 300000; // == the origin's s-maxage on /api/search/*
+    const _queryCache = new Map();
+
+    function cacheKey(query) {
+        return `${String(query).trim().toLowerCase()}::${LIMIT}`;
+    }
+
+    /** A cached answer, or null. Expired and absent are the same answer here. */
+    function cacheGet(query) {
+        const key = cacheKey(query);
+        const hit = _queryCache.get(key);
+        if (!hit) return null;
+        if (Date.now() - hit.at > QUERY_CACHE_TTL_MS) {
+            _queryCache.delete(key);
+            return null;
+        }
+        // Re-insert so the Map's insertion order stays least-recently-used first.
+        _queryCache.delete(key);
+        _queryCache.set(key, hit);
+        // A COPY OF THE ARRAY, never the stored one: renderResults groups and
+        // sorts what it is handed (byCodeThenColor), and a sort in place would
+        // quietly rewrite every later hit on this query.
+        return { ...hit.value, suggestions: hit.value.suggestions.slice() };
+    }
+
+    function cacheSet(query, value) {
+        if (!value || !Array.isArray(value.suggestions)) return;
+        const key = cacheKey(query);
+        _queryCache.delete(key);
+        _queryCache.set(key, { at: Date.now(), value });
+        while (_queryCache.size > QUERY_CACHE_MAX) {
+            // Map iterates in insertion order, so the first key is the oldest.
+            const oldest = _queryCache.keys().next().value;
+            if (oldest === undefined) break;
+            _queryCache.delete(oldest);
+        }
+    }
+
     async function fetchSmart(query, signal) {
+        const cached = cacheGet(query);
+        if (cached) return cached;
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
         // Admin mirror (ERR-234). This is the header dropdown — the surface the
         // owner most wants an admin-only product to appear on — and it is a raw
@@ -179,16 +281,17 @@
         const route = (typeof API !== 'undefined' && typeof API._catalogRoute === 'function')
             ? API._catalogRoute(path)
             : { endpoint: path, anonymous: true };
-        const plain = `${base}${route.endpoint}`;
-        // ?sid=/?vid= — the analytics join key (data-tracking-capture aug2026
-        // §1.1). This is the highest-volume search surface on the site, and it
-        // is a raw fetch that never enters API.request, so it has to ask for the
-        // ids itself. `window.` is correct here: TrafficTracker really is on
-        // window, unlike `Config` (ERR-156). Returns the URL untouched under
-        // DNT, on /admin, or before the tracker has loaded — never a blank param.
-        const url = (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyUrl)
-            ? window.TrafficTracker.identifyUrl(plain)
-            : plain;
+        // NO ?sid=/?vid= ON THIS URL (ERR-253). They were here until 2026-09-10,
+        // when /api/search/* joined the Cloudflare Cache Rule. The cache key is
+        // the URL and excludes custom request headers, so a per-visitor param
+        // would give every visitor a private entry and throw away a measured
+        // MISS 3.39s → HIT 0.057s. The ids ride the header below instead, which
+        // is not part of the key. (They also never delivered a row: the backend
+        // stripped unknown query params before the handler read them.)
+        //
+        // THIS URL IS THE CACHE KEY. Anything added to it here is added to every
+        // visitor's cache entry — keep it to `q` and `limit`.
+        const url = `${base}${route.endpoint}`;
         // Public search read — cookies explicitly omitted (ERR-124). The admin
         // mirror authenticates by bearer token instead; cookies stay off both.
         const headers = {};
@@ -209,10 +312,17 @@
         // THE COST, MEASURED, because a header on a GET is never free: it makes
         // the request non-simple, so the browser preflights it, and the
         // CORS-preflight cache is keyed by full URL — a typeahead query is a new
-        // URL every time, so effectively every search pays one. Measured against
+        // URL every time, so a first-typed query pays one. Measured against
         // api.inkcartridges.co.nz on 2026-09-09: OPTIONS ~280ms against a GET
-        // that is already ~3.0s, so ~9%. That is the trade, and it is one line
-        // to reverse if it ever stops being worth it.
+        // that was then ~3.0s, so ~9%.
+        //
+        // RE-READ THAT TRADE AFTER 2026-09-10 (ERR-253). `Access-Control-Max-Age:
+        // 86400` is set, but keying on the full URL means it amortises per
+        // QUERY STRING, not per day — so "9% on top" understates it on a
+        // first-typed query and overstates it badly on a repeat, where the GET
+        // is now a 0.057s edge HIT and the preflight is already cached. The
+        // header is still the right transport: it is the only one that does not
+        // shatter the cache entry, and the one that actually lands rows.
         if (typeof window !== 'undefined' && window.TrafficTracker && window.TrafficTracker.identifyHeaders) {
             window.TrafficTracker.identifyHeaders(headers);
         }
@@ -234,11 +344,16 @@
         const items = Array.isArray(data.products)
             ? data.products
             : (Array.isArray(data.suggestions) ? data.suggestions : []);
-        return {
+        const answer = {
             suggestions: items,
             matched_printer: data.matched_printer || null,
             did_you_mean: data.did_you_mean || null,
         };
+        // Only a real answer gets remembered. Every failure above threw before
+        // reaching this line, so a 429 or a dropped connection is retried on the
+        // next keystroke rather than cached as an empty shelf.
+        cacheSet(query, answer);
+        return cacheGet(query) || answer;
     }
 
     function createInstance() {

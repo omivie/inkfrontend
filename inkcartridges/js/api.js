@@ -2675,84 +2675,94 @@ const API = {
         //
         // /api/search/smart already returns the shared-cacheable header
         // `public, max-age=0, s-maxage=300, stale-while-revalidate=600` — the
-        // same shape the edge-cached catalog endpoints carry. It is not matched
-        // by the Cache Rule *today* (cf-cache-status: DYNAMIC), but the moment
-        // it is, an authenticated search response becomes storable in the shared
-        // public entry. The other two call paths to this endpoint —
-        // search.js's fetchSmart and _rawJsonFetch's SKU fallback — are
-        // already tokenless; this was the odd one out.
+        // same shape the edge-cached catalog endpoints carry. As of 2026-09-10
+        // the Cache Rule MATCHES it (see below), so an authenticated search
+        // response would be storable in the shared public entry. The other two
+        // call paths to this endpoint — search.js's fetchSmart and
+        // _rawJsonFetch's SKU fallback — are already tokenless; this was the
+        // odd one out.
         //
         // (Previously: `typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart'` —
         //  `searchConfig` was never defined anywhere; the fallback was the
         //  only branch ever taken. Inlined to its actual value.)
         //
-        // ANALYTICS JOIN KEY (data-tracking-capture aug2026 §1.1) — BOTH
-        // transports, on purpose. ?sid=/?vid= carry the traffic beacon's own
-        // session/visitor ids so a search can be joined to the order it
-        // produced, and `identify: true` below now also sends them as
-        // X-Session-Id / X-Visitor-Id, which the backend's CORS allow-list
-        // finally accepts (measured 2026-09-09, see request()).
+        // ANALYTICS JOIN KEY — HEADER ONLY ON THIS ROUTE (ERR-253).
         //
-        // THE PARAMS STAY. They were the only transport for six months and
-        // `search_analytics` still shows 915 rows with zero session ids over
-        // five days, which means the params are not what the backend reads on
-        // this route — or that table is fed from somewhere else entirely. Until
-        // that is known, dropping a transport to add one would be trading a
-        // measured unknown for an unmeasured hope (ERR-158: removing a fallback
-        // is a behaviour change, not cleanup). `identifyQuery` returns the
-        // object untouched when there is no id to add (DNT, /admin, private
-        // browsing), so no empty param is ever emitted.
+        // `identify: true` sends X-Session-Id / X-Visitor-Id so a search can be
+        // joined to the order it produced. There used to be a second transport
+        // here, `?sid=`/`?vid=` via identifySearch(), carried alongside because
+        // we could not yet tell which one the backend read. Both halves of that
+        // question were answered on 2026-09-10 and the params came off:
         //
-        // ⚠️ If /api/search/smart is ever added to the Cloudflare Cache Rule,
-        // these params become part of the cache key and shatter the shared entry
-        // one visitor at a time. probe:data-capture §2 fails the moment
-        // cf-cache-status stops saying DYNAMIC. The HEADER does not have that
-        // problem — it is not part of the cache key — so that is the day to
-        // drop the params and keep the header, not before.
-        const endpoint = this.catalogEndpoint('/api/search/smart', this.identifySearch({
+        //   1. THE PARAMS NEVER DELIVERED A ROW, AND COULD NOT HAVE. The
+        //      backend's `validate(schema, 'query')` runs Joi with
+        //      `stripUnknown: true` and then REPLACES req.query with the
+        //      validated value; `sid`/`vid` were in none of the three search
+        //      schemas, so they were deleted before the handler read them. The
+        //      six months of null session ids had two independent causes, one
+        //      per transport — which is exactly why carrying both until we had
+        //      an answer was right, and why dropping the header to keep the
+        //      "safer-looking" params would have gone straight back to zero.
+        //
+        //   2. THE HEADER DOES DELIVER: 0 of 115 smart searches carried a
+        //      session id on 09-08, 37 of 115 on 09-09, the day the CORS
+        //      allow-list deployed.
+        //
+        //   3. AND THE CACHE-KEY HAZARD BELOW STOPPED BEING HYPOTHETICAL.
+        //      Measured on api.inkcartridges.co.nz, 2026-09-10, cold query:
+        //      MISS 3.39s → HIT 0.057s. Cloudflare's cache key is the URL and
+        //      excludes custom request headers, so a per-visitor `?sid=` gives
+        //      every visitor a private cache entry and hands that 60x back.
+        //      Separately measured: an edge HIT does not spend rate-limit
+        //      budget (`ratelimit-remaining` unmoved across two HITs, frozen
+        //      at the MISS's value and replayed). Limits are PER ENDPOINT, not
+        //      per prefix — measured 2026-09-12, smart and by-printer are
+        //      30;w=60 while suggest and autocomplete are 120;w=60, contrary to
+        //      the backend response doc's "one limiter, 30/min".
+        //
+        // This is scoped to the two search endpoints. `identifyUrl` is still
+        // live on POST /api/cart/items, which is not edge-cached and where the
+        // param is the transport that measurably lands rows — ERR-158 applies
+        // there, not here: this is not a fallback being removed, it is a
+        // transport measured to carry nothing being removed from a URL whose
+        // shape now has a cost.
+        const endpoint = this.catalogEndpoint('/api/search/smart', {
             q: query,
             limit: opts.limit ?? 24,
             page: opts.page,
             include: opts.include || 'compat,description'
-        }));
+        });
         // Admin mirror (ERR-234). getPublic below is unchanged for everyone else.
         const route = this._catalogRoute(endpoint);
         if (!route.anonymous) return this.get(route.endpoint, { identify: true });
         return this.getPublic(endpoint, { identify: true });
     },
 
-    /**
-     * Stamp the analytics session/visitor ids onto a search request's params.
+    /* identifySearch() WAS HERE, AND IS GONE ON PURPOSE (ERR-253, 2026-09-10).
      *
-     * A thin, null-safe forwarder to the one owner of that vocabulary,
-     * `window.TrafficTracker` (js/traffic-tracker.js). It is a method on API so
-     * every search call site inside this file reads the same way, and so a
-     * missing tracker — DNT, /admin, or the script simply not loaded yet — is
-     * handled in ONE place rather than six.
+     * It stamped ?sid=/?vid= onto a search request's params. Its last two call
+     * sites were smartSearch and searchSuggest, and both lost it the day
+     * /api/search/* started being edge-cached: Cloudflare's cache key is the
+     * URL, so a per-visitor param gives every visitor a private cache entry
+     * (measured MISS 3.39s → HIT 0.057s on a shared one).
      *
-     * `window.` is deliberate and load-bearing: TrafficTracker really is on
-     * window (traffic-tracker.js, last statement), unlike `Config` / `Security`,
-     * which are bare consts whose `window.X?.` guards were silent off-switches
-     * (ERR-156 / ERR-167). Grep the `window.X =` line before copying this shape.
-     *
-     * @param {object|URLSearchParams} params
-     * @returns {object|URLSearchParams} the same object, ids added when known.
+     * DO NOT REINSTATE IT ON AN EDGE-CACHED URL. The vocabulary still has one
+     * owner — `TrafficTracker.identifyQuery` — and `identifyUrl` below still
+     * forwards to the tracker for POST /api/cart/items, which is not cached and
+     * where the param is the transport that measurably lands rows. If you need
+     * ids on a new GET, use `{ identify: true }` (the header) and read the note
+     * in request(); if you need them on a new POST, use identifyUrl.
      */
-    identifySearch(params) {
-        try {
-            const tt = typeof window !== 'undefined' ? window.TrafficTracker : null;
-            return (tt && typeof tt.identifyQuery === 'function') ? tt.identifyQuery(params) : params;
-        } catch (_) {
-            return params;
-        }
-    },
 
     /**
-     * As identifySearch, for a call site that has already built its URL string.
+     * Stamp ?sid=/?vid= onto a call site that has already built its URL string.
      *
-     * Not search-specific despite living beside it: `POST /api/cart/items` uses
-     * it too (see addToCart), because the backend's analyticsIdentity reads
-     * ?sid=/?vid= on any request, not only a GET search.
+     * `POST /api/cart/items` (see addToCart) is now its ONLY caller — the two
+     * search helpers gave it up when /api/search/* became edge-cached, and the
+     * tombstone above says why. Keep it that way: the backend's
+     * analyticsIdentity reads ?sid=/?vid= on any request, not only a GET
+     * search, so this is the right transport for a POST and the wrong one for
+     * anything whose URL is a cache key.
      */
     identifyUrl(url) {
         try {
@@ -2818,8 +2828,12 @@ const API = {
     async searchSuggest(query, limit = 10) {
         if (!query || String(query).trim().length < 2) return [];
         try {
-            // ?sid=/?vid= — the analytics join key (see identifySearch).
-            const params = this.identifySearch(new URLSearchParams({ q: query, limit: String(limit) }));
+            // NO ?sid=/?vid= HERE — the ids ride the header via `identify: true`
+            // below. /api/search/suggest is edge-cached (measured 2026-09-10:
+            // MISS, MISS, HIT) and Cloudflare's cache key is the URL, so a
+            // per-visitor param would give every visitor a private entry. See
+            // smartSearch above for the full record (ERR-253).
+            const params = new URLSearchParams({ q: query, limit: String(limit) });
             // Admin mirror (ERR-234); getPublic stays the path for everyone else.
             const suggestRoute = this._catalogRoute(`/api/search/suggest?${params}`);
             const res = suggestRoute.anonymous
