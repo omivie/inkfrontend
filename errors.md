@@ -41,6 +41,139 @@ describing the same incident.
 
 ---
 
+## ERR-255 — The frontend kept deriving a freight bill the backend had started publishing, and the two were the same parcel — **RESOLVED** (2026-09-12)
+
+**Context.** ERR-241 taught the admin that the customer's $100 free-shipping threshold and the
+supplier's $100 free-freight threshold are different tests on different numbers, and built a
+frontend resolver for it: per-supplier terms, a transcribed courier ladder, a lightest-band
+estimate, and a guard that dropped one consignment because `shipping_absorbed` was believed to
+cover it. The backend has now shipped the real thing — `order.supplier_freight`, per order and
+per consignment, computed from the owner's actual terms. The hand-off's §1 is titled
+"Delete before you add", and it is right.
+
+**🚨 THE TWO WERE THE SAME PARCEL, AND RUNNING BOTH DOUBLE-CHARGED IT.** `shipping_absorbed` is
+the outbound parcel RATE; `supplier_freight` prices the same parcel(s) off the same ladder.
+Measured over 115 live order-samples (70 on 09-10, 45 on 09-12):
+
+| | |
+|---|---|
+| orders where absorbed applies and freight does NOT | **0** |
+| orders carrying both | 41 |
+| …with identical amounts | **39** |
+| the 2 exceptions | the same order both times — `2026090102`, two suppliers: absorbed is ONE parcel rate ($7), freight is TWO consignments ($14) |
+
+So `shipping_absorbed` is a strict **SUBSET** of `supplier_freight`. Confirmed from the other
+side by the backend's own identity, which has three deduction terms and **no absorbed-courier
+term**: `gross_profit − net_profit = stripe_fees + operating_expenses + supplier_freight`. Live
+RPC: `2210.76 − (−56.06) = 2266.82 = 170.68 + 1593.50 + 502.64`, exact to the cent. A modal that
+deducts a fourth term can never agree with the dashboard, and making them agree was the job.
+
+The absorbed courier is therefore **parsed but no longer arithmetic**. The zone, area and amount
+are still returned and the free-shipping FACT moved into the freight row's tooltip ("counted here
+once, not twice") — deleting the deduction must not delete the information (ERR-158).
+
+**🚨 TWO DELETIONS THAT WERE NOT IN THE HAND-OFF'S BULLET LIST.**
+
+`customerPaidFreight()` short-circuited the whole rule whenever the customer paid for delivery,
+reasoning that a charged delivery is a pass-through. **27 of 60 orders have customer-paid shipping
+AND a real backend freight bill — $221.77 of $506.98, 44% of the total — and 0 have one without
+the other.** The customer paying OUR courier to reach THEM says nothing about a supplier billing
+US to reach our door. ***It was worse than the ladder's understatement and worse in KIND:*** the
+floor was wrong by a visible amount on orders it did price; this returned a clean "no freight
+owed" with no gap, no qualifier and no estimate flag — nothing on screen to be suspicious of.
+Found independently by two sessions.
+
+The entire `estimated` vocabulary also went. `supplier_freight` is on 150 of 150 live list rows
+and every detail payload. ***"Estimated" was the name of a defect, not a state.***
+
+**🚨 FOUR STATES, AND THE FOURTH IS THE ONE THAT MATTERS.** `applies:true + complete:true` (exact)
+· `applies:false` (a KNOWN zero) · `complete:false` / `unpriced > 0` (a FLOOR ⇒ take-home is a
+CEILING) · **field ABSENT** (LOUD unknown, never $0). Absence and `{applies:false}` produce the
+same dollar figure and mean opposite things, so the test is `hasOwnProperty`, never truthiness —
+the ERR-243 shape. **And absence here is NOT a permissions case**, however the hand-off words it:
+the profit column is in `OWNER_ONLY_COLUMNS` and the modal breakdown is owner-gated, so the field
+is present exactly when the profit UI renders at all. A missing envelope means a stale payload or
+a backend regression.
+
+**🚨 `supplier_freight` HAD TO JOIN `METRIC_KEYS`, AND THE REASON IS NASTY.** `normalizeKpiSummary`
+(`api.js`) rebuilds `current`/`previous` from a fixed allow-list, and anything unnamed is silently
+dropped. That branch only runs on the metric-keyed shape — which is **exactly what the backend's
+kpi-summary RPC-ERROR fallback returns**. So the path that drops the key is the path taken when
+the backend is already degraded, and that fallback's `net_profit` has freight deducted
+server-side: the tiles would show a net with nothing to explain it, and a client-side rebuild
+would over-state net by $502.64. **Reasoned from the documented shape plus the code, NOT observed**
+— the live payload returns on the branch above, so no live call reaches it. Pinned by a unit test
+instead. (Found by a peer session.)
+
+**§6 of the hand-off was DECLINED, deliberately — and the reason is a lesson about measurement.**
+It asks for the Stripe fee to be deducted `÷ 1.15`. The reconciliation is perfect: over 53 card
+orders `Σ (total × 2.65% + $0.30) / 1.15 = $170.68`, matching `kpi-summary`'s `stripe_fees` **to
+the cent**. ***But that proves only what the BACKEND does, not what Stripe charges.*** Whether
+Stripe NZ adds 15% on top or includes it is a fact about a Stripe invoice, and no amount of
+agreement between two of our own surfaces can settle it. I had mistaken agreement-with-the-backend
+for correctness, and my own question to the owner offered three SCOPES for the change without ever
+offering "don't". A peer session asked the WHETHER question instead and the owner chose to check
+the invoice first. **A scope answer is not a ruling on the premise.** The ~$0.48/order
+modal-vs-dashboard gap is documented rather than closed; the settling check is one line on a real
+payout — for the $134.49 charge on `2026090902`, does the fee read **$3.86 or $3.36**?
+
+**The probe was repointed, not relaxed.** §1 now checks the BACKEND's `parcel_rate_incl_gst`
+against the live `/api/settings` rate card (stronger than the old check: it validates the number
+we now TRUST rather than a copy of a table we no longer own); §2 asserts absorbed moves nothing
+and re-measures containment; §5 reconciles the modal's own sum against `kpi-summary`; §6 checks
+the goods cost the $100 threshold actually ran on. Keep `pick()`/`band()` verbatim — `??` cannot
+choose between two spellings of a legitimate `null` (ERR-241's own first bug).
+
+**🚨 THREE RENDER PATHS CANNOT BE PROVEN LIVE, AND THE PROBE SAYS SO BY NAME.** `complete:false`,
+`unpriced_consignments > 0` and a missing envelope fire on **0 of 149** live orders; multi-
+consignment on only 3. They are unit-tested, and the probe calls `skip()` naming each one.
+***A green run that silently omitted three render paths is a green run that lied.*** The
+multi-consignment path gets a NAMED FIXTURE rather than hoping the sample contains `2026090102` —
+a path that passes only when the corpus cooperates is a coin flip with a green tick on it.
+
+**§6 found two real things on its first run, and the blunt version's verdict was wrong on both.**
+`20260821000002` — backend $18.41 vs our column $2.63, because a line names no supplier: our
+roll-up refuses those by design, the backend attributes them through its ladder. **The backend is
+the more complete one, and our Orders-list Supplier cost is understating that order on a live
+screen.** `INV-3276` — backend $0.00 vs our $70.51, reason `always_billed`, so no threshold
+consulted it and the $7 is right anyway; but *the same unpopulated cost on an Augmento consignment
+reads as `$0 < $100` and bills freight on an order that may owe none* — absence-as-zero with a
+billing decision on the end of it. The check now **classifies instead of lumping**, and fails only
+where a wrong number could have changed a decision.
+
+**🚨 `git commit` TAKES THE WHOLE INDEX — AND THE COMMIT THAT BREAKS THE SUITE IS NOT ALWAYS THE
+ONE WHOSE MESSAGE DESCRIBES THE CHANGE.** My `dashboard.js` fourth-term edit was swept into
+`80133fc` ("a dropped column took the catalogue editor with it") by another session's
+`git commit --only`, because `--only` protects you from unstaged peer work but **not from
+staged** peer work. Its tests stayed behind, so HEAD carried new four-term code against old
+three-term expectations and three tests went red under a headline that mentions neither. A bisect
+would land on a session that does not recognise the code. **`--only <paths>` on BOTH halves of a
+feature, or nothing.** A peer also observed the third face of this: in a tree this busy, someone
+else's push can deploy your commit before you have decided it is ready — "committed but not
+pushed" is not the safety margin it reads like.
+
+**ERR NUMBERING RACED, AND THE CODE LOST.** This shipped as ERR-251 and had to be renumbered to
+ERR-255 after the entry landed: another session wrote ERR-251 into `errors.md` for an unrelated
+incident while this work was in flight, so 25 comments across 14 files pointed at the wrong
+postmortem. Renumbered rather than argued, because a comment citing the wrong entry is worse than
+no citation. **Allocate the number by writing the entry FIRST, not by announcing it in chat.**
+
+**Verify.** `npm run probe:supplier-freight` (READ-ONLY, mode printed, 6 sections, three named
+SKIPs) — reports `freight applied: 38 (0 estimated)` on a 40-order sample, which is the signal the
+hand-off named. `node --test tests/*.test.js` = 5965 pass / 0 fail. Browser-verified by importing
+the real ESM graph from a dev server and running it on the live `2026090902` payload — a check the
+unit tests structurally cannot make, since their harness strips the imports.
+
+**Acceptance.** `2026090902` → take-home **$24.92 at 21.3%**, waterfall footing to the cent on
+FOUR outflows. Orders-list Supplier cost stays goods-only and its ERR-219 positive control passes
+**UNMODIFIED** — needing to edit it would have meant freight leaked into the goods cost.
+
+**Files.** `inkcartridges/js/admin/utils/supplier-freight.js` (513 lines replaced) ·
+`utils/profitability.js` · `utils/order-profit.js` · `pages/orders.js` · `pages/dashboard.js` ·
+`admin/api.js` · `scripts/probe-supplier-freight.mjs` · 7 test files.
+
+---
+
 ## ERR-253 — The comment stripper every test used had been deleting live code before the assertions ran, and the search ids were in the one place a cache key can see — **RESOLVED** (2026-09-12)
 
 - **Date**: 2026-09-12 · **Context**: implementing `fe-backend-asks-action-list-sep2026.md`, the backend's six asks from the 2026-09-10 round. Five checked out on the wire; two statements in it were wrong, and the most valuable finding of the round was not in it at all.

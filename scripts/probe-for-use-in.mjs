@@ -157,13 +157,38 @@ if (MODE === 'PRE-MIGRATION') {
     }
 } else {
     // Walk the ribbon catalogue — the surface that depends on this copy.
+    //
+    // 🚨 THIS ASKED FOR limit=500 AND READ THE REFUSAL AS AN EMPTY CATALOGUE.
+    //
+    // `/api/ribbons` caps `limit` at 200 and answers a **400**, not a clamp —
+    // the same shape as the business-applications endpoint (ERR-151). The old
+    // code read `j.data.ribbons` off that error envelope, got `[]`, and reported
+    // "the ribbon catalogue came back empty — cannot establish coverage".
+    //
+    // Which is a REFUSAL scored as an ABSENCE, in the probe written to record
+    // exactly that lesson (ERR-243: a 429 body has no `for_use_in_html` key, and
+    // reading its absence as "no list" nearly sent the backend a data-loss
+    // alarm). It exits 2 rather than green, so it was never a false pass — but a
+    // false alarm sends someone hunting a data-loss problem that does not exist.
+    //
+    // Measured 2026-09-12: limit=200 → 109 ribbons, limit=500 → 400. The status
+    // is checked FIRST now, and an error is named as an error.
     let ribbons = [];
     try {
-        const res = await fetch(`${API}/api/ribbons?limit=500`);
+        const res = await fetch(`${API}/api/ribbons?limit=200`);
+        if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            cannotRun(`/api/ribbons answered ${res.status} — this is a REFUSAL, not an empty catalogue. `
+                + `${body.slice(0, 200)}`);
+        }
         const j = await res.json().catch(() => null);
-        ribbons = (j && j.data && j.data.ribbons) || [];
+        if (!j || j.ok !== true || !j.data) cannotRun('/api/ribbons returned no usable envelope');
+        ribbons = j.data.ribbons || j.data.products || (Array.isArray(j.data) ? j.data : []);
     } catch (e) { cannotRun(`could not list ribbons — ${e.message}`); }
-    if (!ribbons.length) cannotRun('the ribbon catalogue came back empty — cannot establish coverage');
+    if (!ribbons.length) {
+        cannotRun('/api/ribbons answered 200 with zero ribbons — the catalogue really is empty, '
+            + 'which is itself the alarm (ERR-193 blanked 63 brand pages for 44h)');
+    }
     let withList = 0, unmeasurable = 0;
     for (const r of ribbons) {
         const out = await forUseIn(r.sku);
