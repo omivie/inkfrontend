@@ -325,29 +325,49 @@ export function isNetworkFailure(err) {
 /**
  * Same shape for PATCH, where NOT_FOUND means the ACCOUNT is gone, not the user.
  *
- * 🚨 BF-021 — `PATCH` IS BLOCKED BY CORS, SO THIS ENDPOINT CANNOT BE REACHED
- * FROM A BROWSER AT ALL. Measured 2026-08-09 against the production origin:
+ * ✅ BF-021 IS CLOSED (2026-09-10), AND THIS DOCBLOCK IS THE RECORD OF BOTH
+ * STATES, BECAUSE THE SECOND ONE IS ONLY LEGIBLE NEXT TO THE FIRST.
  *
- *   Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS      ← no PATCH
+ * For thirteen months `PATCH` was absent from the API's
+ * `Access-Control-Allow-Methods`, so this endpoint could not be reached from a
+ * browser at all — not degraded, not slow: the preflight failed and the request
+ * was never sent. `PATCH …/business/accounts/:id` is the only verb the route
+ * answers (PUT, POST and DELETE all 404) and `X-HTTP-Method-Override` is not in
+ * `Access-Control-Allow-Headers`, so unlike the invoices PATCH (ERR-138) there
+ * was no fallback to write. Credit limit and status simply could not be edited.
  *
- * and `PATCH …/business/accounts/:id` is the only verb the route answers (PUT,
- * POST and DELETE all 404), while `X-HTTP-Method-Override` is not in
- * `Access-Control-Allow-Headers`. There is no fallback to write. The invoices
- * PATCH hit this same wall in July (ERR-138) and could at least fall back to a
- * full `PUT /:id`; there is no equivalent here.
+ * Re-measured 2026-09-12 on all three origins — apex, www and
+ * http://localhost:3000, because an allow-list that only covers www works in
+ * production and not in dev:
  *
- * So the failure is named rather than dressed up. "Failed to fetch" would send
- * an operator hunting their wifi for a one-line server config, and — worse —
- * looks exactly like a timeout, which is the one reading under which a write
- * might have landed. It did not. Nothing was sent.
+ *   Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+ *
+ * WITH THE NEGATIVE CONTROL that makes a preflight worth believing: a bogus
+ * requested header is NOT echoed back, so this is a real static list rather
+ * than a preflight that agrees with whatever it is asked (ERR-223).
+ *
+ * SO THE BRANCH BELOW HAD TO CHANGE ITS MEANING, NOT ITS EXISTENCE. A bare
+ * transport failure here used to be diagnostic — it meant BF-021, every time.
+ * It now means what it says: the request did not reach the API. Continuing to
+ * blame CORS would be worse than the original bug, because it would send an
+ * operator to file a backend ticket for their own dropped wifi, and it would
+ * do it in a confident voice. What survives is the part that was always right:
+ * a bare `TypeError` is NOT a timeout, so nothing was written, and saying so is
+ * the only thing that distinguishes "try again" from "check before retrying".
+ *
+ * `npm run probe:data-capture` §1 asserts PATCH is still in the list, so a
+ * regression is caught by a probe rather than by an operator.
  */
 export function describeUpdateError(err) {
   const code = err && err.code;
   if (isNetworkFailure(err)) {
     return {
-      code: 'CORS_BLOCKED', fields: [],
-      title: 'Backend blocks this change (BF-021)',
-      message: 'The request was never sent: the API does not list PATCH in Access-Control-Allow-Methods, so the browser refuses the preflight. Nothing was changed. This needs a one-line backend fix — until then, credit limit and status can only be changed server-side.',
+      code: 'TRANSPORT_FAILED', fields: [],
+      title: 'The change was not sent',
+      message: 'The request never reached the API, so nothing was changed — this is a connection '
+        + 'problem rather than a rejected edit, and it is safe to try again. (Until 2026-09-10 this '
+        + 'was always the API refusing the PATCH method at the CORS preflight, BF-021; that is fixed '
+        + 'and verified, so a failure here now really is the network.)',
     };
   }
   if (code === 'NOT_FOUND') {

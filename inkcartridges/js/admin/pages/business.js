@@ -439,7 +439,6 @@ function accountDetailsHtml(a) {
     <div class="biz-drawer__actions">
       <button class="admin-btn admin-btn--ghost admin-btn--sm" id="biz-manage" type="button">Edit credit / status</button>
     </div>
-    <p class="admin-form-help">Editing credit or status uses <code>PATCH</code>, which the API’s CORS policy still does not allow from a browser (BF-021). If it fails with a network error, that is why — nothing is wrong with your connection and nothing has been changed.</p>
   `;
 }
 

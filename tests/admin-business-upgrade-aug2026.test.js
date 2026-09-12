@@ -390,19 +390,38 @@ test('a mid-walk failure keeps the rows already collected instead of throwing th
 // 4. Error mapping — including the two shapes that would otherwise vanish
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('🚨 BF-021: a PATCH killed by CORS preflight is named, not called "Failed to fetch"', async () => {
+test('✅ BF-021 closed: a transport failure says nothing was written, and stops blaming CORS', async () => {
+  // THIS TEST USED TO REQUIRE THE STRING "BF-021" IN THE TITLE, and it was
+  // right to. For thirteen months a bare TypeError here had exactly one cause:
+  // PATCH was absent from Access-Control-Allow-Methods, so Chrome refused the
+  // preflight and the request was never sent. Naming it was the difference
+  // between an operator filing a one-line backend ticket and an operator
+  // hunting their wifi.
+  //
+  // BF-021 closed 2026-09-10, verified on the wire 2026-09-12 on all three
+  // origins with the bogus-header negative control:
+  //   Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+  //
+  // So the assertion inverts: the copy must NOT name a fixed defect as the
+  // cause any more. ***A STALE DIAGNOSIS IS WORSE THAN NO DIAGNOSIS — IT IS
+  // CONFIDENTLY WRONG.*** What must survive is the half that was never about
+  // CORS: a bare TypeError is not a timeout, so nothing was written, and that
+  // is the only thing that distinguishes "retry" from "check first".
   const { describeUpdateError, isNetworkFailure } = await loadUtil();
   const blocked = new TypeError('Failed to fetch');   // exactly what Chrome throws
   assert.equal(isNetworkFailure(blocked), true, 'no status and no code — there was no response');
 
   const d = describeUpdateError(blocked);
-  assert.match(d.title, /BF-021/,
-    'Access-Control-Allow-Methods is GET,POST,PUT,DELETE,OPTIONS — no PATCH — so this endpoint ' +
-    'is unreachable from a browser; PUT/POST/DELETE on the same path all 404 and there is no fallback');
-  assert.match(d.message, /never sent/i);
-  assert.match(d.message, /Nothing was changed/,
-    'a bare "Failed to fetch" reads like a timeout, and a timeout is the one interpretation ' +
-    'under which the write might have landed — it did not');
+  assert.doesNotMatch(d.title, /BF-021/,
+    'BF-021 is closed; a failure here is now the network, and the title must not send an '
+    + 'operator to file a backend ticket for their own dropped connection');
+  assert.doesNotMatch(d.title, /CORS|Backend blocks/i,
+    'nor may it blame the API for refusing a method the API now allows');
+  assert.match(d.message, /nothing was changed/i,
+    'a bare "Failed to fetch" reads like a timeout, and a timeout is the one interpretation '
+    + 'under which the write might have landed — it did not');
+  assert.match(d.message, /safe to try again/i,
+    'and the operator needs to be told the retry is safe, which follows from the line above');
 });
 
 test('a network failure on CREATE says the opposite, because POST is not blocked', async () => {

@@ -1148,21 +1148,34 @@ async function onRowAction(e) {
 // request, no read-modify-write, and the backend answers with the re-serialised
 // invoice. That route is live — curl gets a 401, not a 404 (ERR-131).
 //
-// It is also unreachable from a browser. The API answers a PATCH preflight with
+// It used to be unreachable from a browser. For thirteen months the API answered
+// a PATCH preflight with
 //   Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
-// — no PATCH — from the production origin and from localhost alike. Chrome kills
-// the request before it is sent, so fetch() rejects with a bare TypeError. That
-// is BF-021, re-measured warm ×3 on 2026-07-31 and STILL OPEN, after a handoff
-// doc declared the backend "shipped & live — no further backend change needed".
-// A route that answers curl can still be unreachable from the page (ERR-138).
+// — no PATCH — from the production origin and from localhost alike. Chrome
+// killed the request before it was sent, so fetch() rejected with a bare
+// TypeError. That was BF-021, re-measured warm ×3 on 2026-07-31 and still open
+// then, after a handoff doc declared the backend "shipped & live — no further
+// backend change needed". A route that answers curl can still be unreachable
+// from the page (ERR-138).
 //
 // PUT /api/admin/invoices/:id IS on that allow-list, and it already carries
 // `status` — it is the exact request the editor drawer's Save makes. So when the
-// preflight is blocked, do by code what the operator can already do by hand:
-// read the invoice, flip one field, write it back.
+// preflight was blocked, this did by code what the operator could already do by
+// hand: read the invoice, flip one field, write it back.
 //
-// This path is deliberately SECOND. PATCH stays the preferred call, so the day
-// BF-021 lands the fallback stops running on its own, with no code change.
+// ✅ BF-021 CLOSED 2026-09-10. Verified on the wire 2026-09-12, all three
+// origins, with the bogus-header negative control:
+//   Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+//
+// AND THE FALLBACK STAYS EXACTLY WHERE IT IS. It was built to retire itself:
+// PATCH is the preferred call, so now that it succeeds the `catch` below simply
+// stops being entered, with no code change — which was the entire design claim
+// and is now the thing being collected on. Deleting it would be a behaviour
+// change dressed as cleanup (ERR-158): the day the allow-list regresses, this is
+// the difference between a degraded Paid switch and a broken one, and the
+// announcement below is how anyone would find out.
+//
+// This path is deliberately SECOND, and it is now expected to run ZERO times.
 async function setStatusWithFallback(id, wanted) {
   try {
     return { invoice: await AdminAPI.setInvoiceStatus(id, wanted), via: 'patch' };
@@ -1172,7 +1185,11 @@ async function setStatusWithFallback(id, wanted) {
     // saying no — replaying that through a different, heavier write route would
     // be trying to talk the backend out of an answer it already gave.
     if (!isNetworkFailure(err)) throw err;
-    warn('PATCH /:id/status blocked (BF-021) — falling back to a full PUT', err);
+    // Was 'blocked (BF-021)'. BF-021 is closed, so reaching here is now a
+    // SURPRISE rather than the norm, and the log line should read like one.
+    warn('PATCH /:id/status did not get through — falling back to a full PUT. '
+      + 'BF-021 was closed 2026-09-10, so this is either a transport failure or a regression '
+      + 'in Access-Control-Allow-Methods; npm run probe:data-capture §1 adjudicates.', err);
     return { invoice: await setStatusViaFullUpdate(id, wanted), via: 'put-fallback' };
   }
 }
@@ -1281,9 +1298,10 @@ let _fallbackAnnounced = false;
 function announceFallbackOnce() {
   if (_fallbackAnnounced) return;
   _fallbackAnnounced = true;
-  Toast.info('Heads up: the Paid switch is running on a compatibility path — it re-saves the whole '
-    + 'invoice because the API still blocks the PATCH method (BF-021). Your change saved fine; the '
-    + 'backend fix is one line.', 9000);
+  Toast.info('Heads up: the Paid switch just ran on its compatibility path — it re-saved the whole '
+    + 'invoice because the direct PATCH did not get through. Your change saved fine. This path is '
+    + 'not expected to run at all since 2026-09-10, so if you keep seeing this, say so: it means '
+    + 'the API has stopped allowing PATCH again.', 9000);
 }
 
 // Repaint one row from the status the SERVER reports, not from the checkbox the

@@ -438,16 +438,28 @@ function showOutcomeModal(row) {
     } catch (err) {
       btn.disabled = false;
       if (err && err.transportBlocked) {
-        // BF-021. Say what is actually wrong, name it, and do NOT dress it up as
-        // an unbuilt feature — "isn't available yet (backend endpoint pending)"
-        // is the sentence that hid ERR-131 for a month, over a route that was
-        // answering 401 the whole time. This route answers 400/404 today; the
-        // browser is what will not send the request.
-        showError('The outcome could not be saved: the browser is blocked from sending a PATCH '
-          + 'to the API (BF-021 — PATCH is missing from the backend CORS allow-list). The endpoint '
-          + 'itself is live and correct. Nothing was changed. This starts working the moment that '
-          + 'one line lands, with no change here.');
-        warn('outcome PATCH blocked by CORS (BF-021)', err);
+        // BF-021 IS CLOSED (verified on the wire 2026-09-10: PATCH is in
+        // Access-Control-Allow-Methods on all three origins, with the
+        // bogus-header negative control). So this branch keeps its job and
+        // loses its diagnosis.
+        //
+        // The job is still worth keeping: a bare TypeError from a refused
+        // preflight or a dropped connection carries no status and no code, and
+        // the one thing an operator needs to know about it is that NOTHING WAS
+        // WRITTEN — it is not a timeout, so "did my change land?" has a
+        // definite answer. It still must not be dressed up as an unbuilt
+        // feature; "isn't available yet (backend endpoint pending)" is the
+        // sentence that hid ERR-131 for a month over a route that was
+        // answering 401 the whole time.
+        //
+        // What it must NOT do any more is name a fixed defect as the cause.
+        // ***A STALE DIAGNOSIS IS WORSE THAN NO DIAGNOSIS: IT IS CONFIDENTLY
+        // WRONG, AND IT SENDS SOMEONE TO FILE A BACKEND TICKET FOR THEIR OWN
+        // DROPPED CONNECTION.***
+        showError('The outcome could not be saved: the request never reached the API, so nothing '
+          + 'was changed. This is a connection problem rather than a rejected edit — it is safe to '
+          + 'try again.');
+        warn('outcome PATCH did not reach the API (transport failure, not BF-021 — that is closed)', err);
         noteOutcomeBlockedOnce();
         return;
       }
@@ -456,13 +468,15 @@ function showOutcomeModal(row) {
   });
 }
 
-// Told once per session, not once per click — a nag gets trained away, and this
-// is a standing platform limitation rather than a per-row failure.
+// Told once per session, not once per click — a nag gets trained away. This used
+// to describe a standing platform limitation (BF-021, now closed); it now
+// describes a run of failed requests, which is still worth saying once because
+// the per-row error above is dismissed with the modal.
 let _outcomeBlockNoted = false;
 function noteOutcomeBlockedOnce() {
   if (_outcomeBlockNoted) return;
   _outcomeBlockNoted = true;
-  Toast.error('Quote outcomes cannot be saved until the API allows PATCH (BF-021).');
+  Toast.error('Outcomes are not reaching the API right now — nothing has been saved.');
 }
 
 async function openExisting(row) {
