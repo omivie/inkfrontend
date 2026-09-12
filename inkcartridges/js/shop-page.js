@@ -1471,23 +1471,59 @@
                 });
         },
 
-        /* ── Popular products on the category landings (ERR-236) ─────────────
+        /* ── Popular products on the category landings (ERR-236, ERR-253) ────
          *
          * FE category id -> the name /api/products/popular answers to.
          *
-         * MEASURED 2026-09-09, not assumed: `ink`, `toner`, `ribbons`, `drums`
-         * and `paper` answer 200 with real rows; every other spelling is a hard
-         * 400 — INCLUDING two of our own internal ids, `consumable` (the
-         * backend calls it `drums`) and `label_tape` (no popular route at all).
-         *
-         * So this is a vocabulary translation between two systems, not a list
-         * of what we stock. `npm run audit:types` already counts six type
+         * This is a vocabulary translation between two systems, not a list of
+         * what we stock. `npm run audit:types` already counts six type
          * vocabularies in this repo, which is exactly why this one lives in a
-         * single place with a test on it. A category absent from this map asks
-         * for nothing and shows nothing — it never fires a request we know will
-         * 400.
+         * single place with a test on it.
+         *
+         * MEASURED 2026-09-12 against production, replacing the 2026-09-09
+         * measurement this comment used to carry:
+         *
+         *   ink · toner · ribbons · drums · paper       200
+         *   label_tape · label-tape · photo_paper       200   ← WERE a hard 400
+         *   consumable · cartridge                      200   ← WERE a hard 400
+         *   bogus                                       400
+         *
+         * ⚠️ THE STATUS CODE CAN NO LONGER TELL YOU YOU ARE WRONG. `consumable`
+         * stopped 400ing, but it does NOT mean drums — it resolves to NO FILTER.
+         * Measured, by reading product_type on the rows it returns:
+         *
+         *   ?category=consumable → ink_cartridge 4, typewriter_ribbon 3,
+         *                          printer_ribbon 2, toner_cartridge 2,
+         *                          correction_tape 1
+         *   ?category=drums      → drum_unit 6, waste_toner 3, fuser_kit 1,
+         *                          maintenance_box 1, fax_film_refill 1
+         *
+         * So `consumable: 'drums'` STAYS. Deleting it — which one of the two
+         * backend documents covering this change explicitly invites ("you can
+         * drop your client-side mapping whenever suits") — would silently put
+         * ink and toner on a drums shelf, with a 200 and no error anywhere.
+         * ***THE ONLY DETECTOR IS READING product_type ON THE ROWS***, which is
+         * why probe:landing-popular now does exactly that.
+         *
+         * And `cartridge` must never be added: it is the same no-filter alias.
+         *
+         * `label_tape: 'label'` is the spelling `categories[].apiCategory`
+         * already uses (see `categories` above) — one vocabulary, not a seventh.
+         * The backend reports 244 active in-stock label tapes were behind that
+         * 400, making it the largest category the outage covered.
+         *
+         * A category absent from this map asks for nothing and shows nothing —
+         * it never fires a request we know will 400. `ribbons` is absent on
+         * purpose: /ribbons is a different page with its own controller
+         * (ribbons-page.js), which hardcodes its one category.
          */
-        POPULAR_CATEGORY_API: { ink: 'ink', toner: 'toner', consumable: 'drums', paper: 'paper' },
+        POPULAR_CATEGORY_API: {
+            ink: 'ink',
+            toner: 'toner',
+            consumable: 'drums',   // NOT passthrough — see above
+            paper: 'paper',
+            label_tape: 'label',
+        },
         POPULAR_ROW_LIMIT: 4,
 
         /**

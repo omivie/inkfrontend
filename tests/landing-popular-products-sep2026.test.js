@@ -141,17 +141,66 @@ test('§3 the FE→API category map is the measured one, in exactly one place', 
 
     assert.match(body, /ink:\s*'ink'/);
     assert.match(body, /toner:\s*'toner'/);
+
+    // `consumable: 'drums'` — AND THE REASON CHANGED WITHOUT THE LINE CHANGING.
+    //
+    // Until 2026-09-10 this mapping existed because `?category=consumable` was
+    // a hard 400 and the backend calls that family `drums`. The 400 is gone —
+    // and the mapping is MORE load-bearing than it was, not less. Measured
+    // 2026-09-12 by reading product_type on the rows that come back:
+    //
+    //   ?category=consumable → ink_cartridge 4, typewriter_ribbon 3,
+    //                          printer_ribbon 2, toner_cartridge 2,
+    //                          correction_tape 1   (a retired alias: NO FILTER)
+    //   ?category=drums      → drum_unit 6, waste_toner 3, fuser_kit 1,
+    //                          maintenance_box 1, fax_film_refill 1
+    //
+    // So removing this line now puts ink and toner on a drums shelf, with a
+    // 200 and no error anywhere. One of the two backend documents covering
+    // this change explicitly invites that removal ("you can drop your
+    // client-side mapping whenever suits"); the other, written later, retracts
+    // it. ***THE STATUS CODE CAN NO LONGER TELL YOU YOU ARE WRONG — only
+    // reading product_type on the rows can, which is why probe:landing-popular
+    // does exactly that.***
     assert.match(body, /consumable:\s*'drums'/,
-        'MEASURED 2026-09-09: our internal id `consumable` is a hard 400 on this endpoint; the '
-        + 'backend calls that family `drums`. Passing this.state.category straight through '
-        + '400s on the drums landing');
-    assert.doesNotMatch(body, /label_tape/,
-        'label_tape has no popular route at all — absent from the map means it asks for '
-        + 'nothing and shows nothing, rather than firing a request we know will 400');
+        'MEASURED 2026-09-12: `consumable` is ACCEPTED now and resolves to NO FILTER, not to '
+        + 'drums. Passing it through silently returns ink and toner on the drums landing');
+    assert.doesNotMatch(body, /cartridge:/,
+        '`cartridge` is the same retired no-filter alias as `consumable` and must never be '
+        + 'added as a passthrough');
+
+    // label_tape: 200 as of 2026-09-10, having been a hard 400. The backend
+    // reports 244 active in-stock label tapes were behind it, the largest
+    // category the outage covered. `label` is the spelling categories[].
+    // apiCategory already uses — one vocabulary, not a seventh.
+    assert.match(body, /label_tape:\s*'label'/,
+        'label_tape now 200s and must be asked for; `label` is the canonical spelling this '
+        + 'repo already uses for it in ShopPage.categories');
+    assert.match(body, /paper:\s*'paper'/);
 
     // Exactly one map: a second copy is how the six type vocabularies happened.
     assert.equal((SHOP_JS.match(/POPULAR_CATEGORY_API/g) || []).length, 2,
         'declared once, read once — any third mention is a second copy');
+});
+
+test('§3 every key in the map is a category this repo actually has', () => {
+    // The map translates OUR ids to THEIRS. A key that is not one of our ids
+    // is a request that can never fire; a key that IS one but is missing is a
+    // landing with no shelf. Both are silent, so both are pinned here against
+    // the canonical list rather than against a second hand-kept copy.
+    const map = SHOP_JS.match(/POPULAR_CATEGORY_API:\s*\{([^}]+)\}/)[1];
+    const keys = [...map.matchAll(/(\w+)\s*:/g)].map((m) => m[1]);
+    const ours = [...SHOP_JS.match(/categories:\s*\[([\s\S]*?)\],/)[1]
+        .matchAll(/id:\s*'([^']+)'/g)].map((m) => m[1]);
+    assert.ok(ours.length >= 6, `sanity: expected the category list, found ${ours.join(',')}`);
+    const strays = keys.filter((k) => !ours.includes(k));
+    assert.deepEqual(strays, [], 'every mapped key must be a real ShopPage category id');
+
+    // `ribbons` is absent ON PURPOSE: /ribbons is a different page with its own
+    // controller, which hardcodes its one category. Asserted so the absence
+    // reads as a decision rather than an oversight.
+    assert.ok(!keys.includes('ribbons'),
+        'ribbons is served by ribbons-page.js, which does not consult this map');
 });
 
 test('§3 an unmapped category is reported, not silently blank', () => {
