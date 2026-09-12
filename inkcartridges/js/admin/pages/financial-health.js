@@ -264,6 +264,18 @@ function renderPnLTable() {
     // Invoiced sales settle by bank transfer, so they add exactly $0 of card fees.
     ['Stripe Fees (excl. GST)', cur.stripe_fees, prev.stripe_fees, true],
     ['Operating Expenses (excl. GST)', cur.operating_expenses, prev.operating_expenses, true],
+    // SUPPLIER FREIGHT (ERR-252) — what our SUPPLIERS bill US to send goods to us.
+    // DSNZ charges it on every purchase order; Augmento only when that consignment's
+    // goods cost under $100 ex-GST. Nothing in this P&L had ever counted the cost:
+    // measured 2026-09-12, it is $1,158.33 ex-GST across all 149 live orders, and for
+    // the last 30 days it is the difference between +$446.58 and -$56.06 of net profit.
+    //
+    // ALREADY DEDUCTED SERVER-SIDE. The backend's `net_profit` below has this inside
+    // it, so this row DISPLAYS the term and must never subtract it a second time. The
+    // identity the backend publishes and this table now shows in full is
+    //   gross_profit - net_profit = stripe_fees + operating_expenses + supplier_freight
+    // verified to the cent against the live RPC: 2210.76 - (-56.06) = 2266.82.
+    ['Supplier Freight (excl. GST)', cur.supplier_freight, prev.supplier_freight, true],
     ['Net Profit (excl. GST)', cur.net_profit, prev.net_profit, false, true],
   ];
 
@@ -317,6 +329,20 @@ function renderPnLTable() {
     html += `<p class="fh-pnl-note">${esc(unknownRows.join(', '))} ${unknownRows.length === 1 ? 'is' : 'are'} unavailable —
       at least one sale in this period has no cost of goods recorded, so profit can’t be calculated.
       <a href="#dashboard">See which sales</a> to fix it.</p>`;
+  }
+  // A FLOOR, SAID OUT LOUD (ERR-252). `supplier_freight_unpriced_orders` counts orders
+  // where at least one consignment could not be priced — so Supplier Freight is a
+  // MINIMUM and Net Profit is therefore a CEILING, not a measurement.
+  //
+  // Measured 0 across all 150 live orders on 2026-09-12, which is exactly why it is
+  // rendered rather than assumed away: a branch that never fires on today's data is a
+  // branch nobody is watching the day it does. It cannot be reached by a live-data
+  // probe at all, so its only coverage is the unit test that drives it directly.
+  const unpricedOrders = num(cur.supplier_freight_unpriced_orders, 0);
+  if (unpricedOrders > 0) {
+    html += `<p class="fh-pnl-note">${unpricedOrders} order${unpricedOrders === 1 ? '' : 's'} in this
+      period ${unpricedOrders === 1 ? 'carries' : 'carry'} supplier freight we could not price, so
+      Supplier Freight is a minimum and Net Profit is <strong>at most</strong> the figure shown.</p>`;
   }
   return html;
 }

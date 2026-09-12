@@ -158,6 +158,40 @@ incident while this work was in flight, so 25 comments across 14 files pointed a
 postmortem. Renumbered rather than argued, because a comment citing the wrong entry is worse than
 no citation. **Allocate the number by writing the entry FIRST, not by announcing it in chat.**
 
+**THE TWO AGGREGATE SURFACES WERE LEFT OUT OF THE FIRST COMMIT, AND ONE OF THEM IS THE ONLY
+PLACE THE COST WAS VISIBLE AT ALL.** `pages/financial-health.js` holds the P&L — the single
+surface in the admin that lays gross → net out line by line — and it listed Revenue / COGS /
+Gross / Stripe / Opex / Net. **The gap between the last two silently contained $502.64 of a cost
+with no row**, so the table stopped accounting for its own bottom line: the owner could subtract
+every printed row from gross profit and not arrive at net. It now carries `Supplier Freight
+(excl. GST)` between Operating Expenses and Net Profit, and a test asserts the six rows reconcile
+`gross − net = stripe + opex + freight` rather than merely that the row exists. `utils/trend-math.js`
+had the same hole in its bucket cash waterfall (COGS + opex + Stripe + GST, no freight): it gains
+`orderFreightInclGst()`, `bucketFreightFromOrders()`, a `freightTotal` term, and freight as the
+**fourth reclaimable GST input credit** at `deriveNetGstRemitted()` — omitting that last one would
+have had each bucket remitting GST on money it never kept.
+
+**🚨 THE TWO SURFACES TAKE OPPOSITE GST BASES, AND THE FIELD NAMES DO NOT WARN YOU.** The P&L is an
+ex-GST statement, so its row reads `supplier_freight`. trend-math's waterfall is an **incl-GST CASH**
+waterfall, so its term is `supplier_freight_incl_gst`. The two differ by 15% ($502.64 vs $578.00),
+both are on the same payload, and either one is silently accepted by the other's code. One test
+pins each. ***Two fields that differ only by a suffix are two chances to be quietly 15% wrong.***
+
+**🚨 ABSENCE REACHED THE AGGREGATES TOO, AND NEEDED ITS OWN FLAG.** `orderFreightInclGst()` returns
+`{inclGst: 0}` for both `applies:false` and a missing envelope — the same dollars, opposite
+meanings — so it returns `known` alongside, and **one unreadable row poisons its whole bucket and
+keeps it poisoned** (`freightKnown` never recovers on a later good row). A window total built from
+some of the rows is a floor, and a floor rendered as a total is the ERR-063 family arriving at the
+strip instead of the modal.
+
+**A RED TEST THAT WAS WRONG ABOUT THE RIGHT THING.** The guard "financial-health does no freight
+maths of its own" first banned the characters `1.15`, `0.15` and `3/23` anywhere in `renderPnLTable`,
+and went red — on the GST footnote's prose *"revenue ÷ 1.15"* and a comment citing *"20/23"*. The
+code was correct and the assertion was not. ***Banning a NUMBER catches sentences; banning an
+OPERATION on the value catches the bug.*** Rewritten to assert nothing is computed from
+`supplier_freight` or into `net_profit`, with a positive control that the field is read at all, and
+comments stripped with the shared ERR-253 helper rather than a fresh local regex pair.
+
 **Verify.** `npm run probe:supplier-freight` (READ-ONLY, mode printed, 6 sections, three named
 SKIPs) — reports `freight applied: 38 (0 estimated)` on a 40-order sample, which is the signal the
 hand-off named. `node --test tests/*.test.js` = 5965 pass / 0 fail. Browser-verified by importing
@@ -169,8 +203,15 @@ FOUR outflows. Orders-list Supplier cost stays goods-only and its ERR-219 positi
 **UNMODIFIED** — needing to edit it would have meant freight leaked into the goods cost.
 
 **Files.** `inkcartridges/js/admin/utils/supplier-freight.js` (513 lines replaced) ·
-`utils/profitability.js` · `utils/order-profit.js` · `pages/orders.js` · `pages/dashboard.js` ·
-`admin/api.js` · `scripts/probe-supplier-freight.mjs` · 7 test files.
+`utils/profitability.js` · `utils/order-profit.js` · `utils/trend-math.js` · `pages/orders.js` ·
+`pages/dashboard.js` · `pages/financial-health.js` · `admin/api.js` ·
+`scripts/probe-supplier-freight.mjs` · 8 test files (incl.
+`tests/supplier-freight-pnl-trend-sep2026.test.js`, new, 28 cases).
+
+**Verify (aggregate half).** `node --test tests/*.test.js` = **5993 pass / 0 fail / 19 skipped**
+of 6012 after the P&L + trend-math work landed. `npm run probe:supplier-freight` still all-green:
+**58 orders carry a freight deduction**, tile identity holds, and the three unreachable render
+paths are SKIPPED by name rather than counted as passes.
 
 ---
 

@@ -370,6 +370,65 @@ export function bucketCogsFromOrders(buckets, rawOrders, indexFor) {
   return { resolvedCount, resolvedRevenue, resolvedCost };
 }
 
+// Supplier freight (incl-GST cash) for a single order, read from the BACKEND's
+// `order.supplier_freight` envelope (ERR-252). Never derived here.
+//
+// WHY THIS CLOSES THE ERR-039 / ERR-203 GAP. Until 2026-09 the Orders LIST rows
+// carried no `suppliers[]`, no `supplier_cost_snapshot` and no `shipping_absorbed`,
+// so this module had no way to know a freight charge existed and the ERR-241 brief
+// said so explicitly. The list now carries the whole `supplier_freight` envelope on
+// every row (measured 2026-09-12: 60/60), so freight can be bucketed from list rows
+// exactly the way COGS is.
+//
+// ABSENCE IS NOT ZERO, AND THE CALLER IS TOLD WHICH. `applies:false` is a KNOWN zero
+// — the backend priced the order and nothing is owed. An ABSENT envelope is not: it
+// means this row never carried the field (a non-owner response, or a stale payload),
+// and reporting that as $0 of freight is the absence-as-zero failure this repo keeps
+// paying for. Both return 0 dollars; only the second sets `known: false`.
+export function orderFreightInclGst(order) {
+  const f = (order && typeof order.supplier_freight === 'object') ? order.supplier_freight : null;
+  if (!f) return { inclGst: 0, known: false, complete: true };
+  if (f.applies !== true) return { inclGst: 0, known: true, complete: f.complete !== false };
+  const incl = Number(f.amount_incl_gst);
+  if (!Number.isFinite(incl) || incl < 0) return { inclGst: 0, known: false, complete: f.complete !== false };
+  return { inclGst: incl, known: true, complete: f.complete !== false };
+}
+
+// Bucket per-order supplier freight into the buckets it belongs to — the sibling of
+// bucketCogsFromOrders, deliberately a separate walk over the same rows rather than
+// a second job bolted into that one (ERR-219: a sibling field, not a merged total).
+//
+// `freightKnown` goes false on the FIRST row whose envelope is missing, and stays
+// false: a bucket total built from some-of-the-rows is a floor, and a floor that
+// presents itself as a total is the whole ERR-063 family.
+export function bucketFreightFromOrders(buckets, rawOrders, indexFor) {
+  const orders = Array.isArray(rawOrders) ? rawOrders : [];
+  let resolvedCount = 0;
+  let missingCount = 0;
+  let incompleteCount = 0;
+  for (const o of orders) {
+    const ts = Date.parse(o?.created_at || o?.createdAt || '');
+    if (isNaN(ts)) continue;
+    const i = indexFor(ts);
+    if (i < 0) continue;
+    const { inclGst, known, complete } = orderFreightInclGst(o);
+    if (!known) {
+      missingCount += 1;
+      buckets[i].freightKnown = false;
+      continue;
+    }
+    if (!complete) {
+      incompleteCount += 1;
+      buckets[i].freightComplete = false;
+    }
+    if (buckets[i].freightKnown !== false) buckets[i].freightKnown = true;
+    buckets[i].freightFromOrders = (buckets[i].freightFromOrders || 0) + inclGst;
+    buckets[i].hasOrderFreight = true;
+    if (inclGst > 0) resolvedCount += 1;
+  }
+  return { resolvedCount, missingCount, incompleteCount };
+}
+
 // Residual COGS to spread across orders that did NOT resolve an exact per-order
 // cost. The KPI summary's gross_profit gives the authoritative window-total COGS
 // (`kpiCogsInclGst`); per-order line items account for part of it exactly
@@ -496,8 +555,15 @@ export function deriveGst(revenue) {
 //
 // May be negative in a loss bucket (input credits exceed output GST → a GST
 // refund, a genuine cash inflow); we keep it exact rather than clamping.
-export function deriveNetGstRemitted(revenueInclGst, cogsInclGst, stripeInclGst) {
-  const base = safeNum(revenueInclGst) - safeNum(cogsInclGst) - safeNum(stripeInclGst);
+//
+// SUPPLIER FREIGHT IS A FOURTH INPUT CREDIT (ERR-252). A supplier's freight charge is
+// a GST-inclusive cost like the COGS and Stripe lines above, and its GST is reclaimed
+// at exactly the same place — so it belongs inside this subtraction, not outside it.
+// Omitting it would leave the bucket remitting GST on money it never kept. The
+// parameter defaults to 0 so every existing caller keeps its current arithmetic.
+export function deriveNetGstRemitted(revenueInclGst, cogsInclGst, stripeInclGst, freightInclGst = 0) {
+  const base = safeNum(revenueInclGst) - safeNum(cogsInclGst)
+    - safeNum(stripeInclGst) - safeNum(freightInclGst);
   return base * GST_FRACTION_OF_GROSS;
 }
 
@@ -522,11 +588,20 @@ export function assembleBucketExpense(b) {
   else                     b.cogsTotal = b.cogsDerived || 0;
   b.opexTotal   = b.hasPnlOpex ? b.pnlOpex : (b.opexLogged || 0);
   b.stripeTotal = b.hasPnlStripe ? b.pnlStripe : deriveStripe(b.revenue, b.orders);
-  // GST expense = NET remitted (output − input credits on COGS + Stripe). Must be
-  // computed AFTER cogsTotal + stripeTotal so the credits are available.
-  b.gstTotal    = b.hasPnlGst ? b.pnlGst : deriveNetGstRemitted(b.revenue, b.cogsTotal, b.stripeTotal);
+  // Supplier freight (ERR-252), incl-GST cash to the supplier's courier. Preference
+  // mirrors COGS: the P&L period figure first, then what the list rows resolved.
+  // `pnlFreightInclGst` is the backend's `supplier_freight_incl_gst` — NOT its
+  // ex-GST `supplier_freight`, because every term in this waterfall is incl-GST cash.
+  if (b.hasPnlFreight)          b.freightTotal = b.pnlFreightInclGst || 0;
+  else if (b.hasOrderFreight)   b.freightTotal = b.freightFromOrders || 0;
+  else                          b.freightTotal = 0;
+  // GST expense = NET remitted (output − input credits on COGS + Stripe + freight).
+  // Must be computed AFTER cogsTotal + stripeTotal + freightTotal so the credits
+  // are available.
+  b.gstTotal    = b.hasPnlGst ? b.pnlGst
+    : deriveNetGstRemitted(b.revenue, b.cogsTotal, b.stripeTotal, b.freightTotal);
   b.gstCollected = deriveGst(b.revenue);   // informational: output GST collected
-  b.expenses    = b.cogsTotal + b.opexTotal + b.stripeTotal + b.gstTotal;
+  b.expenses    = b.cogsTotal + b.opexTotal + b.stripeTotal + b.freightTotal + b.gstTotal;
   b.hasExpense  = b.expenses > 0;
   if (!b.hasNet) b.net = b.revenue - b.expenses;
   return b;
@@ -603,11 +678,17 @@ export function sumTrendTotals(series) {
     acc.cogs     += Number(m.cogsTotal || 0);
     acc.opex     += Number(m.opexTotal || 0);
     acc.stripe   += Number(m.stripeTotal || 0);
+    acc.freight  += Number(m.freightTotal || 0);
     acc.gst      += Number(m.gstTotal || 0);
     acc.orders   += Number(m.orders || 0);
     if (m && m.cogsKnown === false) acc.cogsKnown = false;
+    // Same rule as cogsKnown: one bucket that could not read a freight envelope
+    // makes the whole strip's freight a floor, and it must not read as a total.
+    if (m && m.freightKnown === false) acc.freightKnown = false;
+    if (m && m.freightComplete === false) acc.freightComplete = false;
     return acc;
-  }, { revenue: 0, expenses: 0, cogs: 0, opex: 0, stripe: 0, gst: 0, orders: 0, cogsKnown: true });
+  }, { revenue: 0, expenses: 0, cogs: 0, opex: 0, stripe: 0, freight: 0, gst: 0, orders: 0,
+       cogsKnown: true, freightKnown: true, freightComplete: true });
 }
 
 // Decide whether Cost of Goods Sold is genuinely KNOWN for a trend window —
