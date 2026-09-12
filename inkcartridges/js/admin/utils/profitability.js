@@ -15,18 +15,24 @@
  *   - Fee base for an order is the FULL customer-paid amount (incl. shipping
  *     + GST) because Stripe charges on what hit the card. When the caller
  *     doesn't have the exact charge, fall back to (revenue + shipping) × 1.15.
- *   - Absorbed courier (free-shipping orders): when the customer paid $0
- *     shipping but we still paid the courier, that cost IS ours and reduces
- *     take-home. Pass opts.absorbedShipping (the backend's owner-only
- *     order.shipping_absorbed object). It is a GST-inclusive cost handled
- *     exactly like the supplier/Stripe lines — deducted ex-GST from profit,
- *     its GST reclaimed at the IRD line. Absent / { applies:false } ⇒ $0, so
- *     aggregates and card/invoice paths that don't pass it are unchanged.
- *   - Supplier freight (ERR-241): the freight a SUPPLIER bills us when our
- *     purchase order to them is under their free-freight threshold. A separate
- *     payment from the absorbed courier above and from the goods cost itself,
- *     so it gets its own deduction. Pass opts.supplierFreight, built by
- *     utils/supplier-freight.js. Same GST convention, same $0-by-absence rule.
+ *   - Supplier freight: what a SUPPLIER bills us to send a purchase order.
+ *     Pass opts.supplierFreight, built by utils/supplier-freight.js from the
+ *     backend's owner-only order.supplier_freight envelope. A GST-inclusive
+ *     cost handled exactly like the supplier/Stripe lines — deducted ex-GST
+ *     from profit, its GST reclaimed at the IRD line. Absent / {applies:false}
+ *     ⇒ $0, so aggregates and card/invoice paths that don't pass it are
+ *     unchanged.
+ *   - Absorbed courier: NO LONGER A DEDUCTION (ERR-251). opts.absorbedShipping
+ *     is still parsed, and its zone/delivery-type/amount are still returned for
+ *     LABELLING, but it does not reduce take-home and its GST is not credited
+ *     at the IRD line. It was double-charging: measured over 115 order-samples,
+ *     there is no order where shipping_absorbed applies and supplier_freight
+ *     does not, and where both apply the amounts are identical on 39 of 41 (the
+ *     two exceptions are one two-supplier order where absorbed is ONE parcel
+ *     rate and freight is TWO). It is the same parcel off the same ladder, and
+ *     supplier_freight is the complete figure. The backend's own identity
+ *     agrees — gross − net = stripe + opex + supplier_freight, with no
+ *     absorbed-courier term, reconciling to the cent against the live RPC.
  *
  *   priceExGst    = retail_price / (1 + gstRate)        // retail_price stored incl-GST
  *   stripeFee     = retail_price * STRIPE_RATE          // per-unit; $0.30 fixed is per-order
@@ -190,9 +196,11 @@ export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
     ? paid
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
   const stripeFee = feeBase * stripeRate + stripeFixed;
-  const absorbedExGst = absorbedShippingParts(opts, gstRate).exGst; // $0 unless free-ship courier absorbed
+  // Supplier freight is the ONLY courier-side deduction (ERR-251). The absorbed
+  // courier is the same parcel and is already inside this figure; deducting
+  // both was the double-charge the migration removed.
   const freightExGst = supplierFreightParts(opts, gstRate).exGst;   // $0 unless a supplier billed us freight
-  return rev - costExGst - stripeFee - absorbedExGst - freightExGst;
+  return rev - costExGst - stripeFee - freightExGst;
 }
 
 /**
@@ -289,9 +297,21 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   // Supplier — paid the cost plus the GST on it.
   const supplierCostGst = costExGst * gstRate;
   const supplierCostInclGst = costExGst + supplierCostGst;
-  // Absorbed courier — a free-shipping order where the customer paid $0 shipping
-  // but we still paid the courier. GST-inclusive cost, its GST reclaimable, so
-  // it behaves exactly like the supplier/Stripe lines. $0 unless it applies.
+  // Absorbed courier — PARSED FOR LABELLING, NOT DEDUCTED (ERR-251).
+  //
+  // 🚨 THESE THREE AMOUNTS DO NOT APPEAR IN `netProfit` OR IN `gstRemittedToIrd`
+  // BELOW, AND THAT IS DELIBERATE. Until 2026-09-12 they did, alongside supplier
+  // freight, and that double-charged the same parcel: `shipping_absorbed` is the
+  // outbound parcel rate and `supplier_freight` prices the same parcel(s) off
+  // the same ladder. Measured over 115 order-samples — no order where absorbed
+  // applies and freight does not, amounts identical on 39 of 41. They are kept
+  // as returned fields because the zone, the delivery type and the amount are
+  // still worth SAYING on screen ("free shipping — the customer paid $0 and we
+  // absorbed it"); they are simply no longer arithmetic.
+  //
+  // If you are about to add `- absorbedShippingExGst` back into the net: that is
+  // the bug, not the fix. `supplier_freight.amount_ex_gst` is the complete
+  // figure for the order, every supplier and both thresholds already inside it.
   const absorbed = absorbedShippingParts(opts, gstRate);
   const absorbedShippingInclGst = absorbed.inclGst;
   const absorbedShippingGst = absorbed.gst;
@@ -310,12 +330,11 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   const f = (opts && typeof opts === 'object') ? opts.supplierFreight : null;
   const supplierFreightApplies = supplierFreightInclGst > 0;
   // Take-home is GST-neutral (the GST you pay is reclaimed) — same as computeOrderProfit.
-  const netProfit = rev - costExGst - stripeFeeExGst - absorbedShippingExGst - supplierFreightExGst;
+  const netProfit = rev - costExGst - stripeFeeExGst - supplierFreightExGst;
   // GST collected from the customer, and what's left to remit to IRD after
   // crediting the GST already paid to supplier + Stripe + absorbed courier.
   const gstCollected = customerPaid - rev;
-  const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - absorbedShippingGst
-    - supplierFreightGst;
+  const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - supplierFreightGst;
   const netMarginPct = (netProfit / rev) * 100;
   return {
     customerPaidInclGst: customerPaid,
@@ -380,12 +399,31 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
     supplierFreightInclGst,
     supplierFreightGst,
     supplierFreightExGst,
-    // An ESTIMATE must never be readable as a measurement. True while the
-    // amount comes from the lightest band of the zone ladder rather than from
-    // the backend's own weight-aware figure; the modal prints the word.
-    supplierFreightEstimated: supplierFreightApplies && f ? f.estimated === true : false,
+    // `supplierFreightEstimated` IS GONE ON PURPOSE (ERR-251). There is nothing
+    // left to estimate: the backend publishes the figure for every order, so a
+    // flag meaning "we guessed this" has no true value to hold. It was the name
+    // of a defect, not a state. Do not reintroduce it to mean something else.
+    //
+    // The total is a FLOOR when the backend could not price every consignment,
+    // which makes take-home a CEILING. That is `complete`, and it is a different
+    // claim from "we guessed" — one is the backend telling us what it does not
+    // know, the other was us not asking.
+    supplierFreightComplete: !supplierFreightApplies || !f || f.complete !== false,
+    supplierFreightUnpricedConsignments: supplierFreightApplies && f
+      ? (Number(f.unpricedConsignments) || 0) : 0,
     supplierFreightSuppliers: supplierFreightApplies && f && Array.isArray(f.suppliers)
       ? f.suppliers.slice() : [],
+    // Per-consignment detail, verbatim from the backend, so the modal can
+    // explain any figure in a tooltip without a second request.
+    supplierFreightConsignments: supplierFreightApplies && f && Array.isArray(f.consignments)
+      ? f.consignments.slice() : [],
+    supplierFreightZone: supplierFreightApplies && f ? (f.zone ?? null) : null,
+    supplierFreightParcelRateInclGst: supplierFreightApplies && f
+      ? (f.parcelRateInclGst ?? null) : null,
+    // Provenance for the absorbed row's disappearance, in the RETURN VALUE and
+    // not only in a comment — a consumer that still wants to render a courier
+    // line can see WHY the money is not here (fail-soft must be loud).
+    absorbedShippingSupersededByFreight: absorbedShippingApplies,
     gstRemittedToIrd,
     netProfit,
     netMarginPct,

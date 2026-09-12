@@ -48,7 +48,7 @@ import {
 // The delivery area and its provenance. ONE owner (ERR-253) — this page must
 // not re-derive "urban or rural" from an address, which is what the checkout
 // does for a form it is about to submit and is the wrong question for a record.
-import { deliveryFactsForOrder } from '../utils/supplier-freight.js';
+import { deliveryFactsForOrder, freightReasonPhrase } from '../utils/supplier-freight.js';
 // "Has this customer asked us where their parcel is?" — the whole vocabulary,
 // including the two facts the backend deliberately does NOT fold into `state`:
 // whether a cancelled order's request can still be cleared, and how long the
@@ -239,17 +239,24 @@ function profitCellHtml(row, info) {
   const tip = (info.isInvoice
     ? 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. Invoiced sale paid by bank transfer, so no card fee.'
     : 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount.')
-    + (info.absorbedApplies ? ' Absorbed courier cost (free shipping) is subtracted.' : '')
-    // Supplier freight (ERR-241), in its two states. Priced: say so and say it
-    // is an estimate when it is one. Unpriced: this number is a CEILING, and a
-    // ceiling that doesn't announce itself is just a wrong measurement.
+    // NO absorbed-courier clause. It is the same parcel as the freight below and
+    // is no longer deducted (ERR-251); saying it was subtracted would describe
+    // an outflow the number does not contain.
+    //
+    // Supplier freight, from the backend. No "estimated" qualifier survives —
+    // the figure is the backend's own, per consignment.
     + (info.supplierFreightApplies
       ? ` Supplier freight billed by ${info.supplierFreightSuppliers.join(', ') || 'a supplier'}`
-        + `${info.supplierFreightEstimated ? ' (estimated at this zone\u2019s cheapest rate)' : ''} is subtracted.`
+        + ` is subtracted.`
       : '')
-    + (info.supplierFreightUnknown
-      ? ` This order may owe supplier freight we can't price —`
-        + ` ${info.supplierFreightUnknownReason || 'the rule could not be applied'}.`
+    // The CEILING, from either cause — freight we could not state at all, or a
+    // total the backend reports as incomplete. A ceiling that doesn't announce
+    // itself is just a wrong measurement.
+    + (info.supplierFreightCeiling
+      ? ` ${info.supplierFreightAbsent
+          ? 'The supplier-freight figure did not come back for this order'
+          : 'This order may owe supplier freight we can\u2019t fully price'} —`
+        + ` ${info.supplierFreightCeilingReason || 'the rule could not be applied'}.`
         + ` The figure shown is AT MOST this; the real one is the same or lower.`
       : '')
     // Revenue here is REALISED revenue — the line sum less the order discount
@@ -262,7 +269,7 @@ function profitCellHtml(row, info) {
     + ' Open the order for the full breakdown.';
   const lossCls = info.netProfit < 0 ? ' order-profit__amt--loss' : '';
   // A visible mark, not only a tooltip: nobody hovers a column they believe.
-  const ceilingMark = info.supplierFreightUnknown
+  const ceilingMark = info.supplierFreightCeiling
     ? `<span class="admin-text-muted" aria-hidden="true">\u2264</span>` : '';
   return `${open('', tip)}${ceilingMark}`
     + `<span class="order-profit__amt${lossCls}">${formatPrice(info.netProfit)}</span>`
@@ -3009,73 +3016,105 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     }
     // Absorbed courier (free-shipping order): a real cost we paid, shown incl-GST
     // like the lines above; its GST is netted at the IRD line below. Only when it applies.
-    if (b.absorbedShippingApplies) {
-      const zoneLabel = titleCaseZone(b.absorbedShippingZone);
-      // WAS: `b.absorbedShippingDeliveryType ? … : 'urban'`, and the sentence
-      // said "(urban assumed)" either way. Two faults in one line (ERR-253):
-      // it invented 'urban' when nothing was recorded, and it called every
-      // value an assumption — including the 93 of 167 live orders whose basis
-      // the backend reports as `recorded`, `snapshot` or `charged`, all exact.
-      // The basis is now read rather than asserted.
-      const courierTip = `Actual courier rate${zoneLabel ? ` for ${zoneLabel}` : ''} `
-        + `(${deliveryPhrase(b.absorbedShippingDeliveryType || b.deliveryType, b.deliveryTypeBasis)}). `
-        + `Free shipping — the customer paid $0, we absorbed this; its GST (${formatPrice(b.absorbedShippingGst)}) is reclaimed at the IRD line below.`;
-      profitBreakdownInner += pbRow(
-        `<span title="${esc(courierTip)}">Courier absorbed ${muted('(free shipping) ⓘ')}</span>`,
-        neg(b.absorbedShippingInclGst));
-    }
-    // Supplier freight (ERR-241): what a SUPPLIER billed us for delivery because
-    // our purchase order to them fell under their free-freight threshold. A
-    // different payment from the courier row above — that one is what WE paid to
-    // deliver, this one is what the supplier charged to send it to us — so it is
-    // its own row rather than folded into either. Only when it applies.
+    // THE "COURIER ABSORBED" ROW IS GONE, AND ITS ABSENCE IS THE FIX (ERR-251).
+    //
+    // It used to render here, deducting `shipping_absorbed` alongside supplier
+    // freight. That double-charged one parcel. `shipping_absorbed` is the
+    // outbound parcel RATE; `supplier_freight` prices the same parcel(s) off the
+    // same ladder, and the backend's identity — gross − net = stripe + opex +
+    // supplier_freight — has no absorbed-courier term at all.
+    //
+    // Measured over 115 order-samples: NOT ONE order where absorbed applies and
+    // freight does not; where both apply the amounts are identical on 39 of 41,
+    // the two exceptions being one two-supplier order where absorbed is ONE
+    // parcel rate and freight is TWO. A row here cannot foot.
+    //
+    // The FACT it carried is not lost — "free shipping, the customer paid $0 and
+    // we absorbed the courier" now rides in the freight row's tooltip below,
+    // which is where the money actually is.
+    //
+    // Supplier freight: what a SUPPLIER billed us to send our purchase order.
+    // The backend's own figure, per consignment, with its own provenance.
     if (b.supplierFreightApplies) {
       const who = b.supplierFreightSuppliers.length
         ? b.supplierFreightSuppliers.join(', ')
         : 'a supplier';
-      const est = b.supplierFreightEstimated;
-      // The word "estimated" is not decoration — but what it means changed
-      // (ERR-253). It used to mean "the LIGHTEST band, because the weight and
-      // the area are unknown", which understated the real bill by $365 across
-      // 154 live orders. Both facts are on the order now, so this is the band
-      // the parcel actually falls in, priced per consignment. Measured
-      // 2026-09-12, OUR RATE SELECTION reproduces the backend's own figure to
-      // the cent on 154 of 154 orders — that is a claim about the rate table,
-      // not about this row's total, which legitimately differs whenever the
-      // absorbed-courier consignment is de-duplicated out of it (22 of 60
-      // orders carry both blocks). It stays labelled an estimate because it is
-      // arithmetic over OUR copy of the rate table, and the label is what
-      // stops that being read as the supplier's invoice.
       const kg = Number.isFinite(Number(b.parcelWeightKg)) ? Number(b.parcelWeightKg) : null;
-      const freightTip = `${who} billed us freight because the goods we bought came to under $100 ex-GST. `
-        + (est
-          ? `ESTIMATED from the courier ladder for this zone`
-            + (kg != null ? ` at ${kg} kg` : '')
-            + ` (${deliveryPhrase(b.deliveryType, b.deliveryTypeBasis)}). `
+      const zoneLabel = titleCaseZone(b.supplierFreightZone);
+      // ONE LINE PER CONSIGNMENT, because the threshold is per supplier and an
+      // order total cannot express it. Each line names the supplier, the rule
+      // that fired and the two numbers it fired on — enough to explain any
+      // figure without a second request.
+      const lines = (b.supplierFreightConsignments || []).map((c) => {
+        const why = freightReasonPhrase(c && c.reason);
+        const goods = Number(c && c.goods_cost_ex_gst);
+        const limit = Number(c && c.free_threshold_ex_gst);
+        const amt = Number(c && c.amount_incl_gst);
+        return `• ${c && c.supplier ? c.supplier : 'unnamed supplier'}`
+          + (Number.isFinite(amt) ? ` ${formatPrice(amt)}` : '')
+          + (why ? ` — ${why}` : '')
+          + (Number.isFinite(goods) && Number.isFinite(limit)
+            ? ` (${formatPrice(goods)} ex-GST against ${formatPrice(limit)})` : '')
+          + (c && c.billed === false ? ' — not billed' : '');
+      });
+      // "urban, assumed" is worth flagging; "rural, from the stored courier
+      // cost" is not. Only the guess gets a warning attached to it.
+      const assumed = b.deliveryTypeBasis === 'assumed';
+      const freightTip = `What our suppliers billed us to send this order's goods. `
+        + `${lines.length ? lines.join('  ') + '  ' : ''}`
+        + `Priced for ${zoneLabel || 'this zone'}`
+        + (kg != null ? ` at ${kg} kg` : '')
+        + ` (${deliveryPhrase(b.deliveryType, b.deliveryTypeBasis)}).`
+        + (assumed
+          ? ` The delivery area was NOT recorded, so this is priced urban — a rural parcel costs roughly double.`
           : '')
-        + `Its GST (${formatPrice(b.supplierFreightGst)}) is reclaimed at the IRD line below.`;
+        + (b.absorbedShippingSupersededByFreight
+          ? ` Free shipping: the customer paid $0 for delivery. That parcel is this one — it is counted here once, not twice.`
+          : '')
+        + ` Its GST (${formatPrice(b.supplierFreightGst)}) is reclaimed at the IRD line below.`;
       profitBreakdownInner += pbRow(
-        `<span title="${esc(freightTip)}">Supplier freight ${muted(`(${who}${est ? ', estimated' : ''}) ⓘ`)}</span>`,
+        `<span title="${esc(freightTip)}">Supplier freight ${muted(`(${who}) ⓘ`)}</span>`,
         neg(b.supplierFreightInclGst));
     }
-    // Freight is owed and we could not price it. This does NOT blank take-home
-    // (ERR-158: present→absent is not an upgrade) — an unpriced freight charge
-    // is bounded by the courier ladder and can only push profit DOWN, so the
-    // figure below is a CEILING. Saying so is the whole job of this row: the
-    // number stays, and it stops reading as a measurement.
-    if (profitInfo.supplierFreightUnknown) {
-      const why = profitInfo.supplierFreightUnknownReason || 'the freight rule could not be applied';
-      const freightUnknownTip = `This order may owe a supplier freight charge and we can't price it — ${why}. `
-        + `Take-home below is therefore a CEILING, not a measurement: the real figure is the same or lower, `
-        + `by at most one courier rate ($7–$30 incl-GST). Record the supplier on every line to fix it.`;
+    // The backend priced SOME consignments and not others, so the amount above
+    // is a FLOOR and take-home below is a CEILING. Distinct from the row after
+    // this one: there we have no figure at all, here we have a partial one.
+    // Fires on 0 of 149 live orders — unit-tested, never live-proven.
+    if (b.supplierFreightApplies && b.supplierFreightComplete === false) {
+      const n = Number(b.supplierFreightUnpricedConsignments) || 0;
+      const partialTip = `${n > 0 ? `${n} supplier consignment${n === 1 ? '' : 's'} on this order could not be priced` : 'The backend reports this freight total as incomplete'}, `
+        + `so the freight above is the part we CAN price, not the whole bill. Take-home below is a CEILING: `
+        + `the real figure is the same or lower.`;
       profitBreakdownInner += pbRow(
-        `<span title="${esc(freightUnknownTip)}">Supplier freight ${muted('(owed, not priced) ⓘ')}</span>`,
+        `<span title="${esc(partialTip)}">Supplier freight ${muted(`(${n > 0 ? `${n} not priced` : 'incomplete'}) ⓘ`)}</span>`,
+        `<span class="admin-text-muted">${MISSING}</span>`);
+    }
+    // No freight figure at all. This does NOT blank take-home (ERR-158:
+    // present→absent is not an upgrade) — an unpriced freight charge is bounded
+    // by the courier ladder and can only push profit DOWN, so the number below
+    // is a stateable CEILING. Saying so is the whole job of this row.
+    //
+    // `supplierFreightAbsent` is its own sentence because it is a different
+    // fault: the envelope never arrived. This UI is owner-gated, so that is a
+    // stale payload or a backend regression, NOT a permissions case — and never
+    // "$0 of freight owed" (ERR-243).
+    if (profitInfo.supplierFreightUnknown) {
+      const why = profitInfo.supplierFreightCeilingReason || 'the freight rule could not be applied';
+      const freightUnknownTip = (profitInfo.supplierFreightAbsent
+        ? `The supplier-freight figure did not come back for this order — ${why}. You are seeing this because you are an owner, so it is a stale or degraded payload, not a permission. It is NOT $0. `
+        : `This order may owe a supplier freight charge and we can't price it — ${why}. `)
+        + `Take-home below is therefore a CEILING, not a measurement: the real figure is the same or lower, `
+        + `by at most one courier rate ($7–$30 incl-GST).`
+        + (profitInfo.supplierFreightAbsent ? ' Reload the order to retry.' : ' Record the supplier on every line to fix it.');
+      profitBreakdownInner += pbRow(
+        `<span title="${esc(freightUnknownTip)}">Supplier freight ${muted(profitInfo.supplierFreightAbsent ? '(not returned) ⓘ' : '(owed, not priced) ⓘ')}</span>`,
         `<span class="admin-text-muted">${MISSING}</span>`);
     }
     const irdCreditSources = [
       'supplier',
       'Stripe',
-      b.absorbedShippingApplies ? 'courier' : null,
+      // NOT 'courier': the absorbed courier's GST is no longer credited here,
+      // because its cost is no longer deducted. One parcel, one credit.
       b.supplierFreightApplies ? 'supplier freight' : null,
     ].filter(Boolean);
     const irdCreditList = irdCreditSources.length > 1
@@ -3086,7 +3125,7 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
       neg(b.gstRemittedToIrd));
     profitBreakdownInner += `<div style="border-top:1px solid var(--border,#e5e7eb);margin:8px 0 6px"></div>`;
     profitBreakdownInner += pbRow(
-      profitInfo.supplierFreightUnknown
+      profitInfo.supplierFreightCeiling
         ? `<strong>Take-home profit</strong> ${muted('(at most)')}`
         : '<strong>Take-home profit</strong>',
       `<strong>${formatPrice(b.netProfit)}</strong>`,

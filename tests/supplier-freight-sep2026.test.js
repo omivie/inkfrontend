@@ -1,31 +1,46 @@
 /**
- * Supplier freight on order profit (ERR-241)
- * ==========================================
+ * Supplier freight on order profit — reading the backend's figure (ERR-241/251)
+ * ============================================================================
  *
- * The customer's free-shipping threshold is $100 on the SELL price. The
- * supplier's free-freight threshold is $100 on the GOODS COST, ex-GST. Two
- * independent tests on two different numbers, and an order sits on both sides
- * of them routinely — 2026090902 sold for $134.49 (customer shipped free) on
- * goods that cost $76.00 ex-GST (Augmento still billed us the delivery). Until
- * this work that freight was charged to nobody and take-home read $37.09.
+ * ERR-241 built a frontend resolver for supplier freight: per-supplier terms,
+ * a transcribed courier ladder, a lightest-band estimate, and a guard that
+ * dropped one consignment because `shipping_absorbed` was believed to cover it.
+ * The backend now publishes the real figure per order and per consignment, so
+ * all of that is deleted and this suite guards the READING of it.
  *
  * WHAT THESE TESTS ARE REALLY GUARDING
  *
- *   1. THE RULE IS PER SUPPLIER, NOT PER ORDER. DSNZ bills freight on every
- *      purchase order; Augmento only under $100. An order total cannot express
- *      that, so a per-supplier cost roll-up is the input.
- *   2. NO DOUBLE CHARGE. `order.shipping_absorbed` already deducts one
- *      consignment on the orders the backend knows about (measured: 23 of 60
- *      live orders, every one of them containing a DSNZ line). This module
- *      charges what the backend has NOT.
- *   3. UNPRICED FREIGHT IS A CEILING, NOT A BLANK. An unpriced freight charge
- *      is bounded by the courier ladder and can only push profit DOWN, so
- *      take-home stands and says "at most". Deleting a figure we can state
- *      would be present→absent (ERR-158). A missing supplier COST is different
- *      — unbounded, dominant term — and still refuses.
- *   4. AN ESTIMATE MUST NEVER READ AS A MEASUREMENT. Parcel weight and
- *      urban/rural are not on the order payload, so the amount is the lightest
- *      band of the zone ladder. Every surface prints the word "estimated".
+ *   1. THE ESTIMATOR IS GONE AND MUST STAY GONE. Running a local derivation
+ *      beside the backend's field double-charges every order. Measured over 115
+ *      live order-samples (70 on 2026-09-10, 45 on 09-12): there is NOT ONE
+ *      order where `shipping_absorbed` applies and `supplier_freight` does not,
+ *      and where both apply the amounts are identical on 39 of 41. The two
+ *      exceptions are the same order both times — 2026090102, two suppliers,
+ *      where absorbed is ONE parcel rate ($7) and freight is TWO ($14). So
+ *      `shipping_absorbed` is a strict SUBSET of `supplier_freight`.
+ *
+ *   2. FOUR STATES, NOT TWO, AND THE FOURTH IS THE ONE THAT MATTERS.
+ *        applies:true + complete:true   → the bill, exact
+ *        applies:false                  → a KNOWN zero
+ *        complete:false / unpriced > 0  → a FLOOR ⇒ take-home is a CEILING
+ *        field ABSENT                   → LOUD unknown, NEVER $0
+ *      Absence and `{applies:false}` produce the same dollar figure and mean
+ *      opposite things. That is the ERR-243 shape, so the test is
+ *      `hasOwnProperty` and never truthiness.
+ *
+ *   3. THE CEILING IS A QUALIFIER, NOT A REFUSAL. Unpriced freight is BOUNDED
+ *      (the ladder tops out at $30) and DIRECTIONAL (it can only push profit
+ *      down), so take-home stands and says "at most". Blanking it would be
+ *      present→absent (ERR-158). A missing supplier COST is different —
+ *      unbounded, dominant term — and still refuses outright.
+ *
+ *   4. "ESTIMATED" IS NOT A STATE ANY MORE. It was the name of a defect.
+ *      `supplier_freight` is present on 150 of 150 live list rows and on every
+ *      detail payload; there is nothing left to estimate.
+ *
+ * TWO PATHS CANNOT BE PROVEN AGAINST LIVE DATA. `complete:false` and
+ * `unpriced_consignments > 0` fire on 0 of 149 live orders, so they are
+ * unit-tested here and the probe SKIPS them BY NAME. A skip is not a pass.
  *
  * Run with: node --test tests/supplier-freight-sep2026.test.js
  */
@@ -47,6 +62,7 @@ const ORDERS_PAGE = path.join(ADMIN, 'pages', 'orders.js');
 
 const ordersSrc = fs.readFileSync(ORDERS_PAGE, 'utf8');
 const freightSrc = fs.readFileSync(SUPPLIER_FREIGHT, 'utf8');
+const profitabilitySrc = fs.readFileSync(PROFITABILITY, 'utf8');
 
 // Each module runs inside its own function scope: profitability.js and
 // sourcing.js both declare a module-private `const MISSING`, and two top-level
@@ -72,12 +88,33 @@ for (const [file, name] of [[PROFITABILITY, 'profitability.js'], [SOURCING, 'sou
   vm.runInContext(stripEsm(fs.readFileSync(file, 'utf8')), ctx, { filename: name });
 }
 const {
-  SUPPLIER_FREIGHT_RULES, ZONE_RATES, lightestZoneRateInclGst, supplierFreightForOrder,
-  orderSupplierCostFromDetail, supplierSlug, orderProfitFromDetail, PROFIT_STATE,
-  computeProfitBreakdown, computeOrderProfit, computeLineProfits, GST_RATE,
+  supplierFreightForOrder, freightCeilingReason, freightReasonPhrase, FREIGHT_REASONS,
+  deliveryFactsForOrder, orderSupplierCostFromDetail, orderProfitFromDetail, PROFIT_STATE,
+  computeProfitBreakdown, computeOrderProfit, GST_RATE,
 } = sandbox;
 
 const near = (a, b, eps = 0.005) => Math.abs(a - b) <= eps;
+
+/** The backend envelope for 2026090902, copied from the live payload 2026-09-12. */
+const ENVELOPE = () => ({
+  applies: true,
+  zone: 'south-island',
+  delivery_type: 'rural',
+  delivery_type_basis: 'snapshot',
+  parcel_weight_kg: 0.4,
+  parcel_rate_incl_gst: 14,
+  amount_incl_gst: 14,
+  gst_component: 1.83,
+  amount_ex_gst: 12.17,
+  complete: true,
+  unpriced_consignments: 0,
+  consignments: [{
+    supplier: 'Augmento', supplier_basis: 'default', billed: true, unpriced: false,
+    reason: 'goods_under_free_threshold', goods_cost_ex_gst: 76, free_threshold_ex_gst: 100,
+    parcel_weight_kg: 0.4, line_count: 1,
+    amount_incl_gst: 14, gst_component: 1.83, amount_ex_gst: 12.17,
+  }],
+});
 
 /** An order shaped like the admin detail endpoint's. Free shipping by default. */
 const mkOrder = (over = {}) => ({
@@ -88,433 +125,467 @@ const mkOrder = (over = {}) => ({
   shipping_fee: 0,
   total_amount: 134.49,
   shipping_absorbed: { applies: false },
+  supplier_freight: ENVELOPE(),
   items: [{ sku: 'C955XLKCMY', qty: 1, sell_price: 116.95, supplier_cost_snapshot: 76.00,
     suppliers: [{ name: 'Augmento', sku: 'C955XLBK' }, { name: 'Augmento', sku: 'C955XLC' },
       { name: 'Augmento', sku: 'C955XLM' }, { name: 'Augmento', sku: 'C955XLY' }] }],
   ...over,
 });
 
-const line = (name, cost, qty = 1, price = 100) => ({
-  sku: `SKU-${name}-${cost}`, qty, sell_price: price, supplier_cost_snapshot: cost,
-  suppliers: name ? [{ name }] : [],
-});
+// ─── 1. The estimator is GONE, and must stay gone ────────────────────────────
 
-// ─── 1. The rules themselves ────────────────────────────────────────────────
-
-test('DSNZ always pays freight; Augmento is free at or above $100 ex-GST', () => {
-  assert.equal(SUPPLIER_FREIGHT_RULES.dsnz.alwaysPays, true);
-  assert.equal(SUPPLIER_FREIGHT_RULES.augmento.freeOverExGst, 100);
-  assert.equal(SUPPLIER_FREIGHT_RULES.dsnz.freeOverExGst, undefined,
-    'DSNZ must not carry a threshold — "always" is not "under a very large number"');
-});
-
-test('a supplier with no recorded terms is UNKNOWN, never free', () => {
-  // okin is a real SUPPLIER_FILTER_VALUES entry whose freight terms nobody has
-  // ever stated. Defaulting it to $0 is the absence-as-zero bug with money on it.
-  assert.equal(SUPPLIER_FREIGHT_RULES.okin, undefined);
-  assert.equal(SUPPLIER_FREIGHT_RULES.unknown, undefined);
-});
-
-test('supplierSlug crosses the name/slug gap both suppliers actually use', () => {
-  assert.equal(supplierSlug('DSNZ'), 'dsnz');
-  assert.equal(supplierSlug('Augmento'), 'augmento');
-  assert.equal(supplierSlug('  augmento  '), 'augmento');
-  // Absence is not a supplier.
-  for (const v of [null, undefined, '', '   ', 'unknown', 'none', 'n/a', 'NA']) {
-    assert.equal(supplierSlug(v), null, `${JSON.stringify(v)} must resolve to null`);
+test('the local rate ladder and the per-supplier rules are DELETED', () => {
+  // Each of these was a real export until 2026-09-12. Their return means
+  // someone re-derived a figure the backend already publishes — which is the
+  // double-charge, not a second opinion.
+  for (const gone of ['ZONE_RATES', 'SUPPLIER_FREIGHT_RULES', 'lightestZoneRateInclGst',
+    'zoneRateInclGst', 'consignmentWeightKg']) {
+    assert.equal(sandbox[gone], undefined, `${gone} must not come back — the backend owns the rate`);
+    assert.ok(!new RegExp(`export\\s+(const|function)\\s+${gone}\\b`).test(freightSrc),
+      `${gone} must not be exported from supplier-freight.js`);
   }
 });
 
-// ─── 2. The zone ladder ─────────────────────────────────────────────────────
-
-test('the zone ladder reproduces every rate the backend has actually charged', () => {
-  // Measured amounts in live shipping_absorbed rows: $7, $12 and $22 incl-GST.
-  const fees = new Set();
-  for (const tiers of Object.values(ZONE_RATES)) for (const t of tiers) fees.add(t.fee);
-  for (const seen of [7, 12, 22]) assert.ok(fees.has(seen), `$${seen} must exist in the ladder`);
+test('the customer-paid-delivery short-circuit is DELETED (44% of the bill)', () => {
+  // Measured: 27 of 60 orders have customer-paid shipping AND a real backend
+  // freight bill — $221.77 of $506.98 — and 0 have customer-paid shipping
+  // without one. The customer paying OUR courier to reach THEM says nothing
+  // about a supplier billing US to reach our door.
+  assert.ok(!/function\s+customerPaidFreight/.test(freightSrc),
+    'customerPaidFreight must be gone: it returned a clean $0 with no qualifier to notice');
+  const paid = supplierFreightForOrder(mkOrder({ shipping_fee: 9.5 }));
+  assert.equal(paid.applies, true, 'a charged delivery must NOT suppress the supplier freight bill');
+  assert.ok(near(paid.amount_incl_gst, 14));
 });
 
-test('the lightest rate is the URBAN floor, and an unknown zone yields null', () => {
-  assert.equal(lightestZoneRateInclGst('auckland'), 7);
-  assert.equal(lightestZoneRateInclGst('north-island'), 7);
-  assert.equal(lightestZoneRateInclGst('south-island'), 7);
-  assert.equal(lightestZoneRateInclGst('south-island', 'rural'), 14);
-  // Unknown/absent must be null — NOT 0, which would read as "free delivery".
-  for (const z of [null, undefined, '', 'chatham-islands', 'AUSTRALIA']) {
-    assert.equal(lightestZoneRateInclGst(z), null, `${JSON.stringify(z)} must be null, never 0`);
+test('the word "estimated" is gone from the engine and from every surface', () => {
+  for (const [src, label] of [[freightSrc, 'supplier-freight.js'], [ordersSrc, 'pages/orders.js']]) {
+    const live = src.split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))   // comments may explain the deletion
+      .join('\n');
+    assert.ok(!/estimated/i.test(live), `"estimated" must not survive in ${label}`);
+  }
+  assert.equal(supplierFreightForOrder(mkOrder()).estimated, undefined);
+});
+
+// ─── 2. Four states, and the fourth is the one that matters ──────────────────
+
+test('applies:true + complete:true → the exact bill', () => {
+  const f = supplierFreightForOrder(mkOrder());
+  assert.equal(f.applies, true);
+  assert.equal(f.unknown, false);
+  assert.equal(f.absent, false);
+  assert.equal(f.complete, true);
+  assert.ok(near(f.amount_incl_gst, 14));
+  assert.ok(near(f.gst_component, 1.83));
+  assert.ok(near(f.amount_ex_gst, 12.17));
+  assert.equal(freightCeilingReason(f), null, 'an exact figure is not a ceiling');
+});
+
+test('applies:false → a KNOWN zero: no row, no qualifier, no refusal', () => {
+  const f = supplierFreightForOrder(mkOrder({ supplier_freight: { applies: false } }));
+  assert.equal(f.applies, false);
+  assert.equal(f.unknown, false, 'we decided no — that is not "we could not decide"');
+  assert.equal(f.absent, false);
+  assert.equal(f.amount_incl_gst, 0);
+  assert.equal(freightCeilingReason(f), null, 'a known zero is exact, not a ceiling');
+});
+
+test('🚨 ABSENT is not {applies:false} — and the dollar figure cannot tell them apart', () => {
+  // Both produce zero freight. They mean opposite things. ERR-243: `null` once
+  // meant both "no list" and "read failed", and the two needed a third state.
+  const order = mkOrder();
+  delete order.supplier_freight;
+  assert.equal('supplier_freight' in order, false, 'positive control: the key must really be gone');
+
+  const absent = supplierFreightForOrder(order);
+  const known = supplierFreightForOrder(mkOrder({ supplier_freight: { applies: false } }));
+
+  assert.equal(absent.amount_incl_gst, known.amount_incl_gst, 'the AMOUNTS agree — that is the trap');
+  assert.equal(absent.absent, true);
+  assert.equal(absent.unknown, true, 'a field that never arrived is UNKNOWN, not zero');
+  assert.equal(known.absent, false);
+  assert.equal(known.unknown, false);
+  assert.ok(freightCeilingReason(absent), 'absence must make take-home a ceiling');
+  assert.equal(freightCeilingReason(known), null);
+});
+
+test('a present-but-unusable envelope is not the same as an absent one', () => {
+  // `supplier_freight: null` means the backend ANSWERED and the answer is
+  // unusable. Distinct from never having been asked.
+  for (const bad of [null, 'yes', 7]) {
+    const f = supplierFreightForOrder(mkOrder({ supplier_freight: bad }));
+    assert.equal(f.unknown, true, `${JSON.stringify(bad)} must be unknown`);
+    assert.equal(f.absent, false, `${JSON.stringify(bad)} is present, just unreadable`);
   }
 });
 
-test('the ladder is a transcription, and says so rather than reading Config', () => {
-  // Config.settings.shipping does not exist in the admin (only cart.js calls
-  // Config.loadSettings). A `Config.settings?.shipping ?? FALLBACK` here would be
-  // an off switch whose fallback is the only branch that runs — ERR-167.
-  // Strip comments first: the file EXPLAINS why it doesn't read Config, and a
-  // grep that can't tell an explanation from a call would ban the explanation.
-  const code = freightSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  assert.ok(!/\bConfig\s*\./.test(code),
-    'supplier-freight.js must not read Config — it is not loaded in the admin');
-  assert.ok(/api\/settings/.test(freightSrc),
-    'the ladder must name its source so the probe can re-check it');
+test('applies:true with no usable amount is a CEILING, not a silent zero', () => {
+  // The backend contradicting itself. Rendering nothing would read as "no
+  // freight owed" for an order we have been told owes some.
+  for (const amt of [0, -3, null, undefined, 'abc']) {
+    const f = supplierFreightForOrder(mkOrder({
+      supplier_freight: { ...ENVELOPE(), amount_incl_gst: amt },
+    }));
+    assert.equal(f.unknown, true, `amount ${JSON.stringify(amt)} must refuse`);
+    assert.ok(freightCeilingReason(f));
+  }
 });
 
-// ─── 3. Per-supplier cost attribution ───────────────────────────────────────
+// ─── 3. complete:false — a FLOOR, so take-home is a CEILING ──────────────────
+//
+// Fires on 0 of 149 live orders. Unit-testable only; the probe skips it by name.
 
-test('an in-house pack is ONE purchase from its supplier, not one per constituent', () => {
-  // The four Augmento entries on 2026090902 are four cartridges in one box.
-  const info = orderSupplierCostFromDetail(mkOrder());
-  assert.deepEqual(Object.keys(info.costBySupplier), ['Augmento']);
-  assert.ok(near(info.costBySupplier.Augmento, 76.00));
-  assert.equal(info.missingSupplierCount, 0);
-  assert.equal(info.mixedSupplierLineCount, 0);
-});
-
-test('costBySupplier is a SIBLING field — the ERR-219 totals are untouched', () => {
-  const info = orderSupplierCostFromDetail(mkOrder());
-  assert.ok(near(info.costExGst, 76.00));
-  assert.ok(near(info.costInclGst, 76.00 * (1 + GST_RATE)));
-});
-
-test('a line naming no supplier is COUNTED, never quietly attributed', () => {
-  const info = orderSupplierCostFromDetail(mkOrder({ items: [line('DSNZ', 10), line(null, 20)] }));
-  assert.equal(info.missingSupplierCount, 1);
-  assert.deepEqual(Object.keys(info.costBySupplier), ['DSNZ']);
-  assert.ok(near(info.costExGst, 30), 'the ORDER total still counts every costed line');
-});
-
-test('a line naming two suppliers is REFUSED, not split down the middle', () => {
-  const mixed = { sku: 'MIX', qty: 1, sell_price: 50, supplier_cost_snapshot: 30,
-    suppliers: [{ name: 'DSNZ' }, { name: 'Augmento' }] };
-  const info = orderSupplierCostFromDetail(mkOrder({ items: [mixed] }));
-  assert.equal(info.mixedSupplierLineCount, 1);
-  assert.deepEqual(Array.from(Object.keys(info.costBySupplier)), [],
-    'an even split would put a fabricated number under a freight decision');
-});
-
-// ─── 4. The freight decision ────────────────────────────────────────────────
-
-const decide = (order) => supplierFreightForOrder(order, orderSupplierCostFromDetail(order));
-
-test('a customer who PAID for delivery does not also get charged for it', () => {
-  const r = decide(mkOrder({ shipping_fee: 7 }));
-  assert.equal(r.applies, false);
-  assert.equal(r.unknown, false, 'a pass-through is a decided NO, not a refusal');
-});
-
-test('Augmento under $100 ex-GST on a free-shipping order owes freight', () => {
-  const r = decide(mkOrder());
-  assert.equal(r.applies, true);
-  assert.deepEqual(Array.from(r.suppliers), ['Augmento']);
-  assert.equal(r.amount_incl_gst, 7);
-  assert.equal(r.estimated, true, 'the weight is unknown, so this is the lightest band');
-  assert.match(r.consignments[0].reason, /under the \$100 free-freight threshold/);
-});
-
-test('$100 exactly is FREE — the threshold is "under", and the boundary is the bug', () => {
-  const at = decide(mkOrder({ items: [line('Augmento', 100)] }));
-  assert.equal(at.applies, false);
-  const under = decide(mkOrder({ items: [line('Augmento', 99.99)] }));
-  assert.equal(under.applies, true);
-  // The live order this boundary decides: 2026090304, Augmento $99.00 ex-GST —
-  // which is $113.85 INCL-GST and would be free on the wrong basis.
-  const live = decide(mkOrder({ items: [line('Augmento', 99.00)] }));
-  assert.equal(live.applies, true, 'the threshold is ex-GST; 99.00 ex is under it');
-});
-
-test('Augmento over $100 owes nothing', () => {
-  const r = decide(mkOrder({ items: [line('Augmento', 110.00)] }));
-  assert.equal(r.applies, false);
-  assert.equal(r.unknown, false);
-});
-
-test('DSNZ owes freight at ANY order value — no threshold applies to it', () => {
-  const r = decide(mkOrder({ items: [line('DSNZ', 500)] }));
-  assert.equal(r.applies, true);
-  assert.match(r.consignments[0].reason, /charges freight on every order/);
-});
-
-test('what the backend already charged is NOT charged again', () => {
-  // Every one of the 23 live orders carrying shipping_absorbed contains a DSNZ
-  // line. Charging DSNZ again here would double a payment made once.
-  const absorbed = { applies: true, amount_incl_gst: 12, gst_component: 1.57, zone: 'south-island' };
-  const r = decide(mkOrder({ items: [line('DSNZ', 50)], shipping_absorbed: absorbed }));
-  assert.equal(r.applies, false, 'the absorbed-courier row already deducted this consignment');
-});
-
-test('a two-supplier order charges only the consignment the backend missed', () => {
-  // Live order 2026090102: DSNZ $70.51 + Augmento $27.07, backend absorbed $7.
-  const absorbed = { applies: true, amount_incl_gst: 7, gst_component: 0.91, zone: 'north-island' };
-  const r = decide(mkOrder({
-    delivery_zone: 'north-island',
-    items: [line('DSNZ', 70.51), line('Augmento', 27.07)],
-    shipping_absorbed: absorbed,
+test('complete:false makes the total a floor and take-home a ceiling', () => {
+  const f = supplierFreightForOrder(mkOrder({
+    supplier_freight: { ...ENVELOPE(), complete: false, unpriced_consignments: 1 },
   }));
-  assert.equal(r.applies, true);
-  assert.deepEqual(Array.from(r.suppliers), ['Augmento'], 'DSNZ is the one the backend already paid for');
-  assert.equal(r.amount_incl_gst, 7);
+  assert.equal(f.applies, true, 'the part we CAN price still applies');
+  assert.equal(f.complete, false);
+  assert.equal(f.unpricedConsignments, 1);
+  assert.ok(near(f.amount_incl_gst, 14), 'the priced part is still deducted');
+  assert.match(freightCeilingReason(f), /could not be priced/);
 });
 
-test('an unresolvable supplier REFUSES the order, it does not price the part it understands', () => {
-  const r = decide(mkOrder({ items: [line('DSNZ', 10), line(null, 20)] }));
-  assert.equal(r.applies, false);
-  assert.equal(r.unknown, true);
-  assert.match(r.unknownReason, /name no supplier/);
+test('an unpriced consignment overrides a complete:true the backend also sent', () => {
+  // The two are the same claim from two directions. Disagreeing with ourselves
+  // is not a state we should be able to render.
+  const f = supplierFreightForOrder(mkOrder({
+    supplier_freight: { ...ENVELOPE(), complete: true, unpriced_consignments: 2 },
+  }));
+  assert.equal(f.complete, false);
+  assert.match(freightCeilingReason(f), /2 supplier consignments/);
 });
 
-test('a supplier with no recorded terms refuses by name', () => {
-  const r = decide(mkOrder({ items: [line('Okin', 10)] }));
-  assert.equal(r.unknown, true);
-  assert.match(r.unknownReason, /no freight terms recorded/);
+test('an ABSENT `complete` on a present envelope is not a refusal', () => {
+  const env = ENVELOPE();
+  delete env.complete;
+  const f = supplierFreightForOrder(mkOrder({ supplier_freight: env }));
+  assert.equal(f.complete, true, 'only an explicit false means incomplete');
+  assert.equal(freightCeilingReason(f), null);
 });
 
-test('a zone with no courier rate refuses rather than inventing one', () => {
-  const r = decide(mkOrder({ delivery_zone: 'chatham-islands' }));
-  assert.equal(r.unknown, true);
-  assert.match(r.unknownReason, /chatham-islands/);
-  const none = decide(mkOrder({ delivery_zone: null }));
-  assert.equal(none.unknown, true);
-  assert.match(none.unknownReason, /no delivery zone/);
+// ─── 4. The money ────────────────────────────────────────────────────────────
+
+test('freight is deducted ex-GST and its GST is credited at the IRD line', () => {
+  const info = orderProfitFromDetail(mkOrder());
+  const bare = orderProfitFromDetail(mkOrder({ supplier_freight: { applies: false } }));
+  assert.ok(near(info.netProfit, bare.netProfit - 12.17), `${bare.netProfit} → ${info.netProfit}`);
+  assert.ok(near(info.breakdown.gstRemittedToIrd, bare.breakdown.gstRemittedToIrd - 1.83));
 });
 
-// ─── 5. The money ───────────────────────────────────────────────────────────
-
-const FREIGHT = { applies: true, amount_incl_gst: 7, estimated: true, suppliers: ['Augmento'] };
-
-test('absence costs exactly nothing — every caller that passes no freight is unchanged', () => {
-  const withOut = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115 });
-  for (const opts of [{}, { supplierFreight: null }, { supplierFreight: { applies: false } },
-    { supplierFreight: { applies: true, amount_incl_gst: 0 } },
-    { supplierFreight: { applies: true, amount_incl_gst: null } }]) {
-    const b = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115, ...opts });
-    assert.equal(b.supplierFreightApplies, false, JSON.stringify(opts));
-    assert.equal(b.supplierFreightInclGst, 0);
-    assert.ok(near(b.netProfit, withOut.netProfit), 'take-home must be byte-identical');
-  }
+test('🚨 shipping_absorbed contributes NOTHING, even when it applies', () => {
+  // 24 of 70 live orders carry both blocks. Before this change they were both
+  // deducted, double-charging one parcel.
+  const withBoth = orderProfitFromDetail(mkOrder({
+    shipping_absorbed: {
+      applies: true, basis: 'zone_rate', zone: 'south-island', delivery_type: 'rural',
+      parcel_weight_kg: 0.4, amount_incl_gst: 14, gst_component: 1.83, amount_ex_gst: 12.17,
+    },
+  }));
+  const freightOnly = orderProfitFromDetail(mkOrder());
+  assert.equal(withBoth.absorbedApplies, true, 'positive control: the absorbed block must be live');
+  assert.ok(near(withBoth.netProfit, freightOnly.netProfit, 1e-9),
+    `one parcel, one charge: ${freightOnly.netProfit} vs ${withBoth.netProfit}`);
+  assert.equal(withBoth.breakdown.absorbedShippingSupersededByFreight, true);
 });
 
-test('freight is deducted EX-GST and its GST is reclaimed at the IRD line', () => {
-  const b = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115, supplierFreight: FREIGHT });
-  const gst = 7 * (GST_RATE / (1 + GST_RATE));            // GST inside a GST-incl amount
-  assert.ok(near(b.supplierFreightInclGst, 7));
-  assert.ok(near(b.supplierFreightGst, gst));
-  assert.ok(near(b.supplierFreightExGst, 7 - gst));
-  const bare = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115 });
-  assert.ok(near(b.netProfit, bare.netProfit - (7 - gst)), 'take-home drops by the EX-GST cost');
-  assert.ok(near(b.gstRemittedToIrd, bare.gstRemittedToIrd - gst), 'the GST is an input credit');
-});
-
-test('the cash waterfall still foots to the cent with freight in it', () => {
-  const b = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115, supplierFreight: FREIGHT });
+test('the cash waterfall foots on FOUR outflows', () => {
+  const b = orderProfitFromDetail(mkOrder()).breakdown;
   const foot = b.customerPaidInclGst - b.supplierCostInclGst - b.stripeFeeInclGst
-    - b.absorbedShippingInclGst - b.supplierFreightInclGst - b.gstRemittedToIrd;
-  assert.ok(near(foot, b.netProfit), `waterfall ${foot} vs take-home ${b.netProfit}`);
+    - b.supplierFreightInclGst - b.gstRemittedToIrd;
+  assert.ok(near(foot, b.netProfit), `waterfall ${foot} ≠ take-home ${b.netProfit}`);
 });
 
-test('computeOrderProfit and the waterfall agree, as they must', () => {
-  const opts = { customerPaidInclGst: 115, supplierFreight: FREIGHT };
-  assert.ok(near(computeOrderProfit(100, 40, opts), computeProfitBreakdown(100, 40, opts).netProfit));
-});
-
-test('per-line profits still sum to take-home (ERR-118 footing invariant)', () => {
-  const opts = { customerPaidInclGst: 115, supplierFreight: FREIGHT };
-  const { lineProfits, totalProfit } = computeLineProfits(
-    [{ revenueExGst: 60, costExGst: 25 }, { revenueExGst: 40, costExGst: 15 }], opts);
-  assert.ok(near(lineProfits.reduce((s, x) => s + x, 0), totalProfit));
-  assert.ok(near(totalProfit, computeProfitBreakdown(100, 40, opts).netProfit));
-});
-
-test('freight rides alongside an absorbed courier without displacing it', () => {
-  const absorbed = { applies: true, amount_incl_gst: 12, gst_component: 1.57 };
-  const b = computeProfitBreakdown(100, 40, {
-    customerPaidInclGst: 115, absorbedShipping: absorbed, supplierFreight: FREIGHT });
-  assert.ok(near(b.absorbedShippingInclGst, 12), 'the courier row is untouched');
-  assert.ok(near(b.supplierFreightInclGst, 7));
-  const foot = b.customerPaidInclGst - b.supplierCostInclGst - b.stripeFeeInclGst
-    - b.absorbedShippingInclGst - b.supplierFreightInclGst - b.gstRemittedToIrd;
-  assert.ok(near(foot, b.netProfit));
-});
-
-test('an estimate is flagged, and a supplied figure is not', () => {
-  const est = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115, supplierFreight: FREIGHT });
-  assert.equal(est.supplierFreightEstimated, true);
-  assert.deepEqual(Array.from(est.supplierFreightSuppliers), ['Augmento']);
-  const measured = computeProfitBreakdown(100, 40, { customerPaidInclGst: 115,
-    supplierFreight: { ...FREIGHT, estimated: false } });
-  assert.equal(measured.supplierFreightEstimated, false);
-});
-
-// ─── 6. The worked example — the order that started this ────────────────────
-
-test('2026090902: take-home falls $37.09 → $31.00 and margin 31.7% → 26.5%', () => {
-  const info = orderProfitFromDetail(mkOrder(), { customerPaidInclGst: 134.49 });
+test('the worked example: 2026090902 lands at $24.92 / 21.3%', () => {
+  // Verified against the live payload 2026-09-12 and footed to the cent:
+  //   revenue ex-GST 116.95, goods ex-GST 76.00,
+  //   Stripe 134.49 × 2.65% + 0.30 = 3.86 (deducted as the 2026-05-17
+  //   convention has it — handoff §6's ÷1.15 was DECLINED by the owner
+  //   pending a real Stripe invoice; see the ERR-251 entry),
+  //   supplier freight 12.17 ex-GST.
+  //   116.95 − 76.00 − 3.86 − 12.17 = 24.92, margin 21.3%.
+  const info = orderProfitFromDetail(mkOrder());
   assert.equal(info.state, PROFIT_STATE.OK);
-  assert.equal(info.supplierFreightApplies, true);
-  assert.equal(info.supplierFreightEstimated, true);
-  assert.deepEqual(Array.from(info.supplierFreightSuppliers), ['Augmento']);
-  assert.ok(near(info.breakdown.supplierFreightInclGst, 7.00));
-  assert.ok(near(info.netProfit, 31.00, 0.01), `take-home ${info.netProfit}`);
-  assert.ok(near(info.netMarginPct, 26.5, 0.05), `margin ${info.netMarginPct}`);
-  assert.ok(near(info.breakdown.gstRemittedToIrd, 4.65, 0.01));
-  // The goods cost row is untouched — freight is its own outflow, not a
-  // markup on what we paid for the cartridges.
+  assert.ok(near(info.netProfit, 24.92), `take-home ${info.netProfit}`);
+  assert.ok(near(info.netMarginPct, 21.3, 0.05), `margin ${info.netMarginPct}`);
+  // The goods row is untouched — freight is its own outflow, not a markup on
+  // what we paid for the cartridges (ERR-219).
   assert.ok(near(info.breakdown.supplierCostInclGst, 87.40, 0.01));
 });
 
-test('the over-$100 control: 2026090701 keeps every cent of its profit', () => {
-  const before = orderProfitFromDetail(mkOrder({ items: [line('Augmento', 110, 1, 161.73)] }));
-  assert.equal(before.supplierFreightApplies, false);
-  const bare = computeProfitBreakdown(before.totalRevenueExGst, before.totalCostExGst,
-    { customerPaidInclGst: before.breakdown.customerPaidInclGst });
-  assert.ok(near(before.netProfit, bare.netProfit), 'no freight, no change');
+test('an order that owes no freight is byte-identical to the pre-change figure', () => {
+  // The over-$100 control. If this moves, freight is being charged to orders
+  // that do not owe it.
+  const info = orderProfitFromDetail(mkOrder({ supplier_freight: { applies: false } }));
+  assert.ok(near(info.netProfit, 116.95 - 76.00 - (134.49 * 0.0265 + 0.30)),
+    `no-freight take-home ${info.netProfit}`);
 });
 
-// ─── 7. Unpriced freight is a CEILING, not a blank (ERR-158) ────────────────
-
-test('an order we cannot price freight for KEEPS its take-home and says "at most"', () => {
-  const info = orderProfitFromDetail(mkOrder({ items: [line('DSNZ', 10), line(null, 20)] }));
-  assert.equal(info.state, PROFIT_STATE.OK, 'a bounded unknown must not blank a stateable figure');
-  assert.notEqual(info.netProfit, null);
-  assert.equal(info.supplierFreightUnknown, true);
-  assert.match(info.supplierFreightUnknownReason, /name no supplier/);
-  assert.equal(info.supplierFreightApplies, false, 'nothing was deducted — that is why it is a ceiling');
-});
-
-test('a missing supplier COST still refuses outright — the two are not the same fact', () => {
+test('a missing supplier COST still refuses outright — it is unbounded', () => {
+  // The distinction that ERR-241 got wrong first time. Unpriced FREIGHT is
+  // bounded and directional, so it qualifies. A missing COST is the dominant
+  // term and unbounded, so no honest number can be printed at all.
   const info = orderProfitFromDetail(mkOrder({
-    items: [{ sku: 'X', qty: 1, sell_price: 50, supplier_cost_snapshot: null, suppliers: [{ name: 'DSNZ' }] }],
+    items: [{ sku: 'X', qty: 1, sell_price: 116.95, supplier_cost_snapshot: null, suppliers: [{ name: 'Augmento' }] }],
   }));
-  assert.equal(info.state, PROFIT_STATE.UNKNOWN, 'an UNBOUNDED unknown has no honest number');
+  assert.equal(info.state, PROFIT_STATE.UNKNOWN);
   assert.equal(info.netProfit, null);
 });
 
-// ─── 8. The render wiring the math cannot see ───────────────────────────────
-
-test('the freight row sits after the courier row and before the IRD line', () => {
-  // Scope to the MODAL. 'Supplier freight' also appears far earlier, in the
-  // Orders-list cell tooltip — an unscoped indexOf compares two different rows
-  // and reports an ordering that was never in question.
-  const iCourier = ordersSrc.indexOf('Courier absorbed');
-  const iFreight = ordersSrc.indexOf('Supplier freight', iCourier);
-  const iIrd = ordersSrc.indexOf('GST remitted to IRD', iCourier);
-  assert.ok(iCourier > -1 && iFreight > -1 && iIrd > -1, 'all three rows must exist');
-  assert.ok(iCourier < iFreight && iFreight < iIrd,
-    `order must be Courier(${iCourier}) < Freight(${iFreight}) < IRD(${iIrd}) — its GST nets at the IRD line`);
+test('unpriced freight does NOT blank take-home (ERR-158)', () => {
+  const order = mkOrder();
+  delete order.supplier_freight;
+  const info = orderProfitFromDetail(order);
+  assert.equal(info.state, PROFIT_STATE.OK, 'a bounded unknown is a qualifier, not a refusal');
+  assert.ok(info.netProfit != null, 'the figure we CAN state must survive');
+  assert.equal(info.supplierFreightCeiling, true);
+  assert.equal(info.supplierFreightAbsent, true);
 });
 
-test('the freight row is guarded on it actually applying', () => {
-  assert.ok(/if\s*\(b\.supplierFreightApplies\)/.test(ordersSrc),
-    'a $0.00 freight row would imply a payment that was rounded away');
+// ─── 5. Multi-consignment — reachable, but only just ─────────────────────────
+//
+// 3 of 149 live orders. A named fixture, because a path that passes only when
+// the live sample happens to contain 2026090102 is a coin flip with a green tick.
+
+const TWO_SUPPLIERS = () => ({
+  applies: true, zone: 'north-island', delivery_type: 'urban', delivery_type_basis: 'charged',
+  parcel_weight_kg: 2.1, parcel_rate_incl_gst: 12,
+  amount_incl_gst: 19, gst_component: 2.48, amount_ex_gst: 16.52,
+  complete: true, unpriced_consignments: 0,
+  consignments: [
+    { supplier: 'Augmento', billed: true, reason: 'goods_under_free_threshold',
+      goods_cost_ex_gst: 27.07, free_threshold_ex_gst: 100, parcel_weight_kg: 0.1, amount_incl_gst: 7 },
+    { supplier: 'DSNZ', billed: true, reason: 'always_billed',
+      goods_cost_ex_gst: 70.51, free_threshold_ex_gst: null, parcel_weight_kg: 2.0, amount_incl_gst: 12 },
+  ],
 });
 
-test('the word "estimated" ships with the number, on every surface that prints it', () => {
-  assert.ok(/estimated/.test(ordersSrc), 'the modal must print the word');
-  assert.ok(/supplierFreightEstimated/.test(ordersSrc), 'and it must come from the flag, not a guess');
+test('two consignments: both suppliers are named and the total is theirs, not the parcel rate', () => {
+  const f = supplierFreightForOrder(mkOrder({ supplier_freight: TWO_SUPPLIERS() }));
+  assert.deepEqual(f.suppliers, ['Augmento', 'DSNZ']);
+  assert.ok(near(f.amount_incl_gst, 19));
+  assert.ok(near(f.parcelRateInclGst, 12),
+    'the ORDER-level parcel rate is 12 — the bill is 19 because there are two parcels');
+  assert.equal(f.consignments.length, 2);
 });
 
-test('an unpriced freight charge marks the take-home as a ceiling in the modal AND the list', () => {
-  assert.ok(/Take-home profit<\/strong>\} \$\{muted\('\(at most\)'\)\}|\(at most\)/.test(ordersSrc),
-    'the modal take-home must say "at most" when freight is unpriced');
-  assert.ok(/supplierFreightUnknown\s*\n?\s*\?\s*`<strong>Take-home profit<\/strong>/.test(ordersSrc)
-    || /profitInfo\.supplierFreightUnknown/.test(ordersSrc),
-    'the qualifier must be driven by the flag');
-  assert.ok(/ceilingMark/.test(ordersSrc),
-    'the Orders list cell needs a VISIBLE mark — nobody hovers a column they believe');
-  assert.ok(/owed, not priced/.test(ordersSrc),
-    'the modal must show a row for freight it knows is owed but cannot price');
+test('a consignment marked billed:false is not named as a biller', () => {
+  const env = TWO_SUPPLIERS();
+  env.consignments[1].billed = false;
+  env.consignments[1].reason = 'goods_at_or_over_free_threshold';
+  const f = supplierFreightForOrder(mkOrder({ supplier_freight: env }));
+  assert.deepEqual(f.suppliers, ['Augmento'], 'only the supplier that actually billed us');
 });
+
+// ─── 6. The reason vocabulary ────────────────────────────────────────────────
+
+test('every reason the backend documents has a phrase', () => {
+  for (const r of ['always_billed', 'goods_under_free_threshold', 'goods_at_or_over_free_threshold',
+    'unknown_supplier', 'unknown_supplier_terms', 'unknown_goods_cost']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(FREIGHT_REASONS, r), `${r} must have a phrase`);
+    assert.ok(freightReasonPhrase(r), `${r} must render`);
+  }
+});
+
+test('an unrecognised reason is a GAP, not an empty string', () => {
+  // A new backend reason must show up as missing, not silently render a
+  // sentence with a hole where the explanation should be.
+  assert.equal(freightReasonPhrase('some_new_rule_2027'), null);
+  assert.equal(freightReasonPhrase(undefined), null);
+});
+
+// ─── 7. Delivery provenance travels with the freight (ERR-253) ───────────────
+
+test('the delivery area and its basis survive every refusal path', () => {
+  const order = mkOrder({ supplier_freight: { applies: false, delivery_type: 'rural', delivery_type_basis: 'charged', parcel_weight_kg: 0.4 } });
+  const f = supplierFreightForOrder(order);
+  assert.equal(f.deliveryType, 'rural', 'an order we charge no freight on still has a delivery area');
+  assert.equal(f.deliveryTypeBasis, 'charged');
+  assert.equal(f.parcelWeightKg, 0.4);
+});
+
+test('a delivery area that was never recorded stays null, never "urban"', () => {
+  // ERR-235 is what happens when a guess is stored as a fact.
+  const f = supplierFreightForOrder(mkOrder({
+    delivery_type: null,
+    supplier_freight: { applies: false },
+  }));
+  assert.equal(f.deliveryType, null);
+  assert.notEqual(f.deliveryType, 'urban');
+});
+
+test('deliveryFactsForOrder prefers the order column, then the freight envelope', () => {
+  assert.equal(deliveryFactsForOrder({ delivery_type: 'rural', supplier_freight: { delivery_type: 'urban' } }).deliveryType, 'rural');
+  assert.equal(deliveryFactsForOrder({ supplier_freight: { delivery_type: 'urban', delivery_type_basis: 'assumed' } }).basis, 'assumed');
+  assert.equal(deliveryFactsForOrder({}).deliveryType, null);
+});
+
+// ─── 8. The render wiring — EXECUTED, not grepped ────────────────────────────
 
 /**
  * Execute the SHIPPED template text rather than grepping it.
  *
- * Every other assertion in this section is a source grep, and a source grep
- * cannot tell you that the row renders — only that the characters are present.
- * This lifts the real `if (b.supplierFreightApplies) { … }` block out of
- * pages/orders.js and runs it against a real breakdown with the helpers it
- * actually closes over. If someone reorders the template literal into
- * nonsense, or drops the amount, the greps stay green and this goes red.
+ * Every source grep can tell you the characters are present; only running the
+ * block tells you the row RENDERS. This lifts the real
+ * `if (b.supplierFreightApplies) { … }` out of pages/orders.js and runs it with
+ * the helpers it actually closes over.
+ *
+ * FRAGILITY, NAMED SO THE NEXT PERSON DOES NOT HAVE TO REDISCOVER IT:
+ *   • the anchor is located by REGEX, not by an exact-spacing indexOf — the
+ *     previous version broke on any reformat while the neighbouring grep test
+ *     stayed green, which is precisely backwards.
+ *   • brace matching is naive character counting with no string/comment
+ *     awareness. It works because `${…}` interpolations are balanced. A literal
+ *     `{` or `}` inside a STRING in that block would desynchronise it.
+ *   • the accumulator must stay named `profitBreakdownInner`.
+ *   • the closed-over helper set is the parameter list below. A sixth helper in
+ *     the block means a sixth parameter here.
  */
-function renderFreightRow(breakdown) {
-  const start = ordersSrc.indexOf('if (b.supplierFreightApplies) {');
-  assert.ok(start > -1, 'the freight row block must exist to be executed');
+function lift(name, startRe, endMarker) {
+  const m = startRe.exec(ordersSrc);
+  assert.ok(m, `${name}: the block must exist to be executed`);
+  const start = m.index;
   let depth = 0; let end = -1;
   for (let i = ordersSrc.indexOf('{', start); i < ordersSrc.length; i++) {
     if (ordersSrc[i] === '{') depth++;
     else if (ordersSrc[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
   }
-  assert.ok(end > start, 'the freight row block must be brace-balanced');
-  const block = ordersSrc.slice(start, end);
-  // The row now words its own provenance ("urban, recorded at checkout" vs
-  // "delivery area not recorded") through deliveryPhrase(). That is SHIPPED
-  // code in orders.js, so it is lifted out of the real file and handed in
-  // rather than stubbed — a stub here would let the phrasing drift from the
-  // thing this test claims to certify (ERR-253).
-  const phraseSrc = ordersSrc.slice(
-    ordersSrc.indexOf('const DELIVERY_BASIS_PHRASE = {'),
-    ordersSrc.indexOf('/** The modal\'s Delivery cell.'));
-  assert.ok(phraseSrc.includes('function deliveryPhrase('),
-    'deliveryPhrase must still live in orders.js between those two markers');
-  const deliveryPhrase = new Function(`${phraseSrc}; return deliveryPhrase;`)();
+  assert.ok(end > start, `${name}: the block must be brace-balanced`);
+  if (endMarker) assert.ok(ordersSrc.slice(start, end).includes(endMarker), `${name}: ${endMarker} must be inside`);
+  return ordersSrc.slice(start, end);
+}
 
-  const fn = new Function('b', 'formatPrice', 'esc', 'muted', 'pbRow', 'neg', 'deliveryPhrase', `
+/** deliveryPhrase and titleCaseZone are SHIPPED code — lift them, never stub them. */
+function liftedHelper(declRe, name) {
+  const m = declRe.exec(ordersSrc);
+  assert.ok(m, `${name} must still live in orders.js`);
+  const start = m.index;
+  let depth = 0; let end = -1;
+  for (let i = ordersSrc.indexOf('{', start); i < ordersSrc.length; i++) {
+    if (ordersSrc[i] === '{') depth++;
+    else if (ordersSrc[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  return ordersSrc.slice(start, end);
+}
+
+const DELIVERY_BASIS_PHRASE_SRC = ordersSrc.slice(
+  ordersSrc.indexOf('const DELIVERY_BASIS_PHRASE = {'),
+  ordersSrc.indexOf('/** The modal’s Delivery cell.') > -1
+    ? ordersSrc.indexOf('/** The modal’s Delivery cell.')
+    : ordersSrc.indexOf("/** The modal's Delivery cell."));
+
+function renderFreightRow(breakdown, profitInfo = {}) {
+  const block = lift('freight row', /if \(b\.supplierFreightApplies\) \{/, 'Supplier freight');
+  const phraseFns = DELIVERY_BASIS_PHRASE_SRC + '\n';
+  const titleCase = liftedHelper(/function titleCaseZone\(/, 'titleCaseZone');
+  const fn = new Function('b', 'profitInfo', 'formatPrice', 'esc', 'muted', 'pbRow', 'neg',
+    'freightReasonPhrase', `
+    ${phraseFns}
+    ${titleCase}
     let profitBreakdownInner = '';
     ${block}
     return profitBreakdownInner;
   `);
   return fn(
-    breakdown,
+    breakdown, profitInfo,
     (v) => `$${Number(v).toFixed(2)}`,
     (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' }[c])),
     (t) => `<span class="admin-text-muted">${t}</span>`,
     (label, value) => `<div class="om-meta-row"><span>${label}</span><span class="mono">${value}</span></div>`,
-    (v) => `\u2212$${Math.abs(v).toFixed(2)}`,
-    deliveryPhrase,
+    (v) => `−$${Math.abs(v).toFixed(2)}`,
+    freightReasonPhrase,
   );
 }
 
-test('the shipped freight row RENDERS the supplier, the amount and the word estimated', () => {
+test('the shipped freight row renders the supplier, the amount and the rule that fired', () => {
   const b = computeProfitBreakdown(116.95, 76.00, {
     customerPaidInclGst: 134.49,
-    supplierFreight: { applies: true, amount_incl_gst: 7, estimated: true, suppliers: ['Augmento'] },
+    supplierFreight: supplierFreightForOrder(mkOrder()),
   });
   const html = renderFreightRow(b);
   assert.match(html, /Supplier freight/, 'the row must be labelled');
   assert.match(html, /Augmento/, 'the supplier must be named — "a supplier" is not an answer');
-  assert.match(html, /\u2212\$7\.00/, 'the amount must render as a negative outflow');
-  assert.match(html, /estimated/, 'an estimate must say so ON THE ROW, not only in the tooltip');
-  assert.match(html, /title="[^"]*under \$100 ex-GST/, 'the tooltip must state the rule that fired');
+  assert.match(html, /−\$14\.00/, 'the amount must render as a negative outflow');
+  assert.match(html, /under the free-freight threshold/, 'the tooltip must state the rule that fired');
+  assert.match(html, /\$76\.00 ex-GST against \$100\.00/, 'the two numbers the rule fired on');
 });
 
-test('a backend-supplied amount renders WITHOUT the word estimated', () => {
-  // The signal that the ERR-241 brief has landed. If this row still says
-  // "estimated" once the backend sends a figure, the flag is being ignored.
+test('the row NEVER says "estimated" — that state no longer exists', () => {
   const b = computeProfitBreakdown(116.95, 76.00, {
-    customerPaidInclGst: 134.49,
-    supplierFreight: { applies: true, amount_incl_gst: 12, estimated: false, suppliers: ['Augmento'] },
+    customerPaidInclGst: 134.49, supplierFreight: supplierFreightForOrder(mkOrder()),
   });
-  const html = renderFreightRow(b);
-  assert.match(html, /\u2212\$12\.00/);
-  assert.ok(!/estimated/.test(html), 'a measured figure must not be labelled an estimate');
+  assert.ok(!/estimated/i.test(renderFreightRow(b)), 'a measured figure must not be labelled an estimate');
 });
 
 test('the row renders NOTHING when no freight applies (negative control)', () => {
-  // Proves the two tests above are exercising the guard, not the template.
+  // Proves the two tests above exercise the GUARD, not just the template.
   const b = computeProfitBreakdown(116.95, 76.00, { customerPaidInclGst: 134.49 });
   assert.equal(renderFreightRow(b), '', 'a $0.00 freight row would imply a payment we never made');
 });
 
-test('the IRD tooltip names supplier freight as a credit source only when it applies', () => {
-  assert.ok(/b\.supplierFreightApplies\s*\?\s*'supplier freight'\s*:\s*null/.test(ordersSrc));
+test('an assumed delivery area is flagged; a recovered one is not', () => {
+  const assumed = supplierFreightForOrder(mkOrder({
+    supplier_freight: { ...ENVELOPE(), delivery_type: 'urban', delivery_type_basis: 'assumed' },
+  }));
+  const exact = supplierFreightForOrder(mkOrder());
+  const bA = computeProfitBreakdown(116.95, 76.00, { customerPaidInclGst: 134.49, supplierFreight: assumed });
+  const bE = computeProfitBreakdown(116.95, 76.00, { customerPaidInclGst: 134.49, supplierFreight: exact });
+  assert.match(renderFreightRow(bA), /NOT recorded/, 'an assumption must say so');
+  assert.ok(!/NOT recorded/.test(renderFreightRow(bE)), 'a recovered area must not carry a warning');
+});
+
+test('the free-shipping fact rides in the tooltip, counted once', () => {
+  const b = computeProfitBreakdown(116.95, 76.00, {
+    customerPaidInclGst: 134.49,
+    supplierFreight: supplierFreightForOrder(mkOrder()),
+    absorbedShipping: { applies: true, amount_incl_gst: 14, gst_component: 1.83 },
+  });
+  assert.match(renderFreightRow(b), /counted here once, not twice/);
+});
+
+test('two consignments produce two tooltip lines', () => {
+  const b = computeProfitBreakdown(116.95, 76.00, {
+    customerPaidInclGst: 134.49,
+    supplierFreight: supplierFreightForOrder(mkOrder({ supplier_freight: TWO_SUPPLIERS() })),
+  });
+  const html = renderFreightRow(b);
+  assert.match(html, /Augmento/);
+  assert.match(html, /DSNZ/);
+  assert.match(html, /billed on every purchase order/, 'DSNZ’s rule');
+});
+
+// ─── 9. Surface wiring — source pins with the contract named ─────────────────
+
+test('the "(at most)" qualifier and the ≤ mark key off ONE ceiling gate', () => {
+  assert.ok(/profitInfo\.supplierFreightCeiling\s*\n?\s*\?\s*`<strong>Take-home profit<\/strong>/.test(ordersSrc),
+    'take-home must say "(at most)" on supplierFreightCeiling, not on one of its two causes');
+  assert.ok(/const ceilingMark = info\.supplierFreightCeiling/.test(ordersSrc),
+    'the list cell’s ≤ mark must use the same gate');
+});
+
+test('the IRD credit list no longer names the courier', () => {
+  assert.ok(!/\?\s*'courier'\s*:\s*null/.test(ordersSrc),
+    'crediting GST we no longer deduct would promise a credit the arithmetic does not take');
+  assert.ok(/b\.supplierFreightApplies \? 'supplier freight' : null/.test(ordersSrc));
+});
+
+test('the profit engine deducts freight and NOT the absorbed courier', () => {
+  assert.ok(/netProfit = rev - costExGst - stripeFeeExGst - supplierFreightExGst;/.test(profitabilitySrc),
+    'netProfit must have exactly four terms');
+  assert.ok(/gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - supplierFreightGst;/.test(profitabilitySrc),
+    'the IRD line must not credit the absorbed courier');
+});
+
+test('the page does no freight maths of its own', () => {
+  // The engine owns the arithmetic; the page renders it. A rate or a threshold
+  // appearing here means the derivation grew back somewhere new.
+  assert.ok(!/supplierFreightForOrder/.test(ordersSrc), 'orders.js must not resolve freight itself');
+  assert.ok(!/\b(0\.15\s*\/\s*1\.15|free_threshold_ex_gst\s*[<>])/.test(ordersSrc),
+    'no GST extraction or threshold comparison in the page');
 });
 
 test('the whole thing stays owner-only', () => {
-  // Freight is derived from supplier costs, the figure ERR-170 was logged for leaking.
-  assert.ok(/const\s+showCost\s*=\s*AdminAuth\.isOwner\(\)/.test(ordersSrc));
-  assert.ok(/if\s*\(showCost\)\s*orderProfitBreakdown\s*=\s*profitInfo\.breakdown/.test(ordersSrc));
-});
-
-test('pages/orders.js still does no money maths of its own', () => {
-  assert.ok(!/computeProfitBreakdown\(/.test(ordersSrc),
-    'the page renders what the engine returns — it must never compute');
-  assert.ok(!/supplierFreightForOrder\(/.test(ordersSrc),
-    'the freight decision belongs to utils/supplier-freight.js, called via order-profit.js');
+  assert.ok(/OWNER_ONLY_COLUMNS = new Set\(\['_profit', '_supplier', '_supplier_cost'\]\)/.test(ordersSrc));
+  assert.ok(/const showCost = AdminAuth\.isOwner\(\)/.test(ordersSrc));
 });

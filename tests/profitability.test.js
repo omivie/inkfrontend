@@ -267,12 +267,32 @@ test('computeProfitBreakdown: zero/negative/NaN revenue returns null', () => {
   assert.equal(sandbox.computeProfitBreakdown(NaN, 100), null);
 });
 
-// ─── Absorbed courier on free-shipping orders (order.shipping_absorbed) ──────
+// ─── Supplier freight, and the absorbed courier it SUPERSEDES (ERR-241/251) ──
+//
+// 🚨 THE ABSORBED COURIER NO LONGER REDUCES TAKE-HOME, AND THIS SECTION EXISTS
+// TO STOP SOMEONE PUTTING IT BACK.
+//
+// It used to. `shipping_absorbed` was deducted alongside `supplier_freight`, and
+// that double-charged one parcel: `shipping_absorbed` is the outbound parcel
+// RATE, and `supplier_freight` prices the same parcel(s) off the same ladder.
+//
+// Measured over 115 live order-samples (70 on 2026-09-10, 45 on 09-12): there is
+// NOT ONE order where `shipping_absorbed` applies and `supplier_freight` does
+// not, and where both apply the amounts are identical on 39 of 41. The two
+// exceptions are the same order both times — 2026090102, two suppliers, where
+// absorbed is ONE parcel rate ($7) and freight is TWO consignments ($14). So
+// absorbed is a strict SUBSET of freight.
+//
+// The backend's own identity agrees and has no absorbed-courier term:
+//     gross_profit − net_profit = stripe_fees + operating_expenses + supplier_freight
+// Live RPC 2026-09-10: 2210.76 − (−56.06) = 2266.82 = 170.68 + 1593.50 + 502.64.
+//
+// The amounts are still PARSED and RETURNED — the zone, the delivery type and
+// the figure are worth saying on screen. They are simply no longer arithmetic.
 //
 // Fixture: order 20260723000001 from the backend hand-off. Genuine Kyocera toner,
 // free ship, North Island. Customer paid $138.79 incl-GST, supplier $99.15 incl,
-// Stripe $4.57 incl. Take-home was reported $30.49 / 25.3%; ~$12 courier was
-// absorbed and never subtracted → true take-home $20.06 / 16.6%.
+// Stripe $4.57 incl.
 //   rev ex-GST  = 138.79 / 1.15 = 120.687
 //   cost ex-GST =  99.15 / 1.15 =  86.217
 const ABSORBED_REV = 138.79 / 1.15;
@@ -281,105 +301,129 @@ const ABSORBED_APPLIES = {
   applies: true, basis: 'zone_rate', zone: 'north-island', delivery_type: 'urban',
   parcel_weight_kg: 2.0, amount_incl_gst: 12.00, gst_component: 1.57, amount_ex_gst: 10.43,
 };
+/** The backend envelope, as utils/supplier-freight.js normalises it. */
+const FREIGHT_APPLIES = {
+  applies: true, amount_incl_gst: 12.00, gst_component: 1.57, amount_ex_gst: 10.43,
+  complete: true, unpricedConsignments: 0, suppliers: ['DSNZ'],
+  consignments: [{ supplier: 'DSNZ', billed: true, reason: 'always_billed', amount_incl_gst: 12.00 }],
+  zone: 'north-island', deliveryType: 'urban', deliveryTypeBasis: 'charged', parcelWeightKg: 2.0,
+};
 
-test('computeProfitBreakdown: absorbed courier drops take-home $30.49 → $20.06 (doc worked example)', () => {
-  const before = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
-  assert.ok(Math.abs(before.netProfit - 30.49) < 0.02, `before netProfit: ${before.netProfit}`);
-  assert.ok(Math.abs(before.gstRemittedToIrd - 4.57) < 0.02, `before gstRemitted: ${before.gstRemittedToIrd}`);
-
-  const b = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
+test('🚨 the absorbed courier is PARSED but does NOT move take-home (the double-charge fix)', () => {
+  const without = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
+  const withAbsorbed = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
     customerPaidInclGst: 138.79, absorbedShipping: ABSORBED_APPLIES,
   });
-  assert.equal(b.absorbedShippingApplies, true);
-  assert.ok(Math.abs(b.absorbedShippingInclGst - 12.00) < 1e-9, `courier incl: ${b.absorbedShippingInclGst}`);
-  assert.ok(Math.abs(b.absorbedShippingGst - 1.57) < 1e-9, `courier gst: ${b.absorbedShippingGst}`);
-  assert.ok(Math.abs(b.absorbedShippingExGst - 10.43) < 1e-9, `courier ex: ${b.absorbedShippingExGst}`);
-  assert.ok(Math.abs(b.netProfit - 20.06) < 0.02, `after netProfit: ${b.netProfit}`);
-  assert.ok(Math.abs(b.gstRemittedToIrd - 3.00) < 0.02, `after gstRemitted: ${b.gstRemittedToIrd}`);
-  assert.ok(Math.abs(b.netMarginPct - 16.6) < 0.2, `after net margin: ${b.netMarginPct}`);
-  // Metadata carried through for the tooltip.
-  assert.equal(b.absorbedShippingZone, 'north-island');
-  assert.equal(b.absorbedShippingDeliveryType, 'urban');
+  // Positive control: the fixture really does carry a courier cost, so an
+  // assertion that "nothing moved" cannot pass by the input being empty.
+  assert.equal(withAbsorbed.absorbedShippingApplies, true, 'positive control: the courier block must be live');
+  assert.ok(Math.abs(withAbsorbed.absorbedShippingInclGst - 12.00) < 1e-9);
+  assert.ok(Math.abs(withAbsorbed.absorbedShippingGst - 1.57) < 1e-9);
+  assert.ok(Math.abs(withAbsorbed.absorbedShippingExGst - 10.43) < 1e-9);
+  // ...and yet neither the profit nor the GST line moves.
+  assert.ok(Math.abs(withAbsorbed.netProfit - without.netProfit) < 1e-9,
+    `absorbed courier moved take-home ${without.netProfit} → ${withAbsorbed.netProfit}; it must not`);
+  assert.ok(Math.abs(withAbsorbed.gstRemittedToIrd - without.gstRemittedToIrd) < 1e-9,
+    'the absorbed courier GST must not be credited at the IRD line any more');
+  // The reason is in the RETURN VALUE, not only in a comment.
+  assert.equal(withAbsorbed.absorbedShippingSupersededByFreight, true);
 });
 
-test('computeProfitBreakdown: cash waterfall still foots with the absorbed-courier line', () => {
+test('supplier freight DOES drop take-home, by its ex-GST amount', () => {
+  const without = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
   const b = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
-    customerPaidInclGst: 138.79, absorbedShipping: ABSORBED_APPLIES,
+    customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES,
   });
-  const footed = b.customerPaidInclGst - b.supplierCostInclGst - b.stripeFeeInclGst
-    - b.absorbedShippingInclGst - b.gstRemittedToIrd;
-  assert.ok(Math.abs(footed - b.netProfit) < 1e-9, `waterfall ${footed} ≠ take-home ${b.netProfit}`);
-  // Take-home drops by exactly amount_ex_gst vs. the no-courier breakdown.
-  const noCourier = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
-  assert.ok(Math.abs((noCourier.netProfit - b.netProfit) - b.absorbedShippingExGst) < 1e-9,
-    `drop ${noCourier.netProfit - b.netProfit} ≠ exGst ${b.absorbedShippingExGst}`);
-  // ...and IRD drops by exactly the courier GST component.
-  assert.ok(Math.abs((noCourier.gstRemittedToIrd - b.gstRemittedToIrd) - b.absorbedShippingGst) < 1e-9);
+  assert.equal(b.supplierFreightApplies, true);
+  assert.ok(Math.abs(b.supplierFreightInclGst - 12.00) < 1e-9);
+  assert.ok(Math.abs(b.supplierFreightGst - 1.57) < 1e-9);
+  assert.ok(Math.abs(b.supplierFreightExGst - 10.43) < 1e-9);
+  assert.ok(Math.abs(b.netProfit - (without.netProfit - 10.43)) < 1e-9,
+    `freight must subtract its ex-GST amount: ${without.netProfit} → ${b.netProfit}`);
+  assert.ok(Math.abs(b.gstRemittedToIrd - (without.gstRemittedToIrd - 1.57)) < 1e-9,
+    'freight GST is a reclaimable input credit and nets at the IRD line');
 });
 
-test('computeProfitBreakdown: { applies:false } and absent absorbedShipping leave the breakdown unchanged', () => {
+test('🚨 BOTH present charges ONCE — the exact shape that was double-charging', () => {
+  // 24 of 70 live orders carry both blocks. Before ERR-251 this order lost
+  // $20.86 of take-home for one $12 parcel.
+  const freightOnly = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
+    customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES,
+  });
+  const both = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
+    customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES, absorbedShipping: ABSORBED_APPLIES,
+  });
+  assert.equal(both.absorbedShippingApplies, true, 'positive control: both blocks must really be present');
+  assert.equal(both.supplierFreightApplies, true);
+  assert.ok(Math.abs(both.netProfit - freightOnly.netProfit) < 1e-9,
+    `one parcel, one charge: ${freightOnly.netProfit} vs ${both.netProfit}`);
+});
+
+test('cash waterfall foots with freight in it — FOUR outflows, not five', () => {
+  const b = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
+    customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES, absorbedShipping: ABSORBED_APPLIES,
+  });
+  // paid − supplier − stripe − freight − GST-to-IRD === take-home.
+  // The absorbed courier is deliberately NOT a term: adding it here would be
+  // the bug, and this expression is the reason it cannot come back unnoticed.
+  const foot = b.customerPaidInclGst - b.supplierCostInclGst - b.stripeFeeInclGst
+    - b.supplierFreightInclGst - b.gstRemittedToIrd;
+  assert.ok(Math.abs(foot - b.netProfit) < 0.005, `waterfall ${foot} ≠ take-home ${b.netProfit}`);
+});
+
+test('computeProfitBreakdown: { applies:false } and absent supplierFreight leave the breakdown unchanged', () => {
   const base = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
   for (const opts of [
     { customerPaidInclGst: 138.79 },
-    { customerPaidInclGst: 138.79, absorbedShipping: { applies: false } },
-    { customerPaidInclGst: 138.79, absorbedShipping: null },
-    { customerPaidInclGst: 138.79, absorbedShipping: { applies: true, amount_incl_gst: 0 } },
-    { customerPaidInclGst: 138.79, absorbedShipping: { applies: true } }, // no amount
+    { customerPaidInclGst: 138.79, supplierFreight: null },
+    { customerPaidInclGst: 138.79, supplierFreight: { applies: false } },
+    { customerPaidInclGst: 138.79, supplierFreight: { applies: true, amount_incl_gst: 0 } },
   ]) {
     const b = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, opts);
-    assert.equal(b.absorbedShippingApplies, false, `applies should be false for ${JSON.stringify(opts.absorbedShipping)}`);
-    assert.equal(b.absorbedShippingInclGst, 0);
-    assert.equal(b.absorbedShippingGst, 0);
-    assert.equal(b.absorbedShippingExGst, 0);
-    assert.ok(Math.abs(b.netProfit - base.netProfit) < 1e-9, `netProfit drifted: ${b.netProfit}`);
-    assert.ok(Math.abs(b.gstRemittedToIrd - base.gstRemittedToIrd) < 1e-9);
+    assert.equal(b.supplierFreightApplies, false, JSON.stringify(opts));
+    assert.equal(b.supplierFreightInclGst, 0);
+    assert.ok(Math.abs(b.netProfit - base.netProfit) < 1e-9, `netProfit moved for ${JSON.stringify(opts)}`);
   }
 });
 
-test('computeProfitBreakdown: gst_component absent → derived as incl × 3/23, still foots', () => {
+test('supplier freight: gst_component absent → derived as incl × 3/23, still foots', () => {
   const b = sandbox.computeProfitBreakdown(ABSORBED_REV, ABSORBED_COST, {
     customerPaidInclGst: 138.79,
-    absorbedShipping: { applies: true, zone: 'north-island', amount_incl_gst: 12.00 }, // no gst_component
+    supplierFreight: { applies: true, amount_incl_gst: 12.00 },   // no gst_component
   });
-  // 12.00 × 0.15/1.15 = 1.5652...
-  assert.ok(Math.abs(b.absorbedShippingGst - (12.00 * 0.15 / 1.15)) < 1e-9, `derived gst: ${b.absorbedShippingGst}`);
-  assert.ok(Math.abs(b.absorbedShippingExGst - (12.00 - 12.00 * 0.15 / 1.15)) < 1e-9);
-  const footed = b.customerPaidInclGst - b.supplierCostInclGst - b.stripeFeeInclGst
-    - b.absorbedShippingInclGst - b.gstRemittedToIrd;
-  assert.ok(Math.abs(footed - b.netProfit) < 1e-9, `waterfall ${footed} ≠ take-home ${b.netProfit}`);
+  assert.ok(Math.abs(b.supplierFreightGst - 12.00 * (0.15 / 1.15)) < 1e-9, `derived gst: ${b.supplierFreightGst}`);
+  assert.ok(Math.abs(b.supplierFreightExGst - (12.00 - b.supplierFreightGst)) < 1e-9);
+  const foot = b.customerPaidInclGst - b.supplierCostInclGst - b.stripeFeeInclGst
+    - b.supplierFreightInclGst - b.gstRemittedToIrd;
+  assert.ok(Math.abs(foot - b.netProfit) < 0.005, `waterfall ${foot} ≠ take-home ${b.netProfit}`);
 });
 
-test('computeOrderProfit: absorbed courier subtracts amount_ex_gst (and is a no-op when absent)', () => {
-  const base = sandbox.computeOrderProfit(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
-  const withCourier = sandbox.computeOrderProfit(ABSORBED_REV, ABSORBED_COST, {
+test('computeOrderProfit: freight subtracts amount_ex_gst; absorbed courier subtracts NOTHING', () => {
+  const bare = sandbox.computeOrderProfit(ABSORBED_REV, ABSORBED_COST, { customerPaidInclGst: 138.79 });
+  const withFreight = sandbox.computeOrderProfit(ABSORBED_REV, ABSORBED_COST, {
+    customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES,
+  });
+  const withAbsorbed = sandbox.computeOrderProfit(ABSORBED_REV, ABSORBED_COST, {
     customerPaidInclGst: 138.79, absorbedShipping: ABSORBED_APPLIES,
   });
-  assert.ok(Math.abs((base - withCourier) - 10.43) < 1e-9, `drop ${base - withCourier} ≠ 10.43`);
-  const noop = sandbox.computeOrderProfit(ABSORBED_REV, ABSORBED_COST, {
-    customerPaidInclGst: 138.79, absorbedShipping: { applies: false },
-  });
-  assert.ok(Math.abs(noop - base) < 1e-9, 'applies:false must not change profit');
+  assert.ok(Math.abs(withFreight - (bare - 10.43)) < 1e-9, `freight: ${bare} → ${withFreight}`);
+  assert.ok(Math.abs(withAbsorbed - bare) < 1e-9, `absorbed must be a no-op: ${bare} → ${withAbsorbed}`);
 });
 
-test('computeLineProfits: absorbed courier drops the total and is allocated by revenue share', () => {
-  // Two lines, 3:1 revenue split, on a free-shipped order that absorbed courier.
+test('computeLineProfits: freight drops the total and is allocated by revenue share', () => {
   const lines = [
-    { revenueExGst: 90, costExGst: 60 },
-    { revenueExGst: 30, costExGst: 20 },
+    { revenueExGst: 80, costExGst: 40 },
+    { revenueExGst: 40.687, costExGst: 46.217 },
   ];
-  const opts = { customerPaidInclGst: 138.00, absorbedShipping: ABSORBED_APPLIES };
-  const withCourier = sandbox.computeLineProfits(lines, opts);
-  const noCourier = sandbox.computeLineProfits(lines, { customerPaidInclGst: 138.00 });
-  // Total drops by the ex-GST courier cost.
-  assert.ok(Math.abs((noCourier.totalProfit - withCourier.totalProfit) - 10.43) < 1e-9,
-    `total drop ${noCourier.totalProfit - withCourier.totalProfit} ≠ 10.43`);
-  // Σ lines === total, exactly.
-  const summed = withCourier.lineProfits.reduce((a, b) => a + b, 0);
-  assert.ok(Math.abs(summed - withCourier.totalProfit) < 1e-9, `Σ ${summed} ≠ total ${withCourier.totalProfit}`);
-  // The bigger line absorbs 3× the courier slice of the smaller line.
-  const dropBig = noCourier.lineProfits[0] - withCourier.lineProfits[0];
-  const dropSmall = noCourier.lineProfits[1] - withCourier.lineProfits[1];
-  assert.ok(Math.abs(dropBig / dropSmall - 3) < 1e-9, `allocation ratio ${dropBig / dropSmall} ≠ 3`);
+  const bare = sandbox.computeLineProfits(lines, { customerPaidInclGst: 138.79 });
+  const withFreight = sandbox.computeLineProfits(lines, {
+    customerPaidInclGst: 138.79, supplierFreight: FREIGHT_APPLIES,
+  });
+  assert.ok(Math.abs(withFreight.totalProfit - (bare.totalProfit - 10.43)) < 1e-9);
+  // Σ lineProfits === totalProfit still holds: the new deduction rides in the
+  // order-level fee (revenue − cost − profit) and allocates itself.
+  const sum = withFreight.lineProfits.reduce((a, v) => a + v, 0);
+  assert.ok(Math.abs(sum - withFreight.totalProfit) < 1e-9, `Σ lines ${sum} ≠ total ${withFreight.totalProfit}`);
 });
 
 // ─── orderDiscountParts — order-level discount, GST-inclusive (ERR-168) ──────

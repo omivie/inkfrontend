@@ -190,15 +190,32 @@ test('isInvoiceOrder honours channel > payment_method > INV- prefix', () => {
   assert.equal(isInvoiceOrder({ order_number: '20260728000001', payment_method: 'stripe' }), false);
 });
 
-test('absorbed courier on a free-shipping order reduces take-home by its ex-GST cost', () => {
+test('🚨 absorbed courier does NOT reduce take-home — supplier freight does (ERR-251)', () => {
+  // INVERTED 2026-09-12. The absorbed courier and the supplier freight are the
+  // same parcel off the same ladder, and deducting both double-charged it on
+  // 24 of 70 live orders. `absorbedApplies` still reports the fact for the UI;
+  // it is simply no longer arithmetic.
   const base = orderProfitFromDetail(fullyCosted());
   const absorbed = orderProfitFromDetail({
     ...fullyCosted(),
     shipping_absorbed: { applies: true, amount_incl_gst: 12, zone: 'north-island' },
   });
-  assert.equal(absorbed.absorbedApplies, true);
+  assert.equal(absorbed.absorbedApplies, true, 'positive control: the block must really be live');
+  near(absorbed.netProfit, base.netProfit, 1e-9);
+
+  // ...and the thing that DOES move it, on the same fixture, so this file
+  // cannot pass just because nothing is ever deducted.
+  const freighted = orderProfitFromDetail({
+    ...fullyCosted(),
+    supplier_freight: {
+      applies: true, amount_incl_gst: 12, gst_component: 12 * 0.15 / 1.15,
+      complete: true, unpriced_consignments: 0,
+      consignments: [{ supplier: 'DSNZ', billed: true, reason: 'always_billed', amount_incl_gst: 12 }],
+    },
+  });
+  assert.equal(freighted.supplierFreightApplies, true);
   const exGst = 12 - (12 * 0.15 / 1.15);         // GST inside a GST-inclusive amount
-  near(absorbed.netProfit, base.netProfit - exGst, 1e-9);
+  near(freighted.netProfit, base.netProfit - exGst, 1e-9);
 });
 
 test('shipping_absorbed with applies:false costs nothing (LOUD-by-absence)', () => {

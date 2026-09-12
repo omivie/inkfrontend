@@ -61,21 +61,49 @@ test('computeLineProfits and computeProfitBreakdown both receive feeOpts (not a 
 
 // ─── 2. The Courier absorbed row — guarded, and correctly positioned ─────────
 
-test('a "Courier absorbed (free shipping)" row is emitted, guarded on it applying', () => {
-  assert.ok(/if\s*\(\s*b\.absorbedShippingApplies\s*\)/.test(ordersSrc),
-    'courier row must be guarded on b.absorbedShippingApplies');
-  assert.ok(/Courier absorbed/.test(ordersSrc), 'row label must read "Courier absorbed"');
-  assert.ok(/neg\(b\.absorbedShippingInclGst\)/.test(ordersSrc),
-    'courier row value must be the negated incl-GST amount');
+test('🚨 the "Courier absorbed" ROW IS GONE, and nothing deducts it (ERR-251)', () => {
+  // THIS TEST WAS INVERTED ON 2026-09-12, DELIBERATELY. It used to require the
+  // row. The row was double-charging: `shipping_absorbed` is the outbound parcel
+  // RATE and `supplier_freight` prices the same parcel off the same ladder.
+  // Measured over 115 live order-samples — no order where absorbed applies and
+  // freight does not; amounts identical on 39 of 41, the exceptions being one
+  // two-supplier order where absorbed is ONE rate and freight is TWO.
+  //
+  // With no deduction behind it a row here cannot foot, so it goes. The FACT it
+  // carried moved into the freight row's tooltip, which is pinned below.
+  assert.ok(!/if\s*\(\s*b\.absorbedShippingApplies\s*\)/.test(ordersSrc),
+    'there must be no row guarded on b.absorbedShippingApplies any more');
+  assert.ok(!/neg\(b\.absorbedShippingInclGst\)/.test(ordersSrc),
+    'the absorbed courier must not be rendered as an outflow');
+  assert.ok(!/Courier absorbed/.test(ordersSrc),
+    'the "Courier absorbed" label must be gone from the waterfall');
 });
 
-test('the courier row sits AFTER "Paid to Stripe" and BEFORE "GST remitted to IRD"', () => {
-  const iStripe = ordersSrc.indexOf('Paid to Stripe');
-  const iCourier = ordersSrc.indexOf('Courier absorbed');
-  const iIrd = ordersSrc.indexOf('GST remitted to IRD');
-  assert.ok(iStripe > -1 && iCourier > -1 && iIrd > -1, 'all three rows must exist');
-  assert.ok(iStripe < iCourier && iCourier < iIrd,
-    `order must be Stripe(${iStripe}) < Courier(${iCourier}) < IRD(${iIrd})`);
+test('the free-shipping FACT survives in the freight tooltip, not as a row', () => {
+  // Present→absent is not an upgrade (ERR-158). Deleting the deduction must not
+  // delete the information: on a free-shipping order the owner still needs to
+  // know the customer paid $0 and that it is counted once.
+  assert.ok(/absorbedShippingSupersededByFreight/.test(ordersSrc),
+    'the freight tooltip must read the superseded flag');
+  assert.ok(/counted here once, not twice/.test(ordersSrc),
+    'the tooltip must say the parcel is charged once');
+  const engineSrc = fs.readFileSync(path.join(ADMIN, 'utils', 'profitability.js'), 'utf8');
+  assert.ok(/absorbedShippingSupersededByFreight/.test(engineSrc),
+    'the engine must publish the flag, not leave the reason in a comment');
+});
+
+test('the supplier-freight row sits AFTER "Paid to Stripe" and BEFORE "GST remitted to IRD"', () => {
+  // Anchor on the modal ROW, not on the bare words: "Supplier freight" also
+  // appears in the Orders-LIST tooltip, which sits earlier in the file, so a
+  // plain indexOf would compare the wrong two positions and pass or fail for a
+  // reason that has nothing to do with row order.
+  const iStripe = ordersSrc.indexOf('Paid to Stripe ');
+  const iFreight = ordersSrc.indexOf('>Supplier freight ');
+  const iIrd = ordersSrc.indexOf('GST remitted to IRD ');
+  assert.ok(iStripe > -1 && iFreight > -1 && iIrd > -1,
+    `all three rows must exist — Stripe ${iStripe}, Freight ${iFreight}, IRD ${iIrd}`);
+  assert.ok(iStripe < iFreight && iFreight < iIrd,
+    `order must be Stripe(${iStripe}) < Freight(${iFreight}) < IRD(${iIrd})`);
 });
 
 test('the IRD-credit tooltip names the courier as a credit source when absorbed applies', () => {
@@ -83,8 +111,11 @@ test('the IRD-credit tooltip names the courier as a credit source when absorbed 
   // (supplier freight). A fixed pair of strings cannot express four states, so
   // the pin follows the code to a filtered list — the CONTRACT is unchanged:
   // a credit source is named if and only if it actually applied.
-  assert.ok(/b\.absorbedShippingApplies\s*\?\s*'courier'\s*:\s*null/.test(ordersSrc),
-    'IRD tooltip must name the courier only when absorbed applies');
+  // 'courier' is NO LONGER a credit source: its cost is no longer deducted, so
+  // its GST is no longer reclaimed here. Naming it would promise a credit the
+  // arithmetic does not take (ERR-251).
+  assert.ok(!/\?\s*'courier'\s*:\s*null/.test(ordersSrc),
+    'the IRD tooltip must not name the courier as a credit source any more');
   assert.ok(/b\.supplierFreightApplies\s*\?\s*'supplier freight'\s*:\s*null/.test(ordersSrc),
     'IRD tooltip must name supplier freight only when it applies');
   assert.ok(/\.filter\(Boolean\)/.test(ordersSrc),
@@ -97,8 +128,10 @@ test('supplierFreight rides on BOTH feeOpts branches, like absorbedShipping', ()
   // sale — and invoiced sales are the ones with no card fee to mask the gap.
   assert.ok(/isInvoice\s*\n?\s*\?[\s\S]{0,200}?supplierFreight[\s\S]{0,200}?:\s*\{[\s\S]{0,160}?supplierFreight/.test(profitSrc),
     'both feeOpts branches must include supplierFreight');
-  assert.ok(/const\s+supplierFreight\s*=\s*supplierFreightForOrder\(order,\s*sourcing\)/.test(profitSrc),
-    'supplierFreight must come from the rules module, not be assembled inline');
+  // Takes the ORDER and nothing else since ERR-251 — the per-supplier cost
+  // roll-up was an input to a threshold WE applied, and the backend applies it.
+  assert.ok(/const\s+supplierFreight\s*=\s*supplierFreightForOrder\(order\)/.test(profitSrc),
+    'supplierFreight must come from the freight module, not be assembled inline');
 });
 
 // ─── 3. Owner-only gating is preserved ───────────────────────────────────────

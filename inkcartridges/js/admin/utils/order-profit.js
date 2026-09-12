@@ -68,8 +68,7 @@
  */
 
 import { computeLineProfits, computeProfitBreakdown, orderDiscountParts, NO_PAYMENT_FEES } from './profitability.js';
-import { orderSupplierCostFromDetail } from './sourcing.js';
-import { supplierFreightForOrder } from './supplier-freight.js';
+import { supplierFreightForOrder, freightCeilingReason } from './supplier-freight.js';
 
 export const PROFIT_STATE = {
   OK: 'ok',
@@ -176,10 +175,26 @@ function result(state, extra = {}) {
     // the money itself lives on `breakdown`, and an order can be
     // supplierFreightUnknown while having no breakdown at all.
     supplierFreightApplies: false,
-    supplierFreightEstimated: false,
     supplierFreightUnknown: false,
     supplierFreightUnknownReason: null,
     supplierFreightSuppliers: [],
+    // ONE ceiling gate, two causes (ERR-251): freight we could not state at all,
+    // and a freight total the backend reports as incomplete. Both mean take-home
+    // is an upper bound; no surface should have to remember which is which.
+    supplierFreightCeiling: false,
+    supplierFreightCeilingReason: null,
+    supplierFreightComplete: true,
+    supplierFreightUnpricedConsignments: 0,
+    // ABSENT is not {applies:false}. The profit UI is owner-gated, so a missing
+    // envelope here means a stale payload or a backend regression, never "this
+    // viewer may not see it" — and never $0.
+    supplierFreightAbsent: false,
+    supplierFreightConsignments: [],
+    supplierFreightZone: null,
+    supplierFreightParcelRateInclGst: null,
+    deliveryType: null,
+    deliveryTypeBasis: null,
+    parcelWeightKg: null,
     // Order-level discount (ERR-168). `grossRevenueExGst` is the raw line sum —
     // kept so a surface can show WHY revenue is lower than the prices above it
     // without re-summing the items itself. `discountApplies` is the gate every
@@ -331,12 +346,12 @@ export function orderProfitFromDetail(order, opts = {}) {
   // order sits on both sides of them routinely — which is why this is decided
   // from a per-supplier cost roll-up rather than from the order total.
   //
-  // `orderSupplierCostFromDetail` is called rather than re-walking the items
-  // above: per-supplier attribution written twice is per-supplier attribution
-  // that drifts. It is a cost-side reader and cannot inherit this function's
-  // revenue-side refusals (ERR-182), which is exactly what is wanted here.
-  const sourcing = orderSupplierCostFromDetail(order);
-  const supplierFreight = supplierFreightForOrder(order, sourcing);
+  // It takes the ORDER and nothing else now. It used to be handed a per-supplier
+  // cost roll-up because it applied the $100 threshold itself; the backend does
+  // that, so the roll-up is no longer an input to a freight decision. The
+  // Supplier-cost column still uses `orderSupplierCostFromDetail` — that is a
+  // different question (what did the goods cost) with a different answer.
+  const supplierFreight = supplierFreightForOrder(order);
 
   // An invoiced sale is settled by bank transfer — there is no card processor, so
   // NO fee. Charging it Stripe's 2.65% + $0.30 invents a payment it never made.
@@ -359,10 +374,23 @@ export function orderProfitFromDetail(order, opts = {}) {
     isInvoice,
     absorbedApplies,
     supplierFreightApplies: supplierFreight.applies === true,
-    supplierFreightEstimated: supplierFreight.applies === true && supplierFreight.estimated === true,
     supplierFreightUnknown: supplierFreight.unknown === true,
     supplierFreightUnknownReason: supplierFreight.unknown === true ? supplierFreight.unknownReason : null,
     supplierFreightSuppliers: Array.isArray(supplierFreight.suppliers) ? supplierFreight.suppliers.slice() : [],
+    supplierFreightCeiling: freightCeilingReason(supplierFreight) != null,
+    supplierFreightCeilingReason: freightCeilingReason(supplierFreight),
+    supplierFreightComplete: supplierFreight.complete !== false,
+    supplierFreightUnpricedConsignments: Number(supplierFreight.unpricedConsignments) || 0,
+    supplierFreightAbsent: supplierFreight.absent === true,
+    supplierFreightConsignments: Array.isArray(supplierFreight.consignments)
+      ? supplierFreight.consignments.slice() : [],
+    supplierFreightZone: supplierFreight.zone ?? null,
+    supplierFreightParcelRateInclGst: supplierFreight.parcelRateInclGst ?? null,
+    // The order's delivery area travels with the profit info so the modal never
+    // has to re-derive it from an address (ERR-253). Null means NOT RECORDED.
+    deliveryType: supplierFreight.deliveryType ?? null,
+    deliveryTypeBasis: supplierFreight.deliveryTypeBasis ?? null,
+    parcelWeightKg: supplierFreight.parcelWeightKg ?? null,
     grossRevenueExGst,
     orderDiscountInclGst: discount.inclGst,
     orderDiscountExGst: discount.exGst,

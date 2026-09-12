@@ -144,7 +144,15 @@ const LIVE_CURRENT = {
   stripe_fees: 178.65,
   operating_expenses: 1071.69,
   net_profit: 340.86,
+  // NOTE ON VINTAGE: this is a real kpi-summary capture from JULY 2026, before
+  // `supplier_freight` existed, so the field is deliberately absent and
+  // 1591.20 − 178.65 − 1071.69 === 340.86 still balances on three terms. Tests
+  // that exercise the SCALAR rebuild path must add it explicitly (ERR-251) —
+  // absent freight now refuses that path rather than treating it as $0.
 };
+
+/** The July fixture plus the fourth term, for tests of the scalar rebuild. */
+const LIVE_CURRENT_WITH_FREIGHT = { ...LIVE_CURRENT, supplier_freight: 0 };
 
 /** A bucketed net_profit_series in the live row shape. */
 const mkNet = (rows) => rows.map(([bucket_start, net_profit, stripe_fees, operating_expenses]) =>
@@ -396,18 +404,19 @@ test('self-disables COMPLETELY on the healthy live payload', () => {
 test('real gross + NULL net now recovers net (the hole this upgrade closes)', () => {
   // Previously the function bailed on line 1 whenever gross_profit was present, blanking
   // the Net tile even with a complete net_profit_series in the same bundle.
-  const cur = { ...LIVE_CURRENT, net_profit: null };
+  const cur = { ...LIVE_CURRENT_WITH_FREIGHT, net_profit: null };
   const r = recoverProfitFromSeries(cur, GROSS_SERIES, NET_SERIES);
   assert.ok(r, 'must recover');
   assert.equal(r.grossRebuilt, false, 'gross was real — do not claim it was rebuilt');
   assert.equal(r.netRebuilt, true);
-  assert.equal(round(r.net), round(1591.20 - 178.65 - 1071.69));
+  // Four terms since ERR-251: gross − stripe_fees − operating_expenses − supplier_freight.
+  assert.equal(round(r.net), round(1591.20 - 178.65 - 1071.69 - cur.supplier_freight));
   assert.equal(round(r.net), 340.86);
 });
 
 test('net PREFERS the range-exact scalars over Σ series (rounding residual)', () => {
   // Construct a case where the two disagree by 2c and assert the scalar formula wins.
-  const cur = { ...LIVE_CURRENT, net_profit: null };
+  const cur = { ...LIVE_CURRENT_WITH_FREIGHT, net_profit: null };
   const driftedSeries = mkNet([['a', 170.45, 0, 0], ['b', 170.43, 0, 0]]); // Σ = 340.88
   const r = recoverProfitFromSeries(cur, GROSS_SERIES, driftedSeries);
   assert.equal(round(r.net), 340.86, 'the scalar formula is range-exact and must win');

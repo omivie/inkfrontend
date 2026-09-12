@@ -95,6 +95,10 @@ const LIVE_CURRENT = {
   gross_profit: null,          // ← the defect
   stripe_fees: 171.11,
   operating_expenses: 0,
+  // Supplier freight is the FOURTH term in the backend's identity (ERR-251).
+  // Present here because the live payload carries it on every call; the test
+  // below pins what happens when it ISN'T.
+  supplier_freight: 96.40,
   net_profit: null,            // ← the defect
 };
 
@@ -114,12 +118,37 @@ test('rebuilds gross profit by summing the backend’s own weekly buckets', () =
   assert.equal(round(r.gross), 1190.07);
 });
 
-test('rebuilds net profit with kpi-summary’s own formula: gross − fees − opex', () => {
+test('rebuilds net profit with kpi-summary’s own formula: gross − fees − opex − freight', () => {
   // Verified to the cent against four un-poisoned weeks of live data before being
   // relied on (e.g. 2026-06-15: 205.39 − 19.55 − 0 === 185.84, the backend's own net).
+  // Supplier freight joined the identity on 2026-09-12 (ERR-251) — the backend's own
+  // reconciliation is gross − net = stripe + opex + supplier_freight, verified against
+  // the live RPC at 2210.76 − (−56.06) = 170.68 + 1593.50 + 502.64, exact to the cent.
   const r = recoverProfitFromSeries(LIVE_CURRENT, LIVE_SERIES);
-  assert.equal(round(r.net), round(1190.07 - 171.11 - 0));
-  assert.equal(round(r.net), 1018.96);
+  assert.equal(round(r.net), round(1190.07 - 171.11 - 0 - 96.40));
+  assert.equal(round(r.net), 922.56);
+});
+
+test('🚨 ABSENT supplier_freight REFUSES the scalar formula — it is not $0', () => {
+  // THE WHOLE POINT. Freight was $502.64 over the last 30 live days. Reading an
+  // absent field as zero would rebuild a net profit half a thousand dollars too
+  // healthy and stamp "Rebuilt" on it as though that were a provenance claim —
+  // ERR-063/068 absence-as-zero with the headline figure on it.
+  //
+  // The honest fallback is the backend's own per-bucket net, which already has
+  // freight inside it. So the recovery must NOT equal gross − fees − opex.
+  const { supplier_freight, ...noFreight } = LIVE_CURRENT;
+  assert.equal('supplier_freight' in noFreight, false, 'positive control: the key must really be gone');
+  const r = recoverProfitFromSeries(noFreight, LIVE_SERIES);
+  assert.notEqual(round(r && r.net), 1018.96,
+    'gross − fees − opex with freight silently treated as $0 is the bug this test exists for');
+});
+
+test('a NULL supplier_freight is refused exactly like an absent one', () => {
+  // Present-and-null is the shape a degraded backend returns. `numOrNull` must
+  // treat it as unknown, not coerce it to 0 the way Number(null) would.
+  const r = recoverProfitFromSeries({ ...LIVE_CURRENT, supplier_freight: null }, LIVE_SERIES);
+  assert.notEqual(round(r && r.net), 1018.96);
 });
 
 test('accepts the wrapped {series:[…]} / {data:[…]} shapes the bundle can return', () => {

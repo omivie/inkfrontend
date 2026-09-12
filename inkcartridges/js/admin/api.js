@@ -396,9 +396,28 @@ function normalizeKpiSummary(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   if (data.current && typeof data.current === 'object') return data;
 
+  // 🚨 THIS LIST IS AN ALLOW-LIST, AND ANYTHING NOT NAMED IS SILENTLY DROPPED.
+  //
+  // `supplier_freight` joined it on 2026-09-12 (ERR-251), and the reason is
+  // nastier than a missing tile. This branch only runs on the METRIC-KEYED
+  // shape, and per the backend's own response §2 that is precisely what their
+  // kpi-summary RPC-ERROR FALLBACK returns. So the path that drops the key is
+  // the path taken when the backend is already degraded — and the fallback's
+  // `net_profit` has freight deducted server-side. Drop the term and the tiles
+  // render a net profit with no line explaining it, while any client-side
+  // rebuild (dashboard.js recoverProfitFromSeries) over-states net by the whole
+  // freight bill: $502.64 over the last 30 live days.
+  //
+  // NOT OBSERVED, REASONED. The live payload uses the {current, previous} shape
+  // and returns on the line above, so this branch is not reachable from a
+  // healthy backend and the drop could not be triggered against production. It
+  // follows from the backend's documented fallback shape plus this code, and it
+  // is pinned by a unit test that drives this branch directly.
+  // (Found by wire-backend-supplier-freight.)
   const METRIC_KEYS = [
     'revenue', 'gross_profit', 'net_profit', 'gross_margin',
     'net_margin', 'stripe_fees', 'orders', 'aov',
+    'supplier_freight', 'supplier_freight_incl_gst', 'supplier_freight_unpriced_orders',
   ];
   const current = {};
   const previous = {};

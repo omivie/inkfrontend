@@ -752,6 +752,11 @@ function buildOverviewBuckets(d) {
   merge(npList, (r) => numOrNull(r.net_profit), 'netProfit');
   merge(npList, (r) => numOrNull(r.stripe_fees), 'fees');
   merge(npList, (r) => numOrNull(r.operating_expenses), 'opex');
+  // The fourth term (ERR-251). `net_profit` above ALREADY has freight deducted
+  // server-side, so this is here to be RENDERED as a cost band — never to be
+  // subtracted again. Measured live: net_profit_series buckets carry
+  // supplier_freight on every row.
+  merge(npList, (r) => numOrNull(r.supplier_freight), 'freight');
 
   order.sort(); // "YYYY-MM-DD" sorts chronologically
 
@@ -844,6 +849,12 @@ function drawPerformanceOverview(d) {
   });
   // Stripe fees per bucket — shipped by the backend on net_profit_series since migration 118.
   const feesByBucket = order.map(b => numOrNull(byBucket.get(b)?.fees));
+  // Supplier freight per bucket (ERR-251), from the same series. It is already
+  // inside the backend's `net_profit`; it is added to the COST band below so
+  // the cost line and the profit line describe the same arithmetic. Leaving it
+  // out made the cost line understate by $502.64 over the last 30 days while
+  // the profit line was correct — two lines on one chart disagreeing silently.
+  const freightByBucket = order.map(b => numOrNull(byBucket.get(b)?.freight));
 
   // Operating expenses per bucket. PRIMARY is the backend's own `operating_expenses` — it is
   // range-scoped, GST-net, order-linked-excluded and includes recurring expense_occurrences,
@@ -878,10 +889,16 @@ function drawPerformanceOverview(d) {
   const opexByBucket = hasBackendOpex ? backendOpex : loggedOpex;
   const opexLabel = hasBackendOpex ? 'Operating expenses' : 'Logged expenses (client-side)';
 
-  // Total costs = COGS + operating expenses + Stripe fees — every component now per-bucket.
-  // Any unknown component makes the total unknown: a gap, never a confident partial sum.
+  // Total costs = COGS + operating expenses + Stripe fees + supplier freight — every
+  // component now per-bucket. Any unknown component makes the total unknown: a gap,
+  // never a confident partial sum.
+  //
+  // 🚨 FREIGHT IS INCLUDED THE SAME WAY THE OTHERS ARE — a null makes the whole
+  // bucket null. It must NOT be coalesced to 0: an absent freight figure would
+  // then quietly shrink the cost band instead of leaving a visible gap, which is
+  // the absence-as-zero failure with a chart in front of it.
   const totalCostByBucket = order.map((_, i) => {
-    const parts = [cogsByBucket[i], opexByBucket[i], feesByBucket[i]];
+    const parts = [cogsByBucket[i], opexByBucket[i], feesByBucket[i], freightByBucket[i]];
     if (parts.some(v => v == null)) return null;
     return parts.reduce((a, v) => a + v, 0);
   });
@@ -2419,10 +2436,22 @@ function renderKpiStrip(d) {
       label: 'Net Profit', value: netProfitShown != null ? formatPrice(netProfitShown) : null,
       raw: netProfitShown, prev: cbPrev(prev.net_profit),
       alert: netProfitShown != null && netProfitShown < 0, stackNext: true,
-      gst: GST_EXCL, sub: cbOn ? 'paid invoices only' : '',
+      gst: GST_EXCL,
+      // Supplier freight is a COMPONENT of net profit, not a peer KPI, so it
+      // rides here rather than taking a tenth grid cell (ERR-251). It is the
+      // reason the last 30 days went from +$446.58 to −$56.06, and a tile that
+      // shows the new number without the term that moved it invites the owner
+      // to go looking for a bug.
+      //
+      // `!= null` and not a truthiness test: a real $0 freight fortnight is a
+      // fact worth printing, and an ABSENT figure must print nothing at all
+      // rather than "after $0.00 supplier freight" (absence-as-zero, ERR-063).
+      sub: [cbOn ? 'paid invoices only' : '',
+        cur.supplier_freight != null ? `after ${formatPrice(cur.supplier_freight)} supplier freight` : '']
+        .filter(Boolean).join(' · '),
       // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
       // so GST is already outside this calculation rather than a line item inside it.
-      tooltip: `Gross profit − Stripe fees − operating expenses, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer).${netNote}${cbOn ? CASH_BASIS_TIP : ''}`,
+      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer).${netNote}${cbOn ? CASH_BASIS_TIP : ''}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginShown), raw: netMarginShown, prev: cbPrev(netMarginPctPrev),

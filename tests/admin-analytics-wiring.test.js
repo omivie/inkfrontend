@@ -165,6 +165,42 @@ test('normalizeKpiSummary folds the spec-doc metric-keyed shape', () => {
   assert.equal(out.fallback, true);
 });
 
+test('🚨 normalizeKpiSummary carries supplier_freight through the metric-keyed branch', () => {
+  // THE PATH THAT DROPS A KEY IS THE PATH TAKEN WHEN THE BACKEND IS DEGRADED.
+  //
+  // This branch only runs on the metric-keyed shape, and per the backend's
+  // response §2 that is exactly what their kpi-summary RPC-error FALLBACK
+  // returns. Its `net_profit` already has freight deducted server-side, so
+  // losing the freight key here renders a net profit with nothing to explain it
+  // and makes dashboard.js's rebuild over-state net by the whole freight bill —
+  // $502.64 over the last 30 live days (ERR-251).
+  //
+  // The live payload uses {current, previous} and returns before this branch,
+  // so this cannot be exercised against production. That is why it is pinned
+  // here rather than in the probe.
+  const fallbackShape = {
+    revenue: { current: 10278.23, previous: 7967.75 },
+    gross_profit: { current: 2210.76, previous: 2013.85 },
+    net_profit: { current: -56.06, previous: 308.24 },
+    stripe_fees: { current: 170.68, previous: 172.76 },
+    supplier_freight: { current: 502.64, previous: 381.77 },
+    supplier_freight_incl_gst: { current: 578, previous: 439 },
+    supplier_freight_unpriced_orders: { current: 0, previous: 0 },
+    fallback: true,
+  };
+  const out = normalizeKpiSummary(fallbackShape);
+  assert.equal(out.current.supplier_freight, 502.64, 'freight must survive the allow-list');
+  assert.equal(out.previous.supplier_freight, 381.77);
+  assert.equal(out.current.supplier_freight_incl_gst, 578);
+  assert.equal(out.current.supplier_freight_unpriced_orders, 0);
+
+  // The identity the tiles rest on must reconcile on the normalised output, or
+  // the Net Profit tile and its own inputs disagree.
+  const c = out.current;
+  assert.ok(Math.abs((c.gross_profit - c.net_profit) - (c.stripe_fees + c.supplier_freight + 1593.50)) < 0.01,
+    'gross − net = stripe + freight + opex');
+});
+
 test('normalizeKpiSummary returns null for junk / empty', () => {
   assert.equal(normalizeKpiSummary(null), null);
   assert.equal(normalizeKpiSummary({}), null);
