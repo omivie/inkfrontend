@@ -45,6 +45,10 @@ import {
   readServerInvoiceSent, orderSendRegime,
   isInvoiceSendEvent, invoiceSendNoteText,
 } from '../utils/order-invoice-sent.js';
+// The delivery area and its provenance. ONE owner (ERR-253) — this page must
+// not re-derive "urban or rural" from an address, which is what the checkout
+// does for a form it is about to submit and is the wrong question for a record.
+import { deliveryFactsForOrder } from '../utils/supplier-freight.js';
 // "Has this customer asked us where their parcel is?" — the whole vocabulary,
 // including the two facts the backend deliberately does NOT fold into `state`:
 // whether a cancelled order's request can still be cleared, and how long the
@@ -542,6 +546,56 @@ function titleCaseZone(zone) {
   return zone.trim().split(/[-_\s]+/).filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+}
+
+/* ── Delivery area, and how we know it (ERR-253) ─────────────────────────────
+ *
+ * THREE STATES, AND THE MIDDLE ONE IS THE POINT. `orders.delivery_type` is
+ * 'urban' | 'rural' | null, where null means NOT RECORDED — the column was
+ * added on 2026-09-10 without a backfill, deliberately, so that a guess would
+ * never be stored as a fact. Measured 2026-09-12: null on 166 of 167 live
+ * orders.
+ *
+ * But the backend ALSO publishes what it can work out, with its own provenance,
+ * in `supplier_freight.delivery_type` / `delivery_type_basis` — and over the
+ * same 167 orders that is exact on 93 of them (recorded 1, snapshot 19,
+ * charged 73) and honestly 'assumed' on 74. ***READING ONLY THE COLUMN WOULD
+ * REPORT "UNKNOWN" ON 99% OF ORDERS WHILE THE ANSWER WAS ALREADY IN THE
+ * PAYLOAD.*** `deliveryFactsForOrder` reads both, in that order.
+ *
+ * The one thing this must never do is print 'urban' for an absence. That is
+ * exactly the fabrication ERR-235 chased through checkout, and it is why the
+ * cell says "Not recorded" rather than going blank or defaulting.
+ */
+const DELIVERY_BASIS_PHRASE = {
+    recorded: 'recorded at checkout',
+    snapshot: 'from the stored courier cost',
+    charged: 'from the delivery fee charged',
+    assumed: 'assumed, not recorded',
+};
+
+/** "rural, recorded at checkout" / "not recorded" — never a bare guess. */
+function deliveryPhrase(deliveryType, basis) {
+    if (!deliveryType) return 'delivery area not recorded';
+    const how = DELIVERY_BASIS_PHRASE[String(basis || '')] || null;
+    return how ? `${deliveryType}, ${how}` : String(deliveryType);
+}
+
+/** The modal's Delivery cell. Absence is rendered, never defaulted away. */
+function deliveryAreaCell(order) {
+    const facts = deliveryFactsForOrder(order);
+    if (!facts.deliveryType) {
+        return `<span class="admin-text-muted" title="${esc('No delivery area is recorded on this order and the backend could not derive one, '
+            + 'so any freight figure below is priced as urban and is a FLOOR. It is not a fact about this delivery.')}">Not recorded ⓘ</span>`;
+    }
+    const exact = facts.basis && facts.basis !== 'assumed';
+    const tip = exact
+        ? `Delivery area is ${facts.deliveryType} — ${DELIVERY_BASIS_PHRASE[facts.basis] || 'source not stated'}.`
+        : `Delivery area is not recorded on this order; ${facts.deliveryType} is the backend's assumption, not a measurement.`;
+    const label = esc(facts.deliveryType.charAt(0).toUpperCase() + facts.deliveryType.slice(1));
+    return exact
+        ? `<span title="${esc(tip)}">${label}</span>`
+        : `<span class="admin-text-muted" title="${esc(tip)}">${label} ${esc('(assumed)')} ⓘ</span>`;
 }
 
 // originBadge() and supplierCell() moved to utils/sourcing.js (imported above) when
@@ -2732,6 +2786,13 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   if (o.shipping_fee != null) metaLeft += omRow(`Shipping${gstSub(GST_INCL)}`, formatPrice(o.shipping_fee));
   if (o.shipping_tier) metaLeft += omRow('Tier', esc(o.shipping_tier));
   if (o.delivery_zone) metaLeft += omRow('Zone', esc(o.delivery_zone));
+  // Delivery area (ERR-253). ALWAYS RENDERED, including when nothing is
+  // recorded — the other rows here are `if (value)` because a missing tier is
+  // uninteresting, but a missing delivery area is the most interesting state
+  // this row has: it is what makes the freight below it a floor. Printing
+  // nothing would read as "urban", which is the fabrication the backend
+  // removed its own Joi default to stop making.
+  metaLeft += omRow('Delivery', deliveryAreaCell(o));
   if (o.source) metaLeft += omRow('Source', esc(o.source));
 
   // Order dates. For owners these drop to their own section lower down and the
@@ -2950,8 +3011,15 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     // like the lines above; its GST is netted at the IRD line below. Only when it applies.
     if (b.absorbedShippingApplies) {
       const zoneLabel = titleCaseZone(b.absorbedShippingZone);
-      const delivery = b.absorbedShippingDeliveryType ? String(b.absorbedShippingDeliveryType) : 'urban';
-      const courierTip = `Actual courier rate${zoneLabel ? ` for ${zoneLabel}` : ''} (${delivery} assumed). Free shipping — the customer paid $0, we absorbed this; its GST (${formatPrice(b.absorbedShippingGst)}) is reclaimed at the IRD line below.`;
+      // WAS: `b.absorbedShippingDeliveryType ? … : 'urban'`, and the sentence
+      // said "(urban assumed)" either way. Two faults in one line (ERR-253):
+      // it invented 'urban' when nothing was recorded, and it called every
+      // value an assumption — including the 93 of 167 live orders whose basis
+      // the backend reports as `recorded`, `snapshot` or `charged`, all exact.
+      // The basis is now read rather than asserted.
+      const courierTip = `Actual courier rate${zoneLabel ? ` for ${zoneLabel}` : ''} `
+        + `(${deliveryPhrase(b.absorbedShippingDeliveryType || b.deliveryType, b.deliveryTypeBasis)}). `
+        + `Free shipping — the customer paid $0, we absorbed this; its GST (${formatPrice(b.absorbedShippingGst)}) is reclaimed at the IRD line below.`;
       profitBreakdownInner += pbRow(
         `<span title="${esc(courierTip)}">Courier absorbed ${muted('(free shipping) ⓘ')}</span>`,
         neg(b.absorbedShippingInclGst));
@@ -2966,14 +3034,24 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
         ? b.supplierFreightSuppliers.join(', ')
         : 'a supplier';
       const est = b.supplierFreightEstimated;
-      // The word "estimated" is not decoration. The parcel weight and the
-      // urban/rural flag are not on the order payload, so this is the LIGHTEST
-      // band of the zone ladder — a floor, and a heavy parcel really does cost
-      // more. Reading it as a measurement is the mistake the label prevents.
+      // The word "estimated" is not decoration — but what it means changed
+      // (ERR-253). It used to mean "the LIGHTEST band, because the weight and
+      // the area are unknown", which understated the real bill by $365 across
+      // 154 live orders. Both facts are on the order now, so this is the band
+      // the parcel actually falls in, priced per consignment. Measured
+      // 2026-09-12, OUR RATE SELECTION reproduces the backend's own figure to
+      // the cent on 154 of 154 orders — that is a claim about the rate table,
+      // not about this row's total, which legitimately differs whenever the
+      // absorbed-courier consignment is de-duplicated out of it (22 of 60
+      // orders carry both blocks). It stays labelled an estimate because it is
+      // arithmetic over OUR copy of the rate table, and the label is what
+      // stops that being read as the supplier's invoice.
+      const kg = Number.isFinite(Number(b.parcelWeightKg)) ? Number(b.parcelWeightKg) : null;
       const freightTip = `${who} billed us freight because the goods we bought came to under $100 ex-GST. `
         + (est
-          ? `ESTIMATED at the cheapest rate for this delivery zone — the parcel weight and urban/rural `
-            + `flag aren't on the order, so a heavier parcel costs more than this. `
+          ? `ESTIMATED from the courier ladder for this zone`
+            + (kg != null ? ` at ${kg} kg` : '')
+            + ` (${deliveryPhrase(b.deliveryType, b.deliveryTypeBasis)}). `
           : '')
         + `Its GST (${formatPrice(b.supplierFreightGst)}) is reclaimed at the IRD line below.`;
       profitBreakdownInner += pbRow(

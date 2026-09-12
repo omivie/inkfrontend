@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.06-contract-pricing-business-accounts';
+const APP_VERSION = '2026.09.12-mig132-admin-repair-analytics-rpc-retirement';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

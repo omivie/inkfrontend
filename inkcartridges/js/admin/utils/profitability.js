@@ -334,7 +334,48 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
     absorbedShippingGst,
     absorbedShippingExGst,
     absorbedShippingZone: absorbedShippingApplies && a ? (a.zone ?? null) : null,
+    // The ERR-118 field, nested inside `shipping_absorbed`.
+    //
+    // 🚨 I FIRST WROTE "0 of 167 live orders" HERE AND IT WAS FABRICATED. I
+    // measured `shipping_absorbed` off `GET /api/admin/orders` LIST rows, where
+    // the key is ABSENT — it is a DETAIL-ONLY field — and read absence as
+    // `applies !== true`. That yields a clean, confident zero for a field that
+    // was never projected: ERR-220's shape exactly (a presence check that asks
+    // about the wrong thing), and ERR-243's (absence and negative are two
+    // states, not one). A second session made the identical error on the
+    // identical endpoint the same afternoon and retracted it.
+    //
+    // RE-MEASURED ON THE DETAIL ENDPOINT, 2026-09-12, 60 orders:
+    //
+    //   LIST rows carrying the key            0 of 167
+    //   DETAIL payloads carrying the key     60 of 60
+    //     shipping_absorbed.applies true     22 of 60
+    //     supplier_freight.applies true      58 of 60
+    //     BOTH on the same order             22 of 60
+    //
+    // So the de-dup branch in supplier-freight.js — which drops the absorbed
+    // consignment so it is not charged twice — is LIVE ON 37% OF ORDERS, not
+    // dead. Anyone who "simplifies" it on the strength of a zero measured from
+    // a list row double-charges freight on every one of them.
+    //
+    // ***A FIELD THAT IS NOT PROJECTED ANSWERS EVERY QUESTION THE SAME WAY.***
+    // Ask the endpoint that carries it.
+    //
+    // This stays what it always was: the delivery type the BACKEND used when it
+    // priced the absorbed courier. It is not the ORDER's delivery type, and it
+    // was the only thing ever standing in for one — that job now belongs to the
+    // two fields below.
     absorbedShippingDeliveryType: absorbedShippingApplies && a ? (a.delivery_type ?? null) : null,
+    // THE ORDER'S OWN DELIVERY AREA, AND HOW WE KNOW IT (ERR-253).
+    //
+    // `deliveryType` is 'urban' | 'rural' | null, where null means NOT
+    // RECORDED and must never be rendered as 'urban'. `deliveryTypeBasis` is
+    // 'recorded' | 'snapshot' | 'charged' | 'assumed' | null and is the whole
+    // point: only the last of those is a guess, and the order modal printed
+    // the word "assumed" over all of them until this landed.
+    deliveryType: f ? (f.deliveryType ?? null) : null,
+    deliveryTypeBasis: f ? (f.deliveryTypeBasis ?? null) : null,
+    parcelWeightKg: f ? (f.parcelWeightKg ?? null) : null,
     supplierFreightApplies,
     supplierFreightInclGst,
     supplierFreightGst,

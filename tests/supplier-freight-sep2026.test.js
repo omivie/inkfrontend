@@ -443,7 +443,19 @@ function renderFreightRow(breakdown) {
   }
   assert.ok(end > start, 'the freight row block must be brace-balanced');
   const block = ordersSrc.slice(start, end);
-  const fn = new Function('b', 'formatPrice', 'esc', 'muted', 'pbRow', 'neg', `
+  // The row now words its own provenance ("urban, recorded at checkout" vs
+  // "delivery area not recorded") through deliveryPhrase(). That is SHIPPED
+  // code in orders.js, so it is lifted out of the real file and handed in
+  // rather than stubbed — a stub here would let the phrasing drift from the
+  // thing this test claims to certify (ERR-253).
+  const phraseSrc = ordersSrc.slice(
+    ordersSrc.indexOf('const DELIVERY_BASIS_PHRASE = {'),
+    ordersSrc.indexOf('/** The modal\'s Delivery cell.'));
+  assert.ok(phraseSrc.includes('function deliveryPhrase('),
+    'deliveryPhrase must still live in orders.js between those two markers');
+  const deliveryPhrase = new Function(`${phraseSrc}; return deliveryPhrase;`)();
+
+  const fn = new Function('b', 'formatPrice', 'esc', 'muted', 'pbRow', 'neg', 'deliveryPhrase', `
     let profitBreakdownInner = '';
     ${block}
     return profitBreakdownInner;
@@ -455,6 +467,7 @@ function renderFreightRow(breakdown) {
     (t) => `<span class="admin-text-muted">${t}</span>`,
     (label, value) => `<div class="om-meta-row"><span>${label}</span><span class="mono">${value}</span></div>`,
     (v) => `\u2212$${Math.abs(v).toFixed(2)}`,
+    deliveryPhrase,
   );
 }
 
