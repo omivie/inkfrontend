@@ -107,7 +107,37 @@ test('no chart mapper coerces a value with `|| 0` any more', () => {
   // reporting a partial sum as though it were the whole cost.
   const perf = functionBody(dashboardSrc, 'drawPerformanceOverview');
   assert.ok(/parts\.some\(v => v == null\)\s*\)\s*return null/.test(perf),
-    'Total costs must be null when any of COGS / opex / fees is unknown');
+    'Total costs must be null when any of COGS / opex / fees / freight is unknown');
+  // Supplier freight is the FOURTH component (ERR-255) and must poison the bucket
+  // exactly like the other three. Coalescing it to 0 would quietly SHRINK the cost
+  // band instead of leaving a visible gap — absence-as-zero with a chart in front
+  // of it, which is the one place it is hardest to notice.
+  assert.ok(/parts = \[cogsByBucket\[i\], opexByBucket\[i\], feesByBucket\[i\], freightByBucket\[i\]\]/.test(perf),
+    'freight must be one of the parts, so a null freight bucket nulls the total');
+  assert.ok(!/freightByBucket\[i\]\s*\|\|\s*0|\?\?\s*0/.test(perf),
+    'freight must never be coerced to 0 in the cost band');
+});
+
+test('🚨 the cost band grosses supplier freight UP — it is cash out, like COGS', () => {
+  // net_profit_series publishes freight EX-GST only (measured 2026-09-12: the rows
+  // carry `supplier_freight`, never `supplier_freight_incl_gst`, though kpi-summary
+  // carries both). Dropping the raw field into this band would sit an ex-GST term
+  // beside `cogsByBucket`, which is deliberately grossed up as "real cash to
+  // suppliers". Freight is a supplier invoice paid incl-GST for the same reason.
+  //
+  // ***TWO FIELDS DIFFERING ONLY BY A SUFFIX ARE TWO CHANCES TO BE QUIETLY 15%
+  // WRONG*** — and this band accepts either without complaint, which is why the
+  // choice is pinned rather than left to the reader.
+  const perf = functionBody(dashboardSrc, 'drawPerformanceOverview');
+  assert.ok(/freightByBucket = order\.map/.test(perf), 'positive control: the freight band must exist');
+  assert.ok(/ex \* COST_GST_GROSS_UP/.test(perf),
+    'the ex-GST series figure must be grossed up to cash');
+  assert.ok(/COST_GST_GROSS_UP/.test(dashboardSrc.slice(0, 3000)),
+    'COST_GST_GROSS_UP must be imported, not re-typed as a local 1.15');
+  // and the gross-up must be the shared constant's value, not a hand-typed twin
+  const tm = fs.readFileSync(path.join(ADMIN, 'utils', 'trend-math.js'), 'utf8');
+  assert.match(tm, /export const COST_GST_GROSS_UP = 1\.15;/,
+    'the shared constant must still be 1.15, or this band silently re-bases');
 });
 
 test('a cumulative running total does not silently step over an unknown bucket', () => {

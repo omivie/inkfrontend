@@ -19,7 +19,7 @@ import { Charts } from '../components/charts.js';
 // Reused pure math so the two expense trend lines reconcile with the rest of the app:
 // COGS from the same convention as the KPI strip, opex from the same cash-basis rules
 // as the Expenses page (paid-only, GST-netted, order-linked excluded).
-import { kpiCogsInclGst } from '../utils/trend-math.js';
+import { kpiCogsInclGst, COST_GST_GROSS_UP } from '../utils/trend-math.js';
 import { cashMs, pnlCost } from '../utils/expense-math.js';
 // Robustly parse the traffic time-series (array | {data|series|points}) into
 // [{ date, sessions, pageviews }] for the Performance overview overlay.
@@ -850,11 +850,32 @@ function drawPerformanceOverview(d) {
   // Stripe fees per bucket — shipped by the backend on net_profit_series since migration 118.
   const feesByBucket = order.map(b => numOrNull(byBucket.get(b)?.fees));
   // Supplier freight per bucket (ERR-255), from the same series. It is already
-  // inside the backend's `net_profit`; it is added to the COST band below so
-  // the cost line and the profit line describe the same arithmetic. Leaving it
-  // out made the cost line understate by $502.64 over the last 30 days while
-  // the profit line was correct — two lines on one chart disagreeing silently.
-  const freightByBucket = order.map(b => numOrNull(byBucket.get(b)?.freight));
+  // inside the backend's `net_profit`; it is added to the COST band below so the
+  // cost line and the profit line describe the same arithmetic. Leaving it out
+  // made the cost line understate while the profit line was correct — two lines
+  // on one chart disagreeing silently.
+  //
+  // 🚨 GROSSED UP, BECAUSE THIS BAND IS CASH OUT AND FREIGHT IS A SUPPLIER
+  // INVOICE. `net_profit_series` publishes freight EX-GST only — measured
+  // 2026-09-12, the per-bucket rows carry `supplier_freight` and NOT
+  // `supplier_freight_incl_gst`, though `kpi-summary` carries both. Dropping the
+  // raw field in here would sit an ex-GST term directly beside `cogsByBucket`,
+  // which is deliberately grossed up as "real cash to suppliers"
+  // (trend-math.js `kpiCogsInclGst`). We pay freight incl-GST for the same
+  // reason we pay goods incl-GST, so it gets the same treatment: over the last
+  // 30 live days that is $488.03 of cash rather than $424.37.
+  //
+  // ***TWO FIELDS DIFFERING ONLY BY A SUFFIX ARE TWO CHANCES TO BE QUIETLY 15%
+  // WRONG*** — and this band would have accepted either one without complaint.
+  //
+  // Known and NOT changed here: `fees` and `opex` in this same band are the
+  // backend's ex-GST figures. That mixture predates this change and is not mine
+  // to silently re-base; it is recorded so the next reader does not have to
+  // re-derive which terms are which.
+  const freightByBucket = order.map(b => {
+    const ex = numOrNull(byBucket.get(b)?.freight);
+    return ex == null ? null : ex * COST_GST_GROSS_UP;
+  });
 
   // Operating expenses per bucket. PRIMARY is the backend's own `operating_expenses` — it is
   // range-scoped, GST-net, order-linked-excluded and includes recurring expense_occurrences,
