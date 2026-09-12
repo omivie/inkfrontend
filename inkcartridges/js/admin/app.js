@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.12-mig132-admin-repair-analytics-rpc-retirement';
+const APP_VERSION = '2026.09.12-catalog-engagement-pager';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

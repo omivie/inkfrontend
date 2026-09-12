@@ -1,6 +1,6 @@
 # Backend correspondence — status index
 
-Audited **2026-09-09**. One row per document. `sent/` is evidence-backed; `outbox/` means
+Audited **2026-09-09**, re-audited **2026-09-12**. One row per document. `sent/` is evidence-backed; `outbox/` means
 *no reply on record*, which is **not** the same as undelivered — see `README.md`.
 
 Do not re-derive this audit. If you deliver something, move the file and change its row.
@@ -18,7 +18,7 @@ below, within a day of it being filed.
 
 ---
 
-## `sent/` — proven received (7)
+## `sent/` — proven received (15)
 
 The backend read these. Evidence is a backend-authored document that postdates ours and
 either names it or cites a `BF-`/`ERR-` number that originates in it.
@@ -32,6 +32,32 @@ either names it or cites a `BF-`/`ERR-` number that originates in it.
 | `add-to-cart-tracking-FE-response-sep2026.md` | 2026-09-06 | BF-060 **originates here**; cited in `fe-verification-and-remaining-gaps-sep2026.md` (09-08) and `FE-open-items-checklist-sep2026.md` (09-09) |
 | `data-tracking-capture-FE-response-aug2026.md` | 2026-09-01 | ERR-194 cited in both 09-08 and 09-09 incoming docs |
 | `gst-basis-backend-brief-jul2026.md` | 2026-07-29 | **moderate only** — ERR-113 in `order-profit-net-of-discount-aug2026.md`; ERR-113 sits in the ambiguous-numbering range, so this is weaker than the six above |
+
+### The 2026-09-09/10 batch — all eight proven received on 2026-09-12
+
+`inbox/fe-verification-round-backend-response-sep2026.md` is the delivery record for
+every one of these. It answers them **section by section**, cites their ERR numbers,
+and ships code against them. Two of these rows previously read "never delivered";
+they were wrong, and this is what that looked like from the inside — *no delivery
+record exists ⇒ UNANSWERED, not undelivered.*
+
+| Doc | Written | Evidence |
+|---|---|---|
+| `BACKEND-ASKS-INDEX-sep2026.md` | 2026-09-09 | its 🔴 item 0 (ERR-232) is answered at length in §1; item 1 (the mig-132 green light) in §2 |
+| `printer-canonicals-backend-brief-sep2026.md` | 2026-09-09 | named in §3; our 15-pair table used **verbatim** as their curated map |
+| `fe-backend-asks-sep2026.md` | 2026-09-09 | §7 answers BF-021; §8 answers the ERR-237 `?sid=` question |
+| `analytics-dashboards-FE-response-sep2026.md` | 2026-09-03 | **the "evidence it was NOT read" row is superseded** — §4 concedes the 80-char truncation point and §5 ships all four asks |
+| `security-hardening-round2-FE-response-sep2026.md` | 2026-09-09 | §1's ACL table and migration 173 answer it directly |
+| `admin-only-test-product-backend-brief-sep2026.md` | 2026-09-09 | answered by `inbox/admin-only-test-product-FE-handoff-sep2026.md` (see ERR-246) |
+| `supplier-freight-backend-brief-sep2026.md` | 2026-09-09 | answered in the same round (ERR-241 follow-up) |
+| `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | 2026-09-09 | delivered with the batch; **its dispute stands unaddressed** — see below |
+
+**Still disputed, and NOT resolved by their reply.** Our mobile-UX response
+contradicted two of the three fixes in `inbox/fe-verification-and-remaining-gaps-sep2026.md`.
+The verification round does not mention it. The dispute is therefore still open
+and the inbox document still must not be implemented as written — the reasoning
+is in the note further down this file, in the past tense, naming the code that
+replaced it (ERR-235).
 
 ---
 
@@ -62,28 +88,27 @@ one 30/min limiter across the prefix; and `delivery_type` being *live* is not it
 
 ---
 
-## `outbox/` — written, no reply on record (36)
+## `outbox/` — written, no reply on record (29)
 
-### ⏳ Never delivered — written 2026-09-09/10, after the last incoming doc (7)
+### ⏳ Never delivered — written after the last incoming doc (1)
 
-These are the **live open asks**. `BACKEND-ASKS-INDEX-sep2026.md` is the cover note for
-the batch, and it is the only written record of the 🔴 admin-analytics-RPC outage (ERR-232).
-**Send these before anything else here is touched.**
+The 2026-09-09/10 batch that used to sit here was **all delivered and answered** —
+those eight rows moved to `sent/` on 2026-09-12. What remains is the reply to the
+document that proved it.
 
 | Doc | Carries |
 |---|---|
-| `BACKEND-ASKS-INDEX-sep2026.md` | the index over the batch + ERR-232, the live 403 outage |
-| `fe-backend-asks-sep2026.md` | ERR-235/236/237 asks; BF-021 re-raised |
-| `supplier-freight-backend-brief-sep2026.md` | ERR-241 |
-| `admin-only-test-product-backend-brief-sep2026.md` | ERR-234 — carries a sequencing constraint. **ANSWERED** by `inbox/admin-only-test-product-FE-handoff-sep2026.md` (2026-09-09); still **unshipped** as of 2026-09-12 (column, RLS, routes, seed row all absent — measured) |
-| `admin-only-test-product-FE-response-sep2026.md` | ERR-246 — answers their §2 with **B**, and measured two of their claims false: the edge serves an `Authorization` request the anonymous cached body, and the `TEST-`/`ADMIN-` prefix guard has never been observed firing (`ADMIN-INK-001` exists but is inactive, and an inactive non-prefixed control 404s identically). Four asks open |
-| `printer-canonicals-backend-brief-sep2026.md` | ERR-242/243, and the migration-132 green light |
-| `security-hardening-round2-FE-response-sep2026.md` | answers `security-hardening-sep2026-round2-FE-handoff.md` |
-| `mobile-ux-and-remaining-gaps-FE-response-sep2026.md` | ERR-238/239/240 — answers `inbox/fe-verification-and-remaining-gaps-sep2026.md`, **partly disputing it**: see below |
+| `fe-verification-round-FE-response-sep2026.md` | answers `inbox/fe-verification-round-backend-response-sep2026.md` section by section. Accepts their §1 ask (the dashboard is off the analytics RPCs entirely), **declines half of §6 with the measurement**, and carries two 🔴 items of our own: the migration-132 fallout in our admin (ours, not theirs) and **BF-062** — no admin route can write a machine list, while the product PUT answers 200 for the field and discards it |
 
-**Disputed, not merely answered** — `mobile-ux-and-remaining-gaps-FE-response-sep2026.md`
-contradicts two of the three fixes `fe-verification-and-remaining-gaps-sep2026.md` proposes.
-Do not implement that inbox document as written:
+**Read this before touching `/api/products/popular` mappings.** Their §6 invites us
+to drop the client-side category map. `consumable` means **"Drums & Supplies"** to
+us and **"all consumable types"** to them; taking the invitation swaps the shelf
+contents with a 200 and no error anywhere. Measured 2026-09-12. The map stays.
+
+**Disputed, and still unresolved as of 2026-09-12** — `sent/mobile-ux-and-remaining-gaps-FE-response-sep2026.md`
+contradicted two of the three fixes `inbox/fe-verification-and-remaining-gaps-sep2026.md`
+proposes. It was delivered with the 09-09/10 batch and the backend's verification round
+does not mention it, so the dispute stands. Do not implement that inbox document as written:
 
 - Its `<input value="urban" checked>` **would have been a no-op when it was written** — at that
   point `init()` un-checked every `delivery_type` radio on load (`forEach(r => r.checked = false)`),
@@ -102,7 +127,7 @@ document. The response document was itself re-tensed in `e9d1ddc` after the firs
 claims went stale between its writing and its filing — it now carries the past tense and points
 at the code that exists.
 
-### No reply on record (30)
+### No reply on record (27)
 
 Available to the backend in this repo; nothing on record says they read it. **Every one of
 these still held at least one open ask when audited** — verified against live code for the
@@ -132,7 +157,6 @@ three oldest, spot-checked for the rest.
 | `ribbon-brand-pages-FE-response-aug2026.md` | 2026-09-01 | |
 | `orders-invoice-sent-column-FE-response-sep2026.md` | 2026-09-01 | |
 | `shipping-information-FE-response-sep2026.md` | 2026-09-01 | |
-| `analytics-dashboards-FE-response-sep2026.md` | 2026-09-03 | **evidence it was NOT read**: the 09-09 checklist still asks us to raise a click truncation this doc reported closed at 200 on 09-03 |
 | `security-hardening-FE-response-sep2026.md` | 2026-09-03 | |
 | `orders-tracking-requested-column-FE-response-sep2026.md` | 2026-09-09 | pinned by `tests/orders-tracking-requested-column-sep2026.test.js` |
 | `admin-products-fallback-FE-response-sep2026.md` | 2026-09-06 | BF-044 phase 2 |
@@ -151,7 +175,8 @@ three oldest, spot-checked for the rest.
 | `fe-verification-and-remaining-gaps-sep2026.md` | 2026-09-08. **Two of its three fixes are disputed** — see the outbox note above before implementing any of it |
 | `FE-open-items-checklist-sep2026.md` | 2026-09-09. Answered by `outbox/printer-canonicals-backend-brief-sep2026.md`; four of its nine items were already shipped when it was written |
 | `admin-only-test-product-FE-handoff-sep2026.md` | 2026-09-09. Answers `outbox/admin-only-test-product-backend-brief-sep2026.md`. A **design reply, not a delivery** — nothing in it had shipped when it was filed, verified 2026-09-12. Answered by `outbox/admin-only-test-product-FE-response-sep2026.md`; **its §2 recommendation was declined on a measurement** |
-| `security-hardening-sep2026-round2-FE-handoff.md` | 2026-09-08. Answered by `outbox/security-hardening-round2-FE-response-sep2026.md`. **This is the document that proves the backend dev can read this repo** — it cites `tests/security-hardening-sep2026.test.js:234` |
+| `security-hardening-sep2026-round2-FE-handoff.md` | 2026-09-08. Answered by `sent/security-hardening-round2-FE-response-sep2026.md`. **This is the document that proves the backend dev can read this repo** — it cites `tests/security-hardening-sep2026.test.js:234` |
+| `fe-verification-round-backend-response-sep2026.md` | 2026-09-10. **The delivery record for the whole 09-09/10 batch** — answers eight of our documents section by section. Ships their §1–§7; holds the `authenticated` grant (migration 172) and asks us never to apply it. Answered by `outbox/fe-verification-round-FE-response-sep2026.md`. Six of its seven sections were verified against production and hold; the two corrections are recorded there |
 
 The historical inbox is `readfirst/` at the repo root — frozen, test-pinned, not moved.
 

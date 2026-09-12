@@ -300,7 +300,108 @@ export function readCoverage(meta) {
     return out;
 }
 
-/** The filters the products endpoint really honours. Everything else is a decoy. */
-export const REAL_PRODUCT_FILTERS = ['from', 'to', 'source', 'brand_id', 'limit', 'include_offshore_bounces'];
-/** Measured 2026-09-03: accepted, echoed nowhere, and completely ignored. */
-export const DECOY_PRODUCT_FILTERS = ['product_type', 'sort', 'offset', 'search'];
+/* ────────────────────────────────────────────────────────────────────────────
+ * 7. the filters the products endpoint honours — all of them, now (ERR-251)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * 🚨 THE FOUR DECOYS BECAME REAL, AND A STALE "DECOY" LIST IS WORSE THAN NO LIST.
+ *
+ * On 2026-09-03 `product_type`, `sort`, `offset` and `search` were accepted by
+ * `validate()` and then dropped by `stripUnknown`, so the endpoint answered page
+ * one with a 200 however you paged it. This module named them DECOY_PRODUCT_FILTERS
+ * and the page refused to send them — correctly, because sending a filter that is
+ * silently ignored is how an operator comes to trust a leaderboard that is not
+ * filtered (ERR-151).
+ *
+ * The backend made all four reach SQL (their migration 170). Re-measured here on
+ * 2026-09-12 with an owner JWT, because this author's DATA has been right and
+ * their RENDERING ADVICE has not — so the payload gets measured, not the note:
+ *
+ *   ?limit=5                          → first CLC37BK,  total 518, has_more true
+ *   ?limit=5&offset=5                 → first C804XLBK  (a DIFFERENT page)
+ *   ?sort=views                       → meta.ranked_by "views"
+ *   ?sort=revenue                     → first GTN237KCMY, ranked_by "revenue"
+ *   ?sort=bogus                       → 400 VALIDATION_FAILED
+ *   ?search=TN2                       → total 518 → 34
+ *   ?product_type=toner_cartridge     → total 518 → 113
+ *   ?product_type=toner               → 400, listing the 17 accepted values
+ *
+ * The `total` moving with the filter is the important one: it confirms the
+ * backend's claim that FILTERS APPLY BEFORE RANKING, so the pager divides by the
+ * filtered count and a paged walk can neither repeat nor skip a row.
+ *
+ * The old constant is deliberately NOT kept as an empty array. A name that says
+ * "these are ignored" is an instruction to the next reader, and leaving it around
+ * saying nothing is how someone re-derives the whole question.
+ */
+export const REAL_PRODUCT_FILTERS = [
+    'from', 'to', 'source', 'brand_id', 'limit', 'include_offshore_bounces',
+    'product_type', 'sort', 'offset', 'search',
+];
+
+/**
+ * The sorts the endpoint allow-lists, in a `CASE` — never dynamic SQL.
+ * `engagement` is the default and the only one that is a composite; the rest are
+ * plain columns. Every branch keeps the same deterministic tie-break, which is
+ * what makes `offset` safe to page with.
+ */
+export const PRODUCT_SORTS = [
+    ['engagement', 'Engagement'],
+    ['views', 'Views'],
+    ['clicks', 'Clicks'],
+    ['units_sold', 'Units sold'],
+    ['revenue', 'Revenue'],
+];
+
+/**
+ * `product_type` takes a REAL `products.product_type` value — `toner_cartridge`,
+ * not the `/shop` category slug `toner`. That distinction is the ERR-162/163
+ * family: `drum` and `paper` sat in two admin filter menus for months, matched
+ * zero rows, and never errored, because a filter value that is not a real type
+ * does not fail — it silently returns nothing.
+ *
+ * Here it DOES fail (the endpoint 400s with its accepted list), which is better.
+ * But the menu is still built from the INTERSECTION of our own vocabulary owner
+ * (utils/product-types.js) and what the endpoint accepts, because the endpoint's
+ * list includes `universal_ribbon` — accepted, and **zero rows in the live
+ * catalogue** (measured 2026-09-12). Offering it would put an option in the menu
+ * that can only ever return an empty leaderboard: exactly ERR-163, arriving from
+ * the backend's side this time.
+ */
+export const CATALOG_TYPES_ACCEPTED = Object.freeze([
+    'ink_cartridge', 'ink_bottle', 'toner_cartridge', 'waste_toner', 'maintenance_box',
+    'drum_unit', 'belt_unit', 'fuser_kit', 'fax_film', 'fax_film_refill',
+    'printer_ribbon', 'typewriter_ribbon', 'correction_tape', 'universal_ribbon',
+    'label_tape', 'photo_paper', 'printer',
+]);
+
+/**
+ * Read the pager out of `meta`, distinguishing "the backend told us" from "we
+ * guessed". `has_more` is the backend's own answer and is never recomputed from
+ * `rows.length === limit` — that inference is wrong on the last full page and
+ * would offer a Next that lands on nothing.
+ */
+export function readPager(meta, rowCount) {
+    const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const limit = num(meta && meta.limit);
+    const offset = num(meta && meta.offset);
+    const reported = meta && has(meta, 'has_more') ? !!meta.has_more : null;
+    if (limit === null || offset === null) {
+        // No echo means no pager. Showing one anyway would be a Next button
+        // built on an assumption the server never confirmed.
+        return { supported: false, limit: null, offset: null, hasMore: false, hasPrev: false, page: null, label: '' };
+    }
+    const page = Math.floor(offset / Math.max(1, limit)) + 1;
+    const first = offset + (rowCount ? 1 : 0);
+    const last = offset + rowCount;
+    return {
+        supported: true,
+        limit,
+        offset,
+        hasMore: reported === null ? false : reported,
+        hasPrev: offset > 0,
+        page,
+        label: rowCount ? `${first.toLocaleString('en-NZ')}–${last.toLocaleString('en-NZ')}` : '',
+    };
+}

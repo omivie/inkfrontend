@@ -21,10 +21,25 @@
  *     nearly as many hub visits as Epson but under half the product views, and
  *     one summed figure hides exactly that.
  *
- * There is no pager. `?offset=` is accepted by both endpoints and completely
- * ignored (measured 2026-09-03), so a Next button would silently re-serve page
- * one. The limit control is the honest equivalent, and the row count is read
- * from meta's PRE-limit total, never from data.length.
+ * THERE IS A PAGER NOW (ERR-251). Until 2026-09-10 `?offset=` was accepted by
+ * both endpoints and completely ignored, so a Next button would have silently
+ * re-served page one — the limit control was the honest equivalent, and this
+ * comment said so. The backend's migration 170 made offset/sort/search/
+ * product_type reach SQL; re-measured here 2026-09-12 before a single control
+ * was drawn (see utils/catalog-engagement.js §7 for the numbers).
+ *
+ * Two things the pager depends on, both measured rather than assumed:
+ *   • `meta.has_more` is the BACKEND's answer. It is never recomputed from
+ *     `rows.length === limit`, which is wrong on the last full page and would
+ *     offer a Next that lands on nothing.
+ *   • filters apply BEFORE ranking, so `total_products_engaged` is the count of
+ *     the FILTERED set (518 → 34 for `search=TN2`) and the pager divides by the
+ *     right number. The row count is still read from that pre-limit total,
+ *     never from data.length.
+ *
+ * The BRANDS panel has no pager: its own endpoint echoes no offset, and a
+ * control that is drawn for one panel and not the other is less confusing than
+ * one that silently does nothing on the second.
  *
  * Follows the demand-ranking.js / website-traffic.js shape: page owns its
  * filters (global bar hidden), _renderSeq race guard, skeleton on first paint
@@ -40,7 +55,12 @@ import {
     readOffshoreExcluded, offshoreDisclosure, OFFSHORE_STATE,
     engagementParts, rowCountLabel, readUnmatchedBrandSlugs, readCoverage,
     overUnityTooltip, RATE_DEFINITION,
+    PRODUCT_SORTS, CATALOG_TYPES_ACCEPTED, readPager,
 } from '../utils/catalog-engagement.js';
+// The type menu is the INTERSECTION of our vocabulary and the endpoint's, never
+// a fresh hand-kept enum — six type vocabularies already exist in this repo and
+// `npm run audit:types` counts them (ERR-162→166).
+import { PRODUCT_TYPE_LABELS } from '../utils/product-types.js';
 
 const PANELS = [
     { id: 'products', label: 'Products' },
@@ -69,6 +89,29 @@ let _source = 'all';
 let _brandId = '';
 let _limit = 50;
 let _includeBounces = false;
+let _sort = 'engagement';
+let _search = '';
+let _productType = '';
+let _offset = 0;
+let _searchTimer = null;
+
+/**
+ * The type options actually offered: our label vocabulary ∩ the endpoint's
+ * accepted list. `universal_ribbon` is accepted by the endpoint and has ZERO
+ * rows in the live catalogue (measured 2026-09-12), and our own vocabulary does
+ * not carry it — so it falls out here rather than becoming a menu entry that can
+ * only ever return an empty leaderboard. That is ERR-163 exactly, and it is the
+ * reason this is an intersection and not a copy of either side.
+ */
+const TYPE_OPTIONS = CATALOG_TYPES_ACCEPTED
+    .filter((t) => Object.prototype.hasOwnProperty.call(PRODUCT_TYPE_LABELS, t))
+    .map((t) => [t, PRODUCT_TYPE_LABELS[t]])
+    .sort((a, b) => a[1].localeCompare(b[1]));
+
+/** Any change to WHAT is being asked must return to page one — otherwise a
+ *  narrower filter can leave the operator on an offset past the end of its own
+ *  result set, looking at an empty table that is not empty. */
+function resetPaging() { _offset = 0; }
 
 let _dt = null;
 let _abort = null;
@@ -214,13 +257,37 @@ function controlsHtml() {
         <span>Include offshore bounces</span>
     </label>`;
 
+    // Products-only. The brands endpoint honours none of these (it echoes no
+    // offset either), and a control that silently does nothing on one panel is
+    // the decoy problem this whole change is about — just moved into our own UI.
+    const sortCtl = _panel === 'products' ? `<div class="ce-filter">
+        <span class="ce-filter__label">Sort</span>
+        <select class="admin-select" data-filter="sort">${PRODUCT_SORTS.map(([v, l]) =>
+            `<option value="${esc(v)}"${_sort === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    </div>` : '';
+
+    const typeCtl = _panel === 'products' ? `<div class="ce-filter">
+        <span class="ce-filter__label">Type</span>
+        <select class="admin-select" data-filter="product_type">
+            <option value="">All types</option>
+            ${TYPE_OPTIONS.map(([v, l]) =>
+                `<option value="${esc(v)}"${_productType === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+    </div>` : '';
+
+    const searchCtl = _panel === 'products' ? `<div class="ce-filter ce-filter--search">
+        <span class="ce-filter__label">Find</span>
+        <input type="search" class="admin-input" data-filter="search" value="${esc(_search)}"
+               placeholder="SKU or name\u2026" autocomplete="off" aria-label="Filter products by SKU or name">
+    </div>` : '';
+
     return `<div class="ce-controls">
         <div class="admin-segmented" role="tablist">${panelBtns}</div>
         <div class="ce-filter">
             <span class="ce-filter__label">Range</span>
             <select class="admin-select" data-filter="range">${rangeOpts}</select>
         </div>
-        ${sourceCtl}${brandCtl}${limitCtl}
+        ${sourceCtl}${brandCtl}${typeCtl}${sortCtl}${limitCtl}${searchCtl}
         <div class="ce-controls__spacer"></div>
         ${bounceCtl}
     </div>`;
@@ -317,6 +384,9 @@ function paint(res) {
     const meta = res.meta || {};
     const kind = _panel === 'brands' ? 'brand' : 'product';
     const count = rowCountLabel(rows, meta, kind);
+    // Brands never gets a pager: its endpoint echoes no limit/offset, so
+    // readPager reports `supported: false` and the old honest caption stands.
+    const pager = _panel === 'products' ? readPager(meta, rows.length) : readPager(null, rows.length);
     const range = meta.range || {};
     const rangeText = (range.from && range.to) ? `${range.from} → ${range.to}` : '';
 
@@ -326,9 +396,11 @@ function paint(res) {
             <span>${esc(count.label)}</span>
             ${rangeText ? `<span class="ce-caption__sep">·</span><span>${esc(rangeText)}</span>` : ''}
             ${meta.ranked_by ? `<span class="ce-caption__sep">·</span><span>ranked by ${esc(String(meta.ranked_by))}</span>` : ''}
-            ${count.truncated ? `<span class="ce-caption__sep">·</span><span class="ce-caption__more">raise “Show” to see more — this endpoint has no next page</span>` : ''}
+            ${pager.supported && pager.label ? `<span class="ce-caption__sep">·</span><span>showing ${esc(pager.label)}</span>` : ''}
+            ${(!pager.supported && count.truncated) ? `<span class="ce-caption__sep">·</span><span class="ce-caption__more">raise “Show” to see more — this panel has no next page</span>` : ''}
         </div>
         <div class="admin-card admin-mb-lg"><div id="ce-table"></div></div>
+        ${pagerHtml(pager)}
         ${notesHtml(meta)}`;
 
     const mount = body.querySelector('#ce-table');
@@ -341,6 +413,28 @@ function paint(res) {
         tableClass: 'ce-table',
     });
     _dt.setData(rows);
+}
+
+/**
+ * The pager. Drawn ONLY when the server echoed limit and offset back (ERR-251).
+ *
+ * `Next` is gated on the backend's own `meta.has_more`, never on
+ * `rows.length === limit` — that inference is wrong on the last full page and
+ * hands the operator a button that lands on an empty table. When the server
+ * does not echo a pager, none is drawn at all: an inferred pager over an
+ * endpoint that ignores `offset` is precisely the silent-decoy failure this
+ * page spent six weeks documenting.
+ */
+function pagerHtml(pager) {
+    if (!pager.supported) return '';
+    if (!pager.hasPrev && !pager.hasMore) return '';
+    const btn = (action, label, enabled) =>
+        `<button type="button" class="admin-btn admin-btn--sm" data-page="${action}"${enabled ? '' : ' disabled'}>${label}</button>`;
+    return `<div class="ce-pager">
+        ${btn('prev', '\u2190 Previous', pager.hasPrev)}
+        <span class="ce-pager__page">Page ${pager.page.toLocaleString('en-NZ')}</span>
+        ${btn('next', 'Next \u2192', pager.hasMore)}
+    </div>`;
 }
 
 /** The rate-limit countdown, so the operator watches a number rather than a
@@ -370,6 +464,10 @@ async function render() {
     _abort = new AbortController();
 
     const opts = Object.assign({ limit: _limit }, rangeParams());
+    // offset is sent ONLY when paging. Page one keeps the same URL it has always
+    // had, so the default view still shares one edge/TTL cache key with itself
+    // (the same reason include_offshore_bounces is omitted when off).
+    if (_panel === 'products' && _offset > 0) opts.offset = _offset;
     // include_offshore_bounces defaults to false server-side; only send it when
     // it is actually on, so the URL (and therefore the shared cache key) stays
     // stable for the default view.
@@ -381,6 +479,11 @@ async function render() {
     } else {
         if (_source !== 'all') opts.source = _source;
         if (_brandId) opts.brand_id = _brandId;
+        if (_productType) opts.product_type = _productType;
+        if (_search.trim()) opts.search = _search.trim();
+        // `engagement` is the server's own default; omitting it keeps the URL
+        // stable for the view the operator has not changed.
+        if (_sort && _sort !== 'engagement') opts.sort = _sort;
         res = await AdminAPI.getCatalogProductEngagement(opts, _abort.signal);
     }
 
@@ -412,6 +515,7 @@ function onContainerClick(e) {
         const id = panelBtn.dataset.panel;
         if (id && id !== _panel) {
             _panel = id;
+            resetPaging();
             const limits = _panel === 'products' ? PRODUCT_LIMITS : BRAND_LIMITS;
             if (!limits.includes(Number(_limit))) _limit = limits[1] || limits[0];
             _hasRenderedSuccessfully = false;
@@ -424,8 +528,17 @@ function onContainerClick(e) {
         const group = pill.closest('[data-filter]');
         if (group && group.dataset.filter === 'source') {
             _source = pill.dataset.value;
+            resetPaging();
             render();
         }
+        return;
+    }
+    const pageBtn = e.target.closest('[data-page]');
+    if (pageBtn) {
+        if (pageBtn.disabled) return;
+        const step = pageBtn.dataset.page === 'next' ? 1 : -1;
+        _offset = Math.max(0, _offset + step * Number(_limit || 0));
+        render();
         return;
     }
     if (e.target.closest('[data-action="ce-retry"]')) render();
@@ -439,8 +552,40 @@ function onContainerChange(e) {
     else if (key === 'limit') _limit = Number(el.value);
     else if (key === 'brand_id') _brandId = el.value;
     else if (key === 'include_offshore_bounces') _includeBounces = !!el.checked;
+    else if (key === 'sort') _sort = el.value;
+    else if (key === 'product_type') _productType = el.value;
+    else if (key === 'search') { _search = el.value; }
     else return;
+    // EVERY filter change returns to page one. Narrowing a result set while
+    // holding an offset leaves the operator past the end of it, looking at an
+    // empty table that is not empty — and `has_more: false` would make the Next
+    // button that could rescue them disabled too.
+    resetPaging();
     render();
+}
+
+/**
+ * Typing is debounced; every other control fires on change.
+ *
+ * 300ms, and it matters more here than on a storefront box: this whole section
+ * shares a 20-requests-per-minute budget (measured — the headers advertise 30
+ * and a second limiter refuses the 21st), so an undebounced search field would
+ * spend it in about two seconds of typing and then show a rate-limit countdown
+ * instead of results.
+ */
+function onContainerInput(e) {
+    const el = e.target.closest('input[data-filter="search"]');
+    if (!el) return;
+    _search = el.value;
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+        resetPaging();
+        render();
+        // Re-focus and restore the caret: paint() replaces the controls wholesale,
+        // so without this the field loses focus mid-word on every keystroke batch.
+        const live = _container && _container.querySelector('input[data-filter="search"]');
+        if (live) { live.focus(); live.setSelectionRange(live.value.length, live.value.length); }
+    }, 300);
 }
 
 export default {
@@ -450,6 +595,7 @@ export default {
         _container = container;
         container.addEventListener('click', onContainerClick);
         container.addEventListener('change', onContainerChange);
+        container.addEventListener('input', onContainerInput);
         FilterState.showBar(false); // this page owns its own controls
         await render();
         // After the table is up, so the first paint is never waiting on it.
@@ -468,6 +614,8 @@ export default {
         if (_container) {
             _container.removeEventListener('click', onContainerClick);
             _container.removeEventListener('change', onContainerChange);
+            _container.removeEventListener('input', onContainerInput);
+            clearTimeout(_searchTimer);
         }
         FilterState.showBar(true);
         _container = null;

@@ -734,9 +734,16 @@ function analyticsHealthSnapshot() {
 /** Build a query string, dropping empties, for the Sep-2026 analytics endpoints.
  *  These take `from`/`to` — NOT the `date_from`/`date_to` that analyticsQuery()
  *  emits — so they deliberately do not route through it (same reason
- *  getTrafficTimeseries does not). Only params VERIFIED to be honoured are
- *  emitted; product_type/sort/offset/search are accepted and silently ignored
- *  (measured), so sending them would imply a filter that does not exist. */
+ *  getTrafficTimeseries does not).
+ *
+ *  Only params VERIFIED to be honoured are emitted — and as of 2026-09-12 that
+ *  includes product_type, sort, offset and search, which were accepted and
+ *  silently dropped by the validator's stripUnknown until the backend's
+ *  migration 170 (ERR-251). This function passes through whatever it is handed;
+ *  the decision about what is honest to send lives with the PAGE, next to the
+ *  measurements. What must never happen is a filter reaching the URL that the
+ *  server ignores — that is how an operator comes to trust an unfiltered
+ *  leaderboard (ERR-151). */
 function catalogQueryString(opts = {}) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(opts)) {

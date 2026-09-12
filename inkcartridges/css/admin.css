@@ -7157,3 +7157,29 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 }
 .admin-fui__fail strong { color: var(--text); }
 .admin-fui__fail .admin-btn { margin-left: 6px; vertical-align: baseline; }
+
+/* ── Catalogue Engagement pager + search (ERR-251) ──────────────────────────
+   Drawn only when the endpoint echoes limit/offset back. Until backend
+   migration 170 the four params were accepted and silently dropped, so this
+   page deliberately had no pager at all. */
+.ce-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: -8px 0 20px;
+}
+.ce-pager__page {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 84px;
+  text-align: center;
+}
+.ce-pager .admin-btn[disabled] { opacity: 0.45; cursor: default; }
+.ce-filter--search { flex: 1 1 190px; min-width: 150px; max-width: 280px; }
+.ce-filter--search .admin-input { width: 100%; }
+@media (max-width: 600px) {
+  .ce-filter--search { flex-basis: 100%; max-width: none; }
+  .ce-pager { gap: 8px; }
+}

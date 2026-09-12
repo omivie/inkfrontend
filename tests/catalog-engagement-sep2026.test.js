@@ -255,29 +255,58 @@ test('§3 the row count comes from meta, never from data.length', async (t) => {
   });
 });
 
-test('§3b the page offers no pager, because offset is a decoy', () => {
-  // A Next button here would re-serve page one and look like it worked.
+/**
+ * §3b/§3c were INVERTED on 2026-09-12 (ERR-251), and they were right when written.
+ *
+ * They asserted that the page sends no `offset` and offers no pager, because
+ * `?offset=` was accepted by both endpoints and completely ignored (measured
+ * 2026-09-03) — so a Next button would have silently re-served page one, which
+ * is the ERR-151 decoy failure rebuilt inside our own UI.
+ *
+ * The backend's migration 170 made offset/sort/search/product_type reach SQL.
+ * Re-measured with an owner JWT before anything was drawn: `&offset=5` returns a
+ * genuinely different page (first row CLC37BK → C804XLBK), `sort=bogus` 400s,
+ * and `search=TN2` moves `total_products_engaged` 518 → 34, which is what proves
+ * filters apply BEFORE ranking and therefore that paging is coherent.
+ *
+ * The property they now pin is the one that still matters: a pager may only be
+ * drawn from what the SERVER echoed, never inferred. See
+ * tests/catalog-engagement-pager-sep2026.test.js for the full set.
+ */
+test('§3b the page pages — but only on the panel whose endpoint echoes a pager', () => {
   const code = codeOf(PAGE);
-  assert.doesNotMatch(code, /onPageChange/, 'the endpoint ignores ?offset= — there is no page 2');
-  assert.doesNotMatch(code, /\boffset\b/, 'offset must not be sent at all');
-  assert.match(PAGE, /raise .Show. to see more/,
-    'the caption must tell the operator how to actually see more rows');
-  // ...and the reason must survive in the docblock, so nobody "adds the missing
-  // pagination" later.
-  assert.match(PAGE, /accepted by both endpoints and completely[\s\S]{0,40}ignored/,
-    'the decoy finding must stay documented in the page');
+  assert.match(code, /opts\.offset = _offset/, 'offset is real now and must be sent when paging');
+  assert.match(code, /readPager\(/, 'the pager state must come from meta, not from rows.length');
+  // The brands endpoint still echoes nothing, so it still gets no pager and must
+  // keep its honest caption. A control drawn for one panel and not the other is
+  // far better than one that silently does nothing on the second.
+  assert.match(PAGE, /this panel has no next page/,
+    'the panel that genuinely cannot page must still say so');
+  assert.match(code, /readPager\(null, rows\.length\)/,
+    'brands must be passed a null meta so it can never draw a pager');
+  // And the history must survive, so nobody "removes the unnecessary guard".
+  // Tolerant of the docblock's ` * ` line continuations — the sentence wraps.
+  const prose = PAGE.replace(/\n\s*\*\s?/g, ' ');
+  assert.match(prose, /accepted by both endpoints and completely ignored/,
+    'the original decoy finding must stay documented — it is why the pager is gated on meta');
 });
 
 test('§3c only VERIFIED filters are sent', () => {
-  // product_type / sort / search are accepted and silently ignored (measured).
-  // Sending one would put a control on screen that does nothing.
+  // Unchanged in intent: a control on screen that does nothing is the failure.
+  // What changed is which params are verified. All four former decoys were
+  // re-measured on 2026-09-12 and now reach SQL, so sending them is honest —
+  // and NOT offering them would now be the thing hiding a real capability.
   const code = codeOf(PAGE);
-  for (const decoy of ["'product_type'", "'sort'", "'search'"]) {
-    assert.ok(!code.includes(decoy), `${decoy} is a decoy param and must not be sent`);
+  for (const real of ["'product_type'", "'sort'", "'search'", 'offset']) {
+    assert.ok(code.includes(real), `${real} is honoured now and must be wired`);
   }
   for (const real of ['source', 'brand_id', 'limit', 'include_offshore_bounces']) {
     assert.ok(PAGE.includes(real), `${real} is honoured and should be offered`);
   }
+  // NEGATIVE CONTROL: a param nobody has measured must still not be sent. This
+  // is what stops "the decoys are real now" from becoming "send everything".
+  assert.ok(!code.includes("'order_by'"), 'an unmeasured param must never be sent');
+  assert.ok(!code.includes("'page'"), 'the endpoint takes offset, not page');
 });
 
 // ── 4. dead brand links ─────────────────────────────────────────────────────
