@@ -99,9 +99,27 @@ through was correct for a unit PRICE** — a cartridge can legitimately cost 0 �
 cart**, which cannot have lines worth nothing. The guard now asks the **line count**, never the
 number, so a genuinely free line is still reported (positive control in the suite), and
 `add_shipping_info` refuses an empty cart symmetrically with `begin_checkout` — otherwise GA4 would
-show a step above its own parent and the whole funnel reads as a data bug. *Observed at
-`Cart.items=0` with `localStorage` still holding the line, on localhost, where a guest's session
-cookie does not reach the API host; the honesty bug it exposed is host-independent.*
+show a step above its own parent and the whole funnel reads as a data bug.
+
+**The first diagnosis of that state was wrong, and production corrected it within the hour.** It was
+written up as a localhost artefact ("a guest's session cookie does not reach the API host") and then
+reproduced on `www` on the next run. The reliable predictor is not the hostname, it is **whether the
+add was server-confirmed**: when `POST /api/cart/items` does not answer 2xx — a 429 from repeated
+probe runs, a cold start — the line exists only in `localStorage`, the server cart is genuinely
+empty, and `/checkout` adopts that. ***A cause that happens to correlate with the host you noticed it
+on is not a cause.*** The probe now names the POST status instead of the hostname.
+
+**And it exposed something outside this change's scope, which is reported rather than fixed here.**
+In that state `Cart.items` goes 1 → 0 **on the checkout page**: `loadCart()` reads the line from
+`localStorage`, `begin_checkout` correctly fires with it, and then the cart GET's empty response is
+adopted with `pricingState: 'ok'` and `hasServerPricing(): true`. `cart.js` has a guard for exactly
+this — "don't clear local items if server unexpectedly returns empty", which drops to
+`PRICING.SERVER_EMPTY` — but it sits on **one** of the three `_parseServerCart` call sites, and the
+state we measured has `ok`, so that is not the path that ran. A shopper whose add was refused would
+therefore be shown an **empty checkout** after being toasted "Item saved locally. It will sync when
+connection is restored." That is a cart-loading defect, not an analytics one, and fixing it inside a
+GA4 change would be the wrong place — it is filed to the backend response's §4 and belongs in its
+own entry.
 
 **A fourth ask was already done.** The hand-off's "while you are in `traffic-tracker.js`, flip
 `USE_ID_HEADERS = false`" describes state from **2026-09-08**. It has been `true` since

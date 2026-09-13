@@ -174,6 +174,7 @@ function record(page) {
     const blocked = [];
     const aborted = [];
     const adds = [];
+    const reportOnly = [];
     page.on('request', (req) => {
         const url = req.url();
         if (isGa4(url)) { for (const h of hitsFrom(req)) if (h.en) ga4.push(h); return; }
@@ -188,7 +189,22 @@ function record(page) {
     });
     page.on('console', (msg) => {
         const t = msg.text();
-        if (/Content Security Policy|Refused to (connect|load)/i.test(t)) blocked.push(`CSP: ${t.slice(0, 200)}`);
+        if (!/Content Security Policy|Refused to (connect|load)/i.test(t)) return;
+        /* TWO KINDS OF CSP LINE, AND ONLY ONE IS A BLOCK.
+         *
+         * Production emits "Framing 'https://www.google.com/' violates the
+         * following REPORT-ONLY ... frame-ancestors 'self'. The violation has
+         * been logged, but no further action has been taken." That sentence says
+         * outright that nothing was blocked, and frame-ancestors governs who may
+         * frame US — it has nothing to do with whether a measurement hit left the
+         * browser. Reporting it as a refusal made this probe red against a
+         * perfectly working deploy, which is the same mistake as the ERR_ABORTED
+         * one above: a probe that reddens on a benign condition is red for ever
+         * and gets ignored. What still fails: an ENFORCED refusal of something we
+         * send (connect-src / script-src). */
+        if (/report-only|no further action has been taken/i.test(t)) { reportOnly.push(t.slice(0, 160)); return; }
+        if (/frame-ancestors/i.test(t)) { reportOnly.push(t.slice(0, 160)); return; }
+        blocked.push(`CSP: ${t.slice(0, 200)}`);
     });
     /* THE GA4 add_to_cart FIRES ONLY ON A SERVER-CONFIRMED 2xx, deliberately —
      * so "no event" has two causes again, and only one of them is a bug. If
@@ -202,7 +218,7 @@ function record(page) {
             adds.push(res.status());
         }
     });
-    return { ga4, ads, blocked, aborted, adds };
+    return { ga4, ads, blocked, aborted, adds, reportOnly };
 }
 
 /** Report the transport honestly: refusals fail, beacon aborts are noise. */
@@ -210,8 +226,10 @@ function checkTransport(rec, where) {
     if (rec.blocked.length) {
         bad(`nothing Google-bound was refused (${where})`, rec.blocked.slice(0, 3).join('\n      '));
     } else {
-        ok(`nothing Google-bound was refused (${where})`,
-            rec.aborted.length ? `${rec.aborted.length} beacon(s) reported ERR_ABORTED — expected, the hits were sent` : 'clean');
+        const bits = [];
+        if (rec.aborted.length) bits.push(`${rec.aborted.length} beacon(s) ERR_ABORTED — expected, the hits were sent`);
+        if (rec.reportOnly.length) bits.push(`${rec.reportOnly.length} report-only/frame-ancestors notice(s) — logged, not blocked`);
+        ok(`nothing Google-bound was refused (${where})`, bits.join('; ') || 'clean');
     }
 }
 
@@ -548,9 +566,18 @@ try {
         const pressed = await pressDeliveryContinue(page);
 
         if (cart.lines === 0) {
-            soft('add_shipping_info on an EMPTY cart', `Cart.items=0 (localStorage still holds ${cart.stored}) `
-                + '— the module refuses an empty cart on purpose, so no event is DUE and nothing is proven '
-                + 'here. On localhost this is expected: a guest session cookie does not reach the API host. '
+            /* MEASURED ON PRODUCTION TOO, not just localhost — the first version of
+             * this note said "on localhost this is expected" and www proved it
+             * wrong on the very next run. The reliable predictor is whether the
+             * add was SERVER-confirmed: when POST /api/cart/items did not answer
+             * 2xx (a 429 from repeated probe runs, a cold start), the item lives
+             * only in localStorage, the server cart is genuinely empty, and
+             * /checkout adopts that. Name the cause, not the hostname. */
+            const why = rec.adds.length && !rec.adds.some((st) => st >= 200 && st < 300)
+                ? `the add was never server-confirmed (POST /api/cart/items -> ${rec.adds.join(', ')})`
+                : 'the server cart read empty even though the add was confirmed — worth chasing if this persists';
+            soft('add_shipping_info on an EMPTY cart', `Cart.items=0, localStorage holds ${cart.stored}: ${why}. `
+                + 'The module refuses an empty cart on purpose, so no event is DUE and nothing is proven here. '
                 + 'NOT EXERCISED.');
         } else if (pressed.state !== 'clicked') {
             soft('the delivery section Continue was NOT reachable', `${pressed.state} — `

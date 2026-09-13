@@ -99,13 +99,39 @@ The allowance was written for a unit **price**, where a genuine 0 is a real pric
 for a **cart**. The guard now asks the **line count**, and `add_shipping_info` refuses an empty cart
 symmetrically with `begin_checkout` (otherwise GA4 shows a funnel step above its own parent).
 
-**What we would like you to check:** we only reproduced it on `http://localhost:3000`, where a
-guest's session cookie does not reach `api.inkcartridges.co.nz`, so an empty server cart is the
-expected answer there. If `GET /api/cart` can ever return `items: []` **alongside a summary** for a
-session that does have a cart — rather than the no-session empty we think this is — then the same
-state is reachable in production, and it would show as an empty checkout to a real shopper, which
-is a much larger problem than our analytics number. `cart.js` has a guard for "server returned
-empty, keep local items", but it cannot fire when the local array is already empty.
+**We first wrote this up as a localhost artefact and production disproved that within the hour**, so
+here is the corrected version. It is **not** about the host. The predictor is **whether the add was
+server-confirmed**: when `POST /api/cart/items` does not answer 2xx — in our case **429**, from
+running the probe repeatedly — the line exists only in `localStorage`, the server cart is genuinely
+empty, and `/checkout` adopts that. Reproduced on `www.inkcartridges.co.nz`, not just localhost.
+
+**And that turned up something bigger than our analytics number, which we are reporting rather than
+fixing, because it is a cart-loading defect and does not belong inside a GA4 change.**
+
+In that state `Cart.items` goes **1 → 0 on the checkout page**:
+
+1. `loadCart()` reads the line from `localStorage` — `Cart.items = 1`. `begin_checkout` fires
+   correctly off it (we measured `value=5.99`, `items[]` populated).
+2. The cart GET returns an empty `items` array **together with a summary**, and it is adopted:
+   measured `Cart.items=0`, `getSubtotal()=0`, **`hasServerPricing(): true`**, **`pricingState: 'ok'`**.
+3. `this.cartItems = Cart.items` is `[]`, so the checkout renders an **empty cart**.
+
+`cart.js` has a guard for exactly this — *"don't clear local items if server unexpectedly returns
+empty"*, which drops to `PRICING.SERVER_EMPTY`. It sits on **one of the three** `_parseServerCart`
+call sites, and the state we measured is `ok`, so that is not the path that ran.
+
+**The shopper-facing consequence:** an add that the server refuses toasts *"Item saved locally. It
+will sync when connection is restored."* — and then the checkout page shows them an empty cart. A
+429 is the easiest way to trigger it, but any non-2xx add does the same.
+
+**Two questions for you:**
+
+- Can `GET /api/cart` return `items: []` **with** a populated summary for a session that does have a
+  cart, or is the empty summary only ever returned for a genuinely empty/absent session cart? That
+  determines whether the frontend guard above is the whole fix.
+- What is the actual limit and window on `POST /api/cart/items`? We hit 429 on the first add of a
+  run more than four minutes after the previous one, which is a longer window than we expected, and
+  it is worth knowing whether a real shopper adding several cartridges in a row can reach it.
 
 ## 5. Every event is scoped with `send_to`, and it has to be — for your acceptance criterion
 
@@ -219,6 +245,7 @@ attached rather than as a failure.
 2. **DebugView on a phone** (criterion 1) — we have the four events on the wire with `items[]`
    populated, but the property-side view is yours.
 3. **§4** — whether `GET /api/cart` can return `items: []` with a summary for a session that has a
-   cart.
+   cart, **and the real limit/window on `POST /api/cart/items`**. The empty-checkout-after-a-refused-add
+   behaviour in §4 is ours to fix once you have answered the first half; it needs its own ticket.
 4. **§5** — what `G-YJXTSGLM28` is.
 5. **§2** — whether you will add `product_type` to the add-to-cart response's `product` object.
