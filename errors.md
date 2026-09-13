@@ -41,6 +41,146 @@ describing the same incident.
 
 ---
 
+## ERR-256 — GA4 could not draw a funnel at all, and three of the instructions for fixing it would each have shipped a confident wrong number — **RESOLVED** (2026-09-13)
+
+**Context.** Backend hand-off `ga4-ecommerce-events-FE-handoff-sep2026.md`. Mobile is **64% of ad
+clicks converting at 1.65%** against desktop's **8.6%**, and nobody could say where the mobile
+funnel lost people, because **GA4 received no ecommerce events from the browser** — only
+`page_view` / `scroll` / `user_engagement`. Purchases arrive server-side via the Measurement
+Protocol, so revenue was right and everything above it was empty: GA4 literally could not draw
+view → cart → checkout → purchase. Verified before writing a line: `view_item`, `view_item_list`,
+`select_item`, `begin_checkout` and `add_shipping_info` had **zero occurrences** anywhere in
+`inkcartridges/js/`. The premise was exactly right.
+
+**The hand-off was also right about where to put it and wrong about three numbers.** Every one of
+the three would have produced a plausible figure in a dashboard nobody could audit.
+
+**1. `value` = "line total" is BF-060/ERR-223, verbatim.** `POST /api/cart/items` returns
+`quantity` as the **resulting line total**, not the amount added. A line holding 2, add 1, and the
+response says 3 — so the literal reading reports a **$290.97 three-unit add for one $96.99
+cartridge**. That bug has already been through this codebase once, into the account the owner bids
+from. Implemented as price × the server's own `quantity_added` (with the clamped derivation kept as
+a live fallback), which is the identical number the Ads tag sends.
+
+**2. `item_category: product_type` is not obtainable at the add-to-cart site.** All **nine**
+add-to-cart entry points funnel through `Cart.addItem`, but **no caller passes `product_type`** and
+neither the local line whitelist (`cart.js`) nor `_parseServerCart` stores one. `item_brand` is
+missing from 3 of the 9, and the PDP's `brandName` resolves through `extractBrand(name)` — a
+hardcoded five-brand read of the product NAME — and then to the literal **`'Unknown'`**. A missing
+brand is visibly missing and gets fixed; `'Unknown'` becomes one of the biggest rows in a report
+and is indistinguishable from a real brand. Both dimensions are now **omitted when not genuinely
+known**, and the PDP — the one surface that knows the authoritative `product_type` — passes it
+through without persisting it.
+
+**3. `value` = "cart total" would have baked in a shipping guess.** At the moment `begin_checkout`
+fires, the shopper has not reached the delivery section, so `Cart.getTotal()` carries the
+`|| 'urban'` estimate of ERR-235. `Cart.getSubtotal()` — goods only, server-authoritative,
+GST-inclusive — is what is sent, with `Cart.hasServerPricing()` reported beside it as
+`valueSource: 'server' | 'local'`.
+
+**🚨 THE HAZARD THE HAND-OFF COULD NOT HAVE KNOWN: `gtag.js` CONFIGURES THREE DESTINATIONS.**
+`G-SDQELG0FGD`, an orphan second GA4 property `G-YJXTSGLM28` that appears **nowhere else in the
+repo** (no loader tag, no doc, no test), and the Ads tag `AW-18032498762`. An event with **no
+`send_to` goes to all three** — which is what every pre-existing custom event on this site does
+(`contact_form_submit`, `faq_open`, `quote_started`). For an ecommerce-shaped event that would put
+add-to-cart hits into the ad account, directly against the hand-off's **own** acceptance criterion
+that the backend's duplicated-conversion monitor stays 22/22. Every event added here names its one
+destination, and the test proves none can reach `AW-`. ***An unscoped event is not a style
+choice when one of the configured targets bills money.***
+
+**🚨 AND THE ONE THE PROBE FOUND, WHICH NO AMOUNT OF READING WOULD HAVE: a real
+`add_shipping_info` hit went out carrying `value=0`.** On `/checkout` the cart can hold **zero
+lines** while `hasServerPricing()` answers **true** and `getSubtotal()` answers **0** — the server
+returned an empty cart together with a summary, so the figure is "server-confirmed" and it is
+zero. Reading it through reported *"this shopper's cart is worth $0.00"* with full confidence into
+the funnel's headline number: absence-as-zero
+(ERR-063/068/073/075/076/149/150) reaching an analytics property. **The allowance that let it
+through was correct for a unit PRICE** — a cartridge can legitimately cost 0 — **and wrong for a
+cart**, which cannot have lines worth nothing. The guard now asks the **line count**, never the
+number, so a genuinely free line is still reported (positive control in the suite), and
+`add_shipping_info` refuses an empty cart symmetrically with `begin_checkout` — otherwise GA4 would
+show a step above its own parent and the whole funnel reads as a data bug. *Observed at
+`Cart.items=0` with `localStorage` still holding the line, on localhost, where a guest's session
+cookie does not reach the API host; the honesty bug it exposed is host-independent.*
+
+**A fourth ask was already done.** The hand-off's "while you are in `traffic-tracker.js`, flip
+`USE_ID_HEADERS = false`" describes state from **2026-09-08**. It has been `true` since
+BF-054 closed on that date, a test **pins it true**, and the backend's own
+`fe-verification-round-backend-response-sep2026.md` §8 confirms rows now carry `session_id`
+(0/99 on 09-08 → 75/176 on 09-09). Nothing to do. ***A hand-off is a snapshot; check the line
+before you flip it.***
+
+**Fix.** `Ga4Ecommerce` in `js/gtag.js` — the same home as `AdsConversions` and for the same
+measured reason: gtag.js is on **38 of 43** pages, a strict superset of the 33 that load `cart.js`,
+and it covers the PDP and `/checkout`; it is a blocking `<head>` script, so the global exists before
+any body script runs. A new file would have needed ~35 new `<script>` tags, which is **ERR-194
+verbatim** — the trap that left `add_to_cart` with 56 events in its entire history. Five fire
+sites: `view_item` after the PDP's **single** `renderProduct()` caller (skipping the admin test
+product, which a granted `AdminPreview` would otherwise push into GA4 — ERR-234/246);
+`add_to_cart` beside the Ads conversion under the **same** `serverConfirmed` gate;
+`begin_checkout` beside the first-party `checkout_started` beacon so either dataset can audit the
+other; and `add_shipping_info` from **both** the delivery section's Continue **and**
+`handleContinueToPayment`, because `_expandAccordionSection` collapses sections **without
+validating**, so a shopper who clicks a later heading skips the Continue handler entirely.
+
+**The delta and the price readers were LIFTED, not copied.** `readMoney`, `hasMoney`, `cleanText`,
+`cleanLabel` and `resolveAddedQuantity` now sit above both tag families and both call them, so
+Ads and GA4 **cannot** report different numbers for the same add. That is structural rather than a
+coincidence a test happened to catch on the inputs someone thought of — and the parity test proves
+it, with a positive control showing what the wrong formula would have said ($290.97). Touching
+live-money code was gated on the existing **35 assertions** staying green unchanged, which they
+did.
+
+**One test was strengthened as a consequence, and it needed to be.** `ads-add-to-cart-conversion`
+§1's `/1.15` check sliced `GTAG_CODE.slice(indexOf('addToCart(confirmed'))`. Lifting the price
+reader **above** that point would have moved the arithmetic out of the window, and the assertion
+would have gone on passing while testing nothing. Widened to the whole file. ***A window anchored
+on one function tests where the code lives, not the claim.***
+
+**Verified.** `npm test` → **6088 tests, 0 fail** (was 6013; +75 in
+`tests/ga4-ecommerce-events-sep2026.test.js`). **Seven deliberate mutations, seven red** — GST
+divide, unscoped event, line-total value, `'Unknown'` allowed through, tier defaulting to urban,
+`getTotal()` for the value, and a browser `purchase` — then restored to 0 fail. §3's first
+blocklist grep **missed a `this._emit('purchase', …)`** because it only looked for
+`gtag('event','purchase'`; replaced with an **allowlist** of the four event names plus a one-door
+check, and both escape routes now redden. ***Blocklisting the spelling you thought of leaves every
+other spelling open.***
+
+**Measured on the wire** by `npm run probe:ga4-events` (Playwright, phone viewport, no
+`ctx.route()`, real requests observed and GA4's `en`/`tid`/`pr1`/`gcs` decoded and printed): all
+four events leave the browser on `G-SDQELG0FGD`, `cu=NZD`, `items[]` populated with the SKU as
+`item_id`, `add_to_cart` at **`qt=1`, `value=5.99`** for a one-unit add (not the line total), and
+**no browser `purchase`**. Consent measured in **both** directions — `gcs=G1-0` before Accept
+(proving we correctly do not gate the calls; Consent Mode models them) and `gcs=G1-1` after
+accepting through the **real banner UI**, never by writing storage.
+
+**Three probe bugs found by running it, all of the same family.** `net::ERR_ABORTED` on a
+`sendBeacon` was being reported as a CSP refusal — the hits were sent and decoded, so this was a
+false positive, and *a probe that reddens on a benign condition is red for ever and gets ignored,
+taking the next real failure with it.* The first run clicked the delivery Continue on an **empty
+form**, validation correctly refused, and the probe blamed the tag — *the site was right and the
+probe was wrong.* And a 429 on `POST /api/cart/items` (my own repeated runs exhausting the rate
+limit) read as "the tag did not fire", when the event correctly fires only on a 2xx. All three now
+resolve to named **NOT EXERCISED** notes carrying the status, never to failures. The closing line
+no longer claims all four events passed on a run where two were skipped: ***a green sentence
+covering a gap is worse than a yellow one, because it is the line people read instead of the log.***
+
+**Deliberately not done.** No browser `purchase` (server-side only; MP dedup is unreliable, and a
+test plus a comment tombstone now say why). No `view_item_list` / `select_item` — not asked for,
+and each is a new data stream. `js/analytics.js` is still a 14-byte `'use strict';` stub shipped on
+28 pages — reported, not removed, since deleting it means editing 28 HTML files for no functional
+gain. And **no `?v=` hand-stamping and no `npm run build`**: `stamp-versions.js` is Vercel's
+`buildCommand`, so deployed HTML is stamped from content hashes while committed HTML stays pristine
+— cache busting is automatic, and a local build would have dirtied 34 shared HTML files that peer
+sessions are working in.
+
+**Lesson.** Three of the four numbers in a correct, well-written hand-off were wrong in the same
+direction: each was the reading that *looks* right and that no dashboard could ever contradict.
+The value that would have tripled, the category that would have been guessed, the total that would
+have carried a shipping estimate — and the one nobody could have read their way to, a
+server-confirmed `$0.00`. ***When the output is a number in somebody else's dashboard, the only
+review that counts is a measurement of the wire.***
+
 ## ERR-255 — The frontend kept deriving a freight bill the backend had started publishing, and the two were the same parcel — **RESOLVED** (2026-09-12)
 
 **Context.** ERR-241 taught the admin that the customer's $100 free-shipping threshold and the
