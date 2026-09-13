@@ -121,6 +121,12 @@ connection is restored." That is a cart-loading defect, not an analytics one, an
 GA4 change would be the wrong place — it is filed to the backend response's §4 and belongs in its
 own entry.
 
+**And the limiter that exposed it has a long memory.** Measured from one IP: a handful of probe runs
+(~3 guest adds each) reached 429, and **429 persisted past 35 minutes** — re-tested at ~4, ~12, ~22
+and ~35 minutes, all 429 on the FIRST add of the run. That is not a per-minute window. It matters
+beyond the probe, because a household or office behind one NAT address shares the address, and an add
+that 429s is precisely the state that empties the checkout above. Asked in the response's §4.
+
 **A fourth ask was already done.** The hand-off's "while you are in `traffic-tracker.js`, flip
 `USE_ID_HEADERS = false`" describes state from **2026-09-08**. It has been `true` since
 BF-054 closed on that date, a test **pins it true**, and the backend's own

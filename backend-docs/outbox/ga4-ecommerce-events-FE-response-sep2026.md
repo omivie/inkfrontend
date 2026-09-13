@@ -129,9 +129,14 @@ will sync when connection is restored."* — and then the checkout page shows th
 - Can `GET /api/cart` return `items: []` **with** a populated summary for a session that does have a
   cart, or is the empty summary only ever returned for a genuinely empty/absent session cart? That
   determines whether the frontend guard above is the whole fix.
-- What is the actual limit and window on `POST /api/cart/items`? We hit 429 on the first add of a
-  run more than four minutes after the previous one, which is a longer window than we expected, and
-  it is worth knowing whether a real shopper adding several cartridges in a row can reach it.
+- **What is the actual limit and window on `POST /api/cart/items`?** Measured today from one IP: a
+  handful of probe runs (≈3 guest adds each) put us into 429, and **429 persisted for more than 35
+  minutes** — re-tested at ~4, ~12, ~22 and ~35 minutes, all 429, on the FIRST add of each run. That
+  is far longer than a per-minute window, so either it is a long-window or daily per-IP cap, or the
+  IP is being held. Two reasons it matters beyond our probe: a household or office behind one NAT
+  address shares it, and **an add that 429s is exactly the state that empties the checkout** per the
+  paragraphs above. If the cap is intentional, we would like the number so the probe can pace itself;
+  if it is not, the persistence looks like a bug in the limiter's reset.
 
 ## 5. Every event is scoped with `send_to`, and it has to be — for your acceptance criterion
 
