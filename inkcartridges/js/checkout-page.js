@@ -83,6 +83,19 @@
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackCheckoutStarted();
             }
+
+            /* GA4 begin_checkout - the same moment as the beacon above, so the
+             * two datasets describe the same event and either can audit the
+             * other (ERR-256). loadCart() was awaited at the top of init(), so
+             * Cart.items and the server summary are populated by now.
+             *
+             * Ga4Ecommerce reads Cart.getSubtotal() - GOODS ONLY. Not
+             * getTotal(): the shopper has not reached the delivery section yet,
+             * so getTotal() carries a guessed urban shipping estimate, and a
+             * guess does not belong in the funnel's headline number. */
+            if (typeof Ga4Ecommerce !== 'undefined') {
+                Ga4Ecommerce.beginCheckout();
+            }
         },
 
         // Check guest checkout feature flag; redirect guests if disabled
@@ -783,6 +796,34 @@
             this._deliveryTypeAuto = false;
         },
 
+        /* GA4 add_shipping_info (ERR-256) - the delivery area, once committed.
+         *
+         * FOUND BY THE CONTROL, NOT BY AN INDEX. The delivery_type radios live
+         * inside the Shipping Address fieldset rather than a section of their
+         * own, so `index === 1` would be correct today and would move silently
+         * the next time a section is added or reordered. Asking which section
+         * CONTAINS the control cannot drift.
+         *
+         * Called from two places, and it needs both:
+         *   - the section's Continue button, the normal path; and
+         *   - handleContinueToPayment, because _expandAccordionSection collapses
+         *     other sections WITHOUT validating, so a shopper who clicks a later
+         *     heading skips the Continue handler entirely and would never emit
+         *     the step. Ga4Ecommerce dedupes on the tier, so the two callers
+         *     cannot double-count, and a genuine urban -> rural change still
+         *     re-fires.
+         *
+         * `|| null`, never `|| 'urban'`. An invented urban is the ERR-235 shape
+         * - the page quoting a rate nobody chose - and it is the same reason
+         * handleContinueToPayment records null. Ga4Ecommerce omits the tier
+         * rather than guessing it. */
+        _emitShippingInfo(data) {
+            if (typeof Ga4Ecommerce === 'undefined') return;
+            if (data && !(data.section && data.section.querySelector('input[name="delivery_type"]'))) return;
+            const tier = document.querySelector('input[name="delivery_type"]:checked')?.value || null;
+            Ga4Ecommerce.addShippingInfo(tier);
+        },
+
         /** Select an area. Returns false when it was already selected. */
         _setDeliveryType(value, { auto = false } = {}) {
             const target = document.querySelector(`input[name="delivery_type"][value="${value}"]`);
@@ -1298,6 +1339,7 @@
                 // Continue button handler
                 continueBtn.addEventListener('click', () => {
                     if (this._validateAccordionSection(data)) {
+                        this._emitShippingInfo(data);
                         this._collapseAccordionSection(data);
                         const nextIdx = this._accordionSections.indexOf(data) + 1;
                         const next = this._accordionSections[nextIdx];
@@ -2455,6 +2497,13 @@
                         + 'The radio group is absent or was un-checked after _normaliseDeliveryType() ran — that is '
                         + 'the bug to chase, not the null.');
                 }
+
+                // GA4 add_shipping_info backstop (ERR-256). A no-op when the
+                // section's Continue already emitted this tier; the only emitter
+                // when the shopper reached Payment by clicking a heading, which
+                // bypasses that handler. Passing no section skips the containment
+                // check - by here the delivery area IS committed.
+                this._emitShippingInfo(null);
 
                 // Build checkout data object to pass to payment page
                 const checkoutData = {

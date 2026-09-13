@@ -3028,12 +3028,12 @@ const Cart = {
          * only an add the SERVER CONFIRMED, because it reports into the account
          * the owner bids real money from.
          *
-         *   branch                                    _trackAdd   Google Ads
-         *   ---------------------------------------   ---------   ----------
-         *   server confirmed (2xx)                     yes         YES
-         *   server rejected (!response.ok, rolled back) no         no
-         *   transport failure (item kept locally)      yes         no
-         *   non-core (cross-sell, never POSTs)         yes         no
+         *   branch                                    _trackAdd   Ads   GA4
+         *   ---------------------------------------   ---------   ---   ---
+         *   server confirmed (2xx)                     yes         YES   YES
+         *   server rejected (!response.ok, rolled back) no         no    no
+         *   transport failure (item kept locally)      yes         no    no
+         *   non-core (cross-sell, never POSTs)         yes         no    no
          *
          * The last two are the interesting ones. In both the item really is in
          * the shopper's cart, so the funnel must count it — but neither produced
@@ -3050,6 +3050,32 @@ const Cart = {
             AdsConversions.addToCart(serverConfirmed, {
                 priorQuantity: priorQty,
                 requestedQuantity: addedQty,
+            });
+        }
+
+        /* GA4 add_to_cart - the twin of the Ads conversion above (ERR-256).
+         *
+         * SAME GATE, ON PURPOSE, and the table above now carries it as a third
+         * column so the difference from _trackAdd stays written down in one
+         * place. GA4's funnel is fed the adds the SERVER confirmed, so every
+         * event carries the server's real price_snapshot and its real quantity
+         * delta - the same two numbers, through the same readers, as the Ads
+         * tag. Nothing is lost on the other branches: _trackAdd already records
+         * them into cart_analytics_events, which is the dataset that can audit
+         * this one precisely because the two do not share a gate.
+         *
+         * `brand` and `product_type` come from the CALLER's product, not the
+         * server payload, which carries neither. Both may be absent - on 3 of
+         * the 9 add-to-cart surfaces there is no brand, and product_type is
+         * supplied only by the PDP - and absent means the dimension is omitted,
+         * never inferred from a name. */
+        if (serverConfirmed && typeof Ga4Ecommerce !== 'undefined') {
+            Ga4Ecommerce.addToCart(serverConfirmed, {
+                priorQuantity: priorQty,
+                requestedQuantity: addedQty,
+            }, {
+                brand: product.brand,
+                category: product.product_type,
             });
         }
 

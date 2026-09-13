@@ -62,7 +62,8 @@
     "probe:for-use-in": "node scripts/probe-for-use-in.mjs",
     "probe:mig132-admin": "node scripts/probe-mig132-admin.mjs",
     "bundle:backend": "node scripts/bundle-backend-outbox.mjs",
-    "probe:orders-delivery-type": "node scripts/probe-orders-delivery-type.mjs"
+    "probe:orders-delivery-type": "node scripts/probe-orders-delivery-type.mjs",
+    "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

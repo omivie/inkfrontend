@@ -342,6 +342,28 @@
                 }
 
                 this.renderProduct();
+
+                /* GA4 view_item (ERR-256).
+                 *
+                 * HERE, not inside renderProduct(), and not inside
+                 * setupEventListeners(): this is renderProduct's ONLY caller, so
+                 * this line is exactly one fire per page load. By now the product
+                 * is fully enriched - manual series_codes applied above, canonical
+                 * path normalised - and `this.product` is the RAW payload, which
+                 * is deliberate: Ga4Ecommerce wants the authoritative `brand` and
+                 * the raw `product_type` enum, not getProductInfo()'s normalised
+                 * display bucket or its 'Unknown' brand fallback.
+                 *
+                 * THE TEST PRODUCT NEVER ENTERS GA4. A shopper 404s at the
+                 * _isTestProduct gate above, but an admin holding an AdminPreview
+                 * grant falls THROUGH it and renders the page - and an operator
+                 * checking a control SKU is not a shopper viewing a product
+                 * (ERR-234/246). The gate above protects the shopper; this one
+                 * protects the data. */
+                if (typeof Ga4Ecommerce !== 'undefined' && !this._isTestProduct(this.product)) {
+                    Ga4Ecommerce.viewItem(this.product);
+                }
+
                 this.loadReviews();
             } catch (error) {
                 DebugLog.error('Error loading product:', error);
@@ -2462,6 +2484,15 @@
                         brand: info.brandName || '',
                         quantity: qty,
                         product_source: info.source || null,
+                        // Read by the GA4 add_to_cart twin for `item_category`
+                        // and by nothing else (ERR-256). The PDP is the only
+                        // add-to-cart surface that knows the authoritative
+                        // product_type, and Cart.addItem's line whitelist does
+                        // not include it, so this is passed THROUGH and never
+                        // persisted - no cart key, journal or storage shape
+                        // changes. Absent on the other surfaces means the
+                        // dimension is omitted there, never guessed.
+                        product_type: info.product_type || null,
                         // The printer the shopper is actually shopping for
                         // (data-tracking-capture aug2026 §1.2). Already read from
                         // ?printer_slug= at :120 for the "bought for this printer"

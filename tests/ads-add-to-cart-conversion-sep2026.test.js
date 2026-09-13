@@ -197,9 +197,18 @@ test('§1 value is price_snapshot x quantity added — the SERVER unit price', (
 test('§1 it never divides by 1.15 anywhere', () => {
     // The ad platform wants the shopper-facing price. price_snapshot and
     // retail_price are both GST-inclusive and are passed through as-is.
-    const fn = GTAG_CODE.slice(GTAG_CODE.indexOf('addToCart(confirmed'));
-    assert.ok(fn.length > 200, 'located addToCart in the comment-stripped source');
-    assert.doesNotMatch(fn, /1\.15/, 'no GST arithmetic belongs in an ad tag');
+    //
+    // WIDENED FROM A SLICE TO THE WHOLE FILE (ERR-256). This used to read
+    // `GTAG_CODE.slice(indexOf('addToCart(confirmed'))`, i.e. from that function
+    // to the end of the file. When the price reader was lifted into a shared
+    // helper ABOVE it — so the GA4 twin could not derive a different number —
+    // the arithmetic left the slice, and the assertion would have gone on
+    // passing while testing nothing. A window anchored on one function tests
+    // where the code lives, not the claim. The claim is about the FILE: no GST
+    // arithmetic belongs in any tag in it.
+    assert.ok(GTAG_CODE.length > 2000, 'located the comment-stripped source');
+    assert.match(GTAG_CODE, /addToCart\(confirmed/, 'addToCart is still in this file');
+    assert.doesNotMatch(GTAG_CODE, /1\.15/, 'no GST arithmetic belongs in an ad or analytics tag');
 });
 
 test('§1 the item is the SKU, tagged retail', () => {
