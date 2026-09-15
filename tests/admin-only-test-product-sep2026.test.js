@@ -47,7 +47,12 @@ const CART_SRC = read('inkcartridges/js/cart.js');
 const PROBE_SRC = read('scripts/probe-admin-only-product.mjs');
 const PKG = JSON.parse(read('package.json'));
 
-const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+// ERR-253: the two-line regex every test file used to carry deleted live code
+// whenever a `//` comment contained a path glob — silently, and in the direction
+// that makes a `doesNotMatch` pass by construction. This file's §11 found it in
+// the probe and in utils.js; the shared helper is the repo-wide fix, and there
+// must be exactly one of these.
+const codeOnly = require('./helpers/strip-comments.js');
 
 /** Lift an object-literal method out of api.js and run it for real. */
 function liftMethod(src, signature) {
@@ -778,9 +783,17 @@ test('§11 no source this feature owns can blind codeOnly() with a stray /*', ()
   // `const AdminPreview = {` and its whole state block — which means a source
   // assertion about those lines could only ever have passed vacuously.
   //
-  // Scoped to the files this change owns. search.js and js/admin/api.js carry
-  // the same defect today and are being edited by other sessions; they are
-  // reported to those sessions rather than fixed from here.
+  // STILL WORTH HAVING AFTER ERR-253 fixed the stripper. This file now uses the
+  // shared helper, so a stray here can no longer blind THIS file — but 46 test
+  // files are still on the naive two-line regex, and they read the sources this
+  // one owns: api.js by 18 of them, utils.js by 8, cart.js by 5,
+  // checkout-page.js by 3, payment-page.js by 2 (measured 2026-09-16). A glob
+  // comment added to any of those would go on silently deleting code from what
+  // those assertions read. Keeping the sources clean is the cheaper half of the
+  // fix and the half that protects tests this file does not control.
+  //
+  // Scoped to the files this change owns; the rest are other sessions' to
+  // migrate, and 10 stray openers remain elsewhere in the repo.
   const OWNED = {
     'inkcartridges/js/api.js': API_SRC,
     'inkcartridges/js/utils.js': UTILS_SRC,
