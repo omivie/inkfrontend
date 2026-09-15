@@ -55,8 +55,49 @@ const notes = [];
 const ok = (n) => console.log(`  \x1b[32m✓\x1b[0m ${n}`);
 const bad = (n, d) => { failures.push(`${n} — ${d}`); console.log(`  \x1b[31m✗\x1b[0m ${n}\n      ${String(d).split('\n').join('\n      ')}`); };
 const soft = (n, d) => { notes.push(`${n} — ${d}`); console.log(`  \x1b[33m~\x1b[0m ${n}\n      ${String(d).split('\n').join('\n      ')}`); };
-/** A check that DECLINED TO RUN says so by name. A skip is not a pass. */
+/**
+ * A check that DECLINED TO RUN says so by name. A skip is not a pass.
+ *
+ * `skip` is for a STRUCTURAL gap: the live data cannot reach that path, every
+ * run, by design — `complete:false` and a missing envelope fire on 0 of 149
+ * orders and always will while the backend behaves. Seeing it is expected.
+ */
 const skip = (n, why) => { notes.push(`SKIPPED: ${n} — ${why}`); console.log(`  \x1b[90m⊘ SKIPPED\x1b[0m ${n}\n      ${why}`); };
+/**
+ * 🚨 `degraded` is for a check that could not run for a TRANSIENT reason — the
+ * network blipped, a dependency was cold. It is NOT the same as a structural
+ * skip and must not read like one.
+ *
+ * Why the distinction earns its keep: on 2026-09-16 §1 reported SKIPPED on one
+ * run and passed on the three after it. `/api/settings` was fine; a Render cold
+ * start had eaten a single fetch. §1 is the STRONGEST check in this file — it
+ * validates the backend figure we now trust against the published rate card —
+ * and it vanished while the run still printed "All checks passed" and exited 0.
+ *
+ * ***THAT IS THIS FILE'S OWN "A SKIP IS NOT A PASS" RULE, ONE LEVEL UP:*** the
+ * vocabulary that stops a declining check reading as green let a RETRYABLE
+ * failure borrow the same word. A degraded run still exits 0 — it proved
+ * nothing wrong — but it says so in its own colour and is named in the verdict.
+ */
+const degraded = (n, why) => { notes.push(`DEGRADED: ${n} — ${why}`); console.log(`  \x1b[35m◍ DEGRADED\x1b[0m ${n}\n      ${why}`); };
+
+/**
+ * Fetch with retries, because Render cold-starts the backend and a single
+ * transient must not silently delete a check. Short backoff; the probe is not
+ * time-critical and an extra 3s is cheaper than an unnoticed hole.
+ */
+async function fetchWithRetry(url, opts = {}, attempts = 3) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await fetch(url, opts);
+      if (r.ok) return r;
+      lastErr = new Error(`HTTP ${r.status}`);
+    } catch (e) { lastErr = e; }
+    if (i < attempts - 1) await new Promise((res) => setTimeout(res, 1000 * (i + 1)));
+  }
+  throw lastErr || new Error('unreachable');
+}
 const head = (t) => console.log(`\n\x1b[1m${t}\x1b[0m`);
 const money = (n) => (n == null || !Number.isFinite(n) ? '—' : `$${n.toFixed(2)}`);
 
@@ -72,7 +113,7 @@ function readEnv() {
 }
 
 async function main() {
-  console.log('\x1b[1mSupplier freight — reading the backend\'s figure (ERR-241/251)\x1b[0m');
+  console.log('\x1b[1mSupplier freight — reading the backend\'s figure (ERR-241/255)\x1b[0m');
   console.log('\x1b[90mMODE: READ-ONLY. Every request is a GET except the sign-in.');
   console.log('This script has no recording flag and cannot write to production.\x1b[0m');
 
@@ -140,14 +181,21 @@ async function main() {
   // ── §1 THE LADDER, CHECKED ON THE BACKEND'S OWN NUMBER ────────────────────
   head('§1  The backend\'s parcel rate vs the live /api/settings rate card');
   let liveZones = null;
+  let zonesError = null;
   try {
-    const r = await fetch(`${BASE}/api/settings`);
+    const r = await fetchWithRetry(`${BASE}/api/settings`);
     const j = await r.json();
     liveZones = (j?.data ?? j)?.shipping?.zones ?? null;
-  } catch (e) { soft('fetch /api/settings', e.message); }
+    if (!liveZones) zonesError = 'the response carried no shipping.zones';
+  } catch (e) { zonesError = e.message; }
 
   if (!liveZones) {
-    skip('rate-card comparison', '/api/settings returned no shipping.zones — the rate card could NOT be checked this run');
+    // TRANSIENT, not structural: /api/settings is a live endpoint that serves
+    // this payload fine, so a failure here is the network, not the contract.
+    degraded('rate-card comparison',
+      `/api/settings could not be read after 3 attempts (${zonesError}) — the STRONGEST check in this `
+      + 'file did NOT run. This is a retryable fault, not an unexercisable path: re-run before '
+      + 'believing a green result.');
   } else {
     // Pick by which KEY exists, then canonicalise. `??` cannot do this job: the
     // live band says `max_weight_kg: null` and a shipped one says `maxKg: null`,
@@ -185,7 +233,10 @@ async function main() {
       }
     }
     if (!checked) {
-      skip('rate-card comparison', 'no order carried a zone + weight + delivery type to price — nothing was compared');
+      degraded('rate-card comparison',
+        'no order in this sample carried a zone + weight + delivery type to price — nothing was compared. '
+        + 'Measured 2026-09-16: 10 of 10 live orders carry all four fields, so an empty comparison means the '
+        + 'sample or the payload changed, not that the check is unexercisable.');
     } else if (mismatched) {
       bad('the backend\'s parcel rate has DRIFTED from /api/settings',
         `${mismatched} of ${checked} orders disagree with the published rate card.\n  ${examples.join('\n  ')}`);
@@ -461,13 +512,26 @@ async function main() {
 
   // ── verdict ───────────────────────────────────────────────────────────────
   head('Result');
-  for (const n of notes) console.log(`  \x1b[33m~\x1b[0m ${n}`);
+  const degradedNotes = notes.filter((n) => n.startsWith('DEGRADED: '));
+  for (const n of notes) {
+    const isDegraded = n.startsWith('DEGRADED: ');
+    console.log(`  \x1b[${isDegraded ? '35m◍' : '33m~'}\x1b[0m ${n}`);
+  }
+  // A degraded run proved nothing WRONG, so it stays exit-0 — but "all checks
+  // passed" would be a lie about which checks ran. Say it in the verdict, where
+  // someone skimming for the last line will see it.
+  if (degradedNotes.length) {
+    console.log(`\n\x1b[35m${degradedNotes.length} CHECK(S) COULD NOT RUN — transient, retryable, and NOT a pass.\x1b[0m`);
+    console.log('  Re-run before treating this result as green.');
+  }
   if (failures.length) {
     console.log(`\n\x1b[31m${failures.length} FAILURE(S)\x1b[0m`);
     for (const f of failures) console.log(`  - ${f}`);
     process.exit(1);
   }
-  console.log('\n\x1b[32mAll checks passed.\x1b[0m');
+  console.log(degradedNotes.length
+    ? '\n\x1b[33mNo failures — but the run was INCOMPLETE (see DEGRADED above).\x1b[0m'
+    : '\n\x1b[32mAll checks passed.\x1b[0m');
 }
 
 main().catch((e) => { console.error(e); process.exit(2); });

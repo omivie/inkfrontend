@@ -600,3 +600,82 @@ test('the whole thing stays owner-only', () => {
   assert.ok(/OWNER_ONLY_COLUMNS = new Set\(\['_profit', '_supplier', '_supplier_cost'\]\)/.test(ordersSrc));
   assert.ok(/const showCost = AdminAuth\.isOwner\(\)/.test(ordersSrc));
 });
+
+// ─── 10. The probe's own honesty vocabulary (ERR-255) ────────────────────────
+//
+// The probe is the only check that runs against live data, so the ways it can
+// quietly stop checking things are worth pinning in a test that DOES run in CI.
+//
+// 🚨 THE DISTINCTION THESE TESTS PROTECT. On 2026-09-16 §1 — the strongest check
+// in the file, validating the backend's parcel rate against the published rate
+// card — reported SKIPPED on one run and passed on the three after it.
+// `/api/settings` was fine; a Render cold start had eaten a single fetch. The run
+// still printed "All checks passed" and exited 0.
+//
+// So there are two kinds of not-running and they must not share a word:
+//   skip()      STRUCTURAL — live data cannot reach it, every run, by design.
+//   degraded()  TRANSIENT  — retryable. Says so, and the verdict says so.
+// *This file's own "a skip is not a pass" rule, applied one level up.*
+
+const PROBE_PATH = path.resolve(__dirname, '..', 'scripts', 'probe-supplier-freight.mjs');
+const probeSrc = fs.readFileSync(PROBE_PATH, 'utf8');
+
+test('the probe distinguishes a STRUCTURAL skip from a TRANSIENT degradation', () => {
+  assert.match(probeSrc, /const skip = \(/, 'skip() must exist');
+  assert.match(probeSrc, /const degraded = \(/, 'degraded() must exist — a retryable fault is not an unexercisable path');
+  assert.match(probeSrc, /notes\.push\(`DEGRADED: /, 'a degraded check must be tagged distinctly in the notes');
+  assert.ok(!/const degraded = skip/.test(probeSrc), 'degraded must not be an alias for skip');
+});
+
+test('the three unexercisable render paths use skip(), not degraded()', () => {
+  // These fire on 0 of 149 live orders BY DESIGN and always will. Calling them
+  // "degraded" would tell the reader to re-run something that can never pass.
+  for (const structural of [
+    'complete:false renders a floor',
+    'a missing supplier_freight envelope renders LOUD',
+    'a multi-consignment order names both suppliers',
+  ]) {
+    const i = probeSrc.indexOf(structural);
+    assert.ok(i > -1, `the probe must still check: ${structural}`);
+    const before = probeSrc.slice(Math.max(0, i - 120), i);
+    assert.match(before, /skip\(\s*$|skip\('?\s*$|skip\(\s*\n?\s*'?$|skip\(/,
+      `"${structural}" must be reported with skip(), not degraded()`);
+  }
+});
+
+test('the rate-card check is DEGRADED (retryable) and fetched with retries', () => {
+  assert.match(probeSrc, /async function fetchWithRetry\(/, 'the settings fetch must retry');
+  assert.match(probeSrc, /await fetchWithRetry\(`\$\{BASE\}\/api\/settings`\)/,
+    '/api/settings must go through the retrying fetch — a Render cold start must not delete the check');
+  // Both of §1's give-up paths are transient, not structural.
+  const rateCardGiveUps = probeSrc.match(/degraded\('rate-card comparison'/g) || [];
+  assert.equal(rateCardGiveUps.length, 2,
+    'both rate-card give-up paths must report degraded, not skip');
+  assert.ok(!/skip\('rate-card comparison'/.test(probeSrc),
+    'the rate card is a live endpoint — failing to read it is retryable, never structural');
+});
+
+test('a degraded run does NOT print "All checks passed"', () => {
+  // The whole point. A run that proved nothing wrong but did not run everything
+  // must not end on a line a skim-reader takes as green.
+  assert.match(probeSrc, /degradedNotes\.length/, 'the verdict must branch on degraded notes');
+  assert.match(probeSrc, /COULD NOT RUN — transient, retryable, and NOT a pass/,
+    'the verdict must name how many checks could not run');
+  assert.match(probeSrc, /the run was INCOMPLETE/,
+    'the final line must say INCOMPLETE rather than "All checks passed"');
+  // ...and it must still exit 0: a degraded run found no fault, so failing the
+  // build on a cold start would train people to ignore it.
+  const exitCalls = probeSrc.match(/process\.exit\(1\)/g) || [];
+  assert.equal(exitCalls.length, 1, 'exit 1 must remain reserved for real FAILURES');
+});
+
+test('the probe still refuses to grade a run that proves nothing', () => {
+  // Positive control on the whole file: the guards that make a green run mean
+  // something must still be present.
+  assert.match(probeSrc, /Refusing to grade it/, 'an empty order list must refuse, not pass');
+  assert.match(probeSrc, /MODE: READ-ONLY/, 'the probe must still announce its mode');
+  for (const gone of ['ZONE_RATES', 'SUPPLIER_FREIGHT_RULES', 'lightestZoneRateInclGst', 'zoneRateInclGst']) {
+    assert.ok(probeSrc.includes(`'${gone}'`),
+      `the probe must still fail if ${gone} comes back — its return IS the double-charge`);
+  }
+});
