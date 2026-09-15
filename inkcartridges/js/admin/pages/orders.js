@@ -13,7 +13,7 @@ import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
-import { marginBadge } from '../utils/profitability.js';
+import { marginBadge, GST_RATE } from '../utils/profitability.js';
 import {
   orderProfitFromDetail, isInvoiceOrder, orderChannel, ORDER_CHANNEL, PROFIT_STATE,
 } from '../utils/order-profit.js';
@@ -3012,7 +3012,36 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     if (isInvoiceOrder(o)) {
       profitBreakdownInner += pbRow(`Card fee ${muted('(bank transfer — none)')}`, formatPrice(0));
     } else {
-      profitBreakdownInner += pbRow(`Paid to Stripe ${muted(`(2.65% + $0.30, incl. ${formatPrice(b.stripeFeeGst)} GST)`)}`, neg(b.stripeFeeInclGst));
+      // 🚨 THE ONE FIGURE THIS MODAL AND THE DASHBOARD STILL DISAGREE ON (ERR-255).
+      //
+      // We treat Stripe's published 2.65% + $0.30 as the EX-GST fee and deduct it
+      // as-is — the convention the owner set on 2026-05-17 (profitability.js:4-14).
+      // The backend divides the same figure by 1.15, treating it as GST-INCLUSIVE.
+      // Measured over the live 30 days to 2026-09-15: $169.90 here against
+      // kpi-summary's $147.74, and 169.90 / 1.15 = 147.74 to the cent — so the
+      // reconciliation is exact and tells us only WHAT THE BACKEND DOES.
+      //
+      // Which convention is correct is a fact about a Stripe invoice, not about our
+      // code, so the owner declined the change pending a real payout line. That
+      // leaves a KNOWN divergence standing between two money screens, and an
+      // unexplained difference between two money screens is precisely what the rest
+      // of ERR-255 was spent removing. It is therefore stated on the row, per-order
+      // and exactly, rather than left for the next person to re-derive from scratch.
+      //
+      // The delta is `fee − fee/1.15`, which is the whole of the disagreement: it is
+      // NOT a rounding artefact and it does not shrink with order size.
+      const stripeBasisDelta = b.stripeFeeExGst - b.stripeFeeExGst / (1 + GST_RATE);
+      const stripeTip = `Stripe's published 2.65% + $0.30, treated as the ex-GST fee and deducted as-is. `
+        + `Its GST (${formatPrice(b.stripeFeeGst)}) is reclaimed at the IRD line below. `
+        + `KNOWN DIFFERENCE: the Dashboard's backend figure divides this fee by 1.15 instead, so the `
+        + `Dashboard's net profit for this order is about ${formatPrice(stripeBasisDelta)} higher than the `
+        + `take-home below. Neither side is provably right until a real Stripe payout is read — on this `
+        + `order's ${formatPrice(b.customerPaidInclGst)} charge, does the payout's fee line say `
+        + `${formatPrice(b.stripeFeeExGst)} or ${formatPrice(b.stripeFeeExGst / (1 + GST_RATE))}?`;
+      profitBreakdownInner += pbRow(
+        `<span title="${esc(stripeTip)}">Paid to Stripe `
+          + `${muted(`(2.65% + $0.30, incl. ${formatPrice(b.stripeFeeGst)} GST) ⓘ`)}</span>`,
+        neg(b.stripeFeeInclGst));
     }
     // Absorbed courier (free-shipping order): a real cost we paid, shown incl-GST
     // like the lines above; its GST is netted at the IRD line below. Only when it applies.

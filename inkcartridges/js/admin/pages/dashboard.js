@@ -2493,7 +2493,12 @@ function renderKpiStrip(d) {
         .filter(Boolean).join(' · '),
       // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
       // so GST is already outside this calculation rather than a line item inside it.
-      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer).${netNote}${cbOn ? CASH_BASIS_TIP : ''}`,
+      // The Stripe-basis divergence is named on BOTH sides of it (ERR-255). An
+      // operator comparing this tile against an order modal sees a difference of
+      // roughly $0.47 per card order, and it is the backend's ÷1.15 against our
+      // 2026-05-17 convention — not an error in either screen. Naming it only in
+      // the modal would leave whoever starts from the Dashboard re-deriving it.
+      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer). KNOWN DIFFERENCE: this figure divides Stripe's 2.65% + $0.30 by 1.15; an order's own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower. Settled by reading a real Stripe payout, not by changing either screen.${netNote}${cbOn ? CASH_BASIS_TIP : ''}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginShown), raw: netMarginShown, prev: cbPrev(netMarginPctPrev),

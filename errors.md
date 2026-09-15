@@ -437,11 +437,42 @@ unit tests structurally cannot make, since their harness strips the imports.
 FOUR outflows. Orders-list Supplier cost stays goods-only and its ERR-219 positive control passes
 **UNMODIFIED** — needing to edit it would have meant freight leaked into the goods cost.
 
+**🚨 THE DIVERGENCE WE CHOSE TO KEEP WAS INVISIBLE ON BOTH SCREENS.** §6 was declined on purpose
+— the owner will not overturn the 2026-05-17 Stripe convention until a real payout is read — but
+"declined" left a known disagreement standing between the order modal and the Dashboard with
+*nothing on screen saying so*. Re-measured 2026-09-16 over the live 30 days: the modal's convention
+sums to **$169.90** against `kpi-summary`'s **$147.74**, and `169.90 / 1.15 = 147.74` to the cent —
+**$22.16 a month, $0.47 per card order**. And `Paid to Stripe` was **the only row in that waterfall
+with no tooltip at all**, while seven of its neighbours had one: the single row that needed an
+explanation was the one row without one. ***Deciding not to fix a difference is only defensible
+while the difference is on the screen*** — otherwise the next person re-derives it from scratch,
+which is exactly what a peer session and I each did independently before anyone wrote it down.
+
+Both sides now name it: the modal's Stripe row quotes the per-order delta (`fee − fee/1.15`, which
+is the whole of the disagreement and does **not** shrink with order size) and both candidate
+figures, so the reader can just look at a payout; the Net Profit tile says the same thing from its
+own side, because whoever starts at the Dashboard would otherwise re-derive it too. **Neither
+tooltip adjudicates** — a test forbids the words *wrong* / *incorrect* / *bug* in either, since
+asserting a winner is precisely what the owner declined to do. **No arithmetic changed**, and a
+test pins that `profitability.js` still deducts the published fee as-is and that `2026090902` is
+still $24.92 at 21.3%.
+
+The disclosure is covered by `tests/stripe-basis-disclosure-sep2026.test.js` (11), which
+**executes** the shipped card-fee block rather than grepping it. That block is an `if/else`, so the
+extractor brace-matches **twice** — matching once stops at the `if` and the else-branch silently
+never runs. Negative controls both fired: stripping the tooltip turns **4 of 11** red, and an
+invoiced sale (bank transfer, no card fee, no possible divergence) must get **no** note at all.
+
 **Files.** `inkcartridges/js/admin/utils/supplier-freight.js` (513 lines replaced) ·
 `utils/profitability.js` · `utils/order-profit.js` · `utils/trend-math.js` · `pages/orders.js` ·
 `pages/dashboard.js` · `pages/financial-health.js` · `admin/api.js` ·
-`scripts/probe-supplier-freight.mjs` · 8 test files (incl.
+`pages/dashboard.js` (Net Profit tile) · `scripts/probe-supplier-freight.mjs` · 9 test files (incl.
+`tests/stripe-basis-disclosure-sep2026.test.js`, new, 11 cases, and
 `tests/supplier-freight-pnl-trend-sep2026.test.js`, new, 28 cases).
+
+**Verify (disclosure half, 2026-09-16).** `node --test tests/*.test.js` = **6087 pass / 0 fail /
+19 skipped** of 6106. `npm run probe:supplier-freight` all-green, §1 passing against the live rate
+card on 60 orders.
 
 **Verify (aggregate half).** `node --test tests/*.test.js` = **5993 pass / 0 fail / 19 skipped**
 of 6012 after the P&L + trend-math work landed. `npm run probe:supplier-freight` still all-green:
