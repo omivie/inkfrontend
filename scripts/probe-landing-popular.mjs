@@ -52,16 +52,65 @@ const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 
 // On localhost the Vercel rewrites do not exist, so address the files directly.
+//
+// THE LAST TWO ARE THE ONES THE MAP CHANGE TURNED ON, AND THEY ARE HERE BECAUSE
+// PINNING THE MAP IS NOT MEASURING THE PAGE (ERR-253).
+//
+// `POPULAR_CATEGORY_API` gained `label_tape: 'label'` on 2026-09-12, once the
+// backend stopped 400ing that category — 244 active in-stock label tapes had
+// been behind it, the largest category the outage covered. `paper` was already
+// mapped. `tests/landing-popular-products-sep2026.test.js` asserts both entries
+// exist, but that is a source grep, and this file exists precisely because a
+// source grep cannot prove a card was painted.
+//
+// The docstring above carries the ERR-236 lesson in one direction — *a probe
+// that only looks at pages where the feature is on cannot tell "correctly
+// scoped" from "on everywhere"*. The mirror is what bites here: a probe that
+// never looks at a newly-enabled surface cannot tell **enabled** from **enabled
+// in the map only**, and the map is exactly where the previous defect lived.
+//
+// These two are DRILLDOWNS, not ad landings — nothing rewrites a bare path to
+// them, so they are addressed by query string on both branches. They are
+// therefore lower-stakes than the three above and still worth measuring: the
+// ERR-236 defect was a card blowing past the 200px container query on a surface
+// whose class was missing from a 2-up grid rule, and a surface that has never
+// rendered a shelf is exactly where that recurs.
+//
+// ⚠️ `category=label`, NOT `category=label_tape`. THE URL TAKES THE CANONICAL
+// SLUG; `label_tape` IS THE INTERNAL ID AND IS NOT A URL VALUE.
+//
+// I wrote `?category=label_tape` here first and the probe went red with a
+// hidden shelf, 0 cards and the bare-shop heading — which reads exactly like
+// the ERR-236 defect recurring. It is not. `middleware.js` 301s `/shop`
+// document loads through a canonical-or-absent filter and strips anything that
+// is neither canonical nor in its small alias map, so the param never reaches
+// the SPA. Measured on production: `label` and `drums` keep their param and
+// render 4 cards; `label_tape` and `consumable` arrive with NO query string at
+// all; `ribbons` is aliased to `ribbon` and keeps it.
+//
+// That asymmetry is DELIBERATE and documented at middleware.js:28-36 — the edge
+// is an exact mirror of the backend's own document redirects, and the client's
+// `canonicalizeCategory()` maps those legacy params for SPA-INTERNAL state
+// only. The site never emits an internal id in a URL (`shop-page.js:951` maps
+// internal→canonical on the way out).
+//
+// ***A PROBE URL IS PART OF THE MEASUREMENT.*** Addressing a page by a spelling
+// the site never emits measures the middleware, not the feature — and it fails
+// in a way that looks precisely like the bug you were checking for.
 const LANDINGS = LOCAL
     ? [
         { name: '/ink-cartridges', url: '/html/shop?category=ink' },
         { name: '/toner-cartridges', url: '/html/shop?category=toner' },
         { name: '/ribbons', url: '/html/ribbons' },
+        { name: '/shop?category=label', url: '/html/shop?category=label' },
+        { name: '/shop?category=paper', url: '/html/shop?category=paper' },
     ]
     : [
         { name: '/ink-cartridges', url: '/ink-cartridges' },
         { name: '/toner-cartridges', url: '/toner-cartridges' },
         { name: '/ribbons', url: '/ribbons' },
+        { name: '/shop?category=label', url: '/shop?category=label' },
+        { name: '/shop?category=paper', url: '/shop?category=paper' },
     ];
 const CONTROL = LOCAL ? '/html/shop' : '/shop';
 
