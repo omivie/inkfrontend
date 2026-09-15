@@ -71,26 +71,46 @@ function die(code, msg) {
 
 if (!fs.existsSync(OUTBOX)) die(2, `backend-docs/outbox/ not found at ${OUTBOX}`);
 
-let entries;
-if (ALL) {
-    const known = new Map(PRIORITY);
-    const onDisk = fs.readdirSync(OUTBOX).filter((f) => f.endsWith('.md')).sort();
-    // Priority set first, in order; then everything else alphabetically.
-    const rest = onDisk.filter((f) => !known.has(f));
-    entries = [...PRIORITY.filter(([f]) => onDisk.includes(f)), ...rest.map((f) => [f, ''])];
-} else {
-    entries = PRIORITY;
-}
+// MEMBERSHIP COMES FROM THE DIRECTORY, ORDER COMES FROM `PRIORITY`.
+//
+// PRIORITY used to be the membership list, and that was the defect: every
+// delivery moved a document to sent/ and the script then refused to run until
+// someone hand-edited it. Within a week all seven names were stale and the
+// bundle would not build at all.
+//
+// outbox/ already means "not yet answered", so the directory IS the set. A name
+// in PRIORITY is now only a sort hint — one that has been delivered is simply
+// skipped, because a hint about a document that has moved on is harmless.
+// Shipping short is now structurally impossible rather than guarded against.
+const onDisk = fs.readdirSync(OUTBOX).filter((f) => f.endsWith('.md')).sort();
+const known = new Map(PRIORITY);
+const ranked = PRIORITY.filter(([f]) => onDisk.includes(f));
+const rest = onDisk.filter((f) => !known.has(f)).map((f) => [f, '']);
+const entries = ALL ? [...ranked, ...rest] : (ranked.length ? ranked : [...ranked, ...rest]);
 
-const missing = entries.map(([f]) => f).filter((f) => !fs.existsSync(path.join(OUTBOX, f)));
+// The one case the original refusal was written for, and it survives: a named
+// document that is in NEITHER outbox/ nor sent/ has not been delivered — it has
+// been lost, and that must never pass silently.
+const SENT = path.join(ROOT, 'backend-docs', 'sent');
+const lost = PRIORITY.map(([f]) => f).filter((f) =>
+    !fs.existsSync(path.join(OUTBOX, f)) && !fs.existsSync(path.join(SENT, f)));
 
 console.log(`${C.cyan}MODE: READ-ONLY${C.off}  (reads backend-docs/outbox/, writes one file, changes nothing else)`);
-console.log(`${C.dim}Set: ${ALL ? 'ALL of outbox/' : 'the undelivered priority batch'} — ${entries.length} document(s)${C.off}\n`);
+console.log(`${C.dim}Set: ${ALL ? 'ALL of outbox/' : 'outbox/'} — ${entries.length} document(s)${C.off}`);
+const delivered = PRIORITY.map(([f]) => f).filter((f) => fs.existsSync(path.join(SENT, f)));
+if (delivered.length) {
+    console.log(`${C.dim}Skipping ${delivered.length} already in sent/: ${delivered.join(', ')}${C.off}`);
+}
+console.log();
 
-if (missing.length) {
-    console.error(`${C.red}REFUSING TO BUNDLE — ${missing.length} document(s) named in the priority set are not in outbox/:${C.off}`);
-    for (const m of missing) console.error(`  - ${m}`);
-    console.error(`\n${C.yellow}If one was delivered, it has moved to backend-docs/sent/ — remove it from PRIORITY in this\nscript rather than letting the bundle ship short. A missing document is invisible at the far end.${C.off}`);
+if (lost.length) {
+    console.error(`${C.red}REFUSING TO BUNDLE — ${lost.length} document(s) are in neither outbox/ nor sent/:${C.off}`);
+    for (const m of lost) console.error(`  - ${m}`);
+    console.error(`\n${C.yellow}A document that is in neither place has not been delivered — it is lost. Find it before\nbundling; shipping short is invisible at the far end.${C.off}`);
+    process.exit(1);
+}
+if (!entries.length) {
+    console.error(`${C.yellow}Nothing to bundle — backend-docs/outbox/ is empty. Everything has been delivered.${C.off}`);
     process.exit(1);
 }
 

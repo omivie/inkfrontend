@@ -1367,8 +1367,19 @@ test('§10 shipping hygiene', async (t) => {
     const code = stripComments(probe);
     assert.equal(/process\.argv/.test(code), false,
       'a probe that reads flags can grow a --record mode, and then a green run may be green because it overwrote the baseline');
-    assert.equal(/fs\.writeFileSync|fs\.appendFileSync|fs\.promises\.write/.test(code), false,
-      'this probe must not write to disk at all');
+    // ERR-257 narrowed this. The hazard being guarded is a probe RECORDING A
+    // BASELINE it later compares itself against — that is what lets a green run
+    // be green because it overwrote the thing it was checking. §6 now writes one
+    // forensic file when it detects an unexpected write, and that cannot become a
+    // baseline for a reason the next assertion pins: nothing ever reads it back.
+    // So the rule is no longer "no write" but "no write that can feed a verdict".
+    const writes = [...code.matchAll(/fs\.(writeFileSync|appendFileSync|promises\.write\w*)/g)];
+    assert.equal(writes.length, 1,
+      'exactly one disk write is sanctioned here — the §6 forensic dump. Another one needs its own justification');
+    assert.equal(/EVIDENCE_DIR/.test(code.slice(code.indexOf('writeFileSync') - 400, code.indexOf('writeFileSync'))), true,
+      'the sanctioned write goes to EVIDENCE_DIR (audit-output/, gitignored), not beside the source');
+    assert.equal(new RegExp('readFileSync\\([^)]*EVIDENCE_DIR').test(code), false,
+      'the probe must never READ its own evidence back — that is the step that would turn a dump into a baseline');
     assert.match(probe, /No --record mode exists/,
       'and the header must say so, since the mode line is what a reader trusts');
     assert.match(probe, /process\.exit\(2\)/, 'a run that could not run must not exit 0 — a skip is not a pass');
@@ -1389,6 +1400,39 @@ test('§10 shipping hygiene', async (t) => {
     assert.equal(/mark_shipped\s*:\s*true/.test(probe), false);
     assert.equal(/shipping\/send-email/.test(probe), false,
       'the send endpoint emails a real customer; a probe must never call it');
+  });
+
+  // ERR-257. §6 sends four requests it expects the backend to REFUSE. That made
+  // the probe's read-only claim borrowed rather than owned: on 2026-09-10 the
+  // nz_couriers case started answering 200 instead of 400 and the probe, which
+  // only REPORTED the difference, left a real customer order modified.
+  //
+  // These pin the three properties that turn "I noticed" into "I put it back".
+  // They are source assertions because the behaviour they guard can only be
+  // exercised against production by deliberately corrupting a live order.
+  await t.test('§6 does not merely report an unexpected write — it RESTORES', () => {
+    const probe = stripComments(READ(PROBE));
+    const six = probe.slice(probe.indexOf('const snapshot ='));
+    assert.ok(/restore/i.test(six), '§6 must attempt a restore, not just report a difference');
+    assert.match(six, /restored\s*===\s*before/,
+      're-read the order after restoring and compare it to the snapshot — an unverified restore is a hope');
+    assert.match(six, /RESTORE FAILED/,
+      'a failed restore must be distinguishable from a successful one, by name');
+  });
+
+  await t.test('§6 persists the before/after to a FILE before it repairs', () => {
+    const probe = stripComments(READ(PROBE));
+    const six = probe.slice(probe.indexOf('const snapshot ='));
+    assert.match(six, /writeFileSync/,
+      'the evidence was lost to a truncated terminal read once; a file cannot be tailed away');
+    // Order matters: if the restore runs first and fails, an unwritten `before`
+    // is gone for good. Scope this to the DETECTION branch — §6's earlier PUTs are
+    // the four invalid requests, and comparing against those would pass by accident.
+    const branch = six.slice(six.indexOf('after !== before'));
+    assert.ok(branch.indexOf('writeFileSync') !== -1 && branch.indexOf("req('PUT'") !== -1,
+      'the detection branch must both persist evidence and attempt a repair');
+    assert.ok(branch.indexOf('writeFileSync') < branch.indexOf("req('PUT'"),
+      'the evidence must be written BEFORE the repair is attempted, or a failed restore loses the original values');
   });
 
   await t.test('probes live in scripts/, never in the publicly-served tree', () => {

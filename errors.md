@@ -41,6 +41,77 @@ describing the same incident.
 
 ---
 
+## ERR-257 — a probe labelled READ-ONLY wrote to a live customer order, because its safety was borrowed from the server it was testing — **PROBE FIXED, ORDER STILL WRONG** (2026-09-16)
+
+**What happened.** `npm run probe:shipping-info` modified order **2026090902** at
+`2026-09-10T10:52:16.902885` — the order row's `updated_at` matches the run to the microsecond.
+Six days later nothing has touched it, so the damage is still on the order.
+
+**Why a read-only probe could write.** §6 of that probe proves the *refusal* contract: it sends
+four deliberately-invalid shipping payloads and asserts each comes back `400` before any write.
+That is a genuinely useful check — but it means **the probe was read-only only for as long as the
+backend kept refusing**. One case,
+`{carrier:'nz_couriers', tracking_number:'16025241', ticket_product_code:''}`, began answering
+**200** and was applied. The probe printed `MODE: READ-ONLY` truthfully and wrote anyway.
+
+> ***A probe must OWN its safety, never borrow it from the service under test.*** Every
+> assertion of the form "this is safe because the server refuses it" is a write waiting for a
+> deploy on the other side.
+
+**The one thing that worked.** The probe brackets §6 with a before/after snapshot, and that guard
+fired: `A PROBE REQUEST CHANGED AN ORDER`. Without it the write would have been silent and
+permanent, and nobody would have known which run did it.
+
+**🚨 The evidence was destroyed by the READER, not the writer.** The probe printed `before:` and
+`after:` on the two lines following that heading. The run was captured with `tail -12`, which cut
+exactly those two lines — and it could not be re-run to recover them, **because re-running writes
+again**. Every other source was checked and none holds the original values: `order_events` records
+only status changes (`paid → processing → shipped`, all 2026-09-09), `audit_log` is empty, there is
+no email-log table, and this is the only `NZ Couriers` order in the table so there is no sibling to
+infer a shape from. ***When a tool reports an unexpected mutation, capture the whole output before
+doing anything else — the second-best moment to read it may not exist.***
+
+**The damage, stated precisely.** The order now reads carrier `NZ Couriers` / `tracking_number`
+`16025241` / `ticket_product_code: null` — while that carrier's own registry entry says
+`requires_product_code: true` — with a tracking URL still pointing at **NZ Post**
+(`trackid=00894210392921931816`, `tracking_url_source: "operator"`). Internally inconsistent, and
+`/track-order` is where a customer would see it. **The customer was not misinformed by this**: the
+dispatch email went out 2026-09-09 23:51, a day *before* the write, so it carries the original
+values.
+
+**Not repaired, deliberately.** A second wrong value written over the first is worse than a
+known-wrong value, and the inconsistency is at least currently visible. The only route that
+recovers the *truth* rather than reconstructing it is a Supabase point-in-time snapshot from before
+`2026-09-10T10:52`. Awaiting the owner.
+
+**The fix.** §6 now detects, **persists the before/after to `audit-output/` as a file**, and only
+then attempts a restore, re-reading the order to confirm it went back byte-identical — a failed
+restore is reported under its own name, `RESTORE FAILED`, telling the reader not to re-run. The
+evidence is written *before* the repair, so a failed restore still leaves the original values on
+disk. Two tests pin all three properties, including that ordering; they are source assertions
+because the behaviour can only be exercised against production by deliberately corrupting a live
+order.
+
+**A pre-existing test forbade the fix, and it was right to exist.** `the probe is read-only and
+says so before it does anything` asserted `fs.writeFileSync` appeared nowhere in the probe. Its
+docstring gives the reason: a probe that writes to disk can grow a `--record` mode, **and then a
+green run may be green because it overwrote the baseline**. That hazard is real and is not what a
+forensic dump does — so the assertion was *narrowed*, not dropped: exactly one sanctioned write, it
+must go to `EVIDENCE_DIR`, and **the probe must never read it back**, which is the step that would
+turn a dump into a baseline. ***Read a guard's docstring before concluding your change is right;
+then keep the property it was protecting.***
+
+**Scope, measured rather than assumed.** This is not a fleet-wide problem. Of ~50 scripts only ten
+issue a non-GET beyond the sign-in call, and the rest hit quote/cart/analytics endpoints that
+create only their own scratch data. `probe-contract-pricing.mjs` is the pattern to copy — it gates
+its mutation cycle behind `--write` and its header explains why it has one "when almost none of the
+others do".
+
+**Backend**: BF-063 — `PUT /api/admin/orders/:id/shipping` accepts an empty `ticket_product_code`
+for a carrier that requires one, with a 200 where it previously refused with 400.
+
+---
+
 ## ERR-256 — GA4 could not draw a funnel at all, and three of the instructions for fixing it would each have shipped a confident wrong number — **RESOLVED** (2026-09-13)
 
 **Context.** Backend hand-off `ga4-ecommerce-events-FE-handoff-sep2026.md`. Mobile is **64% of ad

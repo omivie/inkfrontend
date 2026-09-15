@@ -169,7 +169,7 @@ three oldest, spot-checked for the rest.
 
 ---
 
-## `inbox/` — from the backend (7)
+## `inbox/` — from the backend (10)
 
 | Doc | Note |
 |---|---|
@@ -179,7 +179,8 @@ three oldest, spot-checked for the rest.
 | `admin-only-test-product-FE-handoff-sep2026.md` | 2026-09-09. Answers `outbox/admin-only-test-product-backend-brief-sep2026.md`. A **design reply, not a delivery** — nothing in it had shipped when it was filed, verified 2026-09-12. Answered by `outbox/admin-only-test-product-FE-response-sep2026.md`; **its §2 recommendation was declined on a measurement** |
 | `security-hardening-sep2026-round2-FE-handoff.md` | 2026-09-08. Answered by `sent/security-hardening-round2-FE-response-sep2026.md`. **This is the document that proves the backend dev can read this repo** — it cites `tests/security-hardening-sep2026.test.js:234` |
 | `fe-verification-round-backend-response-sep2026.md` | 2026-09-10. **The delivery record for the whole 09-09/10 batch** — answers eight of our documents section by section. Ships their §1–§7; holds the `authenticated` grant (migration 172) and asks us never to apply it. Answered by `outbox/fe-verification-round-FE-response-sep2026.md`. Six of its seven sections were verified against production and hold; the two corrections are recorded there |
-
+| `fe-backend-asks-action-list-sep2026.md` | 2026-09-10. The six FE asks returned as an action list. Answered by `outbox/fe-backend-asks-action-list-FE-response-sep2026.md` — all six done, **three of their statements disputed with measurements** |
+| `fe-backend-asks-backend-response-sep2026.md` | 2026-09-10. The reasoning behind the action list above; one round, one reply. **Its §6 invitation to drop our `/api/products/popular` category map must not be taken** — `consumable` means "Drums & Supplies" to us and "all consumable types" to them, so accepting it swaps the shelf contents with a 200 and no error |
 | `supplier-freight-FE-handoff-sep2026.md` | 2026-09-10. The wiring checklist for `supplier_freight`. **Its §1 is the load-bearing part** — delete the FE estimator BEFORE reading the new field, because running both double-charges. Implemented 2026-09-12 (ERR-255). **Its §6 was declined**; everything else shipped |
 | `supplier-freight-backend-response-sep2026.md` | 2026-09-10. The reasoning and measurements behind the checklist above, and the delivery record for `sent/supplier-freight-backend-brief-sep2026.md`. **Every measurable claim in it was re-verified against the live API and held** — the `delivery_type_basis` and `supplier_basis` spreads reproduce exactly. Two corrections are in our reply: its §2 envelope sample shows the wrong `supplier_basis` for `2026090902`, and its §6 reconciliation proves what the BACKEND does, not what Stripe charges |
 

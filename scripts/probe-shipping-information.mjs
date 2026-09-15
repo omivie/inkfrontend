@@ -56,6 +56,11 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Where §6 writes the before/after of an unexpected write. Gitignored, and
+// deliberately a FILE: the run that needed this evidence had it printed to a
+// terminal and read back with `tail`, which cut exactly the two lines that
+// mattered — and the probe could not be re-run to recover them.
+const EVIDENCE_DIR = path.join(ROOT, 'audit-output');
 const BASE = 'https://ink-backend-zaeq.onrender.com';
 const SUPABASE = 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';
@@ -383,13 +388,61 @@ async function main() {
                     ok(`${label}`, `400 ${code} — rejected before any write`);
                 }
             }
+            // ---- The bracket: detect, PERSIST THE EVIDENCE, then RESTORE ----
+            //
+            // This used to stop at "report the difference", and on 2026-09-10 that
+            // was not enough. The four invalid requests above are safe ONLY WHILE
+            // THE BACKEND REFUSES THEM. When the nz_couriers case began answering
+            // 200 instead of 400, a probe labelled READ-ONLY silently became a
+            // writer and changed a real customer order — and the before/after it
+            // printed was then lost to a `tail` on the reader's side, and could not
+            // be recovered by re-running, because re-running writes again.
+            //
+            // A probe must OWN its safety, never borrow it from the server it is
+            // testing. The order of the two steps below matters: the evidence is
+            // written to disk BEFORE the repair is attempted, so that a failed
+            // restore still leaves the original values recoverable.
             const after = await snapshot();
             if (after === null) {
                 bad('post-check read failed', 'could not confirm the order is unchanged. Treat this run as having possibly written.');
             } else if (after !== before) {
-                bad('A PROBE REQUEST CHANGED AN ORDER',
-                    `${target.order.order_number} differs before/after. These requests were expected to be refused pre-write.\n` +
-                    `  before: ${before.slice(0, 200)}\n  after:  ${after.slice(0, 200)}`);
+                // 1. Persist first. A terminal read can be truncated; a file cannot.
+                let evidence = '(not written)';
+                try {
+                    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+                    evidence = path.join(EVIDENCE_DIR, `shipping-probe-write-${target.order.order_number}-${Date.now()}.json`);
+                    fs.writeFileSync(evidence, JSON.stringify({
+                        note: 'A read-only probe wrote to this order. `before` is the pre-probe truth.',
+                        order_number: target.order.order_number,
+                        order_id: target.order.id,
+                        at: new Date().toISOString(),
+                        before: JSON.parse(before),
+                        after: JSON.parse(after),
+                    }, null, 2));
+                } catch (e) { evidence = `(write failed: ${e.message})`; }
+
+                // 2. Then put it back, from the snapshot we are holding.
+                const b = JSON.parse(before);
+                const restore = await req('PUT', `/api/admin/orders/${target.order.id}/shipping`, {
+                    carrier: b.carrier_code ?? b.carrier ?? null,
+                    tracking_number: b.tracking_number ?? null,
+                    ticket_product_code: b.ticket_product_code ?? null,
+                    tracking_url: b.tracking_url_override ?? null,
+                });
+                const restored = await snapshot();
+                if (restored === before) {
+                    bad('A PROBE REQUEST CHANGED AN ORDER — RESTORED',
+                        `${target.order.order_number} was modified by a request that should have been refused. ` +
+                        `The original values were put back and re-read byte-identical.\n` +
+                        `  evidence: ${evidence}\n` +
+                        `  The BACKEND REGRESSION is the finding — this line is only about the cleanup.`);
+                } else {
+                    bad('🚨 A PROBE REQUEST CHANGED AN ORDER AND THE RESTORE FAILED',
+                        `${target.order.order_number} is NOT back to its original values. DO NOT RE-RUN THIS PROBE.\n` +
+                        `  restore attempt: HTTP ${restore.status} ${String(restore.text).slice(0, 160)}\n` +
+                        `  evidence (holds the original values): ${evidence}\n` +
+                        `  before: ${before.slice(0, 200)}\n  after:  ${restored === null ? '(unreadable)' : restored.slice(0, 200)}`);
+                }
             } else {
                 ok('the order is byte-identical before and after', `${target.order.order_number} — the refusals really do happen before the write`);
             }
