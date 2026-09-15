@@ -4545,17 +4545,33 @@ const AdminAPI = {
   // the invoice bridge: outcome is a commercial annotation and must not be able to
   // disturb that flow. So this NEVER routes through updateQuickOrder().
   //
-  // ⚠️ BF-021 — THIS CALL CANNOT REACH THE SERVER FROM A BROWSER TODAY.
-  // The route is live and correct (measured 2026-08-31: an invalid enum answers
-  // `400 "outcome" must be one of [won, lost, pending, null]`, a valid one answers
-  // `404 Quick order not found` — so it validates and looks up), but PATCH is
-  // absent from the backend's CORS allow-list:
+  // BF-021 IS CLOSED — this call reaches the server (verified 2026-09-16).
+  //
+  // It used to be unreachable from a browser. From 2026-07-30 the API answered a
+  // PATCH preflight with `Access-Control-Allow-Methods: GET,POST,PUT,DELETE,
+  // OPTIONS` — no PATCH — so Chrome killed the request before it was sent and
+  // fetch() rejected with a bare TypeError. Six weeks, invisible to every curl
+  // and every server-side test, because a method missing from that list is one
+  // the BROWSER refuses to send. That was BF-021, the same one-line backend
+  // change ERR-131 and ERR-188 waited on.
+  //
+  // The backend shipped it 2026-09-10. Re-measured on the wire 2026-09-16:
   //
   //   OPTIONS /api/admin/quick-orders/:id/outcome  (Request-Method: PATCH)
-  //     → 204, Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
+  //     → GET,POST,PUT,PATCH,DELETE,OPTIONS
+  //   …and asking for BOGUSVERB returns the SAME list unchanged, so this is a
+  //     real static allow-list and not a preflight echoing what it is asked
+  //     (ERR-223: a preflight 204s whatever you ask ⇒ curl cannot adjudicate it).
   //
-  // and Chrome kills the request before it is sent. That is BF-021, open since
-  // 2026-07-30, the same one-line backend change ERR-131 and ERR-188 waited on.
+  // `probe:data-capture` §1 now asserts PATCH is present as a HARD check, in the
+  // opposite direction to the one it used to make. The route itself was always
+  // live and correct (measured 2026-08-31: an invalid enum answers
+  // `400 "outcome" must be one of [won, lost, pending, null]`, a valid one
+  // answers `404 Quick order not found` — so it validates and looks up).
+  //
+  // ⚠️ `quick_orders` IS STILL EMPTY IN PRODUCTION, so this path has never been
+  // exercised against a real row. Working transport is not the same as proven
+  // behaviour — a skip is not a pass.
   //
   // AND THERE IS NO FALLBACK VERB. Every permitted alternative was probed:
   //   POST /:id/outcome                → 404 Endpoint not found
@@ -4573,10 +4589,12 @@ const AdminAPI = {
   // So the invoice pattern's PATCH→PUT fallback (setStatusWithFallback) has
   // nothing to fall back TO here, and inventing one would write the operator's
   // "lost to a competitor at $38.90" into a void while showing a success toast.
-  // The page therefore attempts PATCH — the correct call, which starts working
-  // the day BF-021 lands, with no code change — and reports a blocked transport
-  // by name. It must never say "not available yet": that sentence is what made
-  // ERR-131 invisible for a month, and this would be its fourth recurrence.
+  // So the page attempts PATCH and nothing else — and the `transportBlocked`
+  // branch below KEEPS ITS JOB while losing its diagnosis. A bare TypeError now
+  // means a genuine network failure rather than a refused preflight, and the one
+  // thing an operator needs to know about either is that NOTHING WAS WRITTEN.
+  // It must never say "not available yet": that sentence is what made ERR-131
+  // invisible for a month, over a route that was answering 401 the whole time.
   QUICK_ORDER_OUTCOMES: Object.freeze(['won', 'lost', 'pending']),
   QUICK_ORDER_REASONS_LOST: Object.freeze([
     'price', 'availability', 'delivery_time', 'competitor',

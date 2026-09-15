@@ -120,7 +120,7 @@ process.on('unhandledRejection', async (e) => { await cleanup(); console.error(e
 
 const run = async () => {
     // ── §1 ────────────────────────────────────────────────────────────────
-    console.log('\x1b[1m§1 — the id headers the hand-off asked for are still CORS-blocked\x1b[0m');
+    console.log('\x1b[1m§1 — the id headers are allowed, and must stay that way (BF-054 closed)\x1b[0m');
     let allow = '';
     try {
         const pre = await req('OPTIONS', `${BASE}/api/cart/items`, {
