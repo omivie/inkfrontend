@@ -41,6 +41,225 @@ describing the same incident.
 
 ---
 
+## ERR-262 — A probe with a write mode restored through the one path it had just proved was refused — **RESOLVED** (2026-09-16)
+
+**Context.** Adding a stock quantity to the admin product editor's Inventory tab. Before building
+anything, `scripts/probe-product-stock.mjs` was written to measure which write path actually
+persists `products.stock_quantity`, because `PUT /api/admin/products/:id` has a history of
+answering 200 for fields it discards (ERR-244). The probe is read-only by default; `--write`
+mutates exactly one row, `ADMIN-INK-001` (the inactive Admin Test Cartridge), and restores it.
+
+On the first `--write` run it did the measurement correctly and then **left the row wrong.**
+
+```
+§4  PUT persisted stock_quantity (105 → 108)          ✓
+§5  PostgREST refused the update  403 42501           ✗   permission denied for table products
+
+RESTORE FAILED
+  wanted  : stock_quantity = 105
+  reason  : PATCH answered 403: {"code":"42501", …}
+```
+
+**🚨 THE RESTORE USED POSTGREST — THE VERY LEG §5 EXISTS TO TEST.** §5 had just printed the answer
+in red, one line above, and the cleanup went and used it anyway. The two were written minutes apart
+and never read together. The row sat 3 units high until it was put back by hand through the route
+§4 had proved worked.
+
+***A PROBE MUST NOT UNDO ITS WRITES THROUGH A PATH IT HAS NOT VERIFIED.*** A rollback is a write
+like any other, and it is the one write nobody tests, because it only runs on the way out.
+
+**This is ERR-257 wearing a different hat, and it is the fourth time.** ERR-257 was a probe whose
+safety was *borrowed from the server under test*; `sweep:b2b` ate a committed fixture (2026-08-12);
+two search probes turned out to be writers. The family rule was already written down —
+*a probe must OWN its safety, never borrow it from the service under test* — and it was applied to
+the mutation and not to the rollback. **The undo is part of the safety, not part of the cleanup.**
+
+Damage was small and fully reversed only because the probe **printed the whole failure**: the row
+id, the wanted value, the reason, and a hand-repair instruction. ERR-257's evidence died to a
+`tail -12`; this one was captured whole and the repair was verifiable in one command.
+
+**Fix.** `setStock()` is now the single writer, it goes through the admin PUT, and the restore
+calls it and then **re-reads to confirm**. §5 downgraded from a finding to a note — the direct leg
+being refused is a fact about our grants, not a defect — and a new **§7 verdict** states in words
+which path the UI may use, so the answer cannot be inferred from a wall of ticks.
+
+## What the probe actually measured, and what it corrects
+
+With `ADMIN_EMAIL`/`ADMIN_PASSWORD`, role `authenticated`, against production:
+
+| § | Question | Answer |
+|---|---|---|
+| 1 | do `stock_quantity` / `stock_status` / `low_stock_threshold` exist? | yes, all three, asked one column at a time |
+| 2 | does `GET /api/admin/products/:id` **return** `stock_quantity`? | **yes** — so the form has a real baseline to show |
+| 3 | does a save that **omits** `stock_quantity` change it? | **no — omitting it is SAFE** |
+| 4 | does `PUT` **persist** `stock_quantity`? | **yes** — it is not one of the decoy fields |
+| 4b | does a five-key `PUT` default the columns it omits? | **no** — all 13 other columns untouched |
+| 5 | can the direct PostgREST leg write it? | **no** — 403 42501 for `authenticated` |
+
+**🚨 THIS NARROWS ERR-244's PARTIAL-PUT CLAIM.** That entry recorded *"a partial PUT defaults
+missing fields — it is not a merge"*, from a body carrying a single unknown key that flipped
+`is_active` false→true. Measured now against a real body: a five-key PUT left `description_html`,
+`tags`, `supplier`, `barcode`, `weight_kg`, `compare_price` and seven more exactly as they were.
+So the defaulting is **narrower than the note implies** — it is not a blanket wipe of everything
+omitted. ERR-244's operational advice still stands (send what you mean to keep; `retail_price` is
+required), but *"a partial PUT destroys the rest of the row"* is not what the database does today.
+***A hazard recorded from one field is a claim about that field until someone measures a second.***
+
+**The consequence for the feature.** Because §3 says omission is safe and §4 says the PUT works,
+**`stock_quantity` is deliberately ABSENT from the main save payload** and the Apply button owns
+the write. Adding it to the form payload could not fix anything and could only introduce a new way
+to lose a number — by echoing back a figure the modal read on open, undoing an adjustment made
+since, possibly by someone else. `tests/admin-product-stock-adjust-sep2026.test.js` pins that
+absence with the reason attached, because the next reader will see a gap and want to fill it.
+
+**Verify:** `npm run probe:product-stock` (read-only) · `-- --write` (the cycle, self-restoring).
+
+---
+
+## ERR-261 — ERR-255 removed one half of a pass-through, and the waterfall kept footing because the GST line absorbed the difference — **RESOLVED** (2026-09-16)
+
+**Context.** The owner sent a screenshot of the admin Orders list: *"the profit for these orders is
+just not correct at all."* Four of the twenty rows printed a red negative take-home. Then a second
+screenshot, of one order's PROFIT BREAKDOWN panel, which contained the whole bug in one line.
+
+```
+Customer paid (incl. GST)                            $41.49
+Paid to supplier (incl. $2.25 GST)                  −$17.25
+Paid to Stripe (2.65% + $0.30, incl. $0.21 GST)      −$1.61
+Supplier freight (Augmento)                         −$12.00
+GST remitted to IRD (after credits)                 −$11.82   ← 2026091601
+Take-home profit                                     −$1.19
+Net margin (take-home ÷ ex-GST revenue)               −4.6%
+```
+
+**🚨 A $41.49 GST-INCLUSIVE SALE CONTAINS $5.41 OF GST.** `41.49 × 3/23`. That is the most that
+could ever be remitted, before a single input credit is claimed. The panel said **$11.82** — more
+than twice the GST that exists in the sale. No arithmetic error of any other kind can produce that
+number, which is why one screenshot was enough to locate it.
+
+**The defect.** `utils/profitability.js`:
+
+```js
+const netProfit    = rev - costExGst - stripeFeeExGst - supplierFreightExGst;
+const gstCollected = customerPaid - rev;
+const netMarginPct = (netProfit / rev) * 100;
+```
+
+`rev` is goods revenue — `Σ(sell_price × qty)` less the ex-GST discount share. It does **not**
+include the delivery the customer paid for. `customerPaid` is `order.total_amount`, which does.
+So `gstCollected` was not GST: it was GST **plus the entire ex-GST shipping charge**, $10.43 on
+this order, which had nowhere else to go because nothing ever booked it. And the same deficient
+`rev` was what `netProfit` and `netMarginPct` were built from.
+
+Correct: `(25.64 + 10.43) − 15.00 − 1.40 − 10.43 = +$9.24 at 25.6%`, with $1.39 remitted to IRD.
+
+**🚨 IT WAS A REGRESSION, AND THE TWO COMMITS ARE BOTH DEFENSIBLE ON THEIR OWN.**
+
+  * `a7c22e6` (ERR-241) began deducting supplier freight — but guarded it with
+    `customerPaidFreight()`, which skipped the deduction whenever the customer had paid for
+    delivery. Shipping was a **balanced pass-through**: no revenue in, no cost out, profit correct.
+  * `98e3c09` (ERR-251/255) **deleted `customerPaidFreight()`**. Correctly. ERR-255 measured it:
+    *"27 of 60 orders have customer-paid shipping AND a real backend freight bill — $221.77 of
+    $506.98, 44% of the total — and 0 have one without the other."* We really do pay that bill.
+
+The deletion was right. What nobody noticed is that the guard had been doing **two jobs**: it was
+wrong as a freight rule, and it was also the only thing keeping the pass-through balanced. Removing
+it booked the cost half of delivery and left the revenue half unbooked.
+
+***NEVER REMOVE ONE HALF OF A PASS-THROUGH.*** A deduction whose matching credit is implicit — in a
+short-circuit, a skipped branch, a default — is not a deduction you can delete in isolation. This is
+ERR-158's shape one level up: removing a fallback is a behaviour change, and so is removing the
+thing a fallback was silently balancing.
+
+**🚨 THE WATERFALL FOOTED THE ENTIRE TIME.** `gstRemittedToIrd` is defined as the residual that
+makes the columns add up. It absorbed the unbooked $10.43 and the panel balanced to the cent, every
+render, for four days. Footing was never a test that could catch this, and the module's own docblock
+said the residual and the true GST return were *"algebraically identical"* — true only under a
+precondition nobody had written down.
+
+***IF A RESIDUAL IS YOUR ONLY CHECK, IT WILL AGREE WITH YOU FOREVER.***
+
+The invariant that does catch it is one line, and it is now a test: **GST remitted can never exceed
+the output GST on the sale.** It fails on 2026091601 by $6.41 against a $5.41 ceiling. It would also
+have caught ERR-168.
+
+**🚨 I WROTE A `DERIVED` BRANCH AND A TEST KILLED IT — CORRECTLY.** The first implementation fell
+back to `residual = total − revenue × 1.15` when no fee was recorded. It reproduced 2026091601 to
+the cent. It is still wrong: **a residual cannot tell a delivery charge from any other reason
+revenue fell short of the total.** ERR-168's apportionment test went red because on an order
+carrying an $11.50 discount the residual booked the discount as shipping income — net profit came
+out *identical* with and without the discount, silently undoing ERR-168 in full. The branch is gone.
+The residual survives only as a **cross-check** on a stated fee, which is its one honest use.
+
+***A RESIDUAL IS A CHECK, NEVER A SOURCE.***
+
+**What absence means now.** No recorded delivery charge ⇒ take-home is a **FLOOR** (revenue omitted,
+so the truth is the same or higher), announced with `≥` and *"at least"*. This is the exact mirror
+of unpriced freight, which is a **CEILING** (ERR-241). They point opposite ways and are never
+folded into one marker; an order carrying both is bounded on neither side and says *"approximate"*.
+The figure is never blanked — present → absent is ERR-158 backwards.
+
+**Two bugs found in my own fix, both by guards rather than by reading.**
+
+  1. `Number(null) === 0`. `shippingRevenueParts` derived the GST inside the charge only when
+     `gst_component` was missing — but the caller passed `gst_component: null`, `Number(null)` is 0,
+     0 is finite and non-negative, the derive-it guard never fired, and the full $12.00 was booked
+     ex-GST. The verification harness caught it on the first run: $37.64 of revenue where $36.08
+     was expected. The `== null` test now comes **before** `Number()`, with the reason beside it.
+  2. My live probe reported 5 orders "priced as if they charged $0 for delivery". They were not:
+     all five are invoices carrying `shipping_fee: null` **and `shipping_cost: 0`**, which the
+     reader's alias ladder resolves correctly. The probe had asked about one key while the code read
+     three. ***A PROBE THAT MEASURES ITS OWN ASSUMPTION IS NOT MEASURING THE CODE.*** Corrected, it
+     turned into the most useful line in the run: the alias ladder is **load-bearing on 5 of 40
+     live orders**, not belt-and-braces.
+
+**The revenue side was also absorbing absence as zero.** In the same loop, `(unitPrice ?? 0) * qty`
+with `qty ?? 0`, three lines above a cost side that has refused outright since ERR-122. Worse than
+it looks: a null `qty` zeroed the revenue **and** multiplied a recorded `supplier_cost_snapshot` by
+0, so `missingCostCount` stayed 0 and the order resolved `OK` with a confident, wrong number and no
+witness anywhere. Both sides now refuse.
+
+**We had already found this and mis-scoped it.**
+`backend-docs/outbox/order-profit-net-of-discount-FE-response-aug2026.md` §7, 2026-08-17:
+
+> On an order with **charged** shipping, the waterfall's `gstCollected` overstates … The waterfall
+> still foots and **take-home is correct** … Predates this work, out of scope, flagging it so it
+> isn't discovered as a regression later.
+
+Every word of that was true when written — in August no freight was deducted, so the imbalance was
+genuinely benign. It became false on 2026-09-12. ***A KNOWN-BENIGN IMBALANCE STOPS BEING BENIGN THE
+MOMENT ANYONE TOUCHES THE OTHER SIDE OF IT.*** An out-of-scope note must name the change that would
+make it urgent, or it is a tripwire with nothing attached. Addendum filed against §7.
+
+**Measured live** (`npm run probe:order-profit-shipping`, 40 orders, read-only):
+
+```
+14 of 37 priced orders move · total +$104.35 · 5 crossed from loss to profit
+  2026091601   −$1.19 → +$9.25 (25.6%)      2026091501   −$0.97 → +$9.47 (27.5%)
+  2026091301   −$1.86 → +$10.32 (26.7%)     2026090802   −$0.78 → +$5.31 (19.7%)
+  20260828000004 −$0.32 → +$5.77 (31.7%)
+37 of 37 orders remit no more GST than they collected      ← the new bound, live
+16 charged for delivery · 24 free · 0 unresolvable
+```
+
+Free-shipping orders are **unchanged**, as they must be: there the revenue really is zero and the
+absorbed freight is a real cost. ERR-255's acceptance row `2026090902` stays $24.92 / 21.3% with its
+test unedited — that was the negative control for the whole change.
+
+**Still open.** §5 of the probe could not reach `kpi-summary.revenue`, so **whether the backend's
+`net_profit` books shipping revenue is unsettled**. `trend-math.js:17,627,660` says the dashboard's
+revenue is `Σ orders.total × 20/23` and therefore already includes it, which would mean this fix
+*closed* a divergence rather than opening one — but that is a reading of our code, not a measurement
+of theirs, and it is not the same claim. The probe prints the answer either way when it reaches it.
+Also noted: `INV-3276` disagrees between its stated fee and the charged total by $70.49 — the same
+order ERR-255 §6 flagged for a $0.00 backend goods cost against our $70.51.
+
+**Files.** `js/admin/utils/profitability.js`, `js/admin/utils/order-profit.js`,
+`js/admin/pages/orders.js`, `tests/admin-order-profit-shipping-revenue-sep2026.test.js` (new, 24
+tests), `scripts/probe-order-profit-shipping.mjs` (new), plus two source pins legitimately rewritten
+in `tests/supplier-freight-sep2026.test.js` and `tests/admin-invoice-orders.test.js`.
+Suite 6141 pass / 0 fail / 19 skipped.
+
 ## ERR-260 — Our own CSP was blocking the Google Ads first-party conversion beacon, because a wildcard on one domain says nothing about another — **RESOLVED** (2026-09-16)
 
 **Context.** Found by `npm run probe:ga4-events` against production, on the first run where the

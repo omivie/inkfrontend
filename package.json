@@ -18,6 +18,7 @@
     "audit:colours:static": "node scripts/audit-colour-vocabulary.mjs --static",
     "audit:edge-cache": "node scripts/probe-edge-cache.mjs",
     "probe:order-discount": "node scripts/probe-order-discount.mjs",
+    "probe:order-profit-shipping": "node scripts/probe-order-profit-shipping.mjs",
     "probe:orders-search": "node scripts/probe-orders-search.mjs",
     "probe:invoice-quote": "node scripts/probe-invoice-quote.mjs",
     "probe:invoice-pickers": "node scripts/probe-invoice-pickers.mjs",
@@ -62,6 +63,7 @@
     "probe:printer-canonicals": "node scripts/probe-printer-canonicals.mjs",
     "probe:for-use-in": "node scripts/probe-for-use-in.mjs",
     "probe:mig132-admin": "node scripts/probe-mig132-admin.mjs",
+    "probe:product-stock": "node scripts/probe-product-stock.mjs",
     "bundle:backend": "node scripts/bundle-backend-outbox.mjs",
     "probe:orders-delivery-type": "node scripts/probe-orders-delivery-type.mjs",
     "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs"
