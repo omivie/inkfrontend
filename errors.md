@@ -764,6 +764,38 @@ paths are SKIPPED by name rather than counted as passes.
 - **Verified**: 7 assertions, proven red by deleting a print while leaving the import. `npm run probe:search-packs` and `npm run probe:search-escaping` re-run green with the sentinel in place — the zero-result positive control still returns 0 rows under the new term.
 - **Status**: resolved. **Backend ask**: exclude `query LIKE 'zzprobe%'` from analytics aggregates, and treat the 6 `zzqqxnotaproduct9987` rows as ours.
 
+
+**THE FAMILY — ADDED 2026-09-16, AND IT IS NOW THREE.** Synthesis owed to the ERR-257 session
+(`session_011bFsfs3hq7gZWGLFGYqWEx`), which spotted that its incident was not a one-off and that no
+single entry said so. Three times a probe's `MODE: READ-ONLY` banner has been **true of something
+other than what the reader assumed**:
+
+| # | incident | the banner was TRUE of | and FALSE of |
+|---|---|---|---|
+| 1 | `sweep:b2b`, 2026-08-12 (no ERR of its own — a dated event cited from here and from the probe headers) | the run, if you never passed `--record` | the **committed fixture it ate** |
+| 2 | **ERR-254** (this entry), 2026-09-12 | **this repository** | the **backend's database** |
+| 3 | **ERR-257**, 2026-09-16 | the run, **while the backend refused the write** | a **live customer order**, the day one server-side rule stopped firing |
+
+***"Read-only" is not a property of a script. It is a claim about a SYSTEM, and it has a scope the
+banner never prints.*** Every one of those three banners was **honest**. The scope was wrong — which
+is why the honesty of the print is no defence, and why "we print the mode on every run" stopped being
+a sufficient answer after the first instance.
+
+**The two fixes are complementary, not redundant, and a probe wants both:**
+
+- **ERR-254 made the scope VISIBLE** — one owner in `scripts/lib/probe-search-notice.mjs`, enrolment
+  asserted in a test, because *"every surface does X"* is a list nobody maintains (ERR-150/160).
+- **ERR-257 made the claim SELF-ENFORCING** — restore and verify, so the banner stays true even when
+  the far side changes. Which is the case ERR-254's approach cannot cover: a printed scope is still a
+  statement about the world as it was when someone wrote it down.
+
+***Print the scope, and own it.***
+
+The sharpest corollary of the three sits above in this entry and generalises well past probes: **a
+dataset we quietly contribute to is a dataset we cannot cite.** That is the line to put in front of
+anyone writing a new probe — ahead of the mechanism of any individual instance.
+
+
 ## ERR-251 — The four decoy filters became real, and a page that had correctly refused to send them was now hiding a capability — **RESOLVED** (2026-09-12)
 
 - **Date**: 2026-09-12 · **Context**: on 2026-09-03 (ERR-204) `product_type`, `sort`, `offset` and `search` were measured as **decoys** on `/api/admin/analytics/catalog/products` — accepted by the validator, dropped by `stripUnknown`, so the endpoint answered **page one with a 200 however you paged it**. Catalogue Engagement therefore shipped with **no pager at all** and a caption that said so: *"raise Show to see more — this endpoint has no next page"*. That was the right call. A Next button that silently re-serves page one is the **ERR-151 decoy failure rebuilt inside our own UI**, and a control that does nothing is worse than an absent one.
