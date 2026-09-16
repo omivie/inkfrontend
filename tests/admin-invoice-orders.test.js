@@ -144,8 +144,14 @@ test('the order-profit helper passes NO_PAYMENT_FEES for an invoiced order', () 
   // order-profit-absorbed-shipping-jul2026.test.js. Neither may displace
   // NO_PAYMENT_FEES: an invoiced sale that acquired a 2.65% card fee because a
   // cost was added next to it would be wrong in a way no total reveals.
-  assert.ok(/isInvoice\s*\n?\s*\?\s*\{ customerPaidInclGst, absorbedShipping, supplierFreight, \.\.\.NO_PAYMENT_FEES \}/.test(profitSrc),
+  assert.ok(/isInvoice\s*\n?\s*\?\s*\{ customerPaidInclGst, absorbedShipping, supplierFreight, shippingRevenue, \.\.\.NO_PAYMENT_FEES \}/.test(profitSrc),
     'the fee options must branch on isInvoice and still spread NO_PAYMENT_FEES last');
+  // shippingRevenue (ERR-261) rides both branches for the same reason the two
+  // above do. An invoiced sale pays no card fee; it still charges for delivery,
+  // and dropping the revenue from this branch alone would understate exactly the
+  // invoiced orders — the quietest possible place for it to be wrong.
+  assert.ok(/:\s*\{ customerPaidInclGst, absorbedShipping, supplierFreight, shippingRevenue \};/.test(profitSrc),
+    'the non-invoice branch must carry shippingRevenue too');
   // Both the per-line profits AND the waterfall must use the branched options.
   assert.ok(/computeLineProfits\(lines, feeOpts\)/.test(profitSrc),
     'computeLineProfits must receive feeOpts, not a hard-coded { customerPaidInclGst }');

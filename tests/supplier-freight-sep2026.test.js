@@ -558,10 +558,34 @@ test('two consignments produce two tooltip lines', () => {
 // ─── 9. Surface wiring — source pins with the contract named ─────────────────
 
 test('the "(at most)" qualifier and the ≤ mark key off ONE ceiling gate', () => {
-  assert.ok(/profitInfo\.supplierFreightCeiling\s*\n?\s*\?\s*`<strong>Take-home profit<\/strong>/.test(ordersSrc),
+  // ERR-261 added a SECOND bound pointing the other way, so both surfaces now
+  // resolve a direction rather than a boolean. What this test has always been
+  // about is unchanged: the ceiling is read as the WHOLE gate, never as one of
+  // its two causes. Both readers must still say `supplierFreightCeiling`.
+  assert.ok(/boundQualifier = profitInfo\.supplierFreightCeiling/.test(ordersSrc),
     'take-home must say "(at most)" on supplierFreightCeiling, not on one of its two causes');
-  assert.ok(/const ceilingMark = info\.supplierFreightCeiling/.test(ordersSrc),
+  assert.ok(/const bounded = info\.supplierFreightCeiling/.test(ordersSrc),
     'the list cell’s ≤ mark must use the same gate');
+  // Neither surface may reach past the gate to its causes — that is the bug the
+  // single gate exists to prevent, and a second bound is a fresh chance to make it.
+  for (const [surface, src] of [['take-home row', ordersSrc], ['list cell', ordersSrc]]) {
+    assert.ok(!/(boundQualifier|const bounded)[^;]*supplierFreight(Absent|Complete|UnpricedConsignments)/.test(src),
+      `the ${surface} must not key its bound off a single cause of the ceiling`);
+  }
+});
+
+test('the FLOOR is a separate gate, and it points the opposite way (ERR-261)', () => {
+  // Unpriced freight = a cost possibly understated  => take-home is at MOST this.
+  // An unrecorded delivery charge = revenue definitely omitted => AT LEAST this.
+  // Folding them into one marker would report a ceiling on an order that has a
+  // floor, which is worse than printing no bound at all.
+  assert.ok(/shippingRevenueUnknown \? muted\('\(at least\)'\)/.test(ordersSrc),
+    'an order with no recorded delivery charge must say "(at least)"');
+  assert.ok(/shippingRevenueUnknown \? '\\u2265' : ''/.test(ordersSrc),
+    'and the list cell must mark it ≥');
+  assert.ok(/shippingRevenueUnknown \? muted\('\(approximate\)'\)/.test(ordersSrc)
+    && /\\u2248/.test(ordersSrc),
+    'an order carrying BOTH is bounded on neither side and must say so');
 });
 
 test('the IRD credit list no longer names the courier', () => {
@@ -571,10 +595,24 @@ test('the IRD credit list no longer names the courier', () => {
 });
 
 test('the profit engine deducts freight and NOT the absorbed courier', () => {
-  assert.ok(/netProfit = rev - costExGst - stripeFeeExGst - supplierFreightExGst;/.test(profitabilitySrc),
-    'netProfit must have exactly four terms');
+  // ERR-261 gave this expression a second REVENUE term. It still has exactly the
+  // same THREE outflows, which is what this test has always been about: the
+  // absorbed courier must not reappear among them. Widened from an equality to a
+  // shape so the revenue side can grow without this going red for the wrong
+  // reason — but the ban below is unchanged and still exact.
+  assert.ok(/netProfit = totalRevenueExGst - costExGst - stripeFeeExGst - supplierFreightExGst;/.test(profitabilitySrc),
+    'netProfit must be revenue (goods + shipping charged) less exactly three outflows');
+  assert.ok(!/netProfit[^;]*absorbedShipping/.test(profitabilitySrc),
+    'the absorbed courier must never re-enter the net (ERR-255)');
+  assert.ok(/totalRevenueExGst = rev \+ shippingRevenueExGst;/.test(profitabilitySrc),
+    'the shipping the customer paid must be booked as revenue — deducting the freight '
+    + 'for the same parcel without it is ERR-261');
   assert.ok(/gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - supplierFreightGst;/.test(profitabilitySrc),
     'the IRD line must not credit the absorbed courier');
+  // The GST line is built off the SAME revenue as the net. When it was not, it
+  // reported $11.82 of GST remitted on a $41.49 sale containing $5.41 of GST.
+  assert.ok(/gstCollected = customerPaid - totalRevenueExGst;/.test(profitabilitySrc),
+    'gstCollected must be measured against everything the customer paid for');
 });
 
 test('the page does no freight maths of its own', () => {

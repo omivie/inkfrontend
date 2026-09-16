@@ -114,6 +114,49 @@ function supplierFreightParts(opts, gstRate = GST_RATE) {
 }
 
 /**
+ * Split the delivery charge the CUSTOMER PAID into its three GST parts.
+ *
+ * THE THIRD MIRROR of absorbedShippingParts(), and deliberately a mirror rather
+ * than a generalisation — same reasoning stated there. This one is the only
+ * member of the family that is INCOME rather than an outflow, which is exactly
+ * why it must exist: until ERR-261 the delivery a customer paid for was the one
+ * number in the order that was charged but never booked.
+ *
+ * `orders.shipping_fee` is GST-INCLUSIVE (shipping_rates stores fees that way),
+ * so the convention is identical to its siblings: anchor on the incl-GST figure,
+ * derive the GST inside it (× rate/(1+rate) = × 3/23 at 15%), and derive exGst
+ * by subtraction rather than incl / 1.15 so the waterfall foots exactly.
+ *
+ * 🚨 ZERO AND ABSENT ARE DIFFERENT HERE, AND THE DIFFERENCE IS THE WHOLE POINT.
+ * A shipping_fee of 0 is a REAL DECISION — free shipping — and comes back as
+ * applies:true with zero amounts. An ABSENT fee is not a decision and must never
+ * be allowed to look like one: booking $0 of delivery income against a real
+ * supplier freight bill is precisely the defect this function exists to end.
+ * So `applies` is what callers read, never the amount, and the caller
+ * (order-profit.js) owns what absence means — this parser only refuses to guess.
+ *
+ * Note the guard is `inclGst < 0`, NOT `<= 0` as in orderDiscountParts below.
+ * That asymmetry is deliberate for the reason above: a $0 discount is not a
+ * decision anyone made, a $0 delivery charge is.
+ */
+function shippingRevenueParts(opts, gstRate = GST_RATE) {
+  const s = (opts && typeof opts === 'object') ? opts.shippingRevenue : null;
+  if (!s || typeof s !== 'object' || s.applies !== true) return { exGst: 0, gst: 0, inclGst: 0 };
+  const inclGst = Number(s.amount_incl_gst);
+  if (!Number.isFinite(inclGst) || inclGst < 0) return { exGst: 0, gst: 0, inclGst: 0 };
+  // `== null` BEFORE Number(), not after. `Number(null)` is 0, which is finite and
+  // not negative, so a null gst_component sails through a `!Number.isFinite(gst)`
+  // guard and leaves gst at 0 — making exGst the full incl-GST amount and booking
+  // $12.00 of revenue for a $12.00 charge that contains $1.57 of GST. This exact
+  // line shipped broken for one test run. The siblings above get away with
+  // `Number()` first only because their backends always send the component.
+  let gst = s.gst_component == null ? NaN : Number(s.gst_component);
+  if (!Number.isFinite(gst) || gst < 0) gst = inclGst * (gstRate / (1 + gstRate)); // GST inside a GST-incl amount
+  const exGst = inclGst - gst;
+  return { exGst, gst, inclGst };
+}
+
+/**
  * Split an order-level discount into its GST parts.
  *
  * `orders.discount_amount` is the AGGREGATE of every discount applied to the
@@ -168,8 +211,22 @@ export function computeProfitability(row, gstRate = GST_RATE) {
  *   opts.customerPaidInclGst — exact gross customer charge (preferred fee base
  *                         because Stripe charges on what hit the card, incl.
  *                         shipping + GST).
- *   opts.shippingExGst  — fallback when customerPaidInclGst is absent:
+ *   opts.shippingExGst  — FEE BASE ONLY, and nothing else. It is the fallback
+ *                         used when customerPaidInclGst is absent:
  *                         feeBase = (revenueExGst + shippingExGst) × 1.15.
+ *                         🚨 IT IS NOT REVENUE AND MUST NOT BECOME REVENUE.
+ *                         invoice-math.js:207 passes it alongside
+ *                         NO_PAYMENT_FEES, where it is entirely inert (zero
+ *                         rate, zero fixed). Making it load-bearing would wake
+ *                         that dead argument and credit every invoice with the
+ *                         freight it charged while deducting no freight cost.
+ *                         Delivery INCOME rides on opts.shippingRevenue below.
+ *   opts.shippingRevenue — the delivery charge the customer actually paid
+ *                         (ERR-261), shaped { applies, amount_incl_gst,
+ *                         gst_component?, basis? } and parsed by
+ *                         shippingRevenueParts(). Added to revenue ex-GST.
+ *                         Absent ⇒ $0, so aggregate/invoice callers are
+ *                         unchanged — the CALLER decides what absence means.
  *   opts.stripeRate / opts.stripeFixed — override the processor fee. Spread
  *                         NO_PAYMENT_FEES for a bank-transfer sale (invoiced /
  *                         phone order): no card, so no fee.
@@ -196,22 +253,37 @@ export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
     ? paid
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
   const stripeFee = feeBase * stripeRate + stripeFixed;
+  // Delivery INCOME (ERR-261). The customer's shipping charge is revenue on this
+  // order and has to be booked as such, because the freight bill on the very
+  // same parcel is deducted two lines down. Booking one half of a pass-through
+  // is what printed a loss on profitable orders.
+  const shippingRevExGst = shippingRevenueParts(opts, gstRate).exGst; // $0 unless the customer paid for delivery
+  const totalRevExGst = rev + shippingRevExGst;
   // Supplier freight is the ONLY courier-side deduction (ERR-255). The absorbed
   // courier is the same parcel and is already inside this figure; deducting
   // both was the double-charge the migration removed.
   const freightExGst = supplierFreightParts(opts, gstRate).exGst;   // $0 unless a supplier billed us freight
-  return rev - costExGst - stripeFee - freightExGst;
+  return totalRevExGst - costExGst - stripeFee - freightExGst;
 }
 
 /**
  * Per-line net profit for an order's items.
  *
- * The order carries order-level costs that can't be attributed to a single line
- * — the fixed $0.30 Stripe fee and any absorbed courier cost — so we derive the
- * whole order-level deduction (= revenue − cost − orderProfit) and allocate it
- * across lines proportionally to ex-GST line revenue. This guarantees
+ * The order carries money that can't be attributed to a single line — the
+ * Stripe fee (including the fixed $0.30), any supplier freight, and the
+ * delivery charge the customer paid — so we derive the whole order-level
+ * adjustment (= revenue − cost − orderProfit) and allocate it across lines
+ * proportionally to ex-GST line revenue. This guarantees
  * Σ lineProfits === computeOrderProfit(...) exactly, so the per-line Profit
  * column and its foot always agree with the Profit Breakdown take-home.
+ *
+ * THE RESIDUAL IS WHY THIS FUNCTION NEEDED NO CHANGE FOR ERR-261. It never
+ * enumerates the order-level terms, it subtracts the answer from the inputs, so
+ * delivery income joined the allocation the moment computeOrderProfit booked
+ * it. Note the allocation can now be NEGATIVE — on an order whose shipping
+ * charge exceeds the Stripe fee plus freight, the customer's delivery payment
+ * is income shared across the lines. A line's profit legitimately exceeding its
+ * own revenue-minus-cost is that, not a bug.
  *
  *   lines: [{ revenueExGst, costExGst }]  — costExGst null/NaN ⇒ that line's
  *          profit is null (cost unknown) but its revenue still counts toward
@@ -224,19 +296,25 @@ export function computeLineProfits(lines, opts = {}) {
   const rows = Array.isArray(lines) ? lines : [];
   let totalRevenue = 0, totalCost = 0;
   for (const l of rows) {
-    const rev = Number(l?.revenueExGst);
+    // null/undefined revenue ⇒ unknown, NOT zero. `Number(null)` is 0, which is
+    // finite, so the old spelling let an unpriced line join the allocation
+    // denominator as a confident $0 (ERR-261). Mirrors the cost guard below.
+    const rev = (l == null || l.revenueExGst == null) ? NaN : Number(l.revenueExGst);
     if (Number.isFinite(rev)) totalRevenue += rev;
     const cost = Number(l?.costExGst);
     if (Number.isFinite(cost)) totalCost += cost;
   }
   const totalProfit = computeOrderProfit(totalRevenue, totalCost, opts);
-  // Whole-order deduction not attributable to a line: Stripe fee (incl. the
-  // fixed $0.30) + absorbed courier cost. Allocated by revenue share below.
+  // Whole-order adjustment not attributable to a line: Stripe fee (incl. the
+  // fixed $0.30) + supplier freight − the delivery charge the customer paid.
+  // Deliberately derived as a residual and never enumerated — see the docblock.
+  // (It has NOT included the absorbed courier since ERR-255; that is the same
+  // parcel as supplier freight and is labelling only.)
   const orderLevelFee = (totalProfit != null && totalRevenue > 0)
     ? totalRevenue - totalCost - totalProfit
     : null;
   const lineProfits = rows.map((l) => {
-    const rev = Number(l?.revenueExGst);
+    const rev = (l == null || l.revenueExGst == null) ? NaN : Number(l.revenueExGst);
     // null/undefined cost ⇒ unknown (Number(null) is 0, which would lie); NaN guards bad input.
     const cost = (l == null || l.costExGst == null) ? NaN : Number(l.costExGst);
     if (!Number.isFinite(rev) || !Number.isFinite(cost) || totalProfit == null || totalRevenue <= 0) {
@@ -270,6 +348,22 @@ export function computeLineProfits(lines, opts = {}) {
  * gstRemittedToIrd is both the residual that makes the waterfall foot AND the
  * true GST return figure (output tax − input tax credits) — the two are
  * algebraically identical.
+ *
+ * 🚨 THAT IDENTITY HAS A PRECONDITION, AND IT WAS SILENTLY FALSE FOR A MONTH.
+ * The residual only IS the GST return when revenue covers EVERYTHING the
+ * customer paid. `customerPaidInclGst` is the full charge, shipping included;
+ * `revenueExGst` is the goods alone. So every dollar of delivery the customer
+ * paid used to land inside gstRemittedToIrd, which is a residual and will
+ * absorb anything you fail to book. On order 2026091601 it reported $11.82 of
+ * GST remitted on a $41.49 sale whose entire GST content is $5.41 — more than
+ * twice the GST that exists. It still footed. A residual always foots.
+ *
+ * ***IF A RESIDUAL IS YOUR ONLY CHECK, IT WILL AGREE WITH YOU FOREVER.***
+ *
+ * That is why totalRevenueExGst — goods + the delivery charge — is now what the
+ * net, the margin and gstCollected are all built from, and why the test suite
+ * pins the one bound a residual cannot fake: gstRemittedToIrd can never exceed
+ * the output GST on the sale, customerPaidInclGst × 3/23.
  *
  * Returns null when inputs are unusable (same guard as computeOrderProfit).
  */
@@ -329,16 +423,54 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   const supplierFreightExGst = freight.exGst;
   const f = (opts && typeof opts === 'object') ? opts.supplierFreight : null;
   const supplierFreightApplies = supplierFreightInclGst > 0;
+  // Delivery INCOME — the shipping charge the customer paid (ERR-261).
+  //
+  // Booked as revenue because the freight bill for the SAME PARCEL is deducted
+  // above. Until 2026-09-12 neither half was counted and the two omissions
+  // cancelled: ERR-241 deducted freight but short-circuited it whenever the
+  // customer had paid for delivery, so shipping stayed a clean pass-through.
+  // ERR-255 deleted that short-circuit — correctly, we really do pay the bill —
+  // and the revenue half was never added back. One half of a pass-through is
+  // not a pass-through; it is a loss the order did not make.
+  const shippingRevenue = shippingRevenueParts(opts, gstRate);
+  const shippingRevenueInclGst = shippingRevenue.inclGst;
+  const shippingRevenueGst = shippingRevenue.gst;
+  const shippingRevenueExGst = shippingRevenue.exGst;
+  const sr = (opts && typeof opts === 'object') ? opts.shippingRevenue : null;
+  const shippingRevenueApplies = !!sr && sr.applies === true;
+  // EVERYTHING the customer paid, ex-GST — goods (net of any discount) plus
+  // delivery. This, not the goods alone, is the revenue the rest of the
+  // statement is built on.
+  const totalRevenueExGst = rev + shippingRevenueExGst;
   // Take-home is GST-neutral (the GST you pay is reclaimed) — same as computeOrderProfit.
-  const netProfit = rev - costExGst - stripeFeeExGst - supplierFreightExGst;
+  const netProfit = totalRevenueExGst - costExGst - stripeFeeExGst - supplierFreightExGst;
   // GST collected from the customer, and what's left to remit to IRD after
-  // crediting the GST already paid to supplier + Stripe + absorbed courier.
-  const gstCollected = customerPaid - rev;
+  // crediting the GST already paid to supplier + Stripe + supplier freight.
+  const gstCollected = customerPaid - totalRevenueExGst;
   const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - supplierFreightGst;
-  const netMarginPct = (netProfit / rev) * 100;
+  const netMarginPct = (netProfit / totalRevenueExGst) * 100;
   return {
     customerPaidInclGst: customerPaid,
+    // GOODS ONLY, and it stays that way. ERR-219's two positive controls and
+    // sourcing.js:346 pin the Supplier-cost column against this basis; widening
+    // it would move a cost column to fix a revenue bug. Delivery income is its
+    // own sibling below, and totalRevenueExGst is the sum the net is built on.
     revenueExGst: rev,
+    shippingRevenueApplies,
+    shippingRevenueInclGst,
+    shippingRevenueGst,
+    shippingRevenueExGst,
+    // How we know the delivery charge: 'recorded' (the order's own shipping_fee)
+    // or 'derived' (the residual of customerPaid against booked revenue). null
+    // when nothing applies. Provenance lives in the RETURN VALUE, not only in a
+    // tooltip, so a consumer can tell a measured figure from a reconstructed one.
+    shippingRevenueBasis: shippingRevenueApplies && sr ? (sr.basis ?? null) : null,
+    // NOT `totalRevenueExGst`, deliberately. order-profit.js's result object
+    // already carries a `totalRevenueExGst` meaning the GOODS sum, and a single
+    // consumer reads both objects side by side. Two different numbers sharing
+    // one spelling across two payloads is a bug waiting for a careless
+    // destructure, so this one says what it includes.
+    revenueWithShippingExGst: totalRevenueExGst,
     gstCollected,
     supplierCostExGst: costExGst,
     supplierCostGst,

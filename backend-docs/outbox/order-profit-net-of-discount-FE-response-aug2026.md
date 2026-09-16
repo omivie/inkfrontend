@@ -273,3 +273,68 @@ includes it, so the shipping component lands inside `gstRemittedToIrd` rather th
 The waterfall still foots and take-home is correct — `gstRemittedToIrd` is the residual by
 construction — but that row is not a GST return figure on those orders. Predates this work, out of
 scope, flagging it so it isn't discovered as a regression later.
+
+---
+
+## Addendum — 2026-09-16: §7 became false on 2026-09-12 (ERR-261)
+
+§7 above stays exactly as written, because every word of it was true on 2026-08-17 and the way it
+stopped being true is the useful part.
+
+**What changed.** §7 said *"the waterfall still foots and take-home is correct."* That held because
+in August nothing deducted a courier cost on a charged-shipping order: shipping was a **balanced
+pass-through** — revenue not booked, cost not booked — so the two omissions cancelled and only the
+`gstRemittedToIrd` *row* was misdescribed.
+
+Then ERR-241 began deducting supplier freight, guarded by a short-circuit that skipped it whenever
+the customer had paid for delivery. Still balanced. Then **ERR-255 deleted that short-circuit**, on
+good evidence — *27 of 60 orders have customer-paid shipping AND a real backend freight bill,
+$221.77 of $506.98, and 0 have one without the other*. We really do pay it.
+
+That deletion booked the **cost** half of delivery and left the **revenue** half unbooked. From
+2026-09-12 take-home was understated by the ex-GST shipping charge on every charged-shipping order:
+measured live over 40 orders, **14 moved, +$104.35, and 5 printed a loss on an order that was
+profitable.** On order `2026091601` the IRD row read **$11.82 of GST remitted on a $41.49 sale
+containing $5.41 of GST** — more than twice the GST in existence — and the waterfall still footed,
+because a residual always does.
+
+**The lesson is the scoping, not the arithmetic.** §7 correctly identified the imbalance and
+correctly judged it benign. What it did not do is name the change that would make it urgent.
+
+> ***A KNOWN-BENIGN IMBALANCE STOPS BEING BENIGN THE MOMENT ANYONE TOUCHES THE OTHER SIDE OF IT.***
+
+An out-of-scope note that says "flagging it so it isn't discovered as a regression later" is a
+tripwire with nothing attached to it. It should have read: *"if anything ever starts deducting a
+courier cost on these orders, this becomes a live understatement — book the shipping revenue at the
+same time."* Filed as ERR-261; fixed frontend-side.
+
+### One question back to you
+
+Our `netProfit` now books `orders.shipping_fee` as revenue, so our ex-GST revenue on an order is
+`total_amount × 20/23` — everything the customer paid.
+
+**Does `analytics_kpi_summary.revenue` (and the `net_profit` derived from it) do the same?**
+
+It matters because `net_profit` already deducts `supplier_freight`. If revenue there is the goods
+sum rather than `Σ orders.total`, the aggregate carries the identical half-a-pass-through we just
+fixed, and the two surfaces now disagree by the shipping charged. Reading `trend-math.js` suggests
+you are on the correct side already (`revenue` = `Σ orders.total`, ex-GST via `× 20/23`), which
+would mean this change *closed* a divergence rather than opening one — but that is a reading of our
+code, not a measurement of yours.
+
+`npm run probe:order-profit-shipping` §5 settles it automatically when it can reach
+`kpi-summary.revenue`; on the run of 2026-09-16 that field did not come back, so it is recorded as
+**skipped, not passed**.
+
+Either answer is fine and we will match it. What cannot stand is one half of the pair.
+
+### Two data notes, neither blocking
+
+1. **`shipping_fee` is `null` on invoiced orders** — 5 of 40 sampled (`INV-3276`…`INV-3280`), each
+   carrying `shipping_cost: 0` alongside. Our reader resolves them through an alias ladder, so
+   nothing is wrong on screen. Mentioning it because a consumer reading only `shipping_fee` would
+   floor every invoice, and the two fields disagreeing about which is authoritative is the kind of
+   thing that is cheap to align now and expensive later.
+2. **`INV-3276`**: its stated delivery charge and its charged total disagree by **$70.49**. Same
+   order §6 of the supplier-freight round flagged for a `goods_cost_ex_gst` of $0.00 against our
+   $70.51. Two independent readings now point at that one order.

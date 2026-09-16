@@ -67,7 +67,7 @@
  * on the same footing.
  */
 
-import { computeLineProfits, computeProfitBreakdown, orderDiscountParts, NO_PAYMENT_FEES } from './profitability.js';
+import { computeLineProfits, computeProfitBreakdown, orderDiscountParts, NO_PAYMENT_FEES, GST_RATE } from './profitability.js';
 import { supplierFreightForOrder, freightCeilingReason } from './supplier-freight.js';
 
 export const PROFIT_STATE = {
@@ -157,6 +157,80 @@ function warn(msg) {
   if (typeof DebugLog !== 'undefined' && DebugLog?.warn) DebugLog.warn(msg);
 }
 
+/**
+ * What the customer paid for delivery on this order (ERR-261).
+ *
+ * `orders.shipping_fee` is GST-INCLUSIVE — shipping_rates stores fees that way,
+ * pinned by the modal's own "Shipping (incl. GST)" row (pages/orders.js) and by
+ * pages/invoices.js, which divides it back out for the invoice freight field.
+ *
+ * TWO STATES. A stated fee, or an admission that we do not know.
+ *
+ *   recorded — the order carries a finite fee. A fee of 0 IS recorded: free
+ *              shipping is a decision somebody made, which is why the guard
+ *              below is `< 0` and not `<= 0`.
+ *   unknown  — no fee on the payload. Take-home becomes a FLOOR (revenue we
+ *              could not book, so the truth is higher) and says so. It is NOT
+ *              $0 of income, and the order is NOT blanked.
+ *
+ * 🚨 THERE IS NO "DERIVED FROM THE TOTAL" BRANCH, AND THERE MUST NEVER BE ONE.
+ * I wrote one first. `residual = total − revenue × 1.15` looks unimpeachable —
+ * two known numbers, one gap — and it reproduced order 2026091601 to the cent.
+ * Then the ERR-168 apportionment test went red, because a residual cannot tell
+ * a delivery charge from ANY other reason revenue fell short of the total. On
+ * an order carrying a discount it booked the discount as shipping income: net
+ * profit came out IDENTICAL with and without an $11.50 discount, silently
+ * undoing the whole of ERR-168. A residual will explain away every mistake you
+ * make upstream of it, including the ones you have not made yet.
+ *
+ * ***A RESIDUAL IS A CHECK, NEVER A SOURCE.*** Which is exactly how it is used
+ * below: when a fee IS stated, the residual is computed alongside it and any
+ * disagreement over 5c is warned and carried out in the return value. Two
+ * numbers agreeing is the only evidence either one is live (ERR-253), and the
+ * identity itself is the one scripts/probe-order-discount.mjs already asserts
+ * against production.
+ *
+ * ALIAS LADDER, and the two names deliberately NOT on it:
+ *   `shipping_fee` → `shipping_cost` → `shipping_amount`, all customer-charge
+ *   spellings (js/order-totals.js:144 carries the same ladder for the receipt).
+ *   `freight` is EXCLUDED: on an admin order that word is our supplier's bill to
+ *   US, and reading a cost field as income is how this codebase earns its worst
+ *   bugs. `shipping` is EXCLUDED: on a raw API order it is the tier NAME
+ *   ("Standard Shipping"), not a number.
+ */
+const SHIPPING_FEE_KEYS = ['shipping_fee', 'shipping_cost', 'shipping_amount'];
+const SHIPPING_DRIFT_TOLERANCE = 0.05;   // the bound probe-order-discount.mjs asserts live
+
+function shippingRevenueForOrder(order, ctx = {}) {
+  const NONE = { applies: false, amount_incl_gst: 0, basis: null, unknown: true, drift: null };
+  if (!order || typeof order !== 'object') return NONE;
+
+  let recorded = null;
+  for (const key of SHIPPING_FEE_KEYS) {
+    if (order[key] == null) continue;          // `== null` only — a 0 is an answer
+    const n = Number(order[key]);
+    if (Number.isFinite(n) && n >= 0) { recorded = n; break; }
+  }
+  if (recorded == null) return NONE;
+
+  // THE CHECK, not the source. Everything paid, less everything already booked.
+  const paid = Number(ctx.customerPaidInclGst);
+  const booked = Number(ctx.bookedRevenueExGst);
+  let drift = null;
+  if (Number.isFinite(paid) && Number.isFinite(booked)) {
+    drift = recorded - (paid - booked * (1 + GST_RATE));
+    if (Math.abs(drift) > SHIPPING_DRIFT_TOLERANCE) {
+      warn(`[order-profit] shipping_fee ${recorded} does not reconcile against the charged `
+        + `total on ${order.order_number || order.id} (drift ${drift.toFixed(2)}) — the stated `
+        + `fee still stands; something else on this order is unexplained`);
+    }
+  }
+  // gst_component is OMITTED, not null: the parser derives incl × 3/23 when it is
+  // absent, and `Number(null)` is 0 — a value that passes a finite check and
+  // books the entire charge as GST-free revenue. It did, for one test run.
+  return { applies: true, amount_incl_gst: recorded, basis: 'recorded', unknown: false, drift };
+}
+
 /** Every return has the same shape, so no consumer has to guard on key presence. */
 function result(state, extra = {}) {
   return {
@@ -166,11 +240,21 @@ function result(state, extra = {}) {
     breakdown: null,
     lineProfits: [],
     missingCostCount: 0,
+    // A line nobody priced. Counted and refused exactly like an uncosted one —
+    // see the loop in orderProfitFromDetail for why the two must stay symmetric.
+    missingPriceCount: 0,
     itemCount: 0,
     totalRevenueExGst: null,
     totalCostExGst: null,
     isInvoice: false,
     absorbedApplies: false,
+    // Delivery income (ERR-261). `shippingRevenueBasis` is 'recorded' | 'derived'
+    // | null, and null with applies:false means NOT REPORTED — never $0 charged.
+    shippingRevenueApplies: false,
+    shippingRevenueInclGst: 0,
+    shippingRevenueBasis: null,
+    shippingRevenueUnknown: false,
+    shippingRevenueDrift: null,
     // Supplier freight (ERR-241). Consumers read the FLAGS, never the amount —
     // the money itself lives on `breakdown`, and an order can be
     // supplierFreightUnknown while having no breakdown at all.
@@ -255,19 +339,37 @@ export function orderProfitFromDetail(order, opts = {}) {
   // `== null` and nothing looser: a genuine 0 is a real recorded cost (a giveaway,
   // a sample), only null/undefined means nobody wrote one down. `?? 0` here is the
   // whole bug class — see the module header.
+  //
+  // THE SAME RULE NOW RUNS ON BOTH SIDES OF THE LINE (ERR-261). It used to be
+  // `(unitPrice ?? 0) * qty` with `qty ?? 0`, so a line whose price or quantity
+  // was never recorded contributed $0 of revenue while its cost was still
+  // counted three lines down — the cost side refusing outright, the revenue
+  // side absorbing the identical absence as a confident zero, in one loop.
+  // An unpriced line understates profit exactly as silently as an uncosted one.
   let missingCostCount = 0;
+  let missingPriceCount = 0;
   let totalRevenueExGst = 0;
   let totalCostExGst = 0;
   const lines = [];
   for (const item of items) {
     const unitPrice = item.sell_price ?? item.unit_price ?? item.price;   // backend stores sell_price ex-GST
-    const qty = item.qty ?? item.quantity ?? 0;
-    const lineRevenue = (unitPrice ?? 0) * qty;
-    totalRevenueExGst += lineRevenue;
-    const hasCost = item.supplier_cost_snapshot != null;
-    if (hasCost) totalCostExGst += item.supplier_cost_snapshot * qty;
+    const qtyRaw = item.qty ?? item.quantity;
+    const priceNum = unitPrice == null ? NaN : Number(unitPrice);
+    const qtyNum = qtyRaw == null ? NaN : Number(qtyRaw);
+    const hasRevenue = Number.isFinite(priceNum) && Number.isFinite(qtyNum);
+    if (!hasRevenue) missingPriceCount++;
+    const lineRevenue = hasRevenue ? priceNum * qtyNum : null;
+    if (hasRevenue) totalRevenueExGst += lineRevenue;
+    // Quantity is shared with the cost side, so an unknown quantity makes the
+    // cost unstateable too — a snapshot with nothing to multiply it by is not
+    // a $0 cost.
+    const hasCost = item.supplier_cost_snapshot != null && Number.isFinite(qtyNum);
+    if (hasCost) totalCostExGst += item.supplier_cost_snapshot * qtyNum;
     else missingCostCount++;
-    lines.push({ revenueExGst: lineRevenue, costExGst: hasCost ? item.supplier_cost_snapshot * qty : null });
+    lines.push({
+      revenueExGst: lineRevenue,
+      costExGst: hasCost ? item.supplier_cost_snapshot * qtyNum : null,
+    });
   }
 
   // ── Net out the order-level discount (ERR-168) ─────────────────────────────
@@ -334,6 +436,15 @@ export function orderProfitFromDetail(order, opts = {}) {
       + `breakdown ${paidOverride} vs total_amount ${ownTotal}`);
   }
 
+  // ── Delivery income (ERR-261) ──────────────────────────────────────────────
+  //
+  // Read AFTER the discount has been netted out above, because the derived
+  // branch reconciles against revenue as booked, not as listed.
+  const shippingRevenue = shippingRevenueForOrder(order, {
+    customerPaidInclGst,
+    bookedRevenueExGst: totalRevenueExGst,
+  });
+
   const absorbedShipping = order.shipping_absorbed || null;
   const absorbedApplies = !!absorbedShipping
     && absorbedShipping.applies === true
@@ -355,9 +466,13 @@ export function orderProfitFromDetail(order, opts = {}) {
 
   // An invoiced sale is settled by bank transfer — there is no card processor, so
   // NO fee. Charging it Stripe's 2.65% + $0.30 invents a payment it never made.
+  //
+  // `shippingRevenue` rides on BOTH branches. An invoiced sale pays no card fee;
+  // it still charges for delivery. ERR-255 has a test named for exactly the
+  // branch that gets forgotten here, and this is the same trap.
   const feeOpts = isInvoice
-    ? { customerPaidInclGst, absorbedShipping, supplierFreight, ...NO_PAYMENT_FEES }
-    : { customerPaidInclGst, absorbedShipping, supplierFreight };
+    ? { customerPaidInclGst, absorbedShipping, supplierFreight, shippingRevenue, ...NO_PAYMENT_FEES }
+    : { customerPaidInclGst, absorbedShipping, supplierFreight, shippingRevenue };
 
   // Per-line profits stay valid even when a sibling line has no cost: each line is
   // (own revenue − own cost − its revenue share of the order-level fee), and that
@@ -368,11 +483,17 @@ export function orderProfitFromDetail(order, opts = {}) {
   const common = {
     lineProfits,
     missingCostCount,
+    missingPriceCount,
     itemCount: items.length,
     totalRevenueExGst,
     totalCostExGst: missingCostCount ? null : totalCostExGst,
     isInvoice,
     absorbedApplies,
+    shippingRevenueApplies: shippingRevenue.applies === true,
+    shippingRevenueInclGst: shippingRevenue.applies === true ? shippingRevenue.amount_incl_gst : 0,
+    shippingRevenueBasis: shippingRevenue.applies === true ? shippingRevenue.basis : null,
+    shippingRevenueUnknown: shippingRevenue.unknown === true,
+    shippingRevenueDrift: shippingRevenue.drift ?? null,
     supplierFreightApplies: supplierFreight.applies === true,
     supplierFreightUnknown: supplierFreight.unknown === true,
     supplierFreightUnknownReason: supplierFreight.unknown === true ? supplierFreight.unknownReason : null,
@@ -404,7 +525,16 @@ export function orderProfitFromDetail(order, opts = {}) {
     loyaltyDiscountInclGst: orderDiscountParts(order.loyalty_discount_amount).inclGst,
   };
 
-  if (missingCostCount > 0) return result(PROFIT_STATE.UNKNOWN, common);
+  // Two ways an order cannot be stated at all, and both are UNKNOWN rather than a
+  // number: a line with no cost, and a line with no price or quantity.
+  //
+  // A delivery charge we can neither read nor reconstruct is NOT one of them. It
+  // makes take-home a FLOOR — we have omitted revenue, so the true figure is
+  // higher — which is the exact mirror of unpriced freight making it a CEILING,
+  // and the two must not be folded together because they point opposite ways.
+  // Blanking a number the owner could see yesterday would be ERR-158 in the
+  // wrong direction: the upgrade path is silent → LOUD, never present → absent.
+  if (missingCostCount > 0 || missingPriceCount > 0) return result(PROFIT_STATE.UNKNOWN, common);
 
   const breakdown = computeProfitBreakdown(totalRevenueExGst, totalCostExGst, feeOpts);
   // computeProfitBreakdown refuses unusable inputs (non-finite, zero revenue).

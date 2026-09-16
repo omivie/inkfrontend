@@ -73,8 +73,8 @@ function icon(name, w = 18, h = 18) {
 // ---- Navigation config ----
 // Sidebar is grouped into business-workflow sections (July 2026 IA overhaul —
 // see ADMIN_CENTRE_AUDIT.md). Sections read the way an ecommerce operation is
-// run — Sales, Catalog, Data Operations, Finance, Marketing — rather than the
-// order the codebase was built. A section with no item this role may see renders
+// run — Sales, Analytics, Catalog, Data Operations, Finance, Marketing — rather
+// than the order the codebase was built. A section with no item this role may see renders
 // nothing at all, header included (see renderSidebar), so all-owner groups don't
 // leave orphaned labels for staff.
 //
@@ -82,6 +82,10 @@ function icon(name, w = 18, h = 18) {
 // (ADMIN_CENTRE_AUDIT.md §8 item 9 — the deferred fix for the 27-item wall).
 // `hubTabs` marks an item whose hub tabs render as indented sub-links beneath it;
 // the value names the manifest, never the tabs themselves.
+//
+// SECTION ORDER IS A DELIBERATE CHOICE, not incidental — three suites assert it by
+// source-text index (see the Analytics block below). Reordering a section means
+// re-pointing those bounds in the same commit; it is never a cosmetic edit.
 //
 // KEEP THIS ARRAY FLAT — one level of object literal per entry, no nested arrays or
 // objects. tests/admin-ia-overhaul-jul2026.test.js §3 audits owner gating by parsing
@@ -98,10 +102,31 @@ const NAV_ITEMS = [
   { section: 'Overview' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
 
+  { section: 'Sales' },
+  { key: 'orders', label: 'Orders', icon: 'orders' },
+  { key: 'quick-order', label: 'Quick Order', icon: 'orders', ownerOnly: true },
+  { key: 'invoices', label: 'Invoices', icon: 'invoice', ownerOnly: true },
+  { key: 'customers', label: 'Customers', icon: 'customers' },
+  // B2B. Owner-only because every write here is super_admin server-side
+  // (POST/PATCH /api/admin/business/accounts) — a plain admin would see 403s.
+  { key: 'business', label: 'Business', icon: 'customers', ownerOnly: true },
+  // Kept top-level (not folded into an Orders tab) so its pending-count badge
+  // stays visible as a fulfilment queue.
+  { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
+
   // Everything you READ rather than write. Before Sep 2026 these four were spread
   // across three sections — the hub under "Finance", Demand Ranking / Catalogue
   // Engagement / Price Monitor under "Catalog" — so there was no one place to go
   // and look at how the business is doing.
+  //
+  // The Sep 2026 pass that created this section put it ABOVE Sales, reasoning that
+  // reporting is what the owner opens first. It isn't: the owner works the Orders
+  // queue daily and reads analytics periodically, so Sales now sits above Analytics
+  // at their request. This is the CURRENT order and it is deliberate — do not
+  // "restore" the Analytics-first layout because an old comment or commit implies it.
+  // The upper bound of this section is `Catalog`, and three suites hard-code that:
+  // tests/admin-analytics-section-sep2026.test.js §1/§2, demand-ranking-jul2026.test.js
+  // and catalog-engagement-sep2026.test.js. Move this block and they must move with it.
   { section: 'Analytics' },
   // Route key stays `analytics` (deep links, ?tab= state and the margin /
   // financial-health / website-traffic redirects all resolve through it). The LABEL
@@ -117,18 +142,6 @@ const NAV_ITEMS = [
   // which is why it sat under Catalog until Sep 2026 — but the owner reads it far more
   // often than they reprice from it, and it belongs beside the margin analysis it feeds.
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
-
-  { section: 'Sales' },
-  { key: 'orders', label: 'Orders', icon: 'orders' },
-  { key: 'quick-order', label: 'Quick Order', icon: 'orders', ownerOnly: true },
-  { key: 'invoices', label: 'Invoices', icon: 'invoice', ownerOnly: true },
-  { key: 'customers', label: 'Customers', icon: 'customers' },
-  // B2B. Owner-only because every write here is super_admin server-side
-  // (POST/PATCH /api/admin/business/accounts) — a plain admin would see 403s.
-  { key: 'business', label: 'Business', icon: 'customers', ownerOnly: true },
-  // Kept top-level (not folded into an Orders tab) so its pending-count badge
-  // stays visible as a fulfilment queue.
-  { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
 
   { section: 'Catalog' },
   { key: 'products', label: 'Products', icon: 'products' },

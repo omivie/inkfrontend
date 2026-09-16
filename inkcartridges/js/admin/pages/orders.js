@@ -259,6 +259,21 @@ function profitCellHtml(row, info) {
         + ` ${info.supplierFreightCeilingReason || 'the rule could not be applied'}.`
         + ` The figure shown is AT MOST this; the real one is the same or lower.`
       : '')
+    // Delivery INCOME (ERR-261). Worth naming for the same reason the freight
+    // above is: the two are the same parcel seen from opposite sides, and a
+    // reader who sees only the outflow reads a loss the order never made.
+    + (info.shippingRevenueApplies && info.shippingRevenueInclGst > 0
+      ? ` The ${formatPrice(info.shippingRevenueInclGst)} the customer paid for delivery`
+        + ` is counted as revenue.`
+      : '')
+    // The FLOOR — the mirror of the ceiling above. No delivery charge came back,
+    // so revenue is missing and the true figure can only be higher. Directional
+    // and bounded, exactly like unpriced freight, and pointing the other way.
+    + (info.shippingRevenueUnknown
+      ? ` This order records no delivery charge, so any shipping the customer paid`
+        + ` is NOT in the revenue. The figure shown is AT LEAST this; the real one`
+        + ` is the same or higher.`
+      : '')
     // Revenue here is REALISED revenue — the line sum less the order discount
     // (ERR-168). Naming the amount stops this figure looking wrong beside a Total
     // the operator can see is lower than the line prices.
@@ -269,8 +284,17 @@ function profitCellHtml(row, info) {
     + ' Open the order for the full breakdown.';
   const lossCls = info.netProfit < 0 ? ' order-profit__amt--loss' : '';
   // A visible mark, not only a tooltip: nobody hovers a column they believe.
-  const ceilingMark = info.supplierFreightCeiling
-    ? `<span class="admin-text-muted" aria-hidden="true">\u2264</span>` : '';
+  //
+  // TWO BOUNDS NOW, AND THEY POINT OPPOSITE WAYS. Unpriced freight is a cost we
+  // may have understated, so take-home is AT MOST the figure shown (≤, ERR-241).
+  // An unrecorded delivery charge is revenue we HAVE understated, so take-home is
+  // AT LEAST it (≥, ERR-261). An order carrying both is bounded on neither side
+  // and gets ≈ — which is a weaker claim than either, and must not be flattened
+  // into one of them just because a single glyph is tidier.
+  const bounded = info.supplierFreightCeiling ? (info.shippingRevenueUnknown ? '\u2248' : '\u2264')
+    : (info.shippingRevenueUnknown ? '\u2265' : '');
+  const ceilingMark = bounded
+    ? `<span class="admin-text-muted" aria-hidden="true">${bounded}</span>` : '';
   return `${open('', tip)}${ceilingMark}`
     + `<span class="order-profit__amt${lossCls}">${formatPrice(info.netProfit)}</span>`
     + marginBadge(info.netMarginPct)
@@ -3015,7 +3039,27 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
           + `The matching revenue reduction is ${formatPrice(profitInfo.orderDiscountExGst)} ex-GST.`)}">`
         + muted(` after −${formatPrice(profitInfo.orderDiscountInclGst)} discount ⓘ`) + `</span>`
       : '';
-    profitBreakdownInner += pbRow(`Customer paid ${muted('(incl. GST)')}${discountQualifier}`, formatPrice(b.customerPaidInclGst));
+    // THE DELIVERY CHARGE DOES NOT GET ITS OWN ROW EITHER, AND FOR THE SAME
+    // REASON (ERR-261). "Customer paid" already contains it; an arithmetic row
+    // would double-count it and stop Take-home footing, exactly as a discount row
+    // would. What it gets is a qualifier — because for a month this figure was
+    // the ONLY trace of shipping on the whole panel, while the freight for the
+    // very same parcel sat two rows below it as a deduction. Naming it here is
+    // what makes the freight row read as a matched pair rather than a loss.
+    const shippingQualifier = profitInfo.shippingRevenueApplies && b.shippingRevenueInclGst > 0
+      ? `<span title="${esc(`What the customer paid to have this order delivered. It is REVENUE, and it is `
+          + `already inside the figure beside it — it is not added again below. `
+          + `${formatPrice(b.shippingRevenueExGst)} ex-GST, and the GST inside it is accounted for at the IRD `
+          + `line. The supplier freight row below is what the courier for this same parcel cost US; the two `
+          + `are a matched pair, not one number counted twice.`)}">`
+        + muted(` incl. ${formatPrice(b.shippingRevenueInclGst)} shipping ⓘ`) + `</span>`
+      : (profitInfo.shippingRevenueUnknown
+        ? `<span title="${esc('This order records no delivery charge. If the customer paid for shipping, that '
+            + 'revenue is NOT in the take-home below, so the figure is a lower bound — the true profit is the '
+            + 'same or higher. It is not $0 of shipping; it is shipping we were never told about.')}">`
+          + muted(' shipping not recorded ⓘ') + `</span>`
+        : '');
+    profitBreakdownInner += pbRow(`Customer paid ${muted('(incl. GST)')}${discountQualifier}${shippingQualifier}`, formatPrice(b.customerPaidInclGst));
     profitBreakdownInner += pbRow(`Paid to supplier ${muted(`(incl. ${formatPrice(b.supplierCostGst)} GST)`)}`, neg(b.supplierCostInclGst));
     // An invoiced sale never touched a card processor. Rendering a "Paid to Stripe −$0.00"
     // row would imply a fee was charged and rounded away; the honest thing is to say
@@ -3161,16 +3205,33 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
       ? `${irdCreditSources.slice(0, -1).join(', ')} and ${irdCreditSources[irdCreditSources.length - 1]}`
       : irdCreditSources[0];
     profitBreakdownInner += pbRow(
-      `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your ${irdCreditList} — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
+      `<span title="${esc(`GST you collected from the customer (${formatPrice(b.gstCollected)}, which is `
+        + `${formatPrice(b.customerPaidInclGst)} × 3/23) minus the GST you already paid out to your `
+        + `${irdCreditList} — those are reclaimable, so only the remainder goes to IRD. The delivery the `
+        + `customer paid for is revenue like any other, so its GST is inside the figure above and is not `
+        + `remitted twice.`)}">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
       neg(b.gstRemittedToIrd));
     profitBreakdownInner += `<div style="border-top:1px solid var(--border,#e5e7eb);margin:8px 0 6px"></div>`;
+    // A ceiling (freight we could not price) and a floor (a delivery charge that
+    // was never recorded) are both possible, and an order can carry both — in
+    // which case take-home is bounded on NEITHER side and must say the weaker
+    // thing, not pick the tidier one.
+    const boundQualifier = profitInfo.supplierFreightCeiling
+      ? (profitInfo.shippingRevenueUnknown ? muted('(approximate)') : muted('(at most)'))
+      : (profitInfo.shippingRevenueUnknown ? muted('(at least)') : '');
     profitBreakdownInner += pbRow(
-      profitInfo.supplierFreightCeiling
-        ? `<strong>Take-home profit</strong> ${muted('(at most)')}`
-        : '<strong>Take-home profit</strong>',
+      boundQualifier ? `<strong>Take-home profit</strong> ${boundQualifier}` : '<strong>Take-home profit</strong>',
       `<strong>${formatPrice(b.netProfit)}</strong>`,
       'color:var(--success-text,#15803d)');
-    profitBreakdownInner += pbRow(`Net margin ${muted('(take-home ÷ ex-GST revenue)')}`, `${b.netMarginPct.toFixed(1)}%`);
+    // NAME THE DENOMINATOR. It is everything the customer paid, ex-GST — not the
+    // goods alone. While the two were confused, this row divided a take-home that
+    // had the freight deducted by a revenue that had the shipping left out, and
+    // reported -4.6% on an order making 25.6%.
+    profitBreakdownInner += pbRow(
+      `<span title="${esc(`Take-home divided by ${formatPrice(b.revenueWithShippingExGst)} — everything the `
+        + `customer paid, excluding GST. That includes what they paid for delivery, because the courier for `
+        + `that same parcel is deducted as a cost above.`)}">Net margin ${muted('(take-home ÷ ex-GST revenue) ⓘ')}</span>`,
+      `${b.netMarginPct.toFixed(1)}%`);
   }
   // An owner opened an order we cannot price. Saying nothing here would read as
   // "no profit data for this order type"; printing a partial waterfall would read
