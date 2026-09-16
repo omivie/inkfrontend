@@ -21,6 +21,10 @@ import {
   summariseDeleteOutcome, nothingWasDeleted,
 } from '../utils/product-deletability.js';
 import { SUPPLIER_LABELS, PACK_PACK_TYPES } from '../utils/sourcing.js';
+import {
+  readStock, computeNewStock, stockAdjustPayload, ZEROING_NOTICE,
+  STOCK_KNOWN, STOCK_UNKNOWN,
+} from '../utils/stock-adjust.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
 import { pgrstLike } from '../utils/pgrst.js';
 // For Use In is READ-ONLY since ERR-244 — the column moved to its own table
@@ -1727,6 +1731,10 @@ function buildProductModalTabs(modal, full, isOwner) {
   // fix a typo. What you can set, you must be able to change.
   let inventoryHtml = `
     <div class="admin-form-row">
+      ${stockFieldHtml(formGroup, full)}
+      <div class="admin-form-group"></div>
+    </div>
+    <div class="admin-form-row">
       ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`, 'weight_kg')}
       <div class="admin-form-group"></div>
     </div>
@@ -1930,6 +1938,8 @@ function buildProductModalTabs(modal, full, isOwner) {
     tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
     panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === idx));
   });
+
+  wireStockAdjust(modal, full);
 
   // ── Manual Override Indicators ──────────────────────────────────────────
   applyOverrideBadges(modal, full);
@@ -4767,6 +4777,184 @@ function sourcingFieldsHtml(formGroup, product = null) {
       ${formGroup('Manufacturer part number', `<input class="admin-input" id="edit-mpn" value="${esc(p.manufacturer_part_number || '')}" placeholder="OEM part number">`, 'manufacturer_part_number')}
       <div class="admin-form-group"></div>
     </div>`;
+}
+
+/**
+ * "Stock on hand" — the quantity, and the add/remove control beside it.
+ *
+ * Renders THREE states, never two. `stock_quantity` can be a number, can be
+ * present-and-null, and can be missing from the record altogether, and only the
+ * first is a count. Painting the other two as "0" would tell the operator a
+ * product was out of stock when we had simply failed to fetch it — and zero is
+ * not a cosmetic state here: it pulls Add to cart off the storefront
+ * (js/products.js:238). So the control only appears over a real baseline, and
+ * says plainly why when there isn't one. See utils/stock-adjust.js.
+ *
+ * The pin is the same import-feed lock as its neighbours: pinning
+ * `stock_quantity` stops a supplier feed overwriting a hand-counted number.
+ */
+function stockFieldHtml(formGroup, product) {
+  const s = readStock(product);
+  const known = s.state === STOCK_KNOWN;
+  const note = s.state === STOCK_UNKNOWN
+    ? 'Stock wasn\u2019t returned for this product, so it can\u2019t be adjusted here. '
+      + 'That is not the same as none \u2014 reopen the product, or check the backend, before assuming it is empty.'
+    : 'No stock level is recorded on this product yet.';
+  const control = `
+    <div class="stock-adjust" id="edit-stock" data-state="${esc(s.state)}"${known ? ` data-current="${esc(String(s.value))}"` : ''}>
+      <div class="stock-adjust__current" id="edit-stock-current">${esc(s.label)}</div>
+      ${known ? `
+      <div class="stock-adjust__controls">
+        <div class="stock-adjust__dirs" role="group" aria-label="Add or remove stock">
+          <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm stock-adjust__dir" data-stock-dir="remove" aria-pressed="false">&minus;&nbsp;Remove</button>
+          <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm stock-adjust__dir is-active" data-stock-dir="add" aria-pressed="true">+&nbsp;Add</button>
+        </div>
+        <input class="admin-input stock-adjust__qty" id="edit-stock-delta" type="number" min="1" step="1" inputmode="numeric" placeholder="units" aria-label="How many units">
+        <button type="button" class="admin-btn admin-btn--sm" id="edit-stock-apply" disabled>Apply</button>
+      </div>
+      <p class="stock-adjust__preview" id="edit-stock-preview" role="status"></p>` : `
+      <p class="stock-adjust__note">${esc(note)}</p>`}
+    </div>`;
+  return formGroup('Stock on hand', control, 'stock_quantity');
+}
+
+/**
+ * Wire the stock control. It writes on Apply, independently of Save Changes.
+ *
+ * ── Why Apply owns the write, and why Save must NOT ─────────────────────────
+ *
+ * Measured 2026-09-16, `npm run probe:product-stock`:
+ *   §4   `PUT /api/admin/products/:id` PERSISTS `stock_quantity` — it is not one of
+ *        the fields the route accepts and discards (ERR-244).
+ *   §4b  a five-key PUT left all 13 other columns on the row untouched, so a
+ *        stock-only write costs nothing else.
+ *   §3   a save that OMITS `stock_quantity` leaves it alone.
+ *
+ * That last one is why `stock_quantity` is deliberately absent from the main save
+ * payload. Since omitting it is safe, the only way left to clobber a stock level
+ * is to echo back a number the form read when the modal opened — which would
+ * quietly undo an adjustment made since, including one made by someone else.
+ * ***The form must not resend a figure it is not the owner of.***
+ *
+ * The delta is recomputed from `product.stock_quantity`, which is re-read from
+ * the server after every successful write, so a second adjustment builds on what
+ * the database actually holds rather than on local arithmetic.
+ */
+function wireStockAdjust(modal, product) {
+  const wrap = modal.querySelector('#edit-stock');
+  if (!wrap || wrap.dataset.state !== STOCK_KNOWN) return;
+
+  const qty = modal.querySelector('#edit-stock-delta');
+  const applyBtn = modal.querySelector('#edit-stock-apply');
+  const preview = modal.querySelector('#edit-stock-preview');
+  const currentEl = modal.querySelector('#edit-stock-current');
+  if (!qty || !applyBtn || !preview || !currentEl) return;
+
+  let direction = 'add';
+  let armed = false;          // a zeroing change needs a second, deliberate click
+
+  const disarm = () => {
+    armed = false;
+    applyBtn.classList.remove('admin-btn--danger');
+    applyBtn.textContent = 'Apply';
+  };
+
+  const refresh = () => {
+    disarm();
+    const raw = String(qty.value || '').trim();
+    if (!raw) {
+      preview.textContent = '';
+      preview.classList.remove('is-error');
+      applyBtn.disabled = true;
+      return;
+    }
+    const r = computeNewStock(readStock(product).value, direction, raw);
+    preview.classList.toggle('is-error', !r.ok);
+    if (!r.ok) {
+      preview.textContent = r.error;
+      applyBtn.disabled = true;
+      return;
+    }
+    preview.textContent = `New total: ${r.value} unit${r.value === 1 ? '' : 's'}`;
+    applyBtn.disabled = false;
+  };
+
+  wrap.querySelectorAll('[data-stock-dir]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      direction = btn.dataset.stockDir === 'remove' ? 'remove' : 'add';
+      wrap.querySelectorAll('[data-stock-dir]').forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      refresh();
+    });
+  });
+
+  qty.addEventListener('input', refresh);
+  // The editor lives inside a form-ish modal; Enter must adjust, not submit.
+  qty.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (!applyBtn.disabled) applyBtn.click();
+  });
+
+  applyBtn.addEventListener('click', async () => {
+    const r = computeNewStock(readStock(product).value, direction, qty.value);
+    if (!r.ok) { Toast.error(r.error || 'That stock change is not valid.'); return; }
+
+    if (r.zeroing && !armed) {
+      armed = true;
+      applyBtn.classList.add('admin-btn--danger');
+      applyBtn.textContent = 'Confirm';
+      preview.textContent = ZEROING_NOTICE;
+      return;
+    }
+
+    const payload = stockAdjustPayload(product, r.value);
+    if (!payload) { Toast.error('Could not build the stock update.'); return; }
+
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Saving\u2026';
+    try {
+      const result = await AdminAPI.updateProduct(product.id, payload);
+
+      // Re-read rather than trust the arithmetic. A write that reports success
+      // and a value we never looked at is the shape this whole feature was
+      // measured to avoid.
+      let confirmed = readStock(result);
+      if (confirmed.state !== STOCK_KNOWN) {
+        confirmed = readStock(await AdminAPI.getProduct(product.id));
+      }
+      if (confirmed.state !== STOCK_KNOWN) {
+        // The write may well have landed. Say exactly that, and do not paint a
+        // number we cannot stand behind.
+        Toast.warning('Stock was sent, but the new level could not be read back. '
+          + 'Reopen the product to check before adjusting it again.');
+        return;
+      }
+
+      product.stock_quantity = confirmed.value;
+      wrap.dataset.current = String(confirmed.value);
+      currentEl.textContent = confirmed.label;
+      qty.value = '';
+
+      // Keep an on-screen row in step, but only if it already carries the field.
+      const row = _table?.data?.find((x) => String(x.id) === String(product.id));
+      if (row && Object.prototype.hasOwnProperty.call(row, 'stock_quantity')) {
+        row.stock_quantity = confirmed.value;
+      }
+
+      Toast.success(`${r.delta > 0 ? 'Added' : 'Removed'} ${Math.abs(r.delta)} unit`
+        + `${Math.abs(r.delta) === 1 ? '' : 's'} \u2014 now ${confirmed.label}.`);
+    } catch (e) {
+      showProductWriteError(modal, 'Stock update failed', e);
+    } finally {
+      applyBtn.disabled = true;
+      disarm();
+      refresh();
+    }
+  });
 }
 
 /**

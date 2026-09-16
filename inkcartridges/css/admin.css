@@ -7183,3 +7183,38 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   .ce-filter--search { flex-basis: 100%; max-width: none; }
   .ce-pager { gap: 8px; }
 }
+
+/* ---- Stock on hand: the quantity, and the add/remove control (Inventory tab) ---- */
+/* Colour is inherited on purpose: --text-primary is used elsewhere in this
+   file but is not defined in any stylesheet, so naming it here would add a
+   tenth broken reference and trip the "defined variables only" CSS guards. */
+.stock-adjust__current {
+  font-size: 20px; font-weight: 600;
+  line-height: 1.2; margin-bottom: 8px;
+}
+.stock-adjust__controls {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.stock-adjust__dirs { display: inline-flex; gap: 4px; }
+.stock-adjust__dir { white-space: nowrap; }
+.stock-adjust__dir.is-active {
+  border-color: var(--cyan); color: var(--cyan);
+  background: rgba(0, 200, 255, 0.1);
+}
+/* Wide enough for four digits; the stepper arrows only get in the way here. */
+.stock-adjust__qty { width: 92px; flex: 0 0 auto; text-align: center; }
+.stock-adjust__qty::-webkit-outer-spin-button,
+.stock-adjust__qty::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stock-adjust__qty { -moz-appearance: textfield; appearance: textfield; }
+.stock-adjust__preview {
+  margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); min-height: 18px;
+}
+.stock-adjust__preview.is-error { color: var(--danger); }
+/* The "we were never told" and "nothing recorded" states. Never a zero. */
+.stock-adjust__note {
+  margin: 4px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.45;
+}
+@media (max-width: 600px) {
+  .stock-adjust__controls { gap: 6px; }
+  .stock-adjust__qty { width: 72px; }
+}
