@@ -591,14 +591,55 @@ test('§6.2 the two paths that push local state BACK to the server are filtered 
         'the filter must precede the re-add');
 });
 
-test('§6.3 syncWithServer filters BEFORE its empty-cart guard', () => {
-    const body = methodBody(CART_SRC, 'async syncWithServer()');
-    const filter = body.indexOf('parsed.items = this._filterPendingRemovals(parsed.items)');
-    const guard = body.indexOf('parsed.items.length === 0');
-    assert.ok(filter !== -1 && guard !== -1);
-    assert.ok(filter < guard,
-        '"the server had items but all of them are pending removals" is a LEGITIMATELY empty ' +
-        'cart; filtering after the guard takes the fallback branch and resurrects the local copy');
+test('§6.3 BOTH empty-cart guards filter pending removals BEFORE guarding', () => {
+    /* WIDENED, AND THE REASON IS THE POINT (ERR-259).
+     *
+     * This used to locate the guard by the literal `parsed.items.length === 0`
+     * inside syncWithServer. That string was one SPELLING of the rule, and the
+     * rule had three — syncWithServer's explicit comparison, and loadCart's two
+     * `if (items.length > 0)` branches — while loadFromServer had no guard at
+     * all. Searching for one spelling reported three guarded sites as one and
+     * made the unguarded site look like the norm, which is how loadFromServer
+     * went unnoticed long enough to empty a real shopper's checkout.
+     *
+     * The rule now has ONE NAME, so this asserts on the name. Same intent,
+     * and it covers the site it previously could not see.
+     */
+    for (const sig of ['async syncWithServer()', 'async loadFromServer()']) {
+        const body = methodBody(CART_SRC, sig);
+        const filter = body.indexOf('parsed.items = this._filterPendingRemovals(parsed.items)');
+        const guard = body.indexOf('this._serverEmptyButWeHoldLines(parsed.items)');
+        assert.notEqual(filter, -1, `${sig} must subtract pending removals`);
+        assert.notEqual(guard, -1, `${sig} must guard against an unexpectedly empty server cart`);
+        assert.ok(filter < guard,
+            `${sig}: "the server had items but all of them are pending removals" is a ` +
+            'LEGITIMATELY empty cart; filtering after the guard takes the fallback branch ' +
+            'and resurrects the local copy');
+    }
+});
+
+test('§6.3b the guard is ONE predicate, and it filters the LOCAL side too', () => {
+    // The local half is what stops the guard resurrecting a line the shopper
+    // deliberately removed — without it this trades a silent empty cart for a
+    // silent reappearing item, which is worse.
+    const decls = CART_CODE.match(/_serverEmptyButWeHoldLines\(parsedItems\)\s*\{/g) || [];
+    assert.equal(decls.length, 1, 'the rule must be declared once, not re-spelled per caller');
+    const pred = methodBody(CART_SRC, '_serverEmptyButWeHoldLines(parsedItems) {');
+    assert.match(pred, /_filterPendingRemovals\(this\.items\)/,
+        'the local side must have pending removals subtracted');
+    assert.match(pred, /parsedItems\.length === 0/);
+});
+
+test('§6.3c _executeQuantityUpdate is deliberately NOT guarded, and says so', () => {
+    // A quantity of zero removes the line, so an empty cart there is the correct
+    // answer and the whole point of the request. Guarding it would resurrect the
+    // row the shopper just removed. Pinned so it stays a decision rather than an
+    // omission somebody "completes" later.
+    const body = methodBody(CART_SRC, 'async _executeQuantityUpdate(itemId, quantity)');
+    assert.doesNotMatch(stripComments(body), /_serverEmptyButWeHoldLines/,
+        'a quantity-to-zero legitimately empties the cart — guarding here resurrects the line');
+    assert.match(body, /DELIBERATELY NOT GUARDED/,
+        'the omission must be explained where it lives, or it reads as an oversight');
 });
 
 test('§6.4 there is exactly ONE filter implementation', () => {

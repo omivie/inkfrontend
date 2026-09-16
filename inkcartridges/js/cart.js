@@ -992,6 +992,43 @@ const Cart = {
     },
 
     /**
+     * The server says the cart is empty and we still hold lines it has not
+     * accounted for. ONE OWNER for a rule that had three different spellings.
+     *
+     * WHY THIS IS A NAMED PREDICATE (ERR-259). The rule was implemented three
+     * times in three shapes — `syncWithServer`'s explicit guard, and
+     * `loadCart`'s two `if (items.length > 0)` branches — while the fourth read
+     * path, `loadFromServer`, had none at all. That asymmetry survived because
+     * it was invisible to a search: grepping for the guard finds the spelling
+     * that logs "Server returned empty cart" and misses the two written as a
+     * positive `length > 0` test, so three guarded sites read as one and the
+     * unguarded one read as the norm. (I made exactly that mistake while
+     * writing this up, and reported "the guard is on one of three sites" to the
+     * backend. It is on four of five.) A rule with ONE NAME cannot hide from
+     * the next person who looks for it.
+     *
+     * PENDING REMOVALS ARE SUBTRACTED FROM THE LOCAL SIDE, and that is what
+     * makes this safe rather than merely protective: a removal already
+     * journaled or in flight is filtered out, so "we still hold lines" is FALSE
+     * for a cart the shopper has just emptied, and the empty server answer is
+     * adopted exactly as it should be. Without that filter this would resurrect
+     * a line the shopper deliberately removed — a worse bug than the one it
+     * fixes, and a silent one.
+     *
+     * Callers MUST pass `parsedItems` with pending removals already subtracted,
+     * for the mirror-image reason: "the server had items and every one of them
+     * is a pending removal" is a LEGITIMATELY empty cart, not a suspicious one.
+     *
+     * @param {Array} parsedItems - the server's items, pending removals already subtracted.
+     * @returns {boolean}
+     */
+    _serverEmptyButWeHoldLines(parsedItems) {
+        return Array.isArray(parsedItems)
+            && parsedItems.length === 0
+            && this._filterPendingRemovals(this.items).length > 0;
+    },
+
+    /**
      * Capture the mutation epoch before an `await API.getCart()`.
      * @returns {number}
      */
@@ -1728,8 +1765,10 @@ const Cart = {
                 // guard would take the fallback branch and resurrect the local copy.
                 parsed.items = this._filterPendingRemovals(parsed.items);
 
-                // Guard: don't clear local items if server unexpectedly returns empty
-                if (parsed.items.length === 0 && this._filterPendingRemovals(this.items).length > 0) {
+                // Guard: don't clear local items if server unexpectedly returns empty.
+                // The predicate is shared with loadFromServer (ERR-259); only the
+                // continuation below belongs to this call site.
+                if (this._serverEmptyButWeHoldLines(parsed.items)) {
                     DebugLog.warn('Server returned empty cart — keeping local items as fallback');
                     this._losePricing(PRICING.SERVER_EMPTY);
                     this.updateUI();
@@ -1809,8 +1848,54 @@ const Cart = {
                 const parsed = this._parseServerCart(response.data);
 
                 // Subtract unconfirmed removals — in-flight this page AND journaled
-                // across reloads.
+                // across reloads. BEFORE the empty-cart guard, for the reason
+                // given on the predicate.
                 parsed.items = this._filterPendingRemovals(parsed.items);
+
+                /* THE GUARD syncWithServer HAS HAD ALL ALONG, AND THIS PATH NEVER DID
+                 * (ERR-259).
+                 *
+                 * Without it this function adopted an empty server cart
+                 * UNCONDITIONALLY: `this.items = []` AND
+                 * `_adoptServerSummary({ subtotal: 0 })`, which sets pricingState to
+                 * OK and _everPriced to true. So the cart emptied itself and
+                 * reported the result as HEALTHY — no notice, no degraded state,
+                 * nothing in any channel a shopper or a test could read.
+                 *
+                 * WHAT MADE IT SHOPPER-VISIBLE IS A LOOP, NOT A SINGLE READ, and the
+                 * loop runs through the recovery machinery rather than around it:
+                 *
+                 *   1. a guest add that does not get a 2xx (a 429, a cold start)
+                 *      leaves the line in localStorage only;
+                 *   2. `loadCart()`'s guest branch handles that CORRECTLY — server
+                 *      empty, local non-empty, so it drops to SERVER_EMPTY and keeps
+                 *      the line;
+                 *   3. SERVER_EMPTY is in PRICING_DEGRADED, which is precisely what
+                 *      arms the bounded auto-revalidation added for ERR-210;
+                 *   4. that fires, calls this function, and this function threw the
+                 *      guard's work away and marked the result ok.
+                 *
+                 * ***The recovery path undid the guard the load path had correctly
+                 * applied, and called the result healthy.*** Which is why the guarded
+                 * sites all looked right and the symptom happened anyway.
+                 *
+                 * Measured on production 2026-09-13 at the checkout's delivery step:
+                 * `items=0, subtotal=0, hasServerPricing()=true, pricingState='ok'`
+                 * with the line still in localStorage — and the shopper had just been
+                 * toasted "Item saved locally. It will sync when connection is
+                 * restored." Re-measured 2026-09-16 with the add returning 201:
+                 * `lines=1, subtotal=5.99`, which is the positive control.
+                 *
+                 * This cannot loop: the revalidation budget is three attempts per
+                 * episode (PRICING_REVALIDATE_DELAYS) and only _adoptServerSummary
+                 * resets it, which this branch deliberately does not reach.
+                 */
+                if (this._serverEmptyButWeHoldLines(parsed.items)) {
+                    DebugLog.warn('Server returned empty cart in loadFromServer — keeping local items as fallback');
+                    this._losePricing(PRICING.SERVER_EMPTY);
+                    this.updateUI();
+                    return;
+                }
 
                 this.items = parsed.items;
                 this._adoptServerSummary(parsed.summary);
@@ -2479,6 +2564,15 @@ const Cart = {
 
                     if (response.ok) {
                         if (response.data?.items) {
+                            /* DELIBERATELY NOT GUARDED by _serverEmptyButWeHoldLines
+                             * (ERR-259). Setting a quantity to zero removes the line,
+                             * so an empty cart here is the CORRECT answer and the whole
+                             * point of the request. Guarding it would resurrect the
+                             * line the shopper just removed — the exact failure the
+                             * predicate's pending-removal filter exists to prevent,
+                             * reintroduced at a site where the emptiness is intended.
+                             * Pinned by a test, so this stays a decision rather than
+                             * an omission someone "completes" later. */
                             const parsed = this._parseServerCart(response.data);
                             this.items = parsed.items;
                             this._adoptServerSummary(parsed.summary);
