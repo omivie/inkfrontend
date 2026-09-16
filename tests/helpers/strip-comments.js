@@ -80,6 +80,21 @@
  * string mode, tracked by brace depth. Nested literals and nested objects both
  * work because the two modes are a stack, not a flag.
  */
+/**
+ * Can a `/` at this point open a regex literal rather than mean division?
+ *
+ * True when the previous significant character cannot END an expression. After
+ * a value — `)`, `]`, an identifier character — a slash is division. Keywords
+ * that are followed by a regex (`return /x/`) end in a letter and so read as
+ * identifiers here; that is the known limit of the heuristic and it fails
+ * SAFELY, by treating the regex as division and leaving the text alone, which
+ * is the behaviour this helper had for every regex before ERR-258.
+ */
+function regexCanStartHere(prev) {
+    if (!prev) return true;                       // start of input
+    return '=(,[!&|?{};:+-*%~^<>'.includes(prev);
+}
+
 function stripComments(src) {
     if (typeof src !== 'string') return '';
     let out = '';
@@ -89,6 +104,9 @@ function stripComments(src) {
     // interpolation that will end each one.
     const stack = [];
     const braces = [];
+    // The last non-whitespace character written to `out` — the only thing that
+    // distinguishes `a / b` from `/ab/`.
+    let lastSignificant = '';
     while (i < n) {
         const c = src[i];
         const d = src[i + 1];
@@ -102,6 +120,45 @@ function stripComments(src) {
             i += 2;
             continue;
         }
+        // A REGEX LITERAL IS NOT DIVISION, AND IT IS NOT A STRING (ERR-258).
+        //
+        // `/^['"]|['"]$/` contains quote characters. Without this branch the
+        // scanner below sees that `'`, decides it is inside a string, and from
+        // that point `//` stops starting a comment — so every later comment in
+        // the file LEAKS THROUGH as code. Measured on
+        // scripts/probe-admin-only-product.mjs: 70 comment lines leaked, all of
+        // them downstream of one `.replace(/^['"]|['"]$/g, '')`.
+        //
+        // That is ERR-253 in the mirror. That bug DELETED code, so a
+        // `doesNotMatch` guard passed over text it had never read (false
+        // negatives). This one INJECTS comment prose into the code view, so a
+        // rule merely *discussed* in a comment reads as a violation (false
+        // positives) — which is how someone gets talked into rewriting a
+        // correct comment to appease a broken guard.
+        //
+        // Telling a regex from division needs the previous significant token,
+        // because `a / b` and `/ab/` start identically. The rule below is the
+        // standard one: a `/` opens a regex when what precedes it cannot end an
+        // expression. It is a heuristic, not a parser — the one shape it gets
+        // wrong is a division immediately after `)` or an identifier, which is
+        // exactly the case it declines to treat as a regex.
+        if (c === '/' && regexCanStartHere(lastSignificant)) {
+            out += src[i++];                 // the opening slash
+            let inClass = false;
+            while (i < n) {
+                const ch = src[i];
+                if (ch === '\\') { out += ch + (src[i + 1] || ''); i += 2; continue; }
+                if (ch === '\n') break;      // unterminated — bail rather than eat the file
+                if (ch === '[') inClass = true;
+                else if (ch === ']') inClass = false;
+                else if (ch === '/' && !inClass) { out += src[i++]; break; }
+                out += src[i++];
+            }
+            while (i < n && /[a-z]/.test(src[i])) out += src[i++];   // flags
+            lastSignificant = '/';
+            continue;
+        }
+
         if (c === '"' || c === "'" || c === '`') {
             const quote = c;
             out += src[i++];
@@ -159,6 +216,7 @@ function stripComments(src) {
                 braces[braces.length - 1]--;
             }
         }
+        if (!/\s/.test(c)) lastSignificant = c;
         out += src[i++];
     }
     return out;

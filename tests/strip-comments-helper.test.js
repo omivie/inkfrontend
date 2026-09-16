@@ -165,3 +165,61 @@ test('§5 no test file carries its own copy of stripComments', () => {
     assert.deepEqual(offenders, [],
         'require tests/helpers/strip-comments.js instead of redefining it');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Regex literals (ERR-258) — the mirror of the bug this file was written for
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('§6 a regex containing a quote does not turn the rest of the file into a string', () => {
+    // THE HOLE THIS CLOSES. The scanner tracked quotes but had no regex state,
+    // so the `'` inside /^['"]/ opened a string and `//` stopped starting a
+    // comment from that point on. Every later comment LEAKED THROUGH as code.
+    //
+    // Measured on a real file before the fix: scripts/probe-admin-only-product.mjs
+    // leaked 70 comment lines, all downstream of one
+    // `.replace(/^['"]|['"]$/g, '')` in readEnv().
+    //
+    // This is §1's bug in the mirror. That one DELETED code, so `doesNotMatch`
+    // guards passed over text they never read. This one INJECTED comment prose
+    // into the code view, so a rule merely discussed in a comment read as a
+    // violation — and a false positive is how someone gets talked into editing a
+    // correct comment to appease a broken guard.
+    const src = [
+        `const r = s.replace(/^['"]|['"]$/g, '');`,
+        '// this comment must not survive',
+        'liveCode();',
+    ].join('\n');
+    const out = stripComments(src);
+    assert.doesNotMatch(out, /this comment must not survive/,
+        'the regex opened a string state and the comment leaked through as code');
+    assert.match(out, /liveCode\(\)/, 'and the real code after it must still be there');
+});
+
+test('§6 division is still division — the heuristic fails safe', () => {
+    // Telling `/ab/` from `a / b` needs the previous significant token. The rule
+    // is "a slash opens a regex when what precedes it cannot end an expression".
+    // After `)` or an identifier it is division, and treating it as such is the
+    // SAFE failure: worst case a regex goes unrecognised and we are back to the
+    // pre-fix behaviour for that one line, never eating live code.
+    const out = stripComments('const a = (x) / 2;\nconst b = y / z;\n// must vanish\nlive();');
+    assert.doesNotMatch(out, /must vanish/, 'the comment after a division must still strip');
+    assert.match(out, /const a = \(x\) \/ 2;/, 'and the division must survive untouched');
+    assert.match(out, /const b = y \/ z;/);
+});
+
+test('§6 a slash inside a character class does not end the regex early', () => {
+    const out = stripComments('const r = /[/"]/.test(x);\n// must vanish\nlive();');
+    assert.doesNotMatch(out, /must vanish/);
+    assert.match(out, /live\(\)/);
+});
+
+test('§6 POSITIVE CONTROL: the real file that exposed this stays clean', () => {
+    // A synthetic case can be satisfied by a fix that does not generalise. This
+    // asserts the actual file, which is why the bug was found at all.
+    const probe = path.join(__dirname, '..', 'scripts', 'probe-admin-only-product.mjs');
+    if (!fs.existsSync(probe)) return;   // probe renamed — the synthetic cases still hold
+    const leaked = stripComments(fs.readFileSync(probe, 'utf8'))
+        .split('\n').filter((l) => /^\s*\/\//.test(l));
+    assert.deepEqual(leaked, [],
+        `${leaked.length} comment lines leaked into the code view (was 70 before ERR-258)`);
+});

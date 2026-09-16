@@ -79,17 +79,30 @@ import { supplierSlug, supplierLabel } from './sourcing.js';
  * `null` is a THIRD STATE and must survive to the display layer. It is not
  * `'urban'`; ERR-235 is what happens when a guess is stored as a fact.
  *
- * @returns {{deliveryType: string|null, basis: string|null, weightKg: number|null}}
+ * AND THERE IS A FOURTH (ERR-258). `typeof order.delivery_type === 'string'`
+ * cannot tell `{delivery_type: null}` — this order has none — from `{}`, the
+ * endpoint never sent the column. Those are different problems with different
+ * owners: the first is a shopper who was never asked, the second is a SELECT
+ * that stopped projecting. The backend's own hand-off warned about exactly the
+ * second one: *"A caller that forgets to project `delivery_type` does not get
+ * an error — it silently drops back to inference, and on a rural parcel that is
+ * half the freight."* So `columnProjected` is `hasOwnProperty`, never
+ * truthiness — the ERR-199 discipline, one field over.
+ *
+ * @returns {{deliveryType: string|null, basis: string|null, weightKg: number|null,
+ *            columnProjected: boolean}}
  */
 export function deliveryFactsForOrder(order) {
   const sf = order && typeof order.supplier_freight === 'object' ? order.supplier_freight : null;
+  const columnProjected = !!order && typeof order === 'object'
+    && Object.prototype.hasOwnProperty.call(order, 'delivery_type');
   const recorded = order && typeof order.delivery_type === 'string' ? order.delivery_type : null;
   const fromFreight = sf && typeof sf.delivery_type === 'string' ? sf.delivery_type : null;
   const basis = sf && typeof sf.delivery_type_basis === 'string' ? sf.delivery_type_basis : null;
   const kg = sf && Number.isFinite(Number(sf.parcel_weight_kg)) ? Number(sf.parcel_weight_kg) : null;
-  if (recorded) return { deliveryType: recorded, basis: basis || 'recorded', weightKg: kg };
-  if (fromFreight) return { deliveryType: fromFreight, basis: basis || null, weightKg: kg };
-  return { deliveryType: null, basis: basis || null, weightKg: kg };
+  if (recorded) return { deliveryType: recorded, basis: basis || 'recorded', weightKg: kg, columnProjected };
+  if (fromFreight) return { deliveryType: fromFreight, basis: basis || null, weightKg: kg, columnProjected };
+  return { deliveryType: null, basis: basis || null, weightKg: kg, columnProjected };
 }
 
 /**

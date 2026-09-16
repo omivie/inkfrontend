@@ -592,6 +592,17 @@ function deliveryPhrase(deliveryType, basis) {
 function deliveryAreaCell(order) {
     const facts = deliveryFactsForOrder(order);
     if (!facts.deliveryType) {
+        // TWO DIFFERENT PROBLEMS, TWO DIFFERENT SENTENCES (ERR-258). "This order
+        // has no delivery area" is a shopper who was never asked. "The endpoint
+        // did not send the column" is a SELECT that stopped projecting it, which
+        // the backend warned degrades silently to inference — and on a rural
+        // parcel that is half the freight. Saying "Not recorded" for both hides
+        // the one that is our bug behind the one that is not.
+        if (!facts.columnProjected) {
+            return `<span class="admin-text-muted" title="${esc('This response did not include the delivery_type field at all — not "no area recorded", '
+                + 'but the column absent from the payload. Any freight figure below is priced as urban and is a FLOOR. '
+                + 'Check that the orders endpoint still projects delivery_type; a SELECT that drops it fails silently.')}">Not sent by the API ⓘ</span>`;
+        }
         return `<span class="admin-text-muted" title="${esc('No delivery area is recorded on this order and the backend could not derive one, '
             + 'so any freight figure below is priced as urban and is a FLOOR. It is not a fact about this delivery.')}">Not recorded ⓘ</span>`;
     }

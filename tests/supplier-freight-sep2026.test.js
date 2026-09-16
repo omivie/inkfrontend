@@ -679,3 +679,67 @@ test('the probe still refuses to grade a run that proves nothing', () => {
       `the probe must still fail if ${gone} comes back — its return IS the double-charge`);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The fourth state, and the cell that renders it (ERR-258)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('deliveryFactsForOrder tells an ABSENT column from a null one', () => {
+  // `typeof x === 'string'` collapsed these two, and they are different
+  // problems with different owners: a null is a shopper who was never asked, an
+  // absent key is a SELECT that stopped projecting. The backend's hand-off
+  // warned about the second by name — it "silently drops back to inference, and
+  // on a rural parcel that is half the freight".
+  assert.equal(deliveryFactsForOrder({ delivery_type: null }).columnProjected, true,
+    'the key is present and explicitly null — the question was asked, the answer is none');
+  assert.equal(deliveryFactsForOrder({}).columnProjected, false,
+    'the key is absent — the endpoint did not send it, which is our bug, not the order\'s');
+  assert.equal(deliveryFactsForOrder({ delivery_type: 'rural' }).columnProjected, true);
+
+  // hasOwnProperty, never truthiness: both of these are "present".
+  assert.equal(deliveryFactsForOrder({ delivery_type: '' }).columnProjected, true);
+  assert.equal(deliveryFactsForOrder(null).columnProjected, false, 'no order at all cannot be "projected"');
+
+  // And the third state still survives to the display layer unchanged.
+  assert.equal(deliveryFactsForOrder({ delivery_type: null }).deliveryType, null,
+    "null must never become 'urban' — ERR-235 is what happens when a guess is stored as a fact");
+});
+
+test('deliveryAreaCell renders four distinct states and never invents an area', () => {
+  // THIS CELL HAD NO TEST AT ALL until ERR-258. It is the only surface in the
+  // admin that shows an order's delivery area, and the whole ERR-248 argument
+  // was that "we did not ask" must stay distinguishable from "they said urban".
+  // Declarations, not an expression — assembled as a function BODY that returns
+  // the cell. Wrapping them in `return (...)` is a SyntaxError, which is how the
+  // first version of this test failed: loudly, at the right moment.
+  const src = [
+    liftedHelper(/const DELIVERY_BASIS_PHRASE = \{/, 'DELIVERY_BASIS_PHRASE'),
+    liftedHelper(/function deliveryPhrase\(/, 'deliveryPhrase'),
+    liftedHelper(/function deliveryAreaCell\(/, 'deliveryAreaCell'),
+  ].join('\n');
+  const cell = new Function('deliveryFactsForOrder', 'esc', `${src}\nreturn deliveryAreaCell;`)(
+    deliveryFactsForOrder,
+    (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+  );
+
+  const recorded = cell({ delivery_type: 'rural', supplier_freight: { delivery_type_basis: 'recorded' } });
+  assert.match(recorded, /Rural/, 'a recorded area is named');
+  assert.doesNotMatch(recorded, /assumed/, 'and is not hedged');
+
+  const derived = cell({ supplier_freight: { delivery_type: 'urban', delivery_type_basis: 'assumed' } });
+  assert.match(derived, /\(assumed\)/, "the backend's assumption must say so on the row, not only in the tooltip");
+
+  const nulled = cell({ delivery_type: null });
+  assert.match(nulled, /Not recorded/, 'an order nobody asked');
+  assert.doesNotMatch(nulled, /Not sent by the API/);
+
+  const absent = cell({});
+  assert.match(absent, /Not sent by the API/,
+    'an absent column is a wiring problem and must not hide behind "Not recorded"');
+
+  // The load-bearing one: no state may render the word Urban unless a source said so.
+  for (const [label, html] of [['null', nulled], ['absent', absent]]) {
+    assert.doesNotMatch(html, /Urban/,
+      `${label}: absence must never be rendered as urban — that is the guess ERR-248 removed`);
+  }
+});
