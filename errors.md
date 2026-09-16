@@ -41,6 +41,76 @@ describing the same incident.
 
 ---
 
+## ERR-260 — Our own CSP was blocking the Google Ads first-party conversion beacon, because a wildcard on one domain says nothing about another — **RESOLVED** (2026-09-16)
+
+**Context.** Found by `npm run probe:ga4-events` against production, on the first run where the
+add-to-cart conversion actually fired while something was watching the wire. Verbatim, from
+`www.inkcartridges.co.nz`:
+
+```
+Connecting to 'https://www.google.co.nz/pagead/1p-conversion/18032498762/
+  ?…&en=conversion&…&label=e3c8CI2D3dwcEMqw…&gcs=G1-1&…'
+violates the following Content Security Policy directive:
+  "connect-src 'self' … https://*.google.com …".   The action has been blocked.
+```
+
+`en=conversion`, our own add-to-cart label, consent granted — and blocked. Twice per add, enforced,
+not report-only.
+
+**🚨 `https://*.google.com` DOES NOT MATCH `www.google.co.nz`.** Google Ads fires its first-party
+conversion beacon at the **visitor's country domain**, which for this shop's entire market is
+`google.co.nz`. A wildcard on one registrable domain says nothing about another. This is ERR-225
+(*an allowed origin is not an allowed script*) reached from a third direction: ***an allowed domain
+is not an allowed country domain.***
+
+**Three reasons it hid, each sufficient on its own.**
+
+1. **`img-src 'self' https: data:` allows any https image, and most of Google's other calls to the
+   cctld are pixels.** Measured in the same run: `google.co.nz/ads/ga-audiences` **200** and
+   `google.co.nz/pagead/1p-user-list/` **200**. Only `1p-conversion` is a **fetch**, and only
+   fetches are governed by `connect-src`. So the host looked perfectly reachable.
+2. **The canonical conversion still lands.** Measured **200** from
+   `www.googleadservices.com/pagead/conversion/18032498762/`. So the conversion is counted, no
+   number in the Ads UI drops to zero, and the thing that *is* lost has no dashboard of its own.
+3. **Localhost serves no CSP at all** — `serve.json` sets no headers — so every local probe run was
+   green by construction. The only place this is observable is production, with a real conversion
+   firing, with something reading the wire. Three days of green local runs said nothing about it.
+
+**What is actually lost, stated carefully.** Not "conversions are broken" — they are not, and that
+would be the easy overstatement. The blocked request is the first-party conversion measurement
+carrying the enhanced-conversion and consent-mode inputs (`ezwbk`, `pscrd`, `cerd`, `fsk`). Losing it
+degrades attribution and enhanced-conversion matching precisely where third-party cookies are
+unavailable — mobile Safari, i.e. most of the 64% of ad clicks the ERR-256 work exists to measure.
+The same endpoint serves the **purchase** conversion, so the same block applies to it; that half is
+inferred from the mechanism rather than measured, because triggering it needs a real paid order.
+
+**Fix.** `https://*.google.co.nz` added to `connect-src` in `inkcartridges/vercel.json`.
+`https://*.google.com` was already there, so this grants nothing new in substance — the same party,
+the same trust level, its NZ domain. The `.com` wildcard stays, and a test asserts it was an
+**addition and not a swap**, because tidying it away would reopen the same class of block for every
+google.com endpoint.
+
+**KNOWN AND DELIBERATE LIMIT.** A visitor served a different cctld (`google.com.au`, …) still loses
+this beacon. CSP has no wildcard spanning registrable domains — `https://*.google.*` is not valid —
+the list of Google country domains is unbounded, and this shop ships only within New Zealand. So the
+residual is a small slice of traffic losing an enhanced signal whose canonical conversion still
+lands. Written down as a measured trade rather than left to be rediscovered.
+
+**Verified.** `npm test` → **6116 tests, 0 fail**.
+`tests/ads-conversion-csp-cctld-sep2026.test.js`, 6 tests, including the shape check that
+`https://google.co.nz` would **not** have matched `www.google.co.nz` (a mistake invisible until
+production) and a guard that fails if `serve.json` ever grows a CSP, which would make the "localhost
+proves nothing" paragraph stale. `npm run probe:ga4-events` now checks the Ads conversion's transport
+**by name**, so the failure message says what was refused instead of reporting a generic block —
+which is what the generic version failed to tell me.
+
+**Lesson.** The probe earned itself here. Every source assertion in the repo was green, every local
+run was green, the Ads dashboard was green, and a money-path request had been blocked on every
+add-to-cart. ***A CSP allowlist is a list of registrable domains, and a wildcard is narrower than it
+looks.*** Also: this was only visible because the generic transport check existed and then had to be
+made specific — *a check that tells you something is wrong without naming it is one debugging session
+away from being ignored.*
+
 ## ERR-259 — The cart threw away the shopper's line and reported itself healthy, and the recovery mechanism was what did it — **RESOLVED** (2026-09-16)
 
 **Context.** Found while re-verifying ERR-256: a GA4 `add_shipping_info` hit left a real production

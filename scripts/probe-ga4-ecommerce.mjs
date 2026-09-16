@@ -175,6 +175,7 @@ function record(page) {
     const aborted = [];
     const adds = [];
     const reportOnly = [];
+    const adsBlocked = [];
     page.on('request', (req) => {
         const url = req.url();
         if (isGa4(url)) { for (const h of hitsFrom(req)) if (h.en) ga4.push(h); return; }
@@ -186,6 +187,7 @@ function record(page) {
         const err = req.failure()?.errorText || 'failed';
         if (BENIGN_FAILURE.test(err)) { aborted.push(err); return; }
         blocked.push(`${url.slice(0, 110)} — ${err}`);
+        if (isAds(url)) adsBlocked.push(`${url.slice(0, 130)} — ${err}`);
     });
     page.on('console', (msg) => {
         const t = msg.text();
@@ -218,7 +220,7 @@ function record(page) {
             adds.push(res.status());
         }
     });
-    return { ga4, ads, blocked, aborted, adds, reportOnly };
+    return { ga4, ads, blocked, aborted, adds, reportOnly, adsBlocked };
 }
 
 /** Report the transport honestly: refusals fail, beacon aborts are noise. */
@@ -523,6 +525,28 @@ try {
                 soft('value/price parity NOT EXERCISED', `price=${p.price} value=${total}`);
             }
             check('exactly one add_to_cart per add', hits.length === 1, `${hits.length} hits observed`);
+        }
+
+        /* THE ADS CONVERSION'S OWN TRANSPORT (ERR-260).
+         *
+         * Checked by NAME, not folded into the generic transport check, because
+         * this is how ERR-260 was found and the generic message did not say what
+         * had been refused. `https://*.google.com` does not match
+         * `www.google.co.nz`, so the FETCH-based first-party conversion beacon —
+         * `google.<cctld>/pagead/1p-conversion/…?en=conversion&label=…` — was
+         * CSP-blocked on every add, while the canonical
+         * googleadservices.com/pagead/conversion/ hit landed 200 and every
+         * PIXEL to the same cctld sailed through on `img-src https:`. So nothing
+         * in the Ads UI went to zero and nothing local could see it: localhost
+         * serves no CSP at all. */
+        if (rec.adsBlocked.length) {
+            bad('no Ads conversion request was CSP-refused',
+                rec.adsBlocked.slice(0, 2).join('\n      ')
+                + '\n      (ERR-260: a Google country domain missing from connect-src blocks the '
+                + 'first-party conversion beacon — the canonical conversion still lands, so no '
+                + 'dashboard shows this)');
+        } else {
+            ok('no Ads conversion request was CSP-refused');
         }
 
         // The Ads conversion is on a different host and is not always decodable;
