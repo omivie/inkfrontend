@@ -301,13 +301,19 @@
                 if (t) headers['Authorization'] = `Bearer ${t}`;
             } catch (_) { /* fall through tokenless; the mirror will 401 */ }
         }
-        // X-Session-Id / X-Visitor-Id as well as the ?sid=/?vid= above.
+        // X-Session-Id / X-Visitor-Id — the ONLY id transport on this request.
+        //
+        // (This line used to read "as well as the ?sid=/?vid= above". There is
+        // no ?sid= above any more — it was removed twenty lines up on
+        // 2026-09-10 when search joined the Cloudflare Cache Rule, and this
+        // comment was left behind saying the opposite. A file that contradicts
+        // itself is worse than one that says nothing.)
         //
         // The backend's CORS allow-list gained both on 2026-09-08 (verified
         // 2026-09-09 with a negative control — see api.js request()). This
         // surface is a raw fetch that never enters API.request, so the
         // per-helper `identify: true` enrolment there does not reach it and it
-        // has to ask for itself, exactly as it already does for the URL params.
+        // has to ask for itself.
         //
         // THE COST, MEASURED, because a header on a GET is never free: it makes
         // the request non-simple, so the browser preflights it, and the

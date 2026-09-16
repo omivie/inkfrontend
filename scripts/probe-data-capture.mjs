@@ -55,7 +55,7 @@
  */
 
 import fs from 'node:fs';
-import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
+import { printSearchAnalyticsNotice, probeQuery } from './lib/probe-search-notice.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -127,7 +127,12 @@ console.log('PATCH in §5 (unmatchable UUID + out-of-enum value) to read the val
 console.log('No --record mode exists. This probe writes nothing.\n');
 
 // warm both hosts before measuring anything
-await Promise.all([req(`${PROD}/api/search/smart?q=warm&limit=1`), req(`${RENDER}/api/search/smart?q=warm&limit=1`)]);
+// `q=warm` was the 3rd most common search term on the site — 11 rows in the
+// backend's live 7-day top-terms on 2026-09-16, ahead of `lc73` — because this
+// warm-up ran on every probe invocation and the term looked organic. Nothing
+// here depends on it matching anything, so it takes the sentinel (ERR-254).
+const WARM = encodeURIComponent(probeQuery('warm'));
+await Promise.all([req(`${PROD}/api/search/smart?q=${WARM}&limit=1`), req(`${RENDER}/api/search/smart?q=${WARM}&limit=1`)]);
 
 // ── §1 CORS ────────────────────────────────────────────────────────────────
 // THIS PROBE IS A WRITER (ERR-254). Every GET to /api/search/ has the backend
@@ -250,8 +255,10 @@ head('§2  Edge cache — search IS cached now, so the URL must stay shared');
     //
     // ***A CACHE THAT EXISTS AND A CACHE KEY WE SHARE ARE DIFFERENT CLAIMS.***
     for (const [label, url] of [
-        ['/api/search/smart', `${PROD}/api/search/smart?q=brother%20lc3319&limit=2`],
-        ['/api/search/suggest', `${PROD}/api/search/suggest?q=lc33&limit=3`],
+        // Sentinelled: this loop asks whether a URL is STORED at the edge, which
+        // does not depend on whether the query matched anything.
+        ['/api/search/smart', `${PROD}/api/search/smart?q=${encodeURIComponent(probeQuery('edge'))}&limit=2`],
+        ['/api/search/suggest', `${PROD}/api/search/suggest?q=${encodeURIComponent(probeQuery('edge'))}&limit=3`],
     ]) {
         // A colo fills per edge node, so one request proves nothing either way:
         // measured MISS → HIT → MISS → HIT on a fresh query, `age: 0` on both
@@ -308,6 +315,13 @@ head('§2  Edge cache — search IS cached now, so the URL must stay shared');
 // ── §3 Are the params honoured? ────────────────────────────────────────────
 head('§3  ?sid= / ?vid= — accepted, and honestly reported');
 {
+    // ⚠️ THESE TWO KEEP A REAL TERM, AND MUST. The check below compares the two
+    // response bodies to prove the ids do not influence search output. A
+    // sentinelled term returns zero rows on both sides, so `plain.text ===
+    // withIds.text` would compare two identical empty payloads and pass no
+    // matter what the ids did — a guard that cannot fail (ERR-254). The rows
+    // these create are indistinguishable from organic traffic and there is no
+    // fix for that on our side; the banner says so.
     const plain = await req(`${PROD}/api/search/smart?q=lc3319&limit=2`);
     const withIds = await req(`${PROD}/api/search/smart?q=lc3319&limit=2&sid=ts_probe_readonly&vid=${UNMATCHABLE_UUID}`);
     check(withIds.status === 200, 'a search carrying the ids still returns 200',
@@ -316,8 +330,10 @@ head('§3  ?sid= / ?vid= — accepted, and honestly reported');
         'the response differs with the ids attached — they are influencing search output, which '
         + 'they must not');
 
-    const malformed = await req(`${PROD}/api/search/smart?q=lc3319&limit=1&sid=bad%20id%21`);
-    const decoy = await req(`${PROD}/api/search/smart?q=lc3319&limit=1&zzqxnope=bad%20id%21`);
+    // These two compare STATUS, not rows, so they can be sentinelled.
+    const Q = encodeURIComponent(probeQuery('idcheck'));
+    const malformed = await req(`${PROD}/api/search/smart?q=${Q}&limit=1&sid=bad%20id%21`);
+    const decoy = await req(`${PROD}/api/search/smart?q=${Q}&limit=1&zzqxnope=bad%20id%21`);
     if (malformed.status === decoy.status) {
         soft('acceptance is NOT proof of capture',
             `a malformed sid and a nonsense param both answer ${malformed.status}, so from outside `

@@ -9,14 +9,14 @@
  *
  * WHAT WOULD BE INVISIBLY WRONG WITHOUT THIS PROBE
  * ------------------------------------------------
- * 1. THE HEADER THAT LOOKS FINE FROM curl. The hand-off asks for
- *    `X-Session-Id` on every /api/ call. That header is NOT on the backend's
- *    Access-Control-Allow-Headers, and the preflight answers **204 either way**
- *    — it does not echo the requested headers. So a curl check reads as a pass
- *    while a BROWSER fails the preflight and never sends the request at all. On
- *    /api/cart/items that means nobody can add to cart. §1 asserts the header is
- *    still absent, which is what keeps `USE_ID_HEADERS` correctly false; the day
- *    it lands, §1 flips to a note and the constant can be turned on.
+ * 1. THE HEADER THAT LOOKS FINE FROM curl. A preflight answers **204 either
+ *    way** — it does not echo the requested headers — so a curl check reads as
+ *    a pass while a BROWSER fails the preflight and never sends the request at
+ *    all. That is why §1 uses a negative control rather than a bare 204.
+ *    BF-054 CLOSED 2026-09-08: `X-Session-Id` / `X-Visitor-Id` ARE on the
+ *    allow-list now, `USE_ID_HEADERS` is true, and §1 is a HARD check that they
+ *    stay there. Losing them again is not a lost analytics column — the header
+ *    now rides /api/search/smart, so it is site search down.
  *
  * 2. THE VALUE THE AD PLATFORM BIDS ON. The Google Ads conversion sends
  *    `price_snapshot × quantity` off the add-to-cart response. If the backend
@@ -25,11 +25,14 @@
  *    against a conversion with no worth. A unit test cannot catch that — it only
  *    asks this repo whether it agrees with itself. §3 asks the SERVER.
  *
- * 3. THE QUERY PARAM THAT SHATTERS AN EDGE CACHE. `?sid=`/`?vid=` are free only
- *    while /api/search/smart answers `cf-cache-status: DYNAMIC`. If it is ever
- *    added to the Cloudflare Cache Rule those params become part of the cache
- *    key and fragment the shared entry one visitor at a time (ERR-124/159). §2
- *    fails the moment DYNAMIC stops being true.
+ * 3. THE QUERY PARAM THAT SHATTERED AN EDGE CACHE — and did, on 2026-09-10.
+ *    `?sid=`/`?vid=` were free only while /api/search/smart answered
+ *    `cf-cache-status: DYNAMIC`. It joined the Cloudflare Cache Rule, the params
+ *    became part of the cache key, and the frontend took them off that route
+ *    (ERR-253). They REMAIN on `POST /api/cart/items`, which is correct: a POST
+ *    is never edge-cached and that is the one place the param transport is
+ *    measurably landing rows. §2 now asserts production search IS cached — the
+ *    reason the removal was right — rather than asserting it is not.
  *
  * ── READ-ONLY BY DEFAULT. THE MODE IS PRINTED BEFORE ANY WORK. ──────────────
  * §1, §2 and §5 are GETs and an OPTIONS. §3, §4 and §6 need a real cart line and
@@ -53,9 +56,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { printSearchAnalyticsNotice, probeQuery } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+// The CDN-fronted host. Edge-cache questions can ONLY be asked here — see §2.
+const PROD = process.env.PROD_BASE || 'https://api.inkcartridges.co.nz';
 const ORIGIN = 'https://inkcartridges.co.nz';
 const ARGS = new Set(process.argv.slice(2));
 const WRITE = ARGS.has('--write');
@@ -80,7 +86,9 @@ console.log('\n\x1b[1mprobe:add-to-cart — Google Ads conversion + the analytic
 console.log(WRITE
     ? '\x1b[41m\x1b[97m MODE: WRITE \x1b[0m — adds ONE item to a throwaway guest cart and removes it again.'
     : '\x1b[36mMODE: READ-ONLY\x1b[0m — GETs and one OPTIONS. Pass --write for the cart-response checks (§3/§4/§6).');
-console.log(`Backend: ${BASE}\n`);
+console.log(`Backend: ${BASE}`);
+printSearchAnalyticsNotice();
+console.log('');
 
 /** The ONE transport function. A second one means this is no longer one probe. */
 async function req(method, url, { headers = {}, body = null } = {}) {
@@ -168,26 +176,56 @@ const run = async () => {
     }
 
     // ── §2 ────────────────────────────────────────────────────────────────
-    console.log('\n\x1b[1m§2 — ?sid=/?vid= is accepted and still fragments no edge cache\x1b[0m');
+    //
+    // THIS SECTION USED TO BE A CHECK THAT COULD NOT FAIL, AND IT WAS GREEN THE
+    // WHOLE TIME IT WAS WRONG.
+    //
+    // It asked `${BASE}/api/search/smart` for `cf-cache-status` and scored
+    // `DYNAMIC` as a pass — "the params fragment nothing". But BASE defaults to
+    // the RENDER ORIGIN, which our Cloudflare Cache Rule does not cover and
+    // which therefore answers DYNAMIC permanently. Measured 2026-09-16, the
+    // same request to both hosts:
+    //
+    //     ink-backend-zaeq.onrender.com   cf-cache-status: DYNAMIC
+    //     api.inkcartridges.co.nz         cf-cache-status: MISS -> HIT
+    //
+    // So search joined the Cache Rule on 2026-09-10, the frontend took the ids
+    // out of the search URL because of it (ERR-253), and this probe went on
+    // reporting DYNAMIC as evidence that nothing had changed. ***A GUARD
+    // POINTED AT THE WRONG HOST IS NOT A WEAK GUARD, IT IS A GREEN LIGHT.***
+    //
+    // It now asks PRODUCTION, where the cache rule actually lives, and it no
+    // longer sends ids on a search URL at all — that transport is gone from the
+    // shipped frontend and this file was the last place still exercising it.
+    console.log('\n\x1b[1m§2 — the ids left the search URL, and the cart POST kept them\x1b[0m');
     try {
-        const r = await req('GET', `${BASE}/api/search/smart?q=lc3319&limit=1&sid=ts_probe_a2c&vid=tv_probe_a2c`);
+        const r = await req('GET', `${PROD}/api/search/smart?q=${encodeURIComponent(probeQuery('a2c'))}&limit=1`);
+        const cache = (r.headers.get('cf-cache-status') || '').toUpperCase();
         if (r.status !== 200) {
-            bad('/api/search/smart with ids', `expected 200, got ${r.status}`);
+            bad('production /api/search/smart', `expected 200, got ${r.status}`);
+        } else if (cache === 'MISS' || cache === 'HIT' || cache === 'REVALIDATED' || cache === 'EXPIRED') {
+            ok(`production search IS edge-cached (cf-cache-status: ${cache}) — which is exactly why `
+                + '?sid=/?vid= had to come off this route: the cache key is the URL and excludes '
+                + 'request headers, so a per-visitor param gives every visitor a private entry');
         } else {
-            ok('/api/search/smart accepts ?sid=/?vid= (200)');
-            const cache = r.headers.get('cf-cache-status');
-            if (cache === 'DYNAMIC') {
-                ok(`cf-cache-status: DYNAMIC — the params fragment nothing (ERR-124/159 does not bite)`);
-            } else {
-                bad('EDGE CACHE NOW APPLIES TO SEARCH',
-                    `cf-cache-status: ${cache}. ?sid=/?vid= are now part of the cache key and shatter the `
-                    + 'shared entry one visitor at a time. Move the ids to headers (needs BF-054) or stop '
-                    + 'sending them on this route.');
-            }
+            bad('production search is NOT edge-cached any more',
+                `cf-cache-status: ${cache || '(absent)'}. If the Cache Rule has been withdrawn, the `
+                + 'header transport is no longer buying anything on this route and the ~0.25s '
+                + 'preflight it costs is no longer paid for. Re-measure before changing anything.');
         }
+        // The Render origin, stated rather than asserted — so the next reader
+        // knows why this question cannot be asked there.
+        const origin = await req('GET', `${BASE}/api/search/smart?q=${encodeURIComponent(probeQuery('a2c'))}&limit=1`);
+        soft(`the Render origin answers cf-cache-status: ${origin.headers.get('cf-cache-status') || '(absent)'}`,
+            'permanently, because the Cache Rule is attached to api.inkcartridges.co.nz and not to '
+            + 'it. Asking this host about the edge cache is how the old version of this section '
+            + 'stayed green through the change it existed to catch.');
+
         // A malformed id must be rejected WHOLE, not truncated: a mangled id
-        // groups with nothing and still looks like real data.
-        const badId = await req('GET', `${BASE}/api/search/smart?q=lc3319&limit=1&sid=${encodeURIComponent('has space!')}`);
+        // groups with nothing and still looks like real data. This still rides
+        // the search route because that is where cleanId runs — but on a
+        // sentinelled term, since the row it creates is ours (ERR-254).
+        const badId = await req('GET', `${BASE}/api/search/smart?q=${encodeURIComponent(probeQuery('a2c'))}&limit=1&sid=${encodeURIComponent('has space!')}`);
         if (badId.status === 200) ok('a malformed sid is rejected whole and the search still answers 200');
         else bad('malformed sid', `search returned ${badId.status} — a bad analytics id must never break a search`);
     } catch (e) {

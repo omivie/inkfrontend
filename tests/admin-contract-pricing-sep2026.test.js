@@ -303,7 +303,12 @@ test('the save path attaches the evaluation before throwing', () => {
   const set = API.match(/async setContractPrice\([\s\S]*?\n  \},/)[0];
   assert.match(set, /contractPriceError\(/,
     'not invoiceError — the 409 is a normal path here, not a failure, and it must keep its numbers');
-  assert.match(set, /window\.API\.put\(/, 'PUT is inside the CORS allow-list; PATCH is not (BF-021)');
+  // The assertion is right; its reason went stale. PATCH joined
+  // Access-Control-Allow-Methods on 2026-09-10 (BF-021 closed, verified with a
+  // negative control by probe:data-capture §1). This route still uses PUT because
+  // that is the verb the backend exposes here, not because PATCH is blocked.
+  assert.match(set, /window\.API\.put\(/,
+    'this route is a PUT on the backend — not a PATCH workaround; BF-021 closed 2026-09-10');
 });
 
 test('a below-cost dialog that lost its numbers refuses to offer a blind override', () => {

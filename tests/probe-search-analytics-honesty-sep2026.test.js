@@ -62,10 +62,11 @@ const NOT_A_SEARCH_READER = new Set(['audit-search-click-beacon.mjs']);
  * If you are here because you just enrolled one of these, delete its line.
  */
 const PENDING_OTHER_SESSION = new Set([
-    'probe-data-capture.mjs',
-    'probe-edge-cache.mjs',
-    'probe-add-to-cart-tracking.mjs',
-    'probe-admin-only-product.mjs',
+    // EMPTY, 2026-09-16 — every script that reads the logging endpoints now
+    // prints the notice. Kept rather than deleted because the machinery around
+    // it (§3) is what stops an exception quietly becoming the rule: a new probe
+    // that skips enrolment fails §2 and cannot be waved through without adding
+    // a line here, in front of a reviewer.
 ]);
 
 const files = fs.readdirSync(SCRIPTS)
@@ -76,18 +77,37 @@ const readers = files.filter((f) =>
     LOGGING_ENDPOINTS.test(fs.readFileSync(path.join(SCRIPTS, f), 'utf8')));
 
 /**
- * Enrolled means PRINTED, not imported.
+ * Enrolled means PRINTED, not imported — and there are TWO ways to print it.
  *
- * The first version of this asked `src.includes('SEARCH_ANALYTICS_NOTICE')`,
- * and the red-proof exposed it immediately: deleting the print left the import
- * line behind, the identifier was still in the file, and the suite stayed green
- * over a probe that had gone silent. A banner nobody prints is the exact thing
- * this ERR is about — so the import line is stripped before looking.
+ * THIS DETECTOR HAS NOW BEEN WRONG TWICE, IN THE SAME DIRECTION BOTH TIMES.
+ *
+ * First version asked `src.includes('SEARCH_ANALYTICS_NOTICE')` over the whole
+ * file. The red-proof caught it: deleting the print left the import line, the
+ * identifier was still there, and the suite stayed green over a probe that had
+ * gone silent. Fixed by stripping imports first.
+ *
+ * Second version still asked for that one literal — and
+ * `scripts/lib/probe-search-notice.mjs` also exports
+ * `printSearchAnalyticsNotice()`, a wrapper written so the wording would have
+ * exactly one owner. **`printSearchAnalyticsNotice` does not contain the string
+ * `SEARCH_ANALYTICS_NOTICE`** (camelCase vs upper-snake), so two probes that
+ * enrolled through the convenience helper read as un-enrolled for four days,
+ * and §3 below — whose whole job is "an entry here has been enrolled, delete
+ * its line" — passed because it could not see the enrolment it was checking.
+ *
+ * ***A GUARD CANNOT SEE WHAT IT DOES NOT SPELL.*** The mechanism grew a second
+ * front door and the doorbell was only wired to the first. Both forms count
+ * now, and §8 pins that so a third door cannot open silently.
  */
+const ENROLMENT_FORMS = [
+    'SEARCH_ANALYTICS_NOTICE',      // the constant, printed by the caller
+    'printSearchAnalyticsNotice(',  // the wrapper that prints it for you
+];
+
 function printsTheNotice(file) {
     const src = fs.readFileSync(path.join(SCRIPTS, file), 'utf8');
     const withoutImports = stripComments(src).replace(/^\s*import[^;]*;\s*$/gm, '');
-    return withoutImports.includes('SEARCH_ANALYTICS_NOTICE');
+    return ENROLMENT_FORMS.some((form) => withoutImports.includes(form));
 }
 
 test('§1 the scan finds the search-reading scripts at all', () => {
@@ -170,4 +190,33 @@ test('§7 POSITIVE CONTROL: importing the notice without printing it is not enro
     const strippedPrinted = stripComments(printed).replace(/^\s*import[^;]*;\s*$/gm, '');
     assert.ok(strippedPrinted.includes('SEARCH_ANALYTICS_NOTICE'),
         'and a file that prints it must — or §2 would pass by never matching anything');
+});
+
+test('§8 POSITIVE CONTROL: the detector sees BOTH ways of printing the notice', () => {
+    // §7 proves an import alone is not enrolment. This proves the inverse half:
+    // that every form the module actually offers is recognised. The second form
+    // existed for four days before this detector learned it, and nothing failed
+    // in the meantime — §3 just quietly stopped meaning anything.
+    const IMPORT = "import { SEARCH_ANALYTICS_NOTICE, printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';\n";
+    const strip = (src) => stripComments(src).replace(/^\s*import[^;]*;\s*$/gm, '');
+
+    for (const [label, body] of [
+        ['the constant, printed by the caller', 'console.log(SEARCH_ANALYTICS_NOTICE);\n'],
+        ['the wrapper that prints it for you', 'printSearchAnalyticsNotice();\n'],
+    ]) {
+        const stripped = strip(IMPORT + body);
+        assert.ok(ENROLMENT_FORMS.some((f) => stripped.includes(f)),
+            `${label}: this is a real enrolment and the detector must recognise it`);
+    }
+
+    // And the module must actually export every form the detector accepts —
+    // otherwise this list could drift into recognising something that does not
+    // exist, which is a guard that passes on a typo.
+    const mod = fs.readFileSync(path.join(SCRIPTS, 'lib', 'probe-search-notice.mjs'), 'utf8');
+    for (const form of ENROLMENT_FORMS) {
+        const name = form.replace(/\($/, '');
+        assert.match(mod, new RegExp(`export (const|function) ${name}\\b`),
+            `${name} is accepted as enrolment but is not exported — the detector would be `
+            + 'recognising something nothing can call');
+    }
 });

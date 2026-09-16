@@ -133,13 +133,34 @@ let networkFailures = 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * The search bucket is 120 req/min/IP. A full corpus run is ~80 requests, so an
- * unpaced audit trips 429s halfway through and reports a catalogue-wide outage
- * that is really our own impatience — the worst possible failure mode for a
- * tool whose entire job is to be believed. Serialize every call behind a
- * minimum interval, and retry a 429 rather than recording it.
+ * An unpaced audit trips 429s halfway through and reports a catalogue-wide
+ * outage that is really our own impatience — the worst possible failure mode
+ * for a tool whose entire job is to be believed. So every call is serialized
+ * behind a minimum interval, and a 429 is retried rather than recorded.
+ *
+ * 🚨 THE BUCKET IS NOT ONE BUCKET, AND THIS FILE HAD THE WRONG NUMBER.
+ *
+ * It used to say "the search bucket is 120 req/min/IP" and pace at 550 ms
+ * (~109/min) on that basis. Measured 2026-09-16 from `ratelimit-policy` on each
+ * route — the limiter is PER ENDPOINT, not per `/api/search/*` prefix:
+ *
+ *     /api/search/smart          30;w=60     <- this audit's heaviest caller
+ *     /api/search/by-printer     30;w=60
+ *     /api/search/suggest       120;w=60
+ *     /api/search/autocomplete  120;w=60
+ *
+ * So the old interval was 3.6x over the budget of the very endpoint it calls
+ * most, and a full run could trip the limiter and then blame the catalogue.
+ * The backend's own response doc asserts a single 30/min limiter across the
+ * prefix; that is wrong in the other direction. Both halves are measured here.
+ *
+ * Paced to the TIGHTEST bucket any caller in this file touches. That is slower
+ * than `suggest` alone needs, and the alternative — a per-endpoint gate — buys
+ * a few minutes on a tool that runs by hand, at the cost of a second thing to
+ * keep correct. Not worth it.
  */
-const MIN_INTERVAL_MS = 550;
+const SMART_LIMIT_PER_MIN = 30;                                  // measured, not assumed
+const MIN_INTERVAL_MS = Math.ceil(60000 / SMART_LIMIT_PER_MIN) + 100;  // 2100 ms, ~28/min
 let gate = Promise.resolve();
 let lastAt = 0;
 function paced(fn) {

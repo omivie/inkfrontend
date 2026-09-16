@@ -160,8 +160,15 @@ test('§3 the FE→API category map is the measured one, in exactly one place', 
     // this change explicitly invites that removal ("you can drop your
     // client-side mapping whenever suits"); the other, written later, retracts
     // it. ***THE STATUS CODE CAN NO LONGER TELL YOU YOU ARE WRONG — only
-    // reading product_type on the rows can, which is why probe:landing-popular
-    // does exactly that.***
+    // reading product_type on the rows can, which is why
+    // `npm run probe:popular-categories` does exactly that.***
+    //
+    // That sentence used to name `probe:landing-popular`, and it was not true.
+    // That probe is a Playwright DOM check: measured 2026-09-16, zero mentions
+    // of `products/popular` and zero of `product_type` in the whole file. The
+    // guard this comment described did not exist, and a claim about a guard is
+    // worth less than no claim at all — it stops the next person building it.
+    // scripts/probe-popular-categories.mjs is the guard, written 2026-09-16.
     assert.match(body, /consumable:\s*'drums'/,
         'MEASURED 2026-09-12: `consumable` is ACCEPTED now and resolves to NO FILTER, not to '
         + 'drums. Passing it through silently returns ink and toner on the drums landing');
@@ -181,6 +188,42 @@ test('§3 the FE→API category map is the measured one, in exactly one place', 
     // Exactly one map: a second copy is how the six type vocabularies happened.
     assert.equal((SHOP_JS.match(/POPULAR_CATEGORY_API/g) || []).length, 2,
         'declared once, read once — any third mention is a second copy');
+});
+
+test('§3 the map AGREES with each category\'s own apiCategory — it is the second copy', () => {
+    // THIS MAPPING EXISTS TWICE IN THIS FILE, and nothing held the two together.
+    //
+    //   POPULAR_CATEGORY_API        { consumable: 'drums', … }
+    //   categories[].apiCategory    { id: 'consumable', …, apiCategory: 'drums' }
+    //
+    // Both translate OUR category id to THEIRS. The comment above the map says
+    // this vocabulary "lives in a single place with a test on it" — it does not,
+    // and until now no test compared them. §3's sibling pins the KEYS against
+    // the category list; the VALUES were unpinned, so `ink: 'drums'` would have
+    // passed every check in this repo.
+    //
+    // Found by red-proofing probe:popular-categories: that probe asks "does this
+    // API category return its own family", which `ink → drums` satisfies
+    // perfectly — drums really does return drums. Only the FE→API correspondence
+    // can catch it, and only this file can see both copies at once.
+    const map = SHOP_JS.match(/POPULAR_CATEGORY_API:\s*\{([^}]+)\}/)[1];
+    const mapped = Object.fromEntries([...map.matchAll(/(\w+)\s*:\s*'([^']+)'/g)].map((m) => [m[1], m[2]]));
+
+    const catBlock = SHOP_JS.match(/categories:\s*\[([\s\S]*?)\],/)[1];
+    const declared = Object.fromEntries(
+        [...catBlock.matchAll(/id:\s*'([^']+)'[\s\S]*?apiCategory:\s*'([^']+)'/g)].map((m) => [m[1], m[2]]));
+
+    assert.ok(Object.keys(declared).length >= 6,
+        `sanity: expected apiCategory on every category, found ${JSON.stringify(declared)}`);
+
+    const disagreements = Object.entries(mapped)
+        .filter(([feId, apiId]) => declared[feId] && declared[feId] !== apiId)
+        .map(([feId, apiId]) => `${feId}: map says '${apiId}', categories[] says '${declared[feId]}'`);
+
+    assert.deepEqual(disagreements, [],
+        'the two copies of this translation must agree. If you are changing which backend category '
+        + 'a shelf asks for, change BOTH — or better, delete one copy. A silent disagreement puts '
+        + 'the wrong products on a landing page with every status code still 200.');
 });
 
 test('§3 every key in the map is a category this repo actually has', () => {

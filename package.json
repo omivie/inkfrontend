@@ -55,6 +55,7 @@
     "probe:qty-typing": "node scripts/probe-qty-typing.mjs",
     "probe:shop-columns": "node scripts/probe-shop-source-columns.mjs",
     "probe:landing-popular": "node scripts/probe-landing-popular.mjs",
+    "probe:popular-categories": "node scripts/probe-popular-categories.mjs",
     "probe:checkout-delivery": "node scripts/probe-checkout-delivery.mjs",
     "probe:admin-only": "node scripts/probe-admin-only-product.mjs",
     "probe:mobile-ux": "node scripts/probe-mobile-ux.mjs",

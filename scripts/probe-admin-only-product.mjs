@@ -32,6 +32,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -97,6 +98,13 @@ const mentions = (body) => JSON.stringify(body == null ? '' : body).toUpperCase(
 async function main() {
   console.log(`\n${C.b}probe:admin-only${C.x} — is ${C.b}${SKU}${C.x} invisible to everyone but an admin?`);
   console.log(`${C.y}MODE: READ-ONLY${C.x} — every request is a GET besides the sign-ins. No --record exists.`);
+  // Its search GETs must use the REAL SKU — the whole question is whether that
+  // SKU is visible — so they cannot carry the probe sentinel that other search
+  // probes use. Saying so out loud is the only honest option left (ERR-254).
+  // (Deliberately no wildcard character in this comment: a star after a slash
+  //  inside a line comment opens a block comment for the naive strippers some
+  //  suites still use, which is the ERR-253 hazard.)
+  printSearchAnalyticsNotice();
   console.log(`${C.d}api=${API}  edge=${EDGE}  supabase=${SUPABASE}${C.x}\n`);
 
   const ANON = anonKey();
