@@ -106,7 +106,16 @@ which is what the generic version failed to tell me.
 
 **Lesson.** The probe earned itself here. Every source assertion in the repo was green, every local
 run was green, the Ads dashboard was green, and a money-path request had been blocked on every
-add-to-cart. ***A CSP allowlist is a list of registrable domains, and a wildcard is narrower than it
+add-to-cart.
+
+***This is not "a guard pointed at the wrong host". It is a defect with THREE ALIBIS, and any one of
+them alone would have kept it hidden*** — the pixels passing under `img-src` so the host looked
+reachable, the canonical conversion still landing 200 so no dashboard number moved, and localhost
+serving no CSP so every local run was green by construction. The repo already knows the singular
+form of this (*a measurement taken once is a constant with a good alibi*, ERR-233); the plural is
+worse, because removing any single alibi still leaves a green board. **So the count of independent
+reasons a defect stayed invisible is worth writing down, not just the cause** — it is what tells the
+next reader how many of their green signals were load-bearing. ***A CSP allowlist is a list of registrable domains, and a wildcard is narrower than it
 looks.*** Also: this was only visible because the generic transport check existed and then had to be
 made specific — *a check that tells you something is wrong without naming it is one debugging session
 away from being ignored.*
