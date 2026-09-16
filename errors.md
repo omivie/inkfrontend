@@ -41,6 +41,125 @@ describing the same incident.
 
 ---
 
+## ERR-259 — The cart threw away the shopper's line and reported itself healthy, and the recovery mechanism was what did it — **RESOLVED** (2026-09-16)
+
+**Context.** Found while re-verifying ERR-256: a GA4 `add_shipping_info` hit left a real production
+browser carrying **`value=0`**. The analytics half was fixed there (an empty cart has no value, and
+0 is not its value). This is the cart bug underneath it, which is the larger of the two.
+
+**`loadFromServer()` adopted an empty server cart unconditionally:**
+
+```js
+this.items = parsed.items;                 // [] — the shopper's line is gone
+this._adoptServerSummary(parsed.summary);  // pricingState = OK, _everPriced = true
+```
+
+So the cart discarded the line **and** marked the result healthy. No notice, no degraded state,
+nothing on any channel — `DebugLog` is a no-op in production and the on-page pricing notice only
+paints for a `PRICING_DEGRADED` state, which this deliberately was not.
+
+**🚨 WHAT MADE IT SHOPPER-VISIBLE IS A LOOP, AND IT RUNS THROUGH THE RECOVERY MACHINERY RATHER THAN
+AROUND IT.**
+
+1. A guest add that does not get a 2xx (a 429, a Render cold start) leaves the line in
+   `localStorage` only, and the shopper is toasted *"Item saved locally. It will sync when
+   connection is restored."*
+2. `loadCart()`'s guest branch handles that **correctly** — server empty, local non-empty, so it
+   drops to `PRICING.SERVER_EMPTY` and keeps the line.
+3. `SERVER_EMPTY` is in `PRICING_DEGRADED`, which is **precisely what arms the bounded
+   auto-revalidation added for ERR-210** — a mechanism whose entire job is to clear a degraded
+   episode.
+4. It fires, calls `loadFromServer()`, and `loadFromServer()` threw the guard's work away and
+   marked the result `ok`.
+
+***The recovery path undid the guard the load path had correctly applied, and called the result
+healthy.*** That is why every guarded site looked right and the symptom happened anyway, and it is
+why a single-read test could never have caught it. The regression test that would have is the
+two-read one: guard fires, *then* revalidate, and assert the line is still there.
+
+**Measured on production 2026-09-13** at the checkout's delivery step:
+`items=0, subtotal=0, hasServerPricing()=true, pricingState='ok'`, with the line still in
+`localStorage`. **Re-measured 2026-09-16** with the add returning **201**: `lines=1, subtotal=5.99`.
+That pair is the positive control — the first reading alone was a correlation, and it was first
+written up blaming the wrong thing entirely (the hostname).
+
+**🚨 AND THE COUNT I REPORTED WAS WRONG, IN THE DIRECTION THAT FLATTERS THE BUG.** The ERR-256
+write-up said the keep-local-items guard sat on "one of the three" `_parseServerCart` call sites.
+There are **five**, and **four were already guarded**: `loadCart()`'s two `if (items.length > 0)`
+branches, `syncWithServer()`'s explicit comparison, and `_executeQuantityUpdate()` which is
+correctly unguarded because a quantity-to-zero empties the cart on purpose. Exactly **one read
+path** had nothing.
+
+***My detector was the bug.*** I located the guard by grepping the string
+`Server returned empty cart` — one **spelling** of it — and missed the two written as a positive
+`length > 0` test. Three guarded sites read as one, and the single unguarded site read as the norm.
+**That is the same mistake as the blocklist that missed `this._emit('purchase', …)` in ERR-256,
+three days earlier**, and twice is a pattern: *a rule you can only find by its wording is a rule
+you will mis-count.* So the rule now has **one name**, `_serverEmptyButWeHoldLines()`, both read
+paths call it, and the test asserts on the **name** rather than a spelling.
+
+**THE OPPOSITE MISTAKE WOULD HAVE BEEN WORSE THAN THE ONE BEING FIXED.** A guard that keeps local
+items whenever the server answers empty **resurrects a line the shopper deliberately removed** —
+silently, and into the server on the next sync, where it can be charged for. What makes this safe is
+the existing `_filterPendingRemovals(this.items)` on the **local** side: a removal already journaled
+or in flight is subtracted, so "we still hold lines" is false for a cart the shopper has just
+emptied and the empty answer is adopted exactly as it should be. That filter is *why*
+`syncWithServer`'s guard was correct, and it is reused rather than re-derived. Two of the new tests
+are that direction, and they matter more than the ones for the reported bug.
+
+**Fix.** One named predicate above `_beginSnapshot`, called by `loadFromServer()` and
+`syncWithServer()` and by nothing else. `loadFromServer()` gains the guard it never had:
+`_losePricing(PRICING.SERVER_EMPTY)` + `updateUI()` + return — degraded and honest, so the shopper
+gets the notice that already exists instead of a silently empty cart marked `ok`.
+`_executeQuantityUpdate()` is left unguarded **with a comment saying why and a test pinning it**, so
+it stays a decision rather than an omission someone completes later.
+
+**It cannot spin.** The guard leaves the cart degraded, and a degraded state schedules a
+revalidation, which re-enters the guard. That is only safe because the budget is three attempts per
+episode (`PRICING_REVALIDATE_DELAYS`) and **only `_adoptServerSummary` resets it** — which this
+branch deliberately never reaches. Asserted, rather than reasoned about and hoped for.
+
+**Scope.** `inkcartridges/js/cart.js` only. `loadFromServer()` has ~20 callers across `cart.js`,
+`cart-page.js` and `favourites.js`, and this file is where ERR-136 (stale snapshots) and ERR-210
+(pricing states) live, so nothing else in the read path was touched — no refactor, no tidying, no
+going near the epoch or pending-ops machinery.
+
+**One existing test had to be widened, and it was right when written.**
+`cart-removal-durability-jul2026.test.js` §6.3 asserted the filter ran before the guard by locating
+the guard at the literal `parsed.items.length === 0` inside `syncWithServer`. Naming the rule moved
+that string, so the test failed — **not because the fix was wrong, but because the test found the
+rule the same way I had mis-counted it.** Rewritten to assert on the predicate's name across **both**
+read paths, so it now covers the site it structurally could not see before, plus §6.3b (one
+declaration, and the local side is filtered) and §6.3c (the quantity path's omission is deliberate).
+*Read a test's docstring before assuming your fix is wrong — and then check whether the test and the
+bug share a blind spot.*
+
+**Verified.** `npm test` → **6129 tests, 0 fail**. New suite
+`tests/cart-empty-server-adoption-sep2026.test.js`, **13 tests**, which **executes the real cart.js**
+in a `vm` against a scripted `API.getCart` — the source assertions next door cannot see what
+`pricingState` ends up as, and the whole bug is the value two state-setters leave behind. It also
+uses the nested-`product` payload shape on purpose: `_parseServerCart` drops any line without one, so
+a flat stub parses to zero items and every assertion here would pass for the wrong reason.
+
+**Three mutations, three red, then restored to 0 fail:** removing the `loadFromServer` guard (the
+original bug — 6 of 13 red, plus §6.3 next door); dropping the **local** pending-removal filter (the
+resurrection direction — the two safety tests red); and over-guarding
+`_executeQuantityUpdate` (a quantity-to-zero removal broken — the omission tests red).
+
+**Numbering.** Taken as ERR-259, not 257: a peer session filed **ERR-257 and ERR-258 the same day**
+while this was being written, and both logs were re-read immediately before allocating. The ERR
+number race is real and checking one log is not enough.
+
+**Still open, and not ours.** Whether `GET /api/cart` can return `items: []` **alongside a populated
+summary** for a session that genuinely has a cart, rather than only for an absent/empty one — asked
+in `backend-docs/outbox/ga4-ecommerce-events-FE-response-sep2026.md` §4. The frontend guard is
+correct either way, which is why this did not wait for the answer.
+
+**Lesson.** A guard applied correctly in one place and undone by a later well-meaning path is worse
+than no guard, because the first one makes the state look considered. And the count that described
+the problem was wrong because the *rule had no name* — the fix for the mis-count and the fix for the
+bug turned out to be the same fix.
+
 ## ERR-258 — Five guards that could not see what they guarded, and the red-proof found every one — **RESOLVED** (2026-09-16)
 
 - **Date**: 2026-09-16 · **Context**: a re-run of the September backend round, four days after it shipped. All six asks were implemented, deployed and green; the full suite passed 6088/6088. What was wrong was a cluster of **assertions that could not fail**, which is the one defect a green suite cannot report. Every one below was found by deliberately breaking the thing the guard existed to catch.
@@ -201,8 +320,25 @@ In that state `Cart.items` goes 1 → 0 **on the checkout page**: `loadCart()` r
 `localStorage`, `begin_checkout` correctly fires with it, and then the cart GET's empty response is
 adopted with `pricingState: 'ok'` and `hasServerPricing(): true`. `cart.js` has a guard for exactly
 this — "don't clear local items if server unexpectedly returns empty", which drops to
-`PRICING.SERVER_EMPTY` — but it sits on **one** of the three `_parseServerCart` call sites, and the
-state we measured has `ok`, so that is not the path that ran. A shopper whose add was refused would
+`PRICING.SERVER_EMPTY`.
+
+**CORRECTED 2026-09-16, and the correction is the interesting part.** This first said the guard sat
+on "one of the three" call sites. That was wrong in the direction that flatters the bug and libels
+the code. There are **five** `_parseServerCart` adoption sites and **four were already guarded** — `loadCart()`'s two `if (items.length > 0)` branches, `syncWithServer()`'s explicit comparison, and `_executeQuantityUpdate()` which is correctly unguarded because a quantity-to-zero empties the cart on purpose. Exactly **one read path, `loadFromServer()`, had no guard at all** — and it is the one the checkout reaches.
+
+***My detector was the bug.*** I found the guard by grepping for the string
+`Server returned empty cart`, which is one **spelling** of it, and missed the two written as a
+positive `length > 0` test. So three guarded sites read as one, and the single unguarded site read
+as the norm. That is the same mistake as the blocklist-that-missed-`_emit('purchase')` two entries
+above, three days later — which is why the rule now has **one name**,
+`_serverEmptyButWeHoldLines()`, and the test asserts on the name instead of a spelling.
+
+**And the mechanism is a loop, not a missing guard.** `loadCart()` handles the refused add
+**correctly** — server empty, local non-empty ⇒ `SERVER_EMPTY`, line kept. `SERVER_EMPTY` is in
+`PRICING_DEGRADED`, which is exactly what arms the ERR-210 bounded auto-revalidation; that fires,
+calls `loadFromServer()`, and `loadFromServer()` threw the guard's work away and marked the result
+`ok`. ***The recovery path undid the guard the load path had correctly applied, and called the
+result healthy.*** Fixed under **ERR-259**. A shopper whose add was refused would
 therefore be shown an **empty checkout** after being toasted "Item saved locally. It will sync when
 connection is restored." That is a cart-loading defect, not an analytics one, and fixing it inside a
 GA4 change would be the wrong place — it is filed to the backend response's §4 and belongs in its
@@ -256,6 +392,14 @@ blocklist grep **missed a `this._emit('purchase', …)`** because it only looked
 `gtag('event','purchase'`; replaced with an **allowlist** of the four event names plus a one-door
 check, and both escape routes now redden. ***Blocklisting the spelling you thought of leaves every
 other spelling open.***
+
+**PRODUCTION RE-RUN 2026-09-16 — the last gap is closed.** The 429 that blocked `add_to_cart` and
+`add_shipping_info` from a production-origin run had cleared, and `npm run probe:ga4-events` against
+`www` is now **34 passed, 0 failed, 0 NOT EXERCISED**: `POST /api/cart/items -> 201`, `add_to_cart`
+at `qt=1 value=5.99`, `add_shipping_info` at `shipping_tier=urban` matching the checked radio. The
+same run is the **positive control for the empty-cart diagnosis** — with the add confirmed, the
+delivery step read `lines=1 subtotal=5.99`, so the cause really was the unconfirmed add and not the
+host.
 
 **Measured on the wire** by `npm run probe:ga4-events` (Playwright, phone viewport, no
 `ctx.route()`, real requests observed and GA4's `en`/`tid`/`pr1`/`gcs` decoded and printed): all

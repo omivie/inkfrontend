@@ -117,8 +117,10 @@ In that state `Cart.items` goes **1 → 0 on the checkout page**:
 3. `this.cartItems = Cart.items` is `[]`, so the checkout renders an **empty cart**.
 
 `cart.js` has a guard for exactly this — *"don't clear local items if server unexpectedly returns
-empty"*, which drops to `PRICING.SERVER_EMPTY`. It sits on **one of the three** `_parseServerCart`
-call sites, and the state we measured is `ok`, so that is not the path that ran.
+empty"*, which drops to `PRICING.SERVER_EMPTY`. **`loadFromServer()` did not have it.** (An earlier
+version of this paragraph said the guard was on "one of the three" call sites. That was wrong, and
+wrong in the direction that flatters the bug: there are **five** sites, **four were already
+guarded**, and exactly one read path had nothing. Corrected in the addendum below.)
 
 **The shopper-facing consequence:** an add that the server refuses toasts *"Item saved locally. It
 will sync when connection is restored."* — and then the checkout page shows them an empty cart. A
@@ -254,3 +256,73 @@ attached rather than as a failure.
    behaviour in §4 is ours to fix once you have answered the first half; it needs its own ticket.
 4. **§5** — what `G-YJXTSGLM28` is.
 5. **§2** — whether you will add `product_type` to the add-to-cart response's `product` object.
+
+---
+
+# Addendum — 2026-09-16
+
+Three days on, with the rate limit cleared. Two of these change what is in the document above.
+
+## §7. The production verification is complete — the two gaps are closed
+
+The 429 that stopped `add_to_cart` and `add_shipping_info` from being exercised on the production
+origin had cleared. `npm run probe:ga4-events` against `www.inkcartridges.co.nz` is now:
+
+```
+34 passed, 0 failed, 0 not exercised
+POST /api/cart/items -> 201
+add_to_cart        tid=G-SDQELG0FGD  cu=NZD  value=5.99  pr1={item_id:CLC37BK, … price:5.99, quantity:1}
+add_shipping_info  tid=G-SDQELG0FGD  cu=NZD  value=5.99  shipping_tier=urban
+```
+
+`qt=1` for a one-unit add, `shipping_tier` matching the radio that is actually checked, everything on
+the one property, no browser `purchase`. Nothing in the funnel is unmeasured now.
+
+**The same run is the positive control for §4's diagnosis.** With the add returning 201, the delivery
+step read `lines=1 subtotal=5.99` — where the failing run read `lines=0`. So the empty cart really was
+caused by the unconfirmed add, and not by the host. That was a correlation when we wrote §4; it is a
+measurement now.
+
+## §8. §4's cart defect is fixed at our end — ERR-259
+
+We said we were reporting it rather than fixing it. We have fixed it, because the frontend guard is
+correct whichever way you answer the question below.
+
+**We also owe you a correction.** §4 said the keep-local-items guard sat on "one of the three"
+`_parseServerCart` call sites. There are **five**, and **four were already guarded** —
+`loadCart()`'s two `if (items.length > 0)` branches, `syncWithServer()`'s explicit comparison, and
+`_executeQuantityUpdate()` which is *correctly* unguarded because a quantity-to-zero empties the cart
+on purpose. Exactly **one read path**, `loadFromServer()`, had nothing. Our own detector caused the
+error: we located the guard by grepping one *spelling* of it and missed the two written as a positive
+length test, so three guarded sites read as one.
+
+**And the real mechanism is a loop, which is more useful to you than "a missing guard":**
+
+1. a guest add misses a 2xx (your 429, or a cold start) ⇒ the line lives only in `localStorage`;
+2. `loadCart()` handles that **correctly** ⇒ `SERVER_EMPTY`, line kept, state degraded;
+3. `SERVER_EMPTY` is a degraded state, which is exactly what **arms our ERR-210 bounded
+   auto-revalidation** — whose whole job is clearing a degraded episode;
+4. it fires, calls `loadFromServer()`, and that threw the guard's work away and marked the cart `ok`.
+
+*The recovery path undid the guard the load path had correctly applied, and called the result
+healthy.* Which is why the guarded sites all looked right and a shopper still saw an empty checkout.
+
+Fixed by giving the rule one name and calling it from both read paths; `loadFromServer()` now drops to
+`SERVER_EMPTY` instead of adopting a zero summary. 13 new tests that execute the real `cart.js`, three
+mutations red, `npm test` 6129 / 0 fail.
+
+## §9. What we still need from you
+
+Unchanged from §4 and §5, minus the urgency on one of them:
+
+- **`G-YJXTSGLM28`** — still configured in `gtag.js`, still referenced nowhere else, still sent
+  nothing by us. One line either way once you say.
+- **Can `GET /api/cart` return `items: []` alongside a populated summary for a session that genuinely
+  has a cart?** No longer blocking — our guard is right either way — but it decides whether anything
+  is left to fix on your side, and whether the state is reachable for a signed-in shopper as well as
+  a guest.
+- **The limit and window on `POST /api/cart/items`.** Still worth a number. It was 429 for us for over
+  35 minutes from a single IP and clear again three days later, so we still cannot tell you what the
+  policy is, and a NAT'd household or office shares one address.
+- **`product_type` on the add-to-cart response's `product` object** — the one-field fix for the
+  `item_category` gap in §2. Nothing has changed there.
