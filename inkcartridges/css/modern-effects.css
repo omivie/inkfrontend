@@ -8,45 +8,91 @@
    Always visible, clickable and draggable
    ============================================= */
 
-/* Make scrollbars always visible */
-* {
+/* Inner scrollers — dropdowns, drawers, admin tables, the mobile nav drawer —
+   keep the standard properties: thin and recoloured.
+
+   `html` is excluded ON PURPOSE, and the exclusion is the whole point of this
+   block. css-scrollbars-1 requires that on any element whose computed
+   `scrollbar-width` OR `scrollbar-color` is anything other than `auto`, the UA
+   "must ignore any alternative non-standard means for authors to influence the
+   rendering of scrollbars, such as the ::-webkit-scrollbar family of
+   pseudo-elements". Chrome shipped that in 121 (Jan 2024), Safari in 18.2
+   (Dec 2024) — and an explicit non-zero ::-webkit-scrollbar { width } is the
+   ONLY thing that flips Blink/WebKit out of the macOS overlay scrollbar and
+   into a classic, always-visible one.
+
+   So while this rule was a bare `*`, it named `html`, suppressed the block
+   below on the one element that owns the page scrollbar, and left every page
+   with no visible bar at rest — under a comment promising the opposite.
+   Do not put `html` back. (ERR-267)
+
+   `scrollbar-color` inherits, so `html` must simply never be named: with
+   nothing above it, it computes to `auto`. Per the same spec, `scrollbar-*` on
+   <body> is explicitly NOT propagated to the viewport, so body's values here
+   cannot leak back onto the page scrollbar. */
+*:not(html) {
     scrollbar-width: thin;
     scrollbar-color: var(--steel-400) var(--steel-50);
 }
 
-/* Webkit browsers (Chrome, Safari, Edge) */
-::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+/* Webkit browsers (Chrome, Safari, Edge), mouse/trackpad only.
+   `pointer: fine` is what keeps this off touch devices: there `html` stays
+   `auto`/`auto`, so phones and tablets keep the platform's own overlay bar
+   instead of losing ~10px of a narrow viewport to a permanent one. */
+@media (pointer: fine) {
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: var(--steel-50);
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, var(--steel-400) 0%, var(--steel-500) 100%);
+        border-radius: 5px;
+        border: 2px solid var(--steel-50);
+        min-height: 40px;
+        cursor: grab;
+        transition: background 0.2s ease;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, var(--steel-500) 0%, var(--steel-600) 100%);
+    }
+
+    ::-webkit-scrollbar-thumb:active {
+        background: linear-gradient(180deg, var(--cyan-primary) 0%, var(--cyan-dark) 100%);
+        cursor: grabbing;
+    }
+
+    ::-webkit-scrollbar-corner {
+        background: var(--steel-50);
+    }
 }
 
-::-webkit-scrollbar-track {
-    background: var(--steel-50);
+/* Firefox has no ::-webkit-scrollbar, so it needs the standard properties on
+   `html` after all. `@supports not selector(::-webkit-scrollbar)` CANNOT be
+   used to detect it: Firefox 153 (2026-07-21, bug 2038877) reports that
+   selector as supported while only partially implementing it, so the test now
+   returns false in the one browser it was there to catch. Hence the
+   -moz-appearance probe, which no Blink or WebKit engine answers.
+
+   This block must never match in Chrome or Safari. If it ever does, it
+   re-suppresses the rules above and ERR-267 comes straight back. */
+@supports (-moz-appearance: none) {
+    html {
+        scrollbar-width: thin;
+        scrollbar-color: var(--steel-400) var(--steel-50);
+    }
 }
 
-::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, var(--steel-400) 0%, var(--steel-500) 100%);
-    border-radius: 5px;
-    border: 2px solid var(--steel-50);
-    min-height: 40px;
-    cursor: grab;
-    transition: background 0.2s ease;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, var(--steel-500) 0%, var(--steel-600) 100%);
-}
-
-::-webkit-scrollbar-thumb:active {
-    background: linear-gradient(180deg, var(--cyan-primary) 0%, var(--cyan-dark) 100%);
-    cursor: grabbing;
-}
-
-::-webkit-scrollbar-corner {
-    background: var(--steel-50);
-}
-
-/* Force scrollbar visibility on macOS */
+/* Reserve the gutter so the bar is present on every page, not only the ones
+   long enough to overflow — no reflow when a short page turns into a long
+   one. Until ERR-267 this was a 0px reservation, because an overlay
+   scrollbar has no width to reserve. pages.css releases it below 768px
+   (mobile-parity S0.11); admin pages don't load pages.css and keep it. */
 html {
     overflow-y: scroll;
     scroll-behavior: smooth;

@@ -41,6 +41,122 @@ describing the same incident.
 
 ---
 
+## ERR-267 — Every page's scrollbar was invisible, and the rule that hid it was three lines above the rule that drew it — **RESOLVED** (2026-09-17)
+
+**Context.** Owner screenshot of `/shop?brand=brother&category=ink&code=LC3333`, with the ask:
+*"all pages should have a right-side scroll bar to scroll down the page. implement this"*. On
+macOS, Chrome and Safari draw **overlay** scrollbars by default — zero layout width, faded out
+at rest — so the right edge of every page was empty.
+
+**We had already implemented it. Twice, arguably.** `css/modern-effects.css` has carried a block
+titled *"CUSTOM SCROLLBARS — Always visible, clickable and draggable"* since the site was built:
+a 10px track, a `--steel-400 → --steel-500` gradient thumb, `--cyan-primary` while dragging, and
+`html { overflow-y: scroll }` under the comment *"Force scrollbar visibility on macOS"*. All of
+it correct. None of it rendering.
+
+**The rule that disabled it opened the same block, three lines above it.**
+
+```css
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--steel-400) var(--steel-50);
+}
+```
+
+[css-scrollbars-1](https://drafts.csswg.org/css-scrollbars-1/) requires that on any element whose
+computed `scrollbar-width` **or** `scrollbar-color` is anything other than `auto`, the UA *"must
+ignore any alternative non-standard means for authors to influence the rendering of scrollbars,
+such as the `::-webkit-scrollbar` family of pseudo-elements"*. Chrome shipped that in **121**
+(Jan 2024); Safari in **18.2** (Dec 2024). `*` names `html`. So on the one element that owns the
+page scrollbar, every `::-webkit-scrollbar` rule below was ignored — and an explicit non-zero
+`::-webkit-scrollbar { width }` is the **only** thing that moves Blink/WebKit off the macOS
+overlay scrollbar and onto a classic, always-visible one. What was left was a *recoloured overlay
+bar*, which is why nothing looked broken: the colours were ours, the bar just wasn't there.
+
+> ***A vendor-prefixed block does not fail loudly when the standards-track property supersedes
+> it. It goes quiet — and the comment above it goes on making the promise.*** Nobody wrote a bug
+> here. The CSS was correct when it was written, a browser shipped a spec, and a rule already in
+> the file became the thing that turned it off.
+
+**Measured, same Mac, same headed Chromium, same OS setting — production against localhost:**
+
+| | root `scrollbar-color` | `innerWidth − clientWidth` |
+|---|---|---|
+| **before** (live site) | `rgb(148,163,184) rgb(248,250,252)` | **0px** |
+| **after** (this fix) | `auto` | **10px** |
+
+`auto` is not a cosmetic difference: it is the *only* value that hands control back to the
+pseudo-elements. So the fix is not "add a scrollbar", it is **stop naming `html`** —
+`*` became `*:not(html)`, and nothing else about the bar changed.
+
+**Three things the fix had to get right that the obvious version does not.**
+
+1. **Touch.** The webkit block is now gated on `@media (pointer: fine)`. A permanent 10px bar on
+   a 390px phone is 2.6% of the viewport, and `html` at `auto`/`auto` is what lets a phone keep
+   its own platform bar. Re-specifying `scrollbar-color` under `pointer: coarse` would also have
+   suppressed the webkit rules — but it hands back a *steel-coloured* overlay bar, not the
+   platform's. `auto` is the only value that means "yours".
+2. **Firefox.** The idiomatic isolation, `@supports not selector(::-webkit-scrollbar)`, **is dead
+   as of two months ago**: Firefox 153 (2026-07-21,
+   [bug 2038877](https://bugzilla.mozilla.org/show_bug.cgi?id=2038877)) now reports that selector
+   as supported while only partially implementing it, so the block would never apply in the one
+   browser it exists for, and Firefox would have silently *lost* the thin bar it has today. Used
+   `@supports (-moz-appearance: none)` instead.
+3. **`100vw` is not `100%` once the bar is real.** Measured on the fixed page at a 1440px window:
+   `100vw` = **1440px**, `100%` = **1430px**. While the gutter was a 0px overlay reservation the
+   two were interchangeable, and `css/admin.css` had come to rely on that: `.admin-drawer` is
+   `position: fixed; inset: 0; width: 100vw`, where `width` + `left: 0` beats `right: 0`, so the
+   drawer and its right-aligned close button would now hang 10px under the scrollbar. Same for
+   `.admin-ac__menu`'s `max-width: calc(100vw - 16px)`, whose 16px clearance became 6px. Both
+   moved to `100%`.
+
+> ***Reserving a gutter is not a no-op just because the reservation used to be zero.*** Every
+> `100vw` in the codebase was written under an assumption nobody knew they were making.
+
+**And the verification was green for the wrong reason first.** The initial check of the
+`.admin-drawer` fix loaded `/html/admin/index.html`, injected a `.admin-drawer` div and measured
+`overhang=0px`. The page had already redirected to login, `admin.css` was not loaded, and a plain
+`<div>` at `display:block` is full-width by default — the number was an artefact of block layout,
+not evidence of anything. Caught by then measuring `.admin-ac__menu` and getting `z-index: auto`.
+The rerun asserts `z-index === 1001 / 1150` **before** trusting a single measurement, and the
+first counterfactual after *that* was contaminated too — it read `100vw` through the `max-width:
+100%` the fix had just added. This is the ERR-186 shape: *a test can pass for the wrong reason;
+keep a positive control.* Three measurements of the same fact, two of them lying.
+
+**Guards.** `tests/page-scrollbar-visibility-sep2026.test.js` — five string contracts over
+`modern-effects.css`, every one red-proofed against a mutated copy (ERR-258). Two of them were
+wrong on the first pass and the red-proof is the only reason they aren't still wrong:
+
+- **G2** advertises itself as the guard that catches `*:not(html)` being "tidied" back to `*` —
+  and it was **green** on exactly that mutation, because it walked rule selectors looking for the
+  literal token `html`, and a bare `*` does not contain one. It now reasons about which selectors
+  can *match* the root. ***A guard that greps for the name of the thing will miss the wildcard
+  that includes it.***
+- **G0**, the positive control proving the comment stripper didn't eat the file, asserted on
+  `overflow-y: scroll` — which is **G4's** subject. It went red alongside G4 on an unrelated
+  mutation, which makes it a second copy of G4, not a control. Re-pointed at declarations no
+  other guard owns.
+
+**Not changed, on purpose.** The `::-webkit-scrollbar` declarations are byte-identical — the look
+was already designed, it just had to be allowed to render. `html { overflow-y: scroll }` stays
+(its reservation is simply 10px wide now instead of 0). `pages.css`'s `@media (max-width: 768px)
+{ html { overflow-y: auto } }` and its load-order comment stay. Inner scrollers — the search
+dropdown, printer modal, `.account-nav__list`, `.volume-pricing__chips`, `.admin-sidebar`, the
+invoice panes, the mobile nav drawer — are all still matched by `*:not(html)` and are unchanged.
+`html/admin/quote-qr.html` (base + components only) and `html/admin/sync-report.html` (no
+stylesheet) get no bar, which is correct for what they are.
+
+**Accepted, not chased.** Two breakpoint bands shift ~10px now that the gutter has width:
+`layout.css:874` (`min-width: 1100px`, desktop header) and `layout.css:1069` (`min-width: 1360px`,
+the Admin shortcut pinned to the window edge — **1366px is a common real window width** and now
+lands in MODE D). `layout.css:1039`'s 1100–1359.98px band catches the fallout: degrades, does not
+break. Moving the breakpoints to compensate would be worse than the 10px.
+
+**Files.** `css/modern-effects.css` · `css/admin.css` ·
+`tests/page-scrollbar-visibility-sep2026.test.js`.
+
+---
+
 ## ERR-266 — A code drilldown that could not fetch was rendered as an empty code — **RESOLVED** (2026-09-17)
 
 **Context.** Owner screenshot of `/shop?brand=brother&category=ink&code=LC431` reading
