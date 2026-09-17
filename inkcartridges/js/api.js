@@ -914,6 +914,96 @@ const API = {
     },
 
     /**
+     * Run a catalogue read, and if the ADMIN MIRROR is what failed, fall back to
+     * the public route once before answering (ERR-264).
+     *
+     * WHY THIS EXISTS. AdminPreview's contract, stated at the top of the module
+     * itself (utils.js: "every failure mode degrades to exactly what a shopper
+     * sees"), was true of every state it can REACH and false of the one thing it
+     * does after reaching 'granted': re-route the catalogue. From that moment an
+     * admin is the only visitor on the site whose catalogue reads cannot be
+     * served by the Cloudflare edge — /api/admin/catalog/* is token-bearing and
+     * never cached — so an origin wobble that every shopper rides out on a cached
+     * body is a hard failure for the admin alone.
+     *
+     * Measured live 2026-09-17. The whole /api/products + /api/shop family 500'd
+     * for ten minutes while /api/search/* stayed up. A signed-OUT visitor on
+     * /search?q=273h saw nineteen correct cards throughout. The admin who
+     * reported it saw "We couldn't load products" — because the storefront paints
+     * twice for an admin (public first, then a repaint when 'admin-preview:ready'
+     * fires, shop-page.js), and the second pass went to the mirror and failed.
+     * The error pane replaced a page that had already rendered correctly.
+     *
+     * SCOPE. The fallback is the rule and NOT_FOUND is the single exception.
+     *
+     * That shape is not invented here — it is AdminPreview's own policy, applied
+     * one moment later. Every state it can end in other than 'granted'
+     * ('unknown', 'anonymous', 'refused', 'unreachable', 'unsupported') already
+     * routes publicly; a mirror that starts failing after the grant is the same
+     * situation arriving late, and it should get the same answer. So a 5xx, a
+     * 429, a 401/403 from a session that lapsed mid-visit, and a throw (non-JSON
+     * 5xx / network / timeout) all degrade to the shopper's catalogue.
+     *
+     * NOT_FOUND is excluded because an absent /api/admin/catalog/* route is
+     * precisely the 'unsupported' state AdminPreview exists to SHOUT about —
+     * "admin-only products cannot be shown", which is emphatically not "there
+     * are none". Quietly serving the shopper's catalogue is what would hide it,
+     * and silence on a route nobody implemented is how ERR-166 ran for months.
+     *
+     * KEYED ON THE CODE, NEVER ON THE STATUS. An earlier draft of this gated on
+     * `status >= 500`, which looked equivalent and was not: `request()` sets
+     * `status` on the 5xx envelope ALONE (:471-478), so 401/403/404/429 were
+     * being excluded by a field that happens to be absent rather than by a
+     * decision. Red-proofing caught it — the code list underneath could be
+     * deleted without a single test going red. A backend that started stamping
+     * `status` on those envelopes would have silently inverted the behaviour.
+     *
+     * WHAT THIS DOES NOT DO. It does not tell the admin they are now looking at
+     * the shopper's view; AdminPreview owns that notice, and this warns to the
+     * console. It prevents a dead page, which is the failure that was reported.
+     *
+     * The cost of the fallback is one extra request, paid only by an admin, only
+     * when the mirror is already failing.
+     *
+     * @param {{endpoint: string, anonymous: boolean}} route - from _catalogRoute.
+     * @param {string} publicEndpoint - the endpoint _catalogRoute was given.
+     * @param {(ep: string, anonymous: boolean) => Promise<object>} run - performs one read.
+     */
+    async _catalogReadWithPublicFallback(route, publicEndpoint, run) {
+        if (route.anonymous) return run(publicEndpoint, true);
+
+        const worthRetryingPublicly = (resp, err) => {
+            if (err) return true;
+            if (!resp || resp.ok === true) return false;
+            return resp.code !== 'NOT_FOUND';
+        };
+
+        let resp = null;
+        let err = null;
+        try { resp = await run(route.endpoint, false); } catch (e) { err = e; }
+
+        if (!worthRetryingPublicly(resp, err)) {
+            if (err) throw err;
+            return resp;
+        }
+
+        DebugLog.warn(
+            `[API] admin catalogue mirror failed for ${route.endpoint} ` +
+            `(${err ? 'threw: ' + (err && err.message) : 'status ' + (resp && resp.status)}) — ` +
+            'retrying once on the public route so an admin degrades to what a shopper sees (ERR-264).');
+
+        try {
+            return await run(publicEndpoint, true);
+        } catch (publicErr) {
+            // Both legs are down. Surface the ORIGINAL failure: it is the one that
+            // describes the request we actually meant to make, and swapping in the
+            // fallback's error would misreport which route the admin was on.
+            if (err) throw err;
+            throw publicErr;
+        }
+    },
+
+    /**
      * The REAL number of products behind a brand+category link.
      *
      * WHY THIS IS NOT `getShopData`. Two reasons, both measured (ERR-215):
@@ -963,6 +1053,10 @@ const API = {
     purgeCatalogCache() {
         this._swrCache.clear();
         this._swrInflight.clear();
+        // ERR-266 — the manual-code layer is catalogue data too, and it outlived
+        // every purge: an identity change or a deliberate flush left up to 60s of
+        // the previous identity's overrides in place.
+        this._manualCodeCache.clear();
         const preview = (typeof window !== 'undefined') ? window.AdminPreview : null;
         if (preview) {
             preview.state = 'unknown';
@@ -993,6 +1087,28 @@ const API = {
         // reintroduce exactly the bug this flag exists to prevent.
         const fetcher = anonymous ? (ep) => this.getPublic(ep) : (ep) => this.get(ep);
 
+        // ERR-264 — AN ERROR ENVELOPE IS NOT A CACHEABLE ANSWER.
+        //
+        // `request()` RESOLVES `{ ok: false, status: 5xx }` for a structured
+        // error rather than throwing, so both `.then` handlers below used to
+        // memoise a backend failure like any other body. Two consequences, and
+        // the second is worse than the first:
+        //
+        //   MISS PATH. A 500 was cached for SWR_TTL_MS (60s), so the Retry
+        //   button on the error pane re-read the failure out of memory and
+        //   never touched the network. Measured in a browser 2026-09-17: the
+        //   page showed "We couldn't load products", the backend recovered,
+        //   Try again was pressed — and nothing happened. The one control the
+        //   shopper is given was inert during the only window it is for.
+        //
+        //   STALE PATH. A background revalidation that came back 5xx REPLACED
+        //   good stale data with the failure. The `.catch()` beside it already
+        //   says "keep stale on failure" — it simply never fired, because the
+        //   commonest failure does not throw.
+        //
+        // The two shapes now agree. Nothing negative is ever written here.
+        const isCacheable = (env) => !!env && env.ok !== false;
+
         if (cached && (now - cached.timestamp) < ttl) {
             return this._swrClone(cached.data);
         }
@@ -1002,6 +1118,11 @@ const API = {
             if (!this._swrInflight.has(endpoint)) {
                 const p = fetcher(endpoint)
                     .then(fresh => {
+                        // Keep the stale-but-good copy rather than overwriting it
+                        // with an error, and stay quiet: `swr:update` listeners
+                        // re-render from the payload, so announcing a failure here
+                        // would repaint a working page with one (ERR-264).
+                        if (!isCacheable(fresh)) return fresh;
                         this._swrCache.set(endpoint, { data: fresh, timestamp: Date.now() });
                         try {
                             window.dispatchEvent(new CustomEvent('swr:update', { detail: { endpoint, data: fresh } }));
@@ -1020,7 +1141,12 @@ const API = {
         if (!inflight) {
             inflight = fetcher(endpoint)
                 .then(data => {
-                    this._swrCache.set(endpoint, { data, timestamp: Date.now() });
+                    // A failure is returned to THIS caller but never memoised, so
+                    // the next attempt — the Retry button, a re-navigation — is a
+                    // real request (ERR-264).
+                    if (isCacheable(data)) {
+                        this._swrCache.set(endpoint, { data, timestamp: Date.now() });
+                    }
                     return data;
                 })
                 .finally(() => this._swrInflight.delete(endpoint));
@@ -1053,8 +1179,9 @@ const API = {
         // the mirror route exists (ERR-234). Everyone else takes the line below,
         // unchanged.
         const route = this._catalogRoute(ep);
-        if (!route.anonymous) return this.getWithSWR(route.endpoint, { anonymous: false });
-        return this.getWithSWR(ep, { anonymous: true });
+        // ERR-264 — a failing mirror degrades to the public route, once.
+        return this._catalogReadWithPublicFallback(route, ep,
+            (endpoint, anonymous) => this.getWithSWR(endpoint, { anonymous }));
     },
 
     /**
@@ -1109,9 +1236,9 @@ const API = {
         // whose rows are merged for ranking, and an admin-only row has no
         // business entering that merge.
         const shopRoute = this._catalogRoute(shopEndpoint);
-        const primaryPromise = shopRoute.anonymous
-            ? this.getWithSWR(shopEndpoint, { anonymous: true })
-            : this.getWithSWR(shopRoute.endpoint, { anonymous: false });
+        // ERR-264 — a failing mirror degrades to the public route, once.
+        const primaryPromise = this._catalogReadWithPublicFallback(shopRoute, shopEndpoint,
+            (endpoint, anonymous) => this.getWithSWR(endpoint, { anonymous }));
         let sidecarPromise = null;
         if (eligibleForRecovery) {
             const fbEndpoint = this.catalogEndpoint('/api/products', {
@@ -1614,6 +1741,19 @@ const API = {
         return undefined;
     },
     _manualCodeCacheSet(key, value) {
+        // ERR-266 — NEVER MEMOISE A FAILED READ. `_supabaseSelect` returns null on
+        // missing config, on !res.ok and on a throw, and NEVER as a legitimate
+        // answer — a select that matched nothing returns []. `_manualCodeCacheGet`
+        // treats only `undefined` as a miss, so caching that null pinned a transient
+        // Supabase blip in place for the full 60s TTL, and the retry read the
+        // failure back out of memory instead of asking again. Same shape as the SWR
+        // cache ERR-264 fixed at :1107; this is the layer that was missed.
+        //
+        // Fixed HERE rather than at the three call sites (:1761, :1797, :1833)
+        // because there is no version of this that is right at two of them and
+        // wrong at the third — and a grep for one spelling is how ERR-259 shipped
+        // with four of five sites unfixed.
+        if (value === null || value === undefined) return value;
         if (this._manualCodeCache.size > 240) this._manualCodeCache.clear();
         this._manualCodeCache.set(key, { at: Date.now(), value });
         return value;
@@ -2734,8 +2874,14 @@ const API = {
         });
         // Admin mirror (ERR-234). getPublic below is unchanged for everyone else.
         const route = this._catalogRoute(endpoint);
-        if (!route.anonymous) return this.get(route.endpoint, { identify: true });
-        return this.getPublic(endpoint, { identify: true });
+        // ERR-264 — a failing mirror degrades to the public route, once. This is
+        // the exact path the reported /search?q=273h failure came down: /smart was
+        // healthy for shoppers the whole time and only the admin's mirrored copy
+        // of it failed.
+        return this._catalogReadWithPublicFallback(route, endpoint,
+            (ep, anonymous) => (anonymous
+                ? this.getPublic(ep, { identify: true })
+                : this.get(ep, { identify: true })));
     },
 
     /* identifySearch() WAS HERE, AND IS GONE ON PURPOSE (ERR-253, 2026-09-10).
@@ -4223,26 +4369,53 @@ function calculateGST(inclusiveAmount) {
 const OOS_STOCK_LABEL = 'Contact Us For Stock Enquiries';
 
 function getStockStatus(product) {
-    // contact-button-may2026.md / stock-enquiry-may2026 — for an out-of-stock
-    // product the inline pill spells out the action, "Contact Us For Stock
-    // Enquiries", instead of a bare "Out of stock" status. The class name
-    // 'contact-us' is intentionally retained so existing CSS keeps working;
-    // components.css lets this longer copy wrap inside the card footer row.
-    if (product.stock_status === 'contact_us') {
-        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone' };
+    const p = product || {};
+    // ERR-263 — ONE precedence order for every surface. Until now this function
+    // (the pill) read stock_status first while the card CTA in products.js and
+    // shop-page.js read in_stock first, so a row carrying stock_status:'in_stock'
+    // together with in_stock:false rendered an "In Stock" pill directly above a
+    // "Contact us" button on the same card. Every CTA now derives from this
+    // function, so the two can no longer disagree.
+    //
+    // 1. in_stock === false is the backend's explicit NEGATIVE and outranks
+    //    everything, including a positive stock_quantity. Never offer a unit the
+    //    backend says we do not have.
+    if (p.in_stock === false) {
+        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone', known: true };
     }
-    if (product.stock_status === 'out_of_stock') {
-        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone' };
+    // 2. stock_status is TRI-state (in_stock | out_of_stock | contact_us).
+    //    contact_us is a deliberate merchandising decision, never a number, and
+    //    is never derived from stock_quantity.
+    if (p.stock_status === 'contact_us' || p.stock_status === 'out_of_stock') {
+        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone', known: true };
     }
-    if (product.stock_status === 'in_stock') {
-        return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
+    if (p.stock_status === 'in_stock') {
+        return { class: 'in-stock', text: 'In Stock', icon: 'check-circle', known: true };
     }
-    // Fallback for endpoints that don't return stock_status (listing, search)
-    const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
-    if (!inStock) {
-        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone' };
+    // 3. The listing and typeahead endpoints carry no stock_status at all —
+    //    /api/products and /api/search/smart send in_stock + stock_quantity,
+    //    /api/search/suggest sends stock_quantity alone (all measured live).
+    if (p.in_stock === true) {
+        return { class: 'in-stock', text: 'In Stock', icon: 'check-circle', known: true };
     }
-    return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
+    // 4. Absence of ALL THREE is a THIRD STATE, not a zero. `undefined > 0` is
+    //    false, and that false is indistinguishable from a real out-of-stock, so
+    //    a payload that merely stopped sending the field would pull the buy
+    //    button off every card silently. search.js adaptForCard backfills no
+    //    stock field, so the typeahead is one backend change away from exactly
+    //    that. Say it out loud and keep selling; `known: false` carries the
+    //    partial-ness in the RETURN VALUE so callers can see it.
+    if (p.stock_status == null && p.in_stock == null && p.stock_quantity == null) {
+        if (typeof DebugLog !== 'undefined') {
+            DebugLog.error('getStockStatus: row carries no stock_status, in_stock or stock_quantity — treating as available (ERR-263)',
+                p.sku || p.id || '(unidentified row)');
+        }
+        return { class: 'in-stock', text: 'In Stock', icon: 'check-circle', known: false };
+    }
+    if (!(p.stock_quantity > 0)) {
+        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone', known: true };
+    }
+    return { class: 'in-stock', text: 'In Stock', icon: 'check-circle', known: true };
 }
 
 /**

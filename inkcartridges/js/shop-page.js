@@ -500,9 +500,29 @@
             // normal navigationVersion guard, so a repaint that lands after the
             // shopper has navigated away is discarded like any other stale load.
             try {
-                window.addEventListener('admin-preview:ready', () => {
-                    this.navigationVersion++;
-                    this.loadCurrentLevel(this.navigationVersion);
+                window.addEventListener('admin-preview:ready', async () => {
+                    // ERR-264 — THE REPAINT MAY NOT DESTROY A GOOD PAGE.
+                    //
+                    // This second pass exists only to ADD admin-only rows to a grid
+                    // the shopper's route already rendered. If it fails it has
+                    // nothing to contribute, and the correct outcome is the page the
+                    // admin is already looking at — not an error pane over it. That
+                    // inversion is exactly what was reported: a signed-out visitor
+                    // saw nineteen cards on /search?q=273h while the admin saw
+                    // "We couldn't load products", because the mirror leg of the
+                    // repaint failed and showError() painted over a good render.
+                    //
+                    // api.js now degrades a failing mirror to the public route
+                    // (_catalogReadWithPublicFallback), so this flag is the second
+                    // line of defence, not the first. Both are wanted: the fallback
+                    // fixes the cause, this fixes the blast radius.
+                    this._adminRepaint = true;
+                    try {
+                        this.navigationVersion++;
+                        await this.loadCurrentLevel(this.navigationVersion);
+                    } finally {
+                        this._adminRepaint = false;
+                    }
                 }, { once: true });
             } catch (_) { /* no window (tests) */ }
 
@@ -1240,8 +1260,74 @@
         // (so the user gets immediate visual feedback, not a flash to empty
         // and back). bfcache guard: same `_unloading` check as showEmpty so a
         // mid-unload reject can't poison the snapshot.
+        /**
+         * Is there already a rendered grid or chip wall on screen? (ERR-264)
+         *
+         * Asks the DOM, not a flag: the flag would have to be cleared on every
+         * path that empties these containers, and a stale "yes" would suppress a
+         * legitimate error pane. `hidden` plus real children is the same test the
+         * shopper's eye makes.
+         */
+        _hasRenderedCatalogue() {
+            const populated = (el) => !!(el && !el.hidden && el.children && el.children.length > 0);
+            return populated(this.elements.genuineProducts)
+                || populated(this.elements.compatibleProducts)
+                || populated(this.elements.levelCodes);
+        },
+
+        /**
+         * Is the retryable error pane currently on screen? (ERR-266)
+         *
+         * Asked of the DOM for the same reason as _hasRenderedCatalogue above: the
+         * only instance flag that tracks a degraded load, `_chipsDegraded`, is set
+         * in two places and cleared in none, so a stale "yes" would suppress a
+         * legitimate empty pane on the next navigation.
+         *
+         * What makes the DOM read trustworthy is loadCurrentLevel's own invariant:
+         * hideAllLevels() runs before EVERY level loader (:1152) and hides this pane
+         * (:1201), and showError's Try again hides it again before re-running the
+         * loader. So a pane that is visible when we look belongs to the navigation
+         * currently in flight — never to the previous one.
+         */
+        _errorPaneShowing() {
+            const el = this.elements.error;
+            return !!(el && el.hidden === false);
+        },
+
+        /**
+         * Did this catalogue read FAIL, as opposed to honestly returning nothing?
+         * (ERR-266)
+         *
+         * KEYED ON THE CODE, NEVER ON THE STATUS — the same trap api.js:953-959
+         * documents. `request()` stamps `status` on the 5xx envelope ALONE
+         * (api.js:471-478), so a `status >= 500` test would exclude 401/403/404 and
+         * every thrown RATE_LIMITED by a field that merely happens to be absent,
+         * and would silently interpret them as "no products". A guard that can only
+         * be right by accident is the defect, not the fix.
+         *
+         * NOT_FOUND is excluded deliberately: an absent route or an unknown code is
+         * a real answer meaning "we have none of that", and dressing it up as an
+         * outage would hide it behind a Try again button that can never succeed.
+         * Same boundary as _catalogReadWithPublicFallback (api.js:975-979).
+         */
+        _isCatalogueFailure(resp) {
+            if (!resp) return true;             // nothing came back at all
+            if (resp.ok === true) return false; // an answer, even an empty one
+            return resp.code !== 'NOT_FOUND';
+        },
+
         showError(message, onRetry) {
             if (this._unloading) return;
+            // ERR-264 — an admin-preview repaint that failed keeps the page it was
+            // given. See the listener in init() for why. Deliberately NOT silent:
+            // an admin whose mirror is down is looking at the shopper's catalogue,
+            // which is a real (if benign) degradation and belongs in the console.
+            if (this._adminRepaint && this._hasRenderedCatalogue()) {
+                DebugLog.warn(
+                    '[Shop.showError] suppressed during an admin-preview repaint — a grid is ' +
+                    `already rendered, so the admin keeps the shopper's view. Message was: ${message}`);
+                return;
+            }
             if (!this.elements.error) {
                 // Defensive fallback for legacy DOMs that haven't picked up
                 // the new pane yet — degrade to the empty state rather than
@@ -2040,6 +2126,15 @@
                 }
 
                 let codes = null;
+                // ERR-264 — "we could not ask" is a THIRD state, distinct from both
+                // "here are the products" and "there are none". It is set by the
+                // legacy product walk below and read once, at the render decision, so
+                // a backend outage cannot be mistaken for an empty catalogue.
+                let productsUnavailable = false;
+                // The freshly-built legacy set, held separately from the cache so a
+                // failed walk can still paint whatever partial data it has without
+                // that partial data becoming the session's cached answer.
+                let freshLegacyProducts = null;
 
                 if (this._shopEndpointAvailable) {
                     // Use /api/shop endpoint for server-side series extraction
@@ -2102,22 +2197,63 @@
                         const categoryConfig = this.categories.find(c => c.id === this.state.category);
                         const legacyApiCategory = categoryConfig?.apiCategory || this.state.category;
 
+                        // ERR-264 — A FAILED PAGE IS NOT THE LAST PAGE.
+                        //
+                        // `API.getProducts` has the same two failure shapes as every
+                        // other read on this client (ERR-188/216): it RESOLVES
+                        // `{ ok: false, status: 5xx }` for a structured error
+                        // (api.js:471) and it THROWS for a non-JSON body, a network
+                        // drop or a timeout (api.js:333, :210). This loop answered
+                        // both with `hasMore = false` and handed back whatever it had,
+                        // so a backend outage reached the caller as a perfectly
+                        // ordinary EMPTY CATALOGUE — and the page said "No products
+                        // found for this category."
+                        //
+                        // Measured live 2026-09-17: every route in the /api/products
+                        // and /api/shop family 500'd for ~10 minutes, INCLUDING
+                        // `?limit=1` with no filters at all, and
+                        // /shop?brand=epson&category=ink rendered the empty pane with
+                        // no error and no Try again while three of its calls failed.
+                        //
+                        // The partial-ness now lives in the RETURN VALUE, the same
+                        // shape ERR-216 gave the chip grid a hundred lines up.
+                        // `failed` is sticky across pages: a walk that dies on page 3
+                        // holds three real pages and an unknown tail, which is not the
+                        // same object as a complete two-page answer.
+                        //
+                        // A 200 whose envelope simply carries no `products` array is
+                        // NOT counted as a failure — that is an empty answer, and
+                        // calling it an outage would paint a red pane over a brand
+                        // that genuinely stocks nothing.
                         const fetchAllProducts = async (params) => {
                             let allProducts = [];
                             let page = 1;
                             let hasMore = true;
+                            let failed = false;
+                            let status = null;
                             while (hasMore) {
-                                const response = await API.getProducts({ ...params, page, limit: 100 });
-                                if (response.ok && response.data?.products) {
+                                let response;
+                                try {
+                                    response = await API.getProducts({ ...params, page, limit: 100 });
+                                } catch (fetchErr) {
+                                    failed = true;
+                                    status = (fetchErr && fetchErr.status) || null;
+                                    break;
+                                }
+                                if (!response || response.ok !== true) {
+                                    failed = true;
+                                    status = (response && response.status) || null;
+                                    hasMore = false;
+                                } else if (Array.isArray(response.data?.products)) {
                                     allProducts = allProducts.concat(response.data.products);
                                     const pagination = response.data.pagination;
-                                    hasMore = pagination && page < pagination.total_pages;
+                                    hasMore = !!(pagination && page < pagination.total_pages);
                                     page++;
                                 } else {
                                     hasMore = false;
                                 }
                             }
-                            return allProducts;
+                            return { products: allProducts, failed, status };
                         };
 
                         // Trust product.brand.slug — backend canonical field
@@ -2139,32 +2275,48 @@
                             apiParams.source = this.state.type;
                         }
 
+                        // ERR-264 — a FAILED walk is never retried under the display
+                        // name. That retry exists for a brand whose slug the backend
+                        // does not recognise; "the server is down" is not that.
+                        // Measured 2026-09-17: /api/products?brand=Epson (the display
+                        // name) answers `200 {"total":0}` while ?brand=epson returns
+                        // rows — so retrying an outage here buys a second zero that is
+                        // indistinguishable from a real one, and burns a round trip.
+                        const FAILED_WALK = () => ({ products: [], failed: true, status: null });
                         const brandFetchPromise = fetchAllProducts(apiParams)
-                            .then(async (results) => {
-                                if (results.length === 0) {
-                                    apiParams.brand = brandName;
-                                    return fetchAllProducts(apiParams);
-                                }
-                                return results;
+                            .then(async (walk) => {
+                                if (walk.failed || walk.products.length > 0) return walk;
+                                apiParams.brand = brandName;
+                                return fetchAllProducts(apiParams);
                             })
-                            .catch(() => []);
+                            .catch(FAILED_WALK);
 
                         const searchPromises = [
-                            fetchAllProducts({ search: brandName }).catch(() => [])
+                            fetchAllProducts({ search: brandName }).catch(FAILED_WALK)
                         ];
                         if (this.state.brand === 'fuji-xerox') {
                             for (const variant of ['Fuji-Xerox', 'FujiXerox', 'Xerox']) {
-                                searchPromises.push(fetchAllProducts({ search: variant }).catch(() => []));
+                                searchPromises.push(fetchAllProducts({ search: variant }).catch(FAILED_WALK));
                             }
                         }
 
                         const settled = await Promise.allSettled([brandFetchPromise, ...searchPromises]);
-                        const [brandResult, ...searchResults] = settled.map(r => r.status === 'fulfilled' ? r.value : []);
-                        let searchProducts = searchResults.flat();
+                        const [brandResult, ...searchResults] = settled.map(
+                            r => (r.status === 'fulfilled' ? r.value : FAILED_WALK()));
+
+                        // ERR-264 — ONLY THE PRIMARY BRAND WALK DECIDES. The
+                        // brand-name and variant searches beside it are compat-recovery
+                        // sidecars: they have always been allowed to fail silently
+                        // (they are `.catch()`-wrapped by design, and have been since
+                        // this path was written) and the page is correct without them.
+                        // Letting a sidecar raise the error pane would put a red screen
+                        // over a complete, correct chip grid.
+                        productsUnavailable = !!brandResult.failed;
+                        let searchProducts = searchResults.flatMap(w => w.products);
 
                         if (searchProducts.length === 0) {
                             try {
-                                searchProducts = await fetchAllProducts({ search: brandName });
+                                searchProducts = (await fetchAllProducts({ search: brandName })).products;
                             } catch (searchError) { /* continue */ }
                         }
 
@@ -2181,13 +2333,23 @@
 
                         const seenIds = new Set();
                         const allProducts = [];
-                        for (const p of [...brandResult, ...compatibleProducts]) {
+                        for (const p of [...brandResult.products, ...compatibleProducts]) {
                             if (!seenIds.has(p.id)) { seenIds.add(p.id); allProducts.push(p); }
                         }
-                        this.cache.products[legacyCacheKey] = allProducts;
+                        // ERR-264 — NEVER MEMOISE AN OUTAGE. `legacyCacheKey` is read
+                        // on every later visit to this brand+category in the SPA
+                        // session, so writing a set the backend never actually supplied
+                        // turns a ten-minute blip into a permanently empty brand page
+                        // until a hard reload. `freshLegacyProducts` carries the
+                        // partial set to the render below WITHOUT it becoming the
+                        // answer every subsequent navigation reads.
+                        freshLegacyProducts = allProducts;
+                        if (!productsUnavailable) {
+                            this.cache.products[legacyCacheKey] = allProducts;
+                        }
                     }
 
-                    let allProducts = this.cache.products[legacyCacheKey];
+                    let allProducts = this.cache.products[legacyCacheKey] || freshLegacyProducts || [];
                     allProducts = allProducts.filter(p => {
                         const productType = (p.product_type || '').toLowerCase();
                         if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
@@ -2224,10 +2386,37 @@
                     codes = window.SeriesCodes.collapseChipList(codes);
                 }
 
-                // Cache the final codes with counts
-                this.cache.products[codesCacheKey] = codes;
+                // Cache the final codes with counts — but ONLY when they describe
+                // an answer the backend actually gave (ERR-264). `codesCacheKey` is
+                // consulted at the top of this function on every later visit (:2029),
+                // so memoising an outage-derived [] is precisely what makes a
+                // transient 500 look permanent for the rest of the session.
+                if (!productsUnavailable) {
+                    this.cache.products[codesCacheKey] = codes;
+                }
 
-                if (codes.length === 0) {
+                if (productsUnavailable) {
+                    // ERR-264 — partial-ness is LOUD even when something rendered.
+                    this._chipsDegraded = true;
+                    DebugLog.error(
+                        `[Shop.loadProductCodes] product fetch FAILED (brand=${this.state.brand}, ` +
+                        `category=${this.state.category}); built ${codes.length} chips from whatever ` +
+                        'arrived. Nothing was cached, so a retry can succeed.');
+                }
+
+                if (productsUnavailable && codes.length === 0) {
+                    // ERR-264 — A FETCH THAT NEVER LANDED IS AN ERROR, NOT AN EMPTY
+                    // CATALOGUE. showError() is the pane that says so, and it is the
+                    // very one this function's own catch already uses (:2290) — a
+                    // structured 5xx simply never reached it, because API.request()
+                    // RESOLVES those rather than throwing (api.js:471-478). So the
+                    // commonest backend failure of all took the one path that had no
+                    // error state, and the shopper was told the brand was empty.
+                    this.showError(
+                        "We couldn't load products. The server may be warming up — please try again.",
+                        (v) => this.loadProductCodes(v)
+                    );
+                } else if (codes.length === 0) {
                     this.showEmpty('No products found for this category.');
                 } else if (this.state.category === 'paper') {
                     // Paper categories: skip code selection, show all products with images directly
@@ -2268,7 +2457,16 @@
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
                     if (genuine.length === 0 && compatible.length === 0) {
-                        this.showEmpty('No products found for this category.');
+                        // ERR-264 — same rule as the chip grid above: an empty screen
+                        // that came from a failed fetch is an error, not an answer.
+                        if (productsUnavailable) {
+                            this.showError(
+                                "We couldn't load products. The server may be warming up — please try again.",
+                                (v) => this.loadProductCodes(v)
+                            );
+                        } else {
+                            this.showEmpty('No products found for this category.');
+                        }
                     } else {
                         this.state.level = 'products';
                         this.elements.levelProducts.hidden = false;
@@ -2819,6 +3017,19 @@
 
                 let mergedProducts = this.cache.products[productCacheKey] || [];
 
+                // ERR-266 — "we could not ask" is a THIRD state, distinct from both
+                // "here are the products" and "there are none". This is the same rule
+                // the chip grid one level up already follows (:2087-2092), which
+                // ERR-264 established and this level was simply left out of: every
+                // failure shape below used to fall through to
+                // showEmpty('No products found for this code.') and tell the shopper
+                // the shelf was bare while the catalogue was perfectly healthy.
+                //
+                // `unavailableCode` carries WHICH failure, because RATE_LIMITED needs
+                // different copy from a 5xx — see the render decision at the bottom.
+                let productsUnavailable = false;
+                let unavailableCode = null;
+
                 if (mergedProducts.length === 0) {
                     // Try the codes cache, newest first
                     // (v9 Jul 2026 truncated-code repair, v8 series_codes-only extractor,
@@ -2862,7 +3073,19 @@
                                 category: loadApiCategory,
                                 code: alias,
                                 limit: 200
-                            }).catch(() => null)
+                            // ERR-266 — a throw is a FAILED ASK, not an empty shelf.
+                            // This used to be `.catch(() => null)`, which erased the
+                            // difference. api.js throws for a non-JSON 5xx (:326-343),
+                            // for a network drop or the 15s timeout, and for
+                            // RATE_LIMITED (:128-132) — and that last one an admin
+                            // meets routinely, because /api/admin/catalog/* is served
+                            // `private, no-store` and so spends the shared 100-per-60s
+                            // origin budget on EVERY read, where a shopper rides an
+                            // edge HIT that costs nothing.
+                            }).catch((err) => ({
+                                ok: false,
+                                code: (err && err.code) || 'FETCH_FAILED',
+                            }))
                         ));
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
@@ -2875,6 +3098,13 @@
                                     seenIds.add(key);
                                     mergedProducts.push(p);
                                 }
+                            } else if (this._isCatalogueFailure(response)) {
+                                // A RESOLVED {ok:false} envelope lands here too — it
+                                // used to be discarded by the `response.ok` test above
+                                // without leaving a trace, which is exactly how the
+                                // commonest backend failure of all became "no products".
+                                productsUnavailable = true;
+                                if (!unavailableCode) unavailableCode = response && response.code;
                             }
                         }
                     }
@@ -2882,6 +3112,15 @@
                     // Legacy fallback: trigger loadProductCodes to populate cache
                     if (mergedProducts.length === 0) {
                         await this.loadProductCodes(navVersion);
+                        // ERR-266 — DO NOT PAINT OVER AN ERROR SOMEONE ELSE RAISED.
+                        // ERR-264 taught loadProductCodes to put up a retryable error
+                        // pane when its walk failed; this function then ran on to
+                        // showEmpty() at the bottom, which hides that pane (:1248) —
+                        // so the fix was defeated on precisely this route. Adopting
+                        // its verdict keeps ONE owner of the final pane: the decision
+                        // below. Asked of the DOM rather than a flag, for the reason
+                        // _hasRenderedCatalogue() documents at :1264-1270.
+                        if (this._errorPaneShowing()) productsUnavailable = true;
                         this.elements.levelCodes.hidden = true;
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
@@ -2901,9 +3140,27 @@
                         }
                     }
 
-                    // Cache the fetched products for this code
-                    if (mergedProducts.length > 0) {
+                    // Cache the fetched products for this code.
+                    //
+                    // ERR-266 — NEVER MEMOISE AN OUTAGE, same rule as :2306. The
+                    // length test alone is not enough: with a yield-variant fan-out
+                    // one alias can answer while another 429s, and caching that
+                    // partial set under `productCacheKey` would freeze a 27-second
+                    // rate-limit window into the answer for the rest of the session.
+                    // The partial set still RENDERS — fail-soft — it just never
+                    // becomes what the next navigation reads.
+                    if (mergedProducts.length > 0 && !productsUnavailable) {
                         this.cache.products[productCacheKey] = mergedProducts;
+                    } else if (mergedProducts.length > 0) {
+                        // Partial-ness belongs in the STATE, not only in a log line
+                        // — the rule ERR-063/068/073/075/076/149/150 keeps re-teaching.
+                        // `_chipsDegraded` is the same flag one level up (:2400).
+                        this._productsDegraded = true;
+                        DebugLog.error(
+                            `[Shop.loadProducts] PARTIAL result for code=${code} ` +
+                            `(brand=${this.state.brand}): showing ${mergedProducts.length} row(s) from the ` +
+                            `aliases that answered, but at least one failed (${unavailableCode || 'unknown'}). ` +
+                            'Nothing was cached, so a retry can succeed.');
                     }
                 }
 
@@ -2991,7 +3248,22 @@
                 this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
 
                 if (genuine.length === 0 && compatible.length === 0) {
-                    this.showEmpty('No products found for this code.');
+                    // ERR-266 — an empty screen that came from a failed fetch is an
+                    // ERROR, not an answer. Same decision as the chip grid at :2419
+                    // and the printer level at :3246, which both already got this
+                    // right; the code level was the one that never did.
+                    if (productsUnavailable) {
+                        this.showError(
+                            unavailableCode === 'RATE_LIMITED'
+                                ? "We're handling a lot of requests right now. Please wait a moment and try again."
+                                : "We couldn't load products for this code. The server may be warming up — please try again.",
+                            (v) => this.loadProducts(v)
+                        );
+                    } else {
+                        // The positive control this branch exists for: a code that
+                        // genuinely has no rows must still say so, in these words.
+                        this.showEmpty('No products found for this code.');
+                    }
                 } else {
                     this.elements.levelProducts.hidden = false;
                 }
@@ -3614,7 +3886,27 @@
                                 : Promise.resolve([]),
                         ]);
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                        const fallbackProducts = (fallback?.ok && fallback.data?.products) ? fallback.data.products : [];
+                        // ERR-264 — DISTINGUISH "the literal search found nothing"
+                        // from "the literal search never ran". Both used to arrive
+                        // here as `[]`, and that empty array then fed the swap
+                        // decision below as if it were a measurement. On a
+                        // /api/products outage (measured 2026-09-17, the whole family
+                        // 500'd for ten minutes) the softMiss comparison
+                        // `mergedSplit.direct.length > directCount` was being made
+                        // against a literal set that did not exist, and the hijack /
+                        // hardMiss arms would have declined a swap they had no
+                        // evidence either way about.
+                        //
+                        // A 5xx RESOLVES as `{ ok: false }` here (api.js:471-478) —
+                        // it does not throw — so nothing upstream noticed.
+                        const fallbackFailed = !fallback || fallback.ok !== true;
+                        const fallbackProducts = (!fallbackFailed && fallback.data?.products) ? fallback.data.products : [];
+                        if (fallbackFailed) {
+                            DebugLog.warn(
+                                `[Shop.loadSearchResults] literal fallback unavailable for "${searchQuery}" ` +
+                                `(status ${fallback && fallback.status}); keeping /smart's results rather than ` +
+                                'swapping against a result set we never received.');
+                        }
                         // Union dropdown shortlist + full literal set, dropdown
                         // order first, deduped — guarantees the results page is
                         // a superset of (never a subset of) the dropdown.
@@ -3674,11 +3966,22 @@
                         // /smart's three badged rows; post-99d798b /suggest
                         // returned those same three ribbons, 3 > 0 swapped, and
                         // the page rendered them stripped of their chips.
+                        //
+                        // ERR-264 — when the literal leg FAILED, decline every swap
+                        // that rests on comparing the two sets. `exactMode` is the one
+                        // exception and it is deliberate: the shopper explicitly asked
+                        // for the raw query ("Search instead for X"), and honouring it
+                        // with /api/search/suggest alone is still honouring it —
+                        // re-correcting them back into the loop would be worse. Every
+                        // other arm is a comparison, and a comparison against a set we
+                        // never received is not a comparison.
                         const shouldUseFallback = exactMode
                             ? true
-                            : (hijack || hardMiss)
-                                ? mergedUsed.length > 0
-                                : mergedSplit.direct.length > directCount;
+                            : fallbackFailed && mergedUsed.length === 0
+                                ? false
+                                : (hijack || hardMiss)
+                                    ? mergedUsed.length > 0
+                                    : mergedSplit.direct.length > directCount;
                         if (shouldUseFallback) {
                             // ERR-133 — carry the compat rows across. Assigning the
                             // literal union raw is what deleted the ribbons on every
@@ -3730,7 +4033,13 @@
                             // and would have restored a pager over a curated page.
                             if (!mergedFiltered && preservedCompat.length === 0
                                 && mergedSplit.compat.length === 0
-                                && fallback.meta && fallback.meta.total_pages != null) {
+                                // ERR-264 — optional-chained to match the guard the
+                                // same object gets above. `fallback` is only non-null
+                                // by luck of API.request() resolving an envelope for a
+                                // structured 5xx; a THROWN failure is caught outside
+                                // this block, but a future caller that passes a bare
+                                // null must not take the page down here.
+                                && fallback?.meta && fallback.meta.total_pages != null) {
                                 pagination = {
                                     total: fallback.meta.total,
                                     page: fallback.meta.page,
@@ -4758,7 +5067,7 @@
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
                                 ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}
-                                <span class="product-card__stock product-card__stock--${stockStatus.class}">${stockStatus.text}</span>
+                                <span class="product-card__stock product-card__stock--${stockStatus.class}">${Security.escapeHtml(stockStatus.text)}</span>
                             </div>
                             <div class="product-card__footer-row">
                                 <div class="product-card__pricing">
@@ -4779,10 +5088,10 @@
                                     // nested <a> auto-closes the outer one,
                                     // breaking the layout. The handler below
                                     // navigates to /contact and stops the bubble.
-                                    const oos = product.in_stock === false
-                                        || product.stock_status === 'out_of_stock'
-                                        || product.stock_status === 'contact_us'
-                                        || (product.in_stock === undefined && (product.stock_quantity || 0) <= 0);
+                                    // ERR-263: same object as the pill (stockStatus,
+                                    // via `inStock` above). One precedence order, in
+                                    // getStockStatus() — never re-derived here.
+                                    const oos = !inStock;
                                     if (oos) {
                                         return `<button type="button"
                                                 class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
