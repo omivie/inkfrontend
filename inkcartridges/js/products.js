@@ -235,10 +235,14 @@ const Products = {
                                     // nested <a>, breaking the layout. The button
                                     // handler in attachCardListeners navigates to
                                     // /contact and stops the outer-link bubble.
-                                    const oos = product.in_stock === false
-                                        || product.stock_status === 'out_of_stock'
-                                        || product.stock_status === 'contact_us'
-                                        || (product.in_stock === undefined && (product.stock_quantity || 0) <= 0);
+                                    // ERR-263: the CTA reads the SAME object the pill
+                                    // above it rendered from (stockInfo), so the card
+                                    // can no longer say "In Stock" over a "Contact us"
+                                    // button. The precedence lives in ONE place,
+                                    // getStockStatus() in api.js — do not re-derive it
+                                    // from the raw fields here, which is how the two
+                                    // surfaces drifted apart in the first place.
+                                    const oos = stockInfo.class === 'contact-us';
                                     if (oos) {
                                         return `<button type="button"
                                                 class="product-card__add-btn btn btn--primary product-card__contact-btn"

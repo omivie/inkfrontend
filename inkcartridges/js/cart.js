@@ -3255,12 +3255,17 @@ const Cart = {
             })();
             const price = p.retail_price != null && typeof formatPrice === 'function' ? formatPrice(p.retail_price) : '';
             const crosssellName = (typeof ProductName !== 'undefined') ? ProductName.clean(p) : (p.name || '');
+            // ERR-263: was `p.in_stock === false`, which is only ONE of the
+            // signals that mean "not buyable" — a deliberate contact_us product,
+            // an out_of_stock one, and a row at stock_quantity 0 all slipped
+            // through and showed Add to cart here while every other surface on
+            // the site said Contact us. getStockStatus() is the one vocabulary.
             return `
                 <a class="crosssell-modal__card" href="${Security.escapeAttr(link)}">
                     ${img ? `<img class="crosssell-modal__img" src="${Security.escapeAttr(img)}" alt="${Security.escapeAttr(crosssellName)}" loading="lazy">` : '<div class="crosssell-modal__img crosssell-modal__img--placeholder"></div>'}
                     <div class="crosssell-modal__name">${Security.escapeHtml(crosssellName)}</div>
                     <div class="crosssell-modal__price">${Security.escapeHtml(price)}</div>
-                    ${p.in_stock === false
+                    ${getStockStatus(p).class === 'contact-us'
                         ? `<button type="button"
                             class="btn btn--primary crosssell-modal__add"
                             data-action="contact"
