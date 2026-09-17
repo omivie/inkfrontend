@@ -313,8 +313,11 @@ test('shop-page.js showError honours the bfcache _unloading guard', () => {
 
 test('shop-page.js showError hides the empty pane when showing the error pane', () => {
     // The two panes are mutually exclusive — showError must hide showEmpty's pane.
+    // ERR-264 widened this window: showError now opens with the
+    // admin-preview repaint guard (a failed repaint must not paint over a
+    // grid that already rendered), which sits above the pane swap.
     assert.match(SHOP_PAGE_SRC,
-        /showError\s*\([^)]*\)\s*\{[\s\S]{0,800}this\.elements\.empty\.hidden\s*=\s*true/,
+        /showError\s*\([^)]*\)\s*\{[\s\S]{0,1600}this\.elements\.empty\.hidden\s*=\s*true/,
         'showError must hide the empty pane to avoid stacking');
 });
 

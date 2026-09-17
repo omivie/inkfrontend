@@ -354,8 +354,20 @@ test('§4 getWithSWR resolves its fetcher ONCE so background revalidation stays 
 test('§5 each edge-cached helper is an anonymous read', () => {
     /** helper signature → the marker proving it opted in */
     const cases = [
-        ['async getProducts', /anonymous: true/],
-        ['async getShopData', /anonymous: true/],
+        // ERR-264 — these two (and smartSearch, checked in §9) no longer spell
+        // `anonymous: true` themselves: they hand both legs to
+        // `_catalogReadWithPublicFallback`, which is now the SINGLE place that
+        // decides which endpoint is read with which identity. That is a
+        // strengthening, not a loophole — the rule used to be restated in three
+        // helpers, i.e. three chances to get it wrong, and is now stated once.
+        //
+        // The rule itself is not grepped any more. It is EXECUTED, against the
+        // real lifted method, in tests/catalogue-error-vs-empty-sep2026.test.js
+        // §3 — which asserts the public leg is always read with anonymous===true
+        // and the authenticated leg only ever receives the mirrored endpoint.
+        // If that owner is ever deleted, this marker fails too.
+        ['async getProducts', /_catalogReadWithPublicFallback\(/],
+        ['async getShopData', /_catalogReadWithPublicFallback\(/],
         ['async _productsForCode', /anonymous: true/],
         ['async getProductsByPrinter', /getPublic\(/],
         ['async getColorPacks', /getPublic\(/],
@@ -524,10 +536,23 @@ test('§9 every public catalog/search/ribbon read uses getPublic', () => {
         if (/this\.get\(/.test(body)) {
             assert.match(body, /_catalogRoute\(/,
                 `${sig} calls the authenticated getter, which is only allowed via _catalogRoute (ERR-234)`);
-            // `[,)]` so a caller may pass options alongside — what matters is that
-            // the ROUTED endpoint is the first argument, not that it is the only one.
-            assert.match(body, /this\.get\([A-Za-z_$][\w$]*\.endpoint\s*[,)]/,
-                `${sig} must pass the ROUTED endpoint to the authenticated getter, never an endpoint it built itself`);
+
+            // ERR-264 — a helper may now delegate BOTH legs to
+            // `_catalogReadWithPublicFallback`, which owns the choice of which
+            // endpoint each identity gets. When it does, the endpoint is not a
+            // local expression here to match against; the guarantee moves with
+            // the decision, and is executed (not grepped) in
+            // tests/catalogue-error-vs-empty-sep2026.test.js §3.
+            //
+            // The literal-path check below still applies either way, because it
+            // catches the one mistake that survives delegation: writing a
+            // hard-coded '/api/…' string at this call site.
+            if (!/_catalogReadWithPublicFallback\(/.test(body)) {
+                // `[,)]` so a caller may pass options alongside — what matters is that
+                // the ROUTED endpoint is the first argument, not that it is the only one.
+                assert.match(body, /this\.get\([A-Za-z_$][\w$]*\.endpoint\s*[,)]/,
+                    `${sig} must pass the ROUTED endpoint to the authenticated getter, never an endpoint it built itself`);
+            }
             assert.ok(!/this\.get\(\s*(['"`]|\/api)/.test(body),
                 `${sig} must never hand a literal path to the authenticated getter — that is the token-on-a-cached-URL bug ERR-124 fixed`);
         }

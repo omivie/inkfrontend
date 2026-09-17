@@ -261,8 +261,14 @@ test('soft-miss only swaps when the literal set strictly beats smart count', () 
     // side always was, hence `mergedSplit.direct.length` (mergedSplit is the
     // partition taken after reattachCompatProvenance re-labels the smuggled
     // rows). Both sides direct, or neither.
+    // Sep 17 2026 (ERR-264): a `fallbackFailed && mergedUsed.length === 0`
+    // arm was inserted between `exactMode` and the hijack/hardMiss test, so
+    // that a swap is never DECIDED against a literal set the backend never
+    // returned. The strict-beat rule is, once again, unchanged — only the
+    // gap widened, so the window does. The window is a proximity hint and
+    // has never been the assertion; what is pinned is the ORDER of the arms.
     assert.match(SHOP_CODE,
-        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,80}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,200}mergedSplit\.direct\.length\s*>\s*directCount/);
+        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,400}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,200}mergedSplit\.direct\.length\s*>\s*directCount/);
 });
 
 test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps working', () => {
