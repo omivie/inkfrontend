@@ -66,7 +66,9 @@
     "probe:product-stock": "node scripts/probe-product-stock.mjs",
     "bundle:backend": "node scripts/bundle-backend-outbox.mjs",
     "probe:orders-delivery-type": "node scripts/probe-orders-delivery-type.mjs",
-    "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs"
+    "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs",
+    "probe:stock-freshness": "node scripts/probe-stock-freshness.mjs",
+    "probe:catalogue-outage": "node scripts/probe-catalogue-outage.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

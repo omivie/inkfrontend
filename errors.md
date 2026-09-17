@@ -41,6 +41,388 @@ describing the same incident.
 
 ---
 
+## ERR-266 — A code drilldown that could not fetch was rendered as an empty code — **RESOLVED** (2026-09-17)
+
+**Context.** Owner screenshot of `/shop?brand=brother&category=ink&code=LC431` reading
+**"No products found for this code."**, reported as *"why does the website randomly show that
+we have no products and randomly show that we have products"*. The word that mattered was
+**randomly**.
+
+**The catalogue was never empty.** Eight consecutive live reads returned 18 products for
+LC431, every time, with `cf-cache-status` cycling `MISS → HIT → HIT`. Nothing was missing and
+nothing was intermittent about the data.
+
+**THIS IS ERR-264 ONE LEVEL DOWN, AND THE FIX WAS BEING ACTIVELY UNDONE.** ERR-264 repaired
+`loadProductCodes`, `loadSearchResults`, `showError` and the SWR cache the same day. Its diff
+hunks jump from line 2419 to 3774 — straight over `loadProducts`, which is what a `?code=` URL
+actually runs. That function had no failure state of any kind: `.catch(() => null)` erased every
+thrown failure, `if (response && response.ok && …)` silently discarded every resolved
+`{ok:false}` envelope, and the resulting empty array fell through to
+`showEmpty('No products found for this code.')`. Worse — `loadProducts` falls back to
+`loadProductCodes` (:3117), which ERR-264 had *just* taught to raise a retryable error pane, and
+then ran on to `showEmpty`, **which hides the error pane** (:1248). ***A FIX ONE LEVEL UP IS NOT
+A FIX IF THE CALLER PAINTS OVER IT.*** When you repair a failure path, grep for who calls it and
+what they do afterwards.
+
+**🔴 WHY IT LOOKED RANDOM, AND WHY ONLY THE ADMIN SAW IT.** The origin limiter is
+**100 requests / 60s, per IP, SHARED ACROSS ENDPOINTS** — a read of `/api/products` decrements
+the counter for `/api/shop`, same `x-ratelimit-reset`. A burst of 15 measured **14 × 429**,
+body `{"ok":false,"error":{"code":"RATE_LIMITED"}}`, `retry-after: 27`. And
+`/api/admin/catalog/*` is served `private, no-store, no-cache` (`cf-cache-status: DYNAMIC`),
+while the shopper's `/api/shop` is `s-maxage=300, stale-while-revalidate=600`. Measured: three
+edge HITs left `x-ratelimit-remaining` pinned at 98; three forced MISSes walked it 93 → 92 → 91.
+**So a shopper rides cached bodies and never reaches the origin, while an admin spends the
+shared budget on every single read** — and `getShopData` costs 3-4 origin reads per code load.
+The admin tripped the limiter, the 429 threw, `.catch(() => null)` swallowed it, the page said
+the shelf was bare, and it cleared within 60 seconds. ***"RANDOM" IS A SYMPTOM WITH A CLOCK IN
+IT — ASK WHAT RECOVERS ON ITS OWN, AND HOW FAST.*** (Family: ERR-264's "ask WHO was looking".)
+
+**⚠️ THIS CORRECTS A NOTE IN OUR OWN MEMORY.** ERR-253 recorded *"limits are PER ENDPOINT"*.
+For the catalogue family that is false: `/api/shop` and `/api/products` share one budget and one
+window. Measured, not inferred. `/api/search/*` was not re-tested, so ERR-253's note may still
+hold there — but it cannot be cited as a general rule.
+
+**RATE_LIMITED HAS TWO SHAPES AND NEITHER CARRIES `status`.** `api.js` **throws** it from the
+transport layer after `MAX_RATE_LIMIT_RETRIES` (:128-132, with `retryAfter`), and **resolves**
+it as `{ok:false, code:'RATE_LIMITED', retry_after}` from the envelope ladder (:394-395).
+`request()` stamps `status` on the **5xx envelope alone** (:471-478). So every guard here is
+keyed on `code`, never on `status` — the identical could-not-fail mistake ERR-264 documents at
+`api.js:953-959`, and a mutant test now pins it.
+
+**Fixed** in `js/shop-page.js` — `loadProducts` gains `productsUnavailable` / `unavailableCode`
+(the same third-state vocabulary as :2133), a `_isCatalogueFailure()` classifier keyed on `code`
+and excluding `NOT_FOUND`, a `_errorPaneShowing()` DOM read that adopts a nested call's verdict
+instead of clobbering it, distinct RATE_LIMITED copy, and `_productsDegraded` so a partial
+fan-out renders but is **never cached** (`length > 0` alone was not enough: one alias can answer
+while another 429s). In `js/api.js` — `_manualCodeCacheSet` refuses to memoise `null`, fixed at
+the **setter** because all three call sites (:1761, :1797, :1833) are the same three lines and a
+grep for one spelling is how ERR-259 shipped; `purgeCatalogCache()` now clears that layer too.
+
+**Tests.** `tests/catalogue-error-vs-empty-sep2026.test.js` extended §6-§9, 28 new (54 total,
+26 of them ERR-264's, still green; full suite 6269/0). §9 is **eight mutants** that delete each
+guard from the lifted source and assert the original defect returns — mutating the string, not
+the file, because peers hold `shop-page.js`. Positive controls throughout: a genuinely empty
+code still says "No products found for this code." verbatim, a complete fan-out IS cached, an
+empty *array* from Supabase IS cached. **Red-proofing corrected one of my own claims**: the
+`.catch()` rewrite does *not* restore the empty pane when reverted — the classifier already
+treats a bare `null` as a failure — what it actually buys is preserving *which* failure, so a
+thrown 429 keeps its identity and gets the right copy. The assertion now says that instead of
+overclaiming.
+
+**Backend**: `backend-docs/outbox/catalogue-rate-limit-admin-mirror-sep2026.md`, BF-066 — asks
+that authenticated staff be exempted from the limiter or given their own ceiling, since the
+admin mirror is uncached by design and therefore cannot be shielded by the CDN. No backend
+change is requested for the frontend half.
+
+---
+
+## ERR-265 — A verdict outlived the file it judged: "WRONG PRODUCT" on a card with no product image — **RESOLVED (frontend)** (2026-09-17)
+
+**Context.** Owner screenshot of `#genuine-image-audit`: `GBP71GA3` ("Brother Genuine
+BP71GA3 Glossy Paper") showing a grey **No image** tile under a red **WRONG PRODUCT**
+badge. Reported as *"why cant i see the images even though they are there and also it
+says its the wrong image or something but it is the correct image for this product"*.
+
+Both halves of that sentence were right, and they were right about **different files**.
+
+**The image was not there.** `renderCard` read exactly one field —
+`const imgUrl = p.image_url_resolved || ''` — and the drawer's LEGACY pane read
+`legacy_image_url_resolved`. The correct-looking Brother image the owner could see was
+the **archived** one. Measured live:
+
+```
+GET /api/products?search=GBP71GA3  →  image_url: null, image_thumbnail_url: null
+```
+
+So the column really is empty and every shopper landing on that product got
+`/assets/images/placeholder-product.svg`. A grep for `legacy_image_url` returns **two
+lines in the whole repo** — that drawer, and the quarantine confirm text that explains
+how the row got this way: *"Clears the image_url and archives it to legacy_image_url."*
+Nothing in the product read path has ever looked at the archive. **The only copy of a
+correct image was in a column visible to one drawer and no customer.**
+
+Sampling the first 600 genuine products, **47 (7.8%)** have a null `image_url`. How
+many are recoverable quarantine casualties versus never having had one is a DB
+question, asked in the backend brief.
+
+**The verdict was right about a file that no longer existed.** `renderVerdictBadge()`
+sat *outside* the `missing ? placeholder : img` ternary, so it rendered
+unconditionally. Neither `quarantineOne` nor `refetchOne` clears
+`image_vision_verdict`, so once the image went, the verdict stayed — here for ~4.5
+months, dated 2 May 2026, describing a file cleared some time after.
+
+### The lesson
+
+***A verdict is a statement about an artefact. When the artefact goes, the verdict does
+not become false — it becomes unanchored, and rendering it as current fact is a
+confident lie.*** The badge was not stale in the ordinary sense of "out of date"; it
+had **no subject at all**. Anything that stores a judgement separately from the thing
+judged needs to answer "what if the thing is gone?" — and "keep showing the judgement"
+is never the answer.
+
+A second, cheaper lesson: **the same stale claim was in two places.** Suppressing the
+badge left the italic reason line still reading "Vision rejected — wrong product", and
+the `title` tooltip still carried it after that. The assertion that caught this was
+`doesNotMatch(html, /Wrong product/i)` over the **whole card** — a narrower assertion
+scoped to the badge element would have passed and shipped the bug twice over.
+
+### Fixed
+
+- `imageState(p)` — one helper owning "what image, if any, can this row show". `hasLive`
+  is **never** true on the strength of an archive; the storefront reads `image_url` only.
+- The card renders the archived image dimmed with a **LEGACY** tag, and **keeps**
+  `gia-card--missing` — the product still has no live image, and the "Missing image
+  only" filter depends on that.
+- No live image ⇒ neutral **Image removed** badge instead of the verdict; the reason
+  line becomes "Verdict from … — image since cleared"; the tooltip stops repeating it.
+  The verdict itself stays in the drawer, next to its date and a plain statement that
+  it no longer describes the product.
+- Thumbnail click now **expands the image**; a separate ☰ button opens the detail. An
+  empty tile gets no zoom affordance rather than a dead click target.
+- Drawer gained an **Image fields** block reporting `image_url`, `image_url_resolved`,
+  `legacy_image_url`, `legacy_image_url_resolved` as value / `null` / `(absent from
+  payload)` — via `hasOwnProperty`, because absent ≠ null ≠ empty (ERR-199). This is
+  what let the null above be confirmed rather than guessed.
+- `filename_no_model_tokens` and `no_image_url` added to `humanReason` — they had been
+  reaching the screen title-cased through the unmapped fallback.
+- **Restore archived image** button + `AdminAPI.restoreLegacyImage()`. The endpoint
+  does not exist yet; the call throws and the toast names the failure. Deliberately
+  **not** stubbed or flag-hidden — see `backend-docs/outbox/image-audit-restore-legacy-sep2026.md`.
+
+**A client-side `storageUrl(p.image_url)` fallback was considered and NOT added.** It
+would have been a branch that could never fire: the field it would have read is null.
+The diagnostic block was built first precisely so that could be checked rather than
+assumed (ERR-221).
+
+**Tests.** `tests/image-audit-card-surface-sep2026.test.js` — 15 behaviour tests that
+evaluate the real module in a `vm` and assert on actual `renderCard` /
+`openProductDrawer` output, not source text. **11 red-proofed** against the pre-change
+file via `GIA_SRC=<old copy>`; the other 4 are labelled `[CONTROL]` and pass on both
+sides on purpose. This page had **zero** test coverage before today.
+
+---
+
+## ERR-264 — A backend 500 was rendered as "No products found for this category", and then cached — **RESOLVED** (2026-09-17)
+
+**Context.** Owner screenshot of `/search?q=273h` showing **"We couldn't load products"**,
+reported as *"it seems like there are no products, the backend looks correct — can you check
+the frontend"*. Two things were true at once, and separating them is the whole entry.
+
+**The backend was not correct.** Measured live, every route in the `/api/products` and
+`/api/shop` family answered `500 {"ok":false,"error":{"code":"INTERNAL_ERROR"}}` for about
+ten minutes, then recovered on its own:
+
+| Route | |
+|---|---|
+| `/api/products` **with no parameters at all**, `?limit=1`, `?brand=epson`, `?search=273h` | 500 |
+| `/api/products/G273HYC`, `/by-slug/…`, `/…/for-use-in` | 500 |
+| `/api/shop?brand=epson&category=ink`, `/api/ribbons` | 500 |
+| `/api/search/smart`, `/api/search/suggest`, `/api/brands`, `/api/products/counts` | **200 throughout** |
+
+`x-request-id: 6a522c76-39a7-47f3-b51a-8877e8be4363`. Not query-shaped (`?limit=1` failed
+identically, in 0.9s — thrown, not timed out), routing and Joi intact (`?sort=relevance`
+still returned a correct `400 VALIDATION_FAILED`). Filed as `backend-docs/outbox/
+catalogue-500-outage-sep2026.md`, BF-065.
+
+**🔴 The edge was caching the 500s, which is why the outage outlasted the fault.** Found
+while writing the brief: three identical calls returned the *same* `x-request-id`, and a
+fresh URL goes `MISS → HIT → HIT`. The **origin** sends
+`cache-control: public, max-age=0, s-maxage=300, stale-while-revalidate=600` on a 500, a 404
+and a 200 *identically* — the caching middleware sets the header before the handler's
+outcome is known, so errors inherit the success policy. A cached 5xx is therefore served for
+**5 minutes guaranteed and up to 15**, so a ~10-minute origin fault became up to ~25 minutes
+of user-visible failure and kept being served after recovery.
+
+***That is this entry's own defect one layer out.*** Our `_swrCache` was memoising the same
+`{ok:false}` envelopes for 60s and making the Retry button inert; Cloudflare is memoising
+them for up to 900s. **A cache that cannot tell an answer from a failure makes the failure
+stick — and the rule holds at every layer that has a cache.** Asked as BF-065 §2.
+
+**🔴 `/api/products/by-slug/:slug` never recovered.** Re-measured hours later, with the rest
+of the family back at 200, it still 500s for every slug — **including one that does not
+exist**, which should be a `404`, so the handler throws before the lookup. It is therefore
+the cheapest live reproduction of the outage and is in the brief as such. The PDP survives it
+only because it falls back to `/api/products/:sku` (verified in a browser: `/product/<slug>`
+renders correctly, paying one failed request plus the retry ladder per view). ***A fallback
+working is not the same as the thing behind it working*** — without a measurement of the leg
+underneath, a healthy-looking page hides a dead route indefinitely.
+
+### The frontend half — three defects, one shape
+
+**`API.request()` has two failure shapes and only one of them is loud.** It THROWS for a
+non-JSON body, a network drop or a timeout; it RESOLVES `{ok:false, status:5xx}` for a
+structured error. Every catch in `shop-page.js` was written against the first. The second —
+which is what a healthy-but-broken backend actually sends, and therefore **the commonest
+failure of all** — walked past all of them into code that asked only *"did I get products?"*.
+
+1. **`fetchAllProducts` could not tell a 500 from the last page.** `if (response.ok && …)
+   else hasMore = false` — the walk exited and returned `[]`.
+2. **That `[]` was then cached** (`codesCacheKey`, read at the top of `loadProductCodes` on
+   every later visit), so a ten-minute outage became a permanently empty brand page for the
+   rest of the SPA session.
+3. **`showEmpty` was shown where `showError` belonged.** `/shop?brand=epson&category=ink`
+   rendered **"No products found for this category."** while three of its calls were 500ing:
+   no error, no Try again, and still wrong after the backend healed. `showError` with a
+   working Retry button had existed since May 2026 — the 500 path simply never reached the
+   catch that calls it.
+
+4. **And the Retry button was inert.** Found only by driving a real browser: after (1)–(3)
+   the error pane appeared correctly, the backend "recovered", Try again was pressed — and
+   nothing happened. `getWithSWR` memoises whatever `request()` resolves, so it had cached
+   the `{ok:false, status:500}` envelope for `SWR_TTL_MS` (60s). The retry re-read the
+   failure out of memory and never touched the network, during the only window the button
+   exists for. The stale path was worse: a background revalidation that came back 5xx
+   **replaced good stale data with the failure**, sailing past a `.catch()` that says "keep
+   stale on failure" and never fired because the common failure does not throw.
+
+This is absence-as-zero for the ninth time (ERR-063/068/073/075/076/149/150/158). The rule it
+breaks is the one already written down: **partial-ness belongs in the RETURN VALUE and in the
+UI, never in a log line alone.** `fetchAllProducts` now returns `{products, failed, status}`,
+and nothing negative is written to the SWR cache.
+
+***A CACHE THAT CANNOT TELL AN ANSWER FROM A FAILURE MAKES THE FAILURE STICK.*** Both caches
+in this entry are that same sentence at different layers — `codesCacheKey` in the page and
+`_swrCache` in the client — and fixing one left the bug fully alive through the other. **The
+unit tests were green and the page still did not recover**; only the browser found it. A fix
+verified at the layer it was written in is verified at one layer.
+
+### Why the admin saw something no shopper did
+
+***A granted admin is the only visitor on the site who cannot be shielded by the edge cache.***
+`_catalogRoute` re-routes their catalogue reads to `/api/admin/catalog/*` (ERR-234), which is
+token-bearing and therefore never cached. And the storefront **paints twice** for an admin —
+the public route first, then a repaint when `admin-preview:ready` fires. So the mirror leg did
+not merely fail: **it replaced a page that had already rendered nineteen correct cards with an
+error pane.** A signed-out visitor on the same URL at the same moment saw the products. That
+is why the report and the reproduction disagreed, and why an anonymous reproduction of the
+exact URL was green while the bug was live.
+
+Two fixes, deliberately both: `_catalogReadWithPublicFallback` retries a failing mirror once
+on the public route (the cause), and `showError` is suppressed during a repaint when a grid is
+already on screen (the blast radius).
+
+### The rule that could not fail
+
+The first draft of the fallback gated on `status >= 500` with an exclusion list for
+`UNAUTHORIZED`/`FORBIDDEN`/`NOT_FOUND`. **Red-proofing showed the entire exclusion list could
+be deleted without a single test going red** — because `request()` stamps `status` on the 5xx
+envelope ALONE, so 401/403/404/429 were being excluded *by a field that happens to be absent*,
+not by a decision. A backend that started stamping `status` on those envelopes would have
+inverted the behaviour silently. The rule now keys on the code: **fall back on everything
+except `NOT_FOUND`** — which is excluded because an absent mirror route is the `unsupported`
+state `AdminPreview` exists to shout about, and quietly serving the shopper's catalogue is
+exactly what would hide it (ERR-166 ran for months on that silence).
+
+***A guard whose every branch is covered by a different guard is decoration.*** Six mutations
+were needed to prove the eleven new assertions; the eleventh found this.
+
+### Also observed, deliberately not changed
+
+`shop-page.js` retries the brand walk with `apiParams.brand = brandName` — the **display
+name**. Measured: `/api/products?brand=Epson` returns `200 {"total":0}` while `?brand=epson`
+returns rows, because the backend filters on the slug. It is a guaranteed zero. After fix (1)
+it only fires on a genuinely empty set, so it is harmless; removing a fallback is a behaviour
+change, not cleanup (ERR-158), so it stays, recorded here.
+
+**Fixed in** `js/shop-page.js` (`fetchAllProducts`, `loadProductCodes`, `loadSearchResults`,
+`showError`, the `admin-preview:ready` listener), `js/api.js` (`getWithSWR` +
+`_catalogReadWithPublicFallback`, the latter wired into `getProducts` / `getShopData` /
+`smartSearch`).
+**Pinned by** `tests/catalogue-error-vs-empty-sep2026.test.js` — 26 assertions, all executed
+against lifted source rather than grepped, all red-proofed with 19 mutants.
+**Probe:** `npm run probe:catalogue-outage` (`--base http://localhost:3000 --shop /html/shop`
+to verify a fix before pushing; it reproduced the defect against production and passes
+against the fixed build).
+
+## ERR-263 — The card was right, the data was right, and the shopper still saw the wrong answer: a 15-minute edge cache between the admin write and the storefront — **RESOLVED** (2026-09-16)
+
+**Context.** Owner screenshot pair, taken six seconds apart. The search-results card for
+`G273HYKCMY` (Epson 273HY KCMY 4-Pack) read **"Contact Us For Stock Enquiries"** with a
+Contact-us button; the PDP for the same SKU read **"In Stock · Only 1 left · Add to Cart"**.
+Stock had just been added in the admin Inventory tab. Reported as a card-rendering bug.
+
+**It was not a rendering bug, and nothing in the payload was wrong.** Measured live:
+`/api/products/:sku`, `/api/search/smart` and `/api/products?search=` ALL returned
+`in_stock: true, stock_quantity: 1`, and evaluating the card guard (`shop-page.js:4782`)
+against that row gives `oos === false` → Add to Cart. The row that produced the screenshot
+no longer existed anywhere.
+
+**🚨 THE CACHE IS A SURFACE, AND SURFACES GO STALE INDEPENDENTLY.** Every catalog endpoint
+returns `public, max-age=0, s-maxage=300, stale-while-revalidate=600`, and
+`api.inkcartridges.co.nz` serves them with `cf-cache-status: HIT` and a live `age`. A stock
+write is therefore invisible for **5 minutes guaranteed and up to 15** in the stale tail —
+to every visitor. `/api/products/:sku` and `/api/search/smart` are **separate cache keys
+with separate ages**, so one surface can be fresh while the other is stale at the same
+instant. That is the entire symptom. ***A DISAGREEMENT BETWEEN TWO SURFACES IS NOT
+NECESSARILY A DISAGREEMENT BETWEEN TWO CODE PATHS — THEY MAY SIMPLY BE LOOKING AT
+DIFFERENT MOMENTS.*** Filed as BF-064 in
+`backend-docs/outbox/search-edge-cache-stock-staleness-backend-brief-sep2026.md`; the fix
+is a purge on write, and it is the backend's.
+
+**🚨 I MEASURED THE WRONG HOST FIRST, AND IT CLEARED THE CACHE OF SUSPICION.**
+`ink-backend-zaeq.onrender.com` answers `cf-cache-status: DYNAMIC` on every request. I read
+that as "not cached" and spent an hour hunting a frontend field-loss that did not exist.
+`js/config.js:19-21` points production at `api.inkcartridges.co.nz` — a different host with
+a real edge in front of it. Same shape as ERR-258's guard pointed at the wrong host, and
+the memory entry that warned about exactly this was already written. ***A CACHE HEADER IS A
+PROPERTY OF THE HOST YOU ASKED, NOT OF THE ENDPOINT.***
+
+**The structural bug underneath.** Hunting the phantom turned up a real one. The stock
+**pill** and the stock **button** were computed by two different expressions with **inverted
+precedence** — `getStockStatus()` read `stock_status → in_stock → quantity`, while the card
+CTA, duplicated byte-identically in `products.js:238` and `shop-page.js:4782`, read
+`in_stock → stock_status → quantity`. Layered on a measured field asymmetry — the list and
+search endpoints send `in_stock` + `stock_quantity` but **no `stock_status`**;
+`/api/products/:sku` sends all three; `/api/search/suggest` sends `stock_quantity` alone —
+**the card never evaluated `stock_status` and the PDP never evaluated `in_stock`.** The two
+surfaces read different columns and agreed only because the backend kept them consistent.
+A row with `stock_status:'in_stock'` and `in_stock:false` rendered an "In Stock" pill
+directly above a "Contact us" button, on the same card. Nothing tested that they agree.
+
+**Fix.** One precedence order in `getStockStatus()`, and every CTA derives from it — the
+card now reads the SAME OBJECT the pill rendered from (`stockInfo` / `stockStatus`), so a
+second evaluation that could drift no longer exists. `cart.js:3263`'s cross-sell, which
+branched on `in_stock === false` alone and so showed Add-to-cart for a deliberate
+`contact_us` product, goes through the same helper. Two rules are deliberate and
+load-bearing: **`in_stock: false` is authoritative and is never overridden by a positive
+`stock_quantity`** (the only direction that costs real money), and **`stock_status` is never
+derived from a number** — `contact_us` is a merchandising decision, not a quantity.
+
+**Absence is a THIRD STATE.** With all three fields missing, the old code computed
+`undefined > 0` → false → "Contact Us", indistinguishable from a real zero.
+`search.js:167` `adaptForCard` backfills no stock field, so a `/api/search/suggest` payload
+that ever dropped `stock_quantity` would have pulled the buy button off **every** dropdown
+card, silently. Such a row now stays buyable, carries `known: false` in the return value and
+is logged by SKU. Same family as ERR-063/068/073/075/076/149/150.
+
+**A pin that passed for a new reason.** `tests/contact-button-may2026.test.js:191` counts the
+literal OOS returns inside `getStockStatus` and requires **exactly 3**. Merging the
+`contact_us` and `out_of_stock` branches while adding the `in_stock === false` clause left
+the count at 3, so it stayed green through a rewrite of the function's entire precedence.
+It is a source-grep, not a behavioural check; the new suite is the actual safety net.
+`:132`'s cart.js assertion pinned the literal `in_stock === false` — **it was satisfied by
+the very expression that was too narrow**, so it was replaced with one that pins the shared
+vocabulary instead.
+
+**Verified.** `npm test` **6200 tests / 6182 pass / 0 fail** (18 skips all pre-existing
+`LIVE_API`-gated). 20 new tests in
+`tests/stock-status-surface-agreement-sep2026.test.js`, **red-proofed with three mutants** —
+restoring the old precedence, deleting the absence branch, and re-duplicating the raw
+expression into `products.js` each failed the specific guards that claim to catch them, and
+the files were checksum-restored afterward. Also escaped `shop-page.js:4761`, which
+interpolated the pill text unescaped while `products.js:216` escaped it.
+
+**Verify**: `npm run probe:stock-freshness -- --sku <SKU>` (READ-ONLY; you change stock in
+admin, it watches all four surfaces and reports the spread between fastest and slowest).
+
+**Not fixed, deliberately.** `business-page.js:1025` carries a FOURTH stock vocabulary
+(`it.purchasable !== false && it.in_stock !== false`) and renders the bare copy
+`'Out of stock'` that `OOS_STOCK_LABEL` exists to abolish. It is a B2B reorder tile with a
+*disabled* button rather than a Contact-us card — a different UX decision, outside this
+change, and named here so it is not mistaken for an oversight.
+
+---
+
 ## ERR-262 — A probe with a write mode restored through the one path it had just proved was refused — **RESOLVED** (2026-09-16)
 
 **Context.** Adding a stock quantity to the admin product editor's Inventory tab. Before building
