@@ -2033,6 +2033,30 @@ const AdminAPI = {
     }
   },
 
+  /**
+   * Promote a product's archived `legacy_image_url` back to its live `image_url`.
+   *
+   * Quarantine clears `image_url` and archives it; nothing in the product read
+   * path ever looks at the archive, so a quarantine taken on a bad Vision verdict
+   * leaves the storefront showing a placeholder with no route back through the UI.
+   *
+   * NOT YET DEPLOYED on the backend as of 2026-09-17 — see
+   * backend-docs/outbox/image-audit-restore-legacy-sep2026.md. Until it lands this
+   * throws (404 → "HTTP 404" via _imageAuditFetch), which is the point: the caller
+   * shows the failure. Do not soften this into a resolved promise, or the button
+   * becomes indistinguishable from one that worked.
+   */
+  async restoreLegacyImage(productId) {
+    const json = await this._imageAuditFetch(
+      `/api/admin/image-audit/${encodeURIComponent(productId)}/restore-legacy`,
+      { method: 'POST' }
+    );
+    if (json && json.ok === false) {
+      throw new Error(json.error?.message || 'Restore failed');
+    }
+    return json?.data ?? null;
+  },
+
   imageAuditSearchUrl(productId) {
     return `${Config.API_URL}/api/admin/image-audit/${encodeURIComponent(productId)}/search-url`;
   },

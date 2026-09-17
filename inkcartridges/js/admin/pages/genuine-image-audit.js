@@ -88,9 +88,36 @@ function humanReason(token) {
     vision_skipped_non_genuine: 'Vision skipped (compatible product)',
     url_blocked_domain: 'URL on block-list',
     edge_density_high: 'Image looks like a UI screenshot',
+    // These two reached the UI title-cased ("Filename No Model Tokens", "No Image
+    // Url") because they were never mapped. The tokens are recoverable exactly from
+    // that rendering: humanReason's fallback is invertible for lowercase snake_case.
+    filename_no_model_tokens: 'Filename does not mention the model',
+    no_image_url: 'No image on the product',
   };
   if (map[token]) return map[token];
   return token.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Which image, if any, this row can actually show — and where it came from.
+ *
+ * The card and both drawer panes used to read `image_url_resolved` on their own,
+ * so a row whose image had been quarantined away rendered an unqualified "No
+ * image" even though `legacy_image_url` still held the archived original. That
+ * archive is read by nothing else in the codebase and is invisible to customers
+ * (the storefront renders `products.image_url` only), so surfacing it here is a
+ * diagnostic aid — never a claim that the product is fine. `hasLive` stays false
+ * whenever the live column is empty, whatever the archive holds.
+ */
+function imageState(p) {
+  const live = p.image_url_resolved || '';
+  const legacy = p.legacy_image_url_resolved || '';
+  return {
+    hasLive: !!live,
+    url: live || legacy,
+    isLegacy: !live && !!legacy,
+    hasAny: !!(live || legacy),
+  };
 }
 
 function openImageLightbox(url, alt = '') {
@@ -224,21 +251,40 @@ function renderCard(p) {
   const status = p.image_audit_status;
   const sales = Number(p.units_sold || 0);
   const brand = p.brand || '';
-  const imgUrl = p.image_url_resolved || '';
-  const missing = !imgUrl;
+  const img = imageState(p);
+  const missing = !img.hasLive;
+
+  // A verdict describes the file that was checked. Once the live image is gone the
+  // verdict outlives its subject, so a red WRONG PRODUCT would be accusing the row
+  // of an image it no longer has. Say what is actually true instead; the verdict
+  // itself is still on show in the drawer, next to the date it was reached.
+  const badge = missing
+    ? '<span class="gia-verdict gia-verdict--neutral">Image removed</span>'
+    : renderVerdictBadge(verdict);
+
+  // The reasons are the verdict's evidence, so they go stale with it. Leaving
+  // "Vision rejected — wrong product" under a cleared row repeats the accusation
+  // the badge above just stopped making. Date the judgement instead; the reasons
+  // themselves remain in the drawer, where the staleness is spelled out.
+  const reasonLine = missing
+    ? (verdict
+        ? `Verdict from ${formatRelTime(p.image_vision_checked_at)} — image since cleared`
+        : '')
+    : topReason;
 
   return `
     <article class="gia-card${isSelected ? ' gia-card--selected' : ''}${missing ? ' gia-card--missing' : ''}" data-product-id="${esc(p.id)}">
       <label class="gia-card__select" title="Select" data-action="ignore-click">
         <input type="checkbox" data-action="toggle-select" ${isSelected ? 'checked' : ''}>
       </label>
-      <div class="gia-card__thumb" data-action="open-drawer">
-        ${missing
-          ? `<div class="gia-card__placeholder">${icon('image', 36, 36)}<span>No image</span></div>`
-          : `<img src="${esc(imgUrl)}" alt="${esc(p.name || '')}" loading="lazy">`
+      <div class="gia-card__thumb${img.hasAny ? '' : ' gia-card__thumb--empty'}"${img.hasAny ? ' data-action="zoom" title="Click to expand"' : ''}>
+        ${img.hasAny
+          ? `<img src="${esc(img.url)}" alt="${esc(p.name || '')}" loading="lazy"${img.isLegacy ? ' class="gia-card__img--legacy"' : ''}>
+             ${img.isLegacy ? '<span class="gia-card__legacy-tag" title="Archived image — NOT live on the storefront">LEGACY</span>' : ''}`
+          : `<div class="gia-card__placeholder">${icon('image', 36, 36)}<span>No image</span></div>`
         }
         <div class="gia-card__badges">
-          ${renderVerdictBadge(verdict)}
+          ${badge}
           ${status === 'replaced' ? '<span class="gia-status gia-status--replaced">REPLACED</span>' : ''}
           ${status === 'checked_clean' ? '<span class="gia-status gia-status--clean">CLEAN</span>' : ''}
         </div>
@@ -250,12 +296,14 @@ function renderCard(p) {
           ${brand ? `<span class="gia-pill-badge">${esc(brand)}</span>` : ''}
           <span class="gia-sales">${sales.toLocaleString('en-NZ')} sold</span>
         </div>
-        ${topReason ? `<div class="gia-card__reason" title="${esc(reasons.map(humanReason).join(' • '))}">${esc(topReason)}</div>` : ''}
+        ${reasonLine ? `<div class="gia-card__reason" title="${esc(missing ? 'Open details for the original verdict and its reasons' : reasons.map(humanReason).join(' • '))}">${esc(reasonLine)}</div>` : ''}
       </div>
       <div class="gia-card__actions">
+        <button class="gia-icon-btn" data-action="open-drawer" title="Open details">☰</button>
         <button class="gia-icon-btn" data-action="mark-verified" title="Mark verified">✓</button>
         <button class="gia-icon-btn" data-action="reverify" title="Re-verify with Vision">🔍</button>
         <button class="gia-icon-btn" data-action="refetch" title="Refetch image">↻</button>
+        ${img.isLegacy ? '<button class="gia-icon-btn" data-action="restore-legacy" title="Restore the archived image">⤺</button>' : ''}
         <button class="gia-icon-btn" data-action="search-google" title="Search Google">🌐</button>
         <button class="gia-icon-btn gia-icon-btn--danger" data-action="quarantine" title="Quarantine">✗</button>
       </div>
@@ -473,10 +521,18 @@ function bindGridEvents() {
     const product = _products.find(p => p.id === productId);
     if (!product) return;
 
+    // The thumbnail expands the image in place. Opening the full audit detail is a
+    // separate, explicit button — clicking a picture should show you the picture.
+    if (action === 'zoom') {
+      const img = imageState(product);
+      if (img.hasAny) openImageLightbox(img.url, product.name || '');
+      return;
+    }
     if (action === 'open-drawer') return openProductDrawer(product);
     if (action === 'mark-verified') return markVerified(product, card);
     if (action === 'reverify')      return reverifyOne(product, card);
     if (action === 'refetch')       return refetchOne(product, card);
+    if (action === 'restore-legacy') return restoreLegacy(product, card);
     if (action === 'quarantine')    return quarantineOne(product, card);
     if (action === 'search-google') return openGoogleSearch(product);
   });
@@ -585,6 +641,51 @@ function quarantineOne(product, cardEl) {
   });
 }
 
+/**
+ * Put the archived image back on the product.
+ *
+ * Vision is not always right — a correct photo-paper box reads as
+ * `vision_wrong_product` against a cartridge-shaped vocabulary — and a quarantine
+ * on a bad verdict takes the image off the live storefront. Without this the only
+ * copy sits in `legacy_image_url`, which nothing but this page can see.
+ *
+ * The endpoint may not be deployed yet. `_imageAuditFetch` throws on any non-2xx,
+ * so a missing route surfaces as a named toast rather than a button that looks
+ * like it worked — a silent no-op here would be indistinguishable from success.
+ */
+function restoreLegacy(product, cardEl) {
+  Modal.confirm({
+    title: 'Restore archived image?',
+    message: `Put the archived image back on ${product.sku} as its live image. It becomes visible to customers immediately.`,
+    confirmLabel: 'Restore',
+    onConfirm: async () => {
+      cardEl.classList.add('gia-card--busy');
+      try {
+        const result = await AdminAPI.restoreLegacyImage(product.id);
+        // Trust the server's echo of what it wrote; fall back to the archive URL we
+        // already had rather than inventing one.
+        product.image_url_resolved = result?.image_url_resolved
+          || result?.image_url
+          || product.legacy_image_url_resolved
+          || '';
+        product.legacy_image_url_resolved = result?.legacy_image_url_resolved || '';
+        // The old verdict judged this exact file, and it judged it wrong — that is
+        // why we are restoring. Send it back for a fresh look rather than leaving
+        // the stale rejection attached to a live image.
+        product.image_vision_verdict = result?.image_vision_verdict ?? null;
+        product.image_audit_status = result?.image_audit_status || 'pending';
+        Toast.success(`${product.sku} image restored`);
+        cardEl.outerHTML = renderCard(product);
+        loadStats();
+      } catch (err) {
+        Toast.error(`Could not restore ${product.sku}: ${err.message || 'request failed'}`);
+      } finally {
+        document.querySelector(`.gia-card[data-product-id="${CSS.escape(product.id)}"]`)?.classList.remove('gia-card--busy');
+      }
+    },
+  });
+}
+
 async function openGoogleSearch(product) {
   // The backend endpoint requires admin auth, so we can't `window.open` it directly
   // (a popup tab won't carry our Bearer token). Resolve it via authenticated fetch first.
@@ -624,6 +725,26 @@ function openProductDrawer(product) {
   const cur = product.image_url_resolved || '';
   const legacy = product.legacy_image_url_resolved || '';
 
+  // A blank CURRENT pane has two very different causes — the product genuinely has
+  // no image_url, or the backend held one and failed to resolve it — and the page
+  // used to collapse both into the same "No image". Absent, null and empty are
+  // three distinct answers, so report which one each field actually gave us
+  // (hasOwnProperty, not truthiness) instead of guessing at the difference.
+  const fieldRow = (key) => {
+    const present = Object.prototype.hasOwnProperty.call(product, key);
+    const val = product[key];
+    let shown, tone;
+    if (!present)            { shown = '(absent from payload)'; tone = 'absent'; }
+    else if (val === null)   { shown = 'null';                  tone = 'null';   }
+    else if (val === '')     { shown = '(empty string)';        tone = 'null';   }
+    else                     { shown = String(val);             tone = 'value';  }
+    return `<dt>${esc(key)}</dt><dd class="gia-field--${tone}">${esc(shown)}</dd>`;
+  };
+  const fieldsHtml = ['image_url', 'image_url_resolved', 'legacy_image_url', 'legacy_image_url_resolved']
+    .map(fieldRow).join('');
+
+  const staleVerdict = verdict && !cur;
+
   const reasonsHtml = reasons.length
     ? reasons.map(r => `<li>${esc(humanReason(r))} <code class="gia-reason-token">${esc(r)}</code></li>`).join('')
     : '<li class="admin-text-muted">No reasons recorded.</li>';
@@ -642,6 +763,12 @@ function openProductDrawer(product) {
           Last checked: ${esc(formatRelTime(checkedAt))}
           ${product.image_audit_status ? ` &middot; status: <strong>${esc(product.image_audit_status)}</strong>` : ''}
         </div>
+        ${staleVerdict ? `
+        <div class="gia-drawer__stale">
+          This verdict describes an image that is no longer on the product. It was
+          reached ${esc(formatRelTime(checkedAt))} against a file that has since been
+          cleared, so it says nothing about what customers see today.
+        </div>` : ''}
       </div>
 
       <div class="gia-drawer__compare">
@@ -652,16 +779,28 @@ function openProductDrawer(product) {
             : `<div class="gia-drawer__placeholder">No image</div>`}
         </div>
         <div class="gia-drawer__col">
-          <div class="gia-drawer__col-label">Legacy</div>
+          <div class="gia-drawer__col-label">Legacy <span class="gia-drawer__col-note">archived — not live</span></div>
           ${legacy
             ? `<img src="${esc(legacy)}" alt="legacy" class="gia-drawer__img" data-big="${esc(legacy)}">`
             : `<div class="gia-drawer__placeholder">No prior image</div>`}
         </div>
       </div>
 
+      ${legacy && !cur ? `
+      <div class="gia-drawer__notice">
+        The archived image above is <strong>not</strong> on the storefront — customers
+        see a placeholder for this product. Use <em>Restore archived image</em> to put
+        it back, or <em>Refetch</em> to source a new one.
+      </div>` : ''}
+
       <div class="gia-drawer__section">
         <h4>Vision reasons</h4>
         <ul class="gia-drawer__reasons">${reasonsHtml}</ul>
+      </div>
+
+      <div class="gia-drawer__section">
+        <h4>Image fields</h4>
+        <dl class="gia-drawer__dl gia-drawer__dl--fields">${fieldsHtml}</dl>
       </div>
 
       <div class="gia-drawer__section">
@@ -681,6 +820,7 @@ function openProductDrawer(product) {
     <button class="admin-btn admin-btn--ghost" data-drawer-action="search-google">🌐 Google search</button>
     <button class="admin-btn admin-btn--ghost" data-drawer-action="reverify">🔍 Re-verify</button>
     <button class="admin-btn admin-btn--ghost" data-drawer-action="refetch">↻ Refetch</button>
+    ${legacy && !cur ? '<button class="admin-btn admin-btn--ghost" data-drawer-action="restore-legacy">⤺ Restore archived image</button>' : ''}
     <button class="admin-btn admin-btn--danger" data-drawer-action="quarantine">✗ Quarantine</button>
     <button class="admin-btn admin-btn--primary" data-drawer-action="mark-verified">✓ Mark verified</button>
   `;
@@ -703,6 +843,7 @@ function openProductDrawer(product) {
     if (a === 'mark-verified')   { ref.close(); markVerified(product, cardEl); }
     else if (a === 'reverify')   { ref.close(); reverifyOne(product, cardEl); }
     else if (a === 'refetch')    { ref.close(); refetchOne(product, cardEl); }
+    else if (a === 'restore-legacy') { ref.close(); restoreLegacy(product, cardEl); }
     else if (a === 'quarantine') { ref.close(); quarantineOne(product, cardEl); }
   });
 }

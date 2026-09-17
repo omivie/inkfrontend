@@ -4664,6 +4664,25 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .admin:not([data-theme="light"]) .gia-verdict--good { color: #6ee7b7; }
 .admin:not([data-theme="light"]) .gia-verdict--warn { color: #fde68a; }
 .admin:not([data-theme="light"]) .gia-verdict--bad  { color: #fca5a5; }
+/* Shown instead of a verdict when the live image is gone: the old verdict judged a
+   file that no longer exists, so it must not keep colouring the card red. */
+.gia-verdict--neutral {
+  background: var(--surface-hover); color: var(--text-muted); border-color: var(--border);
+}
+
+/* The archived image, surfaced so the grid shows what was removed. Held visually
+   below a live image — dimmed, and tagged — because it is NOT on the storefront. */
+.gia-card__img--legacy { opacity: 0.55; filter: grayscale(0.25); }
+.gia-card__thumb:hover .gia-card__img--legacy { opacity: 0.8; filter: none; }
+.gia-card__legacy-tag {
+  position: absolute; left: 8px; bottom: 8px;
+  padding: 2px 6px; border-radius: var(--radius-sm);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  background: rgba(17, 24, 39, 0.78); color: #f9fafb;
+  pointer-events: none;
+}
+/* No image at all — nothing to expand, so drop the zoom affordance. */
+.gia-card__thumb--empty { cursor: default; }
 
 .gia-status {
   display: inline-block;
@@ -4719,7 +4738,12 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   background: var(--surface-hover);
 }
 .gia-icon-btn {
+  /* The row carries up to 7 buttons (details, verified, re-verify, refetch,
+     restore, google, quarantine). At the 4-column breakpoint a card track is
+     ~224px, so 7 fixed 28px buttons plus padding only just fit — let them shrink
+     rather than overflow the card. */
   width: 28px; height: 28px;
+  flex: 0 1 28px; min-width: 22px;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: none; cursor: pointer;
   border-radius: var(--radius-sm);
@@ -4802,6 +4826,32 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 }
 .gia-drawer__dl dt { color: var(--text-muted); font-weight: 600; }
 .gia-drawer__dl dd { margin: 0; color: var(--text); }
+
+/* Raw image fields. A blank pane can mean "no image stored" or "stored but the
+   backend could not resolve it" — these read differently and must look different,
+   so absent / null / value each get their own treatment. */
+.gia-drawer__dl--fields dd {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px; word-break: break-all;
+}
+.gia-field--absent { color: var(--text-muted); font-style: italic; }
+.gia-field--null   { color: var(--yellow-text); }
+.gia-field--value  { color: var(--text); }
+
+.gia-drawer__col-note {
+  font-weight: 500; text-transform: none; letter-spacing: 0;
+  color: var(--text-muted); font-size: 10px;
+}
+.gia-drawer__stale,
+.gia-drawer__notice {
+  margin-top: 8px; padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: 12px; line-height: 1.5;
+}
+.gia-drawer__notice { border-left: 3px solid var(--yellow-text); }
 
 /* ─────────────────────────────────────────────────────────────────────────
    Control Center (May 2026 spec)
