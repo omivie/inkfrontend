@@ -419,10 +419,16 @@ test('§7c app.js registers the page, owner-only, under Analytics', () => {
   assert.match(APP, /key: 'catalog-engagement'/);
   // Shipped under "Catalog"; moved in the Sep 2026 pass that gave every read-only
   // reporting surface one home (tests/admin-analytics-section-sep2026.test.js).
+  // Bound is the section FOLLOWING Analytics — Sales until the owner asked for Sales
+  // above Analytics, Catalog since. Re-point it on any reorder: a bound naming a later
+  // section keeps passing while this row drifts out.
   const analyticsIdx = APP.indexOf("section: 'Analytics'");
-  const salesIdx = APP.indexOf("section: 'Sales'");
+  const nextSectionIdx = APP.indexOf("section: 'Catalog'");
   const ceIdx = APP.indexOf("key: 'catalog-engagement'");
-  assert.ok(analyticsIdx !== -1 && ceIdx > analyticsIdx && ceIdx < salesIdx,
+  assert.ok(analyticsIdx !== -1 && nextSectionIdx > analyticsIdx,
+    'the Analytics section must still be followed by Catalog — otherwise the bound below ' +
+    'measures nothing');
+  assert.ok(ceIdx > analyticsIdx && ceIdx < nextSectionIdx,
     'must sit in the Analytics section');
   assert.match(APP.slice(ceIdx, ceIdx + 140), /ownerOnly: true/);
 });

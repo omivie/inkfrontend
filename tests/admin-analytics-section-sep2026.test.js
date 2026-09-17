@@ -74,18 +74,30 @@ const ANALYTICS_KEYS = ['analytics', 'demand-ranking', 'catalog-engagement', 'pr
 // §1–§4 — the section
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§1 NAV_ITEMS has an Analytics section, between Overview and Sales', () => {
+test('§1 NAV_ITEMS has an Analytics section, between Sales and Catalog', () => {
   assert.ok(sectionIdx('Analytics') !== -1,
     'NAV_ITEMS is missing { section: \'Analytics\' } — the dedicated reporting home.');
-  assert.ok(sectionIdx('Overview') < sectionIdx('Analytics'),
-    'Analytics must come after Overview: Dashboard stays the landing page.');
-  assert.ok(sectionIdx('Analytics') < sectionIdx('Sales'),
-    'Analytics must come before Sales — it is what the owner opens first.');
+  assert.ok(sectionIdx('Overview') < sectionIdx('Sales'),
+    'Sales must come after Overview: Dashboard stays the landing page.');
+  // Sep 2026 shipped this section ABOVE Sales, on the theory that reporting is what the
+  // owner opens first. It is not — the owner works the Orders queue daily and reads
+  // analytics periodically — so they asked for Sales above Analytics. The ASSERTION is
+  // kept and flipped rather than deleted: the section's position is still a decision
+  // somebody made on purpose, and the next reorder should have to come here and say so.
+  assert.ok(sectionIdx('Sales') < sectionIdx('Analytics'),
+    'Sales must come before Analytics — the owner works orders daily and reads reports ' +
+    'periodically, so the queue they use every day sits nearer the top.');
+  assert.ok(sectionIdx('Analytics') < sectionIdx('Catalog'),
+    'Analytics must come before Catalog. It is also the upper bound §2 measures section ' +
+    'membership against, so a section inserted between them silently loosens that check.');
 });
 
 test('§2 every analytics surface lives in it', () => {
   for (const key of ANALYTICS_KEYS) {
-    assert.ok(inSection(key, 'Analytics', 'Sales'),
+    // Upper bound is Catalog, the section that FOLLOWS Analytics (Sep 2026 it was Sales;
+    // the two swapped). It must always name the immediate next section — a bound pointing
+    // further down the array still passes while an analytics row drifts into Catalog.
+    assert.ok(inSection(key, 'Analytics', 'Catalog'),
       `"${key}" is not in the Analytics section. The whole point of this pass is that ` +
       'there is exactly ONE place to go and look at how the business is doing; a reporting ' +
       'surface filed anywhere else recreates the sprawl.');

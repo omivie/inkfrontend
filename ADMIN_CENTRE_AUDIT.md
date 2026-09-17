@@ -19,7 +19,8 @@ multiple which would hold all the analytics sections we have neatly organised an
 
 **What changed**
 
-1. **A dedicated `Analytics` section**, between Overview and Sales, holding every read-only
+1. **A dedicated `Analytics` section**, between Overview and Sales (it was moved BELOW Sales
+   later in Sep 2026 — see the end of this section), holding every read-only
    reporting surface: the hub (`#analytics`), Demand Ranking, Catalogue Engagement and Price
    Monitor. They previously sat in three different sections (§3 below).
 2. **Every section is now a collapsible group** — the deferred §8 item 9, below, is done.
@@ -197,8 +198,22 @@ Route keys are unchanged; only **section** and **label** moved.
 | Supplier Prices (`supplier-prices`) | Catalog | Catalog | — |
 | Dashboard (`dashboard`) | Overview | Overview | — |
 
-Sections are now, in order: Overview · **Analytics** · Sales · Catalog · Data Operations ·
-Finance · Marketing · Content · System. Route keys are still unchanged — `#analytics`,
+Sections are now, in order: Overview · **Sales** · **Analytics** · Catalog · Data Operations ·
+Finance · Marketing · Content · System.
+
+> **Sep 2026, later — Sales moved above Analytics.** The pass above placed Analytics directly
+> under Overview on the reasoning that reporting is what the owner opens first. In practice it
+> is not: the owner works the Orders queue every day and reads the reporting surfaces
+> periodically, so at their request the two sections swapped. Nothing else changed — no route
+> key, label, owner gate or tab manifest was touched, and collapsed-group state survived
+> because `groupId()` keys off the section NAME, not its index.
+>
+> The Analytics section's position is asserted by source-text index in three suites
+> (`admin-analytics-section-sep2026.test.js` §1/§2, `demand-ranking-jul2026.test.js`,
+> `catalog-engagement-sep2026.test.js`), each bounding the section by whichever section
+> FOLLOWS it — now `Catalog`. Those assertions were re-pointed, not removed: a bound left
+> naming a section further down the array keeps passing while a reporting row drifts out of
+> Analytics, which is the failure mode the bound exists to catch. Route keys are still unchanged — `#analytics`,
 `#demand-ranking`, `#catalog-engagement` and `#price-monitor` all resolve exactly as before, and
 `website-traffic`/`margin`/`financial-health` still redirect into the hub (now onto their own
 tabs — see §4's redirect list).

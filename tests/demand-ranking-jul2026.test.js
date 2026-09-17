@@ -97,12 +97,18 @@ test('app.js registers the demand-ranking nav item under Analytics, owner-only',
     assert.ok(/key:\s*'demand-ranking'/.test(APP_JS),
         'NAV_ITEMS must include a demand-ranking entry');
     // July 2026 put demand-ranking in "Catalog"; Sep 2026 gathered every read-only
-    // reporting surface into a dedicated "Analytics" section (between Overview and
-    // Sales) — see tests/admin-analytics-section-sep2026.test.js for that contract.
+    // reporting surface into a dedicated "Analytics" section — see
+    // tests/admin-analytics-section-sep2026.test.js for that contract.
+    // The bound is the section that FOLLOWS Analytics. That was Sales until the owner
+    // asked for Sales above Analytics; it is now Catalog. Re-point it on any reorder —
+    // a bound naming a section further down would keep passing while this row drifted.
     const analyticsIdx = APP_JS.indexOf("section: 'Analytics'");
-    const salesIdx = APP_JS.indexOf("section: 'Sales'");
+    const nextSectionIdx = APP_JS.indexOf("section: 'Catalog'");
     const drIdx = APP_JS.indexOf("key: 'demand-ranking'");
-    assert.ok(analyticsIdx !== -1 && drIdx > analyticsIdx && drIdx < salesIdx,
+    assert.ok(analyticsIdx !== -1 && nextSectionIdx > analyticsIdx,
+        'the Analytics section must still be followed by Catalog — otherwise the bound ' +
+        'below measures nothing');
+    assert.ok(drIdx > analyticsIdx && drIdx < nextSectionIdx,
         'demand-ranking nav item must live under the Analytics section');
     const navLine = APP_JS.slice(drIdx, drIdx + 120);
     assert.ok(navLine.includes('ownerOnly: true'),
