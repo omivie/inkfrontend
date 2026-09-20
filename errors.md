@@ -41,6 +41,147 @@ describing the same incident.
 
 ---
 
+## ERR-268 — Apple Pay and Google Pay took 0 of 173 charges, and the brief that diagnosed it named the wrong cause — **RESOLVED (frontend)** (2026-09-20)
+
+**Context.** Backend handoff `stripe-wallets-not-rendering-FE-handoff-sep2026.md`: the wallet row
+on `/payment` had produced no Apple Pay and no Google Pay in the entire live charge history.
+
+```
+173 live charges, 2026-03-10 → 2026-09-17
+  card        118      apple_pay    0
+  link         46      google_pay   0
+  card/link     9
+```
+
+The brief attributed it to four missing CSP entries and supplied a corrected header. Everything it
+said about Stripe's side was verified and correct. **Its diagnosis was not**, and the thing that
+settled it was one measurement nobody had taken.
+
+### The brief was right about the header and wrong about the cause
+
+The seven CSP additions are real, documented by Stripe, and shipped here. Verified first, not
+taken on trust: the live header on `www` matched the brief's "before" exactly; `vercel.json`
+was **byte-identical** to it (1404 chars both sides, no drift to reconcile); and the brief's
+ready-to-paste block was diffed directive-by-directive and confirmed **purely additive — 7
+additions, 0 removals**. That check is not ceremony: ERR-260 shipped as a swap that read like an
+addition in a diff of one very long line.
+
+**But the CSP was not what suppressed the wallets.** `probe:stripe-wallets` §3b, run against
+production *before* anything was deployed — same browser, same origin, same unfixed policy, one
+variable changed:
+
+| Express Checkout options | wallets Chromium reports eligible |
+|---|---|
+| **exactly what production ran** | `klarna, link` — `applePay:false, googlePay:false` |
+| **with `paymentMethods:'always'`** | `applePay, googlePay, klarna, link` |
+
+`inkcartridges/js/payment-page.js` passed **no `paymentMethods` option at all**. Stripe documents
+that Apple Pay on non-Safari desktop, and Google Pay on Safari and **every iOS browser**, render
+*only* when those are `'always'`; at the default `'auto'` they are excluded by design. That is the
+cause, it is one line, and it reproduces on demand.
+
+> ***An explanation that fits the symptom is not the cause. The CSP was genuinely broken, genuinely
+> undocumented-against, and genuinely worth fixing — and it would not have produced one extra wallet
+> payment. Change one variable against the live system and let it tell you.***
+
+**And the row was never dead.** The same run shows `link: true` on the *unfixed* site. The brief
+opens "the wallet row has never produced a single payment"; Link renders in that row and took 46 of
+the 173. The row was live the whole time, missing exactly the two wallets nobody could see. A
+component reported as dead was serving 27% of revenue.
+
+### The entry with the most money attached has nothing to do with wallets
+
+`frame-src` was missing `https://hooks.stripe.com` — **where 3-D Secure challenges render**. Any
+card that triggered a 3DS step had nowhere to draw it, on the main payment path, for as long as the
+header has existed. 118 card charges succeeded because most never trigger one. Nothing measures the
+ones that did. That is the clearest reason to ship the CSP half regardless of §3b.
+
+### The instrument was switched off on the only host that had the bug
+
+The brief's verification step was: open Safari, read the console, `payment-page.js` already logs
+the answer. **It does not.** Every wallet log in that file goes through `DebugLog`, hard-gated on
+`hostname === 'localhost' || '127.0.0.1'`. On production, `Express Checkout ready: …` and
+`no eligible wallet — block hidden` are **no-ops**. Following the brief would have produced a
+tester staring at an empty console, and the same blind experiment that produced the zero.
+
+> ***A log that is silent on production is not an instrument. Neither is a local test run against a
+> header localhost never serves*** — `serve.json` sets none, so every local check of this class is
+> green by construction (ERR-260's third alibi, still standing).
+
+Fixed with an opt-in channel: `?wallet-debug=1` (persisted in `sessionStorage`, so it survives
+Stripe's redirect) prints the availability map, an ECE lifecycle state, and every
+`securitypolicyviolation` — which is what turns "no wallets appeared" into "the CSP refused
+`link.com`". **`DebugLog._isDev` is never flipped**: that would re-open the PayPal order-payload
+exposure ERR-225's sibling guard closed — name, address, phone, guest email — through a flag that
+lives in a URL and therefore gets shared and screenshotted. The wallet channel prints availability,
+a state and refused URIs, and a test pins that it never references the payload, the cart or the
+customer.
+
+### A failure that could not report itself
+
+When the CSP refuses the Element's frame, **`ready` never fires**. Both branches of the ready
+handler are skipped, so the wrapper is never removed: an empty gap sits above the card form and
+not one line is written anywhere. The code had no deadline. `ECE_READY_TIMEOUT_MS` (8s — generous
+on purpose; the deadline is for a frame that is never coming, not a slow one) now removes the
+wrapper and records *why*, distinguishing "the device reported nothing eligible" from "the frame
+was refused" — two states that look identical on screen and are completely different problems.
+
+### Deliberately not done
+
+- **`initStripe()` and the card form are untouched.** The brief suggests flipping the card
+  Payment Element's `wallets` to `'auto'` as a diagnostic. That path carries 164 of 173 charges,
+  and `paymentElement.update()` does **not** accept `wallets` (checked against Stripe's option
+  list), so a real fallback means destroy-and-recreate of the one thing that works. Not worth it
+  before a single wallet payment has ever completed. A measured deferral, not an oversight.
+- **No `/.well-known/apple-developer-merchantid-domain-association`.** Stripe performs Apple
+  merchant validation via `payment_method_domains`; the brief is right that its 404 is fine.
+- **No cart-page wallet button (the brief's Option B).** Its own sequencing, accepted as written.
+
+### Guards
+
+`tests/stripe-wallet-csp-sep2026.test.js` — 23 tests, every guard red-proofed against a mutated
+**string**, never the file (peers hold these files). §3 does not check that a token is present: it
+runs a **real CSP host-source matcher** and proves each wildcard covers what we need and *not* what
+its neighbour covers — `https://link.com` does not match `checkout.link.com`, `https://*.link.com`
+does not match `link.com`, so neither can be tidied away as redundant. The matcher **throws** on a
+form it cannot parse rather than answering "no", and has its own positive control.
+
+**Two of my own guards were wrong and the red-proof is the only reason they are not still wrong.**
+The mutant builder was `csp.split(' ').filter(...)`, which leaves the **last** source in a
+directive glued to its `;` — so removing `https://*.link.com` from `connect-src` (where it is last)
+produced a mutant identical to the original, and the red-proof passed while proving nothing. And
+the `init()` slice was bounded on `loadCheckoutData()`, which appears as a *call* three lines into
+`init()`, cutting the slice before the ordering it existed to check. Both now assert their own
+premise first.
+
+`tests/console-debuglog-audit.test.js` was **widened once, deliberately**, to permit a second gated
+log wrapper, with the reason written into its docstring — and bounded by a new test enumerating
+every gated wrapper in the tree, counted per file rather than pinned to line numbers, because a
+guard that reddens on every unrelated edit is one debugging session from being ignored.
+
+`scripts/probe-stripe-wallets.mjs` (`npm run probe:stripe-wallets`) — READ-ONLY, mode printed
+before any work. §1 reads the **deployed** header and names what a customer loses per missing
+entry; §2 reports drift and says **which side is behind**; §3 opens a real browser on the real
+origin and mounts a **deferred** ECE (no PaymentIntent, no order, no cart, no confirm, no
+`ctx.route()` — its safety is structural, not borrowed from the backend, ERR-262); **§3b is the
+attribution control that produced the table above** and stays permanently, because a measurement
+taken once is a constant with a good alibi (ERR-233). §4 states the blind spot by name: **Chromium
+is not Safari**, Apple Pay on a real device is unproven by any run of this probe, and a skip is
+not a pass.
+
+**Verified.** Full suite green on every file this touches. `probe:stripe-wallets` correctly reports
+§1 red / §2 "repo is ahead of production" while the fix is committed and not yet deployed — the
+ERR-225 precedent, stated in the probe's own header so the first red is not misread as a bug.
+Re-run after deploy. **Open, and only a human can close it:** Apple Pay on real Safari with a card
+in Wallet, via `/payment?wallet-debug=1`.
+
+**Files.** `inkcartridges/vercel.json` · `inkcartridges/js/payment-page.js` ·
+`inkcartridges/html/payment.html` · `tests/stripe-wallet-csp-sep2026.test.js` ·
+`tests/console-debuglog-audit.test.js` · `scripts/probe-stripe-wallets.mjs` · `package.json` ·
+`backend-docs/outbox/stripe-wallets-FE-response-sep2026.md`.
+
+---
+
 ## ERR-267 — Every page's scrollbar was invisible, and the rule that hid it was three lines above the rule that drew it — **RESOLVED** (2026-09-17)
 
 **Context.** Owner screenshot of `/shop?brand=brother&category=ink&code=LC3333`, with the ask:

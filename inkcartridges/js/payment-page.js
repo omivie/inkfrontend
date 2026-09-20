@@ -15,6 +15,22 @@
      */
     const STRIPE_MIN_NZD_CENTS = 50;
 
+    /**
+     * How long to wait for the Express Checkout Element's 'ready' event before
+     * declaring it dead (ERR-268).
+     *
+     * This constant exists because of a failure shape with no symptom: when the
+     * CSP refuses the Element's iframe, 'ready' NEVER FIRES. Both branches of
+     * the ready handler are skipped, so the wrapper is never removed, an empty
+     * gap sits above the card form, and nothing anywhere says why. The wallet
+     * row produced 0 of 173 live charges while that was true.
+     *
+     * 8s is deliberately generous — a slow phone on rural mobile data must not
+     * lose a wallet button it was going to get. The deadline is for a frame
+     * that is never coming, not for a slow one.
+     */
+    const ECE_READY_TIMEOUT_MS = 8000;
+
     const PaymentPage = {
         // State
         cartItems: [],
@@ -52,12 +68,17 @@
         eceElements: null,       // SEPARATE Elements instance for the Express Checkout (wallet) Element
         expressCheckout: null,   // the mounted Express Checkout Element
         paymentElementReady: false,
+        walletDiag: null,        // wallet diagnosis channel — see initWalletDiag()
 
         /**
          * Initialize the payment page
          */
         async init() {
             DebugLog.log('Payment page initializing...');
+
+            // Before anything else: start listening for CSP refusals, so a
+            // blocked wallet frame is attributable rather than merely absent.
+            this.initWalletDiag();
 
             // Load checkout data
             this.checkoutData = this.loadCheckoutData();
@@ -485,6 +506,66 @@
         },
 
         /**
+         * Wallet diagnosis channel — the only way to read the wallet answer on
+         * PRODUCTION (ERR-268).
+         *
+         * WHY THIS EXISTS. Every log in this file goes through DebugLog, which
+         * is hard-gated on `hostname === 'localhost' || '127.0.0.1'`
+         * (utils.js). So on the live site "Express Checkout ready: ..." and
+         * "no eligible wallet" are NO-OPS. The backend's handoff told us to
+         * open Safari and read those lines; there was nothing to read. The
+         * wallet row had been silent for six months and the instrument we
+         * planned to diagnose it with was switched off on the only host that
+         * mattered.
+         *
+         * Turn it on with ?wallet-debug=1 (?wallet-debug=0 turns it off).
+         * The flag persists in sessionStorage so it survives Stripe's redirect.
+         *
+         * OFF BY DEFAULT, AND IT CARRIES NO CUSTOMER DATA. It prints wallet
+         * availability, an ECE lifecycle state and refused URIs — never the
+         * order payload, the cart or the customer. That boundary is what the
+         * PII guard in console-debuglog-audit.test.js protects, and it is
+         * pinned again in stripe-wallet-csp-sep2026.test.js.
+         */
+        initWalletDiag() {
+            if (this.walletDiag) return this.walletDiag;   // idempotent: one listener, not two
+
+            const KEY = 'walletDiag';
+            let on = false;
+            try {
+                const flag = new URLSearchParams(window.location.search).get('wallet-debug');
+                if (flag === '1') sessionStorage.setItem(KEY, '1');
+                else if (flag === '0') sessionStorage.removeItem(KEY);
+                on = sessionStorage.getItem(KEY) === '1';
+            } catch (e) {
+                on = false;   // private mode / storage blocked — stay silent, never throw
+            }
+
+            const diag = {
+                enabled: on,
+                eceStatus: 'not-started',
+                available: null,
+                violations: [],
+                say(...parts) { if (this.enabled) console.info('[wallets]', ...parts); }
+            };
+            this.walletDiag = diag;
+
+            // This is what turns "no wallets appeared" into "the CSP refused
+            // link.com". Violations raised BEFORE this listener registers are
+            // missed — probe:stripe-wallets reads them at the browser level,
+            // which is the only place the earliest ones are visible.
+            window.addEventListener('securitypolicyviolation', (event) => {
+                const refusal = { directive: event.violatedDirective, blocked: event.blockedURI };
+                diag.violations.push(refusal);
+                diag.say('CSP REFUSED', refusal.directive, '->', refusal.blocked);
+            });
+
+            diag.say('diagnosis on. A wallet needs all of: a supported browser, the wallet set up',
+                     'on the device, a registered payment_method_domain, and a CSP that permits the frame.');
+            return diag;
+        },
+
+        /**
          * Initialize the Express Checkout Element (ECE) — the one-tap wallet button
          * row (Link / Apple Pay / Google Pay) shown ABOVE the card form.
          *
@@ -504,8 +585,14 @@
          *    the ECE confirm omits payment_method_data.billing_details.
          */
         initExpressCheckout({ appearance, fonts, totalCents }) {
+            const diag = this.walletDiag || this.initWalletDiag();
+
             const wrapper = document.getElementById('express-checkout-wrapper');
-            if (!wrapper) return;
+            if (!wrapper) {
+                diag.eceStatus = 'no-wrapper';
+                diag.say('no #express-checkout-wrapper in the DOM — nothing to mount into.');
+                return;
+            }
 
             // No valid total yet (server totals failed to load) — never show a live
             // wallet button that would confirm against the $1 fallback amount.
@@ -515,6 +602,9 @@
             // wallet sheet that fails at confirm is worse than an absent one. NaN
             // fails this comparison and removes the button, which is the safe side.
             if (!(Math.round(this.totals.total * 100) >= STRIPE_MIN_NZD_CENTS)) {
+                diag.eceStatus = 'below-minimum';
+                diag.say('total is', this.totals.total, '— below Stripe\'s', STRIPE_MIN_NZD_CENTS,
+                         'cent NZD floor (or NaN), so the wallet row was removed before mounting.');
                 wrapper.remove();
                 return;
             }
@@ -529,6 +619,18 @@
                     appearance
                 });
                 ece = this.eceElements.create('expressCheckout', {
+                    // 🚨 WITHOUT THIS, TWO WHOLE PLATFORMS NEVER SEE A WALLET.
+                    // Stripe renders Apple Pay on non-Safari DESKTOP, and Google
+                    // Pay on Safari and on EVERY iOS browser, only when these are
+                    // 'always'. At the default 'auto' those combinations are
+                    // excluded by design — and they are most of our traffic.
+                    // 'always' also shows the button to someone who has not set
+                    // the wallet up: they get the wallet's own sign-in flow
+                    // instead of no button at all. It does NOT force a button on
+                    // an unsupported platform or an unsupported currency, so this
+                    // widens reach without inventing an option nobody can use.
+                    // ERR-268.
+                    paymentMethods: { applePay: 'always', googlePay: 'always' },
                     // Shipping + contact were collected on the previous step, so the
                     // wallet sheet only needs to authorise payment — don't re-ask.
                     emailRequired: false,
@@ -539,21 +641,53 @@
                 });
             } catch (e) {
                 DebugLog.warn('Express Checkout Element unavailable:', e && e.message);
+                diag.eceStatus = 'error';
+                diag.say('ECE construction THREW:', e && e.message);
                 wrapper.remove();
                 return;
             }
             this.expressCheckout = ece;
 
+            diag.eceStatus = 'mounting';
+            diag.say('ECE created, awaiting ready...');
+
+            // 🚨 A REFUSED FRAME NEVER FIRES 'ready'. Without this deadline the
+            // handler below simply never runs: the wrapper stays, an empty gap
+            // sits above the card form, and not one line is written anywhere
+            // about why. That is the exact state the wallet row was in for six
+            // months. A failure that cannot report itself is the one to give a
+            // clock to. ERR-268.
+            const readyTimer = setTimeout(() => {
+                if (diag.eceStatus !== 'mounting') return;   // ready already won
+                diag.eceStatus = 'timeout';
+                document.getElementById('express-checkout-wrapper')?.remove();
+                diag.say('TIMEOUT — ready never fired within ' + ECE_READY_TIMEOUT_MS + 'ms.',
+                         diag.violations.length
+                             ? 'The CSP refused: ' + diag.violations.map(v => v.blocked).join(', ')
+                             : 'No CSP refusal was seen, so suspect Stripe.js itself, the network, '
+                               + 'or payment_method_domain registration.');
+            }, ECE_READY_TIMEOUT_MS);
+
             // Empty state: hide the whole block (buttons + divider) when no wallet is
             // eligible, so we don't ship an empty gap. Treat an all-false map the same
             // as an absent one.
             ece.on('ready', ({ availablePaymentMethods: apm } = {}) => {
+                clearTimeout(readyTimer);
                 const anyAvailable = apm && Object.values(apm).some(Boolean);
+                diag.available = apm || null;
+                diag.eceStatus = anyAvailable ? 'ready' : 'none';
                 if (!anyAvailable) {
                     document.getElementById('express-checkout-wrapper')?.remove();
                     DebugLog.log('Express Checkout: no eligible wallet — block hidden');
+                    // "Nothing is eligible" and "the frame was refused" look identical
+                    // on the page and are completely different problems. Say which.
+                    diag.say('ready, but NO eligible wallet. Map:', JSON.stringify(apm || {}),
+                             '· This is the browser/device answer, not a CSP problem —',
+                             diag.violations.length + ' CSP refusal(s) seen.');
                 } else {
                     DebugLog.log('Express Checkout ready:', Object.keys(apm).filter(k => apm[k]).join(', '));
+                    diag.say('ready:', Object.keys(apm).filter(k => apm[k]).join(', '),
+                             '· full map:', JSON.stringify(apm));
                 }
             });
 

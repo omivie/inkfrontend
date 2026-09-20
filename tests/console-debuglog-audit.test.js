@@ -20,8 +20,36 @@
  * DebugLog.
  *
  * This test fails if anyone re-introduces a raw `console.*` call in the
- * shipped frontend JS. The ONLY permitted raw console calls are the
- * DebugLog wrapper methods themselves (gated by `this._isDev`).
+ * shipped frontend JS. The ONLY permitted raw console calls are the bodies
+ * of GATED LOG WRAPPERS — a one-line `if (<gate>) console.x(...)`.
+ *
+ * WIDENED ONCE, DELIBERATELY (ERR-268, 2026-09-20). There are now TWO such
+ * wrappers, and the second one exists because of what the first one cost us:
+ *
+ *   1. `DebugLog` (utils.js), gated on `this._isDev` — localhost only.
+ *   2. `PaymentPage.walletDiag.say` (payment-page.js), gated on
+ *      `this.enabled` — opt-in via ?wallet-debug=1, and it DOES print on
+ *      production, which is the entire point of it.
+ *
+ * Why that was necessary: DebugLog's gate means every wallet log in
+ * payment-page.js is a NO-OP on the live site. Apple Pay and Google Pay
+ * produced 0 of 173 live charges over six months, and the instrument we
+ * were told to diagnose it with was switched off on the only host where
+ * the bug existed. A log you cannot read on the host that has the problem
+ * is not an instrument.
+ *
+ * THE PII BOUNDARY IS UNCHANGED AND STILL LOAD-BEARING. The reason this
+ * file exists is that payment-page.js once printed the full order payload
+ * — customer name, address, phone, guest email — into production DevTools.
+ * The wallet channel prints wallet availability, an ECE lifecycle state
+ * and refused URIs. It never touches the payload, the cart or the
+ * customer, and `tests/stripe-wallet-csp-sep2026.test.js` pins that
+ * separately. `DebugLog._isDev` is NEVER flipped to force production
+ * logging: that would re-open the exact exposure this file closed, through
+ * a flag that lives in a URL and therefore gets shared and screenshotted.
+ *
+ * The allowance is bounded by a test below that enumerates every gated
+ * wrapper in the tree, so a third one cannot appear unremarked.
  *
  * Run with: node --test tests/console-debuglog-audit.test.js
  */
@@ -49,12 +77,23 @@ function collectJsFiles(dir, acc = []) {
 const RAW_CONSOLE = /\bconsole\s*\.\s*(log|warn|error|info|debug|table|trace|dir|group|groupEnd|count|time|timeEnd)\s*\(/;
 
 /**
- * A raw console call is allowed only when it is a DebugLog wrapper body
- * (the line is gated by `this._isDev`) — that is the one place a real
- * console call must exist.
+ * The two permitted gates, by exact spelling. Keyed by the gate so the
+ * enumeration test below can report which wrapper a line belongs to.
+ *
+ * Matching on the GATE, not on a filename, is deliberate: a guard that
+ * allowlists a path stops guarding that path (ERR-258).
  */
-function isDebugLogWrapper(line) {
-  return /this\._isDev/.test(line);
+const GATED_LOG_WRAPPERS = [
+  { gate: /this\._isDev/,  name: 'DebugLog (utils.js) — localhost only' },
+  { gate: /this\.enabled/, name: 'walletDiag.say (payment-page.js) — opt-in, ERR-268' },
+];
+
+/**
+ * A raw console call is allowed only when it is the body of a gated log
+ * wrapper — that is the one place a real console call must exist.
+ */
+function isGatedLogWrapper(line) {
+  return GATED_LOG_WRAPPERS.some(w => w.gate.test(line));
 }
 
 /** Crude comment guard: skip whole-line // comments and block-comment bodies. */
@@ -74,7 +113,7 @@ test('no raw console.* calls survive in shipped frontend JS', () => {
     lines.forEach((line, i) => {
       if (isCommentLine(line)) return;
       if (!RAW_CONSOLE.test(line)) return;
-      if (isDebugLogWrapper(line)) return; // DebugLog definition — legitimate
+      if (isGatedLogWrapper(line)) return; // gated wrapper definition — legitimate
       offenders.push(`${path.relative(ROOT, file)}:${i + 1}  ${line.trim()}`);
     });
   }
@@ -83,6 +122,56 @@ test('no raw console.* calls survive in shipped frontend JS', () => {
     'Raw console.* calls bypass DebugLog (they leak into production ' +
     'DevTools). Route them through DebugLog.{log,warn,error,info}:\n  ' +
     offenders.join('\n  ')
+  );
+});
+
+test('the raw-console escape hatch has exactly the two gated wrappers we know about', () => {
+  // Without this, the exemption above is an open door: any future line that
+  // happens to mention `this.enabled` next to a console call inherits it
+  // silently. Enumerating them is what keeps the hatch a hatch.
+  //
+  // Counted PER FILE, not per line number. A guard pinned to line numbers goes
+  // red every time someone edits the lines above it, and a check that cries
+  // wolf is one debugging session away from being ignored (ERR-260).
+  const counts = {};
+  for (const file of collectJsFiles(JS_DIR)) {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line) => {
+      if (isCommentLine(line)) return;
+      if (!RAW_CONSOLE.test(line)) return;
+      if (!isGatedLogWrapper(line)) return;
+      const rel = path.relative(ROOT, file);
+      counts[rel] = (counts[rel] || 0) + 1;
+    });
+  }
+  assert.deepStrictEqual(
+    counts,
+    {
+      // DebugLog defines log / warn / error / info — four gated console calls.
+      'inkcartridges/js/utils.js': 4,
+      // walletDiag.say — one, opt-in, ERR-268.
+      'inkcartridges/js/payment-page.js': 1,
+    },
+    'The set of gated log wrappers changed. Every one of these is a raw console.* ' +
+    'call that ships to production users, so each is a deliberate decision with a ' +
+    'written reason — see this file\'s docstring. If you added one, say why there. ' +
+    'Found:\n  ' + JSON.stringify(counts, null, 2)
+  );
+});
+
+test('the wallet diagnosis channel is opt-in and never force-enables DebugLog', () => {
+  const payment = read('inkcartridges/js/payment-page.js');
+  // Flipping DebugLog._isDev would re-open the PII exposure this file closed,
+  // via a flag that lives in a URL and therefore gets shared and screenshotted.
+  assert.doesNotMatch(
+    payment, /DebugLog\._isDev\s*=/,
+    'payment-page.js must never write to DebugLog._isDev — that would turn the ' +
+    'PayPal order-payload log (customer name, address, phone, guest email) back ' +
+    'on in production DevTools for anyone holding the debug URL.'
+  );
+  assert.match(
+    payment, /say\(\.\.\.parts\) \{ if \(this\.enabled\)/,
+    'the wallet channel must stay a gated wrapper, not a bare console call'
   );
 });
 
