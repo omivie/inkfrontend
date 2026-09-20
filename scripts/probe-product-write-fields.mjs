@@ -61,6 +61,14 @@
  * obvious name, never a damaged real product. Teardown failure is a FAILURE,
  * printed with the SKU and a non-zero exit, never a note.
  *
+ * PACING. `/api/admin/*` is `private, no-store` and never edge-eligible, so
+ * every request here goes to the origin and spends the shared **100 req/60s
+ * per-IP** budget (ERR-266/BF-066) — a budget other staff sessions are spending
+ * at the same time. A write run makes roughly 30 requests, and every step below
+ * sleeps between the write and its read-back. Do not tighten those sleeps: a
+ * probe fast enough to trip the limiter reports the 429 as a failed write, which
+ * is exactly the false alarm ERR-243 nearly sent the backend.
+ *
  *   npm run probe:product-write                                   (read-only)
  *   PROBE_EMAIL=… PROBE_PASSWORD=… npm run probe:product-write -- --write
  *
@@ -297,17 +305,37 @@ console.log('\n\x1b[1m§2 The shipped admin agrees with the measurement\x1b[0m')
         soft('for-use-in.js exports no writeForUseIn', 'the panel is still read-only');
     }
 
-    // The editor must NOT resend its own seed on every save. Omitting the key
-    // leaves the list alone; sending "" CLEARS it (§7). A form that always
-    // sends would turn one failed read into a silent wipe — the same reasoning
-    // that keeps stock_quantity off this payload (products.js ERR-262).
-    if (/_fuiDirty/.test(products)) {
-        ok('the save payload dirty-tracks the machine list (it is not resent blind)');
-    } else if (/compatible_devices_html/.test(products)) {
-        bad('products.js sends compatible_devices_html with no dirty flag',
-            'an unedited save would resend the seed; a failed seed read would then CLEAR the list');
+    // THE FIELD MUST NEVER BE RESENT BLIND. Omitting the key leaves the list
+    // alone; sending "" CLEARS it (§7). So a surface that ships the field on
+    // every save would turn one failed read into a silent wipe — the same
+    // reasoning that keeps stock_quantity off the product payload (ERR-262).
+    //
+    // Two owners, two different guards, because the two paths are not alike:
+    //
+    //   EDIT    the panel owns its own Save and compares against the value it
+    //           was seeded with, so an unchanged field is never sent at all.
+    //   CREATE  there is no product id to PUT to, so the list rides on the POST
+    //           — and an empty box must OMIT the key rather than send "",
+    //           because a create has nothing to clear.
+    const fieldMentions = (products.match(/compatible_devices_html/g) || []).length;
+    if (fieldMentions === 0) {
+        soft('products.js does not send compatible_devices_html', 'the editor is not wired');
+    } else if (fieldMentions > 1) {
+        bad(`products.js names compatible_devices_html ${fieldMentions} times`,
+            'exactly one (the create payload) is expected — the module owns the field name, '
+            + 'and a second speller is how one rule reached six copies (ERR-187/192)');
+    } else if (/if \(newForUseIn !== null\) data\.compatible_devices_html = newForUseIn;/.test(products)) {
+        ok('the create path OMITS the field when empty rather than sending "" (which would clear)');
     } else {
-        soft('products.js does not send compatible_devices_html yet', 'the editor is not wired');
+        bad('the create path may send an empty machine list',
+            'an empty string is the CLEAR instruction; a create has nothing to clear');
+    }
+
+    if (/forUseInChanged\(input\.value, seeded\)/.test(fui)) {
+        ok('the edit panel refuses a save when the field is unchanged (no blind resend)');
+    } else {
+        bad('the edit panel does not compare against its seed before saving',
+            'an unchanged field would be resent on every save, and a failed seed read would wipe it');
     }
 
     // Every admin product surface holds a UUID, so by-id is the route the repair
