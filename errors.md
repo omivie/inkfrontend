@@ -13409,3 +13409,131 @@ PAIRING* — arriving through a completely different door.
 **Files.** `js/traffic-tracker.js` · `js/api.js` · `js/search.js` ·
 `tests/search-session-identity-aug2026.test.js` · `tests/ads-add-to-cart-conversion-sep2026.test.js` ·
 `scripts/probe-data-capture.mjs`.
+
+## ERR-278 — Microsoft Ads had been buying clicks into a site with no tag on it, and the snippet they give you cannot run here — **RESOLVED (frontend)** (2026-09-21)
+
+**Context.** The owner was connecting Microsoft Advertising and reached the "Select a UET tag"
+step, which reported the account's tag `INKCART` as `Unverified`. That word reads like a
+configuration state. It is not: a UET tag object existed in the account (id `97269770`, owner
+Office Consumables Ltd), Microsoft had crawled `inkcartridges.co.nz`, found no `bat.js`, and the
+tag had therefore **never received a single hit**. `Goals: None`, `Audiences: None`. Measured
+in the repo: zero occurrences of `uetq`, `bat.bing`, `msclkid` or Clarity anywhere — the only
+Microsoft strings in the tree are `bingbot` in the prerender UA list and a Supabase `azure` OAuth
+button. **Entirely greenfield.** Ad spend was being judged on clicks with no idea which ones paid
+for themselves.
+
+**The snippet Microsoft hands you cannot run on this site, for two independent reasons.**
+It is an inline `<script>`, and we serve `script-src 'self'` with no `'unsafe-inline'` and no
+nonce; and `bat.bing.com` was allowlisted in no directive. Pasted as instructed it would have
+been refused on load, the tag would have stayed `Unverified` for ever, and **nothing in the
+Microsoft UI would have said why.**
+
+> This is the third tracking tag to meet this CSP, and the previous two both failed silently:
+> ERR-225 (PayPal — an allowed origin is not an allowed script, and the page logged *success*
+> while a payment method was dead) and ERR-260 (the Ads conversion beacon, where `*.google.com`
+> did not match `www.google.co.nz`). The install was therefore designed around the failure mode,
+> not just the feature.
+
+**THE HALF THAT HIDES.** `bat.bing.com` needs to be in **both** `script-src` and `connect-src`,
+and the two fail completely differently. `script-src` blocks `bat.js` outright — loud, obvious,
+nothing works. `connect-src` blocks **only** the fetch/`sendBeacon` transport, and `img-src` is
+`'self' https: data:`, so UET's **pixel** transport keeps working: requests to `bat.bing.com`
+appear in the network panel and return 200, the tag looks completely healthy, and conversions
+simply do not arrive. That is ERR-260's exact shape — and `img-src https:` was one of its three
+alibis then, unchanged since. ***A tag that is half-allowed looks more alive than one that is
+blocked, which is why the blocked one is the cheaper bug.***
+
+**It lives in `js/gtag.js`, not a file of its own.** That file is already a blocking `<head>`
+script on exactly the 38 of 43 pages that want a tag. A new `/js/uet.js` would have meant
+hand-adding a `<script>` to 38 `<head>` blocks at 38 different line numbers — ERR-194/ERR-214
+verbatim, where hash-locked markup plus hand enrolment left 10 pages drifted for four months
+while looking fine. `gtag.js` had already refused that twice, in writing. So **UET introduces no
+new enrolment fact to maintain**: its reach *is* gtag.js's reach, structurally, and a test pins
+that from both ends rather than counting pages.
+
+**Placement inside the file was not free either.** `tests/ga4-ecommerce-events-sep2026.test.js`
+slices `gtag.js` from `indexOf('const Ga4Ecommerce')` **to end of file** and asserts on what it
+finds there. Appending the new module to the bottom — the obvious move — would have dropped it
+inside an assertion window built for something else, where it would pass or fail for reasons
+nobody intended. Today it would have *passed*, by luck. ***Passing by luck inside someone else's
+assertion window is how a test quietly stops meaning what its name says*** (the ERR-256 lesson:
+a window anchored on one function tests where the code lives, not the claim). `UetTag` sits
+above `Ga4Ecommerce`, and the new suite re-asserts *their* invariant to prove this change did
+not move it.
+
+**The purchase conversion, and why GA4's refusal does not transfer.** `js/gtag.js` carries a
+tombstone reading `THERE IS NO purchase() HERE, DELIBERATELY`, because the server already posts
+GA4 `purchase` through the Measurement Protocol and MP dedup is unreliable — a browser twin
+double-counts real revenue. The reflex is to apply that rule to the new platform. It does not
+apply: **nothing posts to Microsoft server-side**, so a browser event is not a second copy of a
+conversion, it is the only path revenue has to that account. ***The rule was never "browsers must
+not send purchases", it was "do not send the same purchase twice"*** — and reading it as the
+former would have shipped a tag that could never report a sale. The asymmetry is recorded at both
+ends so the next reader meets it as a decision rather than an inconsistency.
+
+It fires from inside `order-confirmation-page.js` `markConversion()`, on the line after its
+Google twin, fed from the same `order` object — so it inherits all three existing guards
+(`_paymentSucceeded`, the per-pageload latch, and the per-order-number `localStorage` key that
+exists because the Ads conversion used to report a second full-value purchase on every receipt
+refresh). Both ad accounts are therefore bidding on the same number **by construction**: neither
+call site derives it, and both use the same `readMoney`/`hasMoney` readers, so `Number(null)`
+cannot turn "the server reported no total" into a confident $0.00 sale.
+
+**CONSENT: AN ABSENCE, ON PURPOSE.** UET has its own consent API. We do not call it. The consent
+default at the top of `gtag.js` declares **only** `analytics_storage`; under Consent Mode an
+undeclared type is **granted**, which is why Google Ads conversion tracking runs ungated today,
+and ERR-227 records that as a deliberate revenue decision rather than an oversight. Declaring
+`ad_storage:'denied'` to UET — the reflexive "complete the list" move — would restrict Microsoft
+for 100% of visitors, and if the wiring were ever wrong it would stay denied **for ever with no
+symptom**, which is precisely how `cookie_consent` came to have one reader and zero writers.
+A test pins the absence, because an absence nobody asserts is one refactor from disappearing.
+
+**Guards.** `tests/uet-tag-sep2026.test.js` — 25 tests, **red-proofed by
+`scripts/redproof-uet.sh`, which breaks the install 12 ways against a COPY of the tree and
+confirms the suite notices all 12** (ERR-258: six guards that could not fail sat inside a 6088/0
+green run). The copy matters: several Claude sessions work in this repo at once and a peer's
+sweeping commit can deploy somebody else's half-edited file, so the suite takes a
+`UET_TEST_ROOT` override rather than the red-proof mutating live sources. Behaviour is
+**executed in a `vm`**, not grepped — the *value* is the bug, and `assert.match(/revenue/)`
+cannot see a value — with a positive control asserting that a GST-divided total would be caught.
+
+**THREE OF MY OWN TESTS WERE WRONG, AND ONLY RUNNING THEM SAID SO.**
+(1) `assert.deepStrictEqual` compares **prototypes**, and values returned from a `vm` realm carry
+that realm's `Object`/`Array` — so four assertions failed with "same structure but not
+reference-equal" against code that was entirely correct. `node:assert/strict` makes `deepEqual`
+an alias for `deepStrictEqual`, so the usual escape hatch is not available; values are normalised
+through JSON now. ***A red test that describes a real defect and a red test caused by the
+comparison operator look identical in a test report.***
+(2) A §6 slice anchored on `markConversion()` silently matched the **call site**
+`markConversion();` thirty characters earlier, so every assertion in that section was reading a
+slice of the wrong function. ***A slice anchor that can match two things is a test pointed
+somewhere nobody checked*** — same family as the fixed-1400-character slice of ERR-256. The
+helper now asserts the slice contains its own guards before anything is asserted against it.
+(3) An enrolment test forbade `document.createElement('script')` near the string `uet` — which is
+the **bat.js loader itself**, the legitimate thing. It was replaced with the claim actually worth
+pinning: no second runtime file, and no page loading a UET script directly.
+
+**AND THE PROBE'S FIRST RUN CAUGHT TWO FLAWS IN THE PROBE.** Run against production before
+deploy (correctly red: 6 failures, with the §0 negative control green), it printed **"nothing
+bing-bound was refused by the CSP" — a PASS, on a page that had never asked for `bat.js`.**
+Nothing was refused because nothing was attempted. ***"Nothing was refused" is only evidence when
+something was attempted; otherwise it is a skip wearing a pass's clothes***, and it is exactly the
+line that would let the next real refusal through unnoticed. It reports NOT EXERCISED now. The
+second: a beacon failure message read "bat.js loaded but reported nothing" in a state where
+`bat.js` had never executed. ***A probe that misdescribes the state it found teaches people to
+distrust the one time it is right.***
+
+**What this probe cannot do, stated plainly.** It cannot verify a **purchase** conversion — that
+needs a real paid order, so the first live order after deploy is the measurement, exactly the gap
+ERR-260 recorded when it inferred the purchase-beacon block from mechanism rather than measuring
+it. And §4 is a **browser-driven writer**: loading the real site in a real browser makes the
+*browser* fire a real UET pageview into the live Microsoft account. One per run, indistinguishable
+from a visitor, and invisible to any source-grep guard — ERR-271 verbatim. Printed at runtime.
+
+**Still owed, in the Microsoft UI and not in this repo:** the tag alone creates no goal.
+A Conversion goal of type **Custom event**, `Action = purchase`, revenue taken from the event,
+has to be created there or the event arrives and is never counted. `Goals: None` today.
+
+**Files.** `inkcartridges/vercel.json` · `inkcartridges/js/gtag.js` ·
+`inkcartridges/js/order-confirmation-page.js` · `tests/uet-tag-sep2026.test.js` (new) ·
+`scripts/redproof-uet.sh` (new) · `scripts/probe-uet-tag.mjs` (new) · `package.json` · `errors.md`.

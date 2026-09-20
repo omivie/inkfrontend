@@ -141,6 +141,28 @@
                 });
             }
 
+            // Microsoft Advertising purchase conversion (UET).
+            //
+            // Deliberately the line after its Google twin, inside the SAME
+            // guards, fed from the SAME `order` object. Both ad accounts are
+            // therefore bidding on the same number by construction — a second
+            // call site would have to reimplement `_paymentSucceeded`, the
+            // per-pageload latch and the per-order-number localStorage key, and
+            // the first refresh of a receipt would tell the two platforms
+            // different stories with nothing to reconcile them.
+            //
+            // Unlike GA4 (which refuses a browser purchase because the server
+            // already posts one via the Measurement Protocol), NOTHING posts to
+            // Microsoft server-side. This is the only path revenue has to that
+            // account. See the UET block in gtag.js for why that is not a
+            // loophole in the double-count rule.
+            if (typeof UetTag !== 'undefined') {
+                UetTag.purchase({
+                    total: order.total,
+                    orderNumber: order.orderNumber
+                });
+            }
+
             // First-party funnel bottom — `checkout_completed` in
             // cart_analytics_events. order-confirmation.html did not load
             // cart-analytics.js before this change, so a call here would have

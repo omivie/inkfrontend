@@ -67,6 +67,7 @@
     "bundle:backend": "node scripts/bundle-backend-outbox.mjs",
     "probe:orders-delivery-type": "node scripts/probe-orders-delivery-type.mjs",
     "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs",
+    "probe:uet-tag": "node scripts/probe-uet-tag.mjs",
     "probe:stock-freshness": "node scripts/probe-stock-freshness.mjs",
     "probe:catalogue-outage": "node scripts/probe-catalogue-outage.mjs",
     "probe:mobile-cta": "node scripts/probe-mobile-cta-occlusion.mjs",

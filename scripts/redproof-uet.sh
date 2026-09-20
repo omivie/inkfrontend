@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+#
+# RED-PROOF FOR tests/uet-tag-sep2026.test.js
+# ===========================================
+#
+# A green suite is worth exactly as much as its ability to go red. ERR-258 is
+# this repo's record of six guards that could not fail sitting inside a 6088/0
+# green run — every one of them invisible precisely BECAUSE it was green.
+#
+# So this breaks the UET install one way at a time, against a COPY of the tree,
+# and asserts the suite notices. It never edits a live file: several Claude
+# sessions work in this repo at once, and a peer's sweeping commit can deploy
+# somebody else's half-edited file (ERR-270/272).
+#
+# Usage:  bash scripts/redproof-uet.sh
+# Exit 0 only if EVERY mutation was caught.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+pass=0; fail=0
+
+# Each case: a label, a python mutation, and the section expected to catch it.
+run_case() {
+  local label="$1" mutation="$2"
+
+  rm -rf "$WORK/ink"
+  mkdir -p "$WORK/ink"
+  cp -R inkcartridges/js "$WORK/ink/js"
+  cp -R inkcartridges/html "$WORK/ink/html"
+  cp inkcartridges/vercel.json "$WORK/ink/vercel.json"
+  cp inkcartridges/index.html inkcartridges/404.html "$WORK/ink/" 2>/dev/null || true
+
+  if ! python3 -c "$mutation" "$WORK/ink"; then
+    printf '  ?? %-52s MUTATION DID NOT APPLY\n' "$label"
+    fail=$((fail+1)); return
+  fi
+
+  if UET_TEST_ROOT="$WORK/ink" node --test tests/uet-tag-sep2026.test.js >/dev/null 2>&1; then
+    printf '  \033[31mMISSED\033[0m %-48s suite stayed GREEN\n' "$label"
+    fail=$((fail+1))
+  else
+    printf '  \033[32mcaught\033[0m %-48s\n' "$label"
+    pass=$((pass+1))
+  fi
+}
+
+echo "RED-PROOF: breaking the UET install one way at a time"
+echo
+
+# --- helper used by every mutation -----------------------------------------
+H='
+import sys,io,os
+root=sys.argv[1]
+def edit(rel,old,new,count=1):
+    p=os.path.join(root,rel)
+    s=io.open(p,encoding="utf-8").read()
+    assert s.count(old)==count, "anchor %r x%d" % (old,s.count(old))
+    io.open(p,"w",encoding="utf-8").write(s.replace(old,new))
+'
+
+run_case "connect-src loses bat.bing.com (the silent half)" \
+  "$H"'
+edit("vercel.json"," https://*.link.com https://bat.bing.com;"," https://*.link.com;")'
+
+run_case "script-src loses bat.bing.com" \
+  "$H"'
+edit("vercel.json","https://*.js.stripe.com https://bat.bing.com","https://*.js.stripe.com")'
+
+run_case "CSP swaps a pre-existing host for the new one" \
+  "$H"'
+edit("vercel.json","https://apis.google.com https://*.js.stripe.com https://bat.bing.com","https://*.js.stripe.com https://bat.bing.com")'
+
+run_case "tag id emptied (ships a tag that does nothing)" \
+  "$H"'
+edit("js/gtag.js","const UET_TAG_ID = \x279726977Ъ\x27".replace("Ъ","0"),"const UET_TAG_ID = \x27\x27")'
+
+run_case "revenue divided by GST" \
+  "$H"'
+edit("js/gtag.js","params.revenue_value = total;","params.revenue_value = total / 1.15;")'
+
+run_case "absent total becomes a confident \$0.00" \
+  "$H"'
+edit("js/gtag.js","const hasValue = hasMoney(total);","const hasValue = true; total = Number(order.total) || 0;")
+edit("js/gtag.js","const total = readMoney(order.total);","let total = readMoney(order.total);")'
+
+run_case "purchase moved ABOVE the dedupe latch" \
+  "$H"'
+import re,io,os
+p=os.path.join(root,"js/order-confirmation-page.js")
+s=io.open(p,encoding="utf-8").read()
+m=re.search(r"\n            if \(typeof UetTag !== .undefined.\) \{\n                UetTag\.purchase\(\{\n.*?\n                \}\);\n            \}\n", s, re.S)
+assert m, "could not find the UET call"
+blk=m.group(0)
+s=s.replace(blk,"")
+s=s.replace("            this._conversionFired = true;", blk+"            this._conversionFired = true;",1)
+io.open(p,"w",encoding="utf-8").write(s)'
+
+run_case "purchase call removed from the confirmation page" \
+  "$H"'
+import re,io,os
+p=os.path.join(root,"js/order-confirmation-page.js")
+s=io.open(p,encoding="utf-8").read()
+s2=re.sub(r"\n            if \(typeof UetTag !== .undefined.\) \{\n                UetTag\.purchase\(\{\n.*?\n                \}\);\n            \}\n","\n",s,flags=re.S)
+assert s2!=s
+io.open(p,"w",encoding="utf-8").write(s2)'
+
+run_case "a UET consent default is declared (ERR-227 shape)" \
+  "$H"'
+edit("js/gtag.js","    UetTag.init();".strip(),"window.uetq = window.uetq || []; window.uetq.push(\x27consent\x27,\x27default\x27,{ad_storage:\x27denied\x27}); UetTag.init();")'
+
+run_case "UetTag moved BELOW Ga4Ecommerce (into their window)" \
+  "$H"'
+import io,os
+p=os.path.join(root,"js/gtag.js")
+s=io.open(p,encoding="utf-8").read()
+i=s.index("const UetTag = {"); j=s.index("UetTag.init();")+len("UetTag.init();")
+blk=s[i:j]; s=s[:i]+s[j:]
+io.open(p,"w",encoding="utf-8").write(s+"\n"+blk+"\n")'
+
+run_case "auto SPA tracking switched on (duplicate pageviews)" \
+  "$H"'
+edit("js/gtag.js","{ ti: UET_TAG_ID, q: window.uetq }","{ ti: UET_TAG_ID, q: window.uetq, enableAutoSpaTracking: true }")'
+
+run_case "loader made protocol-relative" \
+  "$H"'
+edit("js/gtag.js","s.src = \x27https://bat.bing.com/bat.js\x27;","s.src = \x27//bat.bing.com/bat.js\x27;")'
+
+echo
+echo "  caught $pass / $((pass+fail))"
+if [ "$fail" -ne 0 ]; then
+  echo "  $fail mutation(s) went unnoticed — those assertions cannot fail and are decoration."
+  exit 1
+fi
+echo "  every mutation was caught: the suite can go red."

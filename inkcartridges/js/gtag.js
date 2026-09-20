@@ -296,6 +296,185 @@ const AdsConversions = {
     },
 };
 
+/* ════════════════════════════════════════════════════════════════════════════
+ * MICROSOFT ADVERTISING — UNIVERSAL EVENT TRACKING (UET)
+ *
+ * WHY THIS LIVES IN gtag.js AND NOT IN ITS OWN FILE
+ * -------------------------------------------------
+ * This file is already a blocking <head> script on exactly the pages that want
+ * a tag. A new /js/uet.js would mean hand-adding a <script> to ~38 <head>
+ * blocks at 38 different line numbers, which is ERR-194/ERR-214 verbatim:
+ * hash-locked markup, hand enrolment, and 10 pages silently drifting for four
+ * months while looking fine. Same reasoning as the GA4 block below and the
+ * traffic tracker above. Enrolment is therefore NOT a new fact to maintain —
+ * it is structurally identical to GA4's, and a test asserts that as a SET.
+ *
+ * WHY IT IS NOT MICROSOFT'S SNIPPET VERBATIM
+ * ------------------------------------------
+ * Microsoft hands you an inline <script>. We serve `script-src 'self'` with no
+ * 'unsafe-inline' and no nonce, so an inline block is dead on arrival — and the
+ * rule from ERR-230 is EXTERNALISE, never add a hash (a hash pins a blob no
+ * tool in this repo can read, lint or diff). This is the same loader, written
+ * as ordinary module code.
+ *
+ * THE CSP HALF THAT HIDES
+ * -----------------------
+ * `bat.bing.com` is in BOTH `script-src` and `connect-src` (vercel.json).
+ * Both are load-bearing and they fail differently:
+ *   - script-src blocks bat.js outright. Loud, obvious, nothing works.
+ *   - connect-src blocks only the fetch/sendBeacon transport. `img-src` is
+ *     'self' https: data:, so UET's PIXEL transport keeps working and the tag
+ *     looks alive while conversions silently go missing.
+ * That asymmetry is ERR-260 exactly, where `*.google.com` did not match
+ * `www.google.co.nz` and hid behind three alibis — one of which was this very
+ * `img-src https:`. Do not "tidy" either entry away, and do not believe a
+ * green LOCAL run: serve.json sets no headers, so localhost has NO CSP at all.
+ *
+ * CONSENT: DELIBERATELY NOT DECLARED — READ BEFORE "COMPLETING THE LIST"
+ * ---------------------------------------------------------------------
+ * UET has its own consent API (`uetq.push('consent','default',{ad_storage})`).
+ * We do not call it, on purpose. The consent default at the top of this file
+ * declares ONLY `analytics_storage`; under Consent Mode an undeclared type is
+ * GRANTED, which is why Google Ads conversion tracking runs ungated today, and
+ * that is written up as a revenue decision rather than an oversight (ERR-227).
+ * Declaring ad_storage:'denied' to UET would restrict Microsoft for 100% of
+ * visitors, and — this is the part that bites — if the wiring were ever wrong
+ * it would stay denied FOREVER WITH NO SYMPTOM, which is precisely how
+ * `cookie_consent` came to have one reader and zero writers. So UET matches the
+ * posture we already chose for Ads. If this is ever revisited, the hook exists:
+ * consent-banner.js dispatches a `consent:change` CustomEvent.
+ *
+ * NO AUTO SPA TRACKING. `enableAutoSpaTracking` fires a pageview on history
+ * changes. This site is 34 real HTML pages with per-page controllers, so it
+ * would add duplicate views, not missing ones.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/* THE ONE CONSTANT. From Microsoft Advertising → Conversion tracking → UET tag
+ * (the snippet shows it as ti:"########"). Tag name in the account: INKCART.
+ *
+ * An EMPTY id is a tag that does nothing, and a tag that does nothing looks
+ * exactly like a tag that works — no console error, no failed request, just an
+ * ad account that never learns which clicks paid for themselves. A skip is not
+ * a pass. So tests/uet-tag-sep2026.test.js asserts this is a real 8-digit id
+ * and the SUITE GOES RED while it is unset. It cannot ship disabled by
+ * accident; it can only ship disabled on purpose, by deleting that assertion. */
+const UET_TAG_ID = '97269770';
+
+const UetTag = {
+    TAG_ID: UET_TAG_ID,
+
+    /**
+     * Load bat.js and record the pageview.
+     *
+     * `window.uetq` is seeded as a plain ARRAY before the script is requested,
+     * and bat.js swaps it for the real UET object on load, draining whatever
+     * queued up meanwhile. That ordering is the whole reason a purchase fired
+     * on a fast confirmation page is not lost to a slow ad script.
+     *
+     * @returns {{loaded: boolean, reason?: string}} Structured, not boolean, so
+     *   partialness lives in the RETURN VALUE where a test can assert on it.
+     */
+    init() {
+        try {
+            if (typeof window === 'undefined' || typeof document === 'undefined') {
+                return { loaded: false, reason: 'no-dom' };
+            }
+            if (!UET_TAG_ID) return { loaded: false, reason: 'no-tag-id' };
+            if (window.uetq && !Array.isArray(window.uetq)) {
+                return { loaded: false, reason: 'already-loaded' };
+            }
+
+            window.uetq = window.uetq || [];
+
+            const s = document.createElement('script');
+            // Explicit https, never protocol-relative: the site is HTTPS-only
+            // (HSTS + upgrade-insecure-requests) and the CSP entry is the
+            // https origin, so spelling it removes a whole class of ambiguity.
+            s.src = 'https://bat.bing.com/bat.js';
+            s.async = true;
+            s.onload = function () {
+                try {
+                    // eslint-disable-next-line no-undef
+                    const uet = new UET({ ti: UET_TAG_ID, q: window.uetq });
+                    window.uetq = uet;
+                    uet.push('pageLoad');
+                } catch (err) {
+                    if (typeof DebugLog !== 'undefined') DebugLog.warn('UET init failed (non-fatal):', err);
+                }
+            };
+            (document.head || document.documentElement).appendChild(s);
+
+            return { loaded: true };
+        } catch (err) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('UET load failed (non-fatal):', err);
+            return { loaded: false, reason: 'threw' };
+        }
+    },
+
+    /**
+     * Microsoft Ads purchase conversion.
+     *
+     * CALL THIS ONLY FROM order-confirmation-page.js markConversion(), which
+     * already holds the three guards that decide whether an order is real: the
+     * payment actually succeeded (Stripe sends failures and pending 3DS to the
+     * same URL), one per pageload, and one per ORDER NUMBER across reloads.
+     * That third guard exists because the Ads conversion used to report a
+     * second full-value purchase every time a customer refreshed their receipt.
+     * Firing from anywhere else means reimplementing all three, and drifting.
+     *
+     * WHY A BROWSER PURCHASE IS CORRECT HERE WHEN GA4 REFUSES ONE
+     * -----------------------------------------------------------
+     * The GA4 block below has "THERE IS NO purchase() HERE, DELIBERATELY",
+     * because the server already posts GA4 `purchase` through the Measurement
+     * Protocol and MP dedup is unreliable — a browser twin double-counts real
+     * revenue. THERE IS NO SERVER-SIDE UET PURCHASE. Nothing posts to Microsoft
+     * from the backend, so this is not a second copy of a conversion, it is the
+     * ONLY path by which revenue reaches that ad account. The asymmetry is the
+     * point, not a loophole: the rule was never "browsers must not send
+     * purchases", it was "do not send the same purchase twice".
+     *
+     * @param {object} order - `{ total, orderNumber }`, GST-INCLUSIVE.
+     * @returns {{sent: boolean, reason?: string, value?: number}}
+     */
+    purchase(order) {
+        try {
+            if (typeof window === 'undefined' || !window.uetq) {
+                return { sent: false, reason: 'no-uet' };
+            }
+            if (!order || typeof order !== 'object') return { sent: false, reason: 'no-payload' };
+
+            const transactionId = cleanText(order.orderNumber);
+            if (!transactionId) return { sent: false, reason: 'no-order-number' };
+
+            // SAME READER AS THE ADS CONVERSION ON THE LINE ABOVE THE CALL SITE.
+            // Not tidiness: if the two derived the figure separately they could
+            // disagree about the same order, the numbers live in two different
+            // ad accounts, and no assertion spans both. readMoney() is why
+            // "the server reported no total" cannot become a confident $0.00.
+            const total = readMoney(order.total);
+            const hasValue = hasMoney(total);
+
+            const params = { currency: 'NZD', transaction_id: transactionId };
+            // A missing total still reports the conversion — the purchase really
+            // happened and that is the fact Microsoft is bidding on — but it
+            // carries no revenue rather than an invented zero, and says so.
+            if (hasValue) params.revenue_value = total;
+
+            window.uetq.push('event', 'purchase', params);
+
+            return hasValue
+                ? { sent: true, value: total }
+                : { sent: true, reason: 'no-value' };
+        } catch (err) {
+            // A thrown tag must never take the receipt page with it.
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('UET purchase failed (non-fatal):', err);
+            return { sent: false, reason: 'threw' };
+        }
+    },
+};
+
+UetTag.init();
+
 /* ============================================================================
  * GA4 BROWSER ECOMMERCE - the funnel above the purchase
  * (backend handoff `ga4-ecommerce-events-FE-handoff-sep2026.md` - ERR-256)
@@ -719,3 +898,4 @@ const Ga4Ecommerce = {
 
 if (typeof window !== 'undefined') window.AdsConversions = AdsConversions;
 if (typeof window !== 'undefined') window.Ga4Ecommerce = Ga4Ecommerce;
+if (typeof window !== 'undefined') window.UetTag = UetTag;
