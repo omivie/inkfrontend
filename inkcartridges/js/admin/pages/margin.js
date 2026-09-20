@@ -205,11 +205,24 @@ async function loadRecommended(el) {
       btn.disabled = true;
       btn.textContent = 'Updating...';
       try {
-        await window.API._fetchWithAuth(`/api/admin/products/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ retail_price: price })
-        });
+        // Routed through AdminAPI like every other product write (ERR-272).
+        //
+        // This was a raw `window.API._fetchWithAuth(... method:'PUT' ...)` — the
+        // one product write in the admin that went around AdminAPI — and it had
+        // the failure mode that shape always has: `_fetchWithAuth` resolves for
+        // a refusal, so a 400 or an `{ok:false}` envelope fell straight through
+        // to the success branch. The button went GREEN and said "Done", the
+        // toast said "Price updated", and the price had not changed. It also
+        // skipped `productWriteError`, so the operator got no `details[]` and no
+        // `(ref …)` request id to quote at anyone.
+        //
+        // `AdminAPI.updateProduct` throws on `{ok:false}`, which is the whole
+        // difference. The body stays a single key deliberately: a partial PUT no
+        // longer defaults the fields it omits (their §2, measured by
+        // `probe:product-write` §4), so there is nothing to echo back defensively
+        // here, and echoing a FORM value on a page that shows recommendations
+        // would be a way to commit one.
+        await AdminAPI.updateProduct(id, { retail_price: price });
         btn.textContent = 'Done';
         btn.style.background = '#22c55e';
         btn.style.color = '#fff';
@@ -218,7 +231,11 @@ async function loadRecommended(el) {
       } catch (e) {
         btn.textContent = 'Error';
         btn.disabled = false;
-        if (typeof Toast !== 'undefined') Toast.error('Failed to update price');
+        if (typeof Toast !== 'undefined') {
+          // Say WHICH refusal. `productWriteError` has already folded the
+          // backend's `details[]` and the `x-request-id` into the message.
+          Toast.error(e && e.message ? `Failed to update price \u2014 ${e.message}` : 'Failed to update price');
+        }
       }
     });
   });

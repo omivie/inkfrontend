@@ -56,11 +56,40 @@ const PrinterContext = {
     TTL_MS: 30 * 24 * 60 * 60 * 1000, // 30 days
 
     /**
-     * Printer slugs are lowercase, hyphen-joined, alphanumeric — e.g.
-     * `brother-mfc-j5740dw`. Anything else is not a slug we were handed by a
-     * printer URL, so it is not something we know.
+     * The shape of a printer slug — MIRRORING THE SERVER, not guessing at it.
+     *
+     * This used to be `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`, and its docstring asserted
+     * that printer slugs are "lowercase, hyphen-joined, alphanumeric" as though
+     * that were the contract. It never was. The backend has always allowed `_`,
+     * and since 2026-09-16 it allows `.` and `+` as well:
+     *
+     *   "Printer slug must contain only lowercase letters, numbers, hyphens,
+     *    underscores, dots and plus signs"   — the live 400 body, measured
+     *
+     * 🚨 WHAT THE NARROW PATTERN COST. `normalize()` returns null for anything
+     * it does not match, and null is this module's honest answer for "not a
+     * slug" — so there is no error, no log, and no symptom. It simply stopped
+     * knowing. Measured 2026-09-20 against the live sitemap: **20 printer URLs
+     * carry a `.` or a `+`**, including `hp-designjet-z9+-24in` (200, 11
+     * compatible products), `hp-colour-laserjet-m880z+`, `epson-300+` and
+     * `universal-81001.01`. Every shopper arriving on one of those lost the
+     * printer annotation on their cart line and on their order, silently.
+     *
+     * ***A CLIENT-SIDE PATTERN THAT IS STRICTER THAN THE SERVER'S IS NOT "EXTRA
+     * SAFE" — IT IS A SECOND, UNDOCUMENTED SPEC THAT NOTHING TESTS.*** The
+     * server is the only authority on what a slug is; our job is to match it.
+     *
+     * WHAT STAYS REFUSED, AND WHY IT IS NOT FUSSINESS. `,` `(` `)` `/` `$` `@`
+     * `\` `'` are exactly the characters the backend still rejects, because the
+     * products route feeds a slug-derived value into a PostgREST `.or()` filter
+     * string where `,` `(` `)` are syntax break-outs. `.` and `+` are inert
+     * there. 13 real printers still carry those characters and still 400; they
+     * need a slug repair plus a redirect hop server-side, not a wider gate here.
+     *
+     * The leading character stays `[a-z0-9]` so a slug can never begin with `-`
+     * or `.`, and the length cap stays.
      */
-    SLUG_PATTERN: /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    SLUG_PATTERN: /^[a-z0-9][a-z0-9_.+-]*$/,
     MAX_SLUG_LENGTH: 120,
 
     /**

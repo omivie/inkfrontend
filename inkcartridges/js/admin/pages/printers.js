@@ -20,8 +20,40 @@ let _sortDir = 'asc';
 let _page = 1;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+/**
+ * Suggest a slug for a printer NAME.
+ *
+ * 🚨 THIS USED TO MANUFACTURE COLLISIONS BETWEEN DIFFERENT PRINTERS (ERR-272).
+ * It was `.replace(/[^a-z0-9]+/g, '-')`, which folds `+` and `.` into a hyphen
+ * and then trims it, so:
+ *
+ *   "Epson LQ-300+"   ->  epson-lq-300     <- the slug of a DIFFERENT machine
+ *   "Printronix 103.23" ->  printronix-103-23
+ *
+ * `+` is the one character the duplicate-printer canonical rule deliberately
+ * PRESERVES (ERR-242 §9.3), precisely because `epson-300` and `epson-300+` are
+ * different printers and a canonical between two real printers does not merge a
+ * duplicate — it deletes a working page. So the one helper in the repo that
+ * generates printer slugs was the one place that threw the distinction away.
+ *
+ * `.` and `+` are legal in a printer slug server-side as of 2026-09-16 and are
+ * inert in the PostgREST `.or()` filter the products route builds, so keeping
+ * them is safe as well as necessary. Everything else still collapses to a
+ * hyphen. The trim is also greedy now and takes trailing DOTS with it: the old
+ * `^-|-$` removed a single leading/trailing hyphen, so "DocuPrint C1190 FS.."
+ * kept one. A trailing full stop is the exact data-entry artefact that produced
+ * the `printronix-103.23.` junk row, so a generated slug should never emit one —
+ * while an INTERIOR dot (`universal-81001.01`) is real and is kept. `+` is never
+ * trimmed, because a trailing `+` is the whole point (`epson-300+`).
+ *
+ * This is a SUGGESTION: the slug field stays free-text and an operator can
+ * overwrite it. The server is the authority on shape and will refuse the rest.
+ */
 function slugify(s) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return String(s == null ? '' : s)
+    .toLowerCase()
+    .replace(/[^a-z0-9.+]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
 }
 
 function formGroup(label, inputHtml) {

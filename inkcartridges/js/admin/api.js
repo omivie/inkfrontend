@@ -1884,6 +1884,24 @@ const AdminAPI = {
     }
   },
 
+  /**
+   * Update a product by SKU. NOT USED BY ANY SURFACE, deliberately \u2014 and this
+   * note is the reason it is kept rather than deleted.
+   *
+   * The by-sku route was broken for six weeks (its Joi schema declared three
+   * fields and `stripUnknown` deleted the rest), which is what BF-062 was
+   * originally reported against. It was fixed on 2026-09-16 and now takes the
+   * full body; `probe:product-write` \u00a76 measures that on every write run.
+   *
+   * We still write by UUID everywhere, for a reason that is not inertia:
+   * `persistRichTextColumns` below repairs `description_html` with
+   * `.eq('id', productId)`, so a save routed through here would land the product
+   * and then quietly skip the rich-text repair \u2014 re-opening ERR-034, where the
+   * backend sanitiser strips `<b>/<i>/<u>/<a>` out of every description.
+   *
+   * Use this only where a UUID genuinely is not available (an importer keyed on
+   * SKU, say), and re-key the repair if you do.
+   */
   async updateBySku(sku, data) {
     try {
       return await window.API.updateProductBySku(sku, data);

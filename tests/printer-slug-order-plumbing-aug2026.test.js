@@ -70,9 +70,35 @@ test('§1 a real slug passes', () => {
 });
 
 test('§1 anything that is not a slug is null — never repaired into one', () => {
-    ['Brother MFC-J5740DW', 'BROTHER-MFC', 'brother_mfc', 'brother--mfc', '-brother',
-     'brother-', '', '   ', null, undefined, 42, {}, 'a'.repeat(121)].forEach((v) => {
+    // THE RULE IN THE HEADER IS UNCHANGED: send it only when you actually know
+    // it, and never repair a non-slug into one. What changed (ERR-272) is the
+    // answer to "what IS a slug", and it was never ours to decide.
+    //
+    // This list used to include `brother_mfc`, `brother--mfc` and `brother-`.
+    // All three are accepted by the BACKEND — its gate is
+    // `[a-z0-9][a-z0-9_.+-]*`, and the underscore has been legal the whole time
+    // (utils.js quotes the server saying so). Our pattern was stricter, which is
+    // not caution: it is a second, undocumented spec that nothing reconciles,
+    // and it silently dropped 20 live printers the day the backend widened its
+    // gate to admit `.` and `+` (hp-designjet-z9+-24in, epson-300+,
+    // universal-81001.01 …). `normalize()` does not repair or construct slugs —
+    // it only decides whether to keep one it was handed — so accepting a
+    // server-valid slug cannot corrupt the ecosystem analysis this file exists
+    // to protect. REJECTING one loses a real answer.
+    //
+    // Shape of a slug: tests/printer-slug-gate-sep2026.test.js, which carries
+    // the 20 measured slugs and the refusal list as a negative control.
+    ['Brother MFC-J5740DW', 'BROTHER-MFC', '-brother', '', '   ',
+     null, undefined, 42, {}, 'a'.repeat(121)].forEach((v) => {
         assert.equal(PrinterContext.normalize(v), null, `expected null for ${JSON.stringify(v)}`);
+    });
+
+    // And the half that is now an ACCEPT, stated rather than merely removed —
+    // a case that quietly disappears from a list is a case nobody decided.
+    ['brother_mfc', 'brother--mfc', 'brother-'].forEach((v) => {
+        assert.equal(PrinterContext.normalize(v), v,
+            `${JSON.stringify(v)} is accepted by the backend's own slug gate, so it must not be `
+            + 'dropped here — and it must come back UNCHANGED, not tidied');
     });
 });
 

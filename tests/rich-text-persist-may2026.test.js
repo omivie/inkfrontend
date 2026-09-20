@@ -329,27 +329,63 @@ test('the product drawer save still emits description_html from the editor', () 
     'both the create and edit handlers must send description_html from the editor');
 });
 
-test('🚨 ERR-244: the save must NOT send compatible_devices_html any more', () => {
-  // Inverted. It is not merely useless now — it is actively dishonest.
-  // Measured 2026-09-12 with an owner JWT against ADMIN-INK-001:
+test('🚨 ERR-272: the machine list is EDITABLE again, and only the panel owns it', () => {
+  // ── READ THIS BEFORE "FIXING" IT ──────────────────────────────────────────
   //
-  //   PUT /api/admin/products/:id  {"compatible_devices_html": "<b>x</b>"}  → 200
-  //   PUT /api/admin/products/:id  {"for_use_in_html": "<b>x</b>"}          → 200
+  // This test is the INVERSE of the one that stood here, and the one it replaced
+  // was correct when it was written. Both versions defend the same principle
+  // from opposite sides, and the principle is the thing to keep:
   //
-  // Both accepted, both discarded — the ERR-151 decoy signature. Sending a
-  // field we have measured as ignored manufactures the appearance of a save,
-  // and an editor whose Save silently drops the operator's typing is strictly
-  // worse than no editor: they walk away believing the work is done.
+  //   ***NEVER SEND A FIELD WE CANNOT PROVE THE SERVER WRITES.***
+  //
+  // The old test (ERR-244) asserted the save must NOT carry
+  // `compatible_devices_html`, because we had measured the PUT answering 200
+  // and discarding it — sending it would have manufactured the appearance of a
+  // save. That measurement was of `PUT /api/admin/products/by-sku/:sku`, whose
+  // Joi schema declared three fields while `stripUnknown: true` deleted the
+  // other twenty-seven. The by-id route has written the field all along.
+  //
+  // Re-measured 2026-09-20 with `npm run probe:product-write -- --write` (21/0),
+  // which creates its own throwaway product and confirms every write through a
+  // reader that took no part in it:
+  //
+  //   PUT /api/admin/products/:id  { compatible_devices_html }  → 200
+  //     → GET /api/admin/products/:id   HAS the new list
+  //     → omitting the key              LEAVES it alone
+  //     → ''                            CLEARS it
+  //     → an unknown key still accepted AND DISCARDED (negative control)
+  //
+  // So the field may be sent now — on the CREATE path, where there is no product
+  // id yet to PUT to. On the EDIT path it must still be absent from this modal's
+  // payload, for a different reason than before: the panel owns its own Save,
+  // because the list is written by a separate statement that can fail while the
+  // product row succeeds (a 500 with the row already written). One Save button
+  // reporting two outcomes could only ever report the wrong one.
+  const products = PRODUCTS_SRC;
+
+  // The edit save payload must not carry it — one owner for the write.
   assert.ok(
-    !/compatible_devices_html:\s*modal\._compatEditor/.test(PRODUCTS_SRC),
-    'the dropped column must not be sent — the PUT 200s and discards it'
+    !/compatible_devices_html:\s*modal\._compatEditor/.test(products),
+    'the old rich-text-editor binding must stay gone'
   );
   assert.ok(
-    !/_compatEditor\s*=\s*new RichTextEditor/.test(PRODUCTS_SRC),
-    'and no editable rich-text editor may be mounted for a field that cannot be saved'
+    !/_compatEditor\s*=\s*new RichTextEditor/.test(products),
+    'and no rich-text editor may be mounted for this field: the Supabase rich-text '
+    + 'repair cannot reach product_compat_devices (RLS, service-role only), so the '
+    + "backend sanitiser's output is final and an editor's generated markup could "
+    + 'not be repaired afterwards — the ERR-034/ERR-244 family'
   );
-  // Positive control: the OTHER editor must still be mounted, or this test
-  // would pass just as well on a file where both editors had been deleted.
+
+  // The CREATE path may send it, through the module accessor, and must OMIT
+  // rather than send '' — '' is the CLEAR instruction and a create has nothing
+  // to clear.
+  assert.match(products, /const newForUseIn = forUseInCreateValue\(modal\);/,
+    'the create handler must read the value through for-use-in.js, not by element id');
+  assert.match(products, /if \(newForUseIn !== null\) data\.compatible_devices_html = newForUseIn;/,
+    "the create handler must omit the key when empty, never send ''");
+
+  // Positive control: the OTHER editor must still be mounted, or this test would
+  // pass just as well on a file where both editors had been deleted.
   assert.match(PRODUCTS_SRC, /_descEditor\s*=\s*new RichTextEditor/,
-    'the description editor must still exist — this is a targeted removal, not a purge');
+    'the description editor must still exist — this is a targeted change, not a purge');
 });

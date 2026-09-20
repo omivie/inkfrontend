@@ -1420,10 +1420,10 @@ function openCreateProductModal(context = null) {
       minHeight: 400,
     });
   }
-  // No SKU exists yet on create, so readForUseIn reports `unavailable` with the
-  // reason "no SKU on this product yet" \u2014 which is the honest answer, and the
-  // notice above it already explains the field cannot be written from here.
-  wireForUseInPanel(modal, null, esc);
+  // Create mode does no read (there is no SKU to read) and offers no Save of
+  // its own \u2014 it only keeps the live preview in step with what is being
+  // typed. Its value is collected by forUseInCreateValue() when Create is pressed.
+  wireForUseInPanel(modal, null, esc, { mode: 'create' });
 
   // Unlock the brand. The pathway pre-filled it, but a product genuinely
   // belonging to another brand must not be un-saveable — a lock with no way out
@@ -1556,16 +1556,22 @@ function openCreateProductModal(context = null) {
       weight_kg: parseFloat(val('edit-weight')) || null,
       is_active: chk('edit-active'),
       description_html: modal._descEditor?.getValue() || null,
-      // compatible_devices_html is NOT sent (ERR-244). The column was dropped by
-      // backend migration 132 and the PUT still answers 200 for it — accepted and
-      // discarded. Sending a field we know is ignored manufactures the appearance
-      // of a save. The panel is read-only and says why.
       meta_title: val('edit-meta-title') || null,
       meta_description: val('edit-meta-desc') || null,
       page_yield: parseInt(val('edit-page-yield'), 10) || null,
       tags: tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
       internal_notes: val('edit-admin-notes') || null,
     };
+    // The machine list, when the operator typed one. Read through the module's
+    // own accessor so the field name and the element id stay in one file.
+    //
+    // OMITTED, not sent as '', when the box is empty: '' is the CLEAR
+    // instruction (measured, probe §7) and on a create there is nothing to
+    // clear. "I am not sending one" and "delete what is there" are the two
+    // answers this field must never confuse.
+    const newForUseIn = forUseInCreateValue(modal);
+    if (newForUseIn !== null) data.compatible_devices_html = newForUseIn;
+
     if (isOwner) data.cost_price = parseFloat(val('edit-cost-price')) || null;
     // admin_only (ERR-234) — sent ONLY when the owner actually ticked it, never
     // as a default `false`. The column does not exist yet on the backend, so an
@@ -1831,11 +1837,14 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
   `;
 
-  // For Use In panel — READ-ONLY since ERR-244. The column this used to edit was
-  // dropped by backend migration 132 and no admin write route replaced it; the
-  // product PUT still answers 200 for the field and discards it. One owner for
-  // the markup, the copy and the read: js/admin/utils/for-use-in.js.
-  let forUseInHtml = forUseInPanelHtml(esc);
+  // For Use In panel — EDITABLE again since ERR-272. It owns its own Save, which
+  // PUTs and then re-reads to confirm, rather than riding on this modal's Save:
+  // the list lives in a different table, is written by a different statement, and
+  // can fail on its own while the product row succeeds (their §1 returns 500 in
+  // exactly that case). One Save that reports two outcomes could only report the
+  // wrong one. One owner for the markup, copy, read, write and verification:
+  // js/admin/utils/for-use-in.js.
+  let forUseInHtml = forUseInPanelHtml(esc, { mode: 'edit' });
 
   // Product Codes panel — its own tab. Shows the product's brand + type, then
   // its own chips followed by every other code in the catalogue; the admin
@@ -1922,13 +1931,35 @@ function buildProductModalTabs(modal, full, isOwner) {
       minHeight: 400,
     });
   }
-  // For Use In: read the live list through GET /api/products/:sku/for-use-in.
-  // NOT from `full` \u2014 the column it used to come from no longer exists
-  // (ERR-244), and `full.compatible_devices_html` is now permanently undefined,
-  // which would have rendered an empty editor that looks exactly like "this
-  // product has no list". Fire-and-paint; the panel owns its own three states
-  // and its own retry, so a slow or refused read never blocks the modal.
-  wireForUseInPanel(modal, full.sku, esc);
+  // For Use In: read the live list through GET /api/products/:sku/for-use-in,
+  // i.e. exactly what a customer is served, so an admin cannot be looking at a
+  // different copy from the shop and be unable to tell.
+  //
+  // \u26a0 CORRECTION to the note that stood here (ERR-244 said `full.compatible_
+  // devices_html` is "permanently undefined"): it is NOT. Measured 2026-09-20,
+  // GET /api/admin/products/:id carries the field, byte-identical to the public
+  // endpoint on 3/3 products holding real lists \u2014 that route joins
+  // product_compat_devices. The backend's own reply repeats the same mistake in
+  // the other direction. The public read stays the SEED anyway, on the reasoning
+  // above; the admin mirror is what writeForUseIn() uses to VERIFY a save,
+  // because a reader that took no part in the write is the only honest witness.
+  //
+  // Fire-and-paint; the panel owns its states, its retry and its own Save, so a
+  // slow or refused read never blocks the modal.
+  wireForUseInPanel(modal, full.sku, esc, {
+    mode: 'edit',
+    productId: full.id,
+    // The route requires retail_price on every product update. Passing the row's
+    // own value back is a no-op; passing a FORM value would let a list save
+    // quietly commit an unsaved price edit.
+    retailPrice: full.retail_price,
+    // NO table refresh on save, and that is a finding rather than an omission.
+    // The products table's column labelled "For Use In" is NOT this list: it is
+    // loadForUseInBrands(), which reads the `product_ribbon_brands` junction and
+    // renders ribbon-BRAND chips. Two different datasets wearing one name. The
+    // obvious "refresh the For Use In cells after saving For Use In" would have
+    // re-read a table this save cannot affect, and looked correct doing it.
+  });
 
   // Wire tab switching
   tabsEl.addEventListener('click', (e) => {

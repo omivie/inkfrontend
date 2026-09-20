@@ -7180,8 +7180,8 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   padding: 9px 11px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--yellow-text);
-  background: var(--yellow-dim);
+  border-left: 3px solid var(--cyan);
+  background: var(--cyan-dim);
   color: var(--text-secondary);
 }
 .admin-fui__box {
@@ -7211,6 +7211,87 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 }
 .admin-fui__fail strong { color: var(--text); }
 .admin-fui__fail .admin-btn { margin-left: 6px; vertical-align: baseline; }
+
+/* ── The machine-list EDITOR (ERR-272) ──────────────────────────────────────
+   Source on the left, rendered preview on the right. The source pane is the
+   authoritative one: this field's sanitiser is the backend's last word (the
+   rich-text repair cannot reach `product_compat_devices`), so the operator
+   edits what is actually sent rather than something an editor generates. */
+.admin-fui__edit { margin-top: 12px; }
+.admin-fui__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.admin-fui__col { display: block; min-width: 0; }
+.admin-form-group .admin-fui__collabel,
+.admin-fui__collabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+.admin-fui__input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  resize: vertical;
+  min-height: 160px;
+  /* Soft-wrap. `white-space: pre` scrolled a one-line machine list sideways out
+     of view, which is the one thing an operator must be able to read in full
+     before pressing Save. Wrapping is not a fidelity risk here: the textarea's
+     VALUE is untouched by how it is displayed. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.admin-fui__input:focus {
+  outline: none;
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px var(--cyan-dim);
+}
+.admin-fui__preview {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 11px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  min-height: 160px;
+  max-height: 420px;
+  overflow: auto;
+  word-break: break-word;
+}
+.admin-fui__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.admin-fui__status { font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+/* Three outcomes, three colours. `saved` is the ONLY green one: a write we
+   could not read back is reported in the warning colour, never as a success,
+   because absence of confirmation is not confirmation. */
+.admin-fui__status--ok { color: var(--success); font-weight: 600; }
+.admin-fui__status--warn { color: var(--yellow-text); font-weight: 600; }
+.admin-fui__status--muted { color: var(--text-muted); }
+
+@media (max-width: 860px) {
+  .admin-fui__cols { grid-template-columns: 1fr; }
+  .admin-fui__preview { min-height: 96px; }
+}
 
 /* ── Catalogue Engagement pager + search (ERR-251) ──────────────────────────
    Drawn only when the endpoint echoes limit/offset back. Until backend
