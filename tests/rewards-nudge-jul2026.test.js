@@ -78,11 +78,22 @@ test('every site-header page loads rewards-nudge.js exactly once', () => {
     }
 });
 
+/* A COMMENT NAMING A SCRIPT IS NOT A SCRIPT TAG.
+ * html/order-confirmation.html now carries a comment explaining why the nudge
+ * is deliberately NOT on that page (ERR-276) — and it names the file, because a
+ * reason that cannot name the thing it is about is not much of a reason. Read
+ * raw, that made both tests below fail on the prose justifying them. Stripping
+ * comments is what the rest of the suite already does to source files, for the
+ * mirror-image reason: so an assertion can never be satisfied by the text
+ * describing it. */
+const markupOnly = (html) => html.replace(/<!--[\s\S]*?-->/g, '');
+const readMarkup = (f) => markupOnly(read(f));
+
 test('headerless pages (checkout funnel + auth screens) never load the nudge', () => {
-    const headerless = htmlFiles().filter((f) => !read(f).includes('<header class="site-header"'));
+    const headerless = htmlFiles().filter((f) => !readMarkup(f).includes('<header class="site-header"'));
     assert.ok(headerless.length >= 7, `expected >=7 headerless pages, found ${headerless.length}`);
     for (const f of headerless) {
-        assert.ok(!read(f).includes('rewards-nudge.js'), `${f} has no site-header and must not load rewards-nudge.js`);
+        assert.ok(!readMarkup(f).includes('rewards-nudge.js'), `${f} has no site-header and must not load rewards-nudge.js`);
     }
 });
 
@@ -91,9 +102,9 @@ test('headerless pages (checkout funnel + auth screens) never load the nudge', (
 // ────────────────────────────────────────────────────────────────────
 
 test('rewards-nudge.js tag comes after utils.js and auth.js on every page', () => {
-    const headerPages = htmlFiles().filter((f) => read(f).includes('rewards-nudge.js'));
+    const headerPages = htmlFiles().filter((f) => readMarkup(f).includes('rewards-nudge.js'));
     for (const f of headerPages) {
-        const html = read(f);
+        const html = readMarkup(f);
         const nudgeAt = html.indexOf('/js/rewards-nudge.js');
         for (const dep of ['/js/utils.js', '/js/auth.js', '/js/config.js', '/js/security.js']) {
             const depAt = html.indexOf(dep);

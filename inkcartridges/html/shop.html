@@ -207,7 +207,28 @@
                 <h1 class="drilldown-title" id="drilldown-title">Shop Ink Cartridges &amp; Toner NZ</h1>
 
                 <section class="drilldown-content">
-                    <div class="drilldown-level" id="level-brands">
+                    <!-- WITHOUT JAVASCRIPT THERE IS NO LOADING, SO THERE MUST BE NO
+                         SKELETON (ERR-276). The levels now ship `hidden` and
+                         #drilldown-loading ships visible, which is what lets the page
+                         reserve its height before any script runs. With scripts
+                         disabled nothing ever resolves that state, and a skeleton
+                         shimmering for ever is a worse answer than the empty shell
+                         this page showed before — it promises content that is not
+                         coming. This restores exactly the previous no-JS rendering.
+                         An inline style element is allowed by our CSP (`style-src
+                         'self' 'unsafe-inline'`); an inline script element would not be,
+                         and is not needed here (ERR-230). The tag names are spelled out
+                         in words on purpose: written as literal tags, this comment makes
+                         every naive source scanner think the page ships an inline script
+                         (it made tests/payment-csp-paypal-sep2026.test.js demand a hash
+                         for it). -->
+                    <noscript>
+                        <style>
+                            #drilldown-loading { display: none; }
+                            #level-brands[hidden] { display: block; }
+                        </style>
+                    </noscript>
+                    <div class="drilldown-level" id="level-brands" hidden>
                         <!-- ERR-236: the ad landing pages' shelf. Hidden until a
                              category landing (/ink-cartridges, /toner-cartridges)
                              fills it, so bare /shop is unchanged. Reuses
@@ -218,7 +239,21 @@
                             <div class="shop-section-card__header">
                                 <h2 class="shop-section-card__title" id="popular-row-title">Popular right now</h2>
                             </div>
-                            <div class="popular-row__grid product-grid" id="popular-row-grid"></div>
+                            <!-- Four placeholders, because POPULAR_ROW_LIMIT is 4. Unlike
+                                 /ribbons, this shelf is CONDITIONAL — bare /shop has no
+                                 category and shows none — so the section still ships
+                                 `hidden`, and shop-page.js#renderPopularRow un-hides it
+                                 synchronously, before its fetch, once it knows the route
+                                 has a shelf. These hold the height across that fetch so
+                                 the shelf does not open on top of the brand picker
+                                 (ERR-276). They sit in the same grid as the real cards,
+                                 so the row count follows the same breakpoints. -->
+                            <div class="popular-row__grid product-grid" id="popular-row-grid">
+                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
+                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
+                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
+                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
+                            </div>
                         </section>
 
                         <div class="shop-section-card">
@@ -301,8 +336,8 @@
                         </div>
                     </div>
 
-                    <div class="drilldown-loading" id="drilldown-loading" hidden>
-                        <div class="drilldown-skeleton drilldown-skeleton--brands" id="skeleton-brands" hidden>
+                    <div class="drilldown-loading" id="drilldown-loading">
+                        <div class="drilldown-skeleton drilldown-skeleton--brands" id="skeleton-brands">
                             <div class="drilldown-grid drilldown-grid--brands">
                                 <div class="skeleton skeleton--brand-box"></div>
                                 <div class="skeleton skeleton--brand-box"></div>

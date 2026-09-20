@@ -89,7 +89,13 @@ import { chromium } from 'playwright';
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
 const PROPERTY = 'G-SDQELG0FGD';
-const SECOND_PROPERTY = 'G-YJXTSGLM28';
+/* REMOVED 2026-09-20 (ERR-276). A second GA4 property that was `gtag('config')`d
+ * and never fed: no event in the repo named it, yet every `config` line makes the
+ * browser fetch that destination's own gtag bundle (~187KB here, measured on a
+ * throttled Pixel-5 profile), and every UNSCOPED custom event on the site was
+ * silently duplicated into it. Kept named so the checks below can say which id
+ * must never come back, rather than asserting against an anonymous regex. */
+const REMOVED_PROPERTY = 'G-YJXTSGLM28';
 const ADS_TAG = 'AW-18032498762';
 const PHONE = { width: 390, height: 844 };   // iPhone 14 — mobile is the point
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
@@ -168,8 +174,15 @@ function decodeProduct(pr) {
 const BENIGN_FAILURE = /ERR_ABORTED|ERR_NETWORK_CHANGED|ERR_CONNECTION_CLOSED/;
 
 /** Attach a recorder to a page. Returns the live arrays it fills. */
+/** `https://www.googletagmanager.com/gtag/js?id=<ID>` -> <ID>, else null. */
+function gtagBundleId(url) {
+    const m = /googletagmanager\.com\/gtag\/js\?(?:[^#]*&)?id=([^&#]+)/.exec(url);
+    return m ? decodeURIComponent(m[1]) : null;
+}
+
 function record(page) {
     const ga4 = [];
+    const bundles = [];
     const ads = [];
     const blocked = [];
     const aborted = [];
@@ -178,6 +191,12 @@ function record(page) {
     const adsBlocked = [];
     page.on('request', (req) => {
         const url = req.url();
+        /* The BUNDLE load, not a measurement hit. One per configured
+         * destination, and the only thing that can prove a `gtag('config')`
+         * line is really gone — a property with zero events looks identical to
+         * an absent one if you only watch the hits (ERR-276). */
+        const bundleId = gtagBundleId(url);
+        if (bundleId) { bundles.push(bundleId); return; }
         if (isGa4(url)) { for (const h of hitsFrom(req)) if (h.en) ga4.push(h); return; }
         if (isAds(url)) ads.push(url);
     });
@@ -220,7 +239,7 @@ function record(page) {
             adds.push(res.status());
         }
     });
-    return { ga4, ads, blocked, aborted, adds, reportOnly, adsBlocked };
+    return { ga4, bundles, ads, blocked, aborted, adds, reportOnly, adsBlocked };
 }
 
 /** Report the transport honestly: refusals fail, beacon aborts are noise. */
@@ -667,9 +686,33 @@ try {
             misrouted.length ? misrouted.map((h) => `${h.en} -> ${h.tid}`).join(', ')
                 : 'none reached AW-18032498762');
 
-        const toSecond = ecommerce.filter((h) => h.tid === SECOND_PROPERTY);
-        check('no ecommerce event feeds the orphan second property', toSecond.length === 0,
-            toSecond.length ? toSecond.map((h) => h.en).join(', ') : `none reached ${SECOND_PROPERTY}`);
+        const toRemoved = rec.ga4.filter((h) => h.tid === REMOVED_PROPERTY);
+        check('no event of any kind feeds the removed second property', toRemoved.length === 0,
+            toRemoved.length ? toRemoved.map((h) => h.en).join(', ') : `none reached ${REMOVED_PROPERTY}`);
+
+        /* THE STRONGER FORM, AND THE ONE THAT MEASURES THE SAVING (ERR-276).
+         *
+         * "No event reached it" was true even while the property was configured,
+         * because nothing ever sent it an ecommerce event — so that check passed
+         * for the wrong reason for as long as the defect existed. What was
+         * actually costing 187KB on every page load was the CONFIG line, which
+         * makes gtag fetch a bundle whether or not anything is ever sent. So
+         * assert on the bundles the browser really downloaded. */
+        const loaded = [...new Set(rec.bundles)].sort();
+        console.log(`  gtag bundles loaded: ${loaded.join(', ') || 'none observed'}`);
+        check('the removed second GA4 property loads no bundle',
+            loaded.length > 0 && !loaded.includes(REMOVED_PROPERTY),
+            loaded.includes(REMOVED_PROPERTY)
+                ? `${REMOVED_PROPERTY} is being configured again — that is a full gtag bundle `
+                  + 'on every page load for a property nothing sends events to'
+                : loaded.length
+                    ? `${REMOVED_PROPERTY} absent from ${loaded.length} bundle(s)`
+                    : 'NO gtag bundle was observed at all — this check measured nothing');
+        check('exactly the intended destinations load a bundle',
+            loaded.length === 2 && loaded.includes(PROPERTY) && loaded.includes(ADS_TAG),
+            loaded.length
+                ? `expected ${[PROPERTY, ADS_TAG].sort().join(' + ')}, saw ${loaded.join(' + ')}`
+                : 'nothing observed');
 
         const purchases = rec.ga4.filter((h) => h.en === 'purchase');
         check('NO browser purchase event — that one is server-side only', purchases.length === 0,

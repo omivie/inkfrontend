@@ -40,7 +40,12 @@
     <link rel="stylesheet" href="/css/pages.css?v=f88f1dcf">
     <link rel="stylesheet" href="/css/search.css?v=6aaf67b9">
 
-    <script type="application/ld+json">
+    <!-- ids are LOAD-BEARING: js/footer.js upserts these three documents by id
+         after the footer paints, so it replaces these blocks in place instead of
+         emitting a second copy beside them. Removing an id brings back the
+         Organization x2 / WebSite x2 / LocalBusiness x2 duplication (ERR-276).
+         FAQPage below is deliberately id-less: nothing upserts it. -->
+    <script type="application/ld+json" id="site-jsonld-organization">
     {
         "@context": "https://schema.org",
         "@type": "Organization",
@@ -74,7 +79,7 @@
         }
     }
     </script>
-    <script type="application/ld+json">
+    <script type="application/ld+json" id="site-jsonld-website">
     {
         "@context": "https://schema.org",
         "@type": "WebSite",

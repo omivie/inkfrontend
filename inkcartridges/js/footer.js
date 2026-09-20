@@ -210,6 +210,154 @@
     window.NewsletterForm = { bind: bindNewsletterForm };
   }
 
+  /* ── SITE-WIDE JSON-LD: ONE NODE PER SCHEMA, ADDRESSED BY ID (ERR-276) ──────
+   *
+   * THE DEFECT. These three documents were emitted twice on the homepage.
+   * index.html carries them statically in <head> (so they exist with JS off,
+   * and for a crawler that does not run scripts), and this file emitted a
+   * second literal copy inside `footer.innerHTML`. A <script> inserted via
+   * innerHTML does not EXECUTE, but application/ld+json is data, not code — it
+   * parses perfectly, so the rendered DOM held Organization x2, WebSite x2 and
+   * LocalBusiness x2. Noise in Rich Results, and the payload paid twice.
+   *
+   * js/schema.js already had the right mechanism — write(id, payload) reuses an
+   * existing #id and only creates a node when there is none — but it could not
+   * see the static blocks, because those had no `id` at all. Two writers, three
+   * ids, and one pair of them invisible to the other.
+   *
+   * THE FIX IS THE ID, NOT A DELETION. The static blocks stay: they are the
+   * fail-open copy, and removing a fallback is a behaviour change dressed as
+   * cleanup (ERR-158). They now carry the same ids used here, so this upsert
+   * REPLACES them in place instead of adding beside them.
+   *
+   * WHY A LOCAL UPSERT RATHER THAN DELEGATING TO Schema.write(). Because
+   * js/schema.js is not loaded on the one page that matters most: root
+   * index.html has no schema.js tag. A delegation that works on /about and not
+   * on / is worse than one small implementation that works everywhere. The two
+   * must agree on the id vocabulary, and that agreement is pinned by
+   * tests/homepage-jsonld-single-owner-sep2026.test.js rather than by comment.
+   *
+   * WHY OBJECTS RATHER THAN THE OLD INTERPOLATED JSON STRING. The previous form
+   * spliced ${TRUST.legalEntity} straight into hand-written JSON. One
+   * apostrophe or backslash from LegalConfig would have produced a document
+   * that silently fails to parse — and invalid JSON-LD reports as NO structured
+   * data, not as an error anyone sees. JSON.stringify cannot be broken that
+   * way. `</` is escaped for the same reason schema.js escapes it: a value
+   * containing "</script" would otherwise close the tag early. */
+  const SITE_JSONLD_IDS = ['site-jsonld-organization', 'site-jsonld-website', 'site-jsonld-localbusiness'];
+
+  function siteSchemaDocs(TRUST) {
+    const SITE = 'https://www.inkcartridges.co.nz';
+    const postalAddress = {
+      '@type': 'PostalAddress',
+      streetAddress: '37A Archibald Road',
+      addressLocality: 'Kelston, Auckland',
+      addressRegion: 'Auckland',
+      postalCode: '0602',
+      addressCountry: 'NZ',
+    };
+    const identifier = [
+      { '@type': 'PropertyValue', propertyID: 'NZBN', value: TRUST.nzbn },
+      { '@type': 'PropertyValue', propertyID: 'GST', value: TRUST.gstNumber },
+    ];
+    return {
+      'site-jsonld-organization': {
+        '@context': 'https://schema.org',
+        '@type': 'Organization',
+        name: TRUST.legalEntity,
+        legalName: TRUST.legalEntity,
+        alternateName: TRUST.tradingName,
+        url: SITE,
+        logo: SITE + '/logo.png',
+        email: TRUST.email,
+        telephone: TRUST.phoneSchema,
+        taxID: TRUST.gstNumber,
+        identifier: identifier,
+        description: 'New Zealand supplier of genuine and compatible ink cartridges, '
+          + 'toner, and printer supplies.',
+        address: postalAddress,
+        contactPoint: {
+          '@type': 'ContactPoint',
+          telephone: TRUST.phoneSchema,
+          email: TRUST.email,
+          contactType: 'customer service',
+          areaServed: 'NZ',
+          availableLanguage: 'English',
+        },
+      },
+      'site-jsonld-website': {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: TRUST.tradingName,
+        url: SITE,
+        publisher: { '@type': 'Organization', name: TRUST.legalEntity },
+        potentialAction: {
+          '@type': 'SearchAction',
+          target: {
+            '@type': 'EntryPoint',
+            urlTemplate: SITE + '/shop?q={search_term_string}',
+          },
+          'query-input': 'required name=search_term_string',
+        },
+      },
+      'site-jsonld-localbusiness': {
+        '@context': 'https://schema.org',
+        '@type': 'LocalBusiness',
+        name: TRUST.legalEntity,
+        legalName: TRUST.legalEntity,
+        alternateName: TRUST.tradingName,
+        url: SITE,
+        telephone: TRUST.phoneSchema,
+        email: TRUST.email,
+        taxID: TRUST.gstNumber,
+        identifier: identifier,
+        address: postalAddress,
+        geo: { '@type': 'GeoCoordinates', latitude: -36.9005, longitude: 174.6669 },
+        priceRange: '$$',
+        currenciesAccepted: 'NZD',
+        areaServed: { '@type': 'Country', name: 'New Zealand' },
+        openingHoursSpecification: {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+          opens: '09:00',
+          closes: '17:00',
+        },
+      },
+    };
+  }
+
+  /** Reuse the node with this id if one exists; create it in <head> if not. */
+  function upsertJsonLd(id, payload) {
+    let json;
+    try {
+      json = JSON.stringify(payload).replace(/<\//g, '<\\/');
+    } catch (_) {
+      return false;                       // never ship a half-serialised document
+    }
+    let el = document.getElementById(id);
+    if (el && el.type !== 'application/ld+json') return false;
+    if (!el) {
+      el = document.createElement('script');
+      el.type = 'application/ld+json';
+      el.id = id;
+      (document.head || document.documentElement).appendChild(el);
+    }
+    el.textContent = json;
+    return true;
+  }
+
+  function writeSiteSchema(TRUST) {
+    try {
+      const docs = siteSchemaDocs(TRUST);
+      SITE_JSONLD_IDS.forEach(function (id) { upsertJsonLd(id, docs[id]); });
+    } catch (_) {
+      /* Non-fatal, and the reason it is safe to swallow: index.html's static
+       * blocks are already in the document. A throw here leaves the page with
+       * exactly one copy of each schema — the previous, correct one — rather
+       * than none. */
+    }
+  }
+
   function initFooter() {
     const footer = document.querySelector('footer.site-footer');
     if (!footer) return;
@@ -372,97 +520,11 @@
 
         <div id="google-reviews-badge"></div>
 
-        <script type="application/ld+json" id="site-jsonld-organization">
-        {
-            "@context": "https://schema.org",
-            "@type": "Organization",
-            "name": "${TRUST.legalEntity}",
-            "legalName": "${TRUST.legalEntity}",
-            "alternateName": "${TRUST.tradingName}",
-            "url": "https://www.inkcartridges.co.nz",
-            "logo": "https://www.inkcartridges.co.nz/logo.png",
-            "email": "${TRUST.email}",
-            "telephone": "${TRUST.phoneSchema}",
-            "taxID": "${TRUST.gstNumber}",
-            "identifier": [
-                { "@type": "PropertyValue", "propertyID": "NZBN", "value": "${TRUST.nzbn}" },
-                { "@type": "PropertyValue", "propertyID": "GST",  "value": "${TRUST.gstNumber}" }
-            ],
-            "description": "New Zealand supplier of genuine and compatible ink cartridges, toner, and printer supplies.",
-            "address": {
-                "@type": "PostalAddress",
-                "streetAddress": "37A Archibald Road",
-                "addressLocality": "Kelston, Auckland",
-                "addressRegion": "Auckland",
-                "postalCode": "0602",
-                "addressCountry": "NZ"
-            },
-            "contactPoint": {
-                "@type": "ContactPoint",
-                "telephone": "${TRUST.phoneSchema}",
-                "email": "${TRUST.email}",
-                "contactType": "customer service",
-                "areaServed": "NZ",
-                "availableLanguage": "English"
-            }
-        }
-        </script>
-        <script type="application/ld+json" id="site-jsonld-website">
-        {
-            "@context": "https://schema.org",
-            "@type": "WebSite",
-            "name": "${TRUST.tradingName}",
-            "url": "https://www.inkcartridges.co.nz",
-            "publisher": { "@type": "Organization", "name": "${TRUST.legalEntity}" },
-            "potentialAction": {
-                "@type": "SearchAction",
-                "target": {
-                    "@type": "EntryPoint",
-                    "urlTemplate": "https://www.inkcartridges.co.nz/shop?q={search_term_string}"
-                },
-                "query-input": "required name=search_term_string"
-            }
-        }
-        </script>
-        <script type="application/ld+json" id="site-jsonld-localbusiness">
-        {
-            "@context": "https://schema.org",
-            "@type": "LocalBusiness",
-            "name": "${TRUST.legalEntity}",
-            "legalName": "${TRUST.legalEntity}",
-            "alternateName": "${TRUST.tradingName}",
-            "url": "https://www.inkcartridges.co.nz",
-            "telephone": "${TRUST.phoneSchema}",
-            "email": "${TRUST.email}",
-            "taxID": "${TRUST.gstNumber}",
-            "identifier": [
-                { "@type": "PropertyValue", "propertyID": "NZBN", "value": "${TRUST.nzbn}" },
-                { "@type": "PropertyValue", "propertyID": "GST",  "value": "${TRUST.gstNumber}" }
-            ],
-            "address": {
-                "@type": "PostalAddress",
-                "streetAddress": "37A Archibald Road",
-                "addressLocality": "Kelston, Auckland",
-                "addressRegion": "Auckland",
-                "postalCode": "0602",
-                "addressCountry": "NZ"
-            },
-            "geo": {
-                "@type": "GeoCoordinates",
-                "latitude": -36.9005,
-                "longitude": 174.6669
-            },
-            "priceRange": "$$",
-            "currenciesAccepted": "NZD",
-            "areaServed": { "@type": "Country", "name": "New Zealand" },
-            "openingHoursSpecification": {
-                "@type": "OpeningHoursSpecification",
-                "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-                "opens": "09:00",
-                "closes": "17:00"
-            }
-        }
-        </script>
+        <!-- The three site-wide JSON-LD documents (Organization, WebSite,
+             LocalBusiness) used to be emitted here, inside this template, as
+             literal <script type="application/ld+json"> tags. They are now
+             upserted BY ID by writeSiteSchema() below — see the comment there
+             for why (ERR-276). -->
 
         <div class="footer-bottom">
             <div class="container">
@@ -544,6 +606,12 @@
                 </p>
             </div>
         </div>`;
+
+    /* Site-wide JSON-LD, upserted by id rather than emitted into the template
+       above (ERR-276). Runs here, immediately after the footer paints, for the
+       same reason the accordion sync does: the document is now in its final
+       shape and nothing below this line is allowed to depend on a network. */
+    writeSiteSchema(TRUST);
 
     // mobile-parity-may2026 S0.5 — collapse the footer link columns into
     // accordions on mobile (the 4-column grid stacked to a 2,081px wall).

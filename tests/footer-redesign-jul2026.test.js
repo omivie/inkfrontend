@@ -476,13 +476,47 @@ test('§9 the static footer is a noscript fallback only — the real one comes f
 // §10 — things the redesign must not have dropped
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§10 all three JSON-LD blocks survive the redesign', () => {
+test('§10 all three JSON-LD documents survive the redesign', () => {
+    /* REWRITTEN 2026-09-20 (ERR-276), and the rewrite is the point.
+     *
+     * This used to assert `id="site-jsonld-organization"` appeared in the
+     * TEMPLATE — i.e. that the three documents were emitted as literal <script>
+     * tags inside footer.innerHTML. That was true, and it was also the defect:
+     * index.html carries the same three statically in <head>, so the homepage's
+     * rendered DOM held Organization x2, WebSite x2 and LocalBusiness x2. They
+     * are now upserted BY ID after the footer paints, so the static blocks are
+     * replaced in place instead of duplicated.
+     *
+     * The old assertion would have FAILED the fix, which is the ERR-217 shape:
+     * the test pinned the mechanism rather than the guarantee. What §10 is
+     * actually for is "the redesign must not have dropped these", so that is
+     * what it now asserts — the documents still exist, still carry the
+     * transparency facts, and are still addressed by the same three ids.
+     *
+     * The full single-owner contract (exactly one node per id, ids present in
+     * index.html, the vocabulary shared with js/schema.js) lives in
+     * tests/homepage-jsonld-single-owner-sep2026.test.js. */
     for (const id of ['site-jsonld-organization', 'site-jsonld-website', 'site-jsonld-localbusiness']) {
-        assert.match(TEMPLATE, new RegExp(`id="${id}"`), `${id} must still be emitted`);
+        assert.match(FOOTER_JS, new RegExp(`'${id}'`), `${id} must still be produced by footer.js`);
     }
-    // Structured data that disagrees with the bot render reads as cloaking.
-    assert.match(TEMPLATE, /"legalName": "\$\{TRUST\.legalEntity\}"/);
-    assert.match(TEMPLATE, /"propertyID": "NZBN", "value": "\$\{TRUST\.nzbn\}"/);
+    assert.match(FOOTER_JS, /SITE_JSONLD_IDS\.forEach\(function \(id\) \{ upsertJsonLd\(id, docs\[id\]\); \}\)/,
+        'the three documents must be written through the id-addressed upsert — a literal '
+        + '<script> tag in the template is what duplicated them (ERR-276)');
+    /* Strip HTML comments first. The template now carries a comment SAYING the
+     * tags used to live here, and without this the assertion would fail on the
+     * prose explaining it — the mirror image of an assertion that passes because
+     * of the comment describing it (the reason this suite uses stripComments
+     * elsewhere). */
+    const templateMarkup = TEMPLATE.replace(/<!--[\s\S]*?-->/g, '');
+    assert.doesNotMatch(templateMarkup, /application\/ld\+json/,
+        'footer.innerHTML must not emit JSON-LD tags any more; innerHTML does not EXECUTE a '
+        + 'script, but application/ld+json is data and parses perfectly, so a tag here is a '
+        + 'second copy of a document index.html already carries');
+
+    // Structured data that disagrees with the bot render reads as cloaking, so
+    // the transparency facts still have to be in the documents themselves.
+    assert.match(FOOTER_JS, /legalName: TRUST\.legalEntity/);
+    assert.match(FOOTER_JS, /propertyID: 'NZBN', value: TRUST\.nzbn/);
 });
 
 test('§10 the Google Customer Reviews badge still has its mount point', () => {

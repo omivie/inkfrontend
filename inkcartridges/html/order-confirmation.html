@@ -236,9 +236,31 @@
                     </div>
 
                     <div class="confirmation-relationship" id="post-purchase-hooks">
+                        <!-- THIS IS THE POST-PURCHASE ACCOUNT ASK, AND IT IS THE ONLY ONE.
+                             ERR-276 suppressed js/rewards-nudge.js on the phone buying
+                             path and re-armed it for the add-to-cart moment. The handoff
+                             also asked for it on this page; it is deliberately NOT here,
+                             for two reasons that are worth writing down so nobody adds it
+                             later. First, this card already is that ask, shown to guests
+                             only (order-confirmation-page.js, on Auth.readyPromise), and
+                             two account prompts on one page is not twice the conversion.
+                             Second, the nudge would bail here anyway: it anchors to
+                             `a.header-actions__item[href="/account"]` and this page runs
+                             the stripped .site-header--checkout, which has no such link.
+
+                             What was missing was the OFFER. The nudge's whole proposition
+                             is loyalty points, and this card never mentioned them even
+                             though the totals block above it prints "Loyalty points
+                             earned". The earn/redeem rates below are the same claim
+                             js/rewards-nudge.js makes and the same one
+                             html/account/loyalty.html:276 states — one vocabulary, three
+                             surfaces, pinned by
+                             tests/mobile-cta-occlusion-sep2026.test.js so a rate change
+                             cannot land on some of them. -->
                         <div class="confirmation-card confirmation-card--accent" id="create-account-prompt" hidden>
                             <h3>Save Your Details for Next Time</h3>
                             <p>Create an account to track orders, reorder in one click, and get new-product updates.</p>
+                            <p>You'll also earn 1 point for every $1 you spend (excluding shipping). 100 points = $1 off a future order.</p>
                             <a href="/account/login" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
                         </div>
 

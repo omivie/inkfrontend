@@ -21,9 +21,14 @@
  * arrives weeks later as a decision made on a bad figure.
  *
  *   1. AN UNSCOPED EVENT REACHES THE GOOGLE ADS ACCOUNT. gtag.js configures
- *      THREE destinations — G-SDQELG0FGD, a second GA4 property G-YJXTSGLM28
- *      that appears nowhere else in the repo, and AW-18032498762 — and an event
- *      with no `send_to` goes to all three. Every pre-existing custom event on
+ *      TWO destinations — G-SDQELG0FGD and AW-18032498762 — and an event
+ *      with no `send_to` goes to both. (Until 2026-09-20 there were three: a
+ *      second GA4 property G-YJXTSGLM28 that appeared nowhere else in the repo
+ *      was configured and never fed, so it silently received a duplicate of
+ *      every unscoped custom event while costing ~187KB of bundle on every page
+ *      load. Removed on the owner's confirmation — ERR-276. §2 now pins the
+ *      destination list as an EXACT SET so it cannot drift back, and so that a
+ *      swap of one id for another cannot pass a count.) Every custom event on
  *      this site (contact_form_submit, faq_open, quote_started) omits it. For an
  *      ecommerce-shaped event that would put add-to-cart hits into the account
  *      the owner bids from, against the backend's own acceptance criterion that
@@ -82,8 +87,10 @@ const GTAG_SRC = JS('gtag.js');
 const GTAG_CODE = stripComments(GTAG_SRC);
 
 const PROPERTY = 'G-SDQELG0FGD';
-const SECOND_PROPERTY = 'G-YJXTSGLM28';
 const ADS_TAG = 'AW-18032498762';
+/** Removed 2026-09-20 (ERR-276). Kept named so the guards below can say WHICH
+ *  id must never come back, rather than asserting against an anonymous regex. */
+const REMOVED_PROPERTY = 'G-YJXTSGLM28';
 
 /** Every .html in the deployed tree. */
 function htmlFiles(dir = INK, out = []) {
@@ -223,15 +230,46 @@ test('§1 AdsConversions still exists alongside it — this is an addition, not 
 // 2. send_to — the scoping that keeps ecommerce events out of the ad account
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('§2 the hazard is real: this file configures three destinations', () => {
+test('§2 the hazard is real: this file configures more than one destination', () => {
     // The negative control for the whole section. If gtag.js only ever
     // configured one target, `send_to` would be decoration and every assertion
-    // below would pass for the wrong reason.
+    // below would pass for the wrong reason. Removing the orphan GA4 property
+    // (ERR-276) took the count from three to two; the control survives because
+    // the Ads tag is still configured and an unscoped event still reaches it.
     assert.match(GTAG_CODE, new RegExp(`gtag\\('config', '${PROPERTY}'`));
-    assert.match(GTAG_CODE, new RegExp(`gtag\\('config', '${SECOND_PROPERTY}'`),
-        'a second GA4 property is configured — an unscoped event reaches it too');
     assert.match(GTAG_CODE, new RegExp(`gtag\\('config', '${ADS_TAG}'`),
         'the Ads tag is configured — an unscoped event reaches the ad account');
+});
+
+test('§2 the configured destinations are an EXACT SET, not a count', () => {
+    /* A count passes when one id is swapped for another (ERR-214, where
+     * enrolment was pinned as a number and ten search boxes went dead inside a
+     * green suite). So read the ids out of the source and compare the set.
+     *
+     * Every `gtag('config', …)` line makes the browser fetch that destination's
+     * own ~150-190KB bundle, which is why a property nobody sends events to is
+     * still expensive: measured at 187KB on a throttled Pixel-5 profile. */
+    const ids = [...GTAG_CODE.matchAll(/gtag\('config',\s*'([^']+)'/g)].map((m) => m[1]);
+    assert.deepEqual(ids.sort(), [ADS_TAG, PROPERTY].sort(),
+        'gtag.js must configure exactly the GA4 property and the Ads tag. Adding a '
+        + 'destination here fans out every unscoped custom event to it AND costs a '
+        + 'full gtag bundle on every page load — see the note at the top of gtag.js.');
+});
+
+test('§2 the removed second GA4 property is gone from the whole repo', () => {
+    /* The kind of removal that comes back. It was referenced in gtag.js, in two
+     * comment blocks describing it, in this file and in the probe — so deleting
+     * only the config line would have left four live citations implying it still
+     * existed. Prose is allowed to name it (this test does); a `config` call or
+     * a `send_to` is not. */
+    assert.doesNotMatch(GTAG_CODE, new RegExp(REMOVED_PROPERTY),
+        `${REMOVED_PROPERTY} must not appear in gtag.js executable code — it was `
+        + 'removed 2026-09-20 (ERR-276) because it was configured and never fed.');
+
+    for (const file of htmlFiles()) {
+        assert.ok(!fs.readFileSync(file, 'utf8').includes(REMOVED_PROPERTY),
+            `${path.relative(INK, file)} still loads or configures ${REMOVED_PROPERTY}`);
+    }
 });
 
 test('§2 EVERY event is scoped to the one GA4 property', () => {
@@ -261,7 +299,7 @@ test('§2 no event can reach the Ads account or the orphan second property', () 
     for (const [, name, params] of calls) {
         const to = String(params.send_to);
         assert.ok(!to.includes('AW-'), `${name} must never route to an Ads tag (got ${to})`);
-        assert.ok(!to.includes(SECOND_PROPERTY), `${name} must not feed the orphan property`);
+        assert.ok(!to.includes(REMOVED_PROPERTY), `${name} must not feed the removed second property (ERR-276)`);
     }
 });
 

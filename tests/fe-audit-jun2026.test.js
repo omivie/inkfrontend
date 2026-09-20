@@ -26,6 +26,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const stripComments = require('./helpers/strip-comments');
 
 const ROOT = path.resolve(__dirname, '..');
 const INK = path.join(ROOT, 'inkcartridges');
@@ -95,11 +96,25 @@ test('§1 no regression — every previously-allowed frame origin survives', () 
 // ───────────────────────────────────────────────────────────────────────────
 // §2  gtag cookie_flags — Secure on every config call
 // ───────────────────────────────────────────────────────────────────────────
-const GTAG = read('js', 'gtag.js');
+/* COMMENTS STRIPPED, and the reason is a bug this very assertion had.
+ * gtag.js now carries a comment explaining which measurement ID was REMOVED and
+ * why, and it spells that removed `gtag('config', …)` call out in full. Reading
+ * the raw source made the loop below assert against the prose describing a line
+ * that no longer exists — an assertion satisfied, and then failed, by a comment.
+ * Same rule the rest of the suite already follows (ERR-253's family). */
+const GTAG = stripComments(read('js', 'gtag.js'));
 
 test('§2 every gtag config call passes cookie_flags', () => {
     const configs = GTAG.match(/gtag\(\s*['"]config['"][^)]*\)/g) || [];
-    assert.ok(configs.length >= 3, 'three measurement IDs configured');
+    /* The count is the NEGATIVE CONTROL for the loop below, not the invariant:
+     * with a single destination, "every config call passes cookie_flags" would
+     * be a claim about one line and could pass by accident. Two is enough for
+     * that job. It was three until 2026-09-20, when the orphan GA4 property
+     * G-YJXTSGLM28 — configured, never fed, and costing ~187KB of bundle on
+     * every page load — was removed (ERR-276). The exact set of destinations is
+     * pinned in tests/ga4-ecommerce-events-sep2026.test.js §2, which is where a
+     * fourth one would have to be justified. */
+    assert.ok(configs.length >= 2, 'more than one measurement ID configured');
     for (const c of configs) {
         assert.ok(/cookie_flags/.test(c) || /GTAG_COOKIE_FLAGS/.test(c),
             `config call passes cookie_flags: ${c}`);

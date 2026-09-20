@@ -4508,9 +4508,9 @@ body.filter-sort-open { overflow: hidden; }
    .drilldown-box tiles so the loading boxes line up with the eventual
    layout (brand 56, category 180, code 100 min-heights). */
 
-/* Brand Box Skeleton — matches .drilldown-box--brand (min-height:56px) */
+/* Brand Box Skeleton — matches .shop-section-card .drilldown-box--brand (80px) */
 .skeleton--brand-box {
-    height: 56px;
+    height: 80px;
     border-radius: var(--radius-lg, 12px);
     background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
     background-size: 200% 100%;
@@ -4588,7 +4588,7 @@ body.filter-sort-open { overflow: hidden; }
 
 @media (max-width: 768px) {
     .skeleton--brand-box {
-        height: 56px;
+        height: 84px;
     }
 
     .skeleton--category-box {
@@ -11365,6 +11365,54 @@ a.account-review-card__product:focus-visible {
     box-shadow: var(--shadow-md);
     transform: translateY(-2px);
 }
+
+/* PLACED HERE, AFTER .product-card, AND THAT IS LOAD-BEARING.
+   It was first written up beside the other skeletons at ~4400, six thousand
+   lines ABOVE .product-card — where the base rule's `background` and
+   `border-radius` simply won, because equal specificity is decided by source
+   order and the base came last. The shimmer never rendered and the reservation
+   still worked, so nothing looked wrong. Caught by
+   tests/order-pathway-three-step-sep2026.test.js, which exists for exactly this
+   ("a BEM modifier never redeclares a property its base sets LATER in the
+   file") — a rule I had to be told by a test I did not know was watching. */
+/* ── THE /ribbons SHELF HOLDS ITS OWN SPACE (ERR-276) ───────────────────────
+   /ribbons is the one landing whose popular shelf is UNCONDITIONAL — it is a
+   single-category page, so there is no route on which the shelf fails to
+   appear and the reservation has nothing to be wrong about. That is why these
+   placeholders ship visible in html/ribbons.html and nowhere else: on
+   html/shop.html the same markup serves /shop, which has no shelf, and
+   reserving 1,121px there would trade two good pages for one bad one.
+
+   The rest of the drilldown reserves its space through the loading skeleton
+   instead (#drilldown-loading now ships visible, the levels ship hidden) —
+   see the note at .skeleton--brand-box.
+
+   WHY IT IS NEEDED HERE AND NOT ON /shop. ribbons-page.js#showLevel un-hides
+   the level and THEN calls renderPopularRow(), so the shelf always arrives
+   after the page is already on screen; shop-page.js calls renderPopularRow
+   from inside renderBrands, before its caller reveals the level. Measured on
+   production 2026-09-20, Pixel-5 profile at 4x CPU throttle: /ribbons CLS
+   0.607 POOR, all of it one shift — the "Typewriter & Printer Ribbons" card
+   pushed off the bottom of the viewport when the 1,121px shelf opened above it.
+
+   The CARD HEIGHT is the only constant here; the row count comes from the same
+   .popular-row__grid the real cards use, so it follows the same 2-up/4-up
+   breakpoints. Measured card heights: 525px at 390 wide, 511 at 768, 522 at
+   1440 — one value covers all three to within 14px, about 1% of the section.
+   `npm run probe:shop-cls` re-measures and fails if this drifts. */
+.product-card--placeholder {
+    min-height: 520px;
+    border-radius: var(--radius-lg, 12px);
+    background: linear-gradient(90deg, #f4f6f8 25%, #eceff2 50%, #f4f6f8 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .product-card--placeholder { animation: none; }
+}
+
 
 /* CARDS PER ROW IN THE TWO SOURCE COLUMNS.
    SCOPED TO .products-row ON PURPOSE. The .product-card rule above is GLOBAL:

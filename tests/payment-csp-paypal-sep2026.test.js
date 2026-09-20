@@ -128,7 +128,15 @@ test('§1b EVERY executable inline script has a matching hash in script-src', ()
 
     const refused = [];
     for (const file of htmlFiles) {
-        const html = fs.readFileSync(file, 'utf8');
+        /* COMMENTS STRIPPED FIRST. A <script> tag written inside an HTML
+         * comment is not a script — the browser never parses it, so script-src
+         * never sees it. Reading the raw file, a comment that merely MENTIONS
+         * `<script>` (html/shop.html explains why its <noscript> block uses
+         * <style> and not a script, ERR-276) opens a phantom match that runs to
+         * the next real </script> on the page, and this test then demands a
+         * hash for a block that does not exist. A commented-out script is
+         * likewise not executed, so stripping cannot hide a real refusal. */
+        const html = fs.readFileSync(file, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
         for (const m of html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)) {
             // ld+json is data, never executed, and not subject to script-src.
             if (/type\s*=\s*["']application\/ld\+json/.test(m[1] || '')) continue;

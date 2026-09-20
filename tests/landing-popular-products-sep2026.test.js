@@ -106,10 +106,27 @@ test('§2 /ribbons really is a different file — the reason this row is added t
 });
 
 for (const [label, html] of [['shop.html', SHOP_HTML], ['ribbons.html', RIBBONS_HTML]]) {
-    test(`§2 ${label} carries the shelf, hidden, above the brand picker`, () => {
-        assert.match(html, /<section class="shop-section-card" id="popular-row" hidden>/,
-            'it starts hidden — an empty shelf over a working catalogue is worse than no shelf '
-            + '(ERR-193 printed empty-shelf copy on 63 pages for 44 hours)');
+    test(`§2 ${label} carries the shelf above the brand picker`, () => {
+        /* THE TWO FILES DIFFER ON `hidden`, DELIBERATELY (ERR-276).
+         *
+         * html/shop.html also serves /shop, which has no category and therefore
+         * no shelf, so its section must ship hidden and be un-hidden by
+         * shop-page.js#renderPopularRow once it knows the route has one.
+         * /ribbons is single-category: its shelf is unconditional, so it ships
+         * VISIBLE with placeholder cards and claims its height before the fetch.
+         * Measured on a Pixel-5 profile at 4x CPU throttle, /ribbons went from
+         * CLS 0.607 POOR to 0.001 on that change alone.
+         *
+         * The ERR-193 rule below is unchanged and still the point: neither file
+         * may render an EMPTY shelf over a working catalogue. What enforces it
+         * is that every failure path calls hide(), which clears the grid as well
+         * as hiding the section — pinned in
+         * tests/shop-cls-reservation-sep2026.test.js §3. */
+        const expectHidden = label === 'shop.html';
+        assert.match(html, new RegExp(`<section class="shop-section-card" id="popular-row"${expectHidden ? ' hidden' : ''}>`),
+            expectHidden
+                ? 'html/shop.html also serves /shop, which has no shelf — it must start hidden'
+                : '/ribbons shelf is unconditional and ships visible so it can reserve its height');
         assert.match(html, /id="popular-row-grid"/, 'and it has a grid to render into');
 
         const levelStart = html.indexOf('id="level-brands"');

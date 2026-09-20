@@ -282,17 +282,32 @@ test('footer.js declares the TRUST fallback constants', () => {
 test('footer.js renders the disambiguation line element', () => {
     assert.match(FOOTER_SRC, /data-legal-bind="disambiguation"/);
 });
+/* These two used to assert on hand-written JSON with ${TRUST.x} spliced into
+ * it, because that is how footer.js emitted these documents — as literal
+ * <script type="application/ld+json"> tags inside footer.innerHTML. That form
+ * was the defect: index.html carries the same three statically in <head>, so
+ * the homepage's rendered DOM held Organization x2, WebSite x2 and
+ * LocalBusiness x2 (measured on production 2026-09-20: 7 ld+json nodes after
+ * JS, 4 after the fix). They are now built as OBJECTS and upserted by id, which
+ * also removes an escaping hazard — one apostrophe from LegalConfig would have
+ * produced JSON that silently fails to parse, and invalid structured data
+ * reports as NO structured data, not as an error (ERR-276).
+ *
+ * The COMPLIANCE claim is unchanged and is what these still assert: the legal
+ * entity, the trading name, the contact email, and the NZBN + GST identifiers
+ * an ads reviewer looks for. Only the spelling moved.
+ * Single-owner contract: tests/homepage-jsonld-single-owner-sep2026.test.js. */
 test('footer.js Organization JSON-LD carries legalName + alternateName + email', () => {
-    assert.match(FOOTER_SRC, /"@type":\s*"Organization"/);
-    assert.match(FOOTER_SRC, /"legalName":\s*"\$\{TRUST\.legalEntity\}"/);
-    assert.match(FOOTER_SRC, /"alternateName":\s*"\$\{TRUST\.tradingName\}"/);
-    assert.match(FOOTER_SRC, /"email":\s*"\$\{TRUST\.email\}"/);
+    assert.match(FOOTER_SRC, /'@type':\s*'Organization'/);
+    assert.match(FOOTER_SRC, /legalName:\s*TRUST\.legalEntity/);
+    assert.match(FOOTER_SRC, /alternateName:\s*TRUST\.tradingName/);
+    assert.match(FOOTER_SRC, /email:\s*TRUST\.email/);
 });
 test('footer.js LocalBusiness JSON-LD carries NZBN + GST identifiers', () => {
-    assert.match(FOOTER_SRC, /"@type":\s*"LocalBusiness"/);
-    assert.match(FOOTER_SRC, /"identifier":\s*\[/);
-    assert.match(FOOTER_SRC, /"propertyID":\s*"NZBN"/);
-    assert.match(FOOTER_SRC, /"propertyID":\s*"GST"/);
+    assert.match(FOOTER_SRC, /'@type':\s*'LocalBusiness'/);
+    assert.match(FOOTER_SRC, /identifier:\s*identifier/);
+    assert.match(FOOTER_SRC, /propertyID:\s*'NZBN'/);
+    assert.match(FOOTER_SRC, /propertyID:\s*'GST'/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────

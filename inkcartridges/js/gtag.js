@@ -14,8 +14,30 @@ gtag('js', new Date());
 // is always honoured. Google's documented mechanism for flagging the
 // conversion-linker cookie (FE audit Jun 2026, ERR-049).
 const GTAG_COOKIE_FLAGS = { cookie_flags: 'SameSite=None;Secure' };
+/* TWO DESTINATIONS, AND THAT IS THE WHOLE LIST (ERR-276).
+ *
+ * A third line used to sit here: `gtag('config', 'G-YJXTSGLM28', …)`, a SECOND
+ * GA4 property. It was configured and never fed — the id appeared nowhere else
+ * in this repo except the comments describing it and the tests pinning its
+ * existence. Every `config` call makes gtag fetch its own ~150-190KB bundle, so
+ * a property with no events still cost ~187KB on every page load, measured on a
+ * Pixel-5 profile at 4x CPU throttle where the site was already shipping 973KB
+ * of JavaScript with our own application code a rounding error inside it.
+ *
+ * Worse than the weight: every legacy custom event on this site
+ * (contact_form_submit, faq_open, quote_started) is sent with NO `send_to`, and
+ * an event with no send_to goes to EVERY configured destination. So the second
+ * property was silently receiving a duplicate of the first property's custom
+ * events — double-counting in a dataset nobody was reading.
+ *
+ * Removed 2026-09-20 on the owner's explicit confirmation that it is not theirs.
+ * If a second property is ever wanted again, it needs a reason written here and
+ * a `send_to` discipline decided BEFORE the config line goes back, because the
+ * default fan-out is the expensive part, not the line.
+ *
+ * Pinned by tests/ga4-ecommerce-events-sep2026.test.js as an EXACT SET, not a
+ * count — a count passes when one id is swapped for another (ERR-214). */
 gtag('config', 'G-SDQELG0FGD', GTAG_COOKIE_FLAGS);
-gtag('config', 'G-YJXTSGLM28', GTAG_COOKIE_FLAGS);
 gtag('config', 'AW-18032498762', GTAG_COOKIE_FLAGS);
 
 // First-party traffic tracker — loaded alongside GA so it lands on every page
@@ -303,11 +325,11 @@ const AdsConversions = {
  *
  * EVERY EVENT IS SCOPED WITH send_to, AND THAT IS NOT DECORATION
  * -------------------------------------------------------------
- * This file configures THREE destinations: G-SDQELG0FGD, a second GA4 property
- * G-YJXTSGLM28 that appears nowhere else in the repo, and the Google Ads tag
- * AW-18032498762. An event with no `send_to` goes to ALL THREE - which is what
- * every pre-existing custom event on this site does (contact_form_submit,
- * faq_open, quote_started). For an ECOMMERCE event that is not a style
+ * This file configures TWO destinations: the GA4 property G-SDQELG0FGD and the
+ * Google Ads tag AW-18032498762. An event with no `send_to` goes to BOTH - which
+ * is what every pre-existing custom event on this site does
+ * (contact_form_submit, faq_open, quote_started). For an ECOMMERCE event that is
+ * not a style
  * preference: it would put add_to_cart-shaped hits into the ad account the owner
  * bids from, and the backend's acceptance criterion for this work is that its
  * duplicated-conversion monitor stays 22/22. So every event here names its one
@@ -330,9 +352,10 @@ const AdsConversions = {
  * a second implementation of a policy that already has an owner.
  * ========================================================================== */
 const GA4 = {
-    // The property the handoff names. NOT G-YJXTSGLM28 (configured at the top of
-    // this file and referenced nowhere else in the repo - raised with the backend
-    // rather than silently fed), and NOT the Ads tag.
+    // The property the handoff names, and now the ONLY GA4 property this site
+    // configures. The second one (G-YJXTSGLM28) was removed at the top of this
+    // file on 2026-09-20 - see the note there for why a configured-but-unfed
+    // property was not free. NOT the Ads tag.
     PROPERTY: 'G-SDQELG0FGD',
 };
 

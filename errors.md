@@ -41,6 +41,244 @@ describing the same incident.
 
 ---
 
+## ERR-276 — The rewards popover covered Add to Cart on every phone, and the two pages carrying most of the ad spend shifted 0.68 — **RESOLVED** (2026-09-20)
+
+**Context.** Backend handoff `mobile-cta-occlusion-and-seo-FE-handoff-sep2026.md`, re-measured by
+its author four days after it was written and still reporting the P0 as live. Mobile converts at
+1.8% against desktop's 6.5% on the same spend, and mobile had already been switched off for the two
+generic ad groups as a stop-loss — so the upside was locked behind this.
+
+Seven asks. **Three were not what the document said they were**, and two of those would have
+shipped as "fixes" that changed nothing or broke something. Verifying first is the reason this entry
+is short on the items that mattered least.
+
+---
+
+### 1. THE REAL P0 — the nudge, and only the nudge
+
+`js/rewards-nudge.js` is two components. Above `Config.BREAKPOINTS.tablet` it is a small popover
+anchored under the header Account button. Below it, `position()` makes it a `position: fixed`,
+`vw - 24px` card at `--z-popover` (600) pinned at `header.bottom + 8px` and re-pinned on every
+scroll. `skipPaths` was `['/cart']` and nothing else, and the trigger is `scrollY >= 600` — the
+exact moment a shopper reaches the price.
+
+Measured on production with the new probe:
+
+```
+worst case: scrollY 1027 puts #add-to-cart-btn inside the band y 144-392 (the mounted nudge)
+inline ATC   y 244-292 (48px)
+             verdict: blocked  (elementFromPoint at its own centre
+                      -> aside#rewards-nudge.rewards-nudge.rewards-nudge--card)
+```
+
+and after the fix, same viewport, same SKU, same scroll position:
+
+```
+inline ATC   y 244-292 (48px)
+             verdict: reachable (-> button#add-to-cart-btn.btn.btn--primary)
+nudge module suppressed=true postAddArmed=true
+```
+
+**THE OCCLUSION IS A SCROLL WINDOW, NOT A STATE, AND THE FIRST PROBE MISSED IT.** The nudge is
+`fixed`, so it owns a constant band of the viewport; `#add-to-cart-btn` is in flow and travels up
+through that band. It is unreachable for roughly 250px of scroll and fine on either side. The first
+version of the probe scrolled to `threshold + 120` and reported the button REACHABLE on a
+definitively broken build. It was not wrong about that pixel, it was asking at the wrong pixel. The
+probe now computes the scroll that puts the button in the middle of the band and asks there.
+
+**The fix is a gate, not a layout change.** `CAMPAIGN.narrowSkipPaths` suppresses the nudge on the
+buying path below the tablet breakpoint. Desktop is untouched — the gate is `isNarrow() && path`,
+and `position()` now calls the same `isNarrow()` rather than carrying a second copy of the media
+query, so the gate and the layout cannot disagree.
+
+***EVERY SPELLING, AND THE ONE THAT NEARLY GOT AWAY.*** The site serves the same product page at
+four URLs: `/products/:slug/:sku`, `/product/:slug`, `/p/:sku` (vercel.json) and
+`/html/product/index.html` (serve.json). `/p` looked redundant — production 301s it to the long
+form — until the probe was run against `localhost`, where `serve.json` rewrites `p/**` with **no
+redirect** and the gate was dead. *The spelling that gets away is the one that only exists where you
+develop.*
+
+**The ask is MOVED, not deleted.** Suppressing it with nothing in its place silently ends mobile
+account signups — the failure mode nobody files a bug about. `js/cart.js` now dispatches
+`cart:item-added` at the success toast and the nudge re-arms for that moment. The dispatch is
+deliberately OUTSIDE the `!product.silent` guard: *suppressing a toast and suppressing an event are
+different decisions, and only one of them was made.*
+
+**Order-confirmation: deliberately no nudge.** The handoff asked for it there. That page already has
+a guest-gated `#create-account-prompt`, and the nudge would bail anyway — `.site-header--checkout`
+has no Account link to anchor to. What was missing was the OFFER, so that card now carries the same
+earn/redeem claim the nudge makes.
+
+### 2. THE CONSENT BANNER DOES NOT COVER THE STICKY BAR — AND THE HANDOFF'S OWN NUMBERS PROVE IT
+
+Reported as live. ERR-238 fixed it in September and the fix is working.
+
+The handoff measured `DIV#sticky-atc` at y 515-582 on a 664px visual viewport with the banner at
+516-664 (148px). `.sticky-atc` is 67px and carries `transform: translateY(100%)` until `.is-visible`.
+With ERR-238's `bottom: var(--consent-banner-height)` applied and the bar hidden, its box lands at
+516-583 — which is what they measured. With **no** lift it would have been off-screen at 664-731.
+The run had scrolled "so the main button is in view", which is precisely the state in which
+`product-detail-page.js:3127` **removes** `.is-visible`.
+
+> ***A CONTROL THAT IS CORRECTLY HIDDEN IS NOT A CONTROL THAT IS BLOCKED.***
+
+The same artefact explains "clicking Accept unblocks `#add-to-cart-btn`": `releaseSpace()` drops
+148px of `body { padding-bottom }`, the document reflows, and the button slides out from under the
+nudge. A scroll shift, not causality — and it nearly buried the real blocker one row above it.
+
+Every control in the new probe therefore reports its STATE before its VERDICT — `display`,
+`.is-visible`, `aria-hidden`, whether its box is in the viewport — and a control hidden by design is
+reported NOT EXERCISED. Never a pass, never a failure.
+
+### 3. THE HOMEPAGE COUNT IS THE BACKEND'S, IT IS 926+, AND IT UNDERSTATES
+
+`grep -rn "930"` across `inkcartridges/` is zero hits. Measured:
+
+| surface | description |
+|---|---|
+| `/` as a browser (our static `index.html`) | already count-free |
+| `/` as Googlebot | "NZ-owned since 2008. **926+** ink cartridges & toner…" |
+| `…/api/prerender/home` direct | byte-identical to the Googlebot response |
+
+The FE only re-publishes it into the rendered DOM via `SeoMeta.reconcile()`. Against ~3,270 live
+ink + toner it **understates**, so it is not the misrepresentation risk described. Raised with the
+backend rather than "fixed" here.
+
+### 4. THE HOMEPAGE EMITTED THREE SCHEMAS TWICE
+
+`index.html` carries Organization / WebSite / LocalBusiness statically in `<head>` (the no-JS copy);
+`footer.js` emitted the same three again inside `footer.innerHTML`. A `<script>` inserted via
+innerHTML never EXECUTES — but `application/ld+json` is **data**, so it parses perfectly. Measured in
+a browser: **7 ld+json nodes on production, 4 after the fix**; Organization x2, WebSite x2,
+LocalBusiness x2 → one each.
+
+`js/schema.js` already had the right mechanism (`write(id, payload)` reuses an existing node) and
+could not help, because the static blocks had **no `id` at all**. Two writers, three documents, one
+pair invisible to the other. ***The fix is the id, not a deletion*** — the static copy stays,
+because removing a fallback is a behaviour change dressed as cleanup (ERR-158).
+
+The documents also moved from interpolated JSON to real objects. The old form spliced
+`${TRUST.legalEntity}` into hand-written JSON; one apostrophe from `LegalConfig` would have produced
+a document that silently fails to parse, and **invalid JSON-LD reports as NO structured data, not as
+an error**. Proved lossless by serialising both forms and diffing: all three byte-identical.
+
+### 5. A SECOND GA4 PROPERTY, CONFIGURED AND NEVER FED
+
+`G-YJXTSGLM28` was `gtag('config')`d and referenced nowhere else. Removed on the owner's explicit
+confirmation. ***A destination with no events is not free***: every `config` line makes gtag fetch
+that destination's own bundle (~187KB here), and every UNSCOPED custom event on this site
+(`contact_form_submit`, `faq_open`, `quote_started`) was being silently duplicated into it.
+Verified on the wire — production requests three gtag bundles, the fixed build two.
+
+The destination list is now pinned as an **exact set**, not a count: a count passes when one id is
+swapped for another (ERR-214).
+
+### 6. CLS 0.68 → 0.007, AND THE HANDOFF POINTED ONE LEVEL TOO LOW
+
+Measured on a Pixel-5 profile at 4x CPU throttle and ~1.6Mbps — the shopper this work exists for,
+not a laptop:
+
+| route | before | after |
+|---|---|---|
+| `/ink-cartridges` | 0.679 POOR | **0.007** |
+| `/toner-cartridges` | 0.674 POOR | **0.007** |
+| `/ribbons` | 0.607 POOR | **0.001** |
+| `/shop` | 0.089 | **0.001** |
+
+`/ribbons` was not in the handoff's table at all.
+
+The ask was "reserve height on `.shop-section-card`". That is where the shift was *attributed*, not
+where the space was being lost. **Two causes, neither of them that:**
+
+**(a) The empty level shell.** `#level-brands` shipped VISIBLE and empty while `#drilldown-loading`
+shipped HIDDEN — so the page painted ~317px of empty section cards, and then `hideAllLevels()`
+removed them and the loading block jumped up into the gap. *The skeleton was built to be the
+reservation and was never on screen when it mattered.* The other three levels already shipped
+`hidden`; brands was the odd one out. The brand skeleton was also 56px against a real 80px tile,
+under a comment claiming they were "matched 1:1".
+
+**(b) The shelf opening into a page already on screen.** `#popular-row` sits above the brand picker
+and was un-hidden only once `/api/products/popular` answered. `renderBrands` does not await it and
+`loadBrands` reveals the level as soon as `renderBrands` returns, so a 1,140px shelf opened on top of
+a page the shopper was looking at. It is now un-hidden **synchronously, before the await**, with four
+placeholder cards in the same grid holding the height.
+
+> ***THE FIX WAS DECLARED DONE ON A LUCKY NUMBER.*** With `/api/products/popular` warm, the shelf
+> landed before the level was revealed and `/ink-cartridges` measured 0.007 — good, and pure chance.
+> The same page on a cold cache measured 0.53. `npm run probe:shop-cls` caught it on the next run.
+> A measurement taken once is a constant with a good alibi (ERR-233), and that applies to the
+> measurement that says you are FINISHED just as much as the one that says you are broken.
+
+`/shop` keeps its shelf hidden (it has no category, so reserving 1,140px there would trade two good
+pages for one bad one); `/ribbons` is single-category, so its shelf is unconditional and ships
+visible. A `<noscript>` block restores the previous no-JS rendering — without scripts nothing
+resolves the skeleton, and a shimmer that never ends promises content that is not coming.
+
+### 7. FOUR TIMES, PROSE SATISFIED AN ASSERTION
+
+Not a footnote — it cost four separate red tests in one change, in four different files, and each
+one looked like a real failure:
+
+- `tests/footer-redesign-jul2026.test.js` — `doesNotMatch(/application\/ld\+json/)` failed on the
+  comment saying the tags used to live there.
+- `tests/fe-audit-jun2026.test.js` — `gtag('config', …)` in the comment explaining which id was
+  **removed** was matched as a live config call.
+- `tests/rewards-nudge-jul2026.test.js` (x2) — a comment on `order-confirmation.html` explaining why
+  the nudge is deliberately absent names the file, so "this page must not load it" failed.
+- `tests/payment-csp-paypal-sep2026.test.js` — a comment containing a literal `<script>` tag opened
+  a **phantom inline script** that ran to the next real `</script>`, and the test demanded a CSP hash
+  for a block that does not exist.
+
+> ***A COMMENT THAT NAMES A THING IS NOT THAT THING.*** Each was fixed by stripping comments in the
+> reader — the class, not the instance — because a commented-out script is not executed and a
+> comment naming a file is not a script tag. The CSP comment was ALSO reworded to spell the tag
+> names in words: a scanner that has to be taught about every comment is a scanner that will be
+> wrong again.
+
+### The race that was avoided, and the one that was not
+
+Six sessions shared this tree. `git commit --only <paths>` was used throughout and was **not
+enough**, twice, in both directions:
+
+- My `package.json` line registering `probe:mobile-cta` was carried into another session's commit
+  while `scripts/probe-mobile-cta-occlusion.mjs` stayed untracked — a live `npm run` pointing at
+  nothing. ***`--only` protects you from another session's FILES; it cannot protect you from another
+  session's HUNK inside a file you legitimately own***, and `package.json` is the file every session
+  appends one line to.
+- A peer's commit swept two of my uncommitted `shop-page.js` hunks and reddened HEAD. They caught it
+  because `git show --stat` reported 87 changed lines in a file where their hunk was 34.
+  ***Verifying `git diff` and then committing are two separate moments, and in this tree the file can
+  change between them.***
+
+Also worth recording: a peer's `Cart.addItem` change replaced a bare `return;` with
+`return { ok: false, … }`, and `tests/ga4-ecommerce-events-sep2026.test.js` §10 failed — it pinned
+the **punctuation of a return statement** as a proxy for "the rejected branch exits before the GA4
+call". Verified against HEAD before reporting it (`returnAfter 82356` at HEAD, `-1` in the tree). The
+test now pins `reason: 'server-rejected'` instead of `return;`.
+
+### Verification
+
+`npm run probe:mobile-cta` (10/10, on real WebKit — the engine 70 of 81 mobile checkouts use), with
+a **negative control** that injects an overlay and asserts the probe goes red, because an occlusion
+check that cannot report occlusion is green for the rest of its life (ERR-258).
+`npm run probe:shop-cls` (4/4, run three times, and it refuses to score a page that never rendered).
+Full suite 6458/1, the one red being the date-dependent `business-demo-mode` fixture that is also
+red at HEAD. 33 mutants killed across the three new test files.
+
+**Files.** `js/rewards-nudge.js` · `js/cart.js` · `js/gtag.js` · `js/footer.js` · `js/shop-page.js` ·
+`index.html` · `html/index.html` · `html/shop.html` · `html/ribbons.html` ·
+`html/order-confirmation.html` · `css/pages.css` · `scripts/probe-mobile-cta-occlusion.mjs` (new) ·
+`scripts/probe-shop-cls.mjs` (new) · `scripts/probe-ga4-ecommerce.mjs` ·
+`tests/mobile-cta-occlusion-sep2026.test.js` (new) ·
+`tests/homepage-jsonld-single-owner-sep2026.test.js` (new) ·
+`tests/shop-cls-reservation-sep2026.test.js` (new) · plus six existing suites updated.
+
+**Open, for the backend.** The homepage count is theirs to own (§3). The ads-side stop-loss should be
+reversed the day this deploys: `node scripts/ads/pause-mobile-until-checkout-fixed.js --restore
+--apply`, in their tree.
+
+---
+
 ## ERR-272 — The machine-list editor was read-only against a route that had worked for six weeks, and our own slug gate was quietly dropping 20 printers — **RESOLVED** (2026-09-20)
 
 **Context.** The backend answered our four open asks

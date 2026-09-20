@@ -22,6 +22,15 @@
  *   - signing in tears it down immediately and permanently
  *   - bump CAMPAIGN.version to re-arm every visitor (state resets)
  *
+ * Geometry contract (ERR-276, pinned by
+ * tests/mobile-cta-occlusion-sep2026.test.js and measured by
+ * `npm run probe:mobile-cta`): below Config.BREAKPOINTS.tablet this
+ * popover is not a popover. position() turns it into a fixed,
+ * full-width card at --z-popover pinned under the sticky header, and
+ * on the buying path that card lands on the Add to Cart button. So it
+ * never shows there on a phone; it re-arms for the add-to-cart toast
+ * instead. Desktop behaviour is unchanged in every respect.
+ *
  * Depends on (all earlier in the defer chain): Config (BREAKPOINTS,
  * MQ_DESKTOP_NAV), Security (escapeHtml), utils.js (getStorage,
  * setStorage, DebugLog), Auth (readyPromise, isAuthenticated,
@@ -58,7 +67,55 @@
         ctaText: 'Create free account',
         ctaHref: '/account/login?tab=register',
         laterText: 'Maybe later',
-        skipPaths: ['/cart']    // browsing pages only — never mid-funnel
+        skipPaths: ['/cart'],   // browsing pages only — never mid-funnel
+
+        /* NARROW VIEWPORTS ONLY — never over the buy button on a phone (ERR-276).
+         *
+         * `skipPaths` above is about FUNNEL STAGE and applies at every width.
+         * This list is about GEOMETRY, and it only exists because of what
+         * position() does below 768px: the nudge stops being a small popover
+         * anchored to the Account button and becomes a `position: fixed`,
+         * `vw - 24px` wide card pinned at `header.bottom + 8px`, at
+         * --z-popover (600), re-pinned on every scroll by onReflow(). Measured
+         * on a 390x844 iPhone it occupies y 144-392 — 248px, 37% of the visual
+         * viewport — and #add-to-cart-btn sits at y 264-312, inside it.
+         * `elementFromPoint` at that button's own centre returns the nudge.
+         *
+         * The trigger makes it worse rather than better: scrollThresholdPx is
+         * 600, so on a PDP the card mounts at precisely the moment the shopper
+         * scrolls down to the price. It is absent from the DOM at 1s, 3s and
+         * 6s, which is why a QA pass that loads the page and waits reports this
+         * fixed when it is not.
+         *
+         * EVERY SPELLING OF THE PATH IS HERE, and that is the part worth
+         * checking before editing. onSkippedPath()'s normaliser turns the
+         * local raw-file shape /html/product/index.html into `/product/index`,
+         * which '/products' does NOT match — production serves the same page at
+         * /products/:slug/:sku (vercel.json). Listing only the production
+         * spelling would leave the gate dead on `npx serve`, where it gets
+         * developed and demoed. '/ribbon' covers /ribbon/:sku without matching
+         * the /ribbons browsing hub, which keeps its nudge on purpose.
+         *
+         * '/p' is the fourth PDP spelling and the one that nearly got away.
+         * vercel.json rewrites /p/:sku to the backend, which 301s to
+         * /products/:slug/:sku, so in production the browser only ever ends up
+         * on the long form and '/p' looks redundant. It is not: serve.json
+         * rewrites `p/**` to the PDP with NO redirect, so `npx serve` — where
+         * this is developed and demoed — stays on /p/CLC37BK and the gate would
+         * have been dead there. Caught by running the probe against localhost,
+         * not by reading the list. It cannot over-match: pathMatches tests
+         * `path === '/p'` or a '/p/' prefix, so /payment, /privacy and
+         * /products are all untouched.
+         *
+         * /checkout and /payment do not load this file today. They are listed
+         * anyway: the gate should be right the day somebody adds the script
+         * tag, not the day somebody notices it is missing. */
+        narrowSkipPaths: ['/products', '/product', '/p', '/ribbon', '/cart', '/checkout', '/payment'],
+
+        /* The nudge is MOVED, not cancelled. When the gate above suppresses it,
+         * it re-arms for the add-to-cart moment — the toast, when the buy
+         * button has already been pressed and covering it costs nothing. */
+        postAddDelayMs: 900
     };
 
     var STORAGE_KEY = 'ic_rewards_nudge';
@@ -77,6 +134,14 @@
         retries: 0,
         bailed: false,
         shownThisPage: false,
+        /* ERR-276. Both are READ BY THE PROBE, not just by this file:
+         * `npm run probe:mobile-cta` asserts suppressed === true on a PDP at
+         * 390px and false at 1280px, which is a far more direct question than
+         * "is a card covering the button right now" and it cannot be fooled by
+         * a nudge that simply has not mounted yet. Exposed via
+         * window.RewardsNudge._state. */
+        suppressed: false,
+        postAddArmed: false,
         cleanups: []
     };
 
@@ -135,16 +200,61 @@
     }
 
     // ─── Eligibility gates ───────────────────────────────────────────
-    function onSkippedPath() {
-        // Normalize away the raw-file shape (/html/cart.html, local serve)
-        // so skip rules match it AND the production pretty URL (/cart).
-        var path = window.location.pathname
+    /* Normalize away the raw-file shape (/html/cart.html, local serve) so skip
+     * rules match it AND the production pretty URL (/cart).
+     *
+     * `raw` is a TEST SEAM, and it is here on purpose. The alternative was a
+     * test that re-implements this three-line normaliser and then asserts
+     * against its own copy — which is how a probe once certified a REPLICA of
+     * the search escaper while the real one was broken (ERR-231). Passing the
+     * path in lets tests/mobile-cta-occlusion-sep2026.test.js run THIS
+     * function, over every URL spelling the site serves, with no DOM at all.
+     * Production never passes it. */
+    function normalizedPath(raw) {
+        var pathname = (typeof raw === 'string') ? raw : window.location.pathname;
+        return pathname
             .replace(/^\/html(?=\/)/, '')
             .replace(/\.html$/, '')
             .replace(/\/+$/, '') || '/';
-        return CAMPAIGN.skipPaths.some(function (p) {
+    }
+
+    // ONE matcher, two lists. Both gates below normalise identically, so a path
+    // spelling that is understood by one is understood by the other — the thing
+    // that goes wrong otherwise is a second, subtly different copy of this
+    // three-line normaliser (ERR-276).
+    function pathMatches(list, raw) {
+        var path = normalizedPath(raw);
+        return (list || []).some(function (p) {
             return path === p || path.indexOf(p + '/') === 0;
         });
+    }
+
+    function onSkippedPath() {
+        return pathMatches(CAMPAIGN.skipPaths);
+    }
+
+    /* THE SINGLE OWNER OF "is this a phone" for this file (ERR-276).
+     *
+     * position() used to spell this inline. The eligibility gate and the layout
+     * branch must agree by construction: a gate that thinks it is desktop while
+     * position() renders the fixed card is exactly the bug being fixed, one
+     * media query away.
+     *
+     * Failure is treated as DESKTOP deliberately. matchMedia is universal in
+     * every browser that can run this file, so a throw means a stubbed DOM (the
+     * node:vm test harness), and defaulting to the desktop branch there keeps
+     * the previous behaviour rather than silently suppressing the nudge
+     * everywhere. */
+    function isNarrow() {
+        try {
+            return !window.matchMedia('(min-width: ' + Config.BREAKPOINTS.tablet + 'px)').matches;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function onNarrowSkippedPath() {
+        return isNarrow() && pathMatches(CAMPAIGN.narrowSkipPaths);
     }
 
     function authCookieHint() {
@@ -164,6 +274,18 @@
         if (document.querySelector('.nav-mega-toggle[aria-expanded="true"]')) return true;
         if (document.querySelector('.nav-toggle[aria-expanded="true"]')) return true;
         if (document.querySelector('.smart-ac-dropdown.is-open')) return true;
+        /* The cross-sell modal, which is the whole reason the post-add trigger
+         * needs a back-off (ERR-276). cart.js#_showCrossSellModal appends
+         * `.crosssell-modal` immediately after a successful add — the same
+         * moment this nudge is now armed for. It is z-index 10000
+         * (components.css:1602), far above --z-popover, so the nudge would not
+         * cover it; it would sit invisible UNDERNEATH it and burn its
+         * once-per-session budget on a card nobody ever saw.
+         *
+         * Safe as a liveness test: close() is `overlay.remove()`
+         * (cart.js#_showCrossSellModal), so the node is gone from the DOM when
+         * the modal is dismissed, and this selector cannot latch on. */
+        if (document.querySelector('.crosssell-modal')) return true;
         return false;
     }
 
@@ -219,9 +341,11 @@
         if (!el || !anchor) return;
 
         var vw = document.documentElement.clientWidth;
-        var isNarrow = !window.matchMedia('(min-width: ' + Config.BREAKPOINTS.tablet + 'px)').matches;
+        // isNarrow() is shared with the eligibility gate on purpose (ERR-276) —
+        // see its definition. This used to be a second copy of the same
+        // media query.
 
-        if (isNarrow) {
+        if (isNarrow()) {
             // Compact card below the (sticky) header, full width minus margins
             el.classList.add('rewards-nudge--card');
             var header = document.querySelector('.site-header');
@@ -373,6 +497,44 @@
         show();
     }
 
+    /* THE NUDGE IS MOVED, NOT CANCELLED (ERR-276).
+     *
+     * Suppressing it on the phone buying path is the P0 fix, but "never ask a
+     * mobile visitor to make an account" is not the outcome anyone wanted —
+     * mobile is the majority of real traffic. So the ask relocates to the one
+     * moment on that path where a popover costs nothing: the add-to-cart toast.
+     * The buy button has already been pressed; covering it is now free.
+     *
+     * ONE-SHOT, and it removes its own listener before doing anything else. The
+     * `?add=SKU:QTY` reorder deep link fires up to twelve adds in a row
+     * (js/cart-deep-link.js), so an un-removed listener would queue twelve
+     * show() attempts for one gesture.
+     *
+     * THE EMITTER LIVES IN ANOTHER FILE, which is the failure mode this comment
+     * exists to flag: cart.js dispatches `cart:item-added`, this file listens.
+     * Neither names the other in code, so a future edit can delete one half and
+     * leave a green suite behind — ERR-214, where hash-locked markup and hand
+     * enrolment left ten dead search boxes for four months. The pairing is
+     * pinned as a pairing by tests/mobile-cta-occlusion-sep2026.test.js: the
+     * dispatch in cart.js and the listener here are asserted in the SAME test,
+     * so removing either one fails it.
+     *
+     * The delay lets the toast land first, and tryShow()'s existing back-off
+     * (MAX_RETRIES x RETRY_MS) covers the cross-sell modal that may open in the
+     * same instant — see headerUiOpen(). */
+    function armPostAddTrigger() {
+        if (state.postAddArmed) return;
+        state.postAddArmed = true;
+        var onAdded = function () {
+            document.removeEventListener('cart:item-added', onAdded);
+            state.suppressed = false;
+            setTimeout(tryShow, CAMPAIGN.postAddDelayMs || 900);
+        };
+        try {
+            document.addEventListener('cart:item-added', onAdded);
+        } catch (_) { /* stubbed DOM in the node:vm harness — nothing to arm */ }
+    }
+
     function init() {
         try {
             if (!CAMPAIGN.enabled) return;
@@ -407,6 +569,17 @@
                 try {
                     if (window.Auth && Auth.isAuthenticated()) { state.bailed = true; return; }
                 } catch (_) { /* guest assumption */ }
+
+                /* THE P0 GATE (ERR-276). Narrow viewport + the money path =
+                 * never on the way in. See CAMPAIGN.narrowSkipPaths for the
+                 * measurement, and armPostAddTrigger() for where it goes
+                 * instead. Desktop never reaches this branch: isNarrow() is
+                 * false, so scheduleByTrigger runs exactly as before. */
+                if (onNarrowSkippedPath()) {
+                    state.suppressed = true;
+                    armPostAddTrigger();
+                    return;
+                }
                 scheduleByTrigger(tryShow);
             });
         } catch (err) {
@@ -469,7 +642,18 @@
         show();
     }
 
-    window.RewardsNudge = { open: openManually, _state: state, _campaign: CAMPAIGN };
+    /* `_pathMatches` and `_normalizePath` are exported for the same reason the
+     * `raw` seam above exists: so the suite exercises the real matcher rather
+     * than a copy of it. `_state` and `_campaign` are read by
+     * `npm run probe:mobile-cta` in a live browser. Nothing in js/ calls any of
+     * the underscore-prefixed members. */
+    window.RewardsNudge = {
+        open: openManually,
+        _state: state,
+        _campaign: CAMPAIGN,
+        _pathMatches: pathMatches,
+        _normalizePath: normalizedPath,
+    };
 
     document.addEventListener('DOMContentLoaded', init);
 })();

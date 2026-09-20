@@ -1701,6 +1701,36 @@
                 return;
             }
 
+            /* CLAIM THE HEIGHT BEFORE THE FETCH, NOT AFTER IT (ERR-276).
+             *
+             * This section sits ABOVE the brand picker (ERR-236 put it there on
+             * purpose) and used to be un-hidden only once the request came back.
+             * renderBrands calls this without awaiting it, and loadBrands
+             * reveals the level as soon as renderBrands returns — so the shelf
+             * opened INTO a page the shopper was already looking at, pushing the
+             * brand picker off the bottom of the screen.
+             *
+             * Measured on a Pixel-5 profile at 4x CPU throttle: CLS 0.68 POOR on
+             * /ink-cartridges and /toner-cartridges, essentially all of it one
+             * shift — div.shop-section-card [y 343->0, h 501->0], the brand card
+             * leaving the viewport at 7.6s.
+             *
+             * IT IS A RACE, WHICH IS WHY ONE MEASUREMENT WAS NOT ENOUGH. When
+             * /api/products/popular answered from a warm cache the shelf landed
+             * BEFORE the level was revealed and the page scored 0.007 — good,
+             * and a fluke. The same page on a cold cache scored 0.53. A
+             * measurement taken once is a constant with a good alibi (ERR-233);
+             * `npm run probe:shop-cls` is what takes it more than once.
+             *
+             * The markup already holds the space — four
+             * .product-card--placeholder tiles in the same grid as the real
+             * cards. This line only stops hiding them, and it runs SYNCHRONOUSLY
+             * before the first await, so the height is in place by the time
+             * loadBrands reveals the level. hide() below still collapses the
+             * section on an unreadable or empty response, so a failure is a
+             * missing shelf, never an empty one. */
+            section.hidden = false;
+
             // A shopper who navigates on while this is in flight must not have
             // the shelf painted over the level they actually landed on. Same
             // reason loadCurrentLevel carries a nav version.

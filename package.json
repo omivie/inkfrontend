@@ -69,6 +69,8 @@
     "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs",
     "probe:stock-freshness": "node scripts/probe-stock-freshness.mjs",
     "probe:catalogue-outage": "node scripts/probe-catalogue-outage.mjs",
+    "probe:mobile-cta": "node scripts/probe-mobile-cta-occlusion.mjs",
+    "probe:shop-cls": "node scripts/probe-shop-cls.mjs",
     "probe:stripe-wallets": "node scripts/probe-stripe-wallets.mjs",
     "probe:product-write": "node scripts/probe-product-write-fields.mjs",
     "probe:chip-prerender": "node scripts/probe-chip-prerender.mjs",
