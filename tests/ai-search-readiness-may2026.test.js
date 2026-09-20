@@ -140,9 +140,16 @@ test('§2 brand prerender path is built from the ?brand= query param', () => {
     // The brand slug must come from url.searchParams.get('brand') — never
     // from path slicing (Vercel 301s /brand/:slug to /shop?brand=:slug, so
     // by the time middleware fires, brand only lives in the query).
-    assert.match(middlewareSrc,
-        /searchParams\.get\('brand'\)[\s\S]{0,400}\/api\/prerender\/brand\/\$\{encodeURIComponent\(/,
-        'brand prerender path must encodeURIComponent(url.searchParams.get("brand"))');
+    //
+    // Asserted as two facts rather than one proximity regex. The original
+    // spelling required the two halves to sit within 400 characters of each
+    // other, which made an explanatory comment between them a test failure —
+    // and that is exactly what happened when the brand arm gained its
+    // forwarding allowlist (ERR-270). Distance is not the invariant.
+    assert.match(middlewareSrc, /const brandSlug = url\.searchParams\.get\('brand'\);/,
+        'the brand slug must be read from the query string');
+    assert.match(middlewareSrc, /\/api\/prerender\/brand\/\$\{encodeURIComponent\(brandSlug\)\}/,
+        'brand prerender path must encodeURIComponent(brandSlug)');
 });
 
 test('§2 brand slug is URL-encoded before interpolation', () => {

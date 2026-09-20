@@ -5543,7 +5543,40 @@
 
                 const params = new URLSearchParams();
                 if (brand || printerBrand) params.set('brand',       lc(brand || printerBrand));
-                if (category)             params.set('category',     lc(this.CATEGORY_CANONICAL_BY_INTERNAL[category] || category));
+                // `category` is dropped once `code` is set (ERR-270). Google does
+                // not read this line on a brand URL — middleware.js prerenders it
+                // and the BACKEND writes that page's canonical — and for a code
+                // the backend RESOLVES, it drops the category itself.
+                //
+                // The backend's actual rule, measured 2026-09-20, is about
+                // RESOLUTION, not precedence:
+                //   ?category=toner&code=LC73   -> canonical ...?brand=brother&code=LC73
+                //   ?category=ink&code=LC73     -> canonical ...?brand=brother&code=LC73
+                //   ?code=LC73XL                -> canonical ...?brand=brother&code=LC73
+                //        (it collapses the yield suffix itself — no edge copy of
+                //         SeriesCodes.collapseYieldSuffix is needed)
+                //   ?category=toner&code=TN2330 -> canonical ...?brand=brother&category=toner
+                //   ?code=TN2330                -> canonical ...?brand=brother
+                //
+                // TN2330 is not a code this endpoint resolves, so it falls back to
+                // the category (or the bare brand). It is NOT that "category beats
+                // code" — a resolved code wins over the category every time. One
+                // unresolved sample reads exactly like the opposite rule, so
+                // re-measure with a code you have confirmed resolves before
+                // changing this line.
+                //
+                // We cannot know resolution status here, so we follow the resolved
+                // case: it is the one that is linked, sitemapped and indexable. For
+                // an unresolved code this canonical differs from the prerender's,
+                // which is no worse than the three-param canonical it replaces —
+                // that one matched neither — and `brand && category && code`
+                // already emits noindex below, so it is moot there.
+                //
+                // Emitting a three-param canonical while the prerender emits the
+                // two-param one is ERR-242's duplicate-canonical shape arriving
+                // from our side of the fence: two URLs, identical content, each
+                // nominating a different canonical.
+                if (category && !code)    params.set('category',     lc(this.CATEGORY_CANONICAL_BY_INTERNAL[category] || category));
                 if (code)                 params.set('code',         code);
                 if (printerSlug)          params.set('printer_slug', printerSlug);
                 if (this.state.search)    params.set('q',            this.state.search);

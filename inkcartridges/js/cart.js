@@ -2884,6 +2884,32 @@ const Cart = {
         }
     },
 
+    /**
+     * Add a product to the cart.
+     *
+     * Takes ONE argument, a product OBJECT — quantity rides inside it as
+     * `product.quantity`. There is no second parameter and there is no
+     * `Cart.add` (ERR-218; pinned by tests/qty-stepper-sep2026.test.js).
+     *
+     * `product.silent` (opt-in) suppresses ONLY this method's own toasts. It
+     * exists for callers that add several lines in one gesture — the `?add=`
+     * cart deep link fires up to 12 adds, and 12 toasts is not a report. A
+     * silent caller takes on the duty of reporting the outcome itself, which
+     * is why the return value below exists.
+     *
+     * @returns {Promise<{ok: boolean, reason: string, error: ?string, confirmed: ?object}>}
+     *   reason is one of:
+     *     'confirmed'       server accepted it (`confirmed` holds the response body)
+     *     'local-only'      non-core namespace (cross-sell); never POSTed
+     *     'offline'         transport failed; the item IS in the cart, unsynced
+     *     'server-rejected' server refused; the line was rolled back (ok: false)
+     *
+     * This used to return `undefined` on every path, so a caller could not tell
+     * a successful add from a rejected one — the only signals were the toasts
+     * fired here (ERR-269). Partial-ness belongs in the RETURN VALUE, not in a
+     * toast the caller may have suppressed. Existing callers ignore the return
+     * and are unaffected.
+     */
     async addItem(product) {
         // The cart's `source` field is a SUBSYSTEM namespace — it tags where
         // the row was added from ('core' for the main catalog, 'cross-sell'
@@ -3031,14 +3057,14 @@ const Cart = {
                     // is not long enough to read an instruction.
                     const refused = (typeof AdminOnlyRefusal !== 'undefined')
                         && AdminOnlyRefusal.is(response);
-                    if (typeof showToast === 'function') {
-                        showToast(
-                            refused
-                                ? AdminOnlyRefusal.text(response)
-                                : API.extractErrorMessage(response, 'Failed to add item to cart'),
-                            'error',
-                            refused ? 7000 : undefined
-                        );
+                    // Hoisted out of the showToast() call so the same string can
+                    // ride back in the return value (ERR-269). A caller that
+                    // suppressed the toast still has to be able to say WHY.
+                    const refusalMessage = refused
+                        ? AdminOnlyRefusal.text(response)
+                        : API.extractErrorMessage(response, 'Failed to add item to cart');
+                    if (typeof showToast === 'function' && !product.silent) {
+                        showToast(refusalMessage, 'error', refused ? 7000 : undefined);
                     }
                     // NO add_to_cart here, deliberately: the server refused, the
                     // line was rolled back, and the shopper's cart does not
@@ -3047,7 +3073,7 @@ const Cart = {
                     // pair is the reason this comment exists — an add that the
                     // customer can see must be counted; one that was undone
                     // must not.)
-                    return;
+                    return { ok: false, reason: 'server-rejected', error: refusalMessage, confirmed: null };
                 }
 
                 // THE SERVER ACCEPTED IT. Keep its payload.
@@ -3092,7 +3118,7 @@ const Cart = {
                 DebugLog.error('Failed to sync cart to server:', error);
                 // Keep item locally — it's saved in localStorage for resilience.
                 // Don't rollback; the server will get the item on next successful sync.
-                if (typeof showToast === 'function') {
+                if (typeof showToast === 'function' && !product.silent) {
                     showToast('Item saved locally. It will sync when connection is restored.', 'info');
                 }
                 // THE ADD HAPPENED — track it before returning. This branch keeps
@@ -3103,13 +3129,56 @@ const Cart = {
                 // and the metric gave no hint that it was measuring the API's
                 // health rather than shopper behaviour.
                 this._trackAdd(product);
-                return;
+                return { ok: true, reason: 'offline', error: null, confirmed: null };
             }
         }
 
-        if (typeof showToast === 'function') {
+        if (typeof showToast === 'function' && !product.silent) {
             showToast(product.name + ' added to cart', 'success');
         }
+
+        /* THE ADD-TO-CART MOMENT, ANNOUNCED (ERR-276).
+         *
+         * js/rewards-nudge.js is the one listener today. On a phone it is now
+         * suppressed on the whole buying path, because below 768px it renders as
+         * a fixed full-width card at --z-popover pinned under the header, and it
+         * was landing on #add-to-cart-btn. The ask is not deleted, it is MOVED to
+         * here: once the buy button has been pressed, a popover costs nothing.
+         *
+         * DELIBERATELY OUTSIDE THE `!product.silent` GUARD ABOVE. `silent` is an
+         * opt-in flag for callers that add several lines in one gesture — the
+         * `?add=SKU:QTY` reorder deep link fires up to twelve adds and does not
+         * want twelve toasts. A silent add is still a real add, and a listener
+         * asking "did the shopper just put something in their cart" must see it.
+         * Suppressing a TOAST and suppressing an EVENT are different decisions
+         * and only one of them was made.
+         *
+         * Fires on every branch that reaches here, server-confirmed or not, and
+         * says which in the detail. That is the opposite gate from the two
+         * conversion trackers below, on purpose: they report money to Google and
+         * must only count what the server confirmed; this reports that the
+         * shopper did something, and from the shopper's side an optimistic add
+         * is an add.
+         *
+         * Every guard here is deliberate, and the reason is the same one
+         * consent-banner.js#announce gives: tests/cart-*.test.js run this file
+         * in a VM against a hand-rolled DOM with no CustomEvent and no
+         * dispatchEvent, and a UI nicety must never throw into the middle of an
+         * add-to-cart. */
+        try {
+            if (typeof CustomEvent === 'function' && typeof document !== 'undefined'
+                && typeof document.dispatchEvent === 'function') {
+                document.dispatchEvent(new CustomEvent('cart:item-added', {
+                    detail: {
+                        name: product.name || null,
+                        sku: product.sku || null,
+                        quantity: product.quantity || 1,
+                        serverConfirmed: !!serverConfirmed,
+                        silent: !!product.silent,
+                    },
+                }));
+            }
+        } catch (_) { /* never gate an add on an announcement */ }
 
         // Track analytics
         this._trackAdd(product);
@@ -3179,6 +3248,13 @@ const Cart = {
         if (crossSellPayload) {
             this._showCrossSellModal(crossSellPayload).catch(() => {});
         }
+
+        return {
+            ok: true,
+            reason: serverConfirmed ? 'confirmed' : 'local-only',
+            error: null,
+            confirmed: serverConfirmed,
+        };
     },
 
     /**

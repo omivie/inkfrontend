@@ -193,13 +193,41 @@ const SeoMeta = {
             // landing and the backend ships prerenders for all six slugs. The
             // excluded-param list below must stay byte-identical to
             // middleware.js (SPA/bot parity — pinned by
-            // tests/ia-reorg-jul2026.test.js). Bare /shop, search, code and
+            // tests/ia-reorg-jul2026.test.js). Bare /shop, search and
             // bare-printer URLs stay on the SPA shell: no prerender to
             // reconcile against, so crawler and human render the same code.
+            //
+            // `code` is NOT in that list of shell-only shapes, and this comment
+            // used to say it was (ERR-270). With `brand` present a ?code= URL has
+            // always routed to the brand prerender — the comment described an
+            // intent the line below never implemented. It now forwards the code
+            // so the page it reconciles against is the one the crawler was served.
             if (brand && printer) {
                 return `/api/prerender/printer/${encodeURIComponent(brand)}/${encodeURIComponent(printer)}`;
             }
-            if (brand) return `/api/prerender/brand/${encodeURIComponent(brand)}`;
+            if (brand) {
+                // MIRROR of middleware.js's brand arm, allowlist included (ERR-270).
+                //
+                // This is not cosmetic parity. reconcile() below overwrites this
+                // page's <title>/<meta description> with the prerender's, and
+                // Google's render pass executes exactly that. While this line
+                // built the path from the brand alone, the edge served Googlebot
+                // "Brother LC73 Ink Cartridges NZ" and the SPA then fetched the
+                // GENERIC brand prerender and overwrote it with "Brother NZ —
+                // Fast NZ Delivery". Human visitors saw the same overwrite: the
+                // code-specific title shop-page.js had just set was replaced on
+                // every load of a ?code= URL.
+                //
+                // Keep the forwarded key list byte-identical to middleware.js.
+                // Pinned by tests/chip-prerender-sep2026.test.js.
+                const forwarded = new URLSearchParams();
+                for (const key of ['code', 'category']) {
+                    const value = params.get(key);
+                    if (value) forwarded.set(key, value);
+                }
+                const forwardedQs = [...forwarded].length ? `?${forwarded}` : '';
+                return `/api/prerender/brand/${encodeURIComponent(brand)}${forwardedQs}`;
+            }
             const cat = params.get('category');
             const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
             if (cat && CANON.includes(cat)

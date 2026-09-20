@@ -229,11 +229,39 @@ test('§5 category landings', () => {
 test('§5 brand hub', () => {
     assert.equal(P('/shop', '?brand=canon'), '/api/prerender/brand/canon');
 });
-test('§5 brand hub IGNORES ?category (matches middleware — brand prerender is category-agnostic)', () => {
-    assert.equal(P('/shop', '?brand=canon&category=ink'), '/api/prerender/brand/canon');
+// These two asserted the OPPOSITE until 2026-09-20, and they were not wrong to
+// exist: their subject is SPA/bot PARITY, and parity did hold — both sides
+// dropped ?code and ?category, so crawler and human saw the same generic brand
+// hub. What nobody noticed is that parity was being held at the WORTHLESS
+// value. The backend has shipped a code-specific page since Sep 2026 and
+// neither side was asking for it, so every chip/code page rendered as the
+// generic brand hub for Googlebot AND overwrote the correct code-specific
+// title on the human's screen (ERR-270). The subject of these tests is
+// unchanged; only the value parity is held at has moved.
+test('§5 brand hub FORWARDS ?category to the brand prerender (ERR-270)', () => {
+    assert.equal(P('/shop', '?brand=canon&category=ink'), '/api/prerender/brand/canon?category=ink');
 });
-test('§5 brand+code still routes to the brand prerender (middleware ignores code)', () => {
-    assert.equal(P('/shop', '?brand=canon&code=PG-540'), '/api/prerender/brand/canon');
+test('§5 brand+code forwards the code — the chip page is the entire point (ERR-270)', () => {
+    assert.equal(P('/shop', '?brand=canon&code=PG-540'), '/api/prerender/brand/canon?code=PG-540');
+});
+test('§5 brand hub forwards code+category and NOTHING else', () => {
+    // An allowlist, not url.search. Every distinct URL is its own s-maxage=3600
+    // edge entry and its own backend fetch, so utm_*/gclid would fragment the
+    // cache and multiply origin load for byte-identical content.
+    assert.equal(P('/shop', '?brand=canon&utm_source=news&gclid=abc123&fbclid=x'),
+        '/api/prerender/brand/canon');
+    assert.equal(P('/shop', '?brand=canon&code=PG-540&utm_source=news'),
+        '/api/prerender/brand/canon?code=PG-540');
+});
+test('§5 forwarded key order is code-then-category (middleware builds the same string)', () => {
+    // Not cosmetic: the two sides must produce a byte-identical URL or they
+    // reconcile against different CDN cache entries.
+    assert.equal(P('/shop', '?brand=canon&category=ink&code=PG-540'),
+        '/api/prerender/brand/canon?code=PG-540&category=ink');
+});
+test('§5 printer hub still wins over brand and forwards nothing (its prerender ignores ?code)', () => {
+    assert.equal(P('/shop', '?brand=brother&printer_slug=x&code=LC73&category=ink'),
+        '/api/prerender/printer/brother/x');
 });
 test('§5 printer hub uses :brand/:slug (the fixed contract — slug-only 404s)', () => {
     assert.equal(P('/shop', '?brand=brother&printer_slug=brother-mfc-j5945dw'),

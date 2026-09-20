@@ -985,12 +985,23 @@ test('§10 add_to_cart is gated on serverConfirmed and nothing else', () => {
 test('§10 add_to_cart is NOT inside the rejected or transport-failure branches', () => {
     // An add the server refused did not happen; an add that never got a 2xx has
     // no server price or delta. Both must stay out.
+    //
+    // This used to search for a literal `return;` between the refusal message
+    // and the GA4 call. That pinned the RETURN STATEMENT'S PUNCTUATION as a
+    // proxy for the invariant, and it broke the moment addItem started
+    // returning a result object instead of undefined (ERR-269) — a change that
+    // does not touch this invariant at all. Match any return, and then name the
+    // branch, so the assertion fails when the exit disappears rather than when
+    // its spelling changes.
     const at = CART_CODE.indexOf('Ga4Ecommerce.addToCart');
     const before = CART_CODE.slice(0, at);
     const rejected = before.lastIndexOf('Failed to add item to cart');
-    const returnAfterRejected = before.indexOf('return;', rejected);
-    assert.ok(rejected !== -1 && returnAfterRejected !== -1 && returnAfterRejected < at,
+    assert.notEqual(rejected, -1, 'the server-rejected branch has moved or been renamed');
+    const tail = before.slice(rejected);
+    assert.match(tail, /\breturn\b[\s;{]/,
         'the GA4 call must sit AFTER the server-rejected branch has returned');
+    assert.match(tail, /reason: 'server-rejected'/,
+        "that exit must be the server-rejected one — an add the server refused is not revenue");
     assert.match(CART_CODE.slice(at - 600, at), /_trackAdd\(product\)/,
         'it belongs in the success tail, beside the first-party tracker');
 });

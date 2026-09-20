@@ -212,7 +212,37 @@ export default async function middleware(request) {
     if (brandSlug && printerSlug) {
       prerenderPath = `/api/prerender/printer/${encodeURIComponent(brandSlug)}/${encodeURIComponent(printerSlug)}`;
     } else if (brandSlug) {
-      prerenderPath = `/api/prerender/brand/${encodeURIComponent(brandSlug)}`;
+      // Forward the two params the backend's brand prerender actually consumes
+      // (ERR-270). Until 2026-09-20 this arm built the path from the brand alone,
+      // so `/shop?brand=brother&code=LC73` was served the GENERIC brand hub and
+      // every chip/code page was invisible to crawlers — the backend has shipped
+      // the code-specific page since Sep 2026 and nothing was asking for it.
+      //
+      // An ALLOWLIST, not `url.search`. Measured 2026-09-20 against the live
+      // backend: `?code=<unknown>`, `?code=<script>`, `?category=<unknown>` and
+      // tracking params are all ignored and collapse the canonical back to
+      // `/shop?brand=<slug>`, so forwarding everything would be *safe* — but each
+      // distinct URL is its own `s-maxage=3600` edge entry AND its own backend
+      // fetch, so utm_*/gclid/fbclid would fragment the cache and multiply origin
+      // load for content that is byte-identical. Two params in, no fragmentation.
+      //
+      // `category` is canonical-or-absent by the time we reach here: the 301
+      // normaliser above runs for ALL user agents, ahead of the bot gate, so
+      // consumable/ribbons/unknowns are already stripped or aliased.
+      //
+      // js/seo-meta.js prerenderPathForLocation MIRRORS this arm and must keep
+      // mirroring it — SeoMeta.reconcile() overwrites <title>/<meta description>
+      // on the SPA render, which is what Google's render pass executes. A mirror
+      // that drops what the edge forwards hands the crawler the code-specific
+      // title and then overwrites it with the generic one.
+      // Pinned by tests/chip-prerender-sep2026.test.js.
+      const forwarded = new URLSearchParams();
+      for (const key of ['code', 'category']) {
+        const value = url.searchParams.get(key);
+        if (value) forwarded.set(key, value);
+      }
+      const forwardedQs = [...forwarded].length ? `?${forwarded}` : '';
+      prerenderPath = `/api/prerender/brand/${encodeURIComponent(brandSlug)}${forwardedQs}`;
     } else {
       // /shop?category=<canonical slug> with no other filter → category
       // prerender (IA reorg, Jul 2026). Drums/Label/Paper deliberately have

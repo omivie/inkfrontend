@@ -69,7 +69,9 @@
     "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs",
     "probe:stock-freshness": "node scripts/probe-stock-freshness.mjs",
     "probe:catalogue-outage": "node scripts/probe-catalogue-outage.mjs",
-    "probe:stripe-wallets": "node scripts/probe-stripe-wallets.mjs"
+    "probe:stripe-wallets": "node scripts/probe-stripe-wallets.mjs",
+    "probe:chip-prerender": "node scripts/probe-chip-prerender.mjs",
+    "probe:cart-deep-link": "node scripts/probe-cart-deep-link.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

@@ -276,9 +276,27 @@ test('§4 there is exactly one place that emits add_to_cart', () => {
 
 test('§4 the transport-failure branch emits; the server-rejected branch does not', () => {
     const cart = JS('cart.js');
+
+    // Each branch is sliced to its own RETURN, whatever that return is spelled
+    // like. This used to slice to a literal `return;`, so when addItem began
+    // returning a result object (ERR-269) indexOf answered -1, slice(idx, -1)
+    // silently handed back the rest of the FILE, and the second assertion
+    // failed against code from three functions away. A slice bounded by
+    // punctuation is a slice that can quietly grow to any size.
+    // Ends at the end of the return STATEMENT's line, not at the `return`
+    // keyword — `return { ok: false, reason: … }` carries the thing worth
+    // asserting on after the keyword.
+    const endOfBranch = (from) => {
+        const m = /\breturn\b[\s;{]/.exec(cart.slice(from));
+        assert.notEqual(m, null, 'branch never returns');
+        const afterKeyword = from + m.index;
+        const eol = cart.indexOf('\n', afterKeyword);
+        return eol === -1 ? cart.length : eol;
+    };
+
     const catchIdx = cart.indexOf("DebugLog.error('Failed to sync cart to server:'");
     assert.notEqual(catchIdx, -1);
-    const catchBlock = cart.slice(catchIdx, cart.indexOf('return;', catchIdx));
+    const catchBlock = cart.slice(catchIdx, endOfBranch(catchIdx));
     assert.ok(catchBlock.includes('this._trackAdd(product)'),
         'the item is kept, saved and shown to the shopper on this branch — an add that the ' +
         'customer can see must be counted, or a spell of cart-API flakiness silently zeroes ' +
@@ -286,7 +304,11 @@ test('§4 the transport-failure branch emits; the server-rejected branch does no
 
     const rejectIdx = cart.indexOf("'Failed to add item to cart'");
     assert.notEqual(rejectIdx, -1);
-    const rejectBlock = cart.slice(rejectIdx, cart.indexOf('return;', rejectIdx));
+    const rejectBlock = cart.slice(rejectIdx, endOfBranch(rejectIdx));
     assert.ok(!rejectBlock.includes('_trackAdd'),
         'the server refused and the line was rolled back — the cart does not contain it');
+    // And name the branch, so the slice above is anchored to a real exit rather
+    // than to whichever `return` happens to come first.
+    assert.match(rejectBlock, /reason: 'server-rejected'/,
+        'the rejected branch must exit with its own reason');
 });
