@@ -867,16 +867,27 @@ test('§10 shipping hygiene', async (t) => {
     if (fs.existsSync(mem)) assert.match(READ(mem), /ERR-201/, '.claude/memory/errors.md');
   });
 
-  await t.test('the FE response to the backend is written', () => {
-    // Backend correspondence moved out of the repo root into backend-docs/ (2026-09-09).
-    // The doc has to exist SOMEWHERE durable, not at one hard-coded path — so accept
-    // either home rather than re-breaking this test the next time it is filed as sent.
-    const resp = ['backend-docs/outbox', 'backend-docs/sent', '.']
-      .map((d) => path.join(ROOT, d, 'orders-tracking-requested-column-FE-response-sep2026.md'))
-      .find((f) => fs.existsSync(f)) || path.join(ROOT, 'backend-docs/outbox/orders-tracking-requested-column-FE-response-sep2026.md');
-    assert.ok(fs.existsSync(resp), 'the dismiss endpoint has to be asked for somewhere durable');
-    assert.match(READ(resp), /dismiss/i);
-  });
+  // 🚨 GUARD REMOVED 2026-09-21 — it was working, and it was dropped on purpose.
+  //
+  // There used to be a sub-test here, 'the FE response to the backend is written', asserting
+  // that orders-tracking-requested-column-FE-response-sep2026.md existed in ONE OF
+  // backend-docs/outbox/, backend-docs/sent/ or the repo root, and that it still contained the
+  // word "dismiss". It pinned the ask for the dismiss endpoint to something durable, so the
+  // request could not quietly evaporate. STATUS.md:214 recorded that pinning by name.
+  //
+  // On 2026-09-21 all 42 documents in backend-docs/outbox/ were deleted and the deletion was
+  // committed on the owner's instruction. That took this document with it, and the assertion
+  // became unsatisfiable — it failed for a TRUE reason. The owner's call was to drop the guard
+  // rather than keep the one file or ship a red suite, so this is a deliberate loss of coverage,
+  // NOT a cleanup and NOT a sign the check was wrong.
+  //
+  // WHAT IS NO LONGER CHECKED: nothing now verifies that the dismiss-endpoint ask is recorded
+  // anywhere at all. STATUS.md:214 only points AT the document; it does not carry the ask, so it
+  // is not a replacement record. Treat the ask as open and unpinned.
+  //
+  // The document, and the other 41, are recoverable — the last commit that held them is 1ded3f8:
+  //   git show 1ded3f8:backend-docs/outbox/orders-tracking-requested-column-FE-response-sep2026.md
+  // Restoring it is all that is needed to bring this guard back; do not re-add it without the file.
 
   await t.test('the stale "clears itself" promises are corrected', () => {
     // Fulfilment is gated on an email ACTUALLY going out — flipping an order to

@@ -114,7 +114,23 @@ one 30/min limiter across the prefix; and `delivery_type` being *live* is not it
 
 ---
 
-## `outbox/` — written, no reply on record (41)
+## `outbox/` — written, no reply on record (DIRECTORY NOW EMPTY)
+
+> **🚨 2026-09-21: all 42 `.md` files were deleted from `backend-docs/outbox/` and the deletion was
+> committed on the owner's instruction.** The directory is empty; only a gitignored `.DS_Store` remains.
+>
+> **The rows below are unchanged and remain the record.** None of these documents was answered, filed
+> to `sent/`, or withdrawn — the emptying was not an archival move, and 0 of the 42 names appear in
+> `sent/`. Every open ask and every BF number recorded below is still open. Do not read the empty
+> directory as "nothing outstanding": `outbox/` means *no reply on record*, which is **not** the same
+> as undelivered, and it is now also not the same as *no document*.
+>
+> **Recover any one of them** — the last commit that held all 42 is `1ded3f8`:
+>
+> ```sh
+> git show 1ded3f8:backend-docs/outbox/<filename>            # read one
+> git checkout 1ded3f8 -- backend-docs/outbox/               # restore all 42
+> ```
 
 ### ⏳ Never delivered — written after the last incoming doc (11)
 
