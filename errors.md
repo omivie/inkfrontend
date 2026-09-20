@@ -13523,6 +13523,18 @@ second: a beacon failure message read "bat.js loaded but reported nothing" in a 
 `bat.js` had never executed. ***A probe that misdescribes the state it found teaches people to
 distrust the one time it is right.***
 
+**AND A THIRD, ON THE FIRST RUN AFTER DEPLOY — from the other direction.** With the tag live
+and every other check green, §3 reported **"a UET consent default is declared on production"**
+against a file that declares none. What it matched was **the comment explaining why we
+deliberately do not call that API**, which necessarily spells the call out. The repo already
+holds this lesson from ERR-276 — *a comment that NAMES a thing is not that thing*, where prose
+**satisfied** an assertion four times in one change. ***This is the same defect inverted: prose
+can also FAIL an assertion, and that is the more corrosive direction, because a probe that
+reddens on a benign condition is red for ever and gets ignored, taking the next real failure with
+it.*** The suite had stripped comments from the start (`codeOnly()`); the probe, reading the
+DEPLOYED file, had not. ***Two readers of the same source must ask the same question the same
+way.***
+
 **What this probe cannot do, stated plainly.** It cannot verify a **purchase** conversion — that
 needs a real paid order, so the first live order after deploy is the measurement, exactly the gap
 ERR-260 recorded when it inferred the purchase-beacon block from mechanism rather than measuring

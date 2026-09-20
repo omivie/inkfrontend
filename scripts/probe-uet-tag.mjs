@@ -155,7 +155,17 @@ try {
     if (!m) {
         bad('the homepage does not load /js/gtag.js — UET has no host file');
     } else {
-        const src = await fetch(new URL(m[1], SITE)).then((r) => r.text());
+        const raw = await fetch(new URL(m[1], SITE)).then((r) => r.text());
+        // STRIP COMMENTS BEFORE ASKING ANYTHING ABOUT THE CODE.
+        // The first production run of this probe reported "a UET consent
+        // default is declared" — against a file that declares none. What it
+        // matched was the COMMENT explaining why we deliberately do not call
+        // that API, which necessarily spells the call out. A comment that NAMES
+        // a thing is not that thing (ERR-276, where prose satisfied an
+        // assertion four times in one change; here it fails one instead).
+        // A probe that reddens on a benign condition is red for ever and gets
+        // ignored, taking the next real failure with it.
+        const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
         if (!src.includes(`'${TAG_ID}'`)) {
             bad(`deployed gtag.js does not contain tag id ${TAG_ID} — repo/production drift, ` +
                 'or the id was emptied. An empty id ships a tag that silently does nothing.');
