@@ -27,6 +27,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const stripComments = require('./helpers/strip-comments');
 
 const ROOT = path.resolve(__dirname, '..');
 const INK = path.join(ROOT, 'inkcartridges');
@@ -432,9 +433,45 @@ test('§4 the overdue count agrees with what the page derives from the rows', ()
     // loadSummary() prints "N overdue" from the summary, while the list marks
     // rows overdue by comparing due_date to today. If those disagree the page
     // announces an overdue invoice that nothing in the list identifies.
-    const todayISO = new Date().toISOString().slice(0, 10);
+    //
+    // LOCAL DATE, NOT UTC, AND THAT IS THE WHOLE ASSERTION (ERR-274).
+    // This read `new Date().toISOString().slice(0, 10)`, which is UTC, while
+    // business-demo.js derives `_overdue` with a LOCAL `iso()`
+    // (`getFullYear()/getMonth()/getDate()`). NZ is UTC+12/+13, so the two
+    // strings disagree for roughly half of every day — and because every due
+    // date is the 20th of a month, the disagreement only changes the COUNT when
+    // the local date is the 21st and the UTC date is still the 20th. Measured by
+    // simulating 400 consecutive days at 08:00 NZ: red on 13 of them, one per
+    // month, always the 21st. At 15:00 NZ, when the two dates agree, never.
+    //
+    // An invoice is overdue relative to the reader's own date, so the page is
+    // right and this line was wrong. Derive it exactly the way the page does —
+    // and do not "tidy" it back to toISOString(), which is the obvious spelling
+    // and the bug.
+    const now = new Date();
+    const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const derived = allInvoices.filter((i) => i.status === 'unpaid' && i.due_date < todayISO).length;
     assert.equal(summary.overdue_invoice_count, derived);
+});
+
+test('§4 the overdue basis is the local date on both sides, never UTC', () => {
+    /* The regression guard for the line above. A reader who replaces that
+     * arithmetic with `toISOString()` gets a test that passes on their machine,
+     * passes in CI if CI runs in UTC, and fails one morning a month in New
+     * Zealand — the shape that teaches people to re-run a suite rather than read
+     * it. Asserted against the SOURCE of both sides, because the defect is a
+     * spelling and a value-level assertion cannot see it on the days the two
+     * dates agree. */
+    const demoSrc = stripComments(DEMO_SRC);
+    assert.match(demoSrc, /const iso = \(d\) => `\$\{d\.getFullYear\(\)\}/,
+        'business-demo.js must keep deriving dates from the LOCAL calendar — the page shows a '
+        + 'reader their own dates, and an invoice is overdue relative to where the reader is');
+    assert.doesNotMatch(demoSrc, /toISOString\(\)\.slice\(0, ?10\)/,
+        'business-demo.js must not mix a UTC date into a local-date comparison');
+
+    const selfSrc = stripComments(fs.readFileSync(__filename, 'utf8'));
+    assert.doesNotMatch(selfSrc, /toISOString\(\)\.slice\(0, ?10\)/,
+        'this file must not reintroduce the UTC spelling either — that is exactly what it did');
 });
 
 test('§4 an unknown route misses instead of inventing a success', () => {

@@ -41,6 +41,87 @@ describing the same incident.
 
 ---
 
+## ERR-274 — The suite was red 39 days a year from one demo fixture: a test that was wrong for half of every day, and a docstring the generator did not keep — **RESOLVED** (2026-09-21)
+
+**Context.** `tests/business-demo-mode.test.js` had a failing assertion at HEAD. I looked at it
+twice while shipping ERR-276, saw it fail on two consecutive days in two *different* places (§3 on
+the 20th, §4 on the 21st), and dismissed it both times as "a date-dependent fixture, also red at the
+parent commit". A peer session refused that dismissal and diagnosed the §4 half. They were right,
+and the dismissal was worse than wrong — ***"it is red at HEAD too" is a statement about blame, not
+about health.*** A suite that is red on 39 days a year teaches everyone to skim past red, which is
+how banned Google Ads copy shipped through two "fixed" reports (ERR-063).
+
+**Two unrelated defects with the same symptom**, which is why one day's evidence pointed at a
+fixture and the next day's pointed somewhere else.
+
+### §4 — a UTC date compared against a local one
+
+```
+tests/business-demo-mode.test.js   new Date().toISOString().slice(0, 10)      // UTC
+inkcartridges/js/business-demo.js  `${d.getFullYear()}-${…getMonth()+1}-…`    // LOCAL
+```
+
+NZ is UTC+12/+13, so those two strings disagree for roughly half of every day.
+
+**But the impact is not "half of every day", and the difference matters.** The assertion only
+changes when a due date falls *inside* the gap between the two dates, and every due date in this
+fixture is the 20th of a month. Measured by injecting a fake `Date` into the same vm sandbox the
+test uses and simulating 400 consecutive days:
+
+| basis | sampled 08:00 NZ (UTC is yesterday) | sampled 15:00 NZ (dates agree) |
+|---|---|---|
+| UTC, as written | **red 13/400** — always the 21st | red 0/400 |
+| the page's own local basis | **red 0/400** | red 0/400 |
+
+The shipped code is right: an invoice is overdue relative to the reader's own date. The test was the
+only thing in the loop using UTC.
+
+### §3 — the generator did not keep its own docstring's promise
+
+`business-demo.js:332` says *"Most are settled; the last few stay open and one of those is past
+due."* Every due date is the 20th of the month after issue, and the three most recent rows stay
+open — so on the **19th and 20th of any month** none of them has come due and
+`overdue_invoice_count` is 0. **Red 26/400 days.** That is what failed on the 20th.
+
+This is not a fixture that drifted. It is a promise in a docstring that the code keeps for 93.5% of
+days, and a test (`§3`) that was right to assert it. A demo account exists to exercise the UI; on
+those days the overdue sub-line and its alert styling had nothing to render.
+
+**The fix keeps the derivation and makes the INPUT deterministic.** The existing comment — *"Whether
+one of them is overdue is DERIVED from its own due date, not asserted"* — was protecting against a
+hardcoded flag disagreeing with the page's own derivation, and that protection is worth keeping. So
+`_overdue` is still computed from `due_date < iso(today)`; what changed is that the oldest of the
+three open rows is pulled back to **the 20th of last month** when none is already past due. That
+date is strictly before today on every day of any month (today is at least the 1st, which is after
+the 20th of the month before), keeps the 20th-of-the-month convention the other rows follow, and
+stays after its own issue date.
+
+> ***A derived value with a non-deterministic input is not "derived", it is "sometimes".***
+
+### Verification
+
+Green on **400/400 days at three times of day** (00:30, 08:00 and 15:00 NZ), with a coherence check
+that no open row ends up with a due date on or before its own issue date. Red-proofed three ways:
+restoring the UTC spelling in *either* file fails the new guard, and reverting the generator
+reintroduces exactly 26 red days per 400.
+
+A new `§4` guard asserts the UTC spelling is absent from **both** files, including this test file
+itself. It has to be a source assertion: on the days the two dates agree, a value-level assertion
+cannot see the defect at all, so it would pass on the author's machine, pass in a UTC CI, and fail
+one morning a month in New Zealand.
+
+**Full suite: 6460 pass, 0 fail** — the first fully green run in this tree.
+
+**Files.** `inkcartridges/js/business-demo.js` · `tests/business-demo-mode.test.js`.
+
+**Lesson.** Two, and the first is the one I got wrong. ***A red test at HEAD is not someone else's
+problem, it is everyone's noise floor*** — "pre-existing" answers who introduced it, never whether
+it should stay. And second: two failures in the same file on consecutive days looked like one flaky
+fixture and were two unrelated bugs. ***The tell was that the failure MOVED*** — §3 one day, §4 the
+next. A single flaky thing fails in the same place.
+
+---
+
 ## ERR-276 — The rewards popover covered Add to Cart on every phone, and the two pages carrying most of the ad spend shifted 0.68 — **RESOLVED** (2026-09-20)
 
 **Context.** Backend handoff `mobile-cta-occlusion-and-seo-FE-handoff-sep2026.md`, re-measured by

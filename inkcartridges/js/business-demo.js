@@ -379,16 +379,41 @@
             }
         });
 
-        // The three most recent stay open. Whether one of them is overdue is
-        // DERIVED from its own due date, not asserted — the page derives the
-        // same way, and a fixture that disagreed would show an "overdue" count
-        // with nothing in the list marked overdue.
-        rows.slice(-3).forEach((r) => {
+        /* The three most recent stay open, and `_overdue` is DERIVED from each
+         * row's own due date rather than asserted — the page derives the same
+         * way, so a hardcoded flag could show an "overdue" count with nothing in
+         * the list marked overdue.
+         *
+         * THE DERIVATION IS KEPT; THE INPUT IS MADE DETERMINISTIC (ERR-274).
+         * The docstring above this function promises "the last few stay open and
+         * one of those is past due", and for 26 days a year that was not true.
+         * Every due date is the 20th of the month after issue, so on the 19th and
+         * 20th of any month none of the three open rows has come due yet and
+         * `overdue_invoice_count` is 0 — measured by simulating 400 consecutive
+         * days: red on 26 of them. A demo account exists to exercise the UI, and
+         * the overdue sub-line and its alert styling had nothing to render on
+         * those days. It also reddened the suite monthly, which is how a team
+         * learns to skim past a failing test (ERR-063).
+         *
+         * So the OLDEST of the three is pulled back to the 20th of LAST month if
+         * it is not already past due. That date is strictly before today on every
+         * day of any month (today is at least the 1st, which is after the 20th of
+         * the month before), keeps the 20th-of-the-month convention the other
+         * rows follow, and stays after its own issue date. `_overdue` is still
+         * computed from `due_date < iso(today)` — one derivation, now with an
+         * input that cannot leave the promise unkept. */
+        const open = rows.slice(-3);
+        open.forEach((r) => {
             r.status = 'unpaid';
             r.paid_at = null;
             r.amount_outstanding = r.total_incl_gst;
             r._overdue = r.due_date < iso(today);
         });
+        if (open.length && !open.some((r) => r._overdue)) {
+            const oldest = open[0];
+            oldest.due_date = iso(new Date(today.getFullYear(), today.getMonth() - 1, 20));
+            oldest._overdue = oldest.due_date < iso(today);
+        }
 
         return rows.reverse();   // newest first, as the real list is ordered
     }
