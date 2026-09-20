@@ -292,11 +292,29 @@ test('mergeLiteralResults — suggest rows are adapted to card shape', () => {
     }
 });
 
-test('mergeLiteralResults — dedups by name when ids/skus differ', () => {
+test('mergeLiteralResults — a name match merges only when no sku contradicts it', () => {
+    // ERR-277. Two rows carrying DIFFERENT, KNOWN skus are two products even
+    // when their names normalize equal — hiding one would be the frontend
+    // asserting an identity it cannot support (the ProductIdentity policy in
+    // utils.js), and the row we dropped could be the one the customer wanted.
+    // The Sep 2026 duplicate-pack retirement hand-off asked for exactly this:
+    // HP DesignJet sells one series in several volumes (G728130MLCMY $583.49 vs
+    // G728300MLCMY $1158.49, both live in the `728` drilldown) which a loose
+    // name comparison reads as duplicates.
     const { mergeLiteralResults } = loadShopHelpers();
     const a = [{ id: 'a', sku: 'AAA', name: 'Canon CL511 Ink', price: 1, is_genuine: true }];
     const b = [{ id: 'b', sku: 'BBB', name: 'Canon CL511 Ink', retail_price: 1, source: 'genuine' }];
-    assert.equal(mergeLiteralResults(a, b).length, 1);
+    assert.equal(mergeLiteralResults(a, b).length, 2, 'different known skus => two products');
+});
+
+test('mergeLiteralResults — name still merges a /suggest row that carries no sku', () => {
+    // The other half of the rule, and the reason the name key is not simply
+    // deleted: adaptSuggestProduct defaults a missing sku to '', so a suggest
+    // row can reach the merge with nothing but a name to match on.
+    const { mergeLiteralResults } = loadShopHelpers();
+    const a = [{ name: 'Canon CL511 Ink', price: 1, is_genuine: true }];
+    const b = [{ id: 'b', sku: 'BBB', name: 'Canon CL511 Ink', retail_price: 1, source: 'genuine' }];
+    assert.equal(mergeLiteralResults(a, b).length, 1, 'sku-less suggest row merges on name');
 });
 
 test('mergeLiteralResults — handles empty / missing inputs', () => {

@@ -92,9 +92,13 @@ function blockBodyAt(src, anchor) {
 // just asserted on the endpoint the code now builds rather than on the appends.
 
 test('getShopData sidecar fires against /api/products (recovers value-packs)', () => {
-    const idx = API_CODE.indexOf('eligibleForRecovery');
-    assert.ok(idx !== -1, 'eligibleForRecovery branch not found in api.js');
-    const slice = API_CODE.slice(idx, idx + 1500);
+    // Brace-walk the real block instead of a fixed window — see blockBodyAt's
+    // note above. stripComments leaves a blank line per comment line, so a
+    // char window counts comment residue as code: re-documenting this block
+    // pushed `sidecarPromise` out of a 1500-char reach and failed a test that
+    // has nothing to do with comments (ERR-277).
+    const slice = blockBodyAt(API_CODE, 'if (eligibleForRecovery)');
+    assert.ok(slice, 'eligibleForRecovery branch not found in api.js');
     assert.match(slice, /catalogEndpoint\(\s*['"]\/api\/products['"]/,
         'sidecar must fetch /api/products (was /api/shop, which drops pack_type=value_pack rows)');
     assert.match(slice, /sidecarPromise\s*=\s*this\.getWithSWR\(fbEndpoint/,
@@ -102,8 +106,8 @@ test('getShopData sidecar fires against /api/products (recovers value-packs)', (
 });
 
 test('getShopData sidecar still passes brand+category+source=compatible+limit', () => {
-    const idx = API_CODE.indexOf('eligibleForRecovery');
-    const slice = API_CODE.slice(idx, idx + 1500);
+    const slice = blockBodyAt(API_CODE, 'if (eligibleForRecovery)');
+    assert.ok(slice, 'eligibleForRecovery branch not found in api.js');
     assert.match(slice, /brand:\s*params\.brand/, 'sidecar must still filter by brand');
     assert.match(slice, /category:\s*params\.category/, 'sidecar must still filter by category');
     assert.match(slice, /source:\s*['"]compatible['"]/, 'sidecar exists to fetch compatibles specifically');

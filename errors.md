@@ -41,6 +41,487 @@ describing the same incident.
 
 ---
 
+## ERR-273 — The cache probe measured a key no browser fills, and its only negative control went green underneath it — **RESOLVED** (2026-09-20)
+
+**Context.** The backend's `fe-three-open-asks-backend-response-sep2026.md` §3 reported the Cache
+Rule gap closed on `/api/site/nav`, `/api/ribbons` and `/api/printers/trending`. Verified before
+believing it, one anonymous GET then a second: all three **MISS → HIT**, `age: 1`, plus
+`/api/site/trust` which shipped in the same change and nothing was watching. The `Pragma: no-cache`
+/ `Expires: 0` residue the doc describes on `/api/site/nav` is gone. Their §3 is accurate.
+
+Updating the three rows in `probe-edge-cache.mjs` from `header-only` to `cached` would have been
+the whole job. It would also have left the probe worthless, in two separate ways.
+
+**1. THE PROBE WAS MEASURING AN ORIGIN NO VISITOR USES.** Every response from this API carries
+`vary: Origin, Accept-Encoding`. The probe sent no `Origin` header at all, so for its entire life
+it read a *different* edge entry than the one the site fills — a visitor's `fetch()` runs on
+`https://www.inkcartridges.co.nz` and the browser attaches that origin to every cross-origin GET.
+
+> ***This is ERR-159 with the axis changed.*** That was "we measured a METHOD no visitor uses"
+> (`curl -I` sends HEAD, and the origin only marked GET cacheable). This is "we measured an ORIGIN
+> no visitor uses", and it was found the same way: by reading the response headers instead of the
+> verdict.
+
+It went unnoticed for seven weeks because **both keys are cacheable, so the verdict agreed**. The
+probe was right by coincidence. `assertNoHeadRequests()` — a real executable guard, written
+precisely so the HEAD misread could not recur — was watching the wrong axis, and could not have
+noticed. The fix sends the real origin, and keeps one labelled `noOrigin: true` row as the visible
+record that the two keys are different things, because the finding is not "we added a header".
+
+That `vary: Origin` is load-bearing rather than decorative is now itself measured: an origin off
+the allowlist answers `private, no-store` + `BYPASS`.
+
+**2. THE ONE ROW THAT COULD FAIL WAS THE ROW THAT GOT FIXED.** `/api/site/nav` carried this note:
+
+> *"BF-040 — STILL OPEN, and it is the negative control for the two rows above: if this ever reads
+> cached at the same time they do, the probe has stopped discriminating."*
+
+That is exactly what happened, and the direction matters: **the control did not fail, it succeeded
+and then evaporated.** Flipping it to `cached` and stopping there leaves a run in which every
+single expectation is `cached` — and a probe whose every row expects the same answer cannot tell
+you the answer was measured. Same family as ERR-258 (six guards that could not fail, hidden by a
+6088/0 green suite) and ERR-249 (a detector that went green because its input had been emptied).
+
+Three replacements, each able to go red, each red-proofed by hand before being trusted:
+
+| control | asserts |
+|---|---|
+| `/api/ribbons?_cb=…` + `sb-*` cookie → `BYPASS` | a session response is never *stored* |
+| `/api/site/trust` + foreign `Origin` → `BYPASS` | the CORS allowlist and the cache agree |
+| `/api/admin/analytics/search` → `DYNAMIC` | admin is never edge-eligible |
+
+`BYPASS` is a new verdict rather than folded into `uncached`, because they are different facts:
+`uncached` means the origin never offered the response to the cache, `bypass` means the edge was
+offered something and refused it. Collapsing them would let a privacy regression read as a routine
+expectation change.
+
+**THE COOKIE CONTROL TAUGHT ME THAT I HAD ASSERTED THE WRONG GUARANTEE.** Written first without a
+cache-buster it returned `HIT`, and the obvious reading — "a signed-in response is being cached" —
+was wrong. Measured both ways:
+
+```
+cookie + COLD key  →  private, no-store + BYPASS     the origin refuses
+cookie + WARM key  →  HIT, carrying the ANON body    the edge does not care
+```
+
+Only the first guarantee exists. The edge will serve an already-stored anonymous entry to a
+cookie-bearing request — harmless for `/api/ribbons`, whose anon body *is* the public body, and the
+**ERR-234/246 mechanism verbatim**. It is why every catalogue read in `api.js` declares
+`anonymous: true` and sends `credentials: 'omit'`: a personalised body must never be requested from
+a shared key at all. Pinned now, in three places, by
+`tests/catalog-edge-cache-jul2026.test.js` §6 — `/api/site/nav`'s `anonymous: true`,
+`/api/printers/trending`'s `credentials: 'omit'`, and every `/api/ribbons` read going through
+`getPublic`. All three red-proofed. Without them, removing one is a performance mystery three
+months later, not a test failure.
+
+**AND THE RUN FOUND A REGRESSION NOBODY HAD REPORTED.** With the rows honest, two went red:
+
+```
+/api/search/smart?q=…    DYNAMIC   (same URL, 3 consecutive requests)
+/api/search/suggest?q=…  DYNAMIC
+/api/search/popular      DYNAMIC
+/api/search/by-part      DYNAMIC
+/api/products?…  MISS→HIT · /api/brands HIT · /api/site/nav HIT   ← controls, same minute
+```
+
+**BF-039 has reopened.** It was measured CLOSED on 2026-09-10 (MISS 3.39s → HIT 0.057s). The origin
+still sends `public, max-age=0, s-maxage=300, stale-while-revalidate=600`, and `DYNAMIC` means
+Cloudflare never considered the path — so it is the rule, not the origin, and not the new `Origin`
+header (DYNAMIC with and without it). The suspect is the **2026-09-17 edit that closed BF-014/BF-019
+by adding `/api/site`, `/api/ribbons` and `/api/printers` to that same expression**: three
+endpoints gained caching and two lost it in one change, and the backend's write-up re-verified only
+the three it was adding. A Cache Rule is a single expression with no per-clause test, which is
+exactly the shape that drops a clause silently.
+
+Left as `header-only` — the real measured state, and the state this probe splits out on purpose so
+an origin that is right cannot be blamed for a rule that is wrong. Carried as an ask.
+
+> ***A probe that reports the same verdict for every row has stopped being an instrument. When a
+> negative control is FIXED, it must be replaced, not celebrated.***
+
+**Files.** `scripts/probe-edge-cache.mjs`, `tests/catalog-edge-cache-jul2026.test.js` §6.
+Verify: `npm run audit:edge-cache` (15/15 matched expectation).
+
+---
+
+## ERR-271 — Five probes wrote to production search analytics, and the guard built to catch exactly that could not see them — **RESOLVED** (2026-09-20)
+
+**Context.** ERR-254 established that any script GETting `/api/search/*` is a WRITER: the backend
+writes a `search_analytics` row per request, fire-and-forget. The fix put enrolment in a test —
+`tests/probe-search-analytics-honesty-sep2026.test.js` — so a tenth probe could not inherit a false
+"read-only" banner. That test has been green since, over ten enrolled scripts.
+
+It was scanning the wrong population. It detects a reader by grepping script **source** for
+`/api/search/(smart|suggest|autocomplete)`. Five Playwright probes drive the **real search box** —
+they type into `#search-input` or navigate to the site's own `/search?q=` page — so the *browser*
+issues the GET and the backend writes the row, while the script text contains no such string.
+
+```
+probe-404-search-dropdown.mjs      types 'lc',    presses Enter → /search?q=lc
+probe-search-dropdown-columns.mjs  types 'lc531'  at every viewport in the loop
+probe-qty-typing.mjs               /search?q=ribbon
+probe-mobile-ux.mjs                /search?q=lc57, and types 'lc57'
+probe-shop-source-columns.mjs      page.goto(BASE + '/search?q=lc531')
+```
+
+They were invisible: §1 never counted them, §2 never asked them for a notice, and every one printed
+a banner claiming to be read-only. `probe-qty-typing.mjs`'s said *"MODE: READ-ONLY (no Add to Cart
+is ever clicked, no cart is written)"* — true, and about a different database.
+
+**THIS IS THE THIRD TIME THIS FILE'S OWN DETECTOR HAS BEEN WRONG IN THE SAME DIRECTION.** Its
+`ENROLMENT_FORMS` docstring records the first two, and the conclusion it drew —
+***A GUARD CANNOT SEE WHAT IT DOES NOT SPELL*** — was about the enrolment side. It was equally true
+of the **reader** side, one function up, and nobody looked there. The lesson had been written down
+and then applied to only half the mechanism.
+
+> ***A mechanism with two ways in needs two doorbells, and the file that says so is not exempt.***
+
+**Two false readings had to be untangled before the detector could be trusted, and they pulled in
+opposite directions.**
+
+- **A false positive.** `probe-lookalike-rows.mjs` contains the sentence *"…falls back to
+  /api/search/smart…"* inside a **report string** — prose about another file. Stripping comments
+  does not remove a string literal, so it read as a writer and §2 demanded a notice it has nothing
+  to disclose. An enrolment list with a wrong entry in it is one nobody trusts.
+- **A false negative, and the dangerous one.** `probe-search-escaping.mjs` builds
+  `` `${API}/api/search/${ep}?…` `` — the endpoint *name is a variable*. The literal appears in
+  that file **only in `console.log` headings**. So the detector was matching a real writer *by
+  accident, via its own section titles*, and the obvious fix for the false positive — requiring a
+  URL boundary before the path — **silently dropped it**.
+
+> ***A detector tightened to remove a false positive can take a true positive with it, and the
+> suite stays green either way*** — the reader set is an input to every assertion, so shrinking it
+> enrols fewer files and fails nothing. The set was diffed before and after, both ways, and is
+> byte-identical to the pre-existing ten.
+
+The pattern now keys on a URL being **built** (boundary before the path, template expression
+allowed after it) rather than the endpoint being **named**. Comments are stripped before both
+detectors, so a file counts for what it does — which matters, because the notices added to the five
+probes *explain* the mechanism and therefore contain the literal; unstripped, they would have
+satisfied the endpoint detector and left `BROWSER_SEARCH_FORMS` dead on arrival. That is §4's
+hazard (a suite scanning for a literal its own prose contains) arriving in the reader detector.
+
+Their terms stay **real** and that is deliberate: the dropdown has to return rows for the
+measurement to mean anything, so a sentinel would measure something else. The notice already says
+exactly that about real terms.
+
+**§9/§10/§12 are the controls**, in the idiom §7/§8 already used for the enrolment side: both
+directions asserted, the five probes named individually, `probe-search-escaping.mjs` pinned as
+must-detect and `probe-lookalike-rows.mjs` as must-not, and an assertion that the five are found by
+the *browser* detector and not the endpoint one — so if one ever starts naming the endpoint in
+code, `BROWSER_SEARCH_FORMS` does not quietly lose its last subject. Red-proofed: killing the
+browser forms fails §1 and §9; un-enrolling one probe fails §2.
+
+**Files.** `tests/probe-search-analytics-honesty-sep2026.test.js`,
+`scripts/lib/probe-search-notice.mjs`, and the five probes.
+
+---
+
+## ERR-277 — The duplicate packs were retired cleanly, and three things on our side were still resting on them — **RESOLVED (frontend)** (2026-09-20)
+
+**Context.** `duplicate-pack-retirement-FE-handoff-sep2026.md` from the backend dev: 17 duplicate
+value-pack SKUs retired, each 301ing to its survivor. Its TL;DR is "no code changes, and — unlike
+Aug 2026 — no cache purge either", with one optional grep.
+
+**Every claim in that doc is true. I verified all of them before touching anything**, and this is
+the rare hand-off where the answer to "do we need to do anything?" was genuinely no:
+
+| claim | measured |
+|---|---|
+| `?brand=epson&category=ink&code=81N` returns one CMY + one KCMY | 8 rows, exactly one of each |
+| all 17 retired SKUs 301 to the documented survivor | 17/17, targets correct |
+| storefront not edge-cached, api `s-maxage=300` ⇒ no purge | headers exactly as documented |
+| §3 Brother `LC3-Pack` names/slugs re-derived at the next import | already correct live |
+| no client-side dedup hides these cards | `ProductIdentity` marks, never filters |
+| none of the 17 hardcoded in shipped JS | none, in any file |
+
+**CURL COULD NOT HAVE SETTLED THE ONE THAT MATTERED.** "Any existing link keeps working" rests on
+the SPA *following* those 301s, and every catalogue GET we make is **preflighted** — `api.js`
+`_rawJsonFetch` sets `Content-Type: application/json` on a bodyless GET, and that value is not
+CORS-safelisted. A preflighted request meeting a redirect is exactly the class of thing ERR-223
+recorded curl as unable to adjudicate. Measured in a real browser on the live origin instead, with
+both controls: `/api/products/CT081KCMY` → `redirected:true` → survivor; the survivor itself
+`redirected:false`; a bogus SKU still 404s rather than redirecting. Then end-to-end:
+`/p/CT081KCMY` renders the survivor PDP, canonical self-referencing, Add-to-cart present.
+
+> A green transport claim measured with the wrong tool is not evidence, it is a coincidence.
+
+What the hand-off could not know is what those now-dead SKUs were still holding up here.
+
+**1. A load-bearing comment in `api.js` had become false.** `getShopData` fires a SECOND request
+per brand+category drilldown (`/api/products?source=compatible`) and merges it. The only thing
+justifying that cost was a comment recording a live measurement — and the two cards it named as
+the sidecar's entire yield were `CT081KCMY` and `CT073CMY`. **Both are among the seventeen.**
+Re-measured 2026-09-20: `epson/81N` `/api/shop` 8 rows, sidecar carries 8 with that code, recovers
+**nothing**; `epson/73N` 7 rows, sidecar 6, recovers **nothing**. The block's own text warned that
+"a stale comment is how ERR-216 happened" — and then became one.
+
+***The sidecar stays.*** Removing a fallback is a behaviour change, not cleanup (ERR-158), a
+handful of chips is not a catalogue-wide proof, and the merge is what covers a backend regression
+on `series_codes`. A zero is evidence for a decision, not the decision. What changed is that the
+claim is no longer prose: `npm run probe:lookalike` now prints the yield per brand/category/code,
+and `api.js` points at it instead of asserting a number.
+
+**2. The one place we DID assert two rows were one product.** §4 asks us to remove any client-side
+dedup hiding these cards and warns a name-based one is "actively risky" — HP DesignJet sells one
+series in several volumes. The card surfaces were already clean: `ProductIdentity.markLookalikes`
+(ERR-195) prints the SKU on both and six tests pin that it never removes or reorders a row.
+
+But the `/search` union path did it. `productIdentityKeys` emitted a normalized-name key and
+`mergeLiteralResults` treated ANY shared key as identity, so **two rows with different, known SKUs
+collapsed to one card whenever their titles normalized equal**, survivor decided by ordering. That
+is precisely what `ProductIdentity`'s own header says the frontend must never do.
+
+The backend's example is live and concrete: `G728130MLCMY` $583.49 and `G728300MLCMY` $1158.49,
+both on the `728` chip. **A full scan of all 4,066 active products found zero name collisions
+today**, so this was latent, not firing — and that is the whole point. The generator has re-minted
+duplicate twins FOUR times (05-11, 05-29, 06-16, 08-31) and the first sweep on 09-19 reverted
+within the day. Latent is not safe when the data that trips it is regenerated nightly.
+
+Fix: the name key stays — it is load-bearing, because `/suggest` rows reach the merge with
+`sku: ''` (`adaptSuggestProduct`) and without it the same product renders twice — and a **SKU
+conflict now vetoes it**. All three dedup sites (`mergeLiteralResults`, `rowsNotAlreadyIn`,
+`reattachCompatProvenance`) read one `identityIndex()`, so they cannot drift apart again.
+
+> Two rows that each name a SKU, and name different ones, are two products however identical
+> their titles read.
+
+**TWO TESTS WERE PINNING THE UNSAFE RULE.** `search-results-parity-may2026.test.js:295` and
+`ribbon-compat-search-additive-jul2026.test.js` both asserted that differing id AND sku "still
+collapse on normalized name". Read before changing (ERR-229): both are *synthetic* `AAA`/`BBB`
+fixtures whose docstrings describe them as refactor safety-nets, not product requirements. Every
+other `mergeLiteralResults` test uses live payloads that overlap by SKU and is untouched.
+
+**3. `/api/products/by-slug/` is 500ing for EVERY slug — and we could not tell.** The endpoint
+outage itself was already reported to the backend on 2026-09-17 (`catalogue-500-outage-sep2026.md`
+§1) and is **still live three days later**. What is new here is ours: found again while checking
+§3's promise that the changing Brother slugs "keep resolving". It returns
+`INTERNAL_ERROR` for a known-good live slug, and **also for a slug that cannot exist** — so there
+was no shape distinguishing an outage from a miss, and a probe asking only one of those questions
+would have reported either a failure or a pass at random. `resolveSkuFromSlug` swallowed both the
+non-ok status and the throw into bare `catch (_) {}` and proceeded to the search-smart fallback.
+The customer still lands on the right product, one round-trip slower, with a 5xx in the console.
+Nothing looked broken, so nobody reported it — for an unknown length of time.
+
+> Fail-soft is a feature. Fail-silent is an outage you have agreed not to find out about.
+
+Fixed on our side only: the fallback is now loud (`DebugLog.error` naming endpoint, status, and
+that the fallback is carrying the page), and the probe's new scan **carries its negative control**
+so a 500-for-everything can never read as a pass. The endpoint itself is the backend's —
+raised in `backend-docs/outbox/duplicate-pack-retirement-FE-response-sep2026.md`.
+
+**Also found, and NOT fixed** (pre-existing, fail-soft, out of this hand-off's scope, all raised in
+the same reply): `CBCI6KCMY` still does not redirect although the Aug 2026 hand-off claimed it
+does — caught only because the manifest was extended to all seventeen;
+`/api/products/:sku/bought-together` 404s on the live PDP and fires **twice**; and
+`/api/admin/catalog/shop?limit=1` 400s.
+
+**The merchandising call was the owner's, and was taken.** §5 leaves three pairs deliberately
+showing as two cards pending a decision "not a backend one". Measured: none of the three pairs
+share a series code, so they never co-appear in a chip drilldown — they only co-exist in broad
+brand+category listings, with distinct names and distinct prices. Owner's decision: leave all
+three. Recorded here and in the backend reply so it stops being re-reported every sweep.
+(`CLC40KCMY` could not be retired anyway — it is supplier-keyed, so the importer reactivates it
+every run; it is now a second must-NOT-redirect control in the manifest.)
+
+**Guards.** `tests/duplicate-pack-retirement-sep2026.test.js` (19 tests) pins the veto in both
+directions, that no retired SKU re-enters shipped JS, the `business-demo.js` frozen catalogue
+shape — the one FE surface where a retirement would 404, since it hardcodes eight real SKUs *and*
+their full product URLs — and that the probe manifest covers all seventeen. All three new guards
+were **red-proofed** by breaking them and watching them fail (ERR-258). The probe manifest keeps
+two must-stay-live controls, because a manifest of nothing but `expect:'redirect'` passes just as
+happily against a backend that 301s everything.
+
+**One more brittleness, fixed in passing.** `stripComments` replaces each comment line with a
+*blank line*, so a fixed `slice(idx, idx + 1500)` window over stripped source counts comment
+residue as if it were code. Re-documenting the sidecar pushed the asserted line out of range and
+failed `product-surface-consistency-may2026.test.js` for a reason having nothing to do with the
+invariant. Switched to that file's own `blockBodyAt()` brace-walk — which its header comment
+already prescribed for exactly this failure (ERR-124/ERR-133). Documentation should never be able
+to break a structural test.
+
+**Numbering.** Originally written as ERR-268; a peer session had already taken 268 for the Apple
+Pay/Google Pay wallet work and written it to `errors.md`, while mine was still only in source
+comments. Renumbered to 277 across all nine files before either landed. A third session had also
+restamped one of my comments to ERR-270 in place. ERR/BF numbers race — check **both** logs at
+write time, and announce what you take.
+
+---
+
+## ERR-270 — Every chip/code page was invisible to Google, and the fix had a second half that would have undone it — **RESOLVED (frontend)** (2026-09-20)
+
+**Context.** `fe-verification-results-two-fixes-sep15-2026.md` from the backend dev: three of five
+items verified on production, two did not. This is the first. Bot requests to
+`/shop?brand=<slug>&code=<code>` rendered the *generic brand page*, blocking the chip/code-page SEO
+win. **The report was exactly right and I reproduced both halves before touching anything**: the
+backend returns `<title>Brother LC73 Ink Cartridges NZ` for `?code=LC73`, and www under a Googlebot
+UA returned `<title>Brother NZ — Fast NZ Delivery`.
+
+**The prescription named a framework we do not use.** The doc offered
+`return NextResponse.rewrite(...)` and called it "one line in `middleware.js`". There is no Next.js
+here — `inkcartridges/middleware.js` is Vercel Edge Middleware that `fetch`es the backend and
+returns the body. The *shape* of the advice was right; the API was not, and neither was the
+one-line estimate.
+
+**What was actually wrong** is one arm: `else if (brandSlug)` built
+`/api/prerender/brand/${brandSlug}` and dropped the rest of the query. The category arm three lines
+below it has excluded `code` explicitly since the Jul 2026 IA reorg. The brand arm never did.
+
+**THE HALF NOBODY REPORTED, AND IT WOULD HAVE UNDONE THE FIX.** `js/seo-meta.js` carries a
+deliberate mirror of that routing in `prerenderPathForLocation`, and `SeoMeta.reconcile()` performs
+what its own comment calls an *"authoritative parity overwrite"* of `<title>`/`<meta description>`.
+Google's JavaScript render pass executes that. Fixing only the edge would have served the crawler
+the LC73 title and then let the SPA fetch the **generic** brand prerender and overwrite it.
+
+> Fixing one side of a mirror is not a partial fix. It is a fix plus a mechanism for reverting it.
+
+**And it was hurting humans already, with no report and no symptom anyone could name.** On
+`/shop?brand=brother&code=LC73`, `shop-page.js updateSEO()` sets a correct code-specific title and
+`SeoMeta.render()` then replaces it with "Brother NZ — Fast NZ Delivery". The comment at
+`shop-page.js:5582` asserts that code-filtered views have no prerender and their strings "remain
+authoritative". They never did: `prerenderPathForLocation` returns the brand prerender whenever
+`brand` is present, whatever `code` says. ***The comment described the intent; the line three
+lines down had never implemented it.*** ERR-216's shape — grep for the parser, not the promise.
+
+**An allowlist, not `url.search`.** The doc's "forward the whole search string, the backend ignores
+what it does not know" is TRUE — measured, not assumed:
+
+| request | result |
+|---|---|
+| `?code=NOSUCHCODE123` | 200, generic body, canonical collapses to `/shop?brand=brother` |
+| `?code=<script>` | canonical collapses to `/shop?brand=brother` |
+| `?code=lc73`, `?code=LC73%20` | canonical normalises to `…&code=LC73` |
+| `?utm_source=`, `?bogusparam=`, `?category=NOTACAT` | ignored, clean brand canonical |
+
+It is still the wrong call. Every distinct URL is its own `s-maxage=3600` edge entry **and its own
+origin fetch**, so forwarding `utm_*`/`gclid`/`fbclid` fragments the CDN and multiplies backend load
+for byte-identical content. Forwarded set is exactly `code` + `category`. `category` is
+canonical-or-absent by then: the 301 normaliser runs for ALL user agents, ahead of the bot gate.
+
+**THE BACKEND'S RULE IS RESOLUTION, NOT PRECEDENCE — and one sample reads as the exact opposite.**
+A peer session measured `?category=toner&code=TN2330` → the *toner* page and concluded "category
+beats code at the origin, code is ignored". Re-measured, same host, same minute:
+
+```
+?category=toner&code=LC73     -> Brother LC73 …   canonical …?brand=brother&code=LC73
+?category=ink&code=LC73       -> Brother LC73 …   canonical …?brand=brother&code=LC73
+?code=LC73XL                  -> Brother LC73 …   canonical …?brand=brother&code=LC73
+?category=toner&code=TN2330   -> Brother Toner …  canonical …?brand=brother&category=toner
+?code=TN2330  (alone)         -> Brother NZ …     canonical …?brand=brother
+```
+
+TN2330 alone falls back to the **bare brand** page. That is the tell: it is simply not a code this
+endpoint resolves, so it falls through to whatever else is on the URL. A code that DOES resolve
+beats the category every time, and the canonical drops the category — which is why `shop-page.js`
+now emits `category` only when `code` is absent. ***An unresolved input makes a fallback look like
+a precedence rule.*** The full table is in the source comment so it is not re-litigated from one
+sample. `?code=LC73XL` also shows the backend collapses the yield suffix itself, so no edge copy of
+`SeriesCodes.collapseYieldSuffix` was added.
+
+**Three existing tests failed for spelling, not substance, and widening them needed care.**
+`seo-meta-rewrite §5` asserted the *opposite* — and was not wrong to exist. Its subject is SPA/bot
+parity, and parity DID hold: both sides dropped the code, so crawler and human saw the same generic
+hub. ***Parity was being held at the worthless value.*** The subject is unchanged; only the value
+moved. The other two were punctuation proxies: `ai-search §2` required
+`searchParams.get('brand')` and the prerender path within 400 characters of each other, so adding
+an explanatory comment between them was a test failure.
+
+**A process scar from the renumber itself, recorded because it nearly went unattributed.** When
+ERR-268 was taken by another session mid-flight, I renumbered my citations with
+`sed -i '' 's/ERR-268/ERR-270/g'` over a file list that included `js/shop-page.js`. That file is
+shared, and a global substitution does not know whose comment it is rewriting: it silently
+restamped a PEER's unrelated `ERR-268` citation in their own hunk. They reported the number
+changing under them and assumed a third session had done it.
+
+> `git commit --only <paths>` protects you from committing someone else's files. A global `sed`
+> walks straight past that, because it operates on CONTENT, not on hunks.
+
+No damage survived — the peer's line is correctly `ERR-277` and mine is the only `ERR-270` in the
+file — but in a six-session tree the failure mode is a citation quietly pointing at someone else's
+incident, which is exactly the ERR-113…123 ambiguity this log's preamble exists to prevent.
+
+**Expected RED on production until this deploys.** `npm run probe:chip-prerender` currently fails
+its two acceptance checks and the parity check, because production still runs the old middleware.
+That is the probe reproducing the reported bug, and its header says so.
+
+**Files.** `inkcartridges/middleware.js` · `inkcartridges/js/seo-meta.js` ·
+`inkcartridges/js/shop-page.js` · `tests/chip-prerender-sep2026.test.js` ·
+`tests/seo-meta-rewrite-may2026.test.js` · `tests/ai-search-readiness-may2026.test.js` ·
+`scripts/probe-chip-prerender.mjs` · `package.json`
+
+---
+
+## ERR-269 — `/cart?add=SKU:QTY` did nothing for a year of reorder emails, and the probe I wrote to prove the fix reported a clean rollback of a line it never saw — **RESOLVED** (2026-09-20)
+
+**Context.** Second of the two items in the same verification doc.
+`https://www.inkcartridges.co.nz/cart?add=C73NM:1` showed an unchanged cart with `?add=` still in
+the address bar. The backend's reorder/refill emails were already emitting that URL for guest
+recipients — roughly 99 per send — while account holders had a working signed backend link. Nothing
+in `js/` had ever read the parameter: `grep -rn "reorder"` across `inkcartridges/` returns the
+business reorder *tiles* and nothing else.
+
+**Three things the implementation had to get right, each of them an existing scar.**
+
+1. **`Cart.add` does not exist.** The method is `Cart.addItem(product)` — one OBJECT argument,
+   quantity inside it, no second parameter. `tests/qty-stepper-sep2026.test.js:209` pins the
+   non-existence because ERR-218 shipped `Cart.add(sku, 1)` to the business reorder tile, which
+   read `.id` off a string and POSTed `product_id: undefined`.
+2. **`addItem` POSTs a product UUID, not a SKU**, so every entry costs one `API.getProduct(sku)`
+   first. There is no batch endpoint.
+3. **`Cart.init()` is async.** It registers its `DOMContentLoaded` listener before any page
+   controller but then awaits `waitForAuth()` (≤3s) and `loadCart()`. Adding inside that window
+   races the server-cart adoption that emptied a cart in ERR-259. There IS a readiness signal —
+   `Cart.loading` starts `true` and clears only at the end of `loadCart()` — so no new Cart API was
+   needed, only a bounded poll on it.
+
+**`addItem` returned `undefined` on every path**, so a caller could not tell a server refusal from
+a success; the only signals were the toasts it fired itself. It now returns
+`{ok, reason, error, confirmed}` with `reason` one of `confirmed` / `local-only` / `offline` /
+`server-rejected`, and takes an opt-in `product.silent` that suppresses only its own toasts. Both
+are additive — no existing caller reads the return. **Partial-ness now lives in the return value,
+not in a toast the caller may have suppressed.** A 12-entry link firing 12 toasts is not a report;
+one summary that NAMES the failure is: *"Added 2 of 3 — we couldn't add C73NM."*
+
+**🚨 MY OWN PROBE PRINTED "cleanup verified" ABOUT A LINE IT HAD NEVER BEEN ABLE TO SEE.**
+`probe-cart-deep-link.mjs --write` invented its own guest id, sent it as `X-Guest-Session`, added a
+line, then read the cart back with the same invented id and found it empty. **The server ignores a
+client-invented guest id and mints its own**, returning it in the `x-guest-session` response header
+— which is exactly why `js/api.js` re-reads that header after every request. So the add landed in
+one cart and the verification read another, which was empty and always would have been.
+
+> An empty cart is only evidence of cleanup if it was non-empty a moment ago.
+
+It was green while leaking a line it could not see and could not remove. This is ERR-257 reached
+through a different door — a probe that borrows its rollback instead of owning it, and ERR-262's
+rule extended: **a probe must own its rollback's ADDRESS, not just its existence.** The write arm
+now adopts the server's session id and proves removal BOTH ways — the line must be readable first,
+and gone after — and a run that cannot verify exits 1 saying what may be orphaned and where.
+Red-proofed by restoring the invented id: it now fails with `CANNOT VERIFY CLEANUP`.
+
+**Known residue from this investigation**: three lines were added to anonymous, server-minted guest
+carts whose ids were not captured (the first probe run, one manual reproduction, and the red-proof
+run). They carry no customer, no PII and no order; they expire with their sessions. One further
+line WAS captured and removed, verified empty. Recorded here rather than quietly dropped.
+
+**My own test caught a bug in my own parser before it shipped.** `handleReorderParam('constructor')`
+resolved up the prototype chain and would have toasted `[Function: Object]` at a shopper;
+`REORDER_MESSAGES` is now read through `hasOwnProperty`. That assertion existed only because the
+test file executes the module instead of grepping it (ERR-224).
+
+**Two more punctuation-proxy tests fell out of the return-value change**, both the ERR-253 shape —
+an assertion that cannot fail over code that is not in the string. `cart-funnel-enrolment §4` and
+`ga4-ecommerce-events §10` each sliced a branch to a literal `return;`. With that gone `indexOf`
+answered −1, `slice(idx, -1)` silently handed back the rest of the FILE, and the assertions were
+evaluating code three functions away. ***A slice bounded by punctuation is a slice that can quietly
+grow to the whole file instead of failing.*** Both now match any `return` and then NAME the branch.
+
+**Files.** `inkcartridges/js/cart-deep-link.js` (new) · `inkcartridges/js/cart.js` ·
+`inkcartridges/html/cart.html` · `tests/cart-add-deep-link-sep2026.test.js` ·
+`tests/cart-funnel-enrolment-aug2026.test.js` · `tests/ga4-ecommerce-events-sep2026.test.js` ·
+`scripts/probe-cart-deep-link.mjs` · `package.json`
+
+---
+
 ## ERR-268 — Apple Pay and Google Pay took 0 of 173 charges, and the brief that diagnosed it named the wrong cause — **RESOLVED (frontend)** (2026-09-20)
 
 **Context.** Backend handoff `stripe-wallets-not-rendering-FE-handoff-sep2026.md`: the wallet row

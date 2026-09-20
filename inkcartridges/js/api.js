@@ -1266,17 +1266,39 @@ const API = {
             // them would put a known-duplicate KCMY card back on the grid.
             //
             // The backend therefore asked us to retire this sidecar. WE
-            // MEASURED INSTEAD OF AGREEING, by running this very method against
-            // the live API, and it is still recovering rows:
+            // MEASURED INSTEAD OF AGREEING, and in Sep 2026 it was still
+            // recovering two rows:
             //
             //   epson/81N  /api/shop alone 8 rows -> getShopData 9  (+CT081KCMY)
             //   epson/73N  /api/shop alone 7 rows -> getShopData 8  (+CT073CMY)
-            //   brother/LC38, canon/PGI650        -> +0, correctly
             //
-            // Both recoveries are value_pack rows on live chip drilldowns.
-            // Deleting this would delete those two cards. Removing a fallback is
-            // a behaviour change, not cleanup (ERR-158) — re-measure with
-            // `npm run probe:search-packs` before anyone tries again.
+            // THAT MEASUREMENT IS NOW DEAD, AND SO IS ITS ARGUMENT (ERR-277).
+            // Both recovered rows were duplicate value packs, and both were
+            // retired by the backend on 2026-09-19 — `CT081KCMY` now 301s to
+            // `C81NKCMY`, `CT073CMY` to `C73NCMY`. Re-measured live 2026-09-20:
+            //
+            //   epson/81N  /api/shop 8 rows; sidecar carries 8 with that code
+            //              -> recovers NOTHING
+            //   epson/73N  /api/shop 7 rows; sidecar carries 6 with that code
+            //              -> recovers NOTHING
+            //
+            // So the two cards this block was kept alive to save no longer
+            // exist, and on the pairs measured it now buys a second request per
+            // drilldown and nothing else. That matters: the origin limiter is
+            // 100 req/60s SHARED per IP, and an admin spends it on every read
+            // (ERR-266).
+            //
+            // IT STAYS ANYWAY, and deliberately. One brand/category pair is not
+            // a catalogue-wide measurement, the merge is what covers a backend
+            // regression on `series_codes`, and removing a fallback is a
+            // behaviour change, not cleanup (ERR-158) — which is precisely how
+            // this comment came to assert something false in the first place.
+            // What changed is that the claim is no longer only a comment:
+            // `npm run probe:lookalike` re-measures the recovery live and prints
+            // the yield per brand/category/code. Read that table before anyone
+            // argues either way — do not re-derive it by hand, and do not let
+            // this paragraph rot again (a stale comment is how ERR-216
+            // happened, as the paragraph above already warned).
             //
             // The OTHER branch below (the drilldown series-count merge) is a
             // different story and is now dormant: it only counts compats whose
@@ -4198,8 +4220,29 @@ const API = {
 
     /**
      * Update product by SKU (admin - super_admin/stock_manager only)
+     *
+     * \u26a0 THIS DOCSTRING WAS THE BUG, WRITTEN DOWN. Until 2026-09-16 the route
+     * validated against a Joi schema declaring exactly the three fields listed
+     * here, under `stripUnknown: true` with `req.body` REPLACED by Joi's output
+     * \u2014 so every other key was deleted before the handler ran, and the route
+     * returned 200 having written three fields out of thirty. Name, description,
+     * colour, weight, MPN, barcode, SEO, supplier and category all vanished
+     * silently. The three-field contract here was accurate, and describing a
+     * data-loss bug faithfully is how it survives review.
+     *
+     * It now takes the same wide body as `PUT /api/admin/products/:id`, plus
+     * `compatible_devices_html` and `compatible_printer_ids`. Verified live by
+     * `npm run probe:product-write -- --write` \u00a76 (2026-09-20): `name` and the
+     * machine list both persist, and the `in_stock` / `stock_status` /
+     * `is_low_stock` response shape is unchanged.
+     *
+     * PREFER THE BY-ID ROUTE. Every admin surface already holds the UUID, and
+     * `AdminAPI.persistRichTextColumns` keys its repair `.eq('id', productId)`,
+     * so a caller who switches to by-sku silently loses `description_html`'s
+     * formatting repair on the same save.
+     *
      * @param {string} sku - Product SKU
-     * @param {object} data - { retail_price, stock_quantity, is_active }
+     * @param {object} data - the full product body; at least one field required
      */
     async updateProductBySku(sku, data) {
         return this.put(`/api/admin/products/by-sku/${encodeURIComponent(sku)}`, data);

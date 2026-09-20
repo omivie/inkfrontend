@@ -92,20 +92,82 @@
         return keys;
     }
 
-    // Rows from `candidates` that are not already present in `existing`, by
-    // productIdentityKeys. Order-preserving. Used to carry compat rows across a
-    // reconciliation swap without duplicating any row the literal set already
-    // supplied. Pinned by tests/ribbon-compat-search-additive-jul2026.test.js.
+    const skuOf = (product) => (product && product.sku ? String(product.sku).toUpperCase() : '');
+
+    // An index of "products already accounted for", and the ONE place that
+    // decides whether a new row is one of them. Every dedup on the search path
+    // goes through this so they cannot drift into separate notions of "same
+    // product" — the drift ERR-133 extracted productIdentityKeys to prevent.
+    //
+    // THE SKU VETO (ERR-277). A name match alone used to be enough, so two rows
+    // with DIFFERENT, KNOWN SKUs were merged into one card whenever their titles
+    // normalized equal — and the row we dropped was the one the customer might
+    // have wanted. That is the assertion `ProductIdentity` (utils.js) says the
+    // frontend must never make: deciding two database rows are one product is a
+    // claim about identity we cannot support, and the cards path deliberately
+    // MARKS look-alikes instead of hiding either (ERR-195).
+    //
+    // The name key still has a real job: /api/search/suggest rows can arrive
+    // without a sku (adaptSuggestProduct defaults it to ''), and without the
+    // name we would show the same product twice. So the rule is:
+    //   id match                      -> same product
+    //   sku match                      -> same product
+    //   name match, neither side naming a DIFFERENT sku -> same product
+    //   name match, two different known skus            -> TWO products
+    // The backend asked for exactly this in the Sep 2026 duplicate-pack
+    // retirement hand-off §4: a name-based dedup is unsafe because HP DesignJet
+    // sells one series in several volumes (G728130MLCMY $583.49 vs
+    // G728300MLCMY $1158.49 — both live, both in the `728` drilldown, verified
+    // 2026-09-20) which a loose comparison reads as duplicates.
+    function identityIndex() {
+        const byId = new Map();    // id   -> stored value (true when none given)
+        const bySku = new Map();   // SKU  -> stored value
+        // normalized name -> { sku: the SKU that claimed it ('' if none), value }
+        const byName = new Map();
+
+        // The stored value for the row this product is already accounted for
+        // by, or undefined when it is a product we have not seen.
+        function find(product) {
+            if (!product) return undefined;
+            const id = (product.id != null && product.id !== '') ? String(product.id) : '';
+            if (id && byId.has(id)) return byId.get(id);
+            const sku = skuOf(product);
+            if (sku && bySku.has(sku)) return bySku.get(sku);
+            const n = normalizeForMatch(product.name);
+            if (!n || !byName.has(n)) return undefined;
+            const claim = byName.get(n);
+            // THE VETO — two rows that each name a sku, and name different
+            // ones, are two products however identical their titles read.
+            if (sku && claim.sku && sku !== claim.sku) return undefined;
+            return claim.value;
+        }
+
+        return {
+            add(product, value) {
+                if (!product) return;
+                const v = value === undefined ? true : value;
+                const id = (product.id != null && product.id !== '') ? String(product.id) : '';
+                const sku = skuOf(product);
+                if (id && !byId.has(id)) byId.set(id, v);
+                if (sku && !bySku.has(sku)) bySku.set(sku, v);
+                const n = normalizeForMatch(product.name);
+                if (n && !byName.has(n)) byName.set(n, { sku, value: v });
+            },
+            find,
+            has(product) { return find(product) !== undefined; },
+        };
+    }
+
+    // Rows from `candidates` that are not already present in `existing`.
+    // Order-preserving. Used to carry compat rows across a reconciliation swap
+    // without duplicating any row the literal set already supplied. Identity is
+    // identityIndex's, so the SKU veto above applies here too.
+    // Pinned by tests/ribbon-compat-search-additive-jul2026.test.js.
     function rowsNotAlreadyIn(candidates, existing) {
         if (!Array.isArray(candidates)) return [];
-        const seen = new Set();
-        for (const p of (Array.isArray(existing) ? existing : [])) {
-            for (const k of productIdentityKeys(p)) seen.add(k);
-        }
-        return candidates.filter((p) => {
-            if (!p) return false;
-            return !productIdentityKeys(p).some(k => seen.has(k));
-        });
+        const seen = identityIndex();
+        for (const p of (Array.isArray(existing) ? existing : [])) seen.add(p);
+        return candidates.filter((p) => (p ? !seen.has(p) : false));
     }
 
     function mergeLiteralResults(suggestList, fallbackProducts) {
@@ -117,13 +179,11 @@
             if (p && p.id != null && p.id !== '') byId.set(String(p.id), p);
             if (p && p.sku) bySku.set(String(p.sku).toUpperCase(), p);
         }
-        const seen = new Set();
+        const seen = identityIndex();
         const out = [];
         const used = new Set();
-        const mark = (p) => {
-            for (const k of productIdentityKeys(p)) seen.add(k);
-        };
-        const isSeen = (p) => productIdentityKeys(p).some(k => seen.has(k));
+        const mark = (p) => seen.add(p);
+        const isSeen = (p) => seen.has(p);
         for (const s of suggest) {
             const adapted = adaptSuggestProduct(s);
             const richer = (adapted.id != null && byId.get(String(adapted.id)))
@@ -292,23 +352,23 @@
     function reattachCompatProvenance(rows, compatRows) {
         if (!Array.isArray(rows)) return [];
         if (!Array.isArray(compatRows) || compatRows.length === 0) return rows;
-        const byKey = new Map();
+        const byKey = identityIndex();
+        let tagged = 0;
         for (const c of compatRows) {
             if (!c || c.match_reason !== 'compatibility') continue;
-            for (const k of productIdentityKeys(c)) {
-                if (!byKey.has(k)) byKey.set(k, c);
-            }
+            byKey.add(c, c);
+            tagged++;
         }
-        if (byKey.size === 0) return rows;
+        if (tagged === 0) return rows;
         return rows.map((row) => {
             // An own match_reason is the backend's verdict for THIS row — never
             // overwrite it. Only a row the backend told us nothing about can be
             // re-labelled, and only from a row it did speak about.
             if (!row || row.match_reason) return row;
-            let source = null;
-            for (const k of productIdentityKeys(row)) {
-                if (byKey.has(k)) { source = byKey.get(k); break; }
-            }
+            // Same identity rule as the merges — a title collision alone must
+            // not stamp one product's provenance onto a different SKU.
+            const found = byKey.find(row);
+            const source = (found && found !== true) ? found : null;
             if (!source) return row;
             return Object.assign({}, row, {
                 match_reason: source.match_reason,
@@ -362,7 +422,7 @@
         window._searchParityHelpers = {
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
-            partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn,
+            partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn, identityIndex,
             reattachCompatProvenance,
         };
     }

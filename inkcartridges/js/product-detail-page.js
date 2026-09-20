@@ -2958,6 +2958,16 @@
             // round-trip. For the Epson Genuine 200 family the chained
             // /api/products/<sku> 500s, breaking the read of res.ok — that's
             // what the search-smart fallback below catches.
+            // FAIL-SOFT, BUT NOT SILENT (ERR-277). Both the non-ok status and
+            // the throw used to fall through to search-smart with no signal at
+            // all, so a resolver that is down for EVERY slug looks exactly like
+            // a resolver that is healthy: the page still renders, one round-trip
+            // slower, off the fallback. Measured 2026-09-20,
+            // /api/products/by-slug/ was 500ing for every slug including
+            // known-good live ones — with a nonexistent slug ALSO 500ing rather
+            // than 404ing, so there was no shape to distinguish outage from
+            // miss. Nobody noticed, because nothing said anything.
+            // Partial-ness belongs in the log, not just in the return value.
             try {
                 // Public catalog read, and genuinely edge-cached (verified MISS->HIT).
                 // credentials stated explicitly rather than left to the default (ERR-124).
@@ -2965,8 +2975,16 @@
                 if (res.ok) {
                     const json = await res.json();
                     if (json && json.ok && json.data && json.data.sku) return json.data.sku;
+                    DebugLog.error(`[resolveSkuFromSlug] /api/products/by-slug/${slug} returned 200 with no sku — falling back to search-smart`);
+                } else {
+                    // A 5xx here is an outage, not a missing product: a slug the
+                    // catalogue does not have should 404. Say which it was.
+                    DebugLog.error(`[resolveSkuFromSlug] /api/products/by-slug/${slug} -> HTTP ${res.status}`
+                        + `${res.status >= 500 ? ' (resolver OUTAGE — the search-smart fallback is carrying this page)' : ''}`);
                 }
-            } catch (_) { /* fall through to search-smart */ }
+            } catch (err) {
+                DebugLog.error(`[resolveSkuFromSlug] /api/products/by-slug/${slug} threw (${(err && err.message) || err}) — falling back to search-smart`);
+            }
 
             // Fallback: search-smart with the slug-as-query, then exact-match
             // on `slug` to avoid surfacing a near-neighbor. Same fallback shape
@@ -2986,7 +3004,13 @@
                     const match = products.find(p => p && p.slug === slug);
                     if (match && match.sku) return match.sku;
                 }
-            } catch (_) { /* return null below */ }
+            } catch (err) {
+                DebugLog.error(`[resolveSkuFromSlug] search-smart fallback threw for slug ${slug} (${(err && err.message) || err})`);
+            }
+            // BOTH paths are now exhausted. The caller redirects to /shop?q=…,
+            // which looks to the customer like a search they never ran — so this
+            // is the loudest line in the function, not a quiet `return null`.
+            DebugLog.error(`[resolveSkuFromSlug] could not resolve slug ${slug} by EITHER path — the PDP will bounce to /shop`);
             return null;
         },
 

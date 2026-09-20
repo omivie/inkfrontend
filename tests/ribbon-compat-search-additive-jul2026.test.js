@@ -405,19 +405,31 @@ test('§2 rowsNotAlreadyIn preserves order and is safe on null inputs', () => {
 });
 
 test('§2 mergeLiteralResults still dedups exactly as before the refactor', () => {
-    // productIdentityKeys was extracted OUT of mergeLiteralResults; its
-    // behaviour must be unchanged. Name-key dedup is the aggressive one, so pin
-    // it explicitly.
+    // productIdentityKeys was extracted OUT of mergeLiteralResults; the real
+    // payload behaviour must be unchanged — that is what the CE50 fixture pins.
     const { mergeLiteralResults } = loadShopHelpers();
     const merged = mergeLiteralResults(CE50_SUGGEST, CE50_PRODUCTS);
     assert.equal(merged.length, 5, 'the 3-row suggest list overlaps 3 of the 5 products');
     assert.deepEqual(skus(merged), ['GCE506A', 'C05XBK', 'CCART319BK', 'G05ABK', 'G05XBK'],
         'dropdown order first, then products-search rows the dropdown missed');
+    // CHANGED DELIBERATELY (ERR-277). This used to assert that differing id AND
+    // sku "still collapse on normalized name". That was a refactor safety-net
+    // pinning the aggressive rule, never a product requirement — and it is the
+    // one thing ProductIdentity (utils.js) says the frontend must never do:
+    // assert two rows are one product. Two known, different SKUs are now two
+    // cards, whatever their titles read.
     const byName = mergeLiteralResults(
         [{ id: 'x1', sku: 'AAA', name: 'Same Name' }],
         [{ id: 'x2', sku: 'BBB', name: 'same  name' }]
     );
-    assert.equal(byName.length, 1, 'differing id AND sku still collapse on normalized name');
+    assert.equal(byName.length, 2, 'two known, DIFFERENT skus are two products (SKU veto)');
+    // The name key still earns its place: a /suggest row can arrive with no sku
+    // at all, and without it the same product would render twice.
+    const skuless = mergeLiteralResults(
+        [{ name: 'Same Name' }],
+        [{ id: 'x2', sku: 'BBB', name: 'same  name' }]
+    );
+    assert.equal(skuless.length, 1, 'a sku-less suggest row still merges on name');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

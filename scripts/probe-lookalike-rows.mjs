@@ -53,8 +53,11 @@
  *   2  identical name-tail     — names differing only in their lead code token
  *   3  shared slug             — two rows, one URL: a canonical collision
  *   4  identical rendered card — what §7 did not check, via the shipped code
- *   5  redirect manifest       — every §4a/§4b SKU that was claimed redirected
+ *   5  redirect manifest       — every §4a/§4b/§2 SKU claimed redirected, and
+ *                                the two that must NOT be
  *   6  endpoint disagreement   — a row /api/products lists and /api/shop hides
+ *   7  compat sidecar yield    — what api.js's second request actually recovers
+ *   8  slug resolver health    — /api/products/by-slug, with a negative control
  *
  * WHAT IT DOES NOT MEASURE
  * ------------------------
@@ -300,6 +303,42 @@ const REDIRECT_MANIFEST = [
   { from: 'CT081KCMY',  to: 'C81NKCMY',     expect: 'redirect', why: '§4b — deactivated duplicate pack' },
   { from: 'CIS365CMY',  to: 'CCLT406SCMY',  expect: 'redirect', why: '§4b — deactivated duplicate pack' },
   { from: 'CIS365KCMY', to: 'CCLT406SKCMY', expect: 'redirect', why: '§4b — deactivated duplicate pack' },
+
+  // ── duplicate-pack-retirement-FE-handoff-sep2026.md §2, the other twelve ──
+  // The Sep 2026 retirement listed seventeen SKUs. Five were already above from
+  // the Aug hand-off; these are the rest. They are pinned here and not in a
+  // unit test for the reason in this file's header: nothing in the repo is
+  // wrong when one of them comes back — the DATA changes, nightly, from a
+  // supplier feed. The dedup script had retired the same rows FOUR times
+  // (05-11, 05-29, 06-16, 08-31) and they were live again each time, and the
+  // first sweep on 09-19 reverted within the day. This list is how a fifth
+  // revert gets noticed by us rather than by a customer.
+  //
+  // Two of these were charging different money for identical goods —
+  // GW213KCMY $1,403.79 vs G213AKCMY $1,616.79 — so which card a shopper
+  // landed on was luck. All seventeen verified 301ing to these exact targets
+  // 2026-09-20, and verified followed by a real browser (the GET is
+  // preflighted, so curl alone could not have settled it).
+  { from: 'G410CMY',      to: 'G410HYCMY',     expect: 'redirect', why: '§2 — Epson duplicate pack' },
+  { from: 'G312CMY',      to: 'G312HYCMY',     expect: 'redirect', why: '§2 — Epson duplicate pack' },
+  { from: 'GW213KCMY',    to: 'G213AKCMY',     expect: 'redirect', why: '§2 — HP dup, was $213 cheaper than its twin' },
+  { from: 'GW212KCMY',    to: 'G212AKCMY',     expect: 'redirect', why: '§2 — HP dup, was $330 above its twin' },
+  { from: 'GW212CMY',     to: 'G212ACMY',      expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GW218CMY',     to: 'G218ACMY',      expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GW204KCMY',    to: 'G416AKCMY',     expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GW204CMY',     to: 'G416ACMY',      expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GCF50KCMY',    to: 'G202AKCMY',     expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GCF50CMY',     to: 'G202ACMY',      expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GCF21KCMY',    to: 'G131AKCMY',     expect: 'redirect', why: '§2 — HP duplicate pack' },
+  { from: 'GCART055HCMY', to: 'GCART055HYCMY', expect: 'redirect', why: '§2 — Canon duplicate pack' },
+
+  // §2 again: CLC40KCMY was in an EARLIER DRAFT of the retirement list and is
+  // deliberately NOT retired — it carries a supplier_sku (Augmento IBLC73VP)
+  // so the importer turns it back on every run. A redirect here would 301 a
+  // live, supplier-fed product onto a different cartridge. Second negative
+  // control, same job as CBCI3BK below: a manifest of only-expect-redirect
+  // entries cannot tell "all correct" from "redirecting everything".
+  { from: 'CLC40KCMY',  to: null,           expect: 'live',     why: '§2 — supplier-keyed, must NOT be retired' },
   // §3: CBCI3BK stays LIVE and must NOT redirect. The backend consults
   // sku_redirects before a direct SKU match, so a row here would send every
   // request for the live BCI-3e black to the BCI-6 black instead.
@@ -450,6 +489,129 @@ async function main() {
     }
   }
 
+  // ── 7. compat sidecar yield ────────────────────────────────────────────
+  // api.js's getShopData fires a SECOND request per brand+category drilldown
+  // (/api/products?source=compatible) and merges it into the /api/shop result.
+  // The only thing that ever justified it was a comment recording a live
+  // measurement — and both rows that measurement named (CT081KCMY, CT073CMY)
+  // were retired in Sep 2026, so the comment outlived the thing it described.
+  //
+  // That is the failure this scan exists to prevent, not the sidecar itself.
+  // The number belongs somewhere that re-derives it, so nobody has to trust a
+  // paragraph again: this prints the yield, and api.js points here.
+  //
+  // A ZERO HERE IS NOT AN INSTRUCTION TO DELETE ANYTHING. Removing a fallback
+  // is a behaviour change, not cleanup (ERR-158), and a handful of chips is not
+  // a catalogue-wide proof. It is evidence for a decision, not the decision.
+  say('');
+  rule();
+  say('  SCAN 7 — what does the compat sidecar actually recover?');
+  rule();
+  const SIDECAR_CASES = [
+    { brand: 'epson',   category: 'ink',   codes: ['81N', '73N'] },
+    { brand: 'canon',   category: 'ink',   codes: ['PGI650', 'CLI681'] },
+    { brand: 'brother', category: 'ink',   codes: ['LC432', 'LC3339'] },
+    { brand: 'hp',      category: 'toner', codes: ['128', '05A'] },
+  ];
+  let sidecarTotal = 0;
+  let sidecarMeasured = 0;
+  for (const cs of SIDECAR_CASES) {
+    const side = await get(`/api/products?brand=${cs.brand}&category=${cs.category}`
+      + '&source=compatible&limit=200');
+    const sideList = (side.json && side.json.data && (side.json.data.products || side.json.data)) || [];
+    if (!Array.isArray(sideList) || !side.ok) {
+      note(`${cs.brand}/${cs.category}: sidecar request returned ${side.status} — yield undetermined, not zero.`);
+      continue;
+    }
+    for (const code of cs.codes) {
+      const shop = await get(`/api/shop?brand=${cs.brand}&category=${cs.category}`
+        + `&code=${encodeURIComponent(code)}&limit=200`);
+      const shopList = (shop.json && shop.json.data && (shop.json.data.products || shop.json.data)) || [];
+      if (!Array.isArray(shopList) || !shop.ok) {
+        note(`${cs.brand}/${cs.category}/${code}: /api/shop returned ${shop.status} — yield undetermined, not zero.`);
+        continue;
+      }
+      const shopSkus = new Set(shopList.map((p) => p.sku));
+      const recovered = sideList
+        .filter((p) => Array.isArray(p.series_codes) && p.series_codes.includes(code))
+        .filter((p) => !shopSkus.has(p.sku))
+        .map((p) => p.sku);
+      sidecarMeasured++;
+      sidecarTotal += recovered.length;
+      if (recovered.length) {
+        note(`${cs.brand}/${cs.category}/${code}: /api/shop ${shopSkus.size} rows, `
+          + `sidecar RECOVERS ${recovered.length} — ${recovered.join(', ')}`);
+      } else {
+        say(`     ${cs.brand}/${cs.category}/${code}: /api/shop ${shopSkus.size} rows, sidecar recovers 0`);
+      }
+    }
+  }
+  if (sidecarMeasured === 0) {
+    note('sidecar yield: nothing could be measured — undetermined, not zero.');
+  } else {
+    ok('compat sidecar yield measured',
+      `${sidecarTotal} row(s) recovered across ${sidecarMeasured} chip(s). `
+      + (sidecarTotal === 0
+        ? 'It is buying a second request per drilldown and no cards on these chips '
+          + '— evidence for the api.js note, NOT a licence to delete it.'
+        : 'It is still pulling cards onto the grid; leave it alone.'));
+  }
+
+  // ── 8. slug resolver health ────────────────────────────────────────────
+  // The retirement's promise is that "any existing link keeps working". For a
+  // SKU link that is scan 5. For a SLUG link it is this endpoint — the PDP's
+  // legacy /product/:slug route resolves through it, and the Sep 2026 hand-off
+  // §3 leans on it again for the two Brother slugs that change at the next
+  // import ("a slug_redirects hop is written automatically").
+  //
+  // THE NEGATIVE CONTROL IS THE POINT. Measured 2026-09-20 this endpoint 500'd
+  // for EVERY slug — including known-good live ones — and a nonexistent slug
+  // 500'd too, so there was no shape that distinguished outage from miss. A
+  // probe that only asked "did the good slug resolve?" would have reported a
+  // failure; a probe that only asked "does a bad slug fail?" would have
+  // reported a pass. Only asking both separates a broken resolver from a
+  // working one. The SPA's search-smart fallback hides all of this from the
+  // customer, which is exactly why nobody noticed.
+  say('');
+  rule();
+  say('  SCAN 8 — can a slug still resolve to a product?');
+  rule();
+  const liveSlugRow = rows.find((p) => p.slug && p.sku);
+  if (!liveSlugRow) {
+    note('slug resolver: no row with a slug in the walked catalogue — undetermined.');
+  } else {
+    const good = await get(`/api/products/by-slug/${encodeURIComponent(liveSlugRow.slug)}`);
+    const goodSku = (good.json && good.json.data && (good.json.data.sku || (good.json.data.product || {}).sku)) || '';
+    const bogus = await get('/api/products/by-slug/zzz-no-such-slug-probe-control-zzz');
+
+    if (good.ok && goodSku === liveSlugRow.sku) {
+      if (bogus.status === 404) {
+        ok('slug resolver', `${liveSlugRow.slug} → ${goodSku}; unknown slug 404s (control held)`);
+      } else {
+        bad('slug resolver answers a slug that does not exist',
+          `A known-good slug resolves, but the control slug returns ${bogus.status} instead of 404. `
+          + 'A resolver that never says "no" cannot be trusted when it says "yes".');
+      }
+    } else if (good.status >= 500 && bogus.status >= 500) {
+      bad('slug resolver is DOWN for every slug',
+        `/api/products/by-slug/ returns ${good.status} for a known-good live slug `
+        + `(${liveSlugRow.slug} → ${liveSlugRow.sku}) AND ${bogus.status} for a slug that does not exist. `
+        + 'Both controls fail the same way, so this is an outage, not a miss.\n'
+        + 'Customer impact is hidden: product-detail-page.js falls back to /api/search/smart, so every '
+        + 'legacy /product/:slug URL still lands on the right product one round-trip slower and with a '
+        + '5xx in the console. Nothing is broken on screen — which is why it went unreported.\n'
+        + 'This is also what §3 of the retirement hand-off leans on for the two Brother slugs that '
+        + 'change at the next import: while this is down, that promise is unverifiable.');
+    } else if (!good.ok) {
+      bad('slug resolver cannot resolve a live slug',
+        `${liveSlugRow.slug} (sku ${liveSlugRow.sku}) returns ${good.status}. `
+        + `Control slug returns ${bogus.status}.`);
+    } else {
+      bad('slug resolver resolved to the wrong product',
+        `${liveSlugRow.slug} belongs to ${liveSlugRow.sku} but the endpoint answered ${goodSku || '(nothing)'}.`);
+    }
+  }
+
   // ── verdict ────────────────────────────────────────────────────────────
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
   if (JSON_OUT) {
@@ -475,7 +637,10 @@ async function main() {
       say('  These are DATA findings, not code findings. The storefront marks look-alike');
       say('  cards with their SKU so a shopper can still tell them apart (ERR-195), but');
       say('  that is a mitigation — the rows themselves are the backend\'s to resolve.');
-      say('  Hand them over: lookalike-duplicate-rows-FE-response-sep2026.md');
+      say('  Hand them over: backend-docs/outbox/ —');
+      say('    lookalike-duplicate-rows-FE-response-sep2026.md   (look-alike rows, §4a/§4b redirects)');
+      say('    duplicate-pack-retirement-FE-response-sep2026.md  (the 17 retired packs, sidecar yield,');
+      say('                                                       slug resolver)');
     }
     if (notes.length) {
       say('');

@@ -251,8 +251,12 @@ test('§1 it uses the SHARED identity vocabulary, not a private one', () => {
     // that happens again.
     const body = blockBodyAt(SHOP_CODE, 'function reattachCompatProvenance');
     assert.ok(body, 'reattachCompatProvenance must exist');
-    assert.match(body, /productIdentityKeys\(/,
-        'identity must go through productIdentityKeys, shared with mergeLiteralResults + rowsNotAlreadyIn');
+    // The shared vocabulary is now identityIndex() (ERR-277) — it owns the same
+    // id/sku/name rule productIdentityKeys emitted, PLUS the SKU veto, and all
+    // three call sites read it. This assertion tracks the shared thing, not its
+    // former name; the intent above is unchanged and now covers one more site.
+    assert.match(body, /identityIndex\(\)/,
+        'identity must go through identityIndex, shared with mergeLiteralResults + rowsNotAlreadyIn');
     assert.doesNotMatch(body, /\.toUpperCase\(\)|\.trim\(\)|\.replace\(/,
         'no hand-rolled key normalisation — that is productIdentityKeys\' job');
 });
