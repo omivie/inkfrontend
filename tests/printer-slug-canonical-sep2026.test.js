@@ -46,6 +46,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const stripComments = require('./helpers/strip-comments');
 
 const ROOT = path.resolve(__dirname, '..');
 const JS_DIR = path.join(ROOT, 'inkcartridges', 'js');
@@ -54,16 +55,22 @@ const SHOP_JS = fs.readFileSync(path.join(JS_DIR, 'shop-page.js'), 'utf8');
 
 const { PrinterSlug, buildPrinterUrl } = require(path.join(JS_DIR, 'utils.js'));
 
-/** The 16 measured pairs: [loser, winner]. Kept here INDEPENDENTLY of the
+/** The 15 measured pairs: [loser, winner]. Kept here INDEPENDENTLY of the
  *  implementation so the test is a second opinion, not an echo of the table.
  *
- *  The 16th (Printronix) arrived from the backend on 2026-09-10 and is the one
- *  we could not have found ourselves: our discovery ran off the live sitemap,
- *  and the sitemap's slug-shape gate rejects the `.`, so NEITHER spelling has
- *  ever been in it. Confirmed independently 2026-09-12 via
- *  /api/printers/search?q=103.23 — two rows, model_name "103.23" and "103.23.".
+ *  THIS LIST WAS 16 FOR TEN DAYS. The backend asked us on 2026-09-10 to add
+ *  `printronix-103.23.` → `printronix-103.23` as a 16th pair we could not have
+ *  found ourselves (our discovery ran off the live sitemap, whose slug-shape
+ *  gate rejects the `.`), and on 2026-09-16 it WITHDREW that request: an audit
+ *  found neither row was a printer. `103.23` is the part number of Printronix's
+ *  own ribbon, and both rows held nothing but 8 Epson 103 EcoTank INK products
+ *  that had arrived by a bare-number collision. They were twins because they
+ *  were both wrong in the same way, which is exactly what identical compat-link
+ *  counts — the check both sides used to prove they were twins — cannot tell you.
+ *  Both rows are deactivated; §5 pins the retirement AND the survival of the
+ *  rule that found it.
  *
- *  Also settled that day: the backend's grouping rule counted 21 groups where
+ *  Also settled 2026-09-12: the backend's grouping rule counted 21 groups where
  *  we counted 15, and the six-group difference was NOT ours to adopt. Five of
  *  the extra six differ only by a trailing `+`, which is part of the model name
  *  — LQ-300 vs LQ-300+, M880z vs M880z+ are different printers. Verified as
@@ -71,7 +78,11 @@ const { PrinterSlug, buildPrinterUrl } = require(path.join(JS_DIR, 'utils.js'));
  *  `hp-color-laserjet-m880z`, `…m880z+` AND `…m880z+nfc`). Canonicalising those
  *  would not consolidate a duplicate, it would delete a working page — the same
  *  objection as brother-dcp-130c / brother-dcp-135c, with a different
- *  character. §5 pins the refusal so nobody "completes" the table later. */
+ *  character. §5 pins the refusal so nobody "completes" the table later, and
+ *  the refusal has since been VINDICATED: the backend widened its printer slug
+ *  gate on 2026-09-16 and all five of those pages now serve products (measured
+ *  2026-09-20: epson-300+ 1, epson-1600k3+ 1, hp-color-laserjet-m880z+ 4). Had
+ *  we canonicalised them away, five working pages would have been deleted. */
 const MEASURED_PAIRS = [
     ['brother-hll-3230cdw',              'brother-hl-l3230cdw'],
     ['epson-ec-otank-et-2850',           'epson-ecotank-et-2850'],
@@ -88,21 +99,20 @@ const MEASURED_PAIRS = [
     ['hp-smarttank-7600',                'hp-smart-tank-7600'],
     ['oki-mc-362dn',                     'oki-mc362dn'],
     ['oki-ml-182',                       'oki-ml182'],
-    ['printronix-103.23.',               'printronix-103.23'],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
 // §1  The table itself
 // ─────────────────────────────────────────────────────────────────────────
 
-test('§1 all 16 measured losers map to their winner', () => {
+test('§1 all 15 measured losers map to their winner', () => {
     for (const [loser, winner] of MEASURED_PAIRS) {
         assert.equal(PrinterSlug.canonical(loser), winner,
             `${loser} must canonical to ${winner}`);
     }
 });
 
-test('§1 the table holds exactly the 16 measured pairs — no more, no fewer', () => {
+test('§1 the table holds exactly the 15 measured pairs — no more, no fewer', () => {
     const actual = Object.entries(PrinterSlug.DUPLICATES).sort();
     const expected = MEASURED_PAIRS.map(([l, w]) => [l, w]).sort();
     assert.deepEqual(actual, expected,
@@ -325,17 +335,108 @@ test('§5 a trailing + is NEVER canonicalised away — those are different print
     }
 });
 
-test('§5 the Printronix pair is prerender-only, and the table says so', () => {
-    // A reader who checks the sitemap for printronix-103.23 finds nothing and
-    // could reasonably conclude the entry is wrong. The comment beside it has
-    // to explain that absence, or this pair looks like a mistake forever.
-    assert.equal(PrinterSlug.canonical('printronix-103.23.'), 'printronix-103.23');
-    const block = UTILS_SRC.slice(
-        Math.max(0, UTILS_SRC.indexOf("'printronix-103.23.'") - 1400),
-        UTILS_SRC.indexOf("'printronix-103.23.'")
-    );
-    assert.match(block, /sitemap/i, 'the entry must explain why neither spelling is sitemapped');
-    assert.match(block, /prerender/i, 'and which surface it actually serves');
+test('§5 the Printronix pair is RETIRED — absent from the table, identity in the code', () => {
+    // 2026-09-20. This pair was here for ten days and is now gone, because the
+    // backend withdrew its own request: neither row was a printer. `103.23` is
+    // the part number of Printronix's own RIBBON, and both rows held nothing but
+    // 8 Epson 103 EcoTank INK products that arrived by a bare-number collision.
+    //
+    // ***A REMOVAL NEEDS A TEST MORE THAN AN ADDITION DOES.*** The old version of
+    // this test asserted the mapping existed. Deleting that assertion alone would
+    // leave nothing at all pointing at this slug, so the next reader of the
+    // backend's 2026-09-10 document — which asks in plain words for the pair to be
+    // added — has no way to discover that the ask was withdrawn, and re-adds it.
+    // These three assertions are what makes the absence deliberate rather than
+    // merely true.
+    for (const slug of ['printronix-103.23.', 'printronix-103.23']) {
+        assert.ok(!PrinterSlug.isDuplicate(slug),
+            `${slug} is retired, not consolidated — there is no winner to canonicalise to`);
+        assert.equal(PrinterSlug.canonical(slug), slug,
+            `${slug} must come back unchanged; a canonical here would advertise a 404`);
+    }
+    assert.ok(!Object.keys(PrinterSlug.DUPLICATES).some((k) => k.startsWith('printronix')),
+        'no Printronix spelling belongs in the table');
+    assert.ok(!Object.values(PrinterSlug.DUPLICATES).some((v) => v.startsWith('printronix')),
+        'and none may be a winner either');
+
+    // The reason has to survive in the file, or this looks like an oversight to
+    // anyone holding the document that asked for the pair.
+    assert.match(UTILS_SRC, /RETIRED, NOT RENAMED/,
+        'utils.js must say the pair was retired rather than merged');
+    assert.match(UTILS_SRC, /ribbon/i,
+        'and why: 103.23 is a ribbon part number, not a model number');
+});
+
+test('§5 the RULE that found the pair outlives the pair (a 17th of that shape must group)', () => {
+    // THE HAZARD THIS PINS. The Printronix row and the trailing-full-stop rule
+    // arrived in the same change and are easy to mistake for one thing. They are
+    // not: the INSTANCE was a data defect, the RULE is still correct, and the
+    // backend said so explicitly — "the trailing-full-stop rule stays in
+    // printerSlugKey and is still pinned; the next feed row spelled that way must
+    // still group. Only this instance is gone."
+    //
+    // Read from the ONE owner (the probe's `strip`), extracted rather than
+    // re-typed. ERR-231 is this repo's record of a probe certifying a REPLICA of
+    // the thing it was meant to check; a second copy of this rule in a test would
+    // be that again, and would keep passing after the real rule was edited.
+    // Comments stripped first, via the repo's single owner for that job: the
+    // declaration carries trailing `//` comments on two of its lines, so the
+    // statement's own terminating `;` is followed by trailing spaces, not the newline
+    // the naive `;\n` would need. Both details are why this extracts rather than
+    // re-types: the rule may be reformatted, and this must still find it.
+    const probeSrc = stripComments(fs.readFileSync(
+        path.join(ROOT, 'scripts', 'probe-printer-canonicals.mjs'), 'utf8'));
+    const m = probeSrc.match(/const strip = \(s\) => String\(s\)[\s\S]*?;[ \t]*\n/);
+    assert.ok(m, 'probe-printer-canonicals.mjs must still declare `strip` — it is the rule');
+    // eslint-disable-next-line no-new-func
+    const strip = new Function(`${m[0]} return strip;`)();
+
+    assert.equal(strip('acme-99.9.'), strip('acme-99.9'),
+        'a TRAILING full stop is a data-entry artefact and must still merge');
+    assert.equal(strip('oki-mc-362dn'), strip('oki-mc362dn'),
+        'separators must still merge');
+    assert.notEqual(strip('epson-1600k3+'), strip('epson-1600k3'),
+        '`+` is part of the model name and must NEVER merge');
+    assert.notEqual(strip('brother-dcp-130c'), strip('brother-dcp-135c'),
+        'two real printers one character apart must stay distinct');
+    assert.notEqual(strip('printronix-103.23'), strip('printronix-10323'),
+        'a MID-slug full stop is not an artefact and must not be stripped');
+});
+
+test('§5 a `+` in an emitted URL is PERCENT-ENCODED — a bare one decodes to a space', () => {
+    // The five `+` pairs we refused are no longer hypothetical pages. The backend
+    // widened its printer slug gate on 2026-09-16, and measured 2026-09-20 all
+    // five now serve products (epson-300+ 1, epson-1600k3+ 1,
+    // hp-color-laserjet-m880z+ 4, hp-designjet-z9+-24in 11). So the refusal
+    // stopped being a defence of an empty page and became a link we have to emit
+    // CORRECTLY.
+    //
+    // ***`+` IS THE ONE CHARACTER THAT CHANGES MEANING BETWEEN A PATH AND A QUERY
+    // STRING.*** In a query string it is legacy-decoded as a SPACE, so a link
+    // written with a literal `+` names a printer whose slug ends in a space — a
+    // different slug, and one no row has. encodeURIComponent writes `%2B`, which
+    // is why buildPrinterUrl is correct today; this pins it, because the obvious
+    // "simplification" (template-literal the slug straight in) is silent.
+    for (const slug of ['epson-300+', 'epson-1600k3+', 'hp-color-laserjet-m880z+',
+                        'hp-designjet-z9+-24in']) {
+        const url = buildPrinterUrl({ slug, brand_slug: 'epson' });
+        assert.ok(url, `${slug} must still produce a URL`);
+        assert.ok(!/\+/.test(url),
+            `${url} carries a bare + — URLSearchParams would read it back as a space`);
+        assert.match(url, /%2B/, `${slug} must be percent-encoded`);
+
+        // The round trip is the assertion that matters: what a browser hands back
+        // to parseURLState must be the slug we started with.
+        const readBack = new URLSearchParams(url.split('?')[1]).get('printer_slug');
+        assert.equal(readBack, slug,
+            'the slug must survive the round trip through the query string');
+    }
+
+    // Negative control: the same round trip on a BARE `+` really does corrupt,
+    // so the assertion above is not passing on a property of URLSearchParams that
+    // does not exist.
+    assert.equal(new URLSearchParams('printer_slug=epson-300+').get('printer_slug'),
+        'epson-300 ', 'a bare + decodes to a space — this is the hazard being guarded');
 });
 
 test('§5 whole-value matching — a slug that is a PREFIX of another is not a hit', () => {

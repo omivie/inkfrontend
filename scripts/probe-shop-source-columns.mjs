@@ -39,6 +39,7 @@
  */
 
 import { chromium } from 'playwright';
+import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const CODE_URL = process.env.PROBE_SHOP_PATH || '/shop?brand=brother&category=ink&code=LC3317';
@@ -201,6 +202,13 @@ async function load(page, url) {
 }
 
 console.log('\n\x1b[1mprobe:shop-columns — Compatible left / Genuine right on /shop and /search\x1b[0m');
+// THIS PROBE IS A WRITER, AND ITS SOURCE NEVER SPELLS THE ENDPOINT (ERR-271).
+// SEARCH_URL sends the browser to the site's own /search?q= page, so the SPA
+// issues GET /api/search/* and the backend writes a `search_analytics` row. The
+// enrolment detector used to grep script SOURCE for the endpoint, which this
+// file has never contained. `lc531` stays REAL — the whole measurement is which
+// SOURCE each returned card carries, and a sentinel returns no cards.
+printSearchAnalyticsNotice();
 console.log(`   base: ${BASE}\n`);
 
 const browser = await chromium.launch();

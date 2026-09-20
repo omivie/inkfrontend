@@ -41,6 +41,180 @@ describing the same incident.
 
 ---
 
+## ERR-272 — The machine-list editor was read-only against a route that had worked for six weeks, and our own slug gate was quietly dropping 20 printers — **RESOLVED** (2026-09-20)
+
+**Context.** The backend answered our four open asks
+(`backend-docs/inbox/fe-open-asks-backend-response-sep2026.md`). Three were real and fixed on
+their side; one was already true. This entry is what the frontend had to do to collect on them —
+and the two places their reply is wrong about our side, both of which changed the design.
+
+**Nothing here was taken on trust, theirs or ours.** `npm run probe:product-write -- --write`
+creates its own throwaway product, exercises every claim, and deletes it. 21/0.
+
+---
+
+### §1 BF-062 — the panel was read-only against a route that worked
+
+For ten days `js/admin/utils/for-use-in.js` refused to save, and said so in the UI: *"no admin
+route can write it yet — a Save would be accepted and silently discarded"*. That was honest and
+it was wrong. ERR-244 measured `PUT /api/admin/products/:id` answering **200** for
+`compatible_devices_html` and concluded it was discarded. It was not. The route we actually
+measured discarding fields was **`by-sku/:sku`**, whose Joi schema declared three fields
+(`retail_price`, `stock_quantity`, `is_active`) while `validate()` ran `stripUnknown: true` and
+**replaced `req.body` with Joi's output** — deleting the other twenty-seven before the handler ran.
+Name, description, colour, weight, MPN, barcode, SEO, supplier and category, all silently.
+
+> ***A 200 tells you the request was accepted. It never tells you which of two routes you were
+> looking at.*** The decoy we reported was real; we attached it to the wrong path.
+
+Measured with the probe, on a subject it created and destroyed:
+
+| | before | after |
+|---|---|---|
+| `PUT /:id` `{compatible_devices_html}` → admin mirror | assumed discarded | **persists** |
+| `PUT /by-sku/:sku` `{name}` | stripped | **persists** |
+| omitting the key on a later PUT | unknown | **leaves the list alone** |
+| `compatible_devices_html: ""` | unknown | **clears it** |
+| an unknown key, and `for_use_in_html` | discarded | **still discarded** (negative control) |
+
+**🚨 THE ECHO THEY PROPOSED AS THE PROOF DOES NOT EXIST, AND COULD NOT HAVE BEEN THE PROOF
+ANYWAY.** Their §1 says both routes now echo the field back so a caller can distinguish a real
+write from a silent strip. Measured: no `compatible_devices_html` key comes back at all — an
+implementation built on that suggestion would read **every successful write as a strip**. And the
+echo is the wrong instrument regardless: a route that strips the field can still hand back the
+string it was given, which is exactly how every decoy in this codebase has worked (ERR-151). So
+`writeForUseIn()` PUTs and then **re-reads through a route that took no part in the write**, and
+returns four states, not a boolean — `saved` / `saved-unverified` / `list-failed` / `refused`.
+`saved-unverified` is deliberately not folded into `saved`; absence of confirmation is not
+confirmation (ERR-063/068/073/075/076/149/150).
+
+**⚠️ THIS CORRECTS THEIR REPLY AND OUR OWN COMMENT.** Their §1: the list *"is not a `products`
+column (migration 132 dropped that mirror), so a re-fetch cannot carry it"*. Our
+`products.js` said `full.compatible_devices_html` is *"permanently undefined"*. Both false.
+`GET /api/admin/products/:id` carries it, **byte-identical to the public
+`/api/products/:sku/for-use-in` on 3/3 products holding real lists** (123, 183, 232 chars) — that
+route joins `product_compat_devices`. Which is the only reason verify-by-re-read is possible.
+
+**🚨 AND THE FIRST VERSION OF THE EDITOR COULD NOT EDIT AN UNPUBLISHED PRODUCT.** It seeded from
+the public endpoint, on the good reasoning that an admin should see what a shopper sees. But that
+endpoint **404s for `is_active: false`**, the panel correctly calls that `unavailable`, and the
+editor deliberately refuses to open over a failed read — so the machine list of an unpublished
+product, *the one an operator is still preparing*, was permanently uneditable. The admin mirror
+now seeds; the public read stays as a cross-check, and when the two differ the panel says the
+storefront copy is cached for up to five minutes rather than picking a winner (ERR-263: two
+surfaces disagreeing may be looking at different **moments**, not different code).
+
+> ***Logic that is correct in isolation can still be wrong in place. Driving the real panel
+> against a real record found this; reading the file would not have.***
+
+**Not a rich-text editor, on purpose.** `description_html` survives the backend sanitiser only
+because `persistRichTextColumns` re-writes it straight to Supabase afterwards (ERR-034, ERR-244).
+That repair **cannot reach `product_compat_devices`** — RLS, service-role only — so their
+sanitiser's output is final and generated markup could not be repaired. A source textarea with a
+live preview sends exactly what the operator can see. Their allow-list here is deliberately wider
+than for descriptions (`<div> <b> <span> <br>` survive), and the preview renders through an
+allow-list of our own rather than `innerHTML` of a network value.
+
+**The sanitiser rewrites `<br>` as `<br />`, and that is not an error.** The probe's own first
+write run reported three failures that were all this one fact — ERR-243 had recorded the same
+transform a fortnight earlier and this file's author did not apply it. `normaliseForUseIn()` now
+forgives exactly the measured transforms and nothing else, both raw values are printed on a
+mismatch, and a successful save **re-seeds the box from the server's copy** so the next reopen
+does not read as an unsaved edit.
+
+### §2 Partial-PUT defaulting — fixed upstream, one fallback kept, one write repaired
+
+Their §2 removed three `.default()`s from the update schema. Measured (probe §4): a rename-only
+PUT now leaves `is_active`, `track_inventory` and `low_stock_threshold` alone. `stockAdjustPayload`
+keeps its `is_active` echo-back anyway — **removing a fallback is a behaviour change, not cleanup**
+(ERR-158) — with the measurement and its date in the comment so it is defence, not cargo.
+
+**`js/admin/pages/margin.js` was the one product write that bypassed `AdminAPI`**, and it had the
+failure mode that shape always has: `window.API._fetchWithAuth(... 'PUT' ...)` **resolves** for a
+refusal, so a 400 or an `{ok:false}` fell into the success branch. The button turned green, the
+toast said "Price updated", and the price had not changed — with no `details[]` and no `(ref …)`
+to quote at anyone. Routed through `AdminAPI.updateProduct`, which throws.
+
+### §3 Their printer-slug fix exposed one of ours
+
+Verified live: `hp-designjet-z9+-24in` **200, 11 products**; `epson-300+`, `universal-81001.01`
+200; `hp-2700/2700e` and `foo,bar` still **400**, with the new grammar quoted in the error body.
+
+**🚨 OUR OWN GATE WAS STRICTER THAN THE SERVER'S, AND HAD BEEN FOR LONGER THAN THIS CHANGE.**
+`PrinterContext.SLUG_PATTERN` was `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`, with a docstring asserting slugs
+are "lowercase, hyphen-joined, alphanumeric" as though that were the contract. It never was — the
+backend has always allowed `_`, and now allows `.` and `+`. `normalize()` returns `null` for a
+non-match, and null is this module's honest answer for "not a slug", so there was **no error, no
+log and no symptom**: it simply stopped knowing. Measured against the live sitemap, **20 printer
+URLs carry a `.` or a `+`**, and every shopper arriving on one lost the printer annotation on
+their cart line and on their order.
+
+> ***A client-side pattern stricter than the server's is not "extra safe". It is a second,
+> undocumented spec that nothing reconciles, and it fails silently by construction.***
+
+Widened to mirror the server (`/^[a-z0-9][a-z0-9_.+-]*$/`). The refusals stay refusals: `, ( ) /
+$ @ \ '` are the PostgREST `.or()` break-out characters (ERR-202/231 family), and the 13 real
+printers carrying them need a server-side slug repair plus a redirect hop, not a wider gate here.
+
+**And the admin was manufacturing collisions.** `js/admin/pages/printers.js` `slugify()` collapsed
+`[^a-z0-9]+`, so **"Epson LQ-300+" → `epson-lq-300`** — the slug of a genuinely different printer.
+`+` is the one character the duplicate-printer canonical rule deliberately preserves (ERR-242
+§9.3), and the single helper in the repo that generates printer slugs was the one place throwing
+it away. It now keeps `.` and `+`, and its greedy trim drops a **trailing** dot — the exact
+artefact that produced the `printronix-103.23.` junk row — while keeping an interior one.
+
+### §4 Suppliers — confirmed, with one new finding
+
+`GET /api/admin/suppliers` → **200, 2 suppliers** (Augmento 509 products, Supplier2026 491),
+derived from `supplier_offers` as they describe. The vestigial table is not the source and no
+frontend change is needed. **But `email` is `null` on both**, though their §4 says
+`supplier_contacts` (2 rows) is joined for exactly that field. Raised as **BF-067**.
+
+**Tests.** `tests/for-use-in-write-sep2026.test.js` (26) and
+`tests/printer-slug-gate-sep2026.test.js` (14), both executing lifted source rather than grepping
+it, every guard red-proofed against a mutated copy of the **string** — peers hold this repo and a
+mutated file on disk is a deployed file (ERR-258). Two existing suites were **inverted rather than
+deleted**, each keeping its positive control and gaining a note on why the answer changed:
+`rich-text-persist-may2026.test.js` (the ERR-244 test asserting the field must *not* be sent) and
+`printer-slug-order-plumbing-aug2026.test.js` (whose refusal list included three slugs the backend
+accepts). Full suite 6456, 0 failures in these areas.
+
+**§2 of the test file found a bug in the module before it shipped**: `confirmed === null` as the
+"could not read" sentinel meant every successful **clear** — which reads back as exactly `null` —
+reported itself as unconfirmed. ABSENT ≠ null ≠ `''` (ERR-199), landing inside the very function
+written to avoid it. Now a separate `confirmedKnown` flag.
+
+**And the probe caught a defect in itself.** Its §2 grepped raw source for
+`compatible_devices_html` and matched the **comment** explaining why the field was not sent. It
+now reads through `tests/helpers/strip-comments.js`, the one repo-wide owner (ERR-253), with a
+positive control that the stripper did not eat the file.
+
+**Verified in the real admin**, not only in tests: a throwaway inactive product, created and
+deleted through the API, driven through the shipped panel in Chromium — seeds from the mirror,
+no-op save refused without a round trip, edit saved and confirmed (`data-for-use-in-write="saved"`),
+clear emptied it and repainted the "no list" state, a second clear refused. Three layout defects
+were visible only in that screenshot and are fixed: the Source caption rendered beside its box
+(`.admin-form-group label` outranked ours), the textarea scrolled sideways instead of wrapping,
+and the stored-value box duplicated the textarea verbatim.
+
+**Backend**: `backend-docs/outbox/fe-open-asks-verification-sep2026.md`, **BF-067** — the
+`supplier_contacts` email join, the missing echo, and the re-fetch correction.
+`outbox/fe-verification-round-FE-response-sep2026.md` → `sent/` (their reply names BF-062, which
+originates there).
+
+**Files.** `js/admin/utils/for-use-in.js` · `js/admin/pages/products.js` ·
+`js/admin/pages/margin.js` · `js/admin/pages/printers.js` · `js/printer-context.js` ·
+`js/admin/api.js` · `js/api.js` · `css/admin.css` · `scripts/probe-product-write-fields.mjs` ·
+`tests/for-use-in-write-sep2026.test.js` · `tests/printer-slug-gate-sep2026.test.js` ·
+`tests/rich-text-persist-may2026.test.js` · `tests/printer-slug-order-plumbing-aug2026.test.js`.
+
+**Not done, and not mine to do.** `js/shop-page.js:3391` `getColorPacks` treats a
+`VALIDATION_FAILED` or a 500 exactly like "this printer has no packs" — absence-as-zero, the
+fail-soft family. It was in scope and is left unfixed: two concurrent sessions hold that file with
+uncommitted work. Raised with both; logged here so it does not become nobody's.
+
+---
+
 ## ERR-273 — The cache probe measured a key no browser fills, and its only negative control went green underneath it — **RESOLVED** (2026-09-20)
 
 **Context.** The backend's `fe-three-open-asks-backend-response-sep2026.md` §3 reported the Cache
@@ -2135,6 +2309,54 @@ dataset we quietly contribute to is a dataset we cannot cite.** That is the line
 anyone writing a new probe — ahead of the mechanism of any individual instance.
 
 
+
+### ERR-254 addendum — `warm` was the biggest polluter, and the exclusion is wider than we asked for (2026-09-20)
+
+Two facts that lived only in a code comment and are now recorded where the entry is.
+
+**1. The largest single polluter was not a `zz` string at all.** `probe-data-capture.mjs` warmed both
+hosts with `q=warm` on every invocation. The backend measured it independently: **21 rows, 0
+sessions, always 0 results, and 17 of them sharing an IP with a `zz%` prober** — sitting at **#1 in
+the live 7-day zero-result top-15, ahead of `lc73`**. It looked organic for months because a
+one-word lowercase query is exactly what a person types. Renamed to `zzprobe_warm` on 2026-09-16;
+the measurement was in a comment at `probe-data-capture.mjs:129-135` and nowhere else, which is the
+shape this repo calls *a citation is not a measurement*.
+
+**2. Our ask was too narrow and the backend widened it.** We asked for
+`query NOT LIKE 'zzprobe%'`. That would have caught **20 rows of 86**. Both sides have been firing
+`zz`-prefixed probes since April in varying shapes (`zzq1789008040`, `zzqqxnonexistent`,
+`zzqxwvqwerty12345`, `zzz_no_results_<ts>`, `zzznotreal`), so it is now `zz%` plus `warm`, `ping` and
+`healthcheck`. `zz` is safe as a marker because `products`, `printer_models` and `brands` contain
+zero rows starting with `zz` — checked, not assumed. What it was costing, live over 7 days:
+zero-result rate reported **16.91 %** against an actual **14.12 %**, and **6 of the top 15
+zero-result terms were ours** — on the list that answers "what is the catalogue missing", so a
+polluted one sends someone sourcing products nobody searched for.
+
+**`test` is deliberately NOT filtered, and must never be proposed again.** A human can type it, and
+guessing wrong there deletes real demand. The real rule is recorded in
+`scripts/lib/probe-search-notice.mjs` as `EXCLUDED_BY_BACKEND` — **as documentation, not as a
+predicate**: re-implementing someone else's SQL locally is ERR-231's "the probe was certifying a
+REPLICA of the escaper", and a copy can only ever agree with itself. What we can honestly assert is
+a fact about our own strings, so `probeQuery()` now **throws** if it ever produces a term that does
+not start with `zz` — a sentinel that silently fails to apply is indistinguishable from organic
+traffic, which is the entire defect.
+
+**3. The site itself was about to become the biggest polluter of all.** `js/landing.js`'s
+`loadFeaturedProducts()` called `API.smartSearch('ink cartridge', 8)` — on a page every visitor
+loads. It was **inert when found** (no HTML in this repo contains `#featured-products-grid`, so the
+guard returned before the call), which is not a reason to leave it: it was a landmine armed by
+whoever next adds that markup, and the pollution would have started silently. Unlike a probe term
+this one is **unfilterable** — "ink cartridge" is what a real shopper types, the same argument that
+protects `test`. Now reads `/api/products/popular` (`API.getPopularProducts`), which is the endpoint
+that *means* featured and is edge-cached. Pinned by
+`tests/probe-search-analytics-honesty-sep2026.test.js` §11, with both a positive and a negative
+control on the detector, and `tests/dense-pack-rollout-may2026.test.js` §2 — which had been pinning
+`smartSearch`'s second argument, i.e. **the accident (which endpoint supplied the rows) rather than
+the rule (the rail shows a small slice)** — now reads the limit source-agnostically and forbids the
+search endpoint outright.
+
+See **ERR-271** for the enrolment guard that could not see five of these writers.
+
 ## ERR-251 — The four decoy filters became real, and a page that had correctly refused to send them was now hiding a capability — **RESOLVED** (2026-09-12)
 
 - **Date**: 2026-09-12 · **Context**: on 2026-09-03 (ERR-204) `product_type`, `sort`, `offset` and `search` were measured as **decoys** on `/api/admin/analytics/catalog/products` — accepted by the validator, dropped by `stripUnknown`, so the endpoint answered **page one with a 200 however you paged it**. Catalogue Engagement therefore shipped with **no pager at all** and a caption that said so: *"raise Show to see more — this endpoint has no next page"*. That was the right call. A Next button that silently re-serves page one is the **ERR-151 decoy failure rebuilt inside our own UI**, and a control that does nothing is worse than an absent one.
@@ -2188,6 +2410,59 @@ anyone writing a new probe — ahead of the mechanism of any individual instance
 - **Verified**: `npm run probe:printer-canonicals` — **8 passed, 0 failed**; 0 of 16 losers in the sitemap, 15/16 winners present (the 16th shape-excluded and named), 11 duplicate groups discovered and all resolving to one URL, and **4/4 sampled prerender canonicals confirmed** (was 0/4, falsely). `tests/printer-slug-canonical-sep2026.test.js` 22/22, with the five `+` refusals pinned so nobody "completes" the table later.
 - **Lesson**: when you ask someone to remove data, check what of yours was reading it. A detector and the thing it detects can share a source, and the day the source is cleaned the detector reports success.
 - **Files**: `js/utils.js` · `scripts/probe-printer-canonicals.mjs` · `tests/printer-slug-canonical-sep2026.test.js`.
+
+
+### ERR-249 addendum — the 16th pair was RETIRED, and the ask was withdrawn (2026-09-20)
+
+The Printronix pair this entry added as the 16th group is **gone from `PrinterSlug.DUPLICATES`**, and
+the canonical table is back to the original fifteen. Written in the past tense on purpose: the
+backend's 2026-09-10 document asking us to add it is still on disk in `backend-docs/inbox/`, and a
+reader who finds it and greps for the entry now finds nothing.
+
+`fe-three-open-asks-backend-response-sep2026.md` §1 and its companion both withdraw the request.
+**Neither row was a printer.** Printronix build line-matrix and dot-matrix machines, which take
+RIBBONS; `103.23` is the part number of *Printronix's own ribbon*, sitting in our catalogue as
+"Printronix Compatible 103.23 FN Black Printer Ribbon". Both rows held nothing but 8 Epson 103
+EcoTank INK products, which had arrived by a **bare-number collision** — the cartridge's `103`
+matching a printer row whose name *is* the ribbon's part number. Three more rows of the same shape
+confirmed it (`printronix-$100works` and `printronix-30-day` are supplier marketing prose parsed
+into `printer_models` as machines).
+
+> ***The check that proved they were twins was true and beside the point.*** Identical compat-link
+> counts on both sides is what both we and the backend used as the twin test. They were twins
+> because they were both wrong **in the same way** — which is the one thing that test cannot
+> distinguish from being right.
+
+Verified live 2026-09-20 rather than taken from the hand-off: both spellings now `404 NOT_FOUND`
+(they were `400 VALIDATION_FAILED` until the printer slug gate was widened to admit `.` and `+`),
+`printronix-30-day` 404s, `printronix-p300` serves 200 with no Epson ink. Both status codes land in
+the same place on our side — `isBadPrinterSlug()` treats `VALIDATION_FAILED` and `NOT_FOUND` alike —
+so a visitor to either URL still meets the unsupported-printer state.
+
+**The RULE stays, and that distinction is the whole point of the change.** The instance was a data
+defect; the trailing-full-stop clause in the probe's `strip()` is still correct and the next feed row
+spelled that way must still group. `tests/printer-slug-canonical-sep2026.test.js` §5 now asserts
+*both* halves in separate tests — the pair is absent, and the rule still merges — and they
+red-proof independently: re-adding the row fails the retirement test, deleting the clause fails only
+the rule test.
+
+**This entry's own lesson applied to this change.** ERR-249 is "when you remove data, check what was
+reading it". The entry had **four** readers, and the one that would not have been predicted is
+`tests/brand-canonical-audit-may2026.test.js:56-65`, which regex-extracts the whole
+`const PrinterSlug = {…}` literal and evals it — it survived only because the object was not
+reformatted. A peer session flagged it before I looked.
+
+**And the refusal that saved five pages has been vindicated.** The five `+` pairs we declined to
+canonicalise were 400ing at the time, so the refusal looked like it was defending nothing. The
+backend widened the slug gate on 2026-09-16 (33 active rows with real compat links had been refused;
+20 unblocked by admitting `.` and `+`) and all five now serve products — `epson-300+` 1,
+`epson-1600k3+` 1, `epson-1900k2+` 1, `hp-color-laserjet-m880z+` 4, `hp-colour-laserjet-m880z+` 6.
+Canonicalising them would have deleted five working pages. New `probe:printer-canonicals` **§3b**
+(the retirement, plus 6/6 Epson 103 cartridges keeping ≥12 EcoTank printers and zero Printronix
+links — the check that the 40-link suppression did not over-match) and **§3c** (the five `+` pages,
+including an assertion that the route serves the slug we *asked* for, since a gate that silently
+normalised `+` away would answer 200 with the bare printer and quietly create the duplicate we
+refused).
 
 ## ERR-250 — BF-021 closed after six weeks, and two probes were still asserting the world it left — **RESOLVED** (2026-09-12)
 

@@ -99,6 +99,15 @@ const strip = (s) => String(s)
 
 // Positive control for the rule itself, asserted before it is trusted. A
 // grouping rule with no control is how 17,686 edit-distance "pairs" happened.
+//
+// ⚠️ THIS CONTROL OUTLIVES THE ROW IT NAMES, DELIBERATELY. The Printronix pair
+// was retired on 2026-09-16 and is no longer in PrinterSlug.DUPLICATES — but
+// these are assertions about the RULE, made on string literals, and they do not
+// need the row to exist. The trailing-full-stop clause is still live and the
+// next feed row spelled that way must still group; deleting this block as "dead
+// code about a retired printer" would remove the only check that the clause
+// still works. tests/printer-slug-canonical-sep2026.test.js §5 extracts `strip`
+// from this file and asserts the same thing from the other side.
 {
     const same = strip('printronix-103.23.') === strip('printronix-103.23');
     const differ = strip('epson-1600k3+') !== strip('epson-1600k3');
@@ -168,13 +177,17 @@ console.log('       so grouping the sitemap can only ever find zero. Discovery i
     console.log(`      ${presentWinners.length} of ${winners.size} winners are in the sitemap`);
     const absent = [...winners].filter((w) => !live.has(w));
     if (absent.length) {
-        // Not a failure: printronix-103.23 is shape-excluded by design, and a
-        // winner with no compat links legitimately never qualified. Named, so
-        // the absence is visible rather than looking like an oversight.
+        // Not a failure, and as of 2026-09-20 no longer expected either. This
+        // used to carry a standing exception for the Printronix pair, whose slug
+        // the sitemap's shape gate rejected — that pair is retired and out of the
+        // table, so the exception went with it. Any name here now is a winner
+        // with no compat links, which is a real thing and legitimately never
+        // qualified for the sitemap. Named, so the absence stays visible rather
+        // than looking like an oversight.
         soft('a winner is not in the sitemap',
-             `${absent.join(', ')} — expected for the Printronix pair (the sitemap's slug-shape `
-             + `gate rejects the '.', so neither spelling has ever been submitted; the prerender `
-             + `canonical is doing what it can). Any OTHER name here is a winner with no compat links.`);
+             `${absent.join(', ')} — a winner with no compatibility links never qualifies `
+             + `(sitemap-printers.xml selects on product_compatibility!inner). Check the row has `
+             + `links before treating this as a sitemap fault.`);
     }
 }
 
@@ -272,24 +285,18 @@ let checked = 0;
 for (const [loser, winner] of entries) {
     if (!liveSlugs.has(loser) && !liveSlugs.has(winner)) {
         // ⚠️ ABSENT FROM THE SITEMAP HAS TWO CAUSES AND THEY NEED OPPOSITE ACTIONS.
-        // "The rows were merged, retire the entry" is one. The other is that the
-        // sitemap's slug-shape gate REFUSES the slug and always has — which is
-        // the Printronix pair, where retiring the entry would drop the only
-        // canonical the prerenderer has to work with. A slug carrying a
-        // character the gate rejects has never been in the sitemap, so its
-        // absence says nothing about the rows at all.
-        const shapeExcluded = /[^a-z0-9-]/.test(loser) || /[^a-z0-9-]/.test(winner);
-        if (shapeExcluded) {
-            soft(`${loser} / ${winner}`,
-                'neither spelling is sitemapped and neither ever was — the slug carries a character '
-                + "the sitemap's shape gate rejects (a '.', here). This entry is PRERENDER-ONLY and "
-                + 'must NOT be retired: it is what makes our internal links and the SPA canonical '
-                + 'agree with the prerenderer. The durable fix is a server-side slug rename.');
-        } else {
-            soft(`${loser} / ${winner}`,
-                'neither spelling is in the sitemap any more — the backend may have merged the rows; '
-                + 'the entry may now be inert. Check /api/products/printer/ for both before retiring it.');
-        }
+        // "The rows were merged, retire the entry" is one. The other used to be
+        // "the sitemap's slug-shape gate REFUSES this slug and always has", which
+        // was true of exactly one entry — the Printronix pair — and that pair was
+        // RETIRED on 2026-09-16 because neither row was a printer. The gate has
+        // since been widened to admit '.' and '+' as well, so the shape-exclusion
+        // branch that lived here now has neither an instance nor a mechanism.
+        // It is gone rather than kept "in case": a branch with no reachable input
+        // is a branch nobody can red-proof. §3b below covers the retirement
+        // directly, which is the honest replacement for it.
+        soft(`${loser} / ${winner}`,
+            'neither spelling is in the sitemap any more — the backend may have merged the rows; '
+            + 'the entry may now be inert. Check /api/products/printer/ for both before retiring it.');
         continue;
     }
     const fetchSet = async (slug) => {
@@ -328,6 +335,190 @@ for (const [loser, winner] of entries) {
     checked++;
 }
 if (checked) ok(`${checked}/${entries.length} pairs verified as two rows with identical product sets`);
+
+// ── §3b THE RETIREMENT — the pair that left the table (ERR-249 addendum) ────
+//
+// WHY A REMOVAL GETS ITS OWN SECTION. `printronix-103.23.` → `printronix-103.23`
+// sat in PrinterSlug.DUPLICATES for ten days on the backend's own request, and
+// was withdrawn on 2026-09-16 when an audit found NEITHER ROW WAS A PRINTER:
+// `103.23` is the part number of Printronix's own ribbon, and both rows held
+// nothing but 8 Epson 103 EcoTank INK products that had arrived by a bare-number
+// collision.
+//
+// Once the entry is gone, §3 above cannot see these slugs at all — it iterates
+// the table. So the retirement would be unwatched, and the backend's 2026-09-10
+// document asking for the pair is still on disk in backend-docs/inbox/, waiting
+// for someone to act on it. This section is what stops that: it asserts the
+// rows are GONE, and it asserts the thing a retirement can actually break —
+// that nothing was left linkless behind them.
+console.log(`\n\x1b[1m§3b the retired Printronix rows — gone, and nothing orphaned\x1b[0m`);
+{
+    const RETIRED = ['printronix-103.23', 'printronix-103.23.', 'printronix-30-day'];
+    for (const slug of RETIRED) {
+        const res = await fetch(`${API}/api/products/printer/${encodeURIComponent(slug)}`);
+        const body = await res.json().catch(() => null);
+        const code = body && body.error && body.error.code;
+        if (res.status === 404) {
+            ok(`${slug} → 404 ${code || ''} (retired)`.trim());
+        } else if (res.status === 400) {
+            // Not a pass and not the old failure either. Until 2026-09-16 both
+            // spellings answered 400 VALIDATION_FAILED because the slug gate
+            // refused the '.', which LOOKS like "gone" from a distance and is a
+            // completely different fact: a 400 means the route would not even
+            // look, so it tells you nothing about whether the row exists.
+            bad(`${slug} → 400 ${code || ''}`,
+                'the slug gate is refusing this again — the route never looked, so this run '
+                + 'cannot tell you whether the row is retired. Re-check the backend gate.');
+        } else if (res.status === 200) {
+            bad(`${slug} → 200`,
+                'a row we were told was deactivated is serving a printer page again. If the feed '
+                + 're-asserted it, the 40 suppressed compat links may be back too — check '
+                + 'compatLinkSuppressions on the backend before touching PrinterSlug.');
+        } else {
+            soft(`${slug} → HTTP ${res.status}`, 'unexpected status; not counted either way');
+        }
+        await sleep(700);
+    }
+
+    // printronix-p300 is a REAL machine and stayed active. It is the positive
+    // control for the sweep: if the suppression had been a bare delete, or had
+    // over-matched, this is where it would show.
+    {
+        const res = await fetch(`${API}/api/products/printer/printronix-p300`);
+        const body = await res.json().catch(() => null);
+        const d = body && body.data;
+        if (res.status !== 200 || !d) {
+            bad('printronix-p300', `expected 200 with a printer; got HTTP ${res.status}`);
+        } else {
+            const skus = (d.compatible_products || []).map((x) => x.sku);
+            const epson = skus.filter((x) => /^C103/i.test(String(x)));
+            if (epson.length) {
+                bad('printronix-p300 still carries Epson 103 ink',
+                    `${epson.join(', ')} — the collision that retired the other four rows is live `
+                    + 'on this one, and this row is NOT junk, so it cannot be deactivated. '
+                    + 'It needs the link suppression, not the row.');
+            } else if (!skus.length) {
+                bad('printronix-p300 has no products at all',
+                    'it held two real Printronix ribbons — a suppression that took those too is '
+                    + 'the over-match this control exists to catch');
+            } else {
+                ok(`printronix-p300 → 200, ${skus.length} product(s), no Epson 103 ink`);
+            }
+        }
+        await sleep(700);
+    }
+
+    // ***THE CHECK THAT MATTERS MOST, AND THE ONE NOBODY WOULD THINK TO MAKE.***
+    // 40 compat links were deleted. The question a deletion raises is never "did
+    // it delete" — it is "what else was reading that data" (ERR-249's own lesson,
+    // turned on this change). If the suppression had over-matched, the Epson 103
+    // cartridges would have lost their REAL EcoTank printers too, and the symptom
+    // would be a PDP with an empty "for use in" list — silent, and nowhere near
+    // Printronix.
+    //
+    // Measured 2026-09-20 before this section was written: 6 SKUs, 12 EcoTank
+    // printers each, zero Printronix rows. (The backend's note says 8 products;
+    // the code drilldown surfaces 6. The delta is reported, not reconciled —
+    // asserting 8 from their count would be pinning their arithmetic, not ours.)
+    const shopRes = await fetch(`${API}/api/shop?brand=epson&code=103&limit=20`);
+    const shopBody = await shopRes.json().catch(() => null);
+    const products = (shopBody && shopBody.data && shopBody.data.products) || [];
+    if (!products.length) {
+        bad('the Epson 103 cartridges could not be read',
+            `/api/shop?brand=epson&code=103 returned no products (HTTP ${shopRes.status}). `
+            + 'NOT counted as "nothing was orphaned" — a read we could not make is not a read '
+            + 'that agreed.');
+    } else {
+        let clean = 0;
+        const orphaned = [];
+        const stillLinked = [];
+        for (const prod of products) {
+            await sleep(500);
+            const r = await fetch(`${API}/api/products/${encodeURIComponent(prod.sku)}`);
+            const b = await r.json().catch(() => null);
+            const printers = ((b && b.data && b.data.compatible_printers) || [])
+                .map((x) => String(x && x.slug || ''));
+            if (!printers.length) { orphaned.push(prod.sku); continue; }
+            if (printers.some((x) => x.startsWith('printronix'))) { stillLinked.push(prod.sku); continue; }
+            if (printers.filter((x) => x.startsWith('epson-ecotank-')).length >= 12) clean++;
+            else orphaned.push(`${prod.sku} (only ${printers.length} printers)`);
+        }
+        if (orphaned.length) {
+            bad('an Epson 103 cartridge lost printers in the Printronix sweep',
+                `${orphaned.join(', ')} — the suppression over-matched. The symptom a shopper sees `
+                + 'is an empty "For use in" list on the PDP, which points nowhere near Printronix.');
+        }
+        if (stillLinked.length) {
+            bad('an Epson 103 cartridge is STILL linked to a Printronix row',
+                `${stillLinked.join(', ')} — the suppression under-matched, or the feed re-asserted `
+                + 'the link. This is the state that produced the wrong-catalogue pages.');
+        }
+        if (!orphaned.length && !stillLinked.length) {
+            ok(`${clean}/${products.length} Epson 103 cartridges keep ≥12 EcoTank printers, 0 Printronix links`);
+        }
+    }
+}
+
+// ── §3c THE FIVE `+` PAIRS WE REFUSED — now working pages ───────────────────
+//
+// These are the five groups the backend's rule produced and we declined: they
+// differ only by a trailing `+`, which is PART OF THE MODEL NAME (LQ-300 vs
+// LQ-300+, M880z vs M880z+). Canonicalising them would not have consolidated a
+// duplicate, it would have deleted a working page.
+//
+// ⚠️ WHEN WE REFUSED, THE PAGES WERE 400ing — so the refusal looked like it was
+// defending nothing. It was not: the backend widened its printer slug gate on
+// 2026-09-16 (33 active rows with real compat links had been refused, 20 of them
+// unblocked by admitting '.' and '+'), and all five now serve products. The
+// refusal is what left rows to unblock. This section watches them, because the
+// pressure to "complete the table" comes back every time someone re-runs the
+// backend's grouping rule and gets 21 groups.
+console.log(`\n\x1b[1m§3c the five \`+\` pairs we refused — separate, live, and staying that way\x1b[0m`);
+{
+    const PLUS_PAIRS = [
+        ['epson-300',                'epson-300+'],
+        ['epson-1600k3',             'epson-1600k3+'],
+        ['epson-1900k2',             'epson-1900k2+'],
+        ['hp-color-laserjet-m880z',  'hp-color-laserjet-m880z+'],
+        ['hp-colour-laserjet-m880z', 'hp-colour-laserjet-m880z+'],
+    ];
+    let live = 0;
+    for (const [bare, plus] of PLUS_PAIRS) {
+        // The table must not have quietly grown them.
+        if (PrinterSlug.isDuplicate(plus) || PrinterSlug.isDuplicate(bare)) {
+            bad(`${bare} / ${plus}`,
+                'one of these is now a canonical LOSER. `+` is part of the model name — this '
+                + 'deletes a working page rather than consolidating a duplicate. Remove the entry.');
+            continue;
+        }
+        const res = await fetch(`${API}/api/products/printer/${encodeURIComponent(plus)}`);
+        const b = await res.json().catch(() => null);
+        const d = b && b.data;
+        if (res.status === 400) {
+            soft(`${plus} → 400`,
+                "the slug gate has narrowed again and this page is unreachable. Not a failure of "
+                + 'OUR half — the refusal to canonicalise is still correct — but the SEO win is gone.');
+        } else if (res.status === 200 && d && d.printer) {
+            // The slug we asked for must be the slug we got. A gate that silently
+            // normalised `+` away would answer 200 with the BARE printer, which
+            // reads as success and is the duplicate we refused to create.
+            if (String(d.printer.slug) !== plus) {
+                bad(`${plus} → 200 but served ${d.printer.slug}`,
+                    'the route normalised the + away, so both URLs now return one printer. That is '
+                    + 'the duplicate we declined to create, arriving from the backend instead.');
+            } else {
+                live++;
+                console.log(`      ok   ${plus} → 200, ${(d.compatible_products || []).length} product(s)`);
+            }
+        } else {
+            soft(`${plus} → HTTP ${res.status}`, 'neither the 400 nor a served page; not counted');
+        }
+        await sleep(700);
+    }
+    if (live === PLUS_PAIRS.length) {
+        ok(`${live}/${PLUS_PAIRS.length} refused \`+\` slugs serve their own printer page`);
+    }
+}
 
 // ── §4 The BACKEND's half — expected to fail until they ship it ────────────
 console.log(`\n\x1b[1m§4 the prerendered canonical — THE BACKEND'S HALF, not ours\x1b[0m`);

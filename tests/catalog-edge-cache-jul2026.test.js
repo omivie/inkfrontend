@@ -657,3 +657,83 @@ test('§9 _isTestProduct treats an ABSENT admin_only as not-admin-only (ERR-234)
     assert.match(body, /startsWith\('TEST-'\)/,
         'the SKU prefix stays as the fallback for rows written before the column existed');
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// §6  THE THREE READS THE 2026-09-17 CACHE RULE FIX MADE CACHEABLE
+//
+// BF-014 (/api/site/*) and BF-019 (/api/ribbons, /api/printers/trending) closed
+// on 2026-09-17: all three now MISS -> HIT at the edge. Nothing in this repo had
+// to change for that, and *that* is the thing worth pinning — because the
+// property it depends on is silent.
+//
+// Every response from this API carries `vary: Origin, Accept-Encoding`, and a
+// request that arrives with a session cookie is served `private, no-store` and
+// BYPASSes the cache entirely (measured 2026-09-20, cookie + cold key). So a
+// catalogue read that sends credentials takes itself OUT of the shared entry —
+// for every signed-in visitor, on every page load, with no error and no visible
+// symptom. The endpoints below would simply stop being cached for the people most
+// likely to be buying.
+//
+// `anonymous: true` is what keeps them in it (api.js sends `credentials: 'omit'`
+// for those reads, ERR-124). These assertions exist so that removing it is a test
+// failure rather than a performance mystery three months later.
+// ─────────────────────────────────────────────────────────────────────────
+
+test('§6 /api/site/nav is read anonymously, so every visitor shares one edge entry', () => {
+    // getWithSWR's `anonymous` flag decides which fetcher it uses (getPublic vs
+    // get), so it is the whole contract on this line.
+    const m = API_SRC.match(/getWithSWR\(\s*'\/api\/site\/nav'[^)]*\)/);
+    assert.ok(m, 'api.js must still read /api/site/nav through getWithSWR');
+    assert.match(m[0], /anonymous:\s*true/,
+        'a cookie-bearing read of /api/site/nav BYPASSes the cache for every signed-in '
+        + 'visitor — the nav is identical for everyone, so it must be read anonymously');
+});
+
+test('§6 /api/printers/trending is fetched with credentials omitted', () => {
+    // This one is a bare fetch() in search.js rather than an API helper, so it
+    // carries its own credentials mode and nothing else enforces it.
+    const SEARCH_SRC = READ(JS('search.js'));
+    const m = SEARCH_SRC.match(/fetch\([^)]*\/api\/printers\/trending[^)]*\)/);
+    assert.ok(m, 'search.js must still fetch /api/printers/trending');
+    assert.match(m[0], /credentials:\s*'omit'/,
+        "search.js fires this on EVERY page load; without credentials:'omit' a signed-in "
+        + 'visitor bypasses the edge on every navigation');
+});
+
+test('§6 every /api/ribbons read goes through getPublic, never an authed helper', () => {
+    // getPublic hard-codes { anonymous: true }, so naming it is equivalent to
+    // declaring the read anonymous — and it is how all seven ribbon reads are
+    // already written. This catches the eighth being added with this.get().
+    const lines = API_SRC.split('\n');
+    const offenders = [];
+    lines.forEach((line, i) => {
+        // Skip prose, including JSDoc continuation lines: api.js:2566 documents the
+        // endpoint's filter semantics in a block comment and is not a call site.
+        // (§4 of tests/probe-search-analytics-honesty-sep2026.test.js is the same
+        // hazard — a scanner tripping on the file's own explanation of itself.)
+        const t = line.trim();
+        if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
+        if (!/['"`]\/api\/ribbons/.test(line)) return;
+        if (!/this\.getPublic\(/.test(line)) offenders.push(`api.js:${i + 1}  ${line.trim()}`);
+    });
+    assert.deepEqual(offenders, [],
+        'these read /api/ribbons without getPublic. /api/ribbons is edge-cached as of '
+        + '2026-09-17 (BF-019); an authed read BYPASSes that entry and hits the origin');
+});
+
+test('§6 no catalog read asks for /api/search/* expecting it to be cached', () => {
+    // 🚨 BF-039 REGRESSED, measured 2026-09-20: the whole /api/search/* family is
+    // DYNAMIC again (smart, suggest, popular, by-part — twice each, with
+    // /api/brands and /api/site/nav HITting in the same run as controls). The
+    // origin still sends s-maxage=300; Cloudflare is not matching the path, so it
+    // is the Cache Rule, and the suspect is the 2026-09-17 edit that added
+    // /api/site, /api/ribbons and /api/printers to the same expression.
+    //
+    // There is nothing to FIX here — the front end is correct either way. This
+    // records the state so nobody reads the /api/search/ latency as a front-end
+    // problem, and so the assumption "search is edge-cached" is not quietly built
+    // on. The stock-staleness brief (ERR-263, separate keys with separate ages)
+    // depends on search being cached, and is temporarily moot because of this.
+    assert.ok(/\/api\/search\/(smart|suggest)/.test(API_SRC),
+        'api.js still owns the search reads — if that moves, this note needs re-homing');
+});

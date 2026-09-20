@@ -261,15 +261,49 @@
     // FEATURED PRODUCTS
     // ============================================
 
+    /**
+     * The featured grid — and why it does NOT search for "ink cartridge".
+     *
+     * It used to call `API.smartSearch('ink cartridge', 8)`. Every GET to
+     * /api/search/* makes the backend write a `search_analytics` row
+     * server-side (ERR-254), so on a page that loads for every visitor that
+     * literal would have become one of the site's top search terms — authored
+     * by us, indistinguishable from organic, and UNFIXABLE by exclusion,
+     * because "ink cartridge" is exactly what a real shopper types. The
+     * backend can filter `zz%` probe terms; it cannot filter this one without
+     * deleting real demand, which is the same reason `test` is deliberately
+     * not filtered.
+     *
+     * ⚠️ IT WAS INERT WHEN THIS WAS WRITTEN, AND THAT IS NOT A REASON TO LEAVE
+     * IT. Measured 2026-09-20: no HTML file in this repo contains
+     * `featured-products-grid` or `featured-products`, so the guard below
+     * returned before the call and the query was never issued. It was a
+     * LANDMINE, not a bug — armed by whoever next adds that markup, at which
+     * point the pollution starts silently and nothing in the repo would
+     * connect the two. The repo has been here before: ERR-150/160 is the same
+     * feature vanishing twice because "it does not run today" was treated as
+     * "it does not matter".
+     *
+     * /api/products/popular is the right source anyway: it is the endpoint that
+     * MEANS "featured", it is edge-cached, and shop-page.js:1651 and
+     * ribbons-page.js:158 already read it. No `category` is passed on purpose —
+     * see the vocabulary map at shop-page.js:1562 for why guessing one is
+     * dangerous (`consumable` resolves to NO filter, not drums). Bare = overall
+     * popular, which is what a home-page rail wants.
+     *
+     * Rows from this endpoint carry no `average_rating`/`review_count`, so the
+     * star block below degrades to no stars rather than an empty star row —
+     * the same gate products.js and shop-page.js use.
+     */
     async function loadFeaturedProducts() {
-        if (typeof API === 'undefined' || !API.smartSearch) return;
+        if (typeof API === 'undefined' || !API.getPopularProducts) return;
 
         const grid = document.getElementById('featured-products-grid');
         const section = document.getElementById('featured-products');
         if (!grid || !section) return;
 
         try {
-            const response = await API.smartSearch('ink cartridge', 8);
+            const response = await API.getPopularProducts({ limit: 8 });
             if (!response.ok || !response.data?.products || response.data.products.length === 0) return;
 
             const products = response.data.products;

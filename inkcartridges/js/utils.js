@@ -593,39 +593,52 @@ const PrinterSlug = {
         // OKI MC362dn / ML182 — no space in the manufacturer's name.
         'oki-mc-362dn': 'oki-mc362dn',
         'oki-ml-182': 'oki-ml182',
-        // Printronix 103.23 — the 16th pair, and the only one we could not see
-        // from the sitemap (ERR-249). The trailing full stop is a data-entry
-        // artefact, confirmed as two real rows via
-        // /api/printers/search?q=103.23 (model_name "103.23" and "103.23.").
+        // ── THE 16TH PAIR WAS RETIRED, NOT RENAMED (ERR-249 addendum, 2026-09-20) ──
         //
-        // ⚠️ NEITHER SPELLING IS SITEMAPPED, AND THAT IS NOT A BUG TO FIX HERE.
-        // The sitemap's slug-shape gate rejects the `.`, so both have always
-        // been excluded — verified 2026-09-12: 0 hits for either in
-        // sitemap-printers.xml, while the brand's other printers
-        // (printronix-p300, printronix-30-day) are present. This entry is
-        // therefore PRERENDER-ONLY: it makes our internal links and the SPA
-        // canonical agree with the prerenderer, which is the surface Googlebot
-        // actually reads (ERR-242). The durable fix is renaming the slug
-        // server-side via a slug_redirects hop.
+        // `printronix-103.23.` → `printronix-103.23` used to sit here. It is gone
+        // because the backend WITHDREW the request to add it: neither row was a
+        // printer, so there was never a duplicate and there is no winner to
+        // canonicalise to.
         //
-        // AND IT IS WORSE THAN UN-SITEMAPPED (measured 2026-09-12, ERR-253):
-        // the products route refuses BOTH spellings outright, so neither page
-        // can render a catalogue at all —
+        // Printronix builds line-matrix and dot-matrix industrial printers, which
+        // take RIBBONS. `103.23` is the part number of Printronix's own ribbon —
+        // it sits in our catalogue as "Printronix Compatible 103.23 FN Black
+        // Printer Ribbon" — and both rows held nothing but 8 Epson 103 EcoTank INK
+        // products, which had arrived by a BARE-NUMBER COLLISION: the cartridge's
+        // `103` matched a printer row whose name IS the ribbon's part number.
         //
-        //   GET /api/products/printer/printronix-103.23   → 400 VALIDATION_FAILED
-        //   GET /api/products/printer/printronix-103.23.  → 400 VALIDATION_FAILED
-        //   "Printer slug must contain only lowercase letters, numbers,
-        //    hyphens, and underscores"
+        // ⚠️ THE CHECK THAT PROVED THEY WERE TWINS WAS TRUE AND BESIDE THE POINT.
+        // Identical compat-link counts on both sides is what we and the backend
+        // both used as the twin test. They were twins because they were both wrong
+        // in the SAME WAY. Three more rows of that shape confirmed the diagnosis —
+        // `printronix-$100works` and `printronix-30-day` are supplier marketing
+        // prose ("…30-day money back… $100…") parsed into `printer_models` as
+        // machines, each carrying the same 8 Epson links.
         //
-        // The `.` is illegal to the API's own validator, not just to the
-        // sitemap's gate. So this canonical consolidates two DEAD urls: it is
-        // correct, it costs nothing, and it rescues no page. That raises the
-        // slug rename from a tidy-up to the actual fix, and it is asked for by
-        // name in the FE response to the 2026-09-10 action list. Meanwhile
-        // shop-page.js's isBadPrinterSlug() already treats VALIDATION_FAILED
-        // the same as NOT_FOUND, so a visitor meets the unsupported-printer
-        // state rather than a blank page.
-        'printronix-103.23.': 'printronix-103.23',
+        // Closed 2026-09-16: 40 compat links suppressed, four junk rows
+        // deactivated. `printronix-p300` stays ACTIVE — it is a real machine and
+        // now holds only its two real ribbons. Verified live 2026-09-20 from this
+        // repo, not taken from the hand-off:
+        //
+        //   GET /api/products/printer/printronix-103.23   → 404 NOT_FOUND
+        //   GET /api/products/printer/printronix-103.23.  → 404 NOT_FOUND
+        //   GET /api/products/printer/printronix-30-day   → 404 NOT_FOUND
+        //   GET /api/products/printer/printronix-p300     → 200, no Epson ink
+        //
+        // (They were 400 VALIDATION_FAILED until the backend widened the printer
+        // slug gate to admit `.` and `+`. Both codes land in the same place here:
+        // shop-page.js's isBadPrinterSlug() treats VALIDATION_FAILED and NOT_FOUND
+        // alike, so a visitor to either URL still meets the unsupported-printer
+        // state rather than a blank page.)
+        //
+        // ***THE RULE THAT FOUND IT STAYS, AND IS STILL PINNED.*** Only this
+        // INSTANCE is gone. A trailing full stop is still a data-entry artefact,
+        // and the next feed row spelled that way must still group — the rule lives
+        // in scripts/probe-printer-canonicals.mjs's `strip()` with its own positive
+        // control, and tests/printer-slug-canonical-sep2026.test.js §5 asserts both
+        // halves: that this pair is absent AND that the rule still merges.
+        // Deleting the rule along with the row is the mistake this note exists to
+        // prevent.
     },
 
     /**

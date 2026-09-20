@@ -29,6 +29,7 @@
  */
 
 import { chromium } from 'playwright';
+import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const PATH_404 = process.env.PROBE_404_PATH || '/this-page-does-not-exist-probe';
@@ -37,6 +38,18 @@ const VIEWPORTS = [
     { width: 1440, height: 800 },
     { width: 1280, height: 720 },
 ];
+
+console.log('\n\x1b[1mprobe:404-search — the 404 page\'s search dropdown\x1b[0m');
+console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no ctx.route(), no writes to this repo.');
+// THIS PROBE IS A WRITER, AND ITS SOURCE NEVER SPELLS THE ENDPOINT (ERR-271).
+// It types into the REAL search box and presses Enter, so the BROWSER issues
+// GET /api/search/* and the backend writes a `search_analytics` row. The
+// enrolment detector in tests/probe-search-analytics-honesty-sep2026.test.js
+// looked for the endpoint string in script SOURCE, which this file has never
+// contained — so four Playwright probes wrote to production analytics while
+// reading as non-writers. `lc` stays REAL: the dropdown has to return rows for
+// the measurement to mean anything, so a sentinel would measure something else.
+printSearchAnalyticsNotice();
 
 const results = [];
 function check(name, ok, detail) {

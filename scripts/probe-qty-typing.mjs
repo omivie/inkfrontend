@@ -34,6 +34,7 @@
  */
 
 import { chromium } from 'playwright';
+import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const BASE = (process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz').replace(/\/$/, '');
 const QUERY = process.env.PROBE_QUERY || 'ribbon';
@@ -73,6 +74,16 @@ const ctaOf = (scopeSel) => `${scopeSel} .product-card__buy :is(${CTA})`;
 
 console.log(`\n\x1b[1mprobe-qty-typing\x1b[0m — ${BASE}  ·  query "${QUERY}"`);
 console.log('  MODE: READ-ONLY (no Add to Cart is ever clicked, no cart is written)\n');
+// THIS PROBE IS A WRITER, AND ITS SOURCE NEVER SPELLS THE ENDPOINT (ERR-271).
+// It drives the REAL search box, so the BROWSER issues GET /api/search/* and the
+// backend writes a `search_analytics` row for every keystroke-settled query. The
+// enrolment detector in tests/probe-search-analytics-honesty-sep2026.test.js
+// looked for the endpoint string in script SOURCE, which this file has never
+// contained — so four Playwright probes wrote to production analytics while
+// reading as non-writers. Its term stays REAL: the dropdown has to have rows for
+// the measurement to mean anything, so a sentinel would measure something else.
+printSearchAnalyticsNotice();
+
 
 const browser = await chromium.launch();
 let gridPathUsed = null;

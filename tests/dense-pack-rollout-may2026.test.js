@@ -175,12 +175,34 @@ test('§2 recovery rails are slice-bounded (≤ 6 by-printer entries)', () => {
 });
 
 test('§2 featured products carousel caps at 8', () => {
-    // Landing page hero rail. Slice cap is the second arg to smartSearch.
-    const m = LANDING_CODE.match(/API\.smartSearch\s*\(\s*['"][^'"]*['"]\s*,\s*(\d+)\s*\)/);
-    assert.ok(m, 'landing.js must call API.smartSearch with a numeric limit');
+    // Landing page hero rail. The cap is what this test is about, and it survives
+    // a change of SOURCE.
+    //
+    // It used to read the second argument of `API.smartSearch('ink cartridge', 8)`.
+    // That call is gone (ERR-254 addendum, 2026-09-20): a /api/search/* GET makes
+    // the backend write a `search_analytics` row, so a hardcoded term on a page
+    // every visitor loads would have become one of the site's top search terms,
+    // authored by us and unfilterable — "ink cartridge" is what a real shopper
+    // types. The rail now reads /api/products/popular, which is the endpoint that
+    // MEANS featured, and is edge-cached.
+    //
+    // Pinning `smartSearch` here pinned the ACCIDENT (which endpoint happened to
+    // supply the rows) rather than the RULE (the rail shows a small slice). The
+    // assertion below is the rule, and it is source-agnostic: the limit is read
+    // from whichever call fills the rail.
+    const m = LANDING_CODE.match(/API\.getPopularProducts\(\s*\{[^}]*\blimit:\s*(\d+)/);
+    assert.ok(m, 'landing.js must fill the featured rail with an explicit numeric limit '
+        + '(API.getPopularProducts({ limit: N }))');
     const limit = parseInt(m[1], 10);
     assert.ok(limit >= 4 && limit <= 12,
         `featured carousel limit should be a small slice (4-12); saw ${limit}`);
+
+    // And it must NOT go back to the search endpoint — pinned in one more place
+    // than the fix, because this test is what would have caught the original.
+    assert.doesNotMatch(LANDING_CODE, /API\.smartSearch\(/,
+        'the featured rail must not be filled by a search: the term becomes an unfilterable '
+        + 'entry in the live top-search-terms list. See tests/probe-search-analytics-honesty-'
+        + 'sep2026.test.js §11.');
 });
 
 test('§2 bought-together rail slices to 4', () => {

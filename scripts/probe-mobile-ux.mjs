@@ -65,6 +65,7 @@
  */
 
 import { chromium } from 'playwright';
+import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const BASE = (process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz').replace(/\/$/, '');
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
@@ -210,6 +211,16 @@ const viewports = VP_FILTER.length ? VIEWPORTS.filter((v) => VP_FILTER.includes(
 
 console.log('\n\x1b[1mprobe:mobile-ux — does the storefront work on a phone? (ERR-238)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no writes, no sign-in.');
+// THIS PROBE IS A WRITER, AND ITS SOURCE NEVER SPELLS THE ENDPOINT (ERR-271).
+// It drives the REAL search box, so the BROWSER issues GET /api/search/* and the
+// backend writes a `search_analytics` row for every keystroke-settled query. The
+// enrolment detector in tests/probe-search-analytics-honesty-sep2026.test.js
+// looked for the endpoint string in script SOURCE, which this file has never
+// contained — so four Playwright probes wrote to production analytics while
+// reading as non-writers. Its term stays REAL: the dropdown has to have rows for
+// the measurement to mean anything, so a sentinel would measure something else.
+printSearchAnalyticsNotice();
+
 console.log(`Target: ${BASE}`);
 console.log(`Routes: ${routes.length}   Viewports: ${viewports.map((v) => v.id).join(', ')}\n`);
 
