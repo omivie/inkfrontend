@@ -118,6 +118,14 @@
         if (started) return;
         started = true;
         track('quote_started');
+
+        // Microsoft's twin. It sits HERE rather than in track() for two
+        // reasons: track() is shared with events that are not conversions,
+        // and `started` above is the one-shot owner for this one - so the
+        // mirror inherits the guard instead of carrying a second copy of it.
+        if (typeof UetTag !== 'undefined') {
+            UetTag.lead('quote_started');
+        }
     }
 
     function reducedMotion() {

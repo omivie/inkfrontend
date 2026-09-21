@@ -13549,3 +13549,124 @@ has to be created there or the event arrives and is never counted. `Goals: None`
 **Files.** `inkcartridges/vercel.json` · `inkcartridges/js/gtag.js` ·
 `inkcartridges/js/order-confirmation-page.js` · `tests/uet-tag-sep2026.test.js` (new) ·
 `scripts/redproof-uet.sh` (new) · `scripts/probe-uet-tag.mjs` (new) · `package.json` · `errors.md`.
+
+## ERR-279 — the conversion goal was created, the snippet it handed back was already live, and the funnel underneath it was empty — **RESOLVED (frontend)** (2026-09-21)
+
+**Context.** The owner created a Microsoft Advertising conversion goal — *Purchase*, `G120GRZ8`,
+on UET tag `97269770` — and Microsoft handed back its standard Event Tag snippet with the
+instruction to paste it between the `<head>` tags. The request was to implement it.
+
+**It was already implemented.** ERR-278 installed the UET tag the same day, and production
+`js/gtag.js` already ran `window.uetq.push('event', 'purchase', { currency, transaction_id,
+revenue_value })` from inside `markConversion()`. Verified against the **deployed** file, not the
+repo copy. Microsoft's version differs only in hardcoding `"currency":"USD"`; ours is NZD, which
+is the account's currency. Pasting it would have been an inline `<script>` under `script-src
+'self'` — refused on load (ERR-230) — and, had it run, a second full-value purchase on every
+receipt. So the goal was not a new integration: **it was the missing half of ERR-278**, whose
+closing line read *"Still owed, in the Microsoft UI and not in this repo: the tag alone creates no
+goal."* That half is now done, and the answer to the request was "do not paste this."
+
+**The real gap was underneath it.** Microsoft received exactly two things: a pageview and a
+purchase. Google received `view_item`, `add_to_cart`, `begin_checkout`, `add_shipping_info`,
+`contact_form_submit` and `quote_started`. An account with one conversion type and low volume
+gives Smart Bidding almost nothing to learn from. So `UetTag` gained four mirrors of the events
+that already exist for Google, wired beside their twins at the same five call sites.
+
+**THE DESIGN IS "MIRROR", NOT "SECOND IMPLEMENTATION", AND THAT IS LOAD-BEARING.**
+`Ga4Ecommerce` already owns the one-shot state (`_sentViewItem` keyed by SKU, `_sentBeginCheckout`)
+and already returns `{ sent:false, reason:'already-sent' }` when it suppresses. Each mirror fires
+only on `sent === true` and keeps no flag of its own; each takes its figure from `ga4.value`
+verbatim and does no arithmetic. Two independent one-shot flags are two things that can drift, and
+**nothing spans two ad accounts to notice that they have**. It matters most at `add_to_cart`, where
+the twin has already run `resolveAddedQuantity()`: `confirmed.quantity` is the resulting LINE
+TOTAL, and a second reader of it is how one $96.99 add reported $290.97 (ERR-223/BF-060). A mirror
+cannot reintroduce that, because it computes nothing.
+
+**🚨 THE NUMBER WAS CORRECT AND MEANT SOMETHING ELSE.** The obvious move was to forward
+`ga4.value` as `revenue_value` on all three rungs. Measured instead of assumed:
+`Ga4Ecommerce.viewItem` sets `params.value = item.price` — **the list price of ONE unit**, not the
+value of anything that happened. As Microsoft `revenue_value` that is not revenue, it is a price
+tag; make `view_item` a counted goal and the account's Conversion Value column fills with the
+prices of things nobody bought, and ROAS is computed against them. ***A figure that is arithmetic-
+ally correct and semantically wrong is the dangerous kind: every test you would think to write
+passes.*** `view_item` now carries the SKU and no figure at all — and no `currency` either, because
+a currency with nothing beside it is noise. `add_to_cart` (price × delta) and `begin_checkout`
+(cart subtotal) are genuinely revenue-shaped and keep theirs. Revenue is **opt-in per rung**, so
+the next rung has to make the decision rather than inherit it.
+
+**🚨 A CALLER-SUPPLIED EVENT NAME SILENTLY RETIRES THE GUARD THAT CATCHES SMUGGLING.**
+`lead(action, params)` was written to serve both non-purchase conversions from one method. But
+`ga4-ecommerce-events-sep2026.test.js` pins the GA4 event vocabulary by **allowlisting the literals
+passed to `_emit`**, and that assertion exists because a mutation adding `purchase()` once sailed
+straight past a blocklist grep. A variable defeats it completely: `UetTag.lead('purchase', {...})`
+from any file in `js/` would have been a second, unguarded revenue path, bypassing all three of
+`markConversion()`'s dedupe guards. ***An allowlist enforced by grep protects only the spellings
+that are literals — the moment a name becomes a variable, the guard is still green and no longer
+guarding anything.*** `LEAD_ACTIONS` is now checked at runtime, so the set is both greppable and
+executable, and a sixth name fails in a test rather than arriving in the account.
+
+**🚨 TWO TRUE FACTS THAT DISAGREED ABOUT WHETHER A STEP WAS NEEDED.**
+`vercel.json` sets `buildCommand: npm run build` → `stamp-versions.js`, which rewrites every `?v=`
+to a fresh md5 **at deploy time**. Measured: the repo commits `js/gtag.js?v=f2b8fdd4` while
+production serves `?v=458b83af`, the real md5 of the deployed file. The committed token is
+cosmetic, so the conclusion — written into the plan — was that no restamp was needed, and that
+skipping it *avoided* a 75-reference edit across 38 HTML files several other sessions are in.
+Both halves of that were true and the conclusion was still wrong: **`tests/asset-cache-tokens.test.js`
+§3 fails any STAGED js/css change whose token did not move.** ***A mechanism that makes a step
+unnecessary for the BROWSER does not make it unnecessary for the REPO*** — the deploy and the guard
+are two audiences, and only one of them was asked. The restamp was done, bounded to one
+fully-qualified literal per asset, md5 so it agrees with what the deploy will stamp anyway.
+
+**🚨 AND THE RESTAMP REPORTED 38 FILES IT HAD NOT TOUCHED.** The first attempt used
+`git grep -lZ … | xargs -0`. This git build does not accept `-Z` (it is `-z`), so `git grep` exited
+with a usage dump, `xargs` received nothing, and **not one byte was written** — while the function
+printed `gtag.js  f2b8fdd4 -> 6b6301bd  (38 files)`, because the count came from a *different*
+`git grep -l` that worked and the arrow came from a variable that was merely computed. Six green
+lines for six no-ops. It was caught only by asking the tree afterwards: `0` HTML files modified.
+***A count printed from what you intended is not a measurement of what you did*** — the same family
+as ERR-254's "a skip is not a pass" and ERR-278's "nothing was refused is only evidence when
+something was attempted". The function now greps for **stragglers of the old token after the fact**
+and fails if any remain.
+
+**A HYPOTHESIS THAT DID NOT SURVIVE BEING CHECKED.** Gating each mirror on the GA4 twin couples
+them to Google's transport: `Ga4Ecommerce` returns `reason:'no-gtag'` when `gtag` is not a
+function, which would silently zero the entire Microsoft funnel while `uetq` was perfectly healthy
+— and the proposed cause was an ad blocker taking `googletagmanager.com`. It cannot happen, and
+the reason is structural: **the `gtag()` shim is defined in `gtag.js` itself, above both modules**,
+so wherever `UetTag` exists `gtag` is a function, because one script delivered both. ***A mechanism
+that fits the symptom is not the cause*** (ERR-268). The fact is pinned anyway — moving the shim
+out of `gtag.js` now has to answer a test — but as the real invariant, not the imagined failure.
+
+**Guards.** `tests/uet-tag-sep2026.test.js` grew from 25 tests to **54** (§7 behaviour executed in
+the existing `vm`; §8 the five call sites). `scripts/redproof-uet.sh` grew from 12 mutations to
+**26, all 26 caught** — including a fifth smuggled action, a lead given revenue, a mirror firing
+when the twin refused, the PDP mirror losing its GA4 argument, the quote lead relocated into the
+shared `track()` helper, the contact lead added to the `.catch()` branch, and a page keeping its
+controller while losing `gtag.js`. Every slice anchor now **proves itself unique before anything
+reads it** — `markStarted()` has five call sites and one definition, which is ERR-278's §6 trap
+live again in a new file.
+
+**The probe was correctly RED before deploy.** `npm run probe:uet-tag` gained §5, which is GET-only
+and fires nothing: it reads the **deployed** controllers and asserts each carries its call site —
+the one check no unit test can make, because the suites read the repo (ERR-194/ERR-214, where
+`cart-analytics.js` looked fine on three pages for four months). Run against production before
+this shipped it reported 6 FAILED, naming each missing call site, which is the evidence §5 can
+fail. Each event that cannot be driven on the wire prints **NOT EXERCISED with its reason**:
+`add_to_cart` would create a real guest cart (ERR-257), `contact_form_submit` would send the owner
+a real enquiry, and `view_item`/`quote_started` write nothing to us but **would manufacture a
+revenue-bearing conversion in the live account** — materially different from §4's one pageview, and
+extending that carve-out silently would be ERR-271 again.
+
+**Still owed, in the Microsoft UI and not in this repo:** a Conversion goal of type **Custom
+event** per action (`view_item`, `add_to_cart`, `begin_checkout`, `contact_form_submit`,
+`quote_started`). **`view_item`, `add_to_cart` and `begin_checkout` must be created as SECONDARY /
+excluded from "Conversions"** — `gtag.js` already records why for the Google twin: promoting the
+add-to-cart action makes Smart Bidding optimise toward add-to-carts instead of purchases. And the
+existing *Purchase* goal must take its revenue **from the event**, or the `revenue_value` already
+being sent is discarded and every sale counts at one made-up number.
+
+**Files.** `inkcartridges/js/gtag.js` · `inkcartridges/js/product-detail-page.js` ·
+`inkcartridges/js/cart.js` · `inkcartridges/js/checkout-page.js` ·
+`inkcartridges/js/contact-page.js` · `inkcartridges/js/quote-page.js` · 38 HTML files (`?v=` only) ·
+`tests/uet-tag-sep2026.test.js` · `scripts/redproof-uet.sh` · `scripts/probe-uet-tag.mjs` ·
+`errors.md`.

@@ -495,3 +495,466 @@ function htmlFiles(dir = INK, out = []) {
     }
     return out;
 }
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * §7 THE FUNNEL MIRRORS — executed, because the VALUE is the bug
+ *
+ * Microsoft received a pageview and a purchase and nothing else, so bidding on
+ * a low-volume account had one signal. view_item, add_to_cart, begin_checkout
+ * and the two lead events are the rungs it can act on before a sale happens.
+ *
+ * THE CLAIM THIS SECTION DEFENDS is that the mirrors do NO arithmetic and hold
+ * NO state. Every figure is the GA4 twin's, verbatim; every "have we sent this
+ * already?" answer is the twin's too. If either stops being true the two ad
+ * accounts can report different numbers for one event, with nothing spanning
+ * them to notice — the failure this design is arranged to make impossible
+ * rather than merely unlikely.
+ *
+ * AND ONE THING THAT IS NOT SYMMETRY: view_item deliberately carries no
+ * revenue. See the test that says so.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+const UET_SECTION = GTAG.slice(GTAG.indexOf('const UetTag'), GTAG.indexOf('const Ga4Ecommerce'));
+
+/** A GA4 twin's return value, shaped the way Ga4Ecommerce actually shapes it. */
+const ga4Sent = (value) => (value === undefined ? { sent: true, reason: 'no-price' } : { sent: true, value });
+
+test('§7 the UET module sends an ALLOWLISTED set of actions, and no other', () => {
+    // The direct mirror of ga4-ecommerce-events-sep2026's _emit allowlist,
+    // which exists because a mutation adding purchase() sailed past a blocklist
+    // grep: blocklisting the one name you thought of leaves every other
+    // spelling open. Here the names live as literals at the _mirror() call
+    // sites and in purchase()'s own push.
+    const actions = new Set([
+        ...UET_SECTION.matchAll(/_mirror\('([a-z_]+)'/g),
+        ...UET_SECTION.matchAll(/uetq\.push\('event', '([a-z_]+)'/g),
+    ].map((m) => m[1]));
+
+    assert.deepStrictEqual([...actions].sort(),
+        ['add_to_cart', 'begin_checkout', 'purchase', 'view_item'],
+        'a UET action was added or renamed. Renaming one silently retires whatever ' +
+        'Microsoft goal the owner built on it: the events keep arriving, under a ' +
+        'name no goal matches, counting toward nothing.');
+});
+
+test('§7 lead() cannot be talked into an arbitrary action', () => {
+    // lead() takes its action from the CALLER, which is the one place this
+    // module is weaker than the GA4 twin — over there every name is a literal a
+    // grep can enumerate. So the set is pinned here AND enforced at runtime.
+    const m = UET_SECTION.match(/LEAD_ACTIONS: \[([^\]]*)\]/);
+    assert.ok(m, 'LEAD_ACTIONS is gone — lead() will accept any action a caller names');
+    assert.deepStrictEqual(
+        m[1].split(',').map((x) => x.trim().replace(/'/g, '')).filter(Boolean),
+        ['contact_form_submit', 'quote_started']);
+});
+
+test('§7 no ecomm_ remarketing variable is pushed', () => {
+    // An omission recorded as a DECISION, so that "completing the set" fails
+    // loudly. Microsoft documents ecomm_prodid / ecomm_pagetype /
+    // ecomm_totalvalue on a standalone object push, not as event params —
+    // pushing them here would be a no-op that looks like a feature.
+    assert.ok(!/ecomm_/.test(UET_SECTION),
+        'ecomm_* belongs on an object push and has not been verified here');
+});
+
+test('§7 ONE owner for the currency', () => {
+    const literals = UET_SECTION.match(/'NZD'/g) || [];
+    assert.equal(literals.length, 1, `${literals.length} 'NZD' literals — one of them will drift`);
+    assert.ok(/CURRENCY: 'NZD'/.test(UET_SECTION));
+});
+
+test('§7 POSITIVE CONTROL for §4 — the consent check reads real source', () => {
+    // §4 asserts an ABSENCE over comment-stripped source. A stripper that ate
+    // the module would satisfy it vacuously and say nothing — six guards that
+    // could not fail sat inside a 6088/0 green run (ERR-258), and this file's
+    // own stripper is the naive two-regex kind that ERR-253 replaced. So: prove
+    // there is still source to be absent FROM.
+    assert.ok(/const UET_TAG_ID/.test(GTAG) && /const Ga4Ecommerce/.test(GTAG),
+        'the comment stripper deleted live code — every absence assertion is now vacuous');
+    assert.ok(UET_SECTION.length > 1000, 'the UET slice collapsed');
+});
+
+test('§7 view_item carries the SKU and, DELIBERATELY, no revenue', () => {
+    // The twin's `value` at this rung is item.price — the list price of ONE
+    // unit, not the value of anything that happened. Forwarding it as
+    // Microsoft revenue_value would put a sticker price into a column the
+    // platform may count: make view_item a conversion goal and the account's
+    // Conversion Value fills with prices of things nobody bought, and ROAS is
+    // computed against them. A number that is correct and means something else
+    // is the dangerous kind. The rung still reports — it is the early signal
+    // the whole change exists for — just without a figure nobody can defend.
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    const r = ctx.UetTag.viewItem({ sku: 'TN2330' }, ga4Sent(96.99));
+
+    assert.equal(r.sent, true);
+    assert.equal(r.reason, 'no-revenue-rung');
+    assert.deepStrictEqual(plain(ctx.uetq.calls[0]), ['event', 'view_item', {
+        event_category: 'ecommerce', event_label: 'TN2330',
+    }]);
+    // Read RAW, not through plain(): a JSON round-trip drops undefined keys, so
+    // `revenue_value: undefined` — the actual bug shape — would pass silently.
+    assert.equal('revenue_value' in ctx.uetq.calls[0][2], false);
+    assert.equal('currency' in ctx.uetq.calls[0][2], false,
+        'a currency with no figure beside it is noise');
+});
+
+test('§7 add_to_cart reads ONLY the sku from the server payload', () => {
+    // The mirror gets the same `confirmed` object the twin did, carrying
+    // price_snapshot and quantity. It must ignore both: the twin has already
+    // run resolveAddedQuantity() over them, and `confirmed.quantity` is the
+    // resulting LINE TOTAL — reading it a second time here is how a one-unit
+    // add came to report $290.97 (ERR-223/BF-060).
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    const confirmed = { product: { sku: 'CF217A' }, quantity: 3, price_snapshot: 96.99 };
+    const r = ctx.UetTag.addToCart(confirmed, ga4Sent(96.99));
+
+    assert.equal(r.value, 96.99, 'the mirror multiplied something — it must do no arithmetic');
+    assert.deepStrictEqual(plain(ctx.uetq.calls[0]), ['event', 'add_to_cart', {
+        event_category: 'ecommerce', event_label: 'CF217A', currency: 'NZD', revenue_value: 96.99,
+    }]);
+});
+
+test('§7 begin_checkout carries no event_label, and says where its figure came from', () => {
+    // valueSource travels with the number because 'local' is a display-only
+    // estimate and 'server' is the backend's confirmed subtotal. Both are
+    // legitimate to send, but they must not be indistinguishable in the return
+    // value — partialness belongs in the RETURN VALUE, not only in a comment.
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    const r = ctx.UetTag.beginCheckout({ sent: true, value: 241.5, items: 3, valueSource: 'local' });
+
+    assert.equal(r.valueSource, 'local');
+    assert.deepStrictEqual(plain(ctx.uetq.calls[0]), ['event', 'begin_checkout', {
+        event_category: 'ecommerce', currency: 'NZD', revenue_value: 241.5,
+    }]);
+});
+
+test('§7 POSITIVE CONTROL — a GST-divided figure would be caught', () => {
+    // Without this the section could pass while reporting 13% less revenue than
+    // the twin does, in an account the owner bids real money from. 115 in, 115
+    // out: anything dividing by 1.15 lands on 100 and this goes red.
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    ctx.UetTag.addToCart({ product: { sku: 'X' } }, ga4Sent(115));
+    assert.equal(ctx.uetq.calls[0][2].revenue_value, 115,
+        '100 here means a /1.15 crept into the mirror path');
+});
+
+test("§7 POSITIVE CONTROL — the figure is the twin's, whatever it is", () => {
+    // A mirror that re-derived anything could not reproduce an arbitrary
+    // number. This one can, because it copies.
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    ctx.UetTag.beginCheckout({ sent: true, value: 1234.56 });
+    assert.equal(ctx.uetq.calls[0][2].revenue_value, 1234.56);
+});
+
+test('§7 a twin that reported no value sends NO revenue_value, not a zero', () => {
+    // Absence-as-zero pointed at an ad account: Number(undefined) is NaN, but
+    // Number(null) and Number('') are both 0, and a confident $0.00 conversion
+    // is worse than a missing one (ERR-063/068/073/219).
+    for (const value of [undefined, null, '', 'abc', NaN]) {
+        const { ctx } = runGtag();
+        ctx.uetq = loadedUet();
+        const r = ctx.UetTag.addToCart({ product: { sku: 'A' } }, { sent: true, value });
+
+        assert.equal(r.sent, true, 'the rung happened — it must still be reported');
+        assert.equal(r.reason, 'no-value');
+        assert.equal('revenue_value' in ctx.uetq.calls[0][2], false,
+            `revenue_value present for value=${String(value)} — must be ABSENT, not 0`);
+        assert.equal('currency' in ctx.uetq.calls[0][2], false);
+    }
+});
+
+test('§7 a genuine zero still reports as zero', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    const r = ctx.UetTag.addToCart({ product: { sku: 'A' } }, { sent: true, value: 0 });
+    assert.equal(r.sent, true);
+    assert.equal(ctx.uetq.calls[0][2].revenue_value, 0);
+});
+
+test('§7 THE ONE-OWNER INVARIANT — nothing is sent unless the twin sent', () => {
+    // The assertion the whole design rests on. Ga4Ecommerce owns the one-shot
+    // state (_sentViewItem by SKU, _sentBeginCheckout). If a mirror ever fires
+    // on its own, the two ad accounts drift apart on a repeat and nothing
+    // anywhere compares them.
+    for (const twin of [
+        undefined,
+        null,
+        {},
+        { sent: false, reason: 'already-sent' },
+        { sent: false, reason: 'no-sku' },
+        { sent: 'true' },                       // truthy, but not the answer
+    ]) {
+        const { ctx } = runGtag();
+        ctx.uetq = loadedUet();
+        const r = ctx.UetTag.viewItem({ sku: 'A' }, twin);
+        assert.equal(r.sent, false, `fired on twin=${JSON.stringify(twin)}`);
+        assert.equal(r.reason, 'not-mirrored');
+        assert.equal(ctx.uetq.calls.length, 0, `pushed on twin=${JSON.stringify(twin)}`);
+    }
+});
+
+test("§7 the twin's own transport cannot strand the mirrors", () => {
+    // Gating on the twin couples the mirrors to Ga4Ecommerce, so it is worth
+    // being exact about what that costs. Ga4Ecommerce returns
+    // { sent:false, reason:'no-gtag' } when `gtag` is not a function — which
+    // would silently zero the whole Microsoft funnel while uetq was fine.
+    //
+    // It cannot happen HERE, and the reason is structural rather than lucky:
+    // the gtag() shim is defined in THIS FILE, above both modules. Wherever
+    // UetTag exists, gtag is a function, because one script delivered both.
+    // An ad blocker takes googletagmanager.com, not our own shim. Pinned so
+    // that moving the shim out of gtag.js has to answer this.
+    assert.ok(/function gtag\(/.test(GTAG),
+        'the gtag() shim left gtag.js — the mirrors can now be stranded by a GA4 transport failure');
+    assert.ok(GTAG.indexOf('function gtag(') < GTAG.indexOf('const UetTag'));
+
+    const { ctx } = runGtag();
+    assert.equal(typeof ctx.gtag, 'function', 'gtag is not defined by loading gtag.js alone');
+});
+
+test('§7 a mirror fired before bat.js lands is queued, not lost', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = [];
+    ctx.UetTag.addToCart({ product: { sku: 'S' } }, ga4Sent(9.5));
+    // Microsoft's documented queue form: three appended elements, not a nest.
+    assert.deepStrictEqual(plain(ctx.uetq), ['event', 'add_to_cart', {
+        event_category: 'ecommerce', event_label: 'S', currency: 'NZD', revenue_value: 9.5,
+    }]);
+});
+
+test('§7 lead() reports an enquiry and invents no revenue for it', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    const r = ctx.UetTag.lead('contact_form_submit', { event_label: 'Bulk order' });
+
+    assert.equal(r.sent, true);
+    assert.deepStrictEqual(plain(ctx.uetq.calls[0]), ['event', 'contact_form_submit', {
+        event_category: 'lead', event_label: 'Bulk order',
+    }]);
+});
+
+test('§7 lead() REFUSES an action outside the allowlist', () => {
+    // The executed half of the allowlist, and the reason it exists:
+    // UetTag.lead('purchase', …) from any file in js/ would otherwise be a
+    // second, unguarded revenue path into the account — bypassing every one of
+    // markConversion()'s three dedupe guards.
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+
+    for (const action of ['purchase', 'view_item', 'signup', 'Contact_Form_Submit']) {
+        const r = ctx.UetTag.lead(action, { revenue_value: 999 });
+        assert.equal(r.sent, false, `lead() sent '${action}'`);
+        assert.equal(r.reason, 'unknown-action');
+    }
+    assert.equal(ctx.uetq.calls.length, 0);
+});
+
+test('§7 a lead cannot carry revenue even when handed some', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    ctx.UetTag.lead('quote_started', { revenue_value: 10, currency: 'USD' });
+    assert.equal('revenue_value' in ctx.uetq.calls[0][2], false);
+    assert.equal('currency' in ctx.uetq.calls[0][2], false);
+});
+
+test('§7 lead() drops a placeholder label rather than reporting it', () => {
+    // A fabricated dimension is worse than a missing one: indistinguishable
+    // from a real row in a report, and quietly one of the biggest (ERR-157).
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    ctx.UetTag.lead('quote_started', { event_label: 'Unknown' });
+    assert.equal('event_label' in ctx.uetq.calls[0][2], false);
+});
+
+test('§7 lead() with no action sends nothing', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    assert.equal(ctx.UetTag.lead('   ').sent, false);
+    assert.equal(ctx.uetq.calls.length, 0);
+});
+
+test('§7 nothing a mirror does reaches the caller as a throw', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = { push() { throw new Error('bat.js exploded'); } };
+    assert.equal(ctx.UetTag.viewItem({ sku: 'A' }, ga4Sent(1)).reason, 'threw');
+    assert.equal(ctx.UetTag.lead('quote_started').reason, 'threw');
+});
+
+test('§7 every action a goal can be built on, in one place', () => {
+    const { ctx } = runGtag();
+    ctx.uetq = loadedUet();
+    ctx.UetTag.viewItem({ sku: 'A' }, ga4Sent(1));
+    ctx.UetTag.addToCart({ product: { sku: 'A' } }, ga4Sent(1));
+    ctx.UetTag.beginCheckout(ga4Sent(1));
+    ctx.UetTag.lead('contact_form_submit');
+    ctx.UetTag.lead('quote_started');
+
+    assert.deepStrictEqual(ctx.uetq.calls.map((c) => c[1]),
+        ['view_item', 'add_to_cart', 'begin_checkout', 'contact_form_submit', 'quote_started']);
+});
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * §8 THE CALL SITES — where a mirror stops being a mirror
+ *
+ * A module nobody calls is the ERR-194/ERR-214 shape: cart-analytics.js sat on
+ * three pages behind a `typeof` guard that was an off-switch at every real
+ * entry point, and add_to_cart recorded 56 events in its entire history while
+ * looking fine. §7 proves the mirrors behave; §8 proves they are wired, and
+ * wired in the one position where they inherit the guards they depend on.
+ *
+ * EVERY SLICE SELF-VALIDATES. An earlier §6 anchored on `markConversion()` and
+ * silently matched the CALL SITE thirty characters earlier, so the whole
+ * section read the wrong function. quote-page.js makes that trap live again:
+ * `markStarted()` has five call sites and one definition.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+const SITES = {
+    pdp: codeOnly(fs.readFileSync(path.join(INK, 'js', 'product-detail-page.js'), 'utf8')),
+    cart: codeOnly(fs.readFileSync(path.join(INK, 'js', 'cart.js'), 'utf8')),
+    checkout: codeOnly(fs.readFileSync(path.join(INK, 'js', 'checkout-page.js'), 'utf8')),
+    contact: codeOnly(fs.readFileSync(path.join(INK, 'js', 'contact-page.js'), 'utf8')),
+    quote: codeOnly(fs.readFileSync(path.join(INK, 'js', 'quote-page.js'), 'utf8')),
+};
+
+/** A bounded slice whose START ANCHOR IS PROVEN UNIQUE before anything reads it. */
+function region(src, start, end, proof, label) {
+    const a = src.indexOf(start);
+    assert.ok(a !== -1, `${label}: start anchor is gone — ${start}`);
+    assert.equal(src.indexOf(start, a + 1), -1,
+        `${label}: the start anchor matches more than once. A slice anchor that can ` +
+        `match two things is a test pointed somewhere nobody checked.`);
+    const b = src.indexOf(end, a);
+    assert.ok(b > a, `${label}: end anchor is gone — ${end}`);
+    const body = src.slice(a, b);
+    for (const re of proof) {
+        assert.ok(re.test(body), `${label}: the slice does not contain ${re} — the anchor moved`);
+    }
+    return body;
+}
+
+test('§8 view_item mirrors only what the twin reported, behind the test-product gate', () => {
+    const body = region(SITES.pdp,
+        "if (typeof Ga4Ecommerce !== 'undefined' && !this._isTestProduct",
+        'this.loadReviews();',
+        [/Ga4Ecommerce\.viewItem/], 'pdp view_item');
+
+    assert.ok(/UetTag\.viewItem/.test(body), 'the UET twin is not wired on the PDP');
+    assert.ok(body.indexOf('Ga4Ecommerce.viewItem') < body.indexOf('UetTag.viewItem'),
+        'the mirror runs BEFORE the twin — it cannot be mirroring a result that does not exist yet');
+    // The one-shot guard for this rung is _sentViewItem, inside Ga4Ecommerce.
+    // The mirror must consume the twin's answer, not re-ask the question.
+    assert.ok(/UetTag\.viewItem\(this\.product, \w+\)/.test(body),
+        'the mirror is not passed the GA4 result — it now has an opinion of its own about repeats');
+    // ERR-234/246: an operator on the control SKU is not a shopper. One gate, both datasets.
+    assert.ok(body.indexOf('_isTestProduct') < body.indexOf('UetTag.viewItem'));
+});
+
+test('§8 add_to_cart mirrors inside the serverConfirmed gate, and derives nothing', () => {
+    const body = region(SITES.cart,
+        "if (serverConfirmed && typeof Ga4Ecommerce !== 'undefined')",
+        '_showCrossSellModal(crossSellPayload)',
+        [/Ga4Ecommerce\.addToCart/], 'cart add_to_cart');
+
+    assert.ok(/UetTag\.addToCart/.test(body), 'the UET twin is not wired in cart.js');
+    assert.ok(body.indexOf('Ga4Ecommerce.addToCart') < body.indexOf('UetTag.addToCart'));
+    assert.ok(/UetTag\.addToCart\(serverConfirmed, \w+\)/.test(body),
+        'the mirror is not passed the GA4 result');
+
+    // An add the server refused is not an add. `serverConfirmed` is the whole
+    // mechanism and there is deliberately no second condition to keep in sync.
+    assert.ok(body.indexOf('UetTag.addToCart') > body.indexOf('serverConfirmed'));
+
+    // NO ARITHMETIC AT THE CALL SITE. resolveAddedQuantity() ran once, in the
+    // twin. `serverConfirmed.quantity` is the resulting LINE TOTAL, and a
+    // second reader of it is how one $96.99 add reported $290.97 (ERR-223).
+    const mirror = body.slice(body.indexOf('UetTag.addToCart'));
+    assert.ok(!/quantity|price_snapshot|\*/.test(mirror),
+        'the mirror touches a quantity or a price — it must copy the twin, not recompute');
+});
+
+test('§8 begin_checkout mirrors the twin, which still takes no argument', () => {
+    const body = region(SITES.checkout,
+        "if (typeof Ga4Ecommerce !== 'undefined') {",
+        'checkGuestCheckoutFlag',
+        [/Ga4Ecommerce\.beginCheckout/], 'checkout begin_checkout');
+
+    assert.ok(/UetTag\.beginCheckout\(\w+\)/.test(body), 'the UET twin is not wired on checkout');
+    assert.ok(/Ga4Ecommerce\.beginCheckout\(\)/.test(body),
+        'beginCheckout() must keep its empty parens — the GA4 suite matches that literal');
+    assert.ok(body.indexOf('Ga4Ecommerce.beginCheckout') < body.indexOf('UetTag.beginCheckout'));
+});
+
+test('§8 the contact lead fires on the SUCCESS branch only', () => {
+    // A failed send is not an enquiry. A conversion that did not happen is one
+    // the owner bids real money on.
+    const body = region(SITES.contact,
+        'send(payload).then(function () {',
+        '}).catch(function (err) {',
+        [/contact_form_submit/], 'contact lead');
+
+    assert.ok(/UetTag\.lead\('contact_form_submit'/.test(body),
+        'the contact lead is not wired, or sits outside the success handler');
+    // And nowhere else in the file — the catch branch and the retry path must
+    // not reach it.
+    assert.equal((SITES.contact.match(/UetTag\.lead/g) || []).length, 1);
+});
+
+test('§8 the quote lead fires from markStarted(), NOT from track()', () => {
+    // markStarted() owns `started`, the once-flag for this event. track() is
+    // shared with quote events that are not conversions, so a mirror placed
+    // there would fire on every one of them. markStarted() also has five call
+    // sites and one definition, which is exactly the anchor trap §6 already
+    // fell into once — hence the `function ` prefix.
+    const body = region(SITES.quote,
+        'function markStarted() {',
+        'function reducedMotion()',
+        [/started = true/, /track\('quote_started'\)/], 'quote lead');
+
+    assert.ok(/UetTag\.lead\('quote_started'\)/.test(body), 'the quote lead is not in markStarted()');
+    assert.ok(body.indexOf('started = true') < body.indexOf('UetTag.lead'),
+        'the mirror sits above the once-flag — every keystroke would report a conversion');
+
+    const track = region(SITES.quote, 'function track(eventName, params) {', '\n    }\n',
+        [/gtag/], 'quote track()');
+    assert.ok(!/UetTag/.test(track),
+        'the mirror moved into track(), which is shared with non-conversion events');
+    assert.equal((SITES.quote.match(/UetTag\.lead/g) || []).length, 1);
+});
+
+test('§8 every new call site guards on typeof UetTag', () => {
+    // gtag.js is a blocking head script on all 38 storefront pages, so UetTag
+    // is in fact always there. The guard is kept anyway because its absence is
+    // the difference between a dead analytics line and a dead page.
+    for (const [name, src] of Object.entries(SITES)) {
+        const calls = (src.match(/UetTag\.\w+/g) || []).length;
+        assert.ok(calls >= 1, `${name}: no UetTag call site`);
+        assert.ok(/typeof UetTag !== 'undefined'/.test(src), `${name}: unguarded UetTag reference`);
+    }
+});
+
+test('§8 every page with a call site actually loads gtag.js', () => {
+    // The enrolment fact, asked of the HTML rather than assumed. This is the
+    // claim that UET adds no new surface to maintain: its reach IS gtag.js's.
+    const owners = {
+        'product-detail-page.js': 1, 'cart.js': 33, 'checkout-page.js': 1,
+        'contact-page.js': 1, 'quote-page.js': 1,
+    };
+    const pages = htmlFiles().map((f) => [f, fs.readFileSync(f, 'utf8')]);
+
+    for (const [controller, expected] of Object.entries(owners)) {
+        const hosts = pages.filter(([, html]) => html.includes(`/js/${controller}`));
+        assert.equal(hosts.length, expected,
+            `${controller} is loaded by ${hosts.length} pages, expected ${expected}`);
+        for (const [file, html] of hosts) {
+            assert.ok(/src="\/js\/gtag\.js(\?v=[a-f0-9]+)?"/.test(html),
+                `${path.basename(file)} loads ${controller} but NOT gtag.js — UetTag is undefined there`);
+        }
+    }
+});

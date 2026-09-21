@@ -129,6 +129,88 @@ run_case "loader made protocol-relative" \
   "$H"'
 edit("js/gtag.js","s.src = \x27https://bat.bing.com/bat.js\x27;","s.src = \x27//bat.bing.com/bat.js\x27;")'
 
+# ═══════════════════════════════════════════════════════════════════════════
+# THE FUNNEL MIRRORS — one mutation per claim the mirrors make
+# ═══════════════════════════════════════════════════════════════════════════
+
+run_case "a mirror re-derives instead of copying (GST)" \
+  "$H"'
+edit("js/gtag.js","params.revenue_value = value;","params.revenue_value = value / 1.15;")'
+
+run_case "an absent twin value becomes a confident \$0.00" \
+  "$H"'
+edit("js/gtag.js","const value = source.revenue === true ? readMoney(ga4.value) : NaN;","let value = source.revenue === true ? readMoney(ga4.value) : NaN;")
+edit("js/gtag.js","const hasValue = hasMoney(value);","const hasValue = source.revenue === true; value = Number(ga4.value) || 0;")'
+
+run_case "a mirror fires even when the twin refused (two owners)" \
+  "$H"'
+edit("js/gtag.js","if (!ga4 || ga4.sent !== true) return { sent: false, reason: \x27not-mirrored\x27 };","if (!ga4) return { sent: false, reason: \x27not-mirrored\x27 };")'
+
+run_case "a fifth UET action is smuggled in" \
+  "$H"'
+edit("js/gtag.js","};\n\nUetTag.init();","    signup() { window.uetq.push(\x27event\x27, \x27signup\x27, {}); },\n};\n\nUetTag.init();")'
+
+run_case "lead() accepts any action the caller names" \
+  "$H"'
+edit("js/gtag.js","            if (this.LEAD_ACTIONS.indexOf(name) === -1) {\n                return { sent: false, reason: \x27unknown-action\x27 };\n            }\n","")'
+
+run_case "a lead is given revenue" \
+  "$H"'
+edit("js/gtag.js","const payload = { event_category: \x27lead\x27 };","const payload = { event_category: \x27lead\x27, revenue_value: (params && params.revenue_value) };")'
+
+run_case "view_item starts reporting the price tag as revenue" \
+  "$H"'
+edit("js/gtag.js","        return this._mirror(\x27view_item\x27, ga4, {\n            event_category: \x27ecommerce\x27,\n            event_label: product && product.sku,\n        });","        return this._mirror(\x27view_item\x27, ga4, {\n            event_category: \x27ecommerce\x27,\n            event_label: product && product.sku,\n            revenue: true,\n        });")'
+
+run_case "the currency stops being NZD" \
+  "$H"'
+edit("js/gtag.js","    CURRENCY: \x27NZD\x27,\n\n    /* THE ONLY ACTIONS lead","    CURRENCY: \x27usd\x27,\n\n    /* THE ONLY ACTIONS lead")'
+
+run_case "the PDP mirror is no longer handed the twin result" \
+  "$H"'
+edit("js/product-detail-page.js","UetTag.viewItem(this.product, ga4);","UetTag.viewItem(this.product, { sent: true });")'
+
+run_case "the add_to_cart mirror is hoisted above the serverConfirmed gate" \
+  "$H"'
+import re,io,os
+p=os.path.join(root,"js/cart.js")
+s=io.open(p,encoding="utf-8").read()
+m=re.search(r"\n            if \(typeof UetTag !== .undefined.\) \{\n                UetTag\.addToCart\([^\n]*\n            \}\n", s)
+assert m, "could not find the add_to_cart mirror"
+blk=m.group(0)
+s=s.replace(blk,"\n")
+s=s.replace("        if (serverConfirmed && typeof Ga4Ecommerce !== \x27undefined\x27) {", blk.replace("\n            ","\n        ")+"        if (serverConfirmed && typeof Ga4Ecommerce !== \x27undefined\x27) {",1)
+io.open(p,"w",encoding="utf-8").write(s)'
+
+run_case "the quote lead moves from markStarted() into track()" \
+  "$H"'
+import re,io,os
+p=os.path.join(root,"js/quote-page.js")
+s=io.open(p,encoding="utf-8").read()
+m=re.search(r"\n        if \(typeof UetTag !== .undefined.\) \{\n            UetTag\.lead\(.quote_started.\);\n        \}\n", s)
+assert m, "could not find the quote lead"
+s=s.replace(m.group(0),"\n")
+s=s.replace("        try { if (typeof gtag === \x27function\x27) gtag(\x27event\x27, eventName, params || {}); } catch (_) { /* ignore */ }",
+            "        try { if (typeof gtag === \x27function\x27) gtag(\x27event\x27, eventName, params || {}); } catch (_) { /* ignore */ }\n        if (typeof UetTag !== \x27undefined\x27) { UetTag.lead(\x27quote_started\x27); }",1)
+io.open(p,"w",encoding="utf-8").write(s)'
+
+run_case "the contact lead also fires on the catch branch" \
+  "$H"'
+edit("js/contact-page.js","        }).catch(function (err) {","        }).catch(function (err) {\n            if (typeof UetTag !== \x27undefined\x27) { UetTag.lead(\x27contact_form_submit\x27); }")'
+
+run_case "a trailing // comment smuggles gtag( into the UET module" \
+  "$H"'
+edit("js/gtag.js","    CURRENCY: \x27NZD\x27,\n\n    /* THE ONLY ACTIONS lead","    CURRENCY: \x27NZD\x27, // unlike gtag( above\n\n    /* THE ONLY ACTIONS lead")'
+
+run_case "a page keeps its controller but loses gtag.js" \
+  "$H"'
+import re,io,os
+p=os.path.join(root,"html/contact.html")
+s=io.open(p,encoding="utf-8").read()
+s2=re.sub(r"\n[^\n]*src=\"/js/gtag\.js[^\n]*\n","\n",s,count=1)
+assert s2!=s, "gtag.js script tag not found in contact.html"
+io.open(p,"w",encoding="utf-8").write(s2)'
+
 echo
 echo "  caught $pass / $((pass+fail))"
 if [ "$fail" -ne 0 ]; then

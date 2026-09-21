@@ -94,7 +94,14 @@
              * so getTotal() carries a guessed urban shipping estimate, and a
              * guess does not belong in the funnel's headline number. */
             if (typeof Ga4Ecommerce !== 'undefined') {
-                Ga4Ecommerce.beginCheckout();
+                const ga4 = Ga4Ecommerce.beginCheckout();
+
+                /* Microsoft's twin. beginCheckout is one-shot per page load
+                 * and that flag lives in Ga4Ecommerce, so the mirror is gated
+                 * on its result and keeps no flag of its own. */
+                if (typeof UetTag !== 'undefined') {
+                    UetTag.beginCheckout(ga4);
+                }
             }
         },
 

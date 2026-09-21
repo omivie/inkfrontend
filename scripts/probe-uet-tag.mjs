@@ -85,7 +85,10 @@ console.log(`  target: ${SITE}`);
 console.log('  MODE:   READ-ONLY against this repo and our backend.');
 console.log('          §4 loads the site in a real browser, which sends ONE real');
 console.log('          UET pageview to the live Microsoft account (ERR-271).');
-console.log('          No purchase is fired.\n');
+console.log('          No purchase is fired.');
+console.log('          §5 is GET-only: it reads the deployed files and fires');
+console.log('          NOTHING — the funnel events would manufacture revenue-');
+console.log('          bearing conversions in the live account.\n');
 
 /* ── §0 NEGATIVE CONTROL ─────────────────────────────────────────────────────
    The only reason to believe anything below. If the detector cannot report a
@@ -271,6 +274,93 @@ if (process.env.UET_SKIP_BROWSER) {
         }
     }
 }
+
+/* ── §5 THE FUNNEL MIRRORS, ON PRODUCTION ───────────────────────────────────
+   Every check here is a GET. Nothing is written to our backend, and — unlike
+   §4 — nothing is written to Microsoft either: no browser runs in this section,
+   so no event is fired.
+
+   WHY IT IS WORTH HAVING ANYWAY. The unit suite reads the REPO. It cannot see
+   a controller that shipped without its call site, or a deploy that served an
+   older file. That is ERR-194/ERR-214 exactly — cart-analytics.js sat on three
+   pages for four months looking fine — and asking the deployed bytes is the
+   only way to catch it.
+
+   AND WHY IT DELIBERATELY DOES NOT DRIVE THESE EVENTS IN A BROWSER.
+   §4's pageview is not a goal. These actions WILL be goals, carrying revenue,
+   feeding the bidding the owner spends money through. One probe run would be a
+   manufactured conversion; a scheduled one would be systematic contamination
+   of a bidding input. Extending §4's carve-out to cover that silently is
+   ERR-271's shape, so each event that cannot be exercised says so by name. */
+console.log('\n§5 the deployed funnel mirrors — GET only, no event is fired');
+
+const CONTROLLERS = [
+    ['/checkout',           'checkout-page.js',       'UetTag.beginCheckout'],
+    ['/contact',            'contact-page.js',        "UetTag.lead('contact_form_submit'"],
+    ['/quote',              'quote-page.js',          "UetTag.lead('quote_started'"],
+    ['/cart',               'cart.js',                'UetTag.addToCart'],
+];
+
+try {
+    const home = await fetch(SITE).then((r) => r.text());
+    const m = home.match(/src="(\/js\/gtag\.js(?:\?v=[a-f0-9]+)?)"/);
+    if (!m) {
+        bad('the homepage does not load /js/gtag.js');
+    } else {
+        const raw = await fetch(new URL(m[1], SITE)).then((r) => r.text());
+        const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+        // THE ACTIONS, AS DEPLOYED. A goal matches the action string and
+        // nothing else, so a rename retires the goal silently: the events keep
+        // arriving under a name that counts toward nothing.
+        const section = src.slice(src.indexOf('const UetTag'), src.indexOf('const Ga4Ecommerce'));
+        const actions = [...new Set([
+            ...[...section.matchAll(/_mirror\('([a-z_]+)'/g)].map((x) => x[1]),
+            ...[...section.matchAll(/uetq\.push\('event', '([a-z_]+)'/g)].map((x) => x[1]),
+        ])].sort();
+        const expected = ['add_to_cart', 'begin_checkout', 'purchase', 'view_item'];
+        if (actions.join(',') !== expected.join(',')) {
+            bad(`deployed UET actions are [${actions}], expected [${expected}] — ` +
+                'repo/production drift, or a rename that retired a Microsoft goal');
+        } else ok(`deployed actions: ${actions.join(', ')}`);
+
+        const leads = section.match(/LEAD_ACTIONS: \[([^\]]*)\]/);
+        if (!leads) bad('LEAD_ACTIONS is absent from the deployed file — lead() takes any action');
+        else ok(`deployed lead allowlist: ${leads[1].replace(/'/g, '')}`);
+    }
+} catch (err) {
+    skip(`could not read the deployed gtag.js: ${err.message}`);
+}
+
+/* The PDP needs a real product URL, so it is resolved from the sitemap rather
+   than guessed — a 404 would look exactly like a missing call site. */
+for (const [page, controller, needle] of CONTROLLERS) {
+    try {
+        const html = await fetch(new URL(page, SITE)).then((r) => r.text());
+        if (!/src="\/js\/gtag\.js/.test(html)) {
+            bad(`${page} does not load gtag.js — UetTag is undefined on that page`);
+            continue;
+        }
+        const ref = html.match(new RegExp(`src="(/js/${controller.replace('.', '\\.')}(?:\\?v=[a-f0-9]+)?)"`));
+        if (!ref) { skip(`${page} does not reference ${controller} — cannot check its call site`); continue; }
+
+        const code = await fetch(new URL(ref[1], SITE)).then((r) => r.text());
+        const bare = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+        if (!bare.includes(needle)) {
+            bad(`deployed ${controller} does NOT contain ${needle} — the mirror shipped ` +
+                'without its call site, which no unit test can see (ERR-194/ERR-214)');
+        } else ok(`${page} -> ${controller} carries ${needle}`);
+    } catch (err) {
+        skip(`${page}: ${err.message} — network, not a verdict`);
+    }
+}
+
+// Named, not assumed. A gap nobody can see is one people believe is covered.
+skip('add_to_cart on the wire — would POST /api/cart/items and create a real guest cart (ERR-257)');
+skip('begin_checkout on the wire — needs a non-empty cart, so it needs that write');
+skip('contact_form_submit on the wire — would send the owner a real enquiry');
+skip('view_item / quote_started on the wire — write nothing to us, but WOULD manufacture');
+skip('  a revenue-bearing conversion in the live Microsoft account. Not run by default.');
 
 /* ── VERDICT ───────────────────────────────────────────────────────────────── */
 console.log('\n─────────────────────────────────────────────────────────');

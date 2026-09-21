@@ -361,7 +361,18 @@
                  * (ERR-234/246). The gate above protects the shopper; this one
                  * protects the data. */
                 if (typeof Ga4Ecommerce !== 'undefined' && !this._isTestProduct(this.product)) {
-                    Ga4Ecommerce.viewItem(this.product);
+                    const ga4 = Ga4Ecommerce.viewItem(this.product);
+
+                    /* Microsoft's twin, gated on GA4's OWN result rather than
+                     * on a second copy of the same condition. viewItem is
+                     * one-shot per SKU per page load and that guard lives in
+                     * Ga4Ecommerce; re-implementing it here would be a second
+                     * owner of one question, free to drift, with nothing
+                     * spanning the two ad accounts to notice. The test-product
+                     * gate above still covers both (ERR-234/246). */
+                    if (typeof UetTag !== 'undefined') {
+                        UetTag.viewItem(this.product, ga4);
+                    }
                 }
 
                 this.loadReviews();

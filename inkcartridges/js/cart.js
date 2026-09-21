@@ -3233,13 +3233,23 @@ const Cart = {
          * supplied only by the PDP - and absent means the dimension is omitted,
          * never inferred from a name. */
         if (serverConfirmed && typeof Ga4Ecommerce !== 'undefined') {
-            Ga4Ecommerce.addToCart(serverConfirmed, {
+            const ga4Add = Ga4Ecommerce.addToCart(serverConfirmed, {
                 priorQuantity: priorQty,
                 requestedQuantity: addedQty,
             }, {
                 brand: product.brand,
                 category: product.product_type,
             });
+
+            /* Microsoft's twin - INSIDE the same serverConfirmed gate, and
+             * carrying GA4's figure verbatim rather than deriving its own.
+             * resolveAddedQuantity() has already run once, over there;
+             * `serverConfirmed.quantity` is the resulting LINE TOTAL and
+             * reading it again here is how a one-unit add came to report
+             * $290.97 (ERR-223/BF-060). The mirror does no arithmetic. */
+            if (typeof UetTag !== 'undefined') {
+                UetTag.addToCart(serverConfirmed, ga4Add);
+            }
         }
 
         // Show "Customers also bought" carousel from add-to-cart response.

@@ -188,6 +188,12 @@
             form.reset();
             ts.reset();
             try { if (typeof gtag === 'function') gtag('event', 'contact_form_submit', { subject: payload.subject }); } catch (_) {}
+            // Microsoft's twin. Inside the success handler on purpose: a
+            // failed send is not an enquiry, and a conversion that did not
+            // happen is one the owner bids real money on.
+            if (typeof UetTag !== 'undefined') {
+                UetTag.lead('contact_form_submit', { event_label: payload.subject });
+            }
         }).catch(function (err) {
             ts.reset();
             var msg = (err && err.message) ? err.message : 'Something went wrong. Please try again, or call 027 474 0115.';

@@ -363,6 +363,26 @@ const UET_TAG_ID = '97269770';
 const UetTag = {
     TAG_ID: UET_TAG_ID,
 
+    /* ONE OWNER FOR THE CURRENCY. Microsoft documents it as upper case and
+     * ignores it otherwise — silently, with the revenue simply not attaching
+     * to the goal. Ga4Ecommerce.CURRENCY exists one module below for the same
+     * reason; this is deliberately NOT a reach across to it, because that
+     * const is declared after this object and a cross-module reference here
+     * would sit inside the slice the placement tests police. */
+    CURRENCY: 'NZD',
+
+    /* THE ONLY ACTIONS lead() WILL SEND.
+     *
+     * lead() takes its action from the CALLER, which is the one place this
+     * module is weaker than its GA4 twin: over there every event name is a
+     * literal inside _emit(), so a source grep can enumerate them, and that
+     * grep is what once caught a smuggled purchase(). A variable defeats it.
+     * So the set is enforced HERE, at runtime, where it is both greppable and
+     * executable — and a sixth name fails in a test rather than arriving in
+     * the account. In particular this is what stops UetTag.lead('purchase',
+     * ...) from becoming a second, unguarded revenue path. */
+    LEAD_ACTIONS: ['contact_form_submit', 'quote_started'],
+
     /**
      * Load bat.js and record the pageview.
      *
@@ -454,7 +474,7 @@ const UetTag = {
             const total = readMoney(order.total);
             const hasValue = hasMoney(total);
 
-            const params = { currency: 'NZD', transaction_id: transactionId };
+            const params = { currency: this.CURRENCY, transaction_id: transactionId };
             // A missing total still reports the conversion — the purchase really
             // happened and that is the fact Microsoft is bidding on — but it
             // carries no revenue rather than an invented zero, and says so.
@@ -468,6 +488,221 @@ const UetTag = {
         } catch (err) {
             // A thrown tag must never take the receipt page with it.
             if (typeof DebugLog !== 'undefined') DebugLog.warn('UET purchase failed (non-fatal):', err);
+            return { sent: false, reason: 'threw' };
+        }
+    },
+
+    /* ────────────────────────────────────────────────────────────────────
+     * THE FUNNEL ABOVE THE PURCHASE
+     *
+     * Until now Microsoft received exactly two things: a pageview and a
+     * purchase. Google receives view_item, add_to_cart, begin_checkout,
+     * add_shipping_info, contact_form_submit and quote_started. An account
+     * with a single conversion type and low volume gives Smart Bidding
+     * almost nothing to learn from, so these are the rungs it can act on
+     * before a sale happens.
+     *
+     * THE "HAVE WE SENT THIS ALREADY?" QUESTION HAS EXACTLY ONE OWNER.
+     * Ga4Ecommerce already holds that state — _sentViewItem keyed by SKU,
+     * _sentBeginCheckout — and already answers
+     * `{ sent: false, reason: 'already-sent' }` when it suppresses. So
+     * everything below is a MIRROR: it fires only when its twin reports
+     * `sent === true`, and it keeps no flag of its own. Two independent
+     * one-shot flags are two things that can drift apart, and nothing
+     * spans both ad accounts to notice when they have. Same reasoning as
+     * the two purchase call sites sharing one readMoney().
+     *
+     * AND THE REVENUE FIGURE IS THE TWIN'S, VERBATIM — never re-derived.
+     * That is what makes both accounts bid on the same number by
+     * construction rather than by review. It matters most at add_to_cart,
+     * where the twin has already applied resolveAddedQuantity(): reading
+     * `confirmed.quantity` straight is the LINE TOTAL, and it once
+     * reported a $290.97 three-unit add for a shopper who added one
+     * $96.99 cartridge (ERR-223/BF-060). A mirror cannot reintroduce that
+     * on its own, because it does no arithmetic.
+     *
+     * PARAMETER NAMES ARE MICROSOFT'S, NOT OURS. Their documented custom
+     * event form is the action string plus
+     * `{ event_category, event_label, event_value, revenue_value, currency }`,
+     * and a Conversion goal of type "Custom event" matches on
+     * action / category / label / value. event_category is populated
+     * rather than left off so the owner has a second axis to build goals
+     * and audiences on without another code change. Currency must be
+     * UPPER CASE, and a decimal must be a period — both are silent when
+     * wrong.
+     * ──────────────────────────────────────────────────────────────── */
+
+    /**
+     * One door for every mirrored funnel event.
+     *
+     * @param {string} action - the UET event action, and the string a
+     *   Custom event goal matches on. Renaming one retires a goal.
+     * @param {object} ga4 - the twin's return value. Anything other than
+     *   `sent === true` means DO NOT SEND: either the twin suppressed a
+     *   repeat, or it had no usable payload, and in both cases Microsoft
+     *   must see what Google saw.
+     * @param {object} extra - `{ event_category, event_label, revenue }` for
+     *   this rung. `revenue` is OPT-IN, and that is the point: see viewItem().
+     * @returns {{sent: boolean, reason?: string, value?: number}}
+     */
+    _mirror(action, ga4, extra) {
+        try {
+            if (typeof window === 'undefined' || !window.uetq) {
+                return { sent: false, reason: 'no-uet' };
+            }
+            if (!ga4 || ga4.sent !== true) return { sent: false, reason: 'not-mirrored' };
+
+            const params = {};
+            const source = extra || {};
+
+            const category = cleanText(source.event_category);
+            if (category !== undefined) params.event_category = category;
+            const label = cleanText(source.event_label);
+            if (label !== undefined) params.event_label = label;
+
+            // Number(null) is 0, and so is Number(''). The TYPE is checked
+            // before any coercion, so "the twin reported no value" cannot
+            // become a confident $0.00 conversion — the absence-as-zero
+            // shape, pointed at an ad platform. A genuine 0 still reports
+            // as 0. No /1.15 anywhere: ad platforms want the
+            // shopper-facing, GST-inclusive figure.
+            //
+            // A currency without a figure is noise, so the two travel
+            // together or not at all.
+            const value = source.revenue === true ? readMoney(ga4.value) : NaN;
+            const hasValue = hasMoney(value);
+            if (hasValue) {
+                params.revenue_value = value;
+                params.currency = this.CURRENCY;
+            }
+
+            window.uetq.push('event', action, params);
+
+            if (!hasValue) {
+                return { sent: true, reason: source.revenue === true ? 'no-value' : 'no-revenue-rung' };
+            }
+            return { sent: true, value: value };
+        } catch (err) {
+            // A thrown tag must never take the page with it.
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('UET ' + action + ' failed (non-fatal):', err);
+            return { sent: false, reason: 'threw' };
+        }
+    },
+
+    /**
+     * Microsoft Ads `view_item` — the mirror of Ga4Ecommerce.viewItem.
+     *
+     * @param {object} product - the same product the twin was given, read
+     *   only for its SKU. The twin's per-SKU one-shot guard is what stops
+     *   a repeat, so this must be called with the twin's result, not on
+     *   its own.
+     * @param {object} ga4 - Ga4Ecommerce.viewItem()'s return value.
+     */
+    viewItem(product, ga4) {
+        /* NO revenue_value ON A PAGE VIEW, AND THIS IS NOT AN OVERSIGHT.
+         *
+         * The twin's `value` here is item.price — the LIST PRICE OF ONE UNIT,
+         * measured, not the value of anything that happened. Forwarding it as
+         * Microsoft `revenue_value` would mean every product page a shopper
+         * opened carried a dollar figure the platform is entitled to count:
+         * make view_item a counted goal and the account's Conversion Value
+         * column fills with sticker prices, and ROAS is computed against them.
+         *
+         * A number that is CORRECT and means something else is the dangerous
+         * kind. The rung is still worth reporting — it is the signal Microsoft
+         * can bid on before a sale — so the event fires, with the SKU, and
+         * without a figure nobody can defend. */
+        return this._mirror('view_item', ga4, {
+            event_category: 'ecommerce',
+            event_label: product && product.sku,
+        });
+    },
+
+    /**
+     * Microsoft Ads `add_to_cart` — the mirror of Ga4Ecommerce.addToCart.
+     *
+     * @param {object} confirmed - `response.data` from POST /api/cart/items,
+     *   the same object the twin was given. ONLY THE SKU IS READ HERE. The
+     *   quantity and the price were resolved by the twin and arrive inside
+     *   ga4.value; deriving either again is exactly how the two accounts
+     *   would come to report different numbers for one add.
+     * @param {object} ga4 - Ga4Ecommerce.addToCart()'s return value.
+     */
+    addToCart(confirmed, ga4) {
+        const product = (confirmed && confirmed.product) || {};
+        // Revenue-shaped, unlike view_item: the twin's figure is the server's
+        // price_snapshot multiplied by the units this call actually added.
+        return this._mirror('add_to_cart', ga4, {
+            event_category: 'ecommerce',
+            event_label: product.sku,
+            revenue: true,
+        });
+    },
+
+    /**
+     * Microsoft Ads `begin_checkout` — the mirror of Ga4Ecommerce.beginCheckout.
+     *
+     * No event_label: there is no single SKU to name at this rung. The
+     * value is the twin's, which is GOODS ONLY — it deliberately excludes
+     * the guessed urban shipping estimate Cart.getTotal() carries before
+     * the shopper has reached the delivery section (ERR-235), because a
+     * guess does not belong in a number an ad account bids on.
+     */
+    beginCheckout(ga4) {
+        const r = this._mirror('begin_checkout', ga4, { event_category: 'ecommerce', revenue: true });
+        /* WHERE THE FIGURE CAME FROM TRAVELS WITH IT.
+         *
+         * The twin answers valueSource: 'server' when the cart total is the
+         * one the backend confirmed, and 'local' when it is a display-only
+         * estimate. Both are legitimate to send — parity with GA4 is what
+         * lets one dataset audit the other — but an estimate and a confirmed
+         * subtotal must not be indistinguishable in the return value.
+         * Partialness belongs in the RETURN VALUE, not only in a comment. */
+        if (ga4 && ga4.valueSource) r.valueSource = ga4.valueSource;
+        return r;
+    },
+
+    /**
+     * A non-purchase conversion: an enquiry, not a sale.
+     *
+     * THERE IS NO TWIN RETURN TO MIRROR, AND THAT ASYMMETRY IS THE POINT.
+     * Both call sites — the contact form's success handler and
+     * quote-page's markStarted() — send through a fire-and-forget Google
+     * helper that returns nothing at all, so the one-shot owner there is
+     * the PAGE: markStarted()'s own `started` flag, and the fact that a
+     * submission only resolves once. Recorded here rather than left to be
+     * rediscovered as an inconsistency with the mirrors above.
+     *
+     * CARRIES NO REVENUE, ON PURPOSE. An enquiry has no value we know,
+     * and a number invented for an ad platform is worse than a missing
+     * one: it is wrong, it is silent, and it is what the account bids on.
+     *
+     * @param {string} action - the event action a Custom event goal matches on.
+     * @param {object} [params] - `{ event_label }`, optional.
+     * @returns {{sent: boolean, reason?: string}}
+     */
+    lead(action, params) {
+        try {
+            if (typeof window === 'undefined' || !window.uetq) {
+                return { sent: false, reason: 'no-uet' };
+            }
+            const name = cleanText(action);
+            if (!name) return { sent: false, reason: 'no-action' };
+            if (this.LEAD_ACTIONS.indexOf(name) === -1) {
+                return { sent: false, reason: 'unknown-action' };
+            }
+
+            const payload = { event_category: 'lead' };
+            // cleanLabel, not cleanText: a subject line can arrive as
+            // 'Other' or a placeholder, and a fabricated dimension is
+            // worse than a missing one (ERR-157).
+            const label = cleanLabel(params && params.event_label);
+            if (label !== undefined) payload.event_label = label;
+
+            window.uetq.push('event', name, payload);
+            return { sent: true };
+        } catch (err) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('UET lead failed (non-fatal):', err);
             return { sent: false, reason: 'threw' };
         }
     },
