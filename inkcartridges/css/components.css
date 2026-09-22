@@ -3783,6 +3783,53 @@ a.product-card__contact-btn {
     transform: rotate(45deg);
 }
 
+/* ERR-280 — BELOW THE TABLET BREAKPOINT THIS CARD IS NOT AN OVERLAY.
+   It was `position: fixed` at --z-popover (600), pinned under the sticky
+   header. A fixed box owns a constant band of the viewport, and on a 390px
+   phone every band is either chrome or product — so anything in flow travelled
+   up through it and could not be tapped while it was inside. That is ERR-224
+   (27.5% of the first screen), ERR-276 (the PDP buy button) and, measured by
+   `npm run probe:mobile-cta` §7, a card Add button at 32 of 92 scroll offsets
+   on /ink-cartridges AFTER ERR-276's path gate had shipped.
+
+   js/rewards-nudge.js#placeInFlow() inserts it into the document just below
+   the fold instead. Static positioning is what makes that true rather than
+   merely intended: with `position: static`, --rn-top/--rn-left/--rn-width and
+   z-index are all inert, so no later rule can quietly restore the overlay by
+   setting one of them. Pinned by tests/mobile-atc-dead-zone-sep2026.test.js. */
+.rewards-nudge--card {
+    /* `relative`, NOT `static`, and the difference is a control that vanishes.
+       .rewards-nudge__close is `position: absolute; top: 2px; right: 2px`, and
+       absolute resolves against the nearest POSITIONED ancestor — so under
+       `static` the dismiss button left the card entirely and was painted
+       against whatever ancestor happened to be positioned. Measured: the x was
+       not on the card at all. `relative` keeps the card in normal flow (it
+       occupies space and scrolls with the page, which is the entire point of
+       ERR-280) while giving the close button its containing block back.
+
+       z-index: auto is what keeps `relative` honest. A positioned element with
+       a z-index would create a stacking context at --z-popover (600) and paint
+       over its neighbours; with `auto` it participates in flow like any other
+       card. tests/mobile-atc-dead-zone-sep2026.test.js pins both, because the
+       one-word edit that turns this back into an overlay is `position: fixed`. */
+    position: relative;
+    /* The base rule is `top: var(--rn-top, 72px); left: var(--rn-left, auto)`,
+       written for the fixed popover. `static` ignored those; `relative` does
+       NOT — it OFFSETS by them. Measured: the card painted 72px below its own
+       layout box, so the next .shop-section-card was laid out against the box
+       and overlapped the "Maybe later" button by 52px. Neutralise both here
+       rather than deleting them from the base rule, which the desktop popover
+       still needs. */
+    top: auto;
+    left: auto;
+    z-index: auto;
+    width: auto;
+    /* Full container width, matching the .shop-section-card blocks it now sits
+       between — the card is part of the page, so it should not read as an
+       inset pop-up that forgot to float. */
+    margin: var(--spacing-5) 0;
+}
+
 .rewards-nudge--card::before {
     display: none;
 }

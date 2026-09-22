@@ -3742,6 +3742,26 @@
     transform: translateY(0);
 }
 
+/* ERR-280 — A BAR THAT IS NOT SHOWN MUST NOT EAT THE TAP UNDER IT.
+   `transform` is animated over 0.3s, so for that whole slide the bar is still
+   a painted, hit-testable box travelling across content it is not offering
+   anything to. Measured on a 390x664 iPhone 13 profile, mid-slide it covered
+   #add-to-cart-btn and `elementFromPoint` at that button's own centre returned
+   `button#sticky-atc-btn` — a control the site had already decided to hide.
+
+   It is not only the animation. `bottom: var(--consent-banner-height)` (ERR-238)
+   lifts this bar by ~149px while the consent banner is up, and translateY(100%)
+   only pushes it back down by its own 67px height, so the RESTING hidden bar
+   sits at y 515-582 in a 664px viewport — on screen, invisible only because the
+   banner paints over it at --z-popover. Remove the banner mid-session and the
+   resting bar is a live 67px tap target nobody can see.
+
+   aria-hidden="true" already says this to assistive tech
+   (product-detail-page.js). This says it to the thumb. */
+.sticky-atc:not(.is-visible) {
+    pointer-events: none;
+}
+
 .sticky-atc__inner {
     display: flex;
     align-items: center;

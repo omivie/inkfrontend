@@ -65,6 +65,7 @@
  */
 
 import { chromium } from 'playwright';
+import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobile-viewports.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const ROUTES = (process.env.PROBE_ROUTES || '/ink-cartridges,/toner-cartridges,/ribbons,/shop')
@@ -77,7 +78,12 @@ const SETTLE_MS = 11000;
 
 /* A mid-range Android on 4G — a Pixel-5 class profile. Changing these numbers
  * changes what the probe is measuring, so they are named and printed. */
-const PHONE = { width: 390, height: 844 };
+/* ERR-280: the phone box comes from playwright's own device registry now.
+   Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
+   SCREEN; its usable viewport after Safari's chrome is 390x664. The 180px
+   difference is larger than the consent banner, so overlaps that are real on a
+   phone did not reproduce at 844. See scripts/lib/mobile-viewports.mjs. */
+const PHONE = MOBILE_PHONE;
 const CPU_THROTTLE = 4;
 const NET = { latencyMs: 150, downMbps: 1.6, upMbps: 0.75 };
 const PIXEL_UA = 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 '
@@ -124,7 +130,7 @@ const OBSERVE = () => {
 console.log('\n\x1b[1mprobe:shop-cls — does the shop family hold its own height? (ERR-276)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no writes.');
 console.log(`Target: ${BASE}`);
-console.log(`Profile: ${PHONE.width}x${PHONE.height}, CPU ${CPU_THROTTLE}x throttle, `
+console.log(`Profile: ${describeViewport(PHONE)}, CPU ${CPU_THROTTLE}x throttle, `
     + `${NET.downMbps}Mbps / ${NET.latencyMs}ms — a mid-range Android on 4G, not a laptop.`);
 console.log(`Threshold: CLS <= ${CLS_GOOD} ("good"). Settle window: ${SETTLE_MS}ms.\n`);
 
@@ -134,7 +140,7 @@ try {
     browser = await chromium.launch();
     for (const route of ROUTES) {
         const ctx = await browser.newContext({
-            viewport: PHONE, isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: PIXEL_UA,
+            viewport: PHONE, isMobile: true, hasTouch: true, deviceScaleFactor: PHONE_SCALE, userAgent: PIXEL_UA,
         });
         const page = await ctx.newPage();
         const cdp = await ctx.newCDPSession(page);

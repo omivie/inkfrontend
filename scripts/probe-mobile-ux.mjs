@@ -65,6 +65,7 @@
  */
 
 import { chromium } from 'playwright';
+import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobile-viewports.mjs';
 import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const BASE = (process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz').replace(/\/$/, '');
@@ -72,12 +73,20 @@ const SKU = process.env.PROBE_SKU || 'CLC37BK';
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
     + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-// Named, not inline literals. 320 is the narrowest phone still in the stats;
-// 390 is the iPhone 14 the owner reports against.
+/* Named, not inline literals. 320 is the narrowest phone still in the stats;
+   390 is the iPhone the owner reports against.
+
+   ERR-280: the 390 row used to be `390x844`, which is the iPhone 13/14
+   PHYSICAL SCREEN. Playwright's own registry says the usable viewport after
+   Safari's chrome is 390x664, and the 180px difference is larger than the
+   consent banner — so every overlap this probe exists to catch had 180px of
+   imaginary room to resolve itself in. The other two rows are left as they
+   were: they are deliberate narrow-width stress cases, not device claims, and
+   their labels say so. See scripts/lib/mobile-viewports.mjs. */
 const VIEWPORTS = [
-    { id: 'xs', label: '320x568 (narrowest)', width: 320, height: 568 },
-    { id: 'se', label: '375x667 (iPhone SE)', width: 375, height: 667 },
-    { id: 'p14', label: '390x844 (iPhone 14)', width: 390, height: 844 },
+    { id: 'xs', label: '320x568 (narrowest width in the stats)', width: 320, height: 568 },
+    { id: 'se', label: '375x667 (iPhone SE width)', width: 375, height: 667 },
+    { id: 'p14', label: `${describeViewport(MOBILE_PHONE)}`, width: MOBILE_PHONE.width, height: MOBILE_PHONE.height },
 ];
 
 const TAP_STANDARD = 44;   // WCAG 2.5.5 — failing this is a defect
@@ -534,8 +543,8 @@ try {
        anything, and that is exit 2 (could not run), never exit 1. */
     {
         const ctx = await browser.newContext({
-            viewport: { width: 390, height: 844 }, userAgent: IPHONE_UA,
-            isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+            viewport: MOBILE_PHONE, userAgent: IPHONE_UA,
+            isMobile: true, hasTouch: true, deviceScaleFactor: PHONE_SCALE,
         });
         const page = await ctx.newPage();
         try {
@@ -558,7 +567,7 @@ try {
             const label = `${vp.id} ${route.name}`;
             const ctx = await browser.newContext({
                 viewport: { width: vp.width, height: vp.height }, userAgent: IPHONE_UA,
-                isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+                isMobile: true, hasTouch: true, deviceScaleFactor: PHONE_SCALE,
             });
             const page = await ctx.newPage();
             let m = null;

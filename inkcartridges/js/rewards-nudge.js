@@ -142,6 +142,10 @@
          * window.RewardsNudge._state. */
         suppressed: false,
         postAddArmed: false,
+        /* ERR-280: below the tablet breakpoint the card lives IN the document,
+           not over it. Set once by placeInFlow() so onReflow() cannot keep
+           re-inserting it further down the page on every scroll frame. */
+        placedInFlow: false,
         cleanups: []
     };
 
@@ -334,6 +338,108 @@
         return el;
     }
 
+    // ─── Placement ───────────────────────────────────────────────────
+
+    /**
+     * The first thing in the page's own content that starts BELOW the fold.
+     * The card is inserted before it, so the insertion shifts only pixels the
+     * shopper cannot currently see.
+     *
+     * It descends rather than only looking at <main>'s direct children,
+     * because a page whose <main> holds one full-height section (the shop
+     * family is exactly this: main > .shop-page > .drilldown-content > …)
+     * would otherwise offer no candidate at all and land the card after the
+     * entire page, where nobody would reach it.
+     *
+     * It stops descending at any container that is not block-level. Inserting
+     * into a grid or a flex row would make the card a GRID ITEM one column
+     * wide, which is a different bug wearing this fix's clothes.
+     */
+    function flowAnchor() {
+        var main = document.getElementById('main-content') || document.querySelector('main');
+        return main ? searchForFold(main, 0) : null;
+    }
+
+    /**
+     * THE STRADDLER WINS, AND THAT ORDERING IS THE WHOLE POINT.
+     *
+     * A container is searched for the first child that starts below the fold,
+     * but a child that STRADDLES the fold is descended into first. The first
+     * draft did it the other way round and landed the card 740px below the
+     * viewport on /ink-cartridges: `main`'s children are `.shop-page` (which
+     * straddles, and holds everything the shopper is looking at) and a
+     * `.container` far below it, so taking the first child below the fold
+     * skipped the entire page and put the card after it.
+     *
+     * Descending first puts the card at the nearest point below the fold
+     * instead of the nearest point below the fold AT THE TOP LEVEL, which is a
+     * different and much worse thing. Depth is capped so a deeply nested
+     * layout cannot turn this into a walk of the whole tree on every show().
+     */
+    function searchForFold(container, depth) {
+        var vh = window.innerHeight;
+        var kids = container.children;
+        var straddling = null;
+        var firstBelow = null;
+
+        for (var i = 0; i < kids.length; i++) {
+            var k = kids[i];
+            if (k === state.el || k.hidden) continue;
+            var r = k.getBoundingClientRect();
+            if (r.height === 0) continue;
+            if (r.top >= vh) { if (!firstBelow) firstBelow = k; }
+            else if (r.bottom > vh) straddling = k;
+        }
+
+        if (straddling && depth < 4 && isBlockLevel(straddling)) {
+            var inner = searchForFold(straddling, depth + 1);
+            if (inner) return inner;
+        }
+        return firstBelow ? { parent: container, before: firstBelow } : null;
+    }
+
+    /* Only block containers are descended into. Inserting between the items of
+       a grid or a flex row would make the card a GRID ITEM one column wide —
+       a different bug wearing this fix's clothes. */
+    function isBlockLevel(el) {
+        try {
+            var d = window.getComputedStyle(el).display;
+            return d === 'block' || d === 'flow-root';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /**
+     * Move the card into the document once, below the fold.
+     *
+     * ONCE is the load-bearing word: position() is called from onReflow() on
+     * every scroll frame, and re-running the search each time would walk the
+     * card down the page ahead of the shopper and never let them reach it.
+     */
+    function placeInFlow(el) {
+        if (state.placedInFlow && el.parentNode && el.parentNode !== document.body) return;
+        var spot = flowAnchor();
+        if (spot) {
+            spot.parent.insertBefore(el, spot.before);
+        } else {
+            /* Nothing below the fold — a page shorter than one screen. The end
+               of the content is still off the bottom of it, so appending there
+               keeps the promise this fix makes: the card never covers anything.
+               If there is no <main> at all it stays where buildEl() put it. */
+            var main = document.getElementById('main-content') || document.querySelector('main');
+            if (main) main.appendChild(el);
+        }
+        state.placedInFlow = true;
+    }
+
+    /** Back to the popover, for a rotation that crosses the breakpoint. */
+    function restoreToBody(el) {
+        if (!state.placedInFlow) return;
+        document.body.appendChild(el);
+        state.placedInFlow = false;
+    }
+
     // ─── Positioning ─────────────────────────────────────────────────
     function position() {
         var el = state.el;
@@ -346,15 +452,35 @@
         // media query.
 
         if (isNarrow()) {
-            // Compact card below the (sticky) header, full width minus margins
+            /* IN FLOW, NOT OVER THE PAGE (ERR-280).
+               Until 2026-09-22 this branch made the card `position: fixed` at
+               --z-popover (600), pinned at `header.bottom + 8`. A fixed card
+               owns a CONSTANT BAND of the viewport, so anything in normal flow
+               travels up through it and is un-tappable while it is inside —
+               which is the whole of ERR-224 (27.5% of the first screen on
+               /ink-cartridges), the whole of ERR-276 (the Add to Cart button on
+               every PDP) and, measured by `npm run probe:mobile-cta` §7, a card
+               Add button at 32 of 92 scroll offsets on /ink-cartridges after
+               ERR-276 had supposedly fixed it.
+
+               ERR-276's gate was a PATH LIST, so it could only ever be as
+               complete as the list — and the surface it did not cover is the
+               one 68% of paid clicks land on. The mechanism is what is wrong on
+               a phone: there is no band of a 390px viewport that is not either
+               product or chrome. So below the tablet breakpoint the card stops
+               being an overlay. It is inserted into the document just below the
+               fold and the shopper scrolls into it, which covers nothing, ever,
+               and cannot regress into covering something later.
+
+               Placing it BELOW the fold is what keeps this free: a layout shift
+               of content nobody can see scores no CLS, and /ink-cartridges is
+               at 0.0088 with 0.1 the threshold (`npm run probe:shop-cls`).
+               Desktop is untouched — the anchored popover below is unchanged. */
             el.classList.add('rewards-nudge--card');
-            var header = document.querySelector('.site-header');
-            var hb = header ? header.getBoundingClientRect().bottom : 0;
-            el.style.setProperty('--rn-top', Math.max(hb + 8, EDGE_MARGIN) + 'px');
-            el.style.setProperty('--rn-left', EDGE_MARGIN + 'px');
-            el.style.setProperty('--rn-width', (vw - EDGE_MARGIN * 2) + 'px');
+            placeInFlow(el);
         } else {
             el.classList.remove('rewards-nudge--card');
+            restoreToBody(el);
             var rect = anchor.getBoundingClientRect();
             var width = Math.min(MAX_WIDTH, vw - EDGE_MARGIN * 2);
             var left = Math.min(Math.max(rect.right - width, EDGE_MARGIN), vw - width - EDGE_MARGIN);
@@ -451,11 +577,21 @@
             softClose('conflict'); // a header menu is opening
             return;
         }
+        /* ERR-280: click-outside-to-close is POPOVER behaviour. In flow the
+           card is a block of the page like any other, and closing it because
+           the shopper tapped a product would delete it on the first tap they
+           make — on the surface it was moved in-flow to serve. It keeps its
+           own close button and "Maybe later", which is how an in-flow card is
+           meant to be dismissed. */
+        if (state.placedInFlow) return;
         softClose('outside');
     }
 
     function onFocusIn(e) {
-        // The search dropdown opens on input focus — treat as a conflict
+        // The search dropdown opens on input focus — treat as a conflict.
+        // Only while the card is a popover: in flow it is nowhere near the
+        // dropdown and there is nothing to be in conflict with (ERR-280).
+        if (state.placedInFlow) return;
         var t = e.target;
         if (t && t.closest && t.closest('.search-form') && !t.closest('.rewards-nudge')) {
             softClose('conflict');
@@ -653,6 +789,14 @@
         _campaign: CAMPAIGN,
         _pathMatches: pathMatches,
         _normalizePath: normalizedPath,
+        /* ERR-280. Exported for the same reason _pathMatches is: the choice of
+           insertion point is arithmetic with a right and a wrong answer, and a
+           test that greps for the recursion cannot tell whether the straddling
+           child is searched BEFORE the first child below the fold — which is
+           the difference between landing the card 117px below the fold and
+           landing it 740px below, after the whole page. Driven directly by
+           tests/mobile-atc-dead-zone-sep2026.test.js. */
+        _searchForFold: searchForFold,
     };
 
     document.addEventListener('DOMContentLoaded', init);

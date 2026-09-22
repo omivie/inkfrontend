@@ -43,13 +43,19 @@
  */
 
 import { chromium } from 'playwright';
+import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobile-viewports.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const LOCAL = BASE.includes('localhost');
 const CARD_FLOOR = 150;
 const CARD_CEILING = 200;
 const DESKTOP = { width: 1440, height: 900 };
-const PHONE = { width: 390, height: 844 };
+/* ERR-280: the phone box comes from playwright's own device registry now.
+   Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
+   SCREEN; its usable viewport after Safari's chrome is 390x664. The 180px
+   difference is larger than the consent banner, so overlaps that are real on a
+   phone did not reproduce at 844. See scripts/lib/mobile-viewports.mjs. */
+const PHONE = MOBILE_PHONE;
 
 // On localhost the Vercel rewrites do not exist, so address the files directly.
 //
@@ -126,6 +132,7 @@ const head = (t) => console.log(`\n\x1b[1m${t}\x1b[0m`);
 console.log('\n\x1b[1mprobe:landing-popular — do the ad landing pages show products? (ERR-236)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no writes.');
 console.log(`Target: ${BASE}${LOCAL ? '  (localhost — addressing html/ files directly, no Vercel rewrites)' : ''}\n`);
+console.log(`Phone:  ${describeViewport(PHONE)}`);
 
 /** Everything this probe cares about, read from the live DOM. */
 const MEASURE = () => {

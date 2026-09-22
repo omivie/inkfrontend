@@ -13670,3 +13670,221 @@ being sent is discarded and every sale counts at one made-up number.
 `inkcartridges/js/contact-page.js` · `inkcartridges/js/quote-page.js` · 38 HTML files (`?v=` only) ·
 `tests/uet-tag-sep2026.test.js` · `scripts/redproof-uet.sh` · `scripts/probe-uet-tag.mjs` ·
 `errors.md`.
+
+---
+
+## ERR-280 — a first-time guest on a phone had scroll positions with no tappable Add to Cart, and every control involved was in a defensible state (2026-09-22)
+
+Two handoffs, `mobile-atc-dead-zone-FE-handoff-sep2026.md` and
+`mobile-cta-occlusion-followup-sep2026.md`. Mobile converts at 1.79% against desktop's
+6.46% on the same campaigns, $88.87 cost per order against $46.46, and mobile has been
+excluded at -100% on the two generic ad groups since 2026-09-20 18:40 as a stop-loss.
+Their diagnosis was right, the mechanism was confirmed in source, and the defect was
+wider than they could see from outside.
+
+### The shape of it, which is the reusable part
+
+`.sticky-atc` exists for exactly one reason: to guarantee a tappable Add to Cart
+whenever the real one is not reachable. It stood down on `isIntersecting` of
+`.product-info__actions` at `threshold: 0` with no `rootMargin`.
+
+In the dead zone the sticky bar is **correctly hidden** — the site has decided the main
+button is in view — and the main button is **correctly rendered** — something is merely
+painted on top of it. Both states are defensible. Neither is a bug on its own. The
+shopper has nothing to press.
+
+**`npm run probe:mobile-cta` was green throughout**, and it was green for a good reason:
+its `control()` helper reports a bar the site is deliberately hiding as
+`hidden-by-design`, never as a failure, because ERR-276 was misdiagnosed exactly that way
+(*a control that is correctly hidden is not a control that is blocked*). That lesson is
+right, and it is a lesson about a CONTROL. Asked one level up it hides the defect.
+The 6532-test suite was green too.
+
+***So the question had to change: not "what state is this control in", but "is ANY
+add-to-cart tappable at this scroll offset".*** That is `probe:mobile-cta` §6 now, swept
+every 40px across the whole document. Run against the unfixed build it named two dead
+windows — scrollY 587-785 and 1187-1427 — while §1, asking the old question at a
+computed worst-case pixel, passed in the same run.
+
+### Two errors in one predicate, and the handoff only saw one
+
+**No occlusion term.** `.consent-banner` is `position: fixed; bottom: 0` at
+`--z-popover` (600) over the bar's `--z-sticky` (200) and owns ~148px of a phone
+viewport. An IntersectionObserver with the default root counts that band as visible, so
+the bar handed over to a button underneath it.
+
+**The wrong element, which they missed.** They assumed the test was 60% visibility; it
+was *zero*, and it watched the container rather than the button. On mobile
+`.product-info__actions` is a two-row grid — quantity stepper, then Add to Cart beside
+the favourite (`mobile-parity-may2026` S2.1) — so the container's top edge enters the
+viewport ~56px before the button's. One pixel of the stepper retired the bar while the
+button was still under the banner, or still below the fold entirely.
+
+It watched the container for a real reason: `#add-to-cart-btn` is replaced via
+`outerHTML` with a Contact us anchor on every out-of-stock product, and a stale
+reference would observe a detached node. `.product-info__add-to-cart` is carried by
+**both** spellings, so re-resolving it removes the reason. A `MutationObserver` on the
+container re-points the observer after the swap; without it the guard could not fire on
+any out-of-stock product the shop sells, which is ERR-258's shape.
+
+### Occlusion has two edges
+
+With the banner inset in place the sweep still reported a dead window at scrollY 1200:
+the button at y 33-81, `elementFromPoint` at its centre returning `div.logo-block`.
+`.site-header` is `position: sticky; top: 0` below 1100px at the **same `--z-sticky`
+(200)** the bar uses. ***A model of occlusion with one edge in it will be wrong at the
+other.*** Both bands are now read from their rendered boxes every time —
+`--consent-banner-height` is the value `consent-banner.js` *reserved* and the two
+disagree for a frame after a re-wrap, and `--header-h: 56px` is a design target the
+header does not hold (`js/landing.js:48` had already had to measure it for the same
+reason).
+
+### The probe was measuring a viewport no iPhone has
+
+`const PHONE = { width: 390, height: 844 }` appeared in **eight** probes with a comment
+saying "iPhone 13/14". 390x844 is the iPhone 13's **physical screen**.
+`devices['iPhone 13'].viewport` is **390x664** — the usable area after Safari's URL bar
+and toolbar. The missing 180px is **larger than the consent banner itself**, so at 844
+the sticky bar and the banner do not overlap and at 664 they do.
+
+A file whose own header says *a probe's emulation is part of its measurement*
+(ERR-238/239/240) had 180px of imaginary room in it, and so did every other mobile
+probe. `scripts/lib/mobile-viewports.mjs` now takes the box from playwright's device
+registry rather than retyping it, and all eight import it. `PHONE_SCREEN_844` is kept
+and **named for what it is**, because deleting it would not make the ERR-224/233/238/276
+figures wrong — it would make them uncomparable with nothing in the tree explaining why
+a re-run prints a different number.
+
+### A bar that was hidden still ate the tap
+
+`transform` animates over 0.3s, so through every slide `.sticky-atc` is a painted,
+hit-testable box crossing content it is offering nothing to. Measured mid-slide,
+`elementFromPoint` at `#add-to-cart-btn`'s own centre returned `button#sticky-atc-btn` —
+a control the site had already decided to hide.
+
+It is not only the animation. ERR-238's `bottom: var(--consent-banner-height)` lifts the
+bar ~149px while `translateY(100%)` pushes it back only its own 67px, so the **resting
+hidden bar sits at y 515-582 in a 664px viewport — on screen**, invisible only because
+the banner paints over it at z-600. Dismiss consent mid-session and it is a live 67px
+tap target nobody can see. `aria-hidden="true"` had been saying this to assistive
+technology all along; `pointer-events: none` now says it to the thumb.
+
+### ERR-276's fix was a list of routes, so it decayed to the route nobody listed
+
+The new category sweep found `#rewards-nudge` covering a card Add button at **32 of 92
+scroll offsets on `/ink-cartridges`** — the surface 68% of paid clicks land on — while
+`probe:mobile-cta` §4 *asserts* the nudge must be present there.
+
+`js/rewards-nudge.js`'s own header already named that page: ERR-224, "a 366x248 card
+covering 27.5% of the first screen with ZERO product cards rendered on it". ERR-276 then
+added the popular products shelf to exactly that page, so `scrollThresholdPx: 600` now
+mounts the card squarely on product cards. Two fixes, each correct alone, combining into
+the defect the first one was written to prevent.
+
+***The mechanism was the bug, not the route.*** Below the tablet breakpoint there is no
+band of a 390px viewport that is not either chrome or product, so a `position: fixed`
+card will always own a band that in-flow buy buttons travel through. The card is
+therefore no longer an overlay on a phone: `placeInFlow()` inserts it into the document
+**just below the fold** and the shopper scrolls into it. It costs no CLS because a
+layout shift of content nobody can see scores none — `/ink-cartridges` measures 0.0088
+against a 0.1 threshold, unchanged. The owner chose this over extending
+`narrowSkipPaths`, which would have deleted mobile account signups almost everywhere,
+since category pages are most non-PDP mobile traffic.
+
+**Two things `position: static` broke that `relative` does not.**
+`.rewards-nudge__close` is `position: absolute`, so under `static` the dismiss button
+resolved against a different ancestor and left the card entirely — measured, not
+reasoned. And `relative` re-activates the base rule's `top: var(--rn-top, 72px)`, which
+painted the card 72px below its own layout box and let the next `.shop-section-card`
+overlap "Maybe later" by 52px. `top: auto`, `left: auto`, `z-index: auto`, all pinned.
+
+**The insertion point had a right and a wrong answer.** The first draft took the first
+child of `<main>` starting below the fold. `main`'s children are `.shop-page` (which
+straddles the fold and holds everything the shopper is reading) and a `.container` far
+below it, so that skipped the entire page and landed the card **740px** below the
+viewport. Descending into the straddler **first** puts it 117px below the fold.
+`_searchForFold` is exported for the same reason `_pathMatches` is: ***a grep cannot
+tell which of two branches runs first.***
+
+### Three artefacts the handoffs named do not exist in this tree
+
+`scripts/verify-mobile-cta-occlusion.js` has never existed in any branch
+(`git log --all --diff-filter=A` finds nothing). The quoted failure —
+`Timeout 60000ms exceeded … waiting until "networkidle"` — cannot come from here: all
+three navigations in `scripts/probe-mobile-cta-occlusion.mjs` are `domcontentloaded`,
+and the only two live `networkidle` gotos in `scripts/` are at 45000ms. It already exits
+1 while the defect is present, so `--check` is a no-op; it is accepted anyway as a
+documented alias so their command runs, and **unknown flags are now refused** so a typo
+cannot pass for a clean run. `scripts/ads/pause-mobile-until-checkout-fixed.js` is also
+absent.
+
+Follow-up §2 asked for `body:has(.consent-banner.is-open) .sticky-atc { bottom: … }`.
+That shipped in September as ERR-238, in a better shape — `body.has-consent-banner` with
+the live measured height, no `:has()`, no 148px constant. ***The asks were real and the
+file-level claims were not ours***, and saying so plainly is the difference between
+fixing the defect and inheriting the premise.
+
+### The 826px of category chrome is a scroll-0 reading, and it is mostly not chrome
+
+`main.js#initStickyHeader` already collapses `.header-lead` (~44px) at scrollY 80, so
+the header slims itself the moment the shopper moves. Measured at 390x664 the first card
+Add button sits at y881, and that splits **410px of chrome and 471px of card** — image
+117, title 68, colour/stock 41, price + GST + cost-per-page 45, **business-price block
+83**, quantity stepper 46. Nothing in it is accidental.
+
+No chrome trim reaches a 664px fold. The two levers that would are the `≤480px`
+full-width shipping pill — deliberately pinned by `shipping-bar-inline-may2026.test.js`
+§7, whose own rationale was reclaiming that same ~40px — and the publicly-shown
+business-price block. Both are the owner's calls and were left to them rather than made
+quietly while a 20px trim was reported as an answer to "826px".
+
+### Guards
+
+`tests/mobile-atc-dead-zone-sep2026.test.js` (26 tests) runs **the whole of
+`js/product-detail-page.js` in a vm**, captures its `DOMContentLoaded` handlers and
+drives the sticky-bar one against a fake DOM that records what the
+`IntersectionObserver` was constructed with. A source grep cannot answer any of: whether
+the root is shrunk by the *measured* band or a plausible constant; whether the element
+observed is the button or its container; whether handing back needs full clearance or
+one pixel; whether the observer survives the `outerHTML` swap. §7 drives the nudge's
+real `_searchForFold` over synthetic layouts.
+
+`scripts/redproof-mobile-atc.sh` breaks the fix 28 ways against a copy of the tree —
+never a live file, because several sessions work here at once (ERR-270/272) — and
+**28/28 were caught**.
+
+`probe:mobile-cta` classifies every blocker by **DOM ancestry**, not by matching the
+printed label: `describeHit` prints at most two classes, so a blocker deep inside the
+header reads as `input#search-input` with nothing about the header in it, and an
+allowlist over that string would admit the header under one spelling and fail it under
+the next. Two chrome bands are allowed to cover their own height; everything else fails.
+Each offset is sampled **twice**, before and after the bars stop moving: a sample taken
+mid-transition measures the animation, and the defect worth failing over is the one that
+does **not** resolve on its own.
+
+`PROBE_BASE` now defaults to `http://localhost:3000`. Since ERR-279 every PDP this probe
+opens fires `view_item` into Microsoft UET and GA4, and the UET notes single that event
+out as manufacturing a revenue-bearing conversion in the live account. The READ-ONLY
+banner was true of our database and false of our ad accounts — ERR-271 exactly, in a
+file written before the thing that made it untrue. A production run is still available,
+opt-in, and prints what it is about to fire.
+
+**Before: 2 dead windows, §1 green. After: 15 passed, 0 failed, 0 not exercised.**
+Suite 6558/0. `probe:shop-cls` 0.0088 / 0.0088 / 0.0018 / 0.0018 at the corrected
+viewport (was 0.007 / 0.007 / 0.001 / 0.001 at 844 — the instrument moved, not the
+page). `probe:consent-banner` 14/0, `probe:mobile-checkout-fold` 27/0 with the checkout
+email field still above the fold at 664.
+
+**Lesson.** Ask the shopper's question, not the control's. Every guard here reported the
+truth about the element it was pointed at and the page was still unusable, so the
+assertion has to be *is anything tappable here*, swept, with the layers allowed to cover
+something named explicitly and everything else failing. And a fix written as a list of
+routes decays into the one route nobody listed; a fix written as *this component is not
+an overlay on a phone* cannot.
+
+**Files.** `inkcartridges/js/product-detail-page.js` · `inkcartridges/js/rewards-nudge.js` ·
+`inkcartridges/css/pages.css` · `inkcartridges/css/components.css` ·
+`scripts/lib/mobile-viewports.mjs` (new) · `scripts/probe-mobile-cta-occlusion.mjs` ·
+seven other mobile probes (`?v=`-free, viewport only) ·
+`tests/mobile-atc-dead-zone-sep2026.test.js` (new) ·
+`scripts/redproof-mobile-atc.sh` (new) · 42 HTML files (`?v=` only) · `errors.md`.

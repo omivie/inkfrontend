@@ -92,30 +92,90 @@
  * It lives in scripts/, NOT inkcartridges/scripts/ — that tree is the Vercel
  * output directory and is served publicly (ERR-229).
  *
- * Usage:  npm run probe:mobile-cta
- *         PROBE_BASE=http://localhost:3000 npm run probe:mobile-cta
+ * ════════════════════════════════════════════════════════════════════════════
+ * ERR-280 ADDENDUM, 2026-09-22 — WHAT §1-§5 COULD NOT SEE
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * Backend handoff `mobile-atc-dead-zone-FE-handoff-sep2026.md` reported scroll
+ * positions on a PDP with NO tappable Add to Cart at all: the sticky bar has
+ * already stood down, and the main button is underneath the consent banner.
+ * Everything above was green while that was true, for three separate reasons,
+ * and each one is worth naming because each is a reusable trap.
+ *
+ * 1. THE PROBE ASKED A PER-CONTROL QUESTION ABOUT A PAGE-LEVEL DEFECT.
+ *    `control()` is careful and correct: a bar the site is deliberately hiding
+ *    is reported `hidden-by-design`, never a failure. In the dead zone BOTH
+ *    controls are individually excusable — the sticky bar is correctly hidden
+ *    (the main button is "in view"), and the main button is correctly rendered
+ *    (it is simply painted under a higher layer). Two defensible states, and a
+ *    shopper with nothing to tap. §6 therefore asks the shopper's question:
+ *    IS ANY ADD-TO-CART TAPPABLE AT THIS SCROLL OFFSET — not "is this control
+ *    in a state I can excuse".
+ *
+ * 2. IT ASKED AT THE WRONG END OF THE VIEWPORT. WORST_CASE_SCROLL aims the
+ *    button at the band the *nudge* occupies, which is pinned under the header
+ *    at the TOP. The consent banner owns the BOTTOM. One computed offset is a
+ *    strict improvement on a fixed offset and still samples one pixel; the
+ *    defect is a WINDOW. §6 sweeps the whole document and reports the window's
+ *    extent in px of scroll, with its offsets.
+ *
+ * 3. IT MEASURED A VIEWPORT NO IPHONE HAS. `PHONE` was `{ 390, 844 }`, which
+ *    is the iPhone 13's PHYSICAL SCREEN; the usable viewport after Safari's
+ *    chrome is `{ 390, 664 }` — see scripts/lib/mobile-viewports.mjs. The 180px
+ *    difference is larger than the consent banner itself, so at 844 the sticky
+ *    bar and the banner do not overlap and at 664 they do. A probe whose own
+ *    header says "a probe's emulation is part of its measurement" was measuring
+ *    180px of screen that does not exist.
+ *
+ * THE DEFAULT TARGET IS NOW LOCALHOST. Since ERR-279 a PDP view fires
+ * `view_item` into Microsoft UET and GA4, and the UET notes record that
+ * `view_item` would manufacture a revenue-bearing conversion in the live
+ * account. This file's READ-ONLY banner was written before that was true: it
+ * wrote nothing to US and, through the browser, plenty to our ad accounts —
+ * which is ERR-271 exactly (a guard cannot see what it does not spell). A
+ * production run is still available and still correct; it is now opt-in, and
+ * the run prints what it is about to fire.
+ *
+ * Usage:  npm run probe:mobile-cta                       (localhost:3000)
+ *         npm run probe:mobile-cta -- --check            (alias for the above)
+ *         PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:mobile-cta
  *         PROBE_SKU=GLC3333M npm run probe:mobile-cta
- * Exit:   0 = a fresh mobile guest can tap Add to Cart, and desktop is untouched
- *         1 = a control was covered, or the gate fired on the wrong surface
+ *         PROBE_SWEEP_STEP=20 npm run probe:mobile-cta   (finer sweep)
+ * Exit:   0 = a fresh mobile guest can tap Add to Cart at EVERY scroll offset,
+ *             and desktop is untouched
+ *         1 = a control was covered, a scroll offset had nothing tappable, or
+ *             the gate fired on the wrong surface
  *         2 = could not run (network / the page never rendered / no browser)
  */
 
 import playwright from 'playwright';
+import { PHONE, PHONE_SCALE, IPHONE_UA, describeViewport } from './lib/mobile-viewports.mjs';
 
-const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
+/* `--check` is accepted and does nothing, deliberately. The handoff documents
+   `--check` as the way to run this ("exits non-zero while the defect is
+   present"), and that is already the only behaviour this file has — there is no
+   record mode for it to be the opposite of. Accepting the flag means the
+   documented command runs instead of being silently ignored by an argv parser
+   that does not exist; REJECTING an unknown flag means a typo cannot pass for a
+   clean run. */
+const ARGS = process.argv.slice(2);
+const UNKNOWN = ARGS.filter((a) => a !== '--check');
+
+const DEFAULT_BASE = 'http://localhost:3000';
+const BASE = process.env.PROBE_BASE || DEFAULT_BASE;
+const IS_PRODUCTION = /inkcartridges\.co\.nz/i.test(BASE);
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
-const PHONE = { width: 390, height: 844 };     // iPhone 13/14 — the handoff's viewport
 const DESKTOP = { width: 1440, height: 900 };
-const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-    + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
 /** The nudge's own numbers, mirrored so the probe waits for the real trigger. */
 const NUDGE_SCROLL_PX = 600;                   // CAMPAIGN.scrollThresholdPx
 const NUDGE_FLOOR_MS = 3000;                   // CAMPAIGN.delayMs
 const SETTLE_MS = NUDGE_FLOOR_MS + 900;        // floor + auth hydration headroom
 const TAP_BUDGET_MS = 2000;                    // the handoff's definition of done
-/* The card's measured height at 390x844 (handoff table + this probe's own runs:
- * y 144-392). Used ONLY to reconstruct the band on a build where the nudge is
+/* The card's measured height (handoff table + this probe's own runs: y 144-392).
+ * It is a function of WIDTH, not height — the copy wraps at 390px the same way
+ * in a 664px viewport as in an 844px one — so ERR-280's viewport correction
+ * leaves it valid. Used ONLY to reconstruct the band on a build where the nudge is
  * correctly suppressed, so the fixed build is interrogated at the same pixel the
  * broken one failed at. Never used as a reservation or an offset. */
 const NUDGE_CARD_HEIGHT_PX = 248;
@@ -278,6 +338,225 @@ const MEASURE = () => {
     };
 };
 
+/* ── THE SHOPPER'S QUESTION (ERR-280) ─────────────────────────────────────────
+ *
+ * `control()` above answers "what state is this control in, and does the
+ * question even apply to it". That is the right question about a CONTROL and
+ * the wrong question about a PAGE. In the dead zone the sticky bar is
+ * `hidden-by-design` (correct — the site is not showing it) and the inline
+ * button is `blocked` (correct — a higher layer is on top of it), and a shopper
+ * has nothing to press. Neither verdict is wrong. The page is still broken.
+ *
+ * So this runs over EVERY add-to-cart control on the page at once and returns
+ * one boolean: could a thumb buy something, right now, at this scroll offset.
+ *
+ * `partly-offscreen` is its own verdict on purpose. A control whose centre has
+ * left the viewport returns null from elementFromPoint, which is indistinguish-
+ * able from "covered" if you only branch on truthiness — and reporting a button
+ * that is merely scrolled past as BLOCKED would manufacture a dead zone that is
+ * not there. It is not tappable and it is not evidence of occlusion.
+ */
+const ANY_TAPPABLE = (selectors) => {
+    const describeHit = (el) => {
+        if (!el) return 'nothing';
+        const id = el.id ? `#${el.id}` : '';
+        const cls = String(el.className || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+        return `${el.tagName.toLowerCase()}${id}${cls ? '.' + cls : ''}`;
+    };
+
+    const controls = [];
+    let tappable = false;
+
+    selectors.forEach((sel) => {
+        Array.prototype.forEach.call(document.querySelectorAll(sel), (el) => {
+            const cs = getComputedStyle(el);
+            /* The sticky bar hides by translating the WHOLE bar, so the button's
+               own computed style says nothing. Ask the host it travels with. */
+            const host = el.closest('.sticky-atc') || el;
+            const hostCs = getComputedStyle(host);
+            const r = el.getBoundingClientRect();
+            const row = { sel, top: Math.round(r.top), bottom: Math.round(r.bottom) };
+
+            if (cs.display === 'none' || hostCs.display === 'none') {
+                controls.push({ ...row, verdict: 'not-displayed' });
+                return;
+            }
+            if (host !== el && host.classList.contains('sticky-atc') && !host.classList.contains('is-visible')) {
+                controls.push({ ...row, verdict: 'hidden-by-design' });
+                return;
+            }
+            if (cs.visibility === 'hidden' || Number(cs.opacity) === 0) {
+                controls.push({ ...row, verdict: 'hidden-by-design' });
+                return;
+            }
+            if (r.width === 0 || r.height === 0) {
+                controls.push({ ...row, verdict: 'zero-box' });
+                return;
+            }
+            if (r.bottom <= 0 || r.top >= window.innerHeight) {
+                controls.push({ ...row, verdict: 'offscreen' });
+                return;
+            }
+
+            const x = Math.round(r.left + r.width / 2);
+            const y = Math.round(r.top + r.height / 2);
+            if (y < 0 || y >= window.innerHeight || x < 0 || x >= window.innerWidth) {
+                controls.push({ ...row, verdict: 'partly-offscreen' });
+                return;
+            }
+            const hit = document.elementFromPoint(x, y);
+            const mine = !!hit && (hit === el || el.contains(hit) || hit.contains(el));
+            if (mine) tappable = true;
+            /* WHICH CHROME, decided by ANCESTRY rather than by matching the
+               printed label. `describeHit` gives two classes at most, so a
+               blocker deep inside the header prints as `input#search-input`
+               with nothing about the header in it — an allowlist over that
+               string would let the header through under one spelling and fail
+               it under the next. Ask the DOM instead. */
+            const chrome = !hit ? null
+                : (hit.closest('#consent-banner') ? 'consent-banner'
+                    : (hit.closest('.site-header') ? 'site-header' : null));
+            controls.push({
+                ...row,
+                verdict: mine ? 'reachable' : 'blocked',
+                blockedBy: mine ? null : describeHit(hit),
+                blockedByChrome: mine ? null : chrome,
+            });
+        });
+    });
+
+    const banner = document.getElementById('consent-banner');
+    const br = banner ? banner.getBoundingClientRect() : null;
+    return {
+        scrollY: Math.round(window.scrollY),
+        innerHeight: window.innerHeight,
+        docHeight: Math.round(document.documentElement.scrollHeight),
+        bannerHeight: br ? Math.round(br.height) : 0,
+        tappable,
+        controls,
+    };
+};
+
+/** Every add-to-cart control a PDP can offer, in both stock states. */
+const PDP_CTA_SELECTORS = ['.product-info__add-to-cart', '#sticky-atc-btn', '.sticky-atc__btn'];
+/* Two card renderers, deliberately duplicated rather than shared
+   (js/products.js:172-179), so the sweep has to name both spellings or it
+   measures the popular shelf and calls it the page. */
+const CARD_CTA_SELECTORS = ['.product-card__add-btn', '.product-card__cart-btn'];
+
+/** Smaller than the 48px button, so a step cannot straddle the dead window. */
+const SWEEP_STEP_PX = Number(process.env.PROBE_SWEEP_STEP || 40);
+
+/**
+ * Let every bottom-anchored layer finish moving, then say how long it took.
+ *
+ * `.sticky-atc` animates `transform` over 0.3s and `.consent-banner` over
+ * 0.25s. A box that is sliding is still painted and still hit-testable, so a
+ * sample taken mid-slide measures the ANIMATION, not reachability — and the
+ * two answer different questions. Stops on two identical frames, or the cap.
+ */
+const SETTLE_LAYERS = (capMs) => new Promise((resolve) => {
+    const started = performance.now();
+    const read = () => ['.sticky-atc', '#consent-banner', '.cart-sticky-bar']
+        .map((sel) => { const e = document.querySelector(sel); return e ? getComputedStyle(e).transform : ''; })
+        .join('|');
+    let prev = read();
+    let stable = 0;
+    const tick = () => {
+        const now = read();
+        if (now === prev) stable += 1; else { stable = 0; prev = now; }
+        if (stable >= 2 || performance.now() - started > capMs) {
+            resolve(Math.round(performance.now() - started));
+            return;
+        }
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+});
+
+/**
+ * Walk the document top to bottom and ask ANY_TAPPABLE at every step.
+ *
+ * Two frames of settle before anything is read, not a sleep: the class the
+ * sticky bar toggles is written from an IntersectionObserver callback, which
+ * runs after layout on the next frame. Sampling in the same tick as the scroll
+ * reads the PREVIOUS offset's answer at the CURRENT offset's coordinates.
+ *
+ * EACH OFFSET IS SAMPLED TWICE, AND THE DIFFERENCE IS THE POINT.
+ *
+ *   `transient` — read immediately, while the bars are still sliding. This is
+ *   what a thumb meets during a fast flick.
+ *   `settled`   — read once nothing is moving. This is the shopper's real
+ *   question: IF I STOP HERE, CAN I BUY?
+ *
+ * Only the settled read is asserted on. A stationary offset with nothing
+ * tappable stays that way forever and is the defect ERR-280 is about; a
+ * transient one resolves in ~300ms with no input at all, and asserting on it
+ * would turn every CSS transition on the page into a permanent failure. The
+ * transient count is printed, never silently dropped — it is the number that
+ * says how long the handover takes.
+ */
+async function sweep(page, selectors, { step = SWEEP_STEP_PX } = {}) {
+    const samples = [];
+    const geom = await page.evaluate(() => ({
+        doc: document.documentElement.scrollHeight,
+        vh: window.innerHeight,
+    }));
+    const last = Math.max(0, geom.doc - geom.vh);
+    for (let y = 0; y <= last + step; y += step) {
+        const target = Math.min(y, last);
+        await page.evaluate((to) => window.scrollTo(0, to), target);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const transient = await page.evaluate(ANY_TAPPABLE, selectors);
+        const settleMs = await page.evaluate(SETTLE_LAYERS, 800);
+        const settled = await page.evaluate(ANY_TAPPABLE, selectors);
+        samples.push({ ...settled, settleMs, transientTappable: transient.tappable });
+        if (target >= last) break;
+    }
+    return samples;
+}
+
+/** Contiguous runs of samples matching a predicate, as {from,to,samples}. */
+function runsOf(samples, predicate) {
+    const runs = [];
+    let open = null;
+    samples.forEach((s) => {
+        if (predicate(s)) {
+            if (!open) { open = { from: s.scrollY, to: s.scrollY, samples: [] }; runs.push(open); }
+            open.to = s.scrollY;
+            open.samples.push(s);
+        } else {
+            open = null;
+        }
+    });
+    return runs;
+}
+
+/**
+ * Wait for the consent banner to REACH ITS RESTING POSITION, not merely to
+ * exist. `.is-open` is added before the 0.25s translateY runs, so a probe that
+ * measures on the class sees the bar mid-flight and reads a box it never
+ * occupies. scripts/probe-consent-banner.mjs:137-150 learned this first; the
+ * same wait belongs in every probe that reads the banner's geometry.
+ *
+ * Resolves either way. A banner that never settles is reported by the caller as
+ * NOT EXERCISED — never as a pass.
+ */
+async function waitForBannerSettled(page, timeout = 15000) {
+    try {
+        await page.waitForSelector('#consent-banner', { timeout: Math.min(timeout, 10000) });
+        await page.waitForFunction(() => {
+            const el = document.getElementById('consent-banner');
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            return r.height > 0 && Math.abs(r.bottom - window.innerHeight) <= 1;
+        }, null, { timeout });
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
 /* ── THE WORST-CASE SCROLL, WHICH IS THE WHOLE POINT ──────────────────────────
  *
  * The first version of this probe scrolled to a fixed offset (threshold + 120)
@@ -405,10 +684,31 @@ async function launchEngine() {
     return { browser, engine: 'chromium', emulatesIos: true };
 }
 
-console.log('\n\x1b[1mprobe:mobile-cta — can a fresh mobile guest tap Add to Cart? (ERR-276)\x1b[0m');
+if (UNKNOWN.length) {
+    console.log(`\x1b[31mUnknown argument(s): ${UNKNOWN.join(' ')}\x1b[0m`);
+    console.log('This probe takes --check (a documented alias for its only mode) and nothing else.');
+    console.log('Configure it with PROBE_BASE, PROBE_SKU, PROBE_SWEEP_STEP.');
+    process.exit(2);
+}
+
+console.log('\n\x1b[1mprobe:mobile-cta — can a fresh mobile guest tap Add to Cart? (ERR-276, ERR-280)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no cart writes.');
-console.log('The only DOM write is §5\'s synthetic overlay, in a context closed immediately after.');
-console.log(`Target: ${BASE}   SKU: ${SKU}   Phone: ${PHONE.width}x${PHONE.height}   Desktop: ${DESKTOP.width}x${DESKTOP.height}`);
+console.log('The only DOM write is the synthetic overlay in §5 and §8, in a context closed immediately after.');
+console.log(`Target: ${BASE}   SKU: ${SKU}   Desktop: ${DESKTOP.width}x${DESKTOP.height}`);
+console.log(`Phone:  ${describeViewport(PHONE)}`);
+console.log(`Sweep:  every ${SWEEP_STEP_PX}px of scroll (PROBE_SWEEP_STEP)`);
+
+/* Read-only about OUR data is not read-only about our ad accounts (ERR-271).
+   Since ERR-279 every PDP view this probe opens fires view_item into Microsoft
+   UET and GA4, and view_item is the event the UET notes single out as
+   manufacturing a revenue-bearing conversion in the live account. Nothing here
+   blocks a production run — it is the only way to measure the deployed build —
+   but the run says what it is about to fire, out loud, every time. */
+if (IS_PRODUCTION) {
+    console.log('\n\x1b[33mTARGET IS PRODUCTION.\x1b[0m This run opens real PDPs, so each page view fires');
+    console.log('  view_item -> Microsoft UET (ERR-279) and GA4, plus page_view on every navigation.');
+    console.log(`  Nothing is written to us. To measure locally instead: npx serve inkcartridges -l 3000 (${DEFAULT_BASE}).`);
+}
 
 const { browser, engine, emulatesIos } = await launchEngine();
 console.log(`\x1b[1mEngine: ${engine}\x1b[0m${emulatesIos ? ' (emulating iOS via UA + isMobile + hasTouch)' : ' (real WebKit)'}`);
@@ -419,7 +719,7 @@ const phoneCtx = () => browser.newContext({
     userAgent: emulatesIos ? IPHONE_UA : undefined,
     isMobile: emulatesIos ? true : undefined,
     hasTouch: true,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: PHONE_SCALE,
 });
 
 let fatal = null;
@@ -483,6 +783,10 @@ try {
         // Scroll far enough that .product-info__actions leaves the viewport, which
         // is the ONLY state in which product-detail-page.js shows this bar.
         const page = await openPdp(ctx, { scrollTo: 2600 });
+        /* ERR-280: .is-open is set BEFORE the 0.25s translateY runs, so reading
+           the box on the class alone measures the bar mid-flight at a position
+           it never occupies. */
+        const bannerSettled = await waitForBannerSettled(page);
         const m = await page.evaluate(MEASURE);
 
         console.log(`  scrollY=${m.scrollY}  banner present=${m.banner.present}`
@@ -492,7 +796,7 @@ try {
         }
         describeControl('sticky ATC', m.stickyCta);
 
-        if (!m.banner.present) {
+        if (!m.banner.present || !bannerSettled) {
             soft('the consent banner was not showing — the stacking question was not asked',
                 'this context is fresh, so the banner should be up. Either it was dismissed, or '
                 + 'consent-banner.js did not run. Nothing was proved about the lift.');
@@ -613,6 +917,208 @@ try {
         }
         await ctx.close();
     }
+
+    /* ══ §6 THE DEAD ZONE — the shopper's question, at every offset ═════════ */
+    head('§6 PDP sweep — is there ANY scroll offset with nothing to tap? (ERR-280)');
+    {
+        const ctx = await phoneCtx();
+        const page = await openPdp(ctx, { scrollTo: 0 });
+        const settled = await waitForBannerSettled(page);
+
+        const samples = await sweep(page, PDP_CTA_SELECTORS);
+        const dead = runsOf(samples, (m) => !m.tappable);
+        const bannerH = samples.find((m) => m.bannerHeight > 0)?.bannerHeight || 0;
+
+        const transientOnly = samples.filter((m) => m.tappable && !m.transientTappable);
+        console.log(`  swept ${samples.length} offsets, 0 -> ${samples[samples.length - 1].scrollY}px`
+            + ` at ${SWEEP_STEP_PX}px steps, viewport ${samples[0].innerHeight}px, banner ${bannerH}px`);
+        console.log(`  ${transientOnly.length} offset(s) were un-tappable mid-slide and tappable once the `
+            + `bars stopped moving (max settle ${Math.max(0, ...samples.map((m) => m.settleMs))}ms) — `
+            + 'that is the handover animation, not a dead zone. A dead zone does not resolve on its own.');
+
+        if (!settled) {
+            soft('the consent banner never settled, so this sweep ran without the occluder',
+                'the dead zone only exists while the banner is up — this run proves nothing about it. '
+                + 'Either consent-banner.js did not mount, or a decision was already stored in this '
+                + 'context, which should be impossible since the context is fresh.');
+        } else {
+            check('the consent banner was up for the whole sweep', bannerH > 0,
+                `measured ${bannerH}px. A sweep taken with the banner already dismissed is the state `
+                + 'every member of staff is permanently in, and it is the state in which this defect '
+                + 'does not exist (ERR-280).');
+        }
+
+        for (const run of dead) {
+            const worst = run.samples[Math.floor(run.samples.length / 2)];
+            console.log(`  \x1b[31mdead window\x1b[0m scrollY ${run.from}-${run.to} (${run.to - run.from + SWEEP_STEP_PX}px of scroll)`);
+            for (const c of worst.controls) {
+                console.log(`      ${c.sel.padEnd(30)} y ${String(c.top).padStart(5)}-${String(c.bottom).padStart(5)}`
+                    + `  ${c.verdict}${c.blockedBy ? ` (covered by ${c.blockedBy})` : ''}`);
+            }
+        }
+
+        check('every scroll offset on the PDP offers a tappable Add to Cart',
+            dead.length === 0,
+            dead.length === 0
+                ? `${samples.length} offsets, all tappable`
+                : `${dead.length} dead window(s): `
+                  + dead.map((r) => `scrollY ${r.from}-${r.to}`).join(', ')
+                  + `. This is the whole point of .sticky-atc: it exists to guarantee a tappable CTA `
+                  + 'whenever the real one is not reachable. It stands down on isIntersecting of '
+                  + '.product-info__actions, which counts the band the consent banner owns as visible '
+                  + '— so it hands over to a button underneath the banner and the shopper has nothing '
+                  + 'to press (js/product-detail-page.js, the sticky-bar IntersectionObserver).');
+
+        /* The handoff's own numbers, re-asked at the offsets it named. Its sweep
+           used a 390x664 profile and found two dead offsets of twelve; ours is
+           finer, so it should find at least those. Printed, never asserted —
+           their document heights and ours differ with the catalogue. */
+        const named = [600, 1200].map((y) => samples.reduce((best, m) =>
+            (Math.abs(m.scrollY - y) < Math.abs(best.scrollY - y) ? m : best), samples[0]));
+        console.log(`  the handoff's two named offsets: `
+            + named.map((m) => `scrollY ${m.scrollY} -> ${m.tappable ? 'tappable' : 'NOTHING TAPPABLE'}`).join(', '));
+
+        await ctx.close();
+    }
+
+    /* ══ §7 the category page, which is where most paid clicks land ═════════ */
+    head('§7 category sweep — /ink-cartridges, the surface 68% of paid clicks land on');
+    {
+        const ctx = await phoneCtx();
+        const page = await ctx.newPage();
+        await page.goto(`${BASE}/ink-cartridges`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(SETTLE_MS);
+        const settled = await waitForBannerSettled(page);
+        await page.waitForSelector(CARD_CTA_SELECTORS.join(','), { timeout: 30000 }).catch(() => {});
+
+        const samples = await sweep(page, CARD_CTA_SELECTORS);
+        const bannerH = samples.find((m) => m.bannerHeight > 0)?.bannerHeight || 0;
+        const blockedRuns = runsOf(samples, (m) => m.controls.some((c) => c.verdict === 'blocked'));
+        const cardsOnScreen = (m) => m.controls.some((c) => c.verdict === 'reachable' || c.verdict === 'blocked');
+        const starved = runsOf(samples, (m) => cardsOnScreen(m) && !m.tappable);
+
+        console.log(`  swept ${samples.length} offsets, 0 -> ${samples[samples.length - 1].scrollY}px, `
+            + `banner ${bannerH}px, ${samples[0].controls.length} card control(s) found`);
+
+        if (!settled) {
+            soft('the consent banner never settled on /ink-cartridges', 'nothing below was exercised against it');
+        }
+        if (!samples.some((m) => m.controls.length)) {
+            soft('no card add-to-cart controls were found on /ink-cartridges',
+                `looked for ${CARD_CTA_SELECTORS.join(', ')}. The popular shelf renders through `
+                + 'Products.renderCard (.product-card__add-btn) and the results grid through '
+                + 'DrilldownNav.createProductCard (.product-card__cart-btn) — two renderers, '
+                + 'deliberately not shared, so a rename on one side is invisible from the other.');
+        }
+
+        for (const run of starved) {
+            console.log(`  \x1b[31mstarved window\x1b[0m scrollY ${run.from}-${run.to}`
+                + ` (${run.to - run.from + SWEEP_STEP_PX}px) — cards on screen, none of them tappable`);
+        }
+
+        /* WHAT IS AND IS NOT FIXABLE HERE, STATED SO THE ASSERTION IS HONEST.
+           A fixed bottom banner covers the bottom band of every page on the web;
+           a card that scrolls through that band is briefly un-tappable and a
+           flick clears it. Asserting "no card is ever covered" would be a guard
+           that can never pass while the banner exists, which is worse than no
+           guard. What IS ours, and what this asserts, is that the covered
+           window is only ever the banner's own height — nothing of OURS widens
+           it — and that whatever covers a card is the consent banner and not
+           some layer we shipped. That is the ERR-276 shape, and it can pass. */
+        const widest = blockedRuns.reduce((w, r) => Math.max(w, r.to - r.from + SWEEP_STEP_PX), 0);
+        check('nothing of ours widens the band the consent banner covers',
+            blockedRuns.length === 0 || widest <= bannerH + SWEEP_STEP_PX * 2,
+            `widest covered window ${widest}px of scroll against a ${bannerH}px banner. A window `
+            + 'materially larger than the banner means a second layer of ours is also covering the '
+            + 'cards, which is ERR-276 on a different surface.');
+
+        /* TWO BANDS ARE ALLOWED AND EVERYTHING ELSE IS A DEFECT.
+           `.site-header` is `position: sticky; top: 0` below 1100px and
+           `#consent-banner` is `position: fixed; bottom: 0`. Between them they
+           own the top and bottom edges of every phone viewport on this site,
+           and a card scrolling through either is briefly un-tappable for
+           exactly that band's height — universal to the web, cleared by a
+           flick, and not something a front end can remove.
+
+           Anything ELSE on top of a buy button is ours and is a defect. This
+           check found one on its first run: the rewards nudge, `position:
+           fixed` at --z-popover over the product grid, covering a card Add
+           button at 32 of 92 offsets — ERR-276's mechanism still live on the
+           surface its path gate did not list. The band check above is the
+           other half: these two are allowed to cover their OWN height and no
+           more, so a third layer hiding behind one of them still shows up. */
+        const foreign = samples.flatMap((m) => m.controls
+            .filter((c) => c.verdict === 'blocked' && !c.blockedByChrome)
+            .map((c) => `scrollY ${m.scrollY}: ${c.sel} covered by ${c.blockedBy}`));
+        const byChrome = {};
+        samples.forEach((m) => m.controls.forEach((c) => {
+            if (c.blockedByChrome) byChrome[c.blockedByChrome] = (byChrome[c.blockedByChrome] || 0) + 1;
+        }));
+        check('nothing but the sticky header and the consent banner covers a card Add button',
+            foreign.length === 0,
+            foreign.length === 0
+                ? `${blockedRuns.length} covered window(s); blockers were `
+                  + (Object.keys(byChrome).length
+                      ? Object.entries(byChrome).map(([k, v]) => `${k} x${v}`).join(', ')
+                      : 'none')
+                : `${foreign.length} sample(s) covered by a layer that is neither — `
+                  + `${foreign.slice(0, 4).join(' · ')}. A fixed element over a product grid owns a `
+                  + 'constant band of the viewport, and every in-flow buy button travels through it '
+                  + '(ERR-224/276/280).');
+
+        console.log(`  measurement, not a verdict: ${blockedRuns.length} window(s) where a visible card `
+            + `Add button sits under the banner`
+            + (blockedRuns.length ? ` — ${blockedRuns.map((r) => `${r.from}-${r.to}`).join(', ')}` : '')
+            + `. A ${bannerH}px flick clears each one, and dismissing consent removes them all.`);
+        if (starved.length) {
+            console.log(`  measurement, not a verdict: ${starved.length} window(s) with cards on screen and `
+                + 'none tappable. Unlike the PDP there is no sticky bar to hand over to here, so this is '
+                + 'the banner band plus the gap between card rows, not a broken handover.');
+        }
+
+        await ctx.close();
+    }
+
+    /* ══ §8 NEGATIVE CONTROL for the sweep ═══════════════════════════════════ */
+    head('§8 negative control — can the sweep report a dead window at all?');
+    {
+        const ctx = await phoneCtx();
+        const page = await openPdp(ctx, { scrollTo: 0 });
+        await waitForBannerSettled(page);
+
+        const clean = await sweep(page, PDP_CTA_SELECTORS);
+        const cleanDead = runsOf(clean, (m) => !m.tappable);
+        if (cleanDead.length) {
+            soft('the sweep negative control could not run',
+                'the page already had a dead window before the overlay went in, so covering the '
+                + 'controls proves nothing about the sweep. Fix §6 first.');
+        } else {
+            /* A full-viewport veil, because the sweep's job is the PAGE-level
+               question: covering one control would only prove the other one
+               took over, which is the behaviour we want, not the detector. */
+            await page.evaluate(() => {
+                const veil = document.createElement('div');
+                veil.id = 'probe-synthetic-sweep-occluder';
+                veil.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:transparent;';
+                document.body.appendChild(veil);
+            });
+            const veiled = await sweep(page, PDP_CTA_SELECTORS, { step: 400 });
+            const veiledDead = runsOf(veiled, (m) => !m.tappable);
+            const sawOccluder = veiled.some((m) => m.controls.some(
+                (c) => String(c.blockedBy).includes('probe-synthetic-sweep-occluder')));
+
+            check('a synthetic full-viewport overlay makes the sweep report a dead window',
+                veiledDead.length > 0 && sawOccluder,
+                veiledDead.length > 0 && sawOccluder
+                    ? `${veiledDead.length} dead window(s) while veiled, naming the overlay`
+                    : `dead windows=${veiledDead.length}, overlay named=${sawOccluder}. If §6 stays green `
+                      + 'with every control demonstrably covered, §6 is green because it cannot fail, '
+                      + 'not because the page is reachable. Six guards in this repo once sat inside a '
+                      + '6088/0 suite and not one of them could go red (ERR-258).');
+        }
+        await ctx.close();
+    }
+
 } catch (err) {
     fatal = err;
 } finally {
@@ -635,5 +1141,5 @@ if (failures.length) {
     failures.forEach((f) => console.log(`  ✗ ${f}`));
     process.exit(1);
 }
-console.log('\x1b[32mA first-time guest on a phone can tap Add to Cart, and desktop is unchanged.\x1b[0m');
+console.log('\x1b[32mA first-time guest on a phone can tap Add to Cart at EVERY scroll offset, and desktop is unchanged.\x1b[0m');
 process.exit(0);

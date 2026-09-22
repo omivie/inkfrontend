@@ -3157,18 +3157,167 @@
         const stickyPrice = document.getElementById('sticky-atc-price');
         if (!actionsContainer || !stickyBar) return;
 
-        // Show/hide based on actions container visibility (not the button itself,
-        // which may be replaced via outerHTML for contact-us products)
-        const observer = new IntersectionObserver(([entry]) => {
-            if (entry.isIntersecting) {
-                stickyBar.classList.remove('is-visible');
-                stickyBar.setAttribute('aria-hidden', 'true');
-            } else {
-                stickyBar.classList.add('is-visible');
-                stickyBar.setAttribute('aria-hidden', 'false');
-            }
-        }, { threshold: 0 });
-        observer.observe(actionsContainer);
+        /* THE HANDOVER, AND WHY IT IS NOT `isIntersecting` (ERR-280)
+           ----------------------------------------------------------------
+           This bar exists for one reason: to guarantee a tappable Add to Cart
+           whenever the real one is not reachable. So the question it must
+           answer is "is the real CTA reachable", and until 2026-09-22 it
+           answered a different one — `isIntersecting` of `.product-info__actions`
+           at `threshold: 0`, with no rootMargin. That was wrong twice over, and
+           a first-time guest on a phone had scroll positions with NOTHING
+           TAPPABLE AT ALL:
+
+           1. NO OCCLUSION TERM. `.consent-banner` is `position: fixed;
+              bottom: 0` at --z-popover (600) over this bar's --z-sticky (200),
+              and on a phone it is ~148px tall. The viewport's bottom 148px is
+              therefore not visible in any sense a thumb cares about — but an
+              IntersectionObserver with the default root counts it. So the bar
+              stood down and handed over to a button underneath the banner.
+              ERR-238 lifts the BAR clear of the banner (components.css); this
+              is the other half — keeping the bar from RETIRING into it.
+
+           2. THE WRONG ELEMENT. It watched the CONTAINER, not the button,
+              because `#add-to-cart-btn` is replaced via outerHTML for
+              out-of-stock and contact-us products (see the stock-status block
+              above) and a stale reference would observe a detached node. But on
+              mobile `.product-info__actions` is a two-row grid — quantity
+              stepper, then Add to Cart (pages.css, mobile-parity-may2026 S2.1)
+              — so the container's top edge enters the viewport ~56px before the
+              button does. At `threshold: 0` a single pixel of the stepper was
+              enough to retire the bar while the button was still under the
+              banner, or still below the fold entirely.
+
+           Both are fixed by asking the right question of the right element:
+           the CTA is handed back to only when it is FULLY inside the part of
+           the viewport nothing is covering. `.product-info__add-to-cart` is the
+           one class carried by both spellings of the control — the button in
+           html/product/index.html and the contact-us anchor that replaces it —
+           so re-resolving it each time removes the reason to watch the parent.
+
+           Measured before and after with `npm run probe:mobile-cta` §6, which
+           sweeps every 40px of scroll and asks whether ANY control is tappable.
+           A per-control check cannot see this: in the dead zone the sticky bar
+           is correctly hidden and the main button is correctly rendered, and
+           both of those defensible states are true at the same moment. */
+
+        const setVisible = (visible) => {
+            stickyBar.classList.toggle('is-visible', visible);
+            stickyBar.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        };
+
+        /* THE UNOCCLUDED REGION HAS TWO EDGES, NOT ONE.
+           The consent banner owns a band at the BOTTOM; `.site-header` is
+           `position: sticky; top: 0` below 1100px (layout.css) at the same
+           --z-sticky (200) this bar uses, and owns a band at the TOP. Both were
+           found by `probe:mobile-cta` §6 rather than reasoned about: the first
+           run after the bottom inset landed still reported a dead window at
+           scrollY 1200, with #add-to-cart-btn at y 33-81 and
+           `elementFromPoint` at its centre returning `div.logo-block`. A model
+           of occlusion with one edge in it is a model that will be wrong again
+           at the other end.
+
+           Measured from the rendered box every time rather than read from
+           --consent-banner-height or --header-h: the property is the value
+           consent-banner.js RESERVED, and the two disagree for the frame
+           between the bar re-wrapping and its ResizeObserver firing. --header-h
+           (base.css) is a 56px design target the header does not actually hold
+           — js/landing.js:48 already had to measure the header for the same
+           reason. Each edge counts only the part of the layer that is really
+           over the viewport, so a banner mid-transition (translateY, 0.25s)
+           contributes what it covers and not its full height. */
+        const coveredBy = (el, fromTop) => {
+            if (!el) return 0;
+            const cs = getComputedStyle(el);
+            if (cs.position !== 'fixed' && cs.position !== 'sticky') return 0;
+            if (cs.display === 'none' || cs.visibility === 'hidden') return 0;
+            const r = el.getBoundingClientRect();
+            if (r.height <= 0) return 0;
+            // Only a layer actually pinned to that edge occludes it. A sticky
+            // header that has scrolled away with the page is just content.
+            const covered = fromTop
+                ? Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0)
+                : Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+            if (covered <= 0) return 0;
+            if (fromTop && r.top > 1) return 0;
+            if (!fromTop && r.bottom < window.innerHeight - 1) return 0;
+            return Math.ceil(covered);
+        };
+        const occludedTopPx = () => coveredBy(document.querySelector('.site-header'), true);
+        const occludedBottomPx = () => coveredBy(document.getElementById('consent-banner'), false);
+
+        let ctaObserver = null;
+        let observedCta = null;
+        let observedTop = -1;
+        let observedBottom = -1;
+
+        const sync = () => {
+            const cta = actionsContainer.hidden
+                ? null
+                : actionsContainer.querySelector('.product-info__add-to-cart');
+            const top = cta ? occludedTopPx() : 0;
+            const bottom = cta ? occludedBottomPx() : 0;
+            // Rebuild only on a real change: rootMargin is fixed at construction,
+            // so a changed band needs a new observer, and nothing else does.
+            if (cta === observedCta && top === observedTop && bottom === observedBottom) return;
+            observedCta = cta;
+            observedTop = top;
+            observedBottom = bottom;
+            if (ctaObserver) ctaObserver.disconnect();
+
+            /* No CTA at all — renderError() hides .product-info__actions, and a
+               zero-box target would leave the bar up over a dead page offering
+               to add a product that did not load. */
+            if (!cta) { ctaObserver = null; setVisible(false); return; }
+
+            ctaObserver = new IntersectionObserver(([entry]) => {
+                // ratio 1 against the shrunk root == fully clear of both bands.
+                // Anything less and the bar stays up. The CTA is ~48px and the
+                // shrunk root is never under ~300px on a phone, so ratio 1 is
+                // always reachable; a CTA taller than the root would keep the
+                // bar up forever, which is the safe direction to fail in.
+                setVisible(entry.intersectionRatio < 1);
+            }, {
+                rootMargin: `-${observedTop}px 0px -${observedBottom}px 0px`,
+                threshold: [0, 1],
+            });
+            ctaObserver.observe(cta);
+        };
+
+        sync();
+
+        // The outerHTML swap for out-of-stock / contact-us products replaces the
+        // node this observes. Without this the observer would be watching a
+        // detached element on every such product — a guard that cannot fire.
+        new MutationObserver(sync).observe(actionsContainer, { childList: true, subtree: true });
+
+        /* consent-banner.js publishes `has-consent-banner` and
+           `--consent-banner-height` on <body>, and releaseSpace() removes both
+           on a decision. Watching body's class and style therefore catches the
+           banner mounting, re-wrapping on rotation, and being dismissed, in one
+           observer — and needs no coupling to that module's `consent:change`
+           event, which fires only on an explicit decision and not on a re-wrap. */
+        new MutationObserver(sync).observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class', 'style'],
+        });
+
+        /* The header is not a constant either: main.js#initStickyHeader adds
+           .site-header--scrolled past 80px, which hides .header-lead and the
+           tagline and takes ~44px off the band it occupies (layout.css, the
+           ERR-101 height-delta invariant). Watching its class keeps the top
+           inset honest through that collapse in both directions. */
+        const siteHeader = document.querySelector('.site-header');
+        if (siteHeader) {
+            new MutationObserver(sync).observe(siteHeader, {
+                attributes: true,
+                attributeFilter: ['class', 'style'],
+            });
+        }
+
+        /* A sticky header's height also changes with nothing but a resize, and
+           neither MutationObserver above can see that. Cheap and bounded: sync()
+           returns immediately unless a measurement actually moved. */
+        window.addEventListener('resize', sync);
 
         // Mirror price from product info.
         //

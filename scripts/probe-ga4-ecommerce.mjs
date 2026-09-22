@@ -85,6 +85,7 @@
  */
 
 import { chromium } from 'playwright';
+import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobile-viewports.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
@@ -97,7 +98,12 @@ const PROPERTY = 'G-SDQELG0FGD';
  * must never come back, rather than asserting against an anonymous regex. */
 const REMOVED_PROPERTY = 'G-YJXTSGLM28';
 const ADS_TAG = 'AW-18032498762';
-const PHONE = { width: 390, height: 844 };   // iPhone 14 — mobile is the point
+/* ERR-280: the phone box comes from playwright's own device registry now.
+   Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
+   SCREEN; its usable viewport after Safari's chrome is 390x664. The 180px
+   difference is larger than the consent banner, so overlaps that are real on a
+   phone did not reproduce at 844. See scripts/lib/mobile-viewports.mjs. */
+const PHONE = MOBILE_PHONE;
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
     + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
@@ -113,7 +119,7 @@ const head = (t) => console.log(`\n\x1b[1m── ${t} ──\x1b[0m`);
 console.log('\n\x1b[1mprobe:ga4-events — do the GA4 ecommerce hits leave the browser? (ERR-256)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no writes.');
 console.log('Observes real requests only. It DOES cause GA4 hits — measuring a beacon means firing it.');
-console.log(`Target: ${BASE}   SKU: ${SKU}   Viewport: ${PHONE.width}x${PHONE.height}\n`);
+console.log(`Target: ${BASE}   SKU: ${SKU}   Viewport: ${describeViewport(PHONE)}\n`);
 
 /* ── Reading GA4 off the wire ─────────────────────────────────────────────── */
 
@@ -282,7 +288,7 @@ const valueOf = (h) => Number(h['epn.value'] !== undefined ? h['epn.value'] : h[
 
 async function newPhone(browser) {
     const ctx = await browser.newContext({
-        viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+        viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true, deviceScaleFactor: PHONE_SCALE,
     });
     const page = await ctx.newPage();
     return { ctx, page, rec: record(page) };

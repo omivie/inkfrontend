@@ -56,10 +56,16 @@
  */
 
 import { chromium } from 'playwright';
+import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobile-viewports.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
-const PHONE = { width: 390, height: 844 };   // iPhone 14
+/* ERR-280: the phone box comes from playwright's own device registry now.
+   Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
+   SCREEN; its usable viewport after Safari's chrome is 390x664. The 180px
+   difference is larger than the consent banner, so overlaps that are real on a
+   phone did not reproduce at 844. See scripts/lib/mobile-viewports.mjs. */
+const PHONE = MOBILE_PHONE;
 const SE_FOLD = 667;                         // iPhone SE — the short one that must still work
 const DESKTOP = { width: 1440, height: 900 };
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
@@ -173,14 +179,14 @@ try {
     /* ── 1. MOBILE, the state a shopper actually lands in ────────────────── */
     {
         const ctx = await browser.newContext({
-            viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+            viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true, deviceScaleFactor: PHONE_SCALE,
         });
         const page = await ctx.newPage();
         await seedCart(page);
         await openCheckout(page);
         const m = await page.evaluate(MEASURE);
 
-        console.log(`── ${PHONE.width}x${PHONE.height} ${BASE}/checkout — collapsed (default) ──`);
+        console.log(`── ${describeViewport(PHONE)} ${BASE}/checkout — collapsed (default) ──`);
         if (!m.email) {
             bad('the email field exists at all', 'input[name="email"] not found — page did not render');
         } else {

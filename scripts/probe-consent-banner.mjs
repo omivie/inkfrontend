@@ -53,11 +53,17 @@
  */
 
 import { chromium } from 'playwright';
+import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobile-viewports.mjs';
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const DESKTOP = { width: 1512, height: 806 };   // the viewport the bug was measured at
 const NARROW = { width: 1100, height: 800 };    // still desktop, badge still rendered
-const PHONE = { width: 390, height: 844 };      // iPhone 14
+/* ERR-280: the phone box comes from playwright's own device registry now.
+   Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
+   SCREEN; its usable viewport after Safari's chrome is 390x664. The 180px
+   difference is larger than the consent banner, so overlaps that are real on a
+   phone did not reproduce at 844. See scripts/lib/mobile-viewports.mjs. */
+const PHONE = MOBILE_PHONE;
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
     + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
@@ -72,6 +78,7 @@ const check = (n, cond, d) => (cond ? ok(n, d) : bad(n, d));
 console.log('\n\x1b[1mprobe:consent-banner — can a visitor actually press Accept? (ERR-233)\x1b[0m');
 console.log('\x1b[33mMODE: READ-ONLY.\x1b[0m No --record, no --update-baseline, no ctx.route(), no writes.');
 console.log(`Target: ${BASE}\n`);
+console.log(`Phone:  ${describeViewport(PHONE)}`);
 
 /**
  * Geometry of the bar, its two buttons and the Google badge, plus the hit-test
@@ -370,9 +377,9 @@ try {
 
     /* ── §4 Phone — Google renders the badge 0x0, so nothing is reserved ──── */
     {
-        console.log('\n\x1b[1m§4 iPhone 390x844 — the badge is 0x0 and nothing must be reserved\x1b[0m');
+        console.log(`\n\x1b[1m§4 iPhone ${describeViewport(PHONE)} — the badge is 0x0 and nothing must be reserved\x1b[0m`);
         const ctx = await browser.newContext({
-            viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
+            viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true, deviceScaleFactor: PHONE_SCALE,
         });
         const page = await load(ctx, { expectBadge: false });
         const m = await page.evaluate(MEASURE);
