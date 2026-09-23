@@ -7,6 +7,7 @@ import { DataTable } from '../components/table.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { normalizeTierResponse, sortTierKeys } from '../utils/pricingCalculator.js';
+import { errorMessage } from '../utils/tierProposal.js';
 import { GST_INCL, GST_EXCL } from '../utils/gst-basis.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
@@ -23,45 +24,15 @@ let _tableSortOrder = 'asc';
 let _tableMinGap = 0;
 let _savedOffset = null;
 let _sliderTimer = null;
-let _repricePollTimer = null;
 
 /**
- * Surface the background reprice kicked off by a tier-multiplier / global-offset
- * save. Both PUTs now return 202 with a `reprice` block:
- *   { status: 'queued'|'enqueue_failed', job_id, message }
- * Show the backend's own wording, then (when queued) poll the job to completion
- * for a "repricing complete — N updated" follow-up. Only one poll runs at a time.
+ * The global offset and the tier ladder are both approval-gated since
+ * migration 187 (ERR-281). A PUT here FILES A PROPOSAL: it moves no price and
+ * starts no reprice. Review, approval and reprice tracking live in
+ * Site Health → Pricing (cc2-pricing.js). This tab only proposes the offset
+ * and says, in words, that nothing has changed yet.
  */
-function handleRepriceResponse(data) {
-  const reprice = data && data.reprice;
-  if (!reprice) { Toast.success('Saved'); return; }
-  if (reprice.status === 'queued') {
-    Toast.success(reprice.message || 'Settings saved. Repricing in the background.');
-    if (reprice.job_id) pollRepriceJob(reprice.job_id);
-  } else {
-    // enqueue_failed (or anything non-queued): config saved, reprice did not start.
-    Toast.warning(reprice.message || 'Saved, but background repricing did not start.');
-  }
-}
-
-function pollRepriceJob(jobId) {
-  clearInterval(_repricePollTimer);
-  const startedAt = Date.now();
-  const MAX_MS = 3 * 60_000; // give up after ~3 min; the queued toast already informed the operator
-  _repricePollTimer = setInterval(async () => {
-    if (Date.now() - startedAt > MAX_MS) { clearInterval(_repricePollTimer); return; }
-    const job = await AdminAPI.getRepriceJob(jobId);
-    if (!job) return; // transient read miss — try again next tick
-    if (job.status === 'completed') {
-      clearInterval(_repricePollTimer);
-      const n = job.counts && job.counts.updated;
-      Toast.success(typeof n === 'number' ? `Repricing complete — ${n} price${n !== 1 ? 's' : ''} updated` : 'Repricing complete');
-    } else if (job.status === 'failed') {
-      clearInterval(_repricePollTimer);
-      Toast.error(job.error || 'Background repricing failed — prices may be unchanged.');
-    }
-  }, 4000);
-}
+const REVIEW_HASH = '#control-center?tab=pricing';
 
 function heatColor(margin) {
   if (margin < 5) return 'rgba(220,53,69,0.85)';
@@ -186,6 +157,7 @@ async function loadTierMultipliers() {
   const wrap = _el.querySelector('#cc-tier-wrap');
   wrap.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getTierMultipliers();
+  if (!_el) return;
   _tierData = data;
   renderTierMultipliers(data);
 }
@@ -208,7 +180,8 @@ function renderTierMultipliers(data) {
   const order = ['genuine', 'compatible', 'ribbon'].filter(s => eff[s]);
   for (const s of Object.keys(eff)) if (!order.includes(s)) order.push(s);
 
-  let html = '';
+  const defaults = (data && data.defaults) || {};
+  let html = pendingBannerHtml();
   for (const src of order) {
     const map = eff[src] || {};
     const keys = sortTierKeys(Object.keys(map));
@@ -223,36 +196,52 @@ function renderTierMultipliers(data) {
     for (const name of keys) {
       const mult = Number(map[name]) || 1;
       const markup = ((mult - 1) * 100).toFixed(1);
+      const def = defaults[src] && defaults[src][name];
+      const moved = def != null && Math.abs(Number(def) - mult) > 1e-9;
       html += `<tr>
         <td class="cell-mono">${esc(name)}</td>
-        <td style="text-align:right" class="cell-mono">${mult.toFixed(3)}</td>
+        <td style="text-align:right" class="cell-mono">${mult.toFixed(3)}${moved ? ` <span style="color:var(--text-muted)" title="Shipped default">(default ${Number(def).toFixed(3)})</span>` : ''}</td>
         <td style="text-align:right" class="cell-mono">${markup}%</td>
       </tr>`;
     }
     html += '</tbody></table>';
   }
+  const brandLadders = Object.values((data && data.effective && data.effective.brands) || {});
+  if (brandLadders.length) {
+    html += `<p class="admin-text-muted" style="font-size:13px;margin:4px 0">Brands with their own ladder (bands they do not set inherit the table above): ${brandLadders.map(b => esc(b.name || b.slug || '?')).join(', ')}.</p>`;
+  }
   html += `<p class="admin-text-muted" style="font-size:13px;margin:4px 0 0">
-    Edit these in <strong>Control Center → Pricing</strong> — the Margin simulator previews impact and validates against the live bands before saving.</p>`;
+    Propose changes in <a href="${REVIEW_HASH}"><strong>Site Health → Pricing</strong></a>. Every change needs approval there before any price moves, and the impact is shown before it is filed.</p>`;
   wrap.innerHTML = html;
+}
+
+function pendingBannerHtml() {
+  const p = _tierData && _tierData.pending_proposal;
+  if (!p) return '';
+  return `<div class="cc-pending-banner" role="status">
+    <strong>A pricing proposal is awaiting approval</strong>. It was filed ${esc(new Date(p.created_at).toLocaleString('en-NZ'))}${p.notes ? ` (“${esc(p.notes)}”)` : ''}.
+    No price has moved. <a href="${REVIEW_HASH}">Review it in Site Health → Pricing</a>.</div>`;
 }
 
 function showOffsetConfirm(offset) {
   if (_savedOffset && offset === _savedOffset.offset) return;
   const pct = (offset * 100).toFixed(1);
+  const pending = _tierData && _tierData.pending_proposal;
   const bodyHtml = `
-    <p>Set global price offset to <strong>${pct > 0 ? '+' : ''}${pct}%</strong>?</p>
-    <p style="font-size:13px;color:var(--text-muted);margin:8px 0">All product prices update automatically in the background (about a minute).</p>
+    <p>Propose a global price offset of <strong>${pct > 0 ? '+' : ''}${pct}%</strong>?</p>
+    <p style="font-size:13px;color:var(--text-muted);margin:8px 0">This files a <strong>proposal</strong>. No price moves until it is approved in Site Health → Pricing, and approval reprices the whole catalogue.</p>
+    ${pending ? '<p style="font-size:13px;color:var(--yellow-text);margin:8px 0">It <strong>supersedes</strong> the proposal already awaiting approval.</p>' : ''}
     <div class="admin-form-group">
-      <label>Notes (optional)</label>
+      <label for="cc-offset-notes">Why (shown to the approver)</label>
       <input type="text" class="admin-input" id="cc-offset-notes" placeholder="e.g. Q2 margin boost" style="width:100%">
     </div>
   `;
   const m = Modal.open({
-    title: 'Update Global Offset',
+    title: 'Propose Global Offset',
     body: bodyHtml,
     footer: `
       <button class="admin-btn admin-btn--ghost" id="cc-offset-cancel">Cancel</button>
-      <button class="admin-btn admin-btn--primary" id="cc-offset-save">Save Offset</button>
+      <button class="admin-btn admin-btn--primary" id="cc-offset-save">Propose offset</button>
     `,
   });
   m.footer.querySelector('#cc-offset-cancel').addEventListener('click', () => {
@@ -263,16 +252,19 @@ function showOffsetConfirm(offset) {
     const notes = m.body.querySelector('#cc-offset-notes').value.trim();
     const saveBtn = m.footer.querySelector('#cc-offset-save');
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
+    saveBtn.textContent = 'Proposing...';
     try {
-      const data = await AdminAPI.updateGlobalOffset(offset, notes);
-      handleRepriceResponse(data);
+      await AdminAPI.updateGlobalOffset(offset, notes);
+      if (!_el) return;
+      Toast.success('Offset proposed. It is awaiting approval in Site Health → Pricing, and no price has moved.');
       m.close();
-      await loadOffset();
+      await Promise.all([loadTierMultipliers(), loadOffset()]);
     } catch (e) {
-      Toast.error('Failed to update offset');
+      // The refusal's own reason (RATE_LIMITED / FORBIDDEN / VALIDATION_FAILED
+      // …), never a bare "failed": the old path showed "Saved" here instead.
+      Toast.error(errorMessage(e));
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Save Offset';
+      saveBtn.textContent = 'Propose offset';
     }
   });
   m.el.querySelector('.admin-modal').addEventListener('close', () => renderOffset(_savedOffset));
@@ -405,7 +397,6 @@ export default {
 
   destroy() {
     clearTimeout(_sliderTimer);
-    clearInterval(_repricePollTimer);
     if (_table) { _table.destroy(); _table = null; }
     _tierData = null;
     _el = null;

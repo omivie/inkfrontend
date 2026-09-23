@@ -3533,24 +3533,18 @@ const AdminAPI = {
     } catch (e) { adminApiWarn('Global offset', e); return null; }
   },
 
+  // PUT /global-offset FILES A PROPOSAL (migration 187, ERR-281): 202
+  // {applied:false, status:'pending_approval', proposal, impact}. It moves no
+  // price and starts no reprice. Kept as a thin alias so the Performance tab
+  // and the Control Center share one implementation that throws on refusal —
+  // the old version returned null on a resolved {ok:false} and the caller
+  // toasted "Saved" over a 403/409/429.
   async updateGlobalOffset(offset, notes) {
-    try {
-      const resp = await window.API.put('/api/admin/pricing/global-offset', { offset, notes });
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] updateGlobalOffset failed:', e.message);
-      throw e;
-    }
+    return this.controlCenter.proposeGlobalOffset(offset, notes);
   },
 
-  // Poll the background reprice job kicked off by a tier-multiplier / global-offset
-  // change (both PUTs return 202 + a reprice.job_id). Returns the job row
-  // { id, status, trigger, counts, error, ... } or null on failure.
   async getRepriceJob(jobId) {
-    try {
-      const resp = await window.API.get(`/api/admin/pricing/reprice-jobs/${encodeURIComponent(jobId)}`);
-      return resp?.data ?? null;
-    } catch (e) { adminApiWarn('Reprice job status', e); return null; }
+    return this.controlCenter.getRepriceJob(jobId);
   },
 
   // ---- Control Center: SEO & Trust ----
@@ -3661,21 +3655,15 @@ const AdminAPI = {
   },
 
   // ---- Pricing: Tier Multipliers ----
+  // Read-only here (Performance → Pricing shows the live ladder). Every write
+  // goes through AdminAPI.controlCenter.* — since migration 187 a PUT only
+  // files a proposal (ERR-281). The old flat-map `updateTierMultipliers` was
+  // dead code with the wrong body shape and is gone.
   async getTierMultipliers() {
     try {
       const resp = await window.API.get('/api/admin/pricing/tier-multipliers');
       return resp?.data ?? null;
     } catch (e) { adminApiWarn('Tier multipliers', e); return null; }
-  },
-
-  async updateTierMultipliers(multipliers) {
-    try {
-      const resp = await window.API.put('/api/admin/pricing/tier-multipliers', multipliers);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] updateTierMultipliers failed:', e.message);
-      throw e;
-    }
   },
 
   // ---- Market Intel ----
@@ -5348,34 +5336,117 @@ const AdminAPI = {
       } catch (e) { adminApiWarn('Load health summary', e); return null; }
     },
 
+    // ── Tier multipliers: simulate → propose → approve (migration 187) ──────
+    // Contract: backend-docs/inbox/tier-multiplier-approval-backend-contract-sep2026.md
+    // Pure request shaping lives in utils/tierProposal.js. ERR-281.
+    //
+    // `API.request()` RESOLVES most refusals — 409, VALIDATION_FAILED, 429,
+    // 403, 404, JSON 5xx — as {ok:false, error:<string>, code} with the code at
+    // the TOP level, and THROWS other 4xx with `.code`. The previous wrappers
+    // read `resp.error?.code` (a property of a string) so every code was
+    // undefined and every mapped error branch in the panel was dead.
+    // `invoiceError()` handles both shapes; every write below goes through it.
+
+    // Read-only on the server; throws so the panel can show WHY a preview is
+    // missing instead of keeping the last one on screen as if it were current.
     async simulatePricing(payload) {
       const resp = await window.API.post('/api/admin/pricing/simulate', payload);
-      if (resp && resp.ok === false) {
-        const err = new Error(resp.error?.message || resp.error || 'Simulate failed');
-        err.code = resp.error?.code; err.details = resp.error?.details;
-        throw err;
-      }
-      return resp?.data ?? null;
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Simulation failed');
+      return resp.data ?? null;
     },
 
+    // Returns data or null (with a toast) — the panel treats null as "could
+    // not load the live ladder" and refuses to edit a guessed one.
     async getTierMultipliers() {
       try {
         const resp = await window.API.get('/api/admin/pricing/tier-multipliers');
-        return resp?.data ?? null;
+        if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not load tier multipliers');
+        return resp.data ?? null;
       } catch (e) { adminApiWarn('Load tier multipliers', e); return null; }
     },
 
-    // Commit edited tier multipliers. Mirrors the Copy-JSON payload exactly:
-    // { proposed_tiers: { [source]: {...} }, apply_ending_snap: true }.
-    // Surfaces backend error codes (FORBIDDEN / VALIDATION_FAILED / RATE_LIMITED).
-    async commitPricing(payload) {
-      const resp = await window.API.put('/api/admin/pricing/tier-multipliers', payload);
-      if (resp && resp.ok === false) {
-        const err = new Error(resp.error?.message || resp.error || 'Commit failed');
-        err.code = resp.error?.code; err.details = resp.error?.details;
-        throw err;
+    // PUT = PROPOSE. 202 {applied:false, status:'pending_approval', proposal,
+    // impact, proposed_effective, live_overrides}. Never a save.
+    async proposeTierMultipliers(body) {
+      const resp = await window.API.put('/api/admin/pricing/tier-multipliers', body);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not file the proposal');
+      return resp.data ?? null;
+    },
+
+    async proposeGlobalOffset(offset, notes) {
+      const body = { offset };
+      if (notes) body.notes = notes;
+      const resp = await window.API.put('/api/admin/pricing/global-offset', body);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not file the offset proposal');
+      return resp.data ?? null;
+    },
+
+    // Audit trail, newest first. Throws: an empty history and a failed read
+    // must not look the same.
+    async listTierProposals({ status, limit = 20 } = {}) {
+      const qs = new URLSearchParams();
+      if (status) qs.set('status', status);
+      qs.set('limit', String(Math.min(Math.max(Number(limit) || 20, 1), 100)));
+      const resp = await window.API.get(`/api/admin/pricing/tier-multipliers/proposals?${qs}`);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not load proposals');
+      return Array.isArray(resp.data) ? resp.data : [];
+    },
+
+    // Review read: for a pending proposal the impact is re-measured NOW and
+    // `stale` says whether approve will be refused.
+    async getTierProposal(id) {
+      const resp = await window.API.get(`/api/admin/pricing/tier-multipliers/proposals/${encodeURIComponent(id)}`);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not load the proposal');
+      return resp.data ?? null;
+    },
+
+    // THE ONLY CALL THAT CHANGES LIVE PRICES. `confirm:true` is sent here and
+    // nowhere else, so no other code path can approve by accident.
+    async approveTierProposal(id, notes) {
+      const body = { confirm: true };
+      if (notes) body.notes = notes;
+      const resp = await window.API.post(`/api/admin/pricing/tier-multipliers/proposals/${encodeURIComponent(id)}/approve`, body);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Approval failed');
+      return resp.data ?? null;
+    },
+
+    async rejectTierProposal(id, notes) {
+      const body = { confirm: true };
+      if (notes) body.notes = notes;
+      const resp = await window.API.post(`/api/admin/pricing/tier-multipliers/proposals/${encodeURIComponent(id)}/reject`, body);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Rejection failed');
+      return resp.data ?? null;
+    },
+
+    // Retry for `reprice.status === 'enqueue_failed'` (contract §3.7): the
+    // ladder IS live but no reprice started. The contract names the route but
+    // not its body; `{}` is sent and a refusal surfaces verbatim (BF-068 asks
+    // for the shape). Returns the job id wherever the response carries it.
+    async retryReprice() {
+      const resp = await window.API.post('/api/admin/pricing/reprice', {});
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not start the reprice');
+      const d = resp.data || {};
+      return { ...d, job_id: d.job_id || d.reprice?.job_id || d.id || null };
+    },
+
+    // Poll read. Three states, never two:
+    //   job row          → status known
+    //   { missing:true } → 404, the id does not exist — stop polling, say so
+    //   null             → transient failure — try again next tick
+    // The old wrapper folded 404 into null and polled a dead id for minutes.
+    async getRepriceJob(jobId) {
+      try {
+        const resp = await window.API.get(`/api/admin/pricing/reprice-jobs/${encodeURIComponent(jobId)}`);
+        if (resp && resp.ok === false) {
+          if (resp.code === 'NOT_FOUND') return { missing: true, id: jobId };
+          return null;
+        }
+        return resp?.data ?? null;
+      } catch (e) {
+        if (e && (e.code === 'NOT_FOUND' || e.status === 404)) return { missing: true, id: jobId };
+        DebugLog.warn('[AdminAPI] reprice job read failed:', e && e.message);
+        return null;
       }
-      return resp?.data ?? null;
     },
 
     async getPackHealth(skuOrId) {

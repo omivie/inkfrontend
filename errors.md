@@ -41,6 +41,94 @@ describing the same incident.
 
 ---
 
+## ERR-281 — The pricing panel said "Saved, prices are repricing" after a PUT that since migration 187 only files a proposal, and a simulator whose "after" counts price cuts the system will not make — **RESOLVED** (2026-09-23)
+
+**Context.** Backend contract `backend-docs/inbox/tier-multiplier-approval-backend-contract-sep2026.md`
+(migration 187). Tier multipliers are now approval-gated: `PUT /admin/pricing/tier-multipliers` and
+`PUT /admin/pricing/global-offset` **file a proposal and move no price**. Only
+`POST …/proposals/:id/approve {confirm:true}` makes a ladder live, and it starts a full-catalogue reprice.
+Everything was verified against production with a super_admin session before any code was written.
+
+### What the frontend was doing
+
+| Where | Defect |
+|---|---|
+| `cc2-pricing.js` "Confirm & save" | PUT `{proposed_tiers, apply_ending_snap}`, a shape the contract does not describe, then toasted **"Saved — compatible prices are repricing in the background"**. Since 187 the best case is a proposal, so the toast described a price change that had not happened. |
+| `cc-profit.js` offset slider | Toasted **"Saved"**, then polled a reprice job the PUT no longer starts. |
+| `AdminAPI.updateGlobalOffset` | Never checked `ok:false`. `API.request()` **resolves** 403/409/429/JSON-5xx, so a refusal came back as `null` and the caller showed **"Saved"** over it. |
+| `controlCenter.simulatePricing/commitPricing` | Read `resp.error?.code`. `error` is a **string** in a resolved envelope and the code sits at the top level, so `err.code` was always `undefined` and **every mapped error branch in the panel was dead**. |
+| `getRepriceJob` | Folded a 404 into `null`, so the poller retried a job id that did not exist until its timeout ran out. |
+
+### What the backend's numbers say (measured on live 2026-09-23, not in the contract)
+
+1. **Drift is inside every impact figure.** Simulating the live ladder with **no change** reports
+   57 rises, 190 ratchet-held cuts and −$614.13 net profit per unit (whole catalogue). So `aggregate`
+   does not answer "what does my edit do". It answers "what would a reprice do with this table", and
+   **approving any edit reprices the whole catalogue**, drift included. The panel now runs a no-change
+   baseline and prints "this edit alone" separately. For example, lowering compatible `12-18`
+   1.69 → 1.60 reads **+0 SKUs will move, +34 newly held by the ratchet**. The raw aggregate for the
+   same edit suggests −$587.57.
+2. **The no-decrease ratchet is not applied to the aggregate.** Row `C12XBK` has
+   `current_retail 68.79`, `new_retail 62.49` and `blocked_by_no_decrease: true`, and
+   `total_skus_with_decrease` equals `blocked_skus` exactly. Every `*_after` figure therefore counts
+   cuts that will not happen. Blocked sample rows now read **"keeps $68.79 (table $62.49)"**, and the
+   strip says the delivered figures are higher.
+3. **Simulate silently accepts** an unknown band key (`"<=100"` → 200, "no change") and an
+   unresolvable brand id (→ 200, `by_brand: []`). PUT 400s the same input, so a typo would have
+   previewed as "no effect". Every draft is now validated before it is simulated.
+
+These three went to the backend as **BF-068**.
+
+### Fix
+
+- `utils/tierProposal.js` (new, pure). It diffs the draft against live so only changed bands are
+  sent, addresses brands by `brand_id`, mirrors every `INVALID_BAND_LADDER` rule and reports all of
+  them at once, and rebuilds band keys (verified against all 32 live keys). It also holds the
+  drift/edit attribution, the ratchet wording, the row outcome, the proposal diff, one sentence per
+  contract error code, and the poll decision (5 s interval, 10 min cap; **timeout is reported as
+  "still running", never as success**).
+- `api.js`: `proposeTierMultipliers`, `proposeGlobalOffset`, `list/getTierProposal`,
+  `approve/rejectTierProposal` (`confirm:true` exists at exactly one call site) and `retryReprice`.
+  Every write throws through `invoiceError()`, which reads both envelope shapes. `getRepriceJob` has
+  three states. The dead flat-map `updateTierMultipliers` is gone.
+- `cc2-pricing.js` is rewritten as edit → review → repricing:
+  - **Editing:** brand selector (inherited bands shown as inherited, `clear:true` to remove a ladder);
+    a cost-band editor with add/remove and live key preview; global offset.
+  - **Impact:** the per-band columns come from `by_tier`. Simulate is debounced at 300 ms and
+    sequence-guarded, because `API.request` drops `signal`.
+  - **Proposing** warns when it supersedes a pending proposal. **Review** re-measures the impact, and
+    `stale` disables Approve.
+  - **Approve** re-reads the proposal before opening its dialog and needs an explicit acknowledgement.
+  - **Reprice:** the job is polled until complete. `enqueue_failed` gets its own banner ("the ladder IS
+    live, no reprice started") and a retry. The packs re-anchor checklist is shown verbatim from the
+    response. After a refresh, polling resumes from the latest approved proposal.
+  - **History:** a proposal history panel shows who proposed and who approved, with the impact
+    snapshot.
+- `cc-profit.js`: the offset slider now proposes, says "awaiting approval", and shows the refusal's
+  own reason. The tier table shows the defaults beside moved bands, brand ladders and a pending
+  banner.
+
+### Verification
+
+- `tests/tier-multiplier-approval-sep2026.test.js`: 41 tests. The request-shaping tests run the real
+  module. The API tests run the **real method source** against a fake transport that returns the
+  envelopes `API.request()` actually produces. The attribution tests use the live numbers above.
+- `npm run probe:tier-approval`: READ-ONLY with no write mode, and its transport refuses anything but
+  GET and POST `/simulate`. Result: **15 passed, 0 failed, 3 notes** (the three BF-068 items).
+- **Live end to end, with the owner's permission:** first confirmed `pending_proposal` was null, then
+  proposed compatible `200+` 1.24 → 1.25 (a band with no products) through the panel.
+  - The PUT returned **202**; the review showed `stale:false`, the diff and a fresh impact.
+  - It was **rejected** through the panel. The proposal is `rejected`, `pending_proposal` is null,
+    `overrides` is `{}`, and there is no reprice job.
+  - **Nothing was approved.**
+
+**Lesson.** ***A response that says "after" is describing the table, not the shelf.*** When a
+system has a rule that runs after the engine (here the ratchet), check whether the headline numbers
+applied it. And ***a preview with no baseline cannot tell you what you changed***, because the
+catalogue drifts on its own.
+
+---
+
 ## ERR-274 — The suite was red 39 days a year from one demo fixture: a test that was wrong for half of every day, and a docstring the generator did not keep — **RESOLVED** (2026-09-21)
 
 **Context.** `tests/business-demo-mode.test.js` had a failing assertion at HEAD. I looked at it
