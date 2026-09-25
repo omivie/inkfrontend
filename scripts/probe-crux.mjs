@@ -7,12 +7,13 @@
  * rolling window — the only before/after we can get for ERR-282..285, because
  * the pre-fix build cannot be re-run against the production API.
  *
- * Baseline: audit-output/crux-baseline-2026-09-23.json (window 08-27 → 09-23,
+ * Baseline: ~/.feink-audits/crux-baseline-2026-09-23.json (window 08-27 → 09-23,
  * wholly BEFORE the 2026-09-25 deploy). The first window wholly AFTER it ends
  * ~2026-10-23; compare then. A window that straddles 09-25 is a blend.
  *
  * MODE: READ-ONLY. Key read from ~/.crux_api_key (outside the repo, never
- * printed). `--save` writes the raw responses to audit-output/crux-<lastDate>.json.
+ * printed). `--save` writes the raw responses to ~/.feink-audits/crux-<lastDate>.json —
+ * OUTSIDE the repo: audit-output/ may hold only report.json (no-ghost-files).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,7 +68,9 @@ try {
 
 if (process.argv.includes('--save')) {
     const last = date(out.PHONE.record.collectionPeriod.lastDate);
-    const file = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'audit-output', `crux-${last}.json`);
+    const dir = path.join(os.homedir(), '.feink-audits');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `crux-${last}.json`);
     fs.writeFileSync(file, JSON.stringify({ origin: ORIGIN, fetched: new Date().toISOString(), ...out }, null, 2));
-    console.log(`saved ${path.relative(process.cwd(), file)}`);
+    console.log(`saved ${file}`);
 }
