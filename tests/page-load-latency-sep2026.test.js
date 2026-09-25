@@ -293,3 +293,23 @@ test('§5 site-guard BACKEND_URL is the api subdomain on www/apex, never a relat
     assert.equal(at('inkcartridges.co.nz'), 'https://api.inkcartridges.co.nz');
     assert.equal(at('localhost'), 'https://ink-backend-zaeq.onrender.com');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §6 pages.css carries no statically dead rules (latency follow-up, 2026-09-25)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 473 rules (65.7KB raw) that no HTML or JS file could ever match were deleted
+// from the render-blocking pages.css. This keeps it that way: a rule whose
+// class/id appears nowhere in the web root — not literally, not as a fragment of
+// a class the JS builds — fails here. Remove the CSS in the same change that
+// removes the markup. The audit is conservative by construction (see its
+// header); a false "dead" is a bug in the audit, not a reason to skip this.
+
+test('§6 pages.css has zero statically dead rules', () => {
+    const { execFileSync } = require('node:child_process');
+    const out = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'audit-css-coverage.mjs'), '--no-browser', '--list'],
+        { encoding: 'utf8', env: { ...process.env, HOME: fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'css-audit-')) } });
+    const m = out.match(/STATIC DEAD \(can never match\): (\d+) rules/);
+    assert.ok(m, 'the audit must print its STATIC DEAD line — an audit that printed nothing checked nothing');
+    assert.equal(Number(m[1]), 0, `dead rules in pages.css:\n${out.split('\n').filter((l) => l.startsWith('  dead')).join('\n')}`);
+});

@@ -91,17 +91,18 @@ const SURFACES = [
     ['components.css', '.product-card__image-wrapper {',                       'shop / search / related card image'],
     ['components.css', '.favourite-item__image {',                             'favourites grid card image'],
     ['pages.css',      '.product-card__image-wrapper {',                       'shop-page card image (pages.css override)'],
-    ['pages.css',      '.dash-fav-card__image {',                              'dashboard favourites image'],
-    ['pages.css',      '.product-box__image {',                                'legacy product-box image'],
     ['pages.css',      '.cart-item__image {',                                  'cart line-item image'],
     ['pages.css',      '.product-gallery__main {',                             'PDP gallery main (default)'],
     ['pages.css',      '.product-detail__layout .product-gallery__main {',    'PDP gallery main (scoped layout)'],
-    ['pages.css',      '.product-gallery__thumb {',                            'PDP gallery thumb'],
     ['pages.css',      '.order-item__image {',                                 'order detail line-item image'],
     ['pages.css',      '.checkout-summary__item-image {',                      'checkout summary line-item image'],
     ['search.css',     '.smart-ac__grid .product-card--skeleton .product-card__image-wrapper {', 'smart-AC dropdown skeleton card'],
 ];
 
+// Removed 2026-09-25: dash-fav-card__image, product-box__image and
+// product-gallery__thumb — no HTML or JS renders those classes, so their rules
+// were deleted as dead CSS (`npm run audit:css-coverage`). Re-add a row here
+// if one of those surfaces comes back.
 for (const [file, anchor, label] of SURFACES) {
     test(`${file} — ${label} uses var(--product-image-bg)`, () => {
         const css = loadCss(file);

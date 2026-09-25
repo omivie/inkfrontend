@@ -94,13 +94,11 @@ test('search.css — .smart-ac__grid .product-card__title clamps to 4 lines', ()
     assert.equal(clampValue(body), 4, 'dropdown grid product card title must clamp at 4');
 });
 
-// ─── Product list / box titles (legacy product-box variant) ────────────────
-
-test('pages.css — .product-box__title clamps to 4 lines', () => {
-    const css = loadCss('pages.css');
-    const body = ruleBody(css, '.product-box__title {');
-    assert.equal(clampValue(body), 4);
-});
+// `.product-box__title` (legacy product-box) and `.dash-fav-card__name` (old
+// dashboard favourites) were pinned here until 2026-09-25. Neither class is
+// rendered by any HTML or JS file any more, so their rules were deleted as dead
+// CSS (page-load latency follow-up; `npm run audit:css-coverage`). A clamp on
+// a surface that cannot appear protects nothing.
 
 // ─── Smart autocomplete row title (list view, not grid) ────────────────────
 
@@ -123,12 +121,6 @@ test('components.css — .crosssell-modal__name clamps to 4 lines', () => {
 test('components.css — .favourite-item__name clamps to 4 lines', () => {
     const css = loadCss('components.css');
     const body = ruleBody(css, '.favourite-item__name {');
-    assert.equal(clampValue(body), 4);
-});
-
-test('pages.css — .dash-fav-card__name clamps to 4 lines', () => {
-    const css = loadCss('pages.css');
-    const body = ruleBody(css, '.dash-fav-card__name {');
     assert.equal(clampValue(body), 4);
 });
 

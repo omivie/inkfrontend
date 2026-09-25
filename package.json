@@ -74,6 +74,7 @@
     "probe:mobile-cta": "node scripts/probe-mobile-cta-occlusion.mjs",
     "probe:page-latency": "node scripts/probe-page-latency.mjs",
     "probe:crux": "node scripts/probe-crux.mjs",
+    "audit:css-coverage": "node scripts/audit-css-coverage.mjs",
     "probe:shop-cls": "node scripts/probe-shop-cls.mjs",
     "probe:stripe-wallets": "node scripts/probe-stripe-wallets.mjs",
     "probe:product-write": "node scripts/probe-product-write-fields.mjs",

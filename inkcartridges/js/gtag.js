@@ -297,6 +297,84 @@ const AdsConversions = {
 };
 
 /* ════════════════════════════════════════════════════════════════════════════
+ * REAL-USER CORE WEB VITALS → GA4 (latency follow-up to ERR-282)
+ *
+ * The 2026-09-25 latency fixes can only be measured in aggregate through
+ * Chrome's CrUX field data (`npm run probe:crux`): origin-wide, 28-day rolling,
+ * Chrome-only, nothing per page. This reports each visitor's LCP / FCP / INP /
+ * CLS / TTFB to the GA4 property, so a page's speed can be read next to what
+ * that page sells. Owner-approved 2026-09-25 (third-party script, pinned + SRI).
+ *
+ * - `web-vitals` is pinned to an exact version with SRI, from cdn.jsdelivr.net
+ *   (already in script-src for supabase-js). It is fetched after `load`: its
+ *   observers read BUFFERED entries, so loading late loses nothing and keeps it
+ *   off the critical path. A changed file fails SRI and simply never runs.
+ * - send_to is the GA4 property ONLY. An event with no send_to also reaches the
+ *   Ads tag (see the GA4 block below); these must never land in the ad account.
+ * - It sits ABOVE UetTag and Ga4Ecommerce on purpose: the UET and GA4 suites
+ *   slice this file from those markers and assert on every gtag() call they
+ *   find (one door for ecommerce events, none in UET). `GA4` is declared below
+ *   but only read inside send(), which runs after this file has executed.
+ * - Event shape is Google's documented recipe: name = metric, `value` is an
+ *   integer delta (CLS × 1000), `metric_id` groups the deltas of one page view.
+ *   metric_rating / metric_value must be registered as custom dimensions /
+ *   metrics in GA4 admin before they show in reports.
+ * - Consent is not gated here, for the reason the GA4 block gives.
+ * - Never throws into the page; start() returns why it did not start.
+ * ========================================================================== */
+const WebVitalsReporter = {
+    SRC: 'https://cdn.jsdelivr.net/npm/web-vitals@6.2.2/dist/web-vitals.iife.js',
+    INTEGRITY: 'sha384-sKh//42d8+X4ztiyB4ChMShr0tmbWDWrkHfy9pLz9napB81dM74xVylUQVmZ94PE',
+    METRICS: ['onLCP', 'onFCP', 'onINP', 'onCLS', 'onTTFB'],
+
+    send(metric) {
+        if (typeof gtag !== 'function' || !metric || !metric.name) return false;
+        gtag('event', metric.name, {
+            send_to: GA4.PROPERTY,
+            value: Math.round(metric.name === 'CLS' ? metric.delta * 1000 : metric.delta),
+            metric_id: metric.id,
+            metric_value: metric.value,
+            metric_delta: metric.delta,
+            metric_rating: metric.rating,
+            non_interaction: true,
+        });
+        return true;
+    },
+
+    start() {
+        try {
+            if (typeof document === 'undefined') return { started: false, reason: 'no-dom' };
+            if (location.pathname.startsWith('/admin')) return { started: false, reason: 'admin' };
+            const inject = () => {
+                const s = document.createElement('script');
+                s.src = this.SRC;
+                s.integrity = this.INTEGRITY;
+                s.crossOrigin = 'anonymous';
+                s.async = true;
+                s.onload = () => {
+                    const wv = window.webVitals;
+                    if (!wv) return;
+                    for (const fn of this.METRICS) if (typeof wv[fn] === 'function') wv[fn]((m) => this.send(m));
+                };
+                (document.head || document.documentElement).appendChild(s);
+            };
+            if (document.readyState === 'complete') inject();
+            else window.addEventListener('load', inject, { once: true });
+            return { started: true };
+        } catch (err) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('web-vitals start failed (non-fatal):', err);
+            return { started: false, reason: 'threw' };
+        }
+    },
+};
+
+if (typeof window !== 'undefined') {
+    window.WebVitalsReporter = WebVitalsReporter;
+    WebVitalsReporter.start();
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
  * MICROSOFT ADVERTISING — UNIVERSAL EVENT TRACKING (UET)
  *
  * WHY THIS LIVES IN gtag.js AND NOT IN ITS OWN FILE

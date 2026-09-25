@@ -120,3 +120,30 @@ You measured 0.47–1.59s for it. You offered an edge-cached `/api/site/*` route
 When the route exists, we switch `site-guard.js` to it and drop the Supabase read.
 
 — frontend
+
+## Addendum (same day): `pages.css`, and per-page speed data
+
+**What each page uses.** `npm run audit:css-coverage` loaded 25 routes as a first-time visitor at 390x664 and
+1280x800. On arrival, each page matched **1–5%** of `pages.css`: the heaviest was a category page at 20.4KB
+of 405KB. Across every route we visited, 104KB was used on first load. The other 227KB is for states and
+pages a signed-out first load never shows (account pages, modals, error states), so it is not dead.
+
+**Dead rules deleted: 473 rules, 65.7KB raw.** Gzipped, the file went from 77.3KB to 68.9KB. A rule was
+deleted only if a class or id it needs appears in no HTML or JS file, either literally or as part of a
+class the JS builds at runtime (`${block}__line--${key}`). A first version of the check missed that
+double-built pattern and would have removed the live business and loyalty chart colours. The test suite
+caught it before anything was committed. Two checks confirm the deletion is safe:
+- the browser parses the new file into exactly the old rules minus the 473, with nothing added;
+- on 20 routes at both widths, every element's computed style is unchanged.
+
+For the second check, a noise control (swapping in identical CSS) produced the same 4 differences, so
+those are page noise. A positive control (removing one rule that is in use) produced 95 differences, so
+the check does catch real changes. A new test now fails on any dead rule in `pages.css`.
+
+**Split: not now.** First-visit cost is now 68.9KB gzipped, and repeat visits cost nothing (immutable).
+A per-page split would save most of that 68.9KB on a first visit, but it means sorting about 2,000 rules
+into page bundles, and the states a first load never shows make that error-prone. We'll decide after the
+first clean real-user window (ends around 2026-10-23), measured with CrUX and the new per-page vitals below.
+
+**Per-page real-user vitals.** `gtag.js` now loads `web-vitals@6.2.2` (pinned, SRI, after `load`) and sends
+LCP/FCP/INP/CLS/TTFB to the GA4 property only, never to the Ads tag. Nothing is needed from you.
