@@ -608,7 +608,7 @@ test('§6.3 BOTH empty-cart guards filter pending removals BEFORE guarding', () 
     for (const sig of ['async syncWithServer()', 'async loadFromServer()']) {
         const body = methodBody(CART_SRC, sig);
         const filter = body.indexOf('parsed.items = this._filterPendingRemovals(parsed.items)');
-        const guard = body.indexOf('this._serverEmptyButWeHoldLines(parsed.items)');
+        const guard = body.indexOf('this._serverEmptyButWeHoldLines(parsed.items, parsed.summary)');
         assert.notEqual(filter, -1, `${sig} must subtract pending removals`);
         assert.notEqual(guard, -1, `${sig} must guard against an unexpectedly empty server cart`);
         assert.ok(filter < guard,
@@ -622,9 +622,9 @@ test('§6.3b the guard is ONE predicate, and it filters the LOCAL side too', () 
     // The local half is what stops the guard resurrecting a line the shopper
     // deliberately removed — without it this trades a silent empty cart for a
     // silent reappearing item, which is worse.
-    const decls = CART_CODE.match(/_serverEmptyButWeHoldLines\(parsedItems\)\s*\{/g) || [];
+    const decls = CART_CODE.match(/_serverEmptyButWeHoldLines\(parsedItems, summary\)\s*\{/g) || [];
     assert.equal(decls.length, 1, 'the rule must be declared once, not re-spelled per caller');
-    const pred = methodBody(CART_SRC, '_serverEmptyButWeHoldLines(parsedItems) {');
+    const pred = methodBody(CART_SRC, '_serverEmptyButWeHoldLines(parsedItems, summary) {');
     assert.match(pred, /_filterPendingRemovals\(this\.items\)/,
         'the local side must have pending removals subtracted');
     assert.match(pred, /parsedItems\.length === 0/);

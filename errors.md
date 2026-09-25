@@ -41,6 +41,75 @@ describing the same incident.
 
 ---
 
+## ERR-286 — Admin Products went blank on a column click, its Brand filter had done nothing for weeks, and its export ignored every filter — the backend's 42-doc answer, measured before it was built on — **RESOLVED (frontend)** (2026-09-25)
+
+**Context.** The backend answered all 42 documents of `backend-asks-2026-09-20.md` in one response
+(`backend-docs/inbox/backend-asks-42-doc-bundle-response-sep2026.md`, dated 2026-09-21, deployed as
+`372f740`). The job was to verify it and build on it. **Every change below rests on a production
+measurement, not on the document** — `npm run probe:bundle-response` (new, READ-ONLY) re-runs all of
+them: 29/29 on 2026-09-25, with 2 notes for the backend.
+
+### What was live-broken that nobody had reported
+
+| Where | Defect | Measured |
+|---|---|---|
+| Admin Products column sort | `/api/admin/products` went `strictQuery`. `brand`, `supplier`, `is_active` and `import_locked` are not in its `sort` enum ⇒ **400** ⇒ `AdminAPI.getProducts` returns `null` ⇒ **an EMPTY table**. The page runs on the backend fallback every load (ERR-220), so clicking the Brand header emptied the list in production. | 4 of 15 sort keys 400 |
+| Admin Products Brand filter | The dropdown's value is a brand **UUID**; `brand=` takes a **slug** and **silently ignores** anything else. `brand=<hp uuid>` answered all 4,069 rows. | ignored, not refused |
+| Admin Products "All statuses" | No `is_active` = **active only**. 318 inactive products were missing under a dropdown that said "All". | 4,069 vs 4,387 |
+| Admin CSV/Excel export | `/api/admin/export/products` ignores **every** filter (`source=genuine` exported compatible rows; `search`, `brand` did nothing), stops at 999 rows with no truncation header, and **500s on `brands=`**, the param the global filter bar adds. | 380/1,000 compatible under "genuine" |
+| Admin PDF export | Global brands were sent as `names.join(',')`, ignored by the backend ⇒ a PDF under "HP + Canon" was every brand. | |
+| Admin Pack filter | Keyed on colour **names** (CMY/KCMY/Value Pack). Missed 32 live packs whose colour is a plain hue (`G45BK-2PK` = Black + multipack). | cross-tab of 4,387 rows |
+| Catalogue-browse "codeless" check | Passed `brand_id`/`is_active`, which `getProducts` never reads ⇒ checked **every brand's** products of the type; its "including inactive" diff was active-only. | |
+
+### Fix
+- **Products**: `backendProductFilters()` sends the brand **slug**, `is_active=all` for "All", the backend's
+  `pack_type` (`single`/`packs`), `supplier` and `product_type_group`, and **leaves an unsupported sort off
+  and NAMES it** (`backendCanSort` = the enum from the 400's own message). Pack, Supplier and the grouped type
+  no longer force the Supabase leg. Both backend legs warn through one `warnLostToBackend()`.
+- **Exports**: CSV and Excel are built in the browser from `fetchFilteredProductsForExport()` — the SAME filter
+  builder as the table, one pass per global brand — with a CSV-injection-safe `csvCell()`. The PDF uses the same fetch.
+- **Built on the response** (each measured first): `?reorder=` five values (`error` added, unknown → neutral
+  message, `/shop?reorder=guest` enrolled); BF-040 snapshot-first `BrandSource.of` + order confirmation's binary
+  badge removed; GA4 `add_to_cart` category/variant from `data.product.product_type`/`pack_type`; the empty-cart
+  guard adopts an empty list the server EXPLAINS (`rows_dropped_inactive > 0`) and says so; cart lines render the
+  server's `line_total_after_discount` only for the quantity it priced; the nudge from `volume_next_break`; ribbons
+  `past_the_end` recovers to page 1 (`replaceState`); code chips are crawlable `<a>` links to the two-param
+  canonical; the image-audit restore is per-row with dead-archive / watermark-hold / `overwrite_live` / 409 handling
+  and "Recoverable only" = `recoverable_only` + `status=pending`; order detail read detail-first; supplier Manual
+  mappings panel (Ask 4) and upload + import panel (Ask 5); invoice `warnings[]`, `BUSINESS_ACCOUNT_NOT_FOUND`,
+  Portal column + all-pages Portal filter.
+- **Kept, deliberately**: `yieldTier`'s `max()` — BF-027 cut the disagreement from 16 rows to **3**, not 0
+  (removing a fallback is a behaviour change, ERR-158); `compatLast`/`reattachCompatProvenance` — no-ops now, but
+  proving it needs a live search, which writes prod analytics (ERR-271).
+- **Not done, deliberately**: the 42 outbox files the owner deleted on 2026-09-21 were NOT restored — their STATUS
+  rows moved to `sent/` with the outcome; the text stays in `1ded3f8`. The two price-list POSTs were NOT exercised
+  (one overwrites the stored list, one rewrites `supplier_offers`).
+- **Correction of our own record**: ERR-269's "the server ignores a client-invented guest id and mints its own" was
+  wrong; the backend accepts a well-formed UUID. Annotated in place, in `probe-cart-deep-link.mjs` and in STATUS.
+
+### Verification
+- `npm test` green. New/extended: `image-audit-restore-legacy-sep2026` (13; **10 red** against the pre-change page),
+  `admin-invoice-portal-link-sep2026` (7), `admin-products-fallback-filters-sep2026` (strictQuery section),
+  `cart-empty-server-adoption-sep2026` §4c/§4d + line totals, `chip-prerender-sep2026`, `cart-add-deep-link-sep2026` §3.
+  Nine existing suites were **inverted, not deleted**, each keeping a positive control and a dated note.
+- `probe:cart-deep-link --write` measured the add/cart shapes and cleaned up, verified both ways.
+- `probe:chip-prerender`: all 535 series-shard URLs are brand + code. `probe:supplier-prices` 31/31.
+- Reply: `backend-docs/outbox/bundle-response-FE-reply-sep2026.md` (**BF-070**).
+
+***Lesson. A stricter server turns a silently-ignored mistake into a loud one — but only if the client does not
+turn the loud one back into silence.*** `strictQuery` made four bad sorts refuse, and our `null`-on-error client
+rendered the refusal as an empty list. The mirror image is the param `strictQuery` still lets through: a UUID
+where a slug belongs is not refused, it is IGNORED, and an ignored filter looks exactly like a working one.
+**Measure the value you send, not the name of the param.**
+
+`inkcartridges/js/admin/pages/products.js` · `inkcartridges/js/admin/api.js` · `inkcartridges/js/admin/app.js` ·
+`inkcartridges/js/admin/pages/{catalogue-browse,genuine-image-audit,invoices,orders,supplier-prices}.js` ·
+`inkcartridges/js/{cart,business,gtag,utils,cart-deep-link,order-confirmation-page,ribbons-page,shop-page,product-detail-page,seo-meta,api}.js` ·
+`inkcartridges/css/{admin,pages}.css` · `inkcartridges/html/shop.html` + `?v=` restamps · `scripts/probe-bundle-response-sep2026.mjs` (new) ·
+`scripts/probe-{cart-deep-link,supplier-prices,chip-prerender}.mjs` · `package.json` · 16 test files · `backend-docs/`
+
+---
+
 ## ERR-285 — The traffic beacon posted to the Render origin on production because gtag.js injects the tracker before the deferred config.js defines Config — **RESOLVED** (2026-09-25)
 
 The backend saw `traffic-event` beacons going to `ink-backend-zaeq.onrender.com` from the storefront.
@@ -1190,6 +1259,12 @@ line, then read the cart back with the same invented id and found it empty. **Th
 client-invented guest id and mints its own**, returning it in the `x-guest-session` response header
 — which is exactly why `js/api.js` re-reads that header after every request. So the add landed in
 one cart and the verification read another, which was empty and always would have been.
+
+*Corrected 2026-09-25 (ERR-286): the mechanism in the sentence above is wrong, and the backend
+said so. The server ACCEPTS a well-formed UUID in `X-Guest-Session` and mints one only when the
+header is absent or malformed, echoing the resolved id either way. Our invented id was accepted
+and simply matched no `guest_sessions` row. The lesson below does not change: address the session
+the server echoes back.*
 
 > An empty cart is only evidence of cleanup if it was non-empty a moment ago.
 

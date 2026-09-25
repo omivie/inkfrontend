@@ -94,6 +94,7 @@ const DEFAULT_STATE = {
   _search: '', _sort: 'name', _sortDir: 'asc', _page: 1,
   _brandFilter: '', _activeFilter: '', _sourceFilter: '', _typeFilter: '',
   _imageFilter: '', _stockFilter: '', _packFilter: '', _supplierFilter: '',
+  _brands: [{ id: 'uuid-hp', slug: 'hp', name: 'HP' }],
 };
 
 /**
@@ -105,6 +106,8 @@ async function withState(overrides) {
   const { typeFilterGroup } = await import(path.join(SITE, 'js/admin/utils/product-types.js'));
   const src = [
     extractFunction(PRODUCTS, 'backendProductFilters'),
+    extractFunction(PRODUCTS, 'backendCanSort'),
+    extractFunction(PRODUCTS, 'backendBrandSlug'),
     extractFunction(PRODUCTS, 'filtersLostToBackend'),
     extractFunction(PRODUCTS, 'paginationFrom'),
   ].join('\n\n');
@@ -128,6 +131,7 @@ async function withState(overrides) {
 const NOT_ON_THIS_PAGE = {
   category: 'the list filters by product_type, not the legacy category column',
   is_reviewed: 'the review queue is its own page (getUnreviewedProducts)',
+  color: 'the list has no colour filter; pack-ness is the pack_type filter (ERR-286)',
 };
 
 test('every filter AdminAPI.getProducts forwards is produced by the ONE builder', async () => {
@@ -140,8 +144,11 @@ test('every filter AdminAPI.getProducts forwards is produced by the ONE builder'
     _search: 'brother', _brandFilter: 'b1', _activeFilter: 'true',
     _sourceFilter: 'genuine', _typeFilter: 'toner_cartridge',
     _imageFilter: 'has-images', _stockFilter: 'in_stock',
+    _packFilter: 'packs', _supplierFilter: 'dsnz',
   });
-  const built = backendProductFilters();
+  // A grouped type is a different key; build it in a second state and merge.
+  const grouped = (await withState({ _typeFilter: 'ribbons' })).backendProductFilters();
+  const built = { ...backendProductFilters(), ...grouped };
 
   for (const key of new Set(supported)) {
     if (key in NOT_ON_THIS_PAGE) continue;
@@ -170,18 +177,27 @@ test('the fallback leg forwards the source filter — the ERR-220 case itself', 
   assert.equal(backendProductFilters().source, 'genuine');
 });
 
-test('a GROUPED type is never sent as a single product_type', async () => {
-  // "All Ribbons" spans three types; the backend param takes one. Sending one
-  // arm would filter to a third of the rows and look like it worked. The key is
-  // read from the shipped vocabulary — hardcoding it here is how a renamed
-  // group would quietly stop being tested.
+test('a GROUPED type is sent as product_type_group, never as a single product_type', async () => {
+  // "All Ribbons" spans three types; `product_type` takes one. Sending one arm
+  // would filter to a third of the rows and look like it worked. Since
+  // 2026-09-21 the backend has `product_type_group`, and every key we group by
+  // must be in ITS enum (measured 2026-09-25: ink, toner, ribbon, drums, label,
+  // paper, ribbons, …) — strictQuery 400s anything else into an empty table.
   const { TYPE_FILTER_GROUPS } = await import(path.join(SITE, 'js/admin/utils/product-types.js'));
-  const groupKey = Object.keys(TYPE_FILTER_GROUPS)[0];
-  assert.ok(groupKey, 'there must be at least one grouped type filter to test');
-  const grouped = await withState({ _typeFilter: groupKey });
-  assert.ok(!('product_type' in grouped.backendProductFilters()),
-    'a grouped type must not reach the backend as one value');
-  assert.deepEqual(grouped.filtersLostToBackend(), ['the grouped type filter']);
+  const BACKEND_GROUPS = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper', 'ribbons',
+    'ink-cartridges', 'toner-cartridges', 'drum-units', 'label_tape', 'label-tape',
+    'photo_paper', 'photo-paper', 'consumable', 'cartridge'];
+  const groupKeys = Object.keys(TYPE_FILTER_GROUPS);
+  assert.ok(groupKeys.length, 'there must be at least one grouped type filter to test');
+  for (const groupKey of groupKeys) {
+    assert.ok(BACKEND_GROUPS.includes(groupKey),
+      `group key '${groupKey}' is not in the backend's product_type_group enum — it would 400`);
+    const grouped = await withState({ _typeFilter: groupKey });
+    const f = grouped.backendProductFilters();
+    assert.ok(!('product_type' in f), 'a grouped type must not reach the backend as one value');
+    assert.equal(f.product_type_group, groupKey);
+    assert.deepEqual(grouped.filtersLostToBackend(), [], 'the group crosses now — claiming a loss would be a lie');
+  }
 
   // Positive control: a single type MUST still be sent, or the test above would
   // pass just as well against a builder that forgot product_type entirely.
@@ -193,13 +209,66 @@ test('a GROUPED type is never sent as a single product_type', async () => {
 // 2. What cannot cross must be NAMED
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('Pack and Supplier are named as lost; nothing is invented when nothing is lost', async () => {
-  const both = await withState({ _packFilter: 'packs', _supplierFilter: 'dsnz' });
-  assert.deepEqual(both.filtersLostToBackend(), ['Pack', 'Supplier']);
+// ─────────────────────────────────────────────────────────────────────────────
+// 2b. strictQuery (ERR-286) — every value we send must be in the backend's enum
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const none = await withState({ _sourceFilter: 'genuine', _stockFilter: 'in_stock' });
+test('Pack and Supplier cross in the backend\'s own vocabulary', async () => {
+  // `pack_type` = single | value_pack | multipack | packs. Our 'singles' is a
+  // 400 — which AdminAPI.getProducts turns into an EMPTY table.
+  const packs = (await withState({ _packFilter: 'packs', _supplierFilter: 'dsnz' })).backendProductFilters();
+  assert.equal(packs.pack_type, 'packs');
+  assert.equal(packs.supplier, 'dsnz');
+  const singles = (await withState({ _packFilter: 'singles' })).backendProductFilters();
+  assert.equal(singles.pack_type, 'single', "'singles' is out of the backend enum and 400s");
+  // Positive control: no pack filter sends no pack_type at all.
+  assert.ok(!('pack_type' in (await withState({})).backendProductFilters()));
+});
+
+test('"All statuses" asks for is_active=all — absence means ACTIVE ONLY', async () => {
+  // Measured 2026-09-25: no is_active = 4,069 rows, is_active=all = 4,387.
+  // Omitting it hid 318 inactive products under a dropdown saying "All".
+  assert.equal((await withState({ _activeFilter: '' })).backendProductFilters().active, 'all');
+  assert.equal((await withState({ _activeFilter: 'false' })).backendProductFilters().active, 'false');
+});
+
+test('brand is sent as the SLUG — a UUID is silently IGNORED by the backend', async () => {
+  // brand=<hp uuid> answered 4,069 rows across every brand (measured
+  // 2026-09-25); brand=hp answered 857 HP rows.
+  const f = (await withState({ _brandFilter: 'uuid-hp' })).backendProductFilters();
+  assert.equal(f.brand, 'hp');
+  // A value that is not a known id passes through — it may already be a slug.
+  assert.equal((await withState({ _brandFilter: 'canon' })).backendProductFilters().brand, 'canon');
+});
+
+test('a sort the backend has no key for is left OFF and NAMED, never sent', async () => {
+  // brand / supplier / is_active / import_locked 400 under strictQuery, and a
+  // 400 rendered the whole table empty.
+  for (const col of ['brand', 'supplier', 'is_active', 'import_locked']) {
+    const st = await withState({ _sort: col, _sortDir: 'desc' });
+    const f = st.backendProductFilters();
+    assert.ok(!('sort' in f) && !('order' in f), `sort=${col} would 400`);
+    assert.equal(st.filtersLostToBackend().length, 1, `the ${col} sort must be named as not applied`);
+  }
+  // Positive control: a supported sort is still sent, and nothing is "lost".
+  const ok = await withState({ _sort: 'margin_pct', _sortDir: 'desc' });
+  assert.equal(ok.backendProductFilters().sort, 'margin_pct');
+  assert.equal(ok.backendProductFilters().order, 'desc');
+  assert.deepEqual(ok.filtersLostToBackend(), []);
+
+  const none = await withState({ _sourceFilter: 'genuine', _stockFilter: 'in_stock', _packFilter: 'packs' });
   assert.deepEqual(none.filtersLostToBackend(), [],
-    'source and stock DO cross now — claiming a loss that did not happen is its own lie');
+    'filters DO cross now — claiming a loss that did not happen is its own lie');
+});
+
+test('every sortable Products column is either backend-sortable or named when not', () => {
+  const sortable = [...PRODUCTS.matchAll(/key: '([a-z_]+)', label: '[^']*', sortable: true/g)].map((m) => m[1]);
+  assert.ok(sortable.length >= 8, `expected the sortable columns, found ${sortable.length}`);
+  // eslint-disable-next-line no-new-func
+  const can = new Function(`${extractFunction(PRODUCTS, 'backendCanSort')}; return backendCanSort;`)();
+  const unsupported = sortable.filter((k) => !can(k));
+  assert.deepEqual(unsupported.sort(), ['brand', 'import_locked', 'is_active', 'supplier'],
+    'the set of columns the backend cannot sort changed — re-measure with probe:bundle-response');
 });
 
 test('the fallback toast names the loss instead of "may match slightly differently"', () => {

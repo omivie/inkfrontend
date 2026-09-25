@@ -182,3 +182,33 @@ test('the shared util exposes what both surfaces need', () => {
   assert.match(utilJs, /export function isValidProductCode/);
   assert.match(utilJs, /export function describeCodesWriteError/);
 });
+
+// ── Sep 2026: a code can hold products of ANY type ──────────────────────────
+// The membership drawer used to list only the code's own brand+type, so a drum
+// could never be ticked into the TN155 toner chip. The storefront recovers such
+// a product from its own type (api.js _applyManualCodes), so the picker offers
+// every type of the brand — and keeps each row's REAL scope for the save.
+
+test('the membership pool spans every type of the code’s brand', () => {
+  const open = pageJs.slice(pageJs.indexOf('async function openMembership'), pageJs.indexOf('function promptNewCode'));
+  assert.match(open, /SHOP_CATEGORIES\.map\(c => \(\{ brandSlug, category: c\.value \}\)\)/,
+    'other types are walked from SHOP_CATEGORIES');
+  assert.match(open, /Promise\.allSettled\(otherScopes\.map\(walk\)\)/,
+    'another type failing must not blank the drawer');
+  assert.match(open, /scope: s \}/, 'each row keeps the scope it was walked from');
+  assert.match(open, /const s = scopeOf\.get\(id\)/, 'the save still buckets by the row’s own scope');
+});
+
+test('a type that failed to load is SAID in the drawer, not silently missing', () => {
+  const open = pageJs.slice(pageJs.indexOf('async function openMembership'), pageJs.indexOf('function promptNewCode'));
+  assert.match(open, /missedScopes\.push\(otherScopes\[i\]\)/);
+  assert.match(open, /missedScopes\.length \?[\s\S]{0,80}admin-pcp-incomplete[\s\S]{0,120}This list is incomplete/);
+});
+
+test('a product saved from another type records WHICH chip it visits (chip_category)', () => {
+  const open = pageJs.slice(pageJs.indexOf('async function openMembership'), pageJs.indexOf('function promptNewCode'));
+  assert.match(open, /const visits = ownKeys\.has\(key\(b\.scope\)\)\s*\?\s*null/,
+    'a product in the code’s own scope is NOT a visitor');
+  assert.match(open, /chipCategory: visits/, 'setCodeMembership is told which chip');
+  assert.match(open, /error = error \|\| res\.error/, 'a failed row’s REASON reaches the toast');
+});

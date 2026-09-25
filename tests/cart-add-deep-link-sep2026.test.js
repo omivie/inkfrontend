@@ -182,18 +182,37 @@ test('§2 an unreadable link with no valid entries still explains itself', () =>
 // §3 — the reorder status toast
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§3 all four documented ?reorder= values have copy', () => {
-    for (const status of ['loaded', 'unavailable', 'invalid', 'guest']) {
+// Inverted 2026-09-25 (ERR-286). The backend listed FIVE values, not four —
+// `error` (an exception on their side) was missing, and `guest` lands on
+// /SHOP, where this file used to never run. An unknown value used to be
+// dropped silently; a reorder that did not say it worked now says so.
+test('§3 all five documented ?reorder= values have copy', () => {
+    for (const status of ['loaded', 'unavailable', 'invalid', 'error', 'guest']) {
         const entry = DeepLink.REORDER_MESSAGES[status];
         assert.ok(entry && entry.text && entry.type, `${status} has no copy`);
     }
+    assert.equal(DeepLink.REORDER_MESSAGES.error.type, 'error', 'a backend failure is an error, not a shrug');
 });
 
-test('§3 an unknown status is ignored rather than toasting undefined', () => {
-    assert.equal(DeepLink.handleReorderParam('wat'), null);
+test('§3 an unknown status gets a neutral message — never undefined, never silence', () => {
+    assert.equal(DeepLink.handleReorderParam('wat'), DeepLink.REORDER_UNKNOWN);
+    // The prototype-chain guard still holds: 'constructor' must not resolve to
+    // Object's own function and toast "[Function: Object]".
+    assert.equal(DeepLink.handleReorderParam('constructor'), DeepLink.REORDER_UNKNOWN);
+    assert.equal(typeof DeepLink.REORDER_UNKNOWN.text, 'string');
+    // [CONTROL] no status at all is still nothing.
     assert.equal(DeepLink.handleReorderParam(undefined), null);
-    // Guard against the prototype-chain hit that would make 'constructor' truthy.
-    assert.equal(DeepLink.handleReorderParam('constructor'), null);
+    assert.equal(DeepLink.handleReorderParam(''), null);
+});
+
+test('§3 /shop loads the script and answers ?reorder= ONLY — never ?add=', () => {
+    const shop = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'html', 'shop.html'), 'utf8');
+    assert.match(shop, /src="\/js\/cart-deep-link\.js\?v=[0-9a-f]{8}"/, '/shop?reorder=guest needs the handler loaded');
+    const src = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'cart-deep-link.js'), 'utf8');
+    const fn = src.slice(src.indexOf('    applyReorderParamFromUrl() {'), src.indexOf('    async applyAddParamFromUrl() {'));
+    assert.match(fn, /this\._stripParams\(\['reorder'\]\)/, 'only reorder is stripped on /shop');
+    assert.doesNotMatch(fn, /parseAddParam|addItem|'add'/, 'the shop page must never act on ?add=');
+    assert.match(src, /else if \(document\.querySelector\('\.shop-page'\)\) \{\s*CartDeepLink\.applyReorderParamFromUrl\(\);/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

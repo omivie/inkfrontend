@@ -322,7 +322,12 @@
                     price: item.unit_price || item.price,
                     image_url: typeof storageUrl === 'function' ? storageUrl(item.product?.image_url || item.image_url) : (item.product?.image_url || item.image_url || null),
                     brand: item.product?.brand?.name || item.brand || null,
-                    source: item.product?.source || item.source || null
+                    // BF-040 (ERR-286): the line's SALE-TIME snapshot first, then
+                    // the product's current source, through the one vocabulary.
+                    // Unknown stays null ⇒ no badge; a name never decides it.
+                    source: (typeof BrandSource !== 'undefined')
+                        ? BrandSource.of({ source: item.source, product: item.product })
+                        : null
                 })),
                 shippingAddress: shippingAddress,
                 status: apiOrder.status,
@@ -589,7 +594,11 @@
                 const metaParts = [];
                 if (item.sku) metaParts.push(`<span>SKU: ${esc(item.sku)}</span>`);
                 if (item.brand) metaParts.push(`<span>${esc(item.brand)}</span>`);
-                if (item.source) metaParts.push(`<span class="badge badge--${item.source === 'genuine' ? 'primary' : 'secondary'}">${item.source === 'genuine' ? 'Genuine' : 'Compatible'}</span>`);
+                // Only a PROVEN source gets a badge (ERR-157). The old
+                // `item.source === 'genuine' ? … : 'Compatible'` labelled ANY
+                // other non-empty value "Compatible" — a binary default.
+                if (item.source === 'genuine') metaParts.push('<span class="badge badge--primary">Genuine</span>');
+                else if (item.source === 'compatible') metaParts.push('<span class="badge badge--secondary">Compatible</span>');
 
                 return `
                     <li class="confirmation-item">

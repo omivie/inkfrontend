@@ -144,3 +144,58 @@ comment on view public.product_code_chip_counts is
 
 grant select on public.product_code_catalogue   to anon, authenticated;
 grant select on public.product_code_chip_counts to anon, authenticated;
+
+-- ── Migration: chip_category — a code can hold products of ANOTHER type (Sep 2026) ──
+-- The /shop drilldown is brand > type > code, and a code chip lives inside ONE
+-- type. The admin can now tick a product of another type into a chip: a Brother
+-- DR150 drum into the Toner "TN155" chip, so a shopper on Brother > Toner > TN155
+-- sees the drum beside the toners.
+--
+-- A (product, code) row alone cannot say WHICH type's chip the product joined.
+-- Guessing from the code was measured wrong on live data: HP ink cartridges carry
+-- a hand-tagged "61" and HP Toner has its own backend "61" chip, so a code-only
+-- match put 3 HP 61 INK cartridges under HP > Toner > 61.
+--
+-- chip_category records it:
+--   NULL      → the product sits under this code in its OWN type (every row
+--               written before this migration, and every ordinary tag).
+--   'toner'…  → the product is a VISITOR: it appears under this code's chip in
+--               THAT /shop category, not in its own. Values are the /shop
+--               category slugs (api.js _CATEGORY_PRODUCT_TYPES keys).
+--
+-- Additive and nullable: existing rows and existing readers are untouched. Safe
+-- to run more than once.
+alter table public.product_codes
+  add column if not exists chip_category text;
+
+alter table public.product_codes
+  drop constraint if exists product_codes_chip_category_check;
+
+alter table public.product_codes
+  add constraint product_codes_chip_category_check
+  check (chip_category is null
+         or chip_category in ('ink', 'toner', 'drums', 'ribbons', 'label', 'paper'));
+
+comment on column public.product_codes.chip_category is
+  'NULL = the product shows under this code in its own /shop type. Otherwise the /shop category whose chip it VISITS (e.g. a drum under the toner TN155 chip).';
+
+-- ── View: visitors (customer /shop drilldown) ────────────────────────────────
+-- Cross-type rows only, rolled up like product_code_chip_counts plus the
+-- chip they visit. /shop reads it to (a) keep a visitor from growing a stray
+-- tile in its own type and (b) add it to the count of the tile it visits.
+create or replace view public.product_code_visitors as
+  select b.slug          as brand_slug,
+         p.product_type  as product_type,
+         pc.code         as code,
+         pc.chip_category as chip_category,
+         count(distinct p.id)::int as product_count
+  from public.product_codes pc
+  join public.products p on p.id = pc.product_id and p.is_active = true
+  join public.brands   b on b.id = p.brand_id
+  where pc.chip_category is not null
+  group by b.slug, p.product_type, pc.code, pc.chip_category;
+
+comment on view public.product_code_visitors is
+  'Manual codes whose product VISITS another /shop type''s chip (product_codes.chip_category) — rolled up by brand slug, own product_type, code and visited category.';
+
+grant select on public.product_code_visitors to anon, authenticated;

@@ -3020,9 +3020,18 @@
             grid.innerHTML = '';
 
             codes.forEach(({ code, count, products }) => {
-                const box = document.createElement('button');
+                // A real LINK, not a <button> (ERR-286). The backend shipped
+                // sitemap-series.xml on 2026-09-21 — 535 `?brand=&code=` URLs,
+                // "chip pages are safe to link now" — and a crawler cannot
+                // follow a button. The href is the two-param canonical (brand +
+                // code, category dropped: see the canonical block below and
+                // ERR-270), so the link, the sitemap and <link rel=canonical>
+                // name ONE URL. A plain click still navigates in place; a
+                // modified click (new tab) is left to the browser.
+                const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--code';
                 box.dataset.code = code;
+                box.href = this.codeChipHref(code);
                 // ERR-216 — escape the label. `code` is backend-controlled text
                 // interpolated into innerHTML; the house rule is that every
                 // dynamic value goes through Security, with no exceptions
@@ -3043,9 +3052,27 @@
                     <span class="drilldown-box__code">${Security.escapeHtml(label)}</span>
                     ${countText ? `<span class="drilldown-box__count">${Security.escapeHtml(countText)}</span>` : ''}
                 `;
-                box.addEventListener('click', () => this.navigateTo('products', { code }));
+                box.addEventListener('click', (e) => {
+                    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    this.navigateTo('products', { code });
+                });
                 grid.appendChild(box);
             });
+        },
+
+        /**
+         * The chip's crawlable URL. Brand + code is the canonical chip page
+         * (sitemap-series.xml lists exactly that shape); a codes view reached
+         * without a brand keeps its category instead, so the link still lands
+         * on the same filter the click does.
+         */
+        codeChipHref(code) {
+            const q = new URLSearchParams();
+            if (this.state.brand) q.set('brand', this.state.brand);
+            else if (this.state.category) q.set('category', this.state.category);
+            q.set('code', code);
+            return `/shop?${q.toString()}`;
         },
 
         // Lookup the raw yield aliases (e.g. ['604', '604XL']) that collapsed
@@ -4904,6 +4931,12 @@
             // yield-group breaks are computed against the final order. A no-op on
             // every surface that has no compat rows, which is all of them except
             // search.
+            // ERR-286: the backend says the ranking fix landed (q=AP1000 now
+            // returns G45BK, G45BK-2PK, then the three tier-3 ribbons), which
+            // makes this a no-op on today's payload. Kept, not retired: a
+            // stable partition cannot reorder rows already in that order, and
+            // proving the no-op needs a live search, which writes to prod
+            // analytics (ERR-254/271).
             const compatLast = (rows) => {
                 const split = partitionCompatRows(rows);
                 return split.compat.length ? split.direct.concat(split.compat) : rows;

@@ -373,7 +373,6 @@ if (typeof window !== 'undefined') {
     WebVitalsReporter.start();
 }
 
-
 /* ════════════════════════════════════════════════════════════════════════════
  * MICROSOFT ADVERTISING — UNIVERSAL EVENT TRACKING (UET)
  *
@@ -892,6 +891,8 @@ const Ga4Ecommerce = {
         if (brand) item.item_brand = brand;
         const category = cleanLabel(src.category);
         if (category) item.item_category = category;
+        const variant = cleanLabel(src.variant);
+        if (variant) item.item_variant = variant;
 
         const price = readMoney(src.price);
         if (hasMoney(price)) item.price = price;
@@ -1082,7 +1083,15 @@ const Ga4Ecommerce = {
                 sku: product.sku,
                 name: product.name,
                 brand: desc.brand !== undefined ? desc.brand : this._brandOf(product),
-                category: desc.category,
+                // The SERVER's raw product_type first — the add response has
+                // carried it since 2026-09-21 (measured on `data.product`,
+                // ERR-286) — so all nine add surfaces categorise, not just the
+                // PDP. The caller's value is the fallback for a payload without
+                // it; absent on both means omitted, never inferred from a name.
+                category: product.product_type || desc.category,
+                // pack_type (single | value_pack | multipack) is the variant
+                // axis GA4 has a slot for. Raw enum, same as the category.
+                variant: product.pack_type,
                 // price_snapshot is what the shopper is actually charged (the
                 // volume/contract-aware figure), GST-inclusive. The local
                 // product.price a card was rendered from is NOT an acceptable

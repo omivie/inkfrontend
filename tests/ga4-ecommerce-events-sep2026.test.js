@@ -476,6 +476,28 @@ test('§4 one fire per SKU per page load; a different SKU still fires', () => {
 // 5. add_to_cart — and its numeric parity with the Ads tag
 // ═══════════════════════════════════════════════════════════════════════════
 
+test('§5 category + variant come from the SERVER payload first (ERR-286)', () => {
+    // Measured 2026-09-25 on a live guest add: the response carries
+    // data.product.product_type = "ink_cartridge" and pack_type = "value_pack".
+    const { ga4, calls } = loadGtag();
+    ga4.addToCart(
+        confirmed({ product: { sku: 'C02CMY', name: 'x', product_type: 'ink_cartridge', pack_type: 'value_pack' } }),
+        { priorQuantity: 0, requestedQuantity: 1 },
+        { category: 'caller_type' },
+    );
+    const item = plain(calls[0][2]).items[0];
+    assert.equal(item.item_category, 'ink_cartridge', 'the server\'s raw enum wins over the caller');
+    assert.equal(item.item_variant, 'value_pack');
+
+    // [CONTROL] a payload without it falls back to the caller, and a missing
+    // pack_type is omitted — never inferred.
+    const b = loadGtag();
+    b.ga4.addToCart(confirmed(), { priorQuantity: 0, requestedQuantity: 1 }, { category: 'toner_cartridge' });
+    const fallback = plain(b.calls[0][2]).items[0];
+    assert.equal(fallback.item_category, 'toner_cartridge');
+    assert.ok(!('item_variant' in fallback));
+});
+
 test('§5 QUANTITY IS A DELTA — the server reports the resulting LINE TOTAL', () => {
     // The case that hid BF-060: a line already holding 2, add 1 more, response
     // says `quantity: 3`. Sending that through reported a THREE-unit add.

@@ -300,12 +300,31 @@ async function openMembership(entry, { isNew = false } = {}) {
   if (!drawer) return;
 
   const myToken = ++_loadToken;
+  const walk = s => AdminAPI.listBrandCategoryProducts({ brandSlug: s.brandSlug, category: s.category })
+    .then(rows => rows.map(p => ({ ...p, scope: s })));
+  const scopeKey = s => `${s.brandSlug}|${s.category}`;
+  const ownKeys = new Set(scopes.map(scopeKey));
+  // Any product of the code's brand may carry it — a drum can sit under a toner
+  // chip. The storefront recovers such products from their own type
+  // (API._applyManualCodes), and each row keeps its REAL scope so the save
+  // re-walks the category the product actually lives in.
+  const otherScopes = [...new Set(scopes.map(s => s.brandSlug))]
+    .flatMap(brandSlug => SHOP_CATEGORIES.map(c => ({ brandSlug, category: c.value })))
+    .filter(s => !ownKeys.has(scopeKey(s)));
   let pool = [];
+  const missedScopes = [];
   try {
-    const perScope = await Promise.all(scopes.map(s =>
-      AdminAPI.listBrandCategoryProducts({ brandSlug: s.brandSlug, category: s.category })
-        .then(rows => rows.map(p => ({ ...p, scope: s })))));
-    pool = perScope.flat();
+    const [own, others] = await Promise.all([
+      Promise.all(scopes.map(walk)),
+      Promise.allSettled(otherScopes.map(walk)),
+    ]);
+    const seen = new Set();
+    const rows = own.flat();
+    others.forEach((r, i) => {
+      if (r.status === 'fulfilled') rows.push(...r.value);
+      else missedScopes.push(otherScopes[i]);
+    });
+    pool = rows.filter(p => !seen.has(p.id) && seen.add(p.id));
   } catch (e) {
     if (_alive && Drawer.isOpen()) {
       drawer.body.innerHTML = `<div class="admin-stub"><div class="admin-stub__text">Couldn’t load the products for ${esc(ctx)}.</div></div>`;
@@ -354,8 +373,9 @@ async function openMembership(entry, { isNew = false } = {}) {
       ? sorted.map(p => {
         const on = ticked.has(p.id);
         const others = p.codes.filter(c => c !== code);
-        // With several scopes in one pool, the SKU alone doesn't say which.
-        const scopeBit = multi
+        // With several scopes in one pool, or a row from another type, the SKU
+        // alone doesn't say which.
+        const scopeBit = (multi || !ownKeys.has(scopeKey(p.scope)))
           ? ` · ${brandLabel(p.scope.brandSlug)} ${catLabel(p.scope.category)}`
           : '';
         return `<label class="admin-pcm-row${on ? ' is-on' : ''}">
@@ -378,8 +398,13 @@ async function openMembership(entry, { isNew = false } = {}) {
     <p class="admin-pcp-note">
       Tick every product that should appear under <strong>${esc(code)}</strong> on
       /shop for ${esc(ctx)}. Ticking a product pins its whole code list, so the codes
-      shown beside it stop tracking the catalogue’s automatic ones.
-    </p>
+      shown beside it stop tracking the catalogue’s automatic ones. Products of any
+      type can be ticked — a drum ticked here shows under ${esc(code)} too.
+    </p>${missedScopes.length ? `
+    <div class="admin-pcp-incomplete">
+      <strong>This list is incomplete.</strong> ${esc(describeScopes(missedScopes, brandLabel))}
+      did not load, so those products aren’t listed. Close and reopen to retry.
+    </div>` : ''}
     <input type="search" class="admin-input admin-pcm-search" id="pcp-member-search" placeholder="Search ${esc(String(pool.length))} products by name or SKU…" aria-label="Search products">
     <div class="admin-pcm-list" id="pcp-members"></div>`;
   renderList();
@@ -419,17 +444,23 @@ async function openMembership(entry, { isNew = false } = {}) {
       add.forEach(id => bucket(id, 'add'));
       remove.forEach(id => bucket(id, 'remove'));
 
-      let changed = 0, failed = 0;
+      let changed = 0, failed = 0, error = null;
       for (const b of batches.values()) {
+        // A product from another type VISITS this code's chip: record which
+        // chip (product_codes.chip_category), or /shop can't tell it from a
+        // product that merely shares the code at home.
+        const visits = ownKeys.has(key(b.scope))
+          ? null
+          : (scopes.find(s => s.brandSlug === b.scope.brandSlug) || scopes[0]).category;
         const res = await AdminAPI.setCodeMembership({
           brandSlug: b.scope.brandSlug, category: b.scope.category,
-          code, add: b.add, remove: b.remove,
+          code, add: b.add, remove: b.remove, chipCategory: visits,
         });
-        changed += res.changed; failed += res.failed;
+        changed += res.changed; failed += res.failed; error = error || res.error;
       }
       if (!_alive) return;
       if (failed) {
-        Toast.warning(`${code}: ${plural(changed)} updated, ${failed} failed.`);
+        Toast.warning(`${code}: ${plural(changed)} updated, ${failed} failed${error ? ` — ${error}` : ''}.`);
       } else {
         Toast.success(`${code} now on ${plural(ticked.size)}.`);
       }

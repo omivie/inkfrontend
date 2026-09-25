@@ -651,7 +651,14 @@
                 const productCode = this.extractProductCode(info);
                 const breadcrumbCode = document.getElementById('breadcrumb-code');
                 if (productCode && breadcrumbCode) {
-                    breadcrumbCode.innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(canonCategory)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
+                    // The two-param canonical chip URL (brand + code), the one
+                    // sitemap-series.xml lists and <link rel=canonical> names
+                    // (ERR-270/286). The three-param form is `noindex, follow`,
+                    // so the breadcrumb was spending its link on a page Google
+                    // is told not to index. encodeURIComponent, not escapeAttr:
+                    // in a query VALUE a bare `+` decodes as a space — the bug
+                    // the backend fixed in its own prerender links on 09-21.
+                    breadcrumbCode.innerHTML = `<a href="/shop?brand=${encodeURIComponent(brandSlug)}&amp;code=${encodeURIComponent(productCode)}">${Security.escapeHtml(productCode)}</a>`;
                     breadcrumbCode.hidden = false;
                 }
             }

@@ -161,7 +161,7 @@ test('AdminAPI.applyBrandCodeChange gathers affected products then rewrites each
   // Finds every product carrying the code via the shared /shop walk…
   assert.match(fn, /this\._walkShopProducts\(\{ brandSlug, category, code: from \}\)/);
   // …then writes a fresh override on each via setProductCodes.
-  assert.match(fn, /this\.setProductCodes\(id, next\)/);
+  assert.match(fn, /this\.setProductCodes\(id, next[,)]/);
   // delete = drop the code; rename = swap it for `to`.
   assert.match(fn, /codes\.filter\(c => c !== from\)/);
   assert.match(fn, /next\.push\(to\)/);
@@ -185,6 +185,26 @@ test('_walkShopProducts returns EFFECTIVE codes — the override trap', () => {
   assert.match(fn, /page <= 30/, 'pages the drilldown rather than taking page 1');
 });
 
+// Sep 2026 — API.request() RESOLVES a structured 5xx as { ok:false }. The walk
+// used to read that as "no more pages", so a failed brand+type came back EMPTY
+// and the membership drawer listed nothing without saying so. Run the SHIPPING
+// method, not a replica.
+test('_walkShopProducts THROWS on a resolved { ok:false } — a failure is not an empty type', async () => {
+  const start = ADMIN_API.indexOf('async _walkShopProducts(');
+  const end = ADMIN_API.indexOf('async listProductsForCode(', start);
+  const body = ADMIN_API.slice(start, end).trim().replace(/,\s*$/, '');
+  const run = (shop) => {
+    const ctx = { window: { API: { getShopData: shop } } };
+    vm.createContext(ctx);
+    const obj = vm.runInContext(`({ normalizeProductCode: (c) => String(c).toUpperCase(), ${body} })`, ctx);
+    return obj._walkShopProducts({ brandSlug: 'brother', category: 'drums' });
+  };
+  await assert.rejects(run(async () => ({ ok: false, code: 'RATE_LIMITED' })), /RATE_LIMITED/);
+  // Positive control: a healthy answer still resolves to its products.
+  const ok = await run(async () => ({ ok: true, data: { products: [{ id: 'd1', series_codes: ['DR150'] }] } }));
+  assert.deepEqual([...ok.keys()], ['d1']);
+});
+
 test('setCodeMembership adds/removes ONE code, preserving each product’s others', () => {
   const start = ADMIN_API.indexOf('async setCodeMembership(');
   const end = ADMIN_API.indexOf('async applyBrandCodeChange(', start);
@@ -197,7 +217,7 @@ test('setCodeMembership adds/removes ONE code, preserving each product’s other
   // else on the product survives.
   assert.match(fn, /entry\.codes\.filter\(x => x !== c\)/);
   assert.match(fn, /addSet\.has\(id\)/);
-  assert.match(fn, /this\.setProductCodes\(id, next\)/);
+  assert.match(fn, /this\.setProductCodes\(id, next[,)]/);
   // Same 2–24 rule as the table.
   assert.match(fn, /c\.length < 2 \|\| c\.length > 24/);
 });
@@ -214,7 +234,7 @@ test('every write clears the storefront’s 60s manual-code cache', () => {
 });
 
 test('AdminAPI.setProductCodes replaces the set (delete-then-insert) on product_codes', () => {
-  const fn = extractFunction(ADMIN_API, 'async setProductCodes(');
+  const fn = ADMIN_API.slice(ADMIN_API.indexOf('async setProductCodes('), ADMIN_API.indexOf('async getCodeCatalogue('));
   assert.match(fn, /from\('product_codes'\)[\s\S]*\.delete\(\)\.eq\('product_id', productId\)/);
   assert.match(fn, /from\('product_codes'\)\.insert\(rows\)/);
   // Codes are normalised + de-duped before they can reach the DB constraint.
@@ -340,7 +360,7 @@ test('isValidProductCode matches the DB CHECK exactly', () => {
 });
 
 test('setProductCodes treats a 23505 duplicate as a no-op, not a failure', () => {
-  const fn = extractFunction(ADMIN_API, 'async setProductCodes(');
+  const fn = ADMIN_API.slice(ADMIN_API.indexOf('async setProductCodes('), ADMIN_API.indexOf('async getCodeCatalogue('));
   assert.match(fn, /insErr\.code !== '23505'/,
     'a duplicate (product_id, code) must not abort the write');
 });
@@ -707,7 +727,7 @@ test('brand-wide rename rewrites the code across products and in the grid', asyn
 // 5. api.js — _applyManualCodes (override / chip injection / recovery)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function loadAPI() {
+function loadAPI({ debugLog } = {}) {
   const win = {};
   const ctx = {
     window: win, console,
@@ -716,7 +736,7 @@ function loadAPI() {
     fetch: async () => ({ ok: false, json: async () => null }),
     Config: { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k',
       API_BASE_URL: 'https://api.example', getSetting: (k, d) => d },
-    DebugLog: { warn() {}, error() {}, log() {}, info() {} },
+    DebugLog: debugLog || { warn() {}, error() {}, log() {}, info() {} },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     Security: { escapeHtml: (s) => s, escapeAttr: (s) => s },
   };
@@ -793,6 +813,206 @@ test('(3) recovery — a manually-tagged product is merged into the ?code= grid'
   assert.deepEqual(plain(ids), ['pX'], 'only the LC57-tagged product is recovered');
   assert.equal(primary.meta.total, 1, 'meta.total reflects the recovered row');
   assert.deepEqual(plain(primary.data.products[0].series_codes), ['LC57']);
+});
+
+// Sep 2026 — an admin can tick a product of ANOTHER type into a code (a drum
+// under the TN155 toner chip). That row stores chip_category='toner'; /shop
+// crosses types ONLY for such rows. A code match alone is a collision: live
+// data has HP ink tagged "61" at home while HP Toner has its own "61" chip —
+// a code-only first cut put 3 HP 61 INK cartridges under HP > Toner > 61.
+//
+// World: brother drum (tags DR150 at home, TN155 visiting toner);
+//        brother drum2 (tag FOO visiting toner; toners carry FOO at home, 3 of them);
+//        hp ink61 (tag 61 at home).
+function crossTypeFixture({ visitorsDown = false } = {}) {
+  const warned = [];
+  const API = loadAPI({ debugLog: { warn: (...a) => warned.push(a.join(' ')), error() {}, log() {}, info() {} } });
+  const tags = [
+    { product_id: 'drum', code: 'TN155', chip_category: 'toner' },
+    { product_id: 'drum', code: 'DR150', chip_category: null },
+    { product_id: 'drum2', code: 'FOO', chip_category: 'toner' },
+    { product_id: 'ink61', code: '61', chip_category: null },
+  ];
+  API._supabaseSelect = async (q) => {
+    const visit = q.match(/^product_codes\?select=product_id&code=eq\.(\w+)&chip_category=eq\.(\w+)/);
+    if (visit) {
+      if (visitorsDown) return null;
+      return tags.filter(t => t.code === visit[1] && t.chip_category === visit[2]).map(t => ({ product_id: t.product_id }));
+    }
+    const byCode = q.match(/^product_codes\?select=product_id&code=eq\.(\w+)$/);
+    if (byCode) return tags.filter(t => t.code === byCode[1]).map(t => ({ product_id: t.product_id }));
+    if (q.startsWith('product_codes?select=product_id,code')) return tags.map(({ product_id, code }) => ({ product_id, code }));
+    if (q.startsWith('product_code_visitors')) {
+      if (visitorsDown) return null;
+      return q.includes('brand_slug=eq.brother')
+        ? [{ code: 'TN155', product_type: 'drum_unit', chip_category: 'toner', product_count: 1 },
+           { code: 'FOO', product_type: 'drum_unit', chip_category: 'toner', product_count: 1 }]
+        : [];
+    }
+    if (q.startsWith('product_code_chip_counts')) {
+      if (q.includes('brand_slug=eq.brother') && q.includes('drum_unit')) {
+        return [{ code: 'TN155', product_count: 1 }, { code: 'DR150', product_count: 1 }, { code: 'FOO', product_count: 1 }];
+      }
+      if (q.includes('brand_slug=eq.brother') && q.includes('toner_cartridge')) return [{ code: 'FOO', product_count: 3 }];
+      if (q.includes('brand_slug=eq.hp') && q.includes('ink_cartridge')) return [{ code: '61', product_count: 2 }];
+      return [];
+    }
+    return [];
+  };
+  const POOLS = { 'brother|drums': [{ id: 'drum', series_codes: ['DR150'] }, { id: 'drum2', series_codes: [] }],
+                  'hp|ink': [{ id: 'ink61', series_codes: ['61'] }] };
+  const asked = [];
+  API.getWithSWR = async (endpoint) => {
+    const u = new URL(endpoint, 'https://x');
+    const key = `${u.searchParams.get('brand')}|${u.searchParams.get('category')}`;
+    asked.push(key);
+    return { ok: true, data: { products: POOLS[key] || [{ id: 'other', series_codes: [] }] } };
+  };
+  return { API, asked, warned };
+}
+
+test('(3) recovery — a product ticked in from ANOTHER type joins the ?code= grid', async () => {
+  const { API, asked } = crossTypeFixture();
+  const primary = { ok: true, data: { products: [{ id: 't1', series_codes: ['TN155'] }] }, meta: { total: 1 } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
+  assert.deepEqual(plain(primary.data.products.map(p => p.id)), ['t1', 'drum'], 'the drum shows under Toner · TN155');
+  assert.deepEqual(plain(primary.data.products[1].series_codes).sort(), ['DR150', 'TN155']);
+  assert.equal(asked[0], 'brother|toner', 'the own category is searched first');
+  assert.ok(!asked.includes('brother|paper'), 'the search stops once every visitor is found');
+});
+
+test('(3) recovery — a product that shares the code AT HOME never crosses (HP ink 61 ≠ HP toner 61)', async () => {
+  const { API, asked } = crossTypeFixture();
+  const primary = { ok: true, data: { products: [{ id: 'toner61', series_codes: ['61'] }] } };
+  await API._applyManualCodes(primary, { brand: 'hp', category: 'toner', code: '61' });
+  assert.deepEqual(plain(primary.data.products.map(p => p.id)), ['toner61'], 'no ink cartridge leaks into Toner · 61');
+  assert.deepEqual(plain(asked), ['hp|toner'], 'no visitor rows ⇒ no other type is fetched');
+});
+
+test('(3) recovery — an unreadable visitor list keeps everyone home and SAYS so', async () => {
+  const { API, warned } = crossTypeFixture({ visitorsDown: true });
+  const primary = { ok: true, data: { products: [] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
+  assert.equal(primary.data.products.length, 0, 'unknown ⇒ do not cross over');
+  assert.ok(warned.some(w => /product_code_visitors failed to load/.test(w)), `got ${JSON.stringify(warned)}`);
+});
+
+test('(3) recovery — no other type is fetched when the own category already holds every tagged id', async () => {
+  const { API, asked } = crossTypeFixture();
+  const primary = { ok: true, data: { products: [{ id: 'drum', series_codes: ['TN155'] }] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
+  assert.deepEqual(plain(asked), [], 'nothing missing ⇒ zero pool requests');
+});
+
+test('(3) recovery — a failed pool is LOGGED, not silent', async () => {
+  const warned = [];
+  const API = loadAPI({ debugLog: { warn: (...a) => warned.push(a.join(' ')), error() {}, log() {}, info() {} } });
+  API._supabaseSelect = async (q) => (q.includes('code=eq.TN155') ? [{ product_id: 'drum' }] : []);
+  API.getWithSWR = async (endpoint) => {
+    const cat = new URL(endpoint, 'https://x').searchParams.get('category');
+    return cat === 'toner' ? { ok: false, code: 'SERVER_ERROR' } : { ok: true, data: { products: [] } };
+  };
+  const primary = { ok: true, data: { products: [] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
+  assert.equal(primary.data.products.length, 0);
+  assert.ok(warned.some(w => /toner failed to load/.test(w) && /1 hand-tagged/.test(w)),
+    `expected a warning naming the failed pool, got: ${JSON.stringify(warned)}`);
+});
+
+test('(2) chips — a visitor grows NO tile at home: the drum makes no TN155 or FOO chip under Drums', async () => {
+  const { API } = crossTypeFixture();
+  const primary = { ok: true, data: { products: [], series: [{ code: 'DR150', count: 1 }] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'drums' });
+  assert.deepEqual(plain(primary.data.series.map(s => s.code)), ['DR150']);
+});
+
+test('(2) chips — the visited tile counts its visitor: Toner · TN155 says 7, not 6', async () => {
+  const { API } = crossTypeFixture();
+  const primary = { ok: true, data: { products: [], series: [{ code: 'TN155', count: 6 }] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner' });
+  assert.equal(primary.data.series.find(s => s.code === 'TN155').count, 7);
+});
+
+test('(2) chips — a brand-new manual code: ONE tile, in the visited type, counting everyone', async () => {
+  const { API } = crossTypeFixture();
+  const toner = { ok: true, data: { products: [], series: [] } };
+  await API._applyManualCodes(toner, { brand: 'brother', category: 'toner' });
+  const foo = toner.data.series.find(s => s.code === 'FOO');
+  assert.ok(foo, 'FOO tile exists under Toner');
+  assert.equal(foo.count, 4, '3 toners at home + the visiting drum');
+});
+
+test('(2) chips — a product at home elsewhere is NOT counted: HP Toner · 61 keeps its count', async () => {
+  const { API } = crossTypeFixture();
+  const primary = { ok: true, data: { products: [], series: [{ code: '61', count: 3 }] } };
+  await API._applyManualCodes(primary, { brand: 'hp', category: 'toner' });
+  assert.equal(primary.data.series[0].count, 3);
+});
+
+test('(2) chips — an unreadable visitor list falls back to the old tiles and SAYS so', async () => {
+  const { API, warned } = crossTypeFixture({ visitorsDown: true });
+  const primary = { ok: true, data: { products: [], series: [{ code: 'TN155', count: 6 }] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner' });
+  assert.equal(primary.data.series.find(s => s.code === 'TN155').count, 6);
+  assert.ok(warned.some(w => /product_code_visitors did not load/.test(w)), `got ${JSON.stringify(warned)}`);
+});
+
+// setProductCodes is a delete-then-insert: whatever it doesn't carry forward is
+// lost. Run the SHIPPING method against a fake Supabase client.
+function loadSetProductCodes({ prev = [], prevErr = null } = {}) {
+  const start = ADMIN_API.indexOf('async setProductCodes(');
+  const end = ADMIN_API.indexOf('async getCodeCatalogue(', start);
+  let body = ADMIN_API.slice(start, end).trim();
+  body = body.slice(0, body.lastIndexOf('/**')).trim().replace(/,\s*$/, '');
+  const log = [];
+  const chain = (result) => {
+    const c = { eq: () => c, not: () => c, then: (r, j) => Promise.resolve(result).then(r, j) };
+    return c;
+  };
+  const sb = { from: () => ({
+    select: () => chain({ data: prevErr ? null : prev, error: prevErr }),
+    delete: () => { log.push(['delete']); return chain({ error: null }); },
+    insert: (rows) => { log.push(['insert', rows]); return Promise.resolve({ error: null }); },
+  }) };
+  const ctx = { DebugLog: { warn() {} } };
+  vm.createContext(ctx);
+  const obj = vm.runInContext(`({ normalizeProductCode: (c) => String(c).toUpperCase(),
+    _clearStorefrontCodeCache() {}, ${body} })`, ctx);
+  obj._sb = () => sb;
+  return { obj, log };
+}
+
+test('setProductCodes keeps a visitor row’s chip_category when the codes are rewritten', async () => {
+  const { obj, log } = loadSetProductCodes({ prev: [{ code: 'TN155', chip_category: 'toner' }] });
+  await obj.setProductCodes('drum', ['DR150', 'TN155', 'LC57']);
+  const rows = plain(log.find(l => l[0] === 'insert')[1]);
+  assert.deepEqual(rows, [
+    { product_id: 'drum', code: 'DR150' },
+    { product_id: 'drum', code: 'TN155', chip_category: 'toner' },
+    { product_id: 'drum', code: 'LC57' },
+  ]);
+});
+
+test('setProductCodes carries chip_category across a rename, and can set/clear it', async () => {
+  const { obj, log } = loadSetProductCodes({ prev: [{ code: 'TN155', chip_category: 'toner' }] });
+  await obj.setProductCodes('drum', ['TN155X', 'DR150'], { renamed: { from: 'TN155', to: 'TN155X' }, chipCategory: { DR150: 'toner' } });
+  assert.deepEqual(plain(log.find(l => l[0] === 'insert')[1]), [
+    { product_id: 'drum', code: 'TN155X', chip_category: 'toner' },
+    { product_id: 'drum', code: 'DR150', chip_category: 'toner' },
+  ]);
+  const b = loadSetProductCodes({ prev: [{ code: 'TN155', chip_category: 'toner' }] });
+  await b.obj.setProductCodes('drum', ['TN155'], { chipCategory: { TN155: null } });
+  assert.deepEqual(plain(b.log.find(l => l[0] === 'insert')[1]), [{ product_id: 'drum', code: 'TN155' }]);
+});
+
+test('setProductCodes REFUSES a visitor write before deleting when the column is missing', async () => {
+  const { obj, log } = loadSetProductCodes({ prevErr: { code: '42703', message: 'column does not exist' } });
+  await assert.rejects(obj.setProductCodes('drum', ['TN155'], { chipCategory: { TN155: 'toner' } }), /nothing was changed/);
+  assert.deepEqual(log, [], 'no delete, no insert — the product keeps its codes');
+  // Positive control: an ordinary write still works before the migration.
+  const b = loadSetProductCodes({ prevErr: { code: '42703' } });
+  await b.obj.setProductCodes('p1', ['LC40']);
+  assert.deepEqual(plain(b.log.find(l => l[0] === 'insert')[1]), [{ product_id: 'p1', code: 'LC40' }]);
 });
 
 test('_applyManualCodes is fail-open — a Supabase outage leaves the response intact', async () => {

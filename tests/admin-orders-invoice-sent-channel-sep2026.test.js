@@ -406,7 +406,18 @@ test('§3 which regime answered, and what each one is allowed to read', async (t
   await t.test('the modal skips the invoice lookup it would only discard', () => {
     assert.match(ordersSrc, /const directSent = sentInfoWithoutLookup\(order, orderSendRegime\(\[order\]\)\);/);
     assert.match(ordersSrc, /directSent \? Promise\.resolve\(null\) : AdminAPI\.getOrderInvoicesByOrderIds/);
-    assert.match(ordersSrc, /const sentInfo = directSent \|\| resolveSentInfo\(/);
+    // Since 2026-09-21 the DETAIL payload carries invoice_sent too (ERR-286);
+    // it is the fresher answer, so it goes first on one ladder with the list row.
+    assert.match(ordersSrc, /const sentInfo = detailSent \|\| directSent \|\| resolveSentInfo\(/);
+  });
+
+  await t.test('the detail payload answers first, and only when it CARRIES the key', () => {
+    // hasOwnProperty, via orderSendRegime: `invoice_sent: null` is an answer
+    // ("does not apply"); an absent key is not (ERR-199).
+    assert.match(ordersSrc, /const detailSent = orderSendRegime\(\[fullOrder\]\) === SEND_REGIME\.SERVER\s*\?\s*sentInfoWithoutLookup\(fullOrder, SEND_REGIME\.SERVER\)\s*:\s*null;/);
+    assert.equal(orderSendRegime([null]), SEND_REGIME.LOCAL, 'a failed detail load must fall through to the list row');
+    assert.equal(orderSendRegime([{ invoice_sent: null }]), SEND_REGIME.SERVER, 'null is an answer');
+    assert.equal(orderSendRegime([{}]), SEND_REGIME.LOCAL, '[CONTROL] absent is not');
   });
 });
 

@@ -1066,6 +1066,14 @@ const ProductSort = (function() {
         // the wrong call now that we can cross-check the two and only ever
         // move in the direction both the name and the page count point.
         // ERR-134.
+        //
+        // BF-027 LANDED 2026-09-21 and the merge is NEARLY inert, not inert
+        // (ERR-286). Re-measured 2026-09-25 over all 4,066 active products:
+        // the backend sends yield_tier on every row and max() raises it on 3,
+        // down from 16 — GPG660XLHYBK (the name says XLHY, 400pp), GC333HY0Y
+        // (HY0, 2,500pp) and G288BXLCMY (the SKU says XL, the NAME says "STD"
+        // — a data question, raised with the backend). Keep max() until that
+        // count is 0; removing a fallback is a behaviour change (ERR-158).
         const yt = (product && product.yield_tier || '').toString().toUpperCase();
         const backendTier = yt === 'XXL' ? 2 : yt === 'XL' ? 1 : yt === 'STD' ? 0 : -1;
 
@@ -2236,16 +2244,24 @@ const BrandSource = (function () {
         const stored = normalise(row.product_source);
         if (stored) return stored;
 
-        const nested = row.product && typeof row.product === 'object'
-            ? normalise(row.product.source)
-            : null;
-        if (nested) return nested;
-
+        // The row's OWN source before its embedded product's (BF-040, backend
+        // 2026-09-21 — ERR-286). On an order line `source` is the SALE-TIME
+        // snapshot and `product.source` is today's catalogue value: the
+        // snapshot stays right if a product is later re-sourced, so it wins,
+        // and the product copy is the fallback — the only copy a pre-Sep-2026
+        // receipt has (orders placed before Sep 2026 carry a null line source).
+        // On every other row the two agree, and a cart line's `source` is the
+        // 'core'/'cross-sell' namespace, which the sentinel check skips.
         const raw = row.source;
         if (raw != null && !CART_NAMESPACE_SENTINELS.includes(String(raw).toLowerCase())) {
             const direct = normalise(raw);
             if (direct) return direct;
         }
+
+        const nested = row.product && typeof row.product === 'object'
+            ? normalise(row.product.source)
+            : null;
+        if (nested) return nested;
 
         if (typeof row.is_genuine === 'boolean') return row.is_genuine ? GENUINE : COMPATIBLE;
 

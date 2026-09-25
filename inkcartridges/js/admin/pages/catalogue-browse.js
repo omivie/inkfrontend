@@ -673,12 +673,14 @@ async function runReachabilityCheck(host, btn) {
     }
     if (!live.size) throw new Error('the storefront returned no products for this brand+category.');
 
-    // 2. What the catalogue holds, including inactive. One call per type:
-    //    /api/admin/products takes a single product_type and cannot express a
-    //    type GROUP (BF-044), so a category of seven types is seven requests.
+    // 2. What the catalogue holds, including inactive. One call per type,
+    //    because the category's type list is OURS and this diff must use it.
+    //    "Including inactive" has to be ASKED for: with no `is_active` the
+    //    endpoint answers active rows only (4,069 of 4,387, measured
+    //    2026-09-25, ERR-286), so the inactive half was silently missing.
     const rows = [];
     for (const t of types) {
-      const data = await AdminAPI.getProducts({ brand: _brand.slug, product_type: t }, 1, 200);
+      const data = await AdminAPI.getProducts({ brand: _brand.slug, product_type: t, active: 'all' }, 1, 200);
       const list = data?.products ?? data?.items ?? (Array.isArray(data) ? data : []);
       rows.push(...list);
     }
@@ -873,8 +875,12 @@ async function listCodelessProducts(host, btn) {
     const types = typesForCategory(_category);
     const rows = [];
     for (const type of types) {
+      // `brand` (a SLUG) and `active`, the keys AdminAPI.getProducts reads. This
+      // used to pass `brand_id` / `is_active`, which it never read — so the
+      // check ran over every brand's products of this type and listed other
+      // brands' rows as this brand's codeless ones (ERR-286).
       const page = await AdminAPI.getProducts(
-        { brand_id: _brand.id, product_type: type, is_active: 'true' }, 1, 200);
+        { brand: _brand.slug, product_type: type, active: 'true' }, 1, 200);
       const list = Array.isArray(page?.products) ? page.products : (Array.isArray(page) ? page : []);
       rows.push(...list);
     }

@@ -2727,11 +2727,11 @@ async function openOrderModal(order) {
 
   // Can this order's send state be answered from the row we already have?
   //
-  // Decided BEFORE the fetch, and from the LIST row, because the list row is the
-  // one the backend ships `invoice_sent` on — the detail endpoint does not
-  // carry it (measured against live production, 2026-09-01). When the row answers
-  // for itself the invoice lookup below is not issued at all: a request whose
-  // answer we would discard can only fail in ways that mislead.
+  // Decided BEFORE the fetch, from the LIST row, so that when the row answers for
+  // itself the invoice lookup below is not issued at all: a request whose answer
+  // we would discard can only fail in ways that mislead. Since the backend's
+  // 2026-09-21 deploy the DETAIL payload carries `invoice_sent` too (measured
+  // 2026-09-25, ERR-286), and it wins when it does — see `detailSent` below.
   const directSent = sentInfoWithoutLookup(order, orderSendRegime([order]));
 
   // Fetch full data
@@ -2755,12 +2755,12 @@ async function openOrderModal(order) {
 
   // Deletability is resolved across BOTH payloads, not off `o`.
   //
-  // The backend only promises `deletable` / `delete_method` /
-  // `delete_blocked_reason` on the LIST endpoint. `GET /api/admin/orders/:id`
-  // may not echo them — and gating on the detail payload alone would then take
-  // the legacy cancelled-only path, so an owner opening a paid order would find
-  // NO delete button at all: the whole feature gone, with no error anywhere.
-  // resolveDeleteRight picks whichever candidate actually carries the contract.
+  // `GET /api/admin/orders/:id` carries `deletable` / `delete_method` /
+  // `delete_blocked_reason` since 2026-09-21 (measured 2026-09-25, ERR-286), so
+  // the detail payload answers first. The ladder stays: a detail load that
+  // failed, or a deploy that stops sending the contract, must fall to the list
+  // row — never to the legacy cancelled-only rule, which would silently take the
+  // delete button off a paid order.
   const deleteRight = resolveDeleteRight(fullOrder, lookupOrder(order.id), order);
 
   // Update header title (actions + badge will be set by buildOrderModalContent)
@@ -2769,7 +2769,16 @@ async function openOrderModal(order) {
   // Build single-page content
   // Resolved once, here, and handed down — so the Dates row, the button hint and
   // the list cell behind the modal cannot disagree about the same order.
-  const sentInfo = directSent || resolveSentInfo({
+  //
+  // ONE ladder, freshest payload first — the same order resolveDeleteRight and
+  // readTrackingRequestFrom walk. This used to be the reverse (list row only,
+  // because the detail endpoint did not carry the field), which made this
+  // function hold two opposite special cases. Presence is `hasOwnProperty`, not
+  // truthiness: `invoice_sent: null` is the backend's "does not apply" (ERR-199).
+  const detailSent = orderSendRegime([fullOrder]) === SEND_REGIME.SERVER
+    ? sentInfoWithoutLookup(fullOrder, SEND_REGIME.SERVER)
+    : null;
+  const sentInfo = detailSent || directSent || resolveSentInfo({
     invoice: invoiceLookup?.byOrderId?.get(String(order.id)) || null,
     // The whole list, not newestSendEvent(): the Dates row shows a count and
     // opens the same history panel the list column does.
@@ -2786,13 +2795,12 @@ async function openOrderModal(order) {
 
   // The tracking answer, read from whichever payload actually carries the field.
   //
-  // The two endpoints do not agree about their own contract: measured live on
-  // 2026-09-03, `GET /orders/:id` carries `tracking_request` and does NOT carry
-  // `invoice_sent`, which is the exact reverse of the assumption the block above
-  // is built on. So this takes candidates in preference order — freshest first,
-  // the list row last — the same ladder resolveDeleteRight() walks a few lines
-  // up, and for the same reason: an absent contract is a reason to look at the
-  // next payload, never a reason to answer from one that never had it.
+  // Candidates in preference order — freshest first, the list row last — the
+  // same ladder resolveDeleteRight() and the send state above walk, and for the
+  // same reason: an absent contract is a reason to look at the next payload,
+  // never a reason to answer from one that never had it. (On 2026-09-03 the
+  // detail endpoint carried `tracking_request` but not `invoice_sent`; since
+  // 2026-09-21 it carries both.)
   const trackInfo = resolveTrackingInfo({
     tr: readTrackingRequestFrom(fullOrder, lookupOrder(order.id), order),
     orderStatus: o.status,

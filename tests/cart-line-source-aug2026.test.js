@@ -67,6 +67,7 @@ const UTILS_SRC = JS('utils.js');
 const FAVOURITES_CODE = stripComments(JS('favourites.js'));
 const CHECKOUT_CODE = stripComments(JS('checkout-page.js'));
 const ORDER_DETAIL_CODE = stripComments(JS('order-detail-page.js'));
+const ORDER_CONFIRMATION_CODE = stripComments(JS('order-confirmation-page.js'));
 const SEARCH_CODE = stripComments(JS('search.js'));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,6 +188,13 @@ test('BrandSource.of — the full precedence table', () => {
         [{ is_genuine: 'yes' }, null, 'a non-boolean is_genuine proves nothing'],
         [{ name: '143ABK Compatible Toner Cartridge for HP 143A' }, null, 'names prove nothing'],
         [{ name: 'Brother Genuine LC133BK' }, null, 'names prove nothing'],
+        // BF-040 (ERR-286): an ORDER line's own `source` is the sale-time
+        // snapshot and beats today's product.source — it stays right when a
+        // product is re-sourced. The product copy is the fallback, and the only
+        // copy a pre-Sep-2026 receipt has.
+        [{ source: 'genuine', product: { source: 'compatible' } }, 'genuine', 'snapshot beats the re-sourced product'],
+        [{ source: null, product: { source: 'compatible' } }, 'compatible', 'historical receipt: product copy is the fallback'],
+        [{ source: 'core', product: { source: 'genuine' } }, 'genuine', 'a cart namespace never masks the product'],
     ];
     for (const [row, expected, why] of cases) {
         assert.equal(BrandSource.of(row), expected, `${why}: ${JSON.stringify(row)}`);
@@ -303,6 +311,17 @@ test('every customer-facing source badge is rendered by BrandSource.badgeHTML', 
         assert.doesNotMatch(code, /source-badge--\$\{|source-badge--'\s*\+/,
             `${label} must not build the .source-badge class itself`);
     }
+});
+
+test('order confirmation resolves the source through BrandSource and badges only a PROVEN side', () => {
+    // BF-040 (ERR-286). It read `product.source || item.source` (product FIRST,
+    // the reverse of the backend's rule) and labelled ANY non-genuine value
+    // "Compatible" — a binary default on a customer receipt.
+    assert.match(ORDER_CONFIRMATION_CODE, /BrandSource\.of\(\{ source: item\.source, product: item\.product \}\)/);
+    assert.doesNotMatch(ORDER_CONFIRMATION_CODE, /item\.source === 'genuine' \? 'Genuine' : 'Compatible'/,
+        'the binary default is back');
+    assert.match(ORDER_CONFIRMATION_CODE, /else if \(item\.source === 'compatible'\)/,
+        'Compatible must be earned, not defaulted to');
 });
 
 test('the badge is genuinely conditional — no surface hard-codes GENUINE as a fallback', () => {

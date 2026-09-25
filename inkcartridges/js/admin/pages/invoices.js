@@ -356,6 +356,10 @@ const STATUS_META = {
 let _container = null;
 let _table = null;
 let _filters = { search: '', status: '' };
+// '' | 'linked' | 'unlinked'. CLIENT-side: /api/admin/invoices ignores every
+// portal param we tried (unlinked=, linked=, business_account_id=none, portal=
+// — 21 of 21 rows back each time, measured 2026-09-25), so this is never sent.
+let _portalFilter = '';
 let _page = 1;
 let _limit = 20;
 let _searchDebounce = null;
@@ -784,6 +788,7 @@ export default {
   title: 'Invoices',
 
   async init(container) {
+    _portalFilter = '';
     _container = container;
     _page = 1;
     container.innerHTML = `
@@ -808,7 +813,13 @@ export default {
             <option value="unpaid">Unpaid</option>
             <option value="void">Void</option>
           </select>
+          <select class="admin-select" id="inv-portal" style="min-width:150px" title="Whether the invoice shows on a business customer’s portal">
+            <option value="">Any portal link</option>
+            <option value="linked">On a portal</option>
+            <option value="unlinked">Unlinked</option>
+          </select>
         </div>
+        <div id="inv-portal-note"></div>
         <div id="inv-outstanding"></div>
         <div id="inv-table"></div>
       </div>
@@ -833,6 +844,9 @@ export default {
     });
     container.querySelector('#inv-status').addEventListener('change', (e) => {
       _filters.status = e.target.value; _page = 1; loadData();
+    });
+    container.querySelector('#inv-portal').addEventListener('change', (e) => {
+      _portalFilter = e.target.value; _page = 1; loadData();
     });
     // Row action buttons are delegated (they live inside DataTable cells).
     container.querySelector('#inv-table').addEventListener('click', onRowAction);
@@ -859,10 +873,44 @@ export default {
   },
 };
 
+/**
+ * The portal link a LIST row states: null = the row does not carry the field
+ * (unknown), false = explicitly unlinked, { id, name } = linked. Three states,
+ * because absent is not "no" (ERR-199's rule, applied to a new field).
+ */
+function portalLinkOf(r) {
+  if (!r || !Object.prototype.hasOwnProperty.call(r, 'business_account_id')) return null;
+  if (!r.business_account_id) return false;
+  return { id: r.business_account_id, name: r.business_account_name || '' };
+}
+
+/**
+ * Keep the rows that match the Portal filter. A row whose link is UNKNOWN
+ * matches neither side — it cannot be proven linked or unlinked.
+ */
+function matchesPortalFilter(r, want) {
+  if (!want) return true;
+  const link = portalLinkOf(r);
+  if (link === null) return false;
+  return want === 'unlinked' ? link === false : link !== false;
+}
+
 const COLUMNS = [
   { key: 'invoice_number', label: 'Invoice #', sortable: true, render: (r) => `<span class="cell-mono"><strong>${esc(r.invoice_number || '—')}</strong></span>` },
   { key: 'issue_date', label: 'Date', sortable: true, render: (r) => esc(formatInvoiceDate((r.issue_date || r.date || '').slice(0, 10))) },
   { key: 'customer', label: 'Customer', render: (r) => esc(r.customer_name || r.customer?.name || '—') },
+  {
+    // Whether this invoice shows on a business customer's portal (ERR-286; the
+    // list rows carry the link since 2026-09-21). ABSENT key = an older backend
+    // = unknown, rendered "—" — never "Unlinked", which would be a claim.
+    key: 'portal', label: 'Portal',
+    render: (r) => {
+      const link = portalLinkOf(r);
+      if (link === null) return '<span class="inv-portal__unknown" title="This list row does not say">—</span>';
+      if (!link) return '<span class="inv-portal inv-portal--none" title="Not linked to a business account — not on any customer portal">Unlinked</span>';
+      return `<span class="inv-portal" title="On this business account’s portal">${esc(link.name || 'Linked')}</span>`;
+    },
+  },
   { key: 'total', label: 'Total', align: 'right', sortable: true, gst: GST_INCL, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
   {
     key: 'profit', label: 'Profit', align: 'right', ownerOnly: true, gst: GST_NET,
@@ -1060,15 +1108,55 @@ function adjustOutstanding(row, wasOutstanding, nowOutstanding) {
   renderOutstanding();
 }
 
+const PORTAL_SCAN_LIMIT = 100;
+const PORTAL_SCAN_MAX_PAGES = 20;
+
 async function loadData() {
   if (!_table) return;
   _table.setLoading(true);
+  if (_portalFilter) { await loadPortalFiltered(); loadOutstanding(); return; }
+  paintPortalNote('');
   const data = await AdminAPI.listInvoices(_filters, _page, _limit);
   if (!_table) return; // destroyed mid-fetch
   const rows = data?.invoices || data?.items || (Array.isArray(data) ? data : []);
   const pagination = data?.pagination || (data?.total != null ? { total: data.total, page: _page, limit: _limit } : null);
   _table.setData(rows, pagination);
   loadOutstanding();
+}
+
+/**
+ * The server cannot filter by portal link, so filtering one server page would
+ * show "no unlinked invoices" whenever they sat on page 2. Walk EVERY page under
+ * the other filters, filter here, and show the result on one page. Capped; a
+ * cap that bites is said out loud, as is a row that does not carry the field.
+ */
+async function loadPortalFiltered() {
+  const all = [];
+  let total = null;
+  let failed = false;
+  for (let page = 1; page <= PORTAL_SCAN_MAX_PAGES; page++) {
+    const data = await AdminAPI.listInvoices(_filters, page, PORTAL_SCAN_LIMIT);
+    if (!_table) return;
+    if (!data) { failed = true; break; }
+    const rows = data.invoices || data.items || (Array.isArray(data) ? data : []);
+    all.push(...rows);
+    total = data.pagination?.total ?? data.total ?? total;
+    if (rows.length < PORTAL_SCAN_LIMIT || (total != null && all.length >= total)) break;
+  }
+  const shown = all.filter((r) => matchesPortalFilter(r, _portalFilter));
+  const unknown = all.filter((r) => portalLinkOf(r) === null).length;
+  const partial = failed || (total != null && all.length < total);
+  _table.setData(shown, { total: shown.length, page: 1, limit: Math.max(shown.length, 1) });
+  const bits = [`Filtered here, over ${all.length}${total != null ? ` of ${total}` : ''} invoices — the server cannot filter by portal link.`];
+  if (partial) bits.push(failed ? 'A page failed to load, so this list is INCOMPLETE.' : `Only the first ${all.length} were scanned, so this list is INCOMPLETE.`);
+  if (unknown) bits.push(`${unknown} row${unknown === 1 ? ' does' : 's do'} not say whether ${unknown === 1 ? 'it is' : 'they are'} linked and ${unknown === 1 ? 'is' : 'are'} left out.`);
+  paintPortalNote(bits.join(' '), partial || unknown > 0);
+}
+
+function paintPortalNote(text, warn = false) {
+  const host = _container?.querySelector('#inv-portal-note');
+  if (!host) return;
+  host.innerHTML = text ? `<div class="inv-portal-note${warn ? ' inv-portal-note--warn' : ''}" role="status">${esc(text)}</div>` : '';
 }
 
 async function onRowAction(e) {
@@ -2650,6 +2738,12 @@ async function persistDraft() {
   if (saved) {
     _draft.id = saved.id ?? _draft.id;
     if (saved.invoice_number) _draft.invoice_number = saved.invoice_number;
+    // The invoice EXISTS; something about it did not land (ERR-286). Say each
+    // one, loudly and by name — a green "saved" over a dropped portal link is
+    // how an invoice goes missing from a customer's portal with nobody told.
+    for (const w of (saved._warnings || [])) {
+      Toast.warning(`Invoice ${saved.invoice_number || ''} saved, but: ${w}`.replace('  ', ' '), 12000);
+    }
     const st = serverTotals(saved);
     if (st) _draft._serverTotals = st;
     noteRefEcho(payload, saved);
@@ -2788,6 +2882,14 @@ function saveErrorMessage(err) {
     const s = String(t ?? '').trim();
     if (s && !parts.some((p) => p.includes(s))) parts.push(s);
   };
+  // Refused BEFORE the RPC since 2026-09-21, so nothing was numbered or saved
+  // (ERR-286). The trap that caused it is ours to name: an id from a device-only
+  // account or from a business APPLICATION is not a `business_accounts` id.
+  if (err?.code === 'BUSINESS_ACCOUNT_NOT_FOUND') {
+    add('The linked business account doesn’t exist on the server, so the invoice was NOT created. '
+      + 'Pick an approved account from the Portal list (an account saved only on this device, or a '
+      + 'business application, isn’t one), or clear the link and save.');
+  }
   add(err?.message);
   add(err?.details?.reason);
   // `details` also arrives as a bare array (or `details.errors`) for multi-field

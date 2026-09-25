@@ -203,9 +203,24 @@ console.log('\n\x1b[1m§4 the backend\'s half: are chip/code URLs in the sitemap
 try {
     const r = await get(`${SITE}/sitemap.xml`, GOOGLEBOT);
     const shards = [...r.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-    const codeShard = shards.find((s) => /code|chip/i.test(s));
+    // The backend named it `sitemap-series.xml` (2026-09-21, ERR-286) — the
+    // old /code|chip/ test could not see it and kept reporting "not yet".
+    const codeShard = shards.find((s) => /code|chip|series/i.test(s));
     if (codeShard) {
         ok(`a code/chip shard is published: ${codeShard}`);
+        // Every URL in it must be the TWO-param canonical our pages declare;
+        // a three-param URL there would be a sitemap listing a noindex page.
+        const shard = await get(codeShard, GOOGLEBOT);
+        const locs = [...shard.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+        const offShape = locs.filter((u) => {
+            try {
+                const q = new URL(u).searchParams;
+                return [...q.keys()].sort().join(',') !== 'brand,code';
+            } catch { return true; }
+        });
+        if (locs.length && !offShape.length) ok(`all ${locs.length} shard URLs are brand+code only — the canonical shape`);
+        else if (!locs.length) bad('the series shard is empty', codeShard);
+        else bad('shard URLs off the canonical shape', `${offShape.length} of ${locs.length}, e.g. ${offShape.slice(0, 3).join(' | ')}`);
     } else {
         soft('no chip/code sitemap shard yet',
             `${shards.length} shards published, none of them code/chip. This is the backend's to `

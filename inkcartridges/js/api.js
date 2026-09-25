@@ -1865,6 +1865,49 @@ const API = {
             .replace(/^\/+|\/+$/g, '');
     },
 
+    /**
+     * Cross-type rows for a brand (product_codes.chip_category, Sep 2026) →
+     * [{ code, category, visits, count }]: `count` products of type `category`
+     * appear under chip `code` in category `visits`, not in their own.
+     * null = couldn't ask (view missing before the migration, or an outage) —
+     * callers must treat that as "unknown", never as "no visitors".
+     */
+    async _fetchVisitorRows(brandSlug) {
+        if (!brandSlug) return [];
+        const cacheKey = `visitors:${brandSlug}`;
+        let rows = this._manualCodeCacheGet(cacheKey);
+        if (rows === undefined) {
+            rows = await this._supabaseSelect(
+                `product_code_visitors?select=code,product_type,chip_category,product_count`
+                + `&brand_slug=eq.${encodeURIComponent(brandSlug)}`);
+            this._manualCodeCacheSet(cacheKey, rows);
+        }
+        if (!Array.isArray(rows)) return null;
+        const categoryOf = {};
+        for (const [cat, types] of Object.entries(this._CATEGORY_PRODUCT_TYPES)) {
+            for (const t of types) categoryOf[t] = cat;
+        }
+        return rows
+            .filter(r => r && r.code && r.chip_category && categoryOf[r.product_type])
+            .map(r => ({ code: String(r.code).toUpperCase(), category: categoryOf[r.product_type],
+                visits: String(r.chip_category).toLowerCase(), count: Number(r.product_count) || 0 }));
+    },
+
+    /** Ids of products tagged `code` as visitors of `category`'s chip. null = couldn't ask. */
+    async _fetchVisitorIdsForCode(code, category) {
+        const c = this._normManualCode(code);
+        if (c.length < 2 || !category) return [];
+        const cat = String(category).toLowerCase();
+        const cacheKey = `visitorids:${c}:${cat}`;
+        let rows = this._manualCodeCacheGet(cacheKey);
+        if (rows === undefined) {
+            rows = await this._supabaseSelect(`product_codes?select=product_id`
+                + `&code=eq.${encodeURIComponent(c)}&chip_category=eq.${encodeURIComponent(cat)}`);
+            this._manualCodeCacheSet(cacheKey, rows);
+        }
+        return Array.isArray(rows) ? rows.map(r => r && r.product_id).filter(Boolean) : null;
+    },
+
     /** Product IDs carrying a given manual code. */
     async _fetchProductIdsForCode(code) {
         const c = this._normManualCode(code);
@@ -1914,38 +1957,69 @@ const API = {
 
             // (2) Codes drilldown — ensure a chip exists for every manual code,
             //     so a purely-manual code (the LC57 case) still shows a tile.
+            //     Cross-type tags (a drum ticked into the TN155 toner chip) are
+            //     VISITORS: they add to the chip they visit, and grow no chip at home.
             if (!params.code && params.brand && params.category && Array.isArray(data.series)) {
-                const types = this._CATEGORY_PRODUCT_TYPES[String(params.category).toLowerCase()];
+                const own = String(params.category).toLowerCase();
+                const types = this._CATEGORY_PRODUCT_TYPES[own];
                 if (types) {
-                    const manualChips = await this._fetchManualChipCounts(params.brand, types);
-                    if (manualChips.length) {
-                        const have = new Set(data.series
-                            .map(s => s && s.code && String(s.code).toUpperCase())
-                            .filter(Boolean));
-                        // A merged pair chip ("PG510/CL511") never equals either of
-                        // its halves, so an exact-match `have` check lets a manual
-                        // "PG510" push a duplicate tile covering the same products.
-                        // Suppress anything the pair already speaks for: a half
-                        // itself ("CL511"), a suffixed variant of one ("CL511CLR"),
-                        // and the truncated code the repair pass is about to absorb
-                        // ("CL51").
-                        const halves = (truncated && truncated.halves) || [];
-                        const suspects = (truncated && truncated.suspectCodes) || new Set();
-                        const coveredByPair = code =>
-                            suspects.has(code) || halves.some(h => code === h || code.startsWith(h));
+                    const [manualChips, visitorRows] = await Promise.all([
+                        this._fetchManualChipCounts(params.brand, types),
+                        this._fetchVisitorRows(params.brand),
+                    ]);
+                    const have = new Set(data.series
+                        .map(s => s && s.code && String(s.code).toUpperCase())
+                        .filter(Boolean));
+                    // A merged pair chip ("PG510/CL511") never equals either of
+                    // its halves, so an exact-match `have` check lets a manual
+                    // "PG510" push a duplicate tile covering the same products.
+                    // Suppress anything the pair already speaks for: a half
+                    // itself ("CL511"), a suffixed variant of one ("CL511CLR"),
+                    // and the truncated code the repair pass is about to absorb
+                    // ("CL51").
+                    const halves = (truncated && truncated.halves) || [];
+                    const suspects = (truncated && truncated.suspectCodes) || new Set();
+                    const coveredByPair = code =>
+                        suspects.has(code) || halves.some(h => code === h || code.startsWith(h));
 
-                        let added = false;
-                        for (const { code, count } of manualChips) {
-                            if (!have.has(code) && !coveredByPair(code)) {
-                                data.series.push({ code, count });
-                                have.add(code);
-                                added = true;
-                            }
+                    // Unknown visitors (view missing before the migration, or an
+                    // outage) ⇒ behave as before this feature, and SAY so.
+                    if (visitorRows === null && typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                        DebugLog.warn(`[API._applyManualCodes] ${params.brand}/${own}: product_code_visitors `
+                            + 'did not load — products ticked into another type\'s chip are not counted here');
+                    }
+                    const visitors = visitorRows || [];
+                    const sum = (rows) => rows.reduce((n, r) => n + r.count, 0);
+
+                    let added = false;
+                    for (const { code, count } of manualChips) {
+                        if (have.has(code) || coveredByPair(code)) continue;
+                        // Products of this type that VISIT another type's chip grow
+                        // no tile here — the drum ticked into Toner · TN155 makes no
+                        // TN155 tile under Drums.
+                        const stay = count - sum(visitors.filter(v => v.category === own && v.code === code));
+                        if (stay <= 0) continue;
+                        data.series.push({ code, count: stay });
+                        have.add(code);
+                        added = true;
+                    }
+
+                    // Visitors INTO this type add to the tile they visit — or make
+                    // it, for a code nothing here carries — so the tile count
+                    // matches the cards the click shows.
+                    for (const v of visitors.filter(v => v.visits === own && v.category !== own)) {
+                        const chip = data.series.find(s => s && String(s.code).toUpperCase() === v.code);
+                        if (chip) {
+                            chip.count = (Number(chip.count) || 0) + v.count;
+                        } else if (!coveredByPair(v.code)) {
+                            data.series.push({ code: v.code, count: v.count });
+                            have.add(v.code);
+                            added = true;
                         }
-                        if (added) {
-                            data.series.sort((a, b) => String(a.code)
-                                .localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
-                        }
+                    }
+                    if (added) {
+                        data.series.sort((a, b) => String(a.code)
+                            .localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
                     }
                 }
             }
@@ -1958,29 +2032,64 @@ const API = {
                     const present = new Set(products.map(p => p && p.id).filter(Boolean));
                     const missing = new Set(manualIds.filter(id => !present.has(id)));
                     if (missing.size) {
-                        // Canonical (ERR-124) — this pool is the same shape the
-                        // compat sidecar asks for minus `source`, so sharing the
-                        // serializer keeps both on predictable keys.
-                        const poolEndpoint = this.catalogEndpoint('/api/products', {
-                            brand: params.brand,
-                            category: params.category,
-                            limit: 200
-                        });
-                        const pool = await this.getWithSWR(poolEndpoint, { anonymous: true }).catch(() => null);
-                        const poolProducts = (pool && pool.ok && pool.data && Array.isArray(pool.data.products))
-                            ? pool.data.products : [];
                         // One batched read of every recoverable product's codes.
                         const ownCodes = await this._fetchManualCodesByProduct([...missing]);
                         const fallbackCode = this._normManualCode(params.code);
                         const recovered = [];
-                        for (const p of poolProducts) {
-                            if (!p || !p.id || !missing.has(p.id)) continue;
-                            // Reflect the product's full manual code set.
-                            p.series_codes = ownCodes.has(p.id)
-                                ? [...new Set(ownCodes.get(p.id))]
-                                : [fallbackCode];
-                            recovered.push(p);
-                            missing.delete(p.id);
+                        const failedPools = [];
+                        // Canonical (ERR-124) — this pool is the same shape the
+                        // compat sidecar asks for minus `source`, so sharing the
+                        // serializer keeps both on predictable keys.
+                        // ponytail: each pool is capped at 200 rows, the ceiling the
+                        // same-category pool always had; page it if a brand+type outgrows it.
+                        const recoverFrom = async (category, only = null) => {
+                            const poolEndpoint = this.catalogEndpoint('/api/products', {
+                                brand: params.brand,
+                                category,
+                                limit: 200
+                            });
+                            const pool = await this.getWithSWR(poolEndpoint, { anonymous: true }).catch(() => null);
+                            if (!pool || !pool.ok) failedPools.push(category);
+                            const poolProducts = (pool && pool.ok && pool.data && Array.isArray(pool.data.products))
+                                ? pool.data.products : [];
+                            for (const p of poolProducts) {
+                                if (!p || !p.id || !missing.has(p.id)) continue;
+                                if (only && !only.has(p.id)) continue;
+                                // Reflect the product's full manual code set.
+                                p.series_codes = ownCodes.has(p.id)
+                                    ? [...new Set(ownCodes.get(p.id))]
+                                    : [fallbackCode];
+                                recovered.push(p);
+                                missing.delete(p.id);
+                                if (only) only.delete(p.id);
+                            }
+                        };
+                        await recoverFrom(params.category);
+                        // A code may carry products of ANOTHER type: an admin ticked
+                        // a drum into the TN155 toner chip, which stores
+                        // chip_category='toner' on that row. /api/shop filtered by
+                        // category never returns it, so look in the brand's other
+                        // types — but ONLY for those rows. A code match alone is a
+                        // collision, not a membership: HP ink carries "61" at home
+                        // under Ink, and HP Toner has its own "61" chip.
+                        if (missing.size) {
+                            const own = String(params.category).toLowerCase();
+                            const visitorIds = await this._fetchVisitorIdsForCode(params.code, own);
+                            // Can't ask ⇒ nobody crosses over, and the warning says so.
+                            if (visitorIds === null) failedPools.push('product_code_visitors');
+                            const visiting = new Set((visitorIds || []).filter(id => missing.has(id)));
+                            const others = Object.keys(this._CATEGORY_PRODUCT_TYPES).filter(c => c !== own);
+                            for (const c of others) {
+                                if (!visiting.size) break;
+                                await recoverFrom(c, visiting);
+                            }
+                        }
+                        // Fail-soft, never silent: a failed pool means a tagged
+                        // product may be missing from this grid.
+                        if (failedPools.length && typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                            DebugLog.warn(`[API._applyManualCodes] code=${params.code}: product pool(s) `
+                                + `${failedPools.join(', ')} failed to load — up to ${missing.size} hand-tagged `
+                                + 'product(s) may be missing from this grid');
                         }
                         if (recovered.length) {
                             data.products = products.concat(recovered);
@@ -2982,11 +3091,11 @@ const API = {
      *
      * ⚠️ ERR-144 — THIS IS NO LONGER A PURE NAME/SKU SET. Backend `99d798b`
      * (2026-08-04) made a ribbon's "for use in" blob searchable here, so the
-     * rows can include compatibility matches — carrying NO match_reason /
-     * matched_token, because the typeahead payloads omit them by design. The
-     * reconciliation therefore runs reattachCompatProvenance() over this list
-     * before trusting its provenance; do not add a caller that treats these
-     * rows as "things that literally matched the query text".
+     * rows can include compatibility matches. BF-031 (ERR-286) tags them with
+     * match_reason / matched_token since 2026-09-21; reattachCompatProvenance()
+     * still runs — a no-op on a tagged row, kept because proving that needs a
+     * live search, which writes prod analytics (ERR-271). Do not add a caller
+     * that treats these rows as "things that literally matched the query text".
      *
      * Returns a bare array of suggestion rows (never throws — yields [] on
      * any failure so the caller's reconcile path degrades gracefully). The

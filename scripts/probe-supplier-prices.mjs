@@ -397,36 +397,40 @@ async function main() {
     }
   }
 
-  // ── 8. What the page deliberately does NOT offer ─────────────────────────
-  say('\n\x1b[1m8. Absent endpoints — the two features the page had to leave out\x1b[0m');
+  // ── 8. Ask 4 + Ask 5 — live since the backend's 2026-09-21 deploy (ERR-286) ──
+  say('\n\x1b[1m8. Mappings list and the price-list gate (Ask 4 / Ask 5)\x1b[0m');
   {
-    // Undo can only ever be session-scoped while this is true.
-    const listRoutes = ['/map', '/mappings', '/maps', '/map/list'];
-    const statuses = [];
-    for (const r of listRoutes) statuses.push((await get(`/api/admin/supplier-offers${r}`)).status);
-    check(statuses.every((s) => s === 404),
-      `no endpoint lists existing mappings (${listRoutes.join(', ')} → ${statuses.join('/')})`,
-      `one of them now answers ${statuses.join('/')} — if mappings can be listed, the page can offer a `
-      + 'real undo history instead of a one-shot Undo on the success toast');
-    if (!statuses.every((s) => s === 404)) {
-      soft('a mappings list may now exist', 'see the line above — this would be an improvement, not a bug');
+    // GET, read-only. The page's Manual mappings panel reads exactly this.
+    const r = await get('/api/admin/supplier-offers/mappings?page=1&limit=5');
+    const rows = r.json?.data?.mappings;
+    check(r.status === 200 && Array.isArray(rows),
+      `GET /mappings answers a list (${Array.isArray(rows) ? rows.length : 'no'} rows, total ${r.json?.meta?.total ?? '?'})`,
+      `GET /mappings → HTTP ${r.status} — the Manual mappings panel will show a failed read`);
+    if (Array.isArray(rows) && rows.length) {
+      const need = ['id', 'supplier_name', 'supplier_sku', 'product_sku', 'product_resolved', 'created_at'];
+      const missing = need.filter((k) => !(k in rows[0]));
+      check(!missing.length, 'each mapping carries the fields the panel renders',
+        `missing: ${missing.join(', ')}`);
     }
+    // Negative control: strictQuery must refuse a param the page never sends.
+    const neg = await get('/api/admin/supplier-offers/mappings?zz_probe=1');
+    check(neg.status === 400, 'an unknown param on /mappings is a 400 (strictQuery)',
+      `HTTP ${neg.status} — if unknown params are ignored, a typo in the page would filter nothing silently`);
   }
   {
-    // GET, so read-only. The POST routes were measured 403 by hand on 2026-08-31
-    // and are NOT re-probed here: a probe must not write, and an import rewrites
-    // the whole offer table.
+    // GET, so read-only. The two POSTs (upload, import) are NOT probed: one
+    // overwrites the stored price list, the other rewrites the offer table. The
+    // page reports their status verbatim on first real use instead.
     const r = await get('/api/admin/feed-files');
-    if (r.status === 403 && /CRON_SECRET/i.test(r.text)) {
-      ok('the feed-files router is still cron-gated (403 CRON_SECRET)',
-        'so no browser upload UI can be built — the page says so instead of shipping a dead button');
-    } else if (r.status === 200) {
-      soft(`GET /api/admin/feed-files now returns 200`,
-        'the cron gate may have been relaxed. Re-measure POST /api/admin/feed-files/product-list and '
-        + 'POST /api/admin/import/supplier-price-list BY HAND (this probe will not write) — if they '
-        + 'accept an admin token, the upload + import panel in supplier-prices.js can be built for real.');
+    const slot = (r.json?.data?.files || []).find((f) => f && f.feedType === 'product-list');
+    if (r.status === 200) {
+      ok('GET /api/admin/feed-files is open to an owner token (was 403 CRON_SECRET until 2026-09-21)',
+        slot ? `product-list slot: ${slot.exists ? `${slot.filename}, updated ${slot.updated_at}` : 'empty'}` : 'no product-list slot listed');
+      if (!slot) bad('the product-list slot is missing from the listing', 'the import panel reads that slot by feedType');
+    } else if (r.status === 403 && /CRON_SECRET/i.test(r.text)) {
+      bad('the feed-files router is cron-gated AGAIN', 'the upload + import panel will 403 — the backend reverted Ask 5');
     } else {
-      soft(`GET /api/admin/feed-files → HTTP ${r.status}`, 'neither the known 403 nor a 200 — worth a look');
+      soft(`GET /api/admin/feed-files → HTTP ${r.status}`, 'neither the expected 200 nor the old 403 — worth a look');
     }
   }
 

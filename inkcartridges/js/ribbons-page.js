@@ -762,6 +762,26 @@ const RibbonsPage = {
             if (!Array.isArray(ribbons)) ribbons = [];
             ribbons = ribbons.map(r => this.normalizeRibbon(r));
 
+            // PAST THE END is not EMPTY (ERR-286). Since 2026-09-21 /api/ribbons
+            // says so itself — `meta.past_the_end: true` — so a stale ?page=9
+            // bookmark no longer has to be read off `ribbons.length === 0`,
+            // where it printed "No ribbons found for Epson yet" over a brand
+            // that stocks dozens. Recover to page 1, replacing (not pushing) the
+            // URL so Back does not walk straight into the dead page again.
+            if (ribbons.length === 0 && pagination && pagination.past_the_end === true && this.state.page > 1) {
+                const deadPage = this.state.page;
+                this.state.page = 1;
+                try {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('page');
+                    history.replaceState({ ...this.state }, '', url.pathname + url.search);
+                } catch (_) { /* URL stays; the load below is still page 1 */ }
+                if (typeof showToast === 'function') {
+                    showToast(`Page ${deadPage} is past the end of this list — showing page 1.`, 'info');
+                }
+                return this.loadProducts(navVersion);
+            }
+
             // The brand genuinely stocks nothing. This copy is CORRECT for the ten
             // brands that have no ribbons mapped, and it stays exactly as it was.
             if (ribbons.length === 0) {

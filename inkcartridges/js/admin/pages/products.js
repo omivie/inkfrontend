@@ -616,8 +616,6 @@ function loadRowExtras() {
  * — once per page visit, and only when a sourcing column is actually on screen.
  */
 let _warnedSourcingUnavailable = false;
-/** Same one-shot idea for the CSV export note — see handleExport(). */
-let _warnedCsvSourcingColumns = false;
 function warnIfSourcingFieldsMissing(rows) {
   if (_warnedSourcingUnavailable) return;
   if (_hiddenColumns.has('supplier') && _hiddenColumns.has('origin')) return;
@@ -773,36 +771,86 @@ function supabaseFailureCause(e) {
  * `tests/admin-products-fallback-filters-sep2026.test.js` holds it to the list
  * of params `AdminAPI.getProducts` actually sends.
  *
- * What it deliberately does NOT send:
- *   - a GROUPED type ("All Ribbons"). The backend's product_type takes ONE
- *     value; sending one arm of three would filter to a third of the rows and
- *     look like it worked. The caller warns instead.
- *   - `pack` / `supplier`. No such params exist on this endpoint (the Supabase
- *     leg is the only one that can answer them). The caller warns.
+ * Since the backend's 2026-09-21 deploy (ERR-286) the endpoint is `strictQuery`:
+ * an unknown param — or an out-of-enum value — is a 400, and a 400 here renders
+ * an EMPTY table, not an unfiltered one. Measured 2026-09-25 with
+ * `npm run probe:bundle-response`:
+ *
+ *   - `pack_type` takes single | value_pack | multipack | packs. Our 'singles'
+ *     400s, so it is translated. The backend keys packs on the `pack_type`
+ *     COLUMN, and so does the Supabase leg now: the old colour-name rule
+ *     (CMY/KCMY/Value Pack…) missed 32 live packs such as `G45BK-2PK`.
+ *   - `supplier` and `product_type_group` exist; our only group key, 'ribbons',
+ *     is in the backend's enum and resolves through the storefront taxonomy.
+ *   - NO `is_active` means ACTIVE ONLY (4,069 of 4,387). "All statuses" must say
+ *     `is_active=all`, or 318 inactive products vanish from the admin list.
+ *   - `brand` takes a SLUG. The dropdown's value is the brand's UUID, and a
+ *     UUID is not refused — it is IGNORED: `brand=<hp uuid>` answered all
+ *     4,069 rows across every brand. Since ERR-220 the fallback is every load,
+ *     so the Brand filter did nothing. A comma list (`hp,canon`) is ignored the
+ *     same way; two UUIDs 400 on length.
+ *   - `sort` is an enum that has no brand / supplier / is_active /
+ *     import_locked. Sending one 400s, and the table went blank. An unsupported
+ *     sort is left OFF and named by filtersLostToBackend() instead.
  */
 function backendProductFilters() {
   const filters = { search: _search, sort: _sort, order: _sortDir };
-  if (_brandFilter) filters.brand = _brandFilter;
-  if (_activeFilter !== '') filters.active = _activeFilter;
+  if (!backendCanSort(_sort)) { delete filters.sort; delete filters.order; }
+  if (_brandFilter) filters.brand = backendBrandSlug(_brandFilter);
+  filters.active = _activeFilter === '' ? 'all' : _activeFilter;
   if (_sourceFilter) filters.source = _sourceFilter;
-  if (!typeFilterGroup(_typeFilter) && _typeFilter) filters.product_type = _typeFilter;
+  if (typeFilterGroup(_typeFilter)) filters.product_type_group = _typeFilter;
+  else if (_typeFilter) filters.product_type = _typeFilter;
   if (_imageFilter === 'has-images') filters.has_images = 'true';
   else if (_imageFilter === 'no-images') filters.has_images = 'false';
   if (_stockFilter) filters.stock_status = _stockFilter;
+  if (_packFilter === 'packs') filters.pack_type = 'packs';
+  else if (_packFilter === 'singles') filters.pack_type = 'single';
+  if (_supplierFilter) filters.supplier = _supplierFilter;
   return filters;
 }
 
 /**
- * Which of the operator's active filters cannot survive a trip to the backend.
+ * The dropdown carries brand UUIDs (the Supabase leg filters `brand_id`); the
+ * backend's `brand` param wants the slug and silently ignores anything else.
+ * A value that is not a known id is passed through — it may already be a slug.
+ */
+function backendBrandSlug(value) {
+  const hit = (_brands || []).find((b) => b && typeof b === 'object' && b.id === value);
+  return (hit && hit.slug) || value;
+}
+
+/**
+ * The backend's `sort` enum, measured 2026-09-25 (the 400's own message lists
+ * it). Anything else is refused outright under strictQuery.
+ */
+function backendCanSort(key) {
+  return ['name', 'sku', 'retail_price', 'cost_price', 'stock_quantity', 'created_at',
+    'updated_at', 'product_type', 'source', 'margin_pct', 'profit_ex_gst'].includes(key);
+}
+
+/**
+ * Which of the operator's active choices cannot survive a trip to the backend.
  * Named, always — "results may match slightly differently" is not a way to tell
- * someone their Pack filter did nothing.
+ * someone their filter did nothing. Every FILTER crosses since 2026-09-21; what
+ * is left is a column sort the backend has no key for.
  */
 function filtersLostToBackend() {
   const lost = [];
-  if (_packFilter) lost.push('Pack');
-  if (_supplierFilter) lost.push('Supplier');
-  if (typeFilterGroup(_typeFilter)) lost.push('the grouped type filter');
+  if (_sort && !backendCanSort(_sort)) lost.push(`the ${_sort.replace(/_/g, ' ')} sort`);
   return lost;
+}
+
+/**
+ * About the CURRENT result set, not the session, so it repeats whenever such a
+ * choice is active: the rows on screen are not ordered by it. Called by BOTH
+ * backend legs — the planned one used to be the leg that forgot to say.
+ */
+function warnLostToBackend() {
+  const lost = filtersLostToBackend();
+  if (lost.length) {
+    Toast.warning(`The server can’t apply ${lost.join(' or ')} — these rows are NOT in that order.`);
+  }
 }
 
 /**
@@ -835,16 +883,15 @@ async function loadProducts() {
   // the three ribbon types at once. We compensate by applying the image/stock filters
   // and the margin sort on the Supabase result below.
   //
-  // The pack filter (singles vs CMY/KCMY/Value Pack/Multipack) is Supabase-only for
-  // the same reason: /api/admin/products has no color param, so routing it to the
-  // backend would silently return UNFILTERED rows while the dropdown says otherwise.
-  // The supplier filter is Supabase-only for exactly that reason too — there is no
-  // `supplier` param on /api/admin/products.
+  // Pack, Supplier and the grouped type used to force this Supabase path because
+  // /api/admin/products had no params for them. Since 2026-09-21 it has all three
+  // (ERR-286), so they no longer steer the route — both legs can answer them.
   const isMarginSort = _sort === 'margin_pct' || _sort === 'profit_ex_gst';
   const typeGroup = typeFilterGroup(_typeFilter);
   const supabaseOnlyFilter = !!_packFilter || !!_supplierFilter;
-  const needsBackend = !typeGroup && !supabaseOnlyFilter && (isMarginSort || !!_imageFilter || !!_stockFilter);
+  const needsBackend = isMarginSort || !!_imageFilter || !!_stockFilter;
   if (needsBackend) {
+    warnLostToBackend();
     const data = await AdminAPI.getProducts(backendProductFilters(), _page, LIMIT);
     if (!_table) return;
     if (!data) { _table.setData([], null); return; }
@@ -898,20 +945,13 @@ async function loadProducts() {
       if (typeGroup) query = query.in('product_type', typeGroup);
       else if (_typeFilter) query = query.eq('product_type', _typeFilter);
 
-      // Pack filter — singles vs multi-cartridge packs, on the color column.
-      // Values come from the canonical ProductColors.PACK_VALUES list (one
-      // source — a hand-rolled list here would drift into the ERR-075 trap).
-      // NULL colors count as singles: a bare not.in drops NULL rows (SQL
-      // three-valued logic), so legacy uncoloured products would silently
-      // vanish from "Singles Only" without the color.is.null arm.
-      if (_packFilter) {
-        // Not user input (ERR-202): these come from the canonical
-        // ProductColors.PACK_VALUES list and are already quoted per value.
-        const PACKS = window.ProductColors.PACK_VALUES;
-        const packList = `("${PACKS.join('","')}")`;
-        if (_packFilter === 'packs') query = query.in('color', PACKS);
-        else if (_packFilter === 'singles') query = query.or(`color.is.null,color.not.in.${packList}`);
-      }
+      // Pack filter — keyed on the `pack_type` COLUMN, the same rule the
+      // backend's `pack_type=packs|single` applies (ERR-286), so the two legs
+      // cannot disagree about one row. The old rule keyed on colour NAMES
+      // (CMY/KCMY/Value Pack…) and missed 32 live packs whose colour is a
+      // plain hue — `G45BK-2PK` is colour "Black", pack_type "multipack".
+      if (_packFilter === 'packs') query = query.neq('pack_type', 'single');
+      else if (_packFilter === 'singles') query = query.eq('pack_type', 'single');
 
       // Image filter — only applied when a grouped type or the pack filter
       // forced us through Supabase. Join-aware: images live in BOTH legacy
@@ -1011,20 +1051,15 @@ async function loadProducts() {
       Toast.warning(`Product search fell back to the backend${cause ? ` (${cause})` : ''} — matching and ordering are the backend's, not ours.`);
     }
   }
-  // These are about the CURRENT result set, not the session, so they repeat
-  // whenever such a filter is active: the rows on screen are not filtered by it.
-  const lost = filtersLostToBackend();
-  if (lost.length) {
-    Toast.warning(`${lost.join(' and ')} ${lost.length > 1 ? 'filters are' : 'filter is'} unavailable right now — these rows are NOT filtered by ${lost.length > 1 ? 'them' : 'it'}.`);
-  }
+  warnLostToBackend();
   const data = await AdminAPI.getProducts(backendProductFilters(), _page, LIMIT);
   if (!_table) return;
   if (!data) { _table.setData([], null); return; }
-  // The backend list omits supplier / supplier_sku entirely (0 of 100 rows,
-  // measured). Fill them from Supabase — that read needs no privileged column,
-  // so it survives the refusal that sent us here. If it comes back empty,
-  // warnIfSourcingFieldsMissing says so and Origin renders an em-dash rather
-  // than inferring "Assembled" from a field nobody fetched.
+  // The backend list omitted supplier / supplier_sku entirely until 2026-09-21
+  // (0 of 100 rows, measured 09-06). It now sends both on every row (ERR-286),
+  // so enrichSourcingFields returns at its presence check. It stays as the
+  // fill-in for a deploy that stops sending them, and warnIfSourcingFieldsMissing
+  // still says so rather than inferring "Assembled" from a field nobody fetched.
   const rows = await enrichSourcingFields(Array.isArray(data) ? data : (data.products || data.data || []));
   if (!_table) return;
   warnIfSourcingFieldsMissing(rows);
@@ -4238,54 +4273,79 @@ function diagKpi(label, value, variant = null) {
   return `<div class="admin-kpi${cls}" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value${valCls}" style="font-size:18px">${esc(String(value))}</div></div>`;
 }
 
-function getProductExportParams() {
-  const p = new URLSearchParams(FilterState.getParams());
-  if (_search) p.set('search', _search);
-  if (_brandFilter) p.set('brand', _brandFilter);
-  if (_activeFilter !== '') p.set('active', _activeFilter);
-  if (_imageFilter === 'has-images') p.set('has_images', 'true');
-  else if (_imageFilter === 'no-images') p.set('has_images', 'false');
-  if (_sourceFilter) p.set('source', _sourceFilter);
-  // A grouped type ("All Ribbons") exports as the comma list of the types it
-  // spans, so the export returns the same rows the table shows.
-  const typeGroup = typeFilterGroup(_typeFilter);
-  if (typeGroup) p.set('product_type', typeGroup.join(','));
-  else if (_typeFilter) p.set('product_type', _typeFilter);
-  if (_stockFilter) p.set('stock_status', _stockFilter);
-  // Forward-compat: the backend export endpoint doesn't understand `pack` or
-  // `supplier` yet (harmless \u2014 unknown params are ignored). handleExport warns
-  // the admin so the mismatch is never silent.
-  if (_packFilter) p.set('pack', _packFilter);
-  if (_supplierFilter) p.set('supplier', _supplierFilter);
-  if (_sort) p.set('sort', _sort);
-  if (_sortDir) p.set('order', _sortDir);
-  return p.toString();
-}
-
 async function handleExport(format = 'csv') {
   try {
     if (format === 'pdf') {
       await exportProductsPDF();
       return;
     }
-    // The backend export has no pack/color or supplier filter \u2014 exporting
-    // silently unfiltered rows under an active filter would be a lie. Say so.
-    if (_packFilter) Toast.warning(`Pack filter is not applied to ${format.toUpperCase()} exports \u2014 exporting all matching products`);
-    if (_supplierFilter) Toast.warning(`Supplier filter is not applied to ${format.toUpperCase()} exports \u2014 exporting all matching products`);
-    // The CSV/XLSX itself is built server-side, so it carries whatever columns
-    // the backend chooses \u2014 Supplier and Origin are NOT among them yet. The PDF
-    // export (built here) does include both. Said once per page visit: an admin
-    // who exports repeatedly doesn't need telling every time.
-    if (!_warnedCsvSourcingColumns) {
-      _warnedCsvSourcingColumns = true;
-      Toast.info('Supplier / Origin appear in the PDF export only \u2014 the CSV is generated by the backend.');
-    }
-    Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
-    await AdminAPI.exportData('products', format, getProductExportParams());
-    Toast.success('Products exported');
+    // CSV and Excel are built HERE now, from the same filtered fetch as the PDF.
+    // The server's `/api/admin/export/products` was measured 2026-09-25 (ERR-286)
+    // ignoring EVERY filter — `source=genuine` returned compatible rows, `search`
+    // and `brand` did nothing — stopping at 999 rows with no truncation header,
+    // and 500ing on the `brands=` param the global filter bar adds. An export
+    // that disagrees with the table it was exported from is worse than none.
+    // Excel opens a CSV, so "Excel" is the same file with the same name rule.
+    await exportProductsCSV(format);
   } catch (e) {
     Toast.error(`Export failed: ${e.message}`);
   }
+}
+
+/**
+ * One CSV cell. Quoted when it must be, and a leading = + @ (or tab/CR) is
+ * defused with an apostrophe: a product name is operator-typed text, and a
+ * spreadsheet executes a cell that starts with "=" (CSV injection). A leading
+ * "-" is left alone — negative numbers are real data here.
+ */
+function csvCell(v) {
+  let s = v == null ? '' : String(v);
+  if (/^[=+@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+async function exportProductsCSV(format = 'csv') {
+  Toast.info(`Preparing ${format === 'excel' ? 'Excel (CSV)' : 'CSV'} export\u2026`);
+  const all = await fetchFilteredProductsForExport();
+  if (!all.length) {
+    Toast.error('No products to export');
+    return;
+  }
+  const isOwner = AdminAuth.isOwner();
+  const hasSourcingFields = all.some(p => p && ('supplier' in p || 'supplier_sku' in p));
+  const head = [
+    // Bases are the table's own column labels (utils/gst-basis.js), never retyped.
+    'SKU', 'Name', 'Brand', 'Type', 'Source', 'Colour', 'Pack type', `Retail price (${GST_INCL})`,
+    ...(isOwner ? [`Cost price (${GST_EXCL})`, `Margin % (${GST_BASE})`, `Profit $ (${GST_EXCL})`] : []),
+    ...(hasSourcingFields ? ['Supplier', 'Supplier SKU', 'Origin'] : []),
+    'Stock status', 'Active',
+  ];
+  // Blank, never 0, for an absent number — a spreadsheet will happily average
+  // a fabricated zero (the ERR-063 family).
+  const lines = all.map((p) => {
+    const prof = isOwner ? computeProfitability(p) : null;
+    return [
+      p.sku, p.name, extractBrandName(p), p.product_type, p.source, p.color, p.pack_type,
+      p.retail_price ?? '',
+      ...(isOwner ? [
+        p.cost_price ?? '',
+        prof && prof.marginPct != null ? prof.marginPct.toFixed(1) : '',
+        prof && prof.profitDollars != null ? prof.profitDollars.toFixed(2) : '',
+      ] : []),
+      ...(hasSourcingFields ? [p.supplier, p.supplier_sku, originLabel(productOrigin(p))] : []),
+      p.stock_status, p.is_active !== false ? 'yes' : 'no',
+    ].map(csvCell).join(',');
+  });
+  const blob = new Blob([[head.map(csvCell).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  if (!hasSourcingFields) Toast.warning('Supplier / Origin omitted — the export data has no supplier field.');
+  Toast.success(`Exported ${all.length} product${all.length === 1 ? '' : 's'}.`);
 }
 
 /**
@@ -4328,67 +4388,64 @@ async function enrichSourcingFields(rows) {
   }
 }
 
-async function exportProductsPDF() {
-  Toast.info('Preparing PDF export\u2026');
-  try {
-    // The SAME filter object the list sends (ERR-220: this copy dropped source,
-    // type and stock, so a PDF exported under "Genuine" was the whole
-    // catalogue). The only addition is the global brand selection, which the
-    // list gets from its own brand dropdown.
-    const filters = backendProductFilters();
-    const globalBrands = FilterState.get('brands') || [];
-    if (!_brandFilter && globalBrands.length) filters.brand = globalBrands.join(',');
+/**
+ * Every row the list's CURRENT filters select, across all pages — the ONE fetch
+ * both exports use. Built on backendProductFilters(), so an export can never
+ * disagree with the table about what "Genuine" or "HP" means.
+ */
+async function fetchFilteredProductsForExport() {
+  // The SAME filter object the list sends (ERR-220: this copy dropped source,
+  // type and stock, so a PDF exported under "Genuine" was the whole
+  // catalogue). The only addition is the global brand selection, which the
+  // list gets from its own brand dropdown.
+  //
+  // The global selection holds brand NAMES, and `brand` takes ONE slug: the
+  // old `names.join(',')` was silently ignored by the backend, so a PDF
+  // exported under "HP + Canon" was every brand (measured 2026-09-25,
+  // ERR-286). One pass per brand instead.
+  const filters = backendProductFilters();
+  const globalBrands = FilterState.get('brands') || [];
+  const passes = (!_brandFilter && globalBrands.length)
+    ? globalBrands.map((name) => {
+      const hit = _brands.find((b) => b && (b.name === name || b.slug === name));
+      return { ...filters, brand: (hit && hit.slug) || name };
+    })
+    : [filters];
 
-    let all = [];
+  let all = [];
+  for (const passFilters of passes) {
     let page = 1;
+    let got = 0;
     while (true) {
-      const data = await AdminAPI.getProducts(filters, page, 200);
+      const data = await AdminAPI.getProducts(passFilters, page, 200);
+      if (data === null) throw new Error('the product list request was refused');
       const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
       if (!rows.length) break;
       all = all.concat(rows);
+      got += rows.length;
       const total = data?.pagination?.total || data?.total;
-      if (total && all.length >= total) break;
+      if (total && got >= total) break;
       if (rows.length < 200) break;
       page++;
     }
+  }
 
-    // Apply client-side image filter if active
-    if (_imageFilter) {
-      all = all.filter(p =>
-        _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
-      );
-    }
+  // Image, Supplier and Pack are applied by the SERVER now — they ride in
+  // backendProductFilters() (ERR-286). The client-side re-filters that used to
+  // follow were written for a backend that ignored them, and the pack one keyed
+  // on colour names: re-applied to server-filtered rows it would have DROPPED
+  // the 32 packs whose colour is a plain hue (`G45BK-2PK`).
+  //
+  // The sourcing fill-in stays: it is a no-op when rows carry supplier.
+  all = await enrichSourcingFields(all);
 
-    // The backend export payload may not carry the sourcing columns. Fill them
-    // in from Supabase (one batched read, keyed by SKU) so the PDF can show
-    // Supplier/Origin at all — and so the supplier filter below has something
-    // real to filter on. Best-effort: if it fails we warn and drop the columns
-    // rather than printing a page of dashes that reads as "no supplier".
-    all = await enrichSourcingFields(all);
+  return all;
+}
 
-    // Apply client-side supplier filter if active. Same honesty guard as the
-    // pack filter below: no supplier field means we did NOT filter.
-    if (_supplierFilter) {
-      if (!all.some(p => p && p.supplier != null)) {
-        Toast.warning('Supplier filter not applied to PDF — export data has no supplier field');
-      } else {
-        all = all.filter(p => String(p.supplier || '') === _supplierFilter);
-      }
-    }
-
-    // Apply client-side pack filter if active. Guard: if the backend rows
-    // don't carry a color field at all, filtering would silently classify
-    // EVERYTHING as a single — warn instead of pretending we filtered.
-    if (_packFilter) {
-      const PACKS = window.ProductColors.PACK_VALUES;
-      if (!all.some(p => p.color != null)) {
-        Toast.warning('Pack filter not applied to PDF — export data has no color field');
-      } else {
-        all = all.filter(p =>
-          _packFilter === 'packs' ? PACKS.includes(p.color) : !PACKS.includes(p.color)
-        );
-      }
-    }
+async function exportProductsPDF() {
+  Toast.info('Preparing PDF export\u2026');
+  try {
+    const all = await fetchFilteredProductsForExport();
 
     if (!all.length) {
       Toast.error('No products to export');

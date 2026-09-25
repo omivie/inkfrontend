@@ -279,3 +279,43 @@ test('§5 both sources name the allowlist keys literally', () => {
             `${label} must declare the forwarded allowlist as ['code', 'category']`);
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ERR-286 — the chips became LINKS once the backend's series shard shipped
+// (sitemap-series.xml, 535 brand+code URLs, measured 2026-09-25).
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const fsX = require('node:fs');
+    const pathX = require('node:path');
+    const stripX = require('./helpers/strip-comments');
+    const SHOP_X = stripX(fsX.readFileSync(pathX.join(__dirname, '..', 'inkcartridges', 'js', 'shop-page.js'), 'utf8'));
+    const PDP_X = stripX(fsX.readFileSync(pathX.join(__dirname, '..', 'inkcartridges', 'js', 'product-detail-page.js'), 'utf8'));
+
+    test('ERR-286: code chips are crawlable <a href> links, not buttons', () => {
+        const fn = SHOP_X.slice(SHOP_X.indexOf('renderProductCodes(codes) {'), SHOP_X.indexOf('codeChipHref(code) {'));
+        assert.match(fn, /document\.createElement\('a'\)/, 'a crawler cannot follow a <button>');
+        assert.doesNotMatch(fn, /document\.createElement\('button'\)/);
+        assert.match(fn, /box\.href = this\.codeChipHref\(code\)/);
+        assert.match(fn, /e\.metaKey \|\| e\.ctrlKey \|\| e\.shiftKey/, 'a modified click (new tab) belongs to the browser');
+        assert.match(fn, /e\.preventDefault\(\);\s*this\.navigateTo\('products', \{ code \}\)/, 'a plain click still navigates in place');
+    });
+
+    test('ERR-286: the chip href is the two-param canonical', () => {
+        const src = SHOP_X.slice(SHOP_X.indexOf('codeChipHref(code) {'));
+        const body = src.slice(0, src.indexOf('\n        },') + 10);
+        // eslint-disable-next-line no-new-func
+        const make = (state) => new Function('URLSearchParams', `const o = { state: ${JSON.stringify(state)}, ${body} }; return o;`)(URLSearchParams);
+        assert.equal(make({ brand: 'brother', category: 'ink' }).codeChipHref('LC73'), '/shop?brand=brother&code=LC73',
+            'category is dropped once a brand names the chip — the sitemap/canonical shape');
+        assert.equal(make({ brand: 'hp', category: 'ink' }).codeChipHref('C2P+'), '/shop?brand=hp&code=C2P%2B',
+            'a + is encoded, or it decodes as a space');
+        assert.equal(make({ brand: null, category: 'drums' }).codeChipHref('DR251'), '/shop?category=drums&code=DR251',
+            '[CONTROL] a brandless codes view keeps its category so the link lands where the click does');
+    });
+
+    test('ERR-286: the PDP breadcrumb links the canonical chip page, URL-encoded', () => {
+        assert.match(PDP_X, /\/shop\?brand=\$\{encodeURIComponent\(brandSlug\)\}&amp;code=\$\{encodeURIComponent\(productCode\)\}/);
+        assert.doesNotMatch(PDP_X, /&category=\$\{Security\.escapeAttr\(canonCategory\)\}&code=/,
+            'the three-param breadcrumb pointed at a noindex page');
+    });
+}

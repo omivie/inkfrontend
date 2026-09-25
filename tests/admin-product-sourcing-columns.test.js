@@ -36,6 +36,7 @@ const ROOT = path.resolve(__dirname, '..');
 const SITE = path.join(ROOT, 'inkcartridges');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
+const API = fs.readFileSync(path.join(ROOT, 'inkcartridges/js/admin/api.js'), 'utf8');
 const PRODUCTS = read('inkcartridges/js/admin/pages/products.js');
 const ORDERS = read('inkcartridges/js/admin/pages/orders.js');
 const SOURCING = read('inkcartridges/js/admin/utils/sourcing.js');
@@ -314,31 +315,26 @@ test('every filter value is a real products.supplier value', () => {
   assert.deepEqual(S.SUPPLIER_FILTER_VALUES, ['dsnz', 'augmento', 'okin', 'unknown']);
 });
 
-test('the supplier filter is applied in Supabase, never silently dropped', () => {
+// Inverted 2026-09-25 (ERR-286): /api/admin/products gained `supplier`
+// (BF-044a), so the filter now reaches BOTH legs rather than forcing Supabase
+// and warning on the fallback. What must still hold: it is never dropped.
+test('the supplier filter reaches both legs, never silently dropped', () => {
   assert.match(PRODUCTS, /query\.eq\('supplier', _supplierFilter\)/,
-    'the filter must reach the query');
-  assert.match(PRODUCTS, /supabaseOnlyFilter\s*=\s*!!_packFilter \|\| !!_supplierFilter/,
-    'an active supplier filter must force the Supabase path — /api/admin/products has no supplier param');
-  // The wording moved into filtersLostToBackend() (ERR-220): one message that
-  // names every filter the backend leg could not carry, rather than one toast
-  // each. Still checked end to end — the helper names Supplier, and the
-  // fallback warns with whatever the helper returns.
-  const helper = PRODUCTS.match(/function filtersLostToBackend\(\)[\s\S]+?\n\}/);
-  assert.ok(helper, 'filtersLostToBackend() must exist');
-  assert.match(helper[0], /_supplierFilter\) lost\.push\('Supplier'\)/,
-    'the backend fallback must SAY the supplier filter was not applied');
-  const fallback = PRODUCTS.match(/\/\/ Fallback: use backend API[\s\S]{0,1400}/);
-  assert.match(fallback[0], /const lost = filtersLostToBackend\(\)[\s\S]{0,400}Toast\.warning/,
-    'and the fallback must actually raise that warning');
+    'the filter must reach the Supabase query');
+  const builder = PRODUCTS.match(/function backendProductFilters\(\)[\s\S]+?\n\}/);
+  assert.match(builder[0], /if \(_supplierFilter\) filters\.supplier = _supplierFilter;/,
+    'and the backend leg — the one that actually runs every load (ERR-220)');
+  assert.match(API, /params\.set\('supplier', filters\.supplier\)/,
+    'and AdminAPI.getProducts must forward it');
 });
 
 test('the export path is honest about what it can and cannot filter/carry', () => {
-  assert.match(PRODUCTS, /Supplier filter is not applied to \$\{format\.toUpperCase\(\)\} exports/,
-    'the CSV export cannot apply the supplier filter — say so');
-  assert.match(PRODUCTS, /Supplier \/ Origin appear in the PDF export only/,
-    'the CSV is backend-generated and does not carry the columns — say so');
-  assert.match(PRODUCTS, /Supplier filter not applied to PDF/,
-    'the PDF must warn when the export rows carry no supplier field');
+  // Both exports now come from the list's own filtered fetch, so the old
+  // "Supplier filter is not applied to CSV" caveat would itself be false.
+  assert.ok(!/Supplier filter is not applied to \$\{format\.toUpperCase\(\)\} exports/.test(PRODUCTS),
+    'a caveat about a limitation that no longer exists is its own lie');
+  assert.match(PRODUCTS, /Supplier \/ Origin omitted/,
+    'an export must still say when its rows carry no supplier field');
 });
 
 test('the products list warns when a view cannot supply the sourcing fields', () => {

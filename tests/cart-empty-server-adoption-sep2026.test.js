@@ -302,6 +302,37 @@ test('§4b the predicate itself is what makes that distinction', () => {
     assert.equal(Cart._serverEmptyButWeHoldLines([]), false, 'nothing held, nothing to keep');
 });
 
+// ERR-286: the server now says WHY a list is empty (summary.rows_on_file /
+// rows_dropped_inactive, measured on a live guest cart 2026-09-25). Only a
+// positive dropped count explains an empty list; everything else keeps the
+// ERR-259 guard exactly as it was.
+test('§4c an empty list the server EXPLAINS (all rows inactive) is adopted, and said', async () => {
+    const Cart = loadCart();
+    Cart.items = [localLine()];
+    assert.equal(Cart._serverEmptyButWeHoldLines([], { rows_on_file: 2, rows_dropped_inactive: 2 }), false,
+        'every held row was deactivated — that is a real empty, not a lost session');
+    assert.equal(Cart._serverEmptyButWeHoldLines([], { rows_on_file: 0, rows_dropped_inactive: 0 }), true,
+        'rows_on_file 0 beside local lines IS the ERR-259 case — the guard must hold');
+    assert.equal(Cart._serverEmptyButWeHoldLines([], {}), true, '[CONTROL] absent fields = the pre-deploy shape');
+    assert.equal(Cart._serverEmptyButWeHoldLines([], { rows_dropped_inactive: '2' }), false, 'a numeric string still counts');
+    assert.equal(Cart._serverEmptyButWeHoldLines([], { rows_dropped_inactive: null }), true, 'null is not a count');
+
+    const toasts = [];
+    Cart.__sandbox.showToast = (msg) => toasts.push(msg);
+    Cart._announceDroppedInactive({ rows_dropped_inactive: 2 });
+    Cart._announceDroppedInactive({ rows_dropped_inactive: 2 });
+    assert.equal(toasts.length, 1, 'said once per page, not on every cart read');
+    assert.match(toasts[0], /2 items in your cart are no longer available/);
+    Cart._announceDroppedInactive({ rows_dropped_inactive: 0 });
+    Cart._announceDroppedInactive({});
+    assert.equal(toasts.length, 1, '[CONTROL] nothing dropped, nothing said');
+});
+
+test('§4d both guarded read paths announce the drop BEFORE deciding', () => {
+    const sites = CART_CODE.match(/this\._announceDroppedInactive\(parsed\.summary\);\s*if \(this\._serverEmptyButWeHoldLines\(parsed\.items, parsed\.summary\)\)/g) || [];
+    assert.equal(sites.length, 2, 'loadCart and loadFromServer must both pass the summary and announce');
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 5. THE LOOP — the ERR-210 revalidation must not undo the guard
 //
@@ -378,7 +409,7 @@ test('§6 syncWithServer still guards, now through the shared predicate', async 
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('§7 the rule is declared once and called by both read paths', () => {
-    const decls = CART_CODE.match(/_serverEmptyButWeHoldLines\(parsedItems\)\s*\{/g) || [];
+    const decls = CART_CODE.match(/_serverEmptyButWeHoldLines\(parsedItems, summary\)\s*\{/g) || [];
     assert.equal(decls.length, 1, 'one declaration — three spellings is what hid the gap');
     const calls = CART_CODE.match(/this\._serverEmptyButWeHoldLines\(/g) || [];
     assert.equal(calls.length, 2, 'loadFromServer and syncWithServer, and nothing else');
@@ -406,4 +437,50 @@ test('§7c the guard cannot spin — the revalidation budget is finite', () => {
     const adopt = CART_CODE.slice(CART_CODE.indexOf('_adoptServerSummary(summary)'));
     assert.match(adopt.slice(0, 600), /_revalidateAttempts = 0/,
         'and a genuine recovery is the only thing that resets it');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ERR-286 — the line total is the SERVER's per-line figure, when it still
+// describes the line. Lives here because this suite owns the loadCart harness.
+// ═══════════════════════════════════════════════════════════════════════════
+test('ERR-286: the line total uses the server figure only for the quantity it priced', () => {
+    const Cart = loadCart();
+    const figures = { quantity: 4, line_total: 105.96, line_total_after_discount: 101.72, unit_price: 25.43, line_savings: 4.24 };
+    const line = { price: 26.49, quantity: 4, volume_figures: figures };
+    const html = Cart.lineTotalHtml(line);
+    assert.match(html, /<s class="cart-item__total-was">\$105\.96<\/s>/, 'the pre-discount total stays visible');
+    assert.match(html, /\$101\.72/, 'the server\'s after-discount total is shown');
+    assert.match(html, /\$25\.43 each · volume price/);
+
+    // An optimistic +1 before the server answers: the figure is for 4, the
+    // line shows 5 — the server's number would be wrong for what is on screen.
+    assert.equal(Cart.lineTotalFigures({ ...line, quantity: 5 }), null);
+    assert.equal(Cart.lineTotalHtml({ ...line, quantity: 5 }), '$132.45', 'retail × qty while the change is in flight');
+
+    // [CONTROL] no saving → just the server's total, no strike-through.
+    const flat = { price: 26.49, quantity: 1, volume_figures: { ...figures, quantity: 1, line_total: 26.49, line_total_after_discount: 26.49, line_savings: 0 } };
+    assert.equal(Cart.lineTotalHtml(flat), '$26.49');
+    // [CONTROL] a pre-deploy line without figures renders exactly as before.
+    assert.equal(Cart.lineTotalHtml({ price: 10, quantity: 3 }), '$30.00');
+});
+
+test('ERR-286: the parser keeps the per-line figures and stamps the quantity they describe', () => {
+    const Cart = loadCart();
+    const parsed = Cart._parseServerCart({
+        items: [{
+            quantity: 1, source: 'compatible', line_total: 26.49, line_total_after_discount: 26.49,
+            volume_unit_price: 26.49, volume_line_savings: 0,
+            volume_next_break: { min_quantity: 3, business_price: 25.7, savings_amount: 0.79, units_away: 2 },
+            product: { id: 'p1', sku: 'C02CMY', name: 'x', retail_price: 26.49, source: 'compatible' },
+        }],
+        summary: { rows_on_file: 1, rows_dropped_inactive: 0 },
+    });
+    const f = parsed.items[0].volume_figures;
+    assert.equal(f.quantity, 1);
+    assert.equal(f.line_total_after_discount, 26.49);
+    assert.equal(f.next_break.units_away, 2);
+    assert.equal(parsed.summary.rows_on_file, 1, 'the summary keeps the row accounting');
+    // [CONTROL] a line without the figures carries null, not a fabricated zero.
+    const old = Cart._parseServerCart({ items: [{ quantity: 1, product: { id: 'p2', sku: 'X', retail_price: 5 } }] });
+    assert.equal(old.items[0].volume_figures, null);
 });

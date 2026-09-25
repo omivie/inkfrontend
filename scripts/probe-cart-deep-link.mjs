@@ -34,11 +34,14 @@
  *
  * That two-way check is not belt-and-braces; it is the whole lesson. This
  * probe's first draft invented its own guest id, sent it as X-Guest-Session,
- * and read the cart back with it. The server IGNORES a client-invented id and
- * mints its own (returned in the x-guest-session response header, which is why
- * api.js re-reads it after every request). So the add landed in one cart and
- * the verification read another, which was empty and always would have been —
- * and the probe printed "cleanup verified". It was green while leaking a line
+ * and read the cart back with it. The add landed somewhere the read-back could
+ * not see, the read-back was empty and always would have been — and the probe
+ * printed "cleanup verified". (We first wrote that the server "ignores a
+ * client-invented id and mints its own". The backend corrected that on
+ * 2026-09-21: it ACCEPTS a well-formed UUID and mints one only when the header
+ * is absent or malformed, echoing the resolved id either way; the invented id
+ * matched no `guest_sessions` row. Either way the lesson stands: address the
+ * session the SERVER echoes, not the one you meant.) It was green while leaking a line
  * it could not see and could not remove. ERR-257 is the same shape: a probe
  * that borrows its rollback rather than owning it, including its ROLLBACK'S
  * ADDRESS (ERR-262). A failed or unverifiable cleanup now exits 1 and says
@@ -185,9 +188,10 @@ if (!WRITE) {
     // and then read the cart back with the same invented id. The add answered
     // 201, the read-back answered an EMPTY cart, and the cleanup check reported
     // "verified — the throwaway cart is empty again". It was empty because the
-    // probe was looking at a cart that had never existed: the server ignores a
-    // client-invented id and mints its own, returning it in the x-guest-session
-    // response header (which is why api.js re-reads it after every request).
+    // id addressed no `guest_sessions` row (backend, 2026-09-21: a well-formed
+    // UUID is ACCEPTED, not replaced — the server mints only when the header is
+    // absent or malformed, and echoes the resolved id in x-guest-session either
+    // way, which is why api.js re-reads it after every request).
     // The line it actually added was orphaned in a session the probe had thrown
     // away — a write it could not see and could not roll back. That is ERR-257's
     // shape exactly, reached through a different door, and it passed green.
@@ -208,6 +212,15 @@ if (!WRITE) {
             const line = add.json && (add.json.data || add.json);
             if (line && line.quantity != null) {
                 ok(`server echoed quantity ${line.quantity} (the LINE TOTAL — ERR-223, not the delta)`);
+            }
+            // ERR-286: the add response carries the raw product_type (+ pack_type)
+            // so GA4's add_to_cart can categorise without the caller's help.
+            // Report WHERE it sits — cart.js reads both spots.
+            const where = (k) => (line && k in line ? `data.${k}=${JSON.stringify(line[k])}`
+                : line?.product && k in line.product ? `data.product.${k}=${JSON.stringify(line.product[k])}` : null);
+            for (const k of ['product_type', 'pack_type']) {
+                if (where(k)) ok(`add response carries ${where(k)}`);
+                else soft(`add response has no ${k}`, 'GA4 add_to_cart falls back to the caller-supplied category');
             }
             if (guest) console.log(`\x1b[2m  server-minted guest session: ${guest}\x1b[0m`);
             else {
@@ -232,6 +245,25 @@ if (!WRITE) {
             try {
                 presentBefore = (await linesFor()).length > 0;
             } catch { presentBefore = false; }
+            // ERR-286 shape report, read from the SAME session: the per-line
+            // volume figures and the summary's row accounting. Absent is reported
+            // as absent — cart.js keeps its fallback for exactly that case.
+            try {
+                const r = await req('GET', '/api/cart', { guest });
+                const d = r.json && (r.json.data || r.json);
+                const item = (d?.items || []).find((i) => (i.product_id || i.product?.id) === target.id);
+                const sum = d?.summary || {};
+                for (const k of ['rows_on_file', 'rows_dropped_inactive']) {
+                    if (k in sum) ok(`summary.${k} = ${JSON.stringify(sum[k])}`);
+                    else soft(`summary.${k} absent`, 'the empty-cart guard keeps its pre-ERR-286 behaviour');
+                }
+                const VOL = ['line_total_after_discount', 'volume_unit_price', 'volume_line_savings', 'volume_next_break'];
+                const have = item ? VOL.filter((k) => k in item) : [];
+                if (item && have.length === VOL.length) ok(`cart line carries ${VOL.join(', ')}`);
+                else soft('cart line volume figures', `present: ${have.join(', ') || 'none'} — the cart falls back to price × qty`);
+            } catch (err) {
+                soft('ERR-286 shape report', `could not read the cart — ${err.message}`);
+            }
 
             if (!presentBefore) {
                 bad('CANNOT VERIFY CLEANUP',

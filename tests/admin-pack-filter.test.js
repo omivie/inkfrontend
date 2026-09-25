@@ -28,6 +28,18 @@
  *    filter, so CSV/Excel exports must WARN; the PDF path filters client-side
  *    and warns if the rows carry no color field at all.
  *
+ * ── 2026-09-25 (ERR-286): invariants 2, 3 and 4 were INVERTED, not deleted ──
+ * The backend grew `pack_type=packs|single` (BF-044a) and went strictQuery. So:
+ *   2. the pack filter no longer forces the Supabase path — both legs answer it;
+ *   3. it is keyed on the `pack_type` COLUMN on both legs, not on colour names.
+ *      The colour rule missed 32 live packs whose colour is a plain hue
+ *      (`G45BK-2PK` = "Black" + multipack), measured by cross-tabbing all
+ *      4,387 rows. The NULL-colour trap it guarded is gone with it: pack_type
+ *      is never NULL on a live row;
+ *   4. exports are built client-side from the list's own filters, because the
+ *      server export ignored every filter (see handleExport).
+ * Invariant 1 (the PACK_VALUES vocabulary) is untouched — the storefront uses it.
+ *
  * Run: node --test tests/admin-pack-filter.test.js
  */
 
@@ -71,11 +83,11 @@ test('every PACK_VALUES entry is a canonical OPTIONS value (ERR-075 guard)', () 
   }
 });
 
-test('products.js reads ProductColors.PACK_VALUES — no hand-rolled second list', () => {
-  assert.match(PRODUCTS, /ProductColors\.PACK_VALUES/,
-    'the filter must bind to the canonical list');
+test('products.js keys the pack filter on pack_type — never on a colour-name list', () => {
+  assert.ok(!/ProductColors\.PACK_VALUES/.test(PRODUCTS),
+    'the admin pack filter is back on colour names — that rule missed 32 live packs (ERR-286)');
   assert.ok(!/\[\s*'CMY'\s*,\s*'KCMY'/.test(PRODUCTS),
-    'products.js must not hardcode its own pack-color array — that is how vocabularies drift dead');
+    'products.js must not hardcode its own pack-color array either');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,22 +116,15 @@ test('destroy() resets _packFilter like the other filters', () => {
 // 3. Query routing and NULL handling
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('an active pack filter is forced down the Supabase path', () => {
-  // /api/admin/products has no color param — routing an active pack filter to
-  // the backend would show unfiltered rows while the dropdown says otherwise.
-  // Jul 2026: the supplier filter joined the same club (no `supplier` param
-  // either), so the two share one `supabaseOnlyFilter` flag.
-  assert.match(PRODUCTS, /const\s+supabaseOnlyFilter\s*=\s*!!_packFilter\s*\|\|\s*!!_supplierFilter/,
-    'supabaseOnlyFilter must cover the pack filter');
-  assert.match(PRODUCTS, /const\s+needsBackend\s*=\s*!typeGroup\s*&&\s*!supabaseOnlyFilter\s*&&/,
-    'needsBackend must AND with !supabaseOnlyFilter');
+test('an active pack/supplier filter no longer steers the route — both legs answer it', () => {
+  assert.match(PRODUCTS, /const\s+needsBackend\s*=\s*isMarginSort\s*\|\|\s*!!_imageFilter\s*\|\|\s*!!_stockFilter;/,
+    'needsBackend must depend only on what the Supabase leg cannot compute');
 });
 
-test('"packs" queries .in("color", PACKS); "singles" keeps NULL colors', () => {
-  assert.match(PRODUCTS, /query\.in\(\s*'color'\s*,\s*PACKS\s*\)/,
-    '"Packs Only" must be .in("color", PACKS)');
-  assert.match(PRODUCTS, /color\.is\.null\s*,\s*color\.not\.in\./,
-    '"Singles Only" must include the color.is.null arm — a bare not.in drops NULL-color rows (SQL three-valued logic)');
+test('the Supabase leg keys packs on pack_type, exactly like the backend', () => {
+  assert.match(PRODUCTS, /_packFilter === 'packs'\) query = query\.neq\('pack_type', 'single'\)/);
+  assert.match(PRODUCTS, /_packFilter === 'singles'\) query = query\.eq\('pack_type', 'single'\)/);
+  assert.ok(!/query\.in\(\s*'color'\s*,\s*PACKS\s*\)/.test(PRODUCTS), 'the colour-name rule is back');
 });
 
 test('the forced-Supabase image filter is JOIN-AWARE (ERR-091)', () => {
@@ -143,40 +148,52 @@ test('selectCols keeps the product_images embed the null-filters depend on', () 
     'the Supabase select list must embed product_images(…) — the join-aware image filter depends on it');
 });
 
-test('backend fallback path warns instead of silently ignoring the pack filter', () => {
-  // The warning moved into filtersLostToBackend() when the fallback learned to
-  // carry source/type/image/stock (ERR-220) — one message naming every filter
-  // that could not cross, instead of one toast per filter. The RULE is
-  // unchanged and still checked in both halves: the helper must name Pack, and
-  // the fallback must ask the helper and warn with the answer.
+test('both backend legs send the pack filter and name what they cannot apply', () => {
+  const builder = PRODUCTS.match(/function backendProductFilters\(\)[\s\S]+?\n\}/);
+  assert.ok(builder, 'backendProductFilters() must exist');
+  assert.match(builder[0], /_packFilter === 'singles'\) filters\.pack_type = 'single'/,
+    "'singles' must be translated — it is outside the backend enum and 400s");
   const fallback = PRODUCTS.match(/\/\/ Fallback: use backend API[\s\S]{0,1400}/);
   assert.ok(fallback, 'the backend fallback block must exist');
-  assert.match(fallback[0], /const lost = filtersLostToBackend\(\)[\s\S]{0,400}Toast\.warning/,
-    'if the fast leg is down, the admin must be TOLD which filters were dropped — unfiltered rows under an active filter is a silent lie');
-  const helper = PRODUCTS.match(/function filtersLostToBackend\(\)[\s\S]+?\n\}/);
-  assert.ok(helper, 'filtersLostToBackend() must exist');
-  assert.match(helper[0], /_packFilter\) lost\.push\('Pack'\)/,
-    'the pack filter must be one of the losses it names');
+  assert.match(fallback[0], /warnLostToBackend\(\)/, 'the fallback must still say what it could not apply');
+  const planned = PRODUCTS.match(/if \(needsBackend\) \{[\s\S]{0,200}/);
+  assert.match(planned[0], /warnLostToBackend\(\)/, 'and so must the planned backend leg');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Exports never lie about their scope
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('CSV/Excel export warns when the pack filter is active', () => {
+test('CSV/Excel are built from the list\'s own filters, not the server export', () => {
   const body = PRODUCTS.match(/async function\s+handleExport\s*\([^)]*\)\s*\{[\s\S]+?\n\}/);
   assert.ok(body, 'handleExport must exist');
-  assert.match(body[0], /_packFilter\)\s*Toast\.warning/,
-    'the backend export has no pack param — the admin must be warned the export is unfiltered');
+  assert.ok(!/exportData\(\s*'products'/.test(PRODUCTS),
+    "the server product export is back — it ignored every filter and 500'd on brands= (ERR-286)");
+  assert.match(body[0], /exportProductsCSV\(/);
+  const csv = PRODUCTS.match(/async function\s+exportProductsCSV\s*\([\s\S]+?\n\}/);
+  assert.match(csv[0], /fetchFilteredProductsForExport\(\)/);
 });
 
-test('PDF export filters by pack client-side and guards a missing color field', () => {
-  const body = PRODUCTS.match(/async function\s+exportProductsPDF\s*\([\s\S]+?\n\}/);
-  assert.ok(body, 'exportProductsPDF must exist');
-  assert.match(body[0], /_packFilter === 'packs' \? PACKS\.includes\(p\.color\) : !PACKS\.includes\(p\.color\)/,
-    'the PDF path must apply the pack filter client-side like the image filter');
-  assert.match(body[0], /!all\.some\(p => p\.color != null\)[\s\S]{0,200}?Toast\.warning/,
-    'if the export rows carry no color at all, filtering would classify everything as a single — warn instead');
-  assert.match(body[0], /_packFilter\)\s*filterParts\.push\(/,
+test('PDF and CSV share ONE filtered fetch, and neither re-filters by colour', () => {
+  const pdf = PRODUCTS.match(/async function\s+exportProductsPDF\s*\([\s\S]+?\n\}/);
+  assert.match(pdf[0], /fetchFilteredProductsForExport\(\)/);
+  const fetchAll = PRODUCTS.match(/async function\s+fetchFilteredProductsForExport\s*\([\s\S]+?\n\}/);
+  assert.match(fetchAll[0], /backendProductFilters\(\)/, 'the export must use the list\'s builder');
+  assert.ok(!/PACKS\.includes\(p\.color\)/.test(PRODUCTS),
+    'a client-side colour re-filter over server-filtered rows drops the 32 hue-coloured packs');
+  assert.match(pdf[0], /_packFilter\)\s*filterParts\.push\(/,
     'the PDF filter-summary line must mention the active pack filter');
+});
+
+test('the CSV cell escaper defuses formula injection and keeps negatives', async () => {
+  const fn = PRODUCTS.match(/function csvCell\(v\) \{[\s\S]+?\n\}/);
+  assert.ok(fn, 'csvCell must exist');
+  // eslint-disable-next-line no-new-func
+  const csvCell = new Function(`${fn[0]}; return csvCell;`)();
+  assert.equal(csvCell('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
+  assert.equal(csvCell('@SUM(A1)'), "'@SUM(A1)");
+  assert.equal(csvCell('-12.5'), '-12.5', 'a negative number is data, not a formula');
+  assert.equal(csvCell('a,b'), '"a,b"');
+  assert.equal(csvCell(null), '');
+  assert.equal(csvCell(0), '0', 'a real zero stays a zero');
 });

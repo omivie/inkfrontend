@@ -1022,10 +1022,36 @@ const Cart = {
      * @param {Array} parsedItems - the server's items, pending removals already subtracted.
      * @returns {boolean}
      */
-    _serverEmptyButWeHoldLines(parsedItems) {
-        return Array.isArray(parsedItems)
+    _serverEmptyButWeHoldLines(parsedItems, summary) {
+        if (!(Array.isArray(parsedItems)
             && parsedItems.length === 0
-            && this._filterPendingRemovals(this.items).length > 0;
+            && this._filterPendingRemovals(this.items).length > 0)) return false;
+        // ERR-286: the server now SAYS why a list is empty. `items` is filtered
+        // to active products, so rows the server still holds whose products
+        // were all deactivated come back as `items: []` — and that is a real,
+        // explainable empty, not a lost session. Adopt it (the caller's
+        // _announceDroppedInactive tells the shopper). Only a positive count
+        // counts: an ABSENT field is the pre-deploy shape and keeps the guard,
+        // and `rows_on_file: 0` beside local lines is the ERR-259 case itself —
+        // a server that has lost the lines, which the guard exists for.
+        const dropped = summary && Number(summary.rows_dropped_inactive);
+        if (Number.isFinite(dropped) && dropped > 0) return false;
+        return true;
+    },
+
+    /**
+     * Tell the shopper, once per page, that lines were dropped because their
+     * products are no longer sold (ERR-286). Without this, adopting the
+     * server's list makes lines vanish with no word — "my cart emptied itself"
+     * again, just for a better reason.
+     */
+    _announceDroppedInactive(summary) {
+        const n = summary && Number(summary.rows_dropped_inactive);
+        if (!Number.isFinite(n) || n <= 0 || this._announcedDroppedInactive === n) return;
+        this._announcedDroppedInactive = n;
+        if (typeof showToast === 'function') {
+            showToast(`${n} item${n === 1 ? ' in your cart is' : 's in your cart are'} no longer available and ${n === 1 ? 'was' : 'were'} removed.`, 'info');
+        }
     },
 
     /**
@@ -1507,7 +1533,24 @@ const Cart = {
                 // enough quantity rung beats it and the line is then a volume
                 // line despite the contract existing.
                 contract_price: item.contract_price != null ? item.contract_price : null,
-                price_source: item.price_source || null
+                price_source: item.price_source || null,
+                // PER-LINE VOLUME FIGURES (backend 2026-09-21, ERR-286). Same
+                // whitelist trap as the ladder above. The server prices the line
+                // for the quantity it HOLDS, so the quantity is stamped beside
+                // the figures: lineTotalFigures() uses them only while the line
+                // still shows that quantity, never across an optimistic change.
+                // `line_total` keeps its pre-discount meaning server-side; the
+                // after-discount figure is its own field.
+                volume_figures: (item.line_total_after_discount != null && Number.isFinite(Number(item.line_total_after_discount)))
+                    ? {
+                        quantity: item.quantity,
+                        line_total: Number(item.line_total),
+                        line_total_after_discount: Number(item.line_total_after_discount),
+                        unit_price: item.volume_unit_price != null ? Number(item.volume_unit_price) : null,
+                        line_savings: item.volume_line_savings != null ? Number(item.volume_line_savings) : 0,
+                        next_break: Object.prototype.hasOwnProperty.call(item, 'volume_next_break') ? item.volume_next_break : undefined
+                    }
+                    : null
             };
             parsed.key = self.cartItemKey(parsed);
             // printer_slug is a CLIENT-SIDE annotation — the server cart has no
@@ -1768,7 +1811,8 @@ const Cart = {
                 // Guard: don't clear local items if server unexpectedly returns empty.
                 // The predicate is shared with loadFromServer (ERR-259); only the
                 // continuation below belongs to this call site.
-                if (this._serverEmptyButWeHoldLines(parsed.items)) {
+                this._announceDroppedInactive(parsed.summary);
+                if (this._serverEmptyButWeHoldLines(parsed.items, parsed.summary)) {
                     DebugLog.warn('Server returned empty cart — keeping local items as fallback');
                     this._losePricing(PRICING.SERVER_EMPTY);
                     this.updateUI();
@@ -1890,7 +1934,8 @@ const Cart = {
                  * episode (PRICING_REVALIDATE_DELAYS) and only _adoptServerSummary
                  * resets it, which this branch deliberately does not reach.
                  */
-                if (this._serverEmptyButWeHoldLines(parsed.items)) {
+                this._announceDroppedInactive(parsed.summary);
+                if (this._serverEmptyButWeHoldLines(parsed.items, parsed.summary)) {
                     DebugLog.warn('Server returned empty cart in loadFromServer — keeping local items as fallback');
                     this._losePricing(PRICING.SERVER_EMPTY);
                     this.updateUI();
@@ -2652,10 +2697,11 @@ const Cart = {
             increaseBtn.disabled = item.quantity >= 100;
         }
 
-        // Update line total
+        // Update line total — the server's own figure when it still describes
+        // this quantity, the retail arithmetic while a change is in flight.
         const totalEl = cartItemEl.querySelector('.cart-item__total');
         if (totalEl) {
-            totalEl.textContent = formatPrice(item.price * item.quantity);
+            totalEl.innerHTML = this.lineTotalHtml(item);
         }
 
         // Update mobile price line
@@ -2688,10 +2734,49 @@ const Cart = {
      *
      * @param {Element} container
      */
+    /**
+     * The line's figures from the server, when they still describe it: the
+     * server priced the quantity it holds, so an optimistic change makes them
+     * stale until the next response (ERR-286). null = use the retail arithmetic.
+     */
+    lineTotalFigures: function(item) {
+        const f = item && item.volume_figures;
+        if (!f || f.quantity !== item.quantity || !Number.isFinite(f.line_total_after_discount)) return null;
+        return f;
+    },
+
+    /**
+     * The line total cell. With a volume saving the server's after-discount
+     * total is shown, and the pre-discount one struck through beside it — the
+     * summary's subtotal is pre-discount with its own "You Save" row, so both
+     * numbers stay on screen and the lines still add up to the subtotal.
+     * FE never computes the discounted figure (it is the server's).
+     */
+    lineTotalHtml: function(item) {
+        const f = this.lineTotalFigures(item);
+        if (!f || !(f.line_savings > 0)) {
+            return formatPrice(f ? f.line_total_after_discount : item.price * item.quantity);
+        }
+        const before = Number.isFinite(f.line_total) ? f.line_total : item.price * item.quantity;
+        return '<s class="cart-item__total-was">' + formatPrice(before) + '</s> ' +
+            '<span class="cart-item__total-now">' + formatPrice(f.line_total_after_discount) + '</span>' +
+            (Number.isFinite(f.unit_price)
+                ? '<span class="cart-item__total-unit">' + formatPrice(f.unit_price) + ' each · volume price</span>'
+                : '');
+    },
+
     decorateVolumeNudges: function(container) {
         if (typeof Business === 'undefined' || !container) return;
         if (Array.isArray(this.items)) Business.ingest(this.items);
-        Business.decorateCartLines(container, this.MAX_QUANTITY).catch(function(e) {
+        // The server's next break per line, keyed by SKU, with the quantity it
+        // was computed for (ERR-286). Business uses it only while the line
+        // still shows that quantity.
+        const serverNext = new Map();
+        (this.items || []).forEach(function(it) {
+            const f = it && it.volume_figures;
+            if (f && f.next_break !== undefined && it.sku) serverNext.set(it.sku, { quantity: f.quantity, next: f.next_break });
+        });
+        Business.decorateCartLines(container, this.MAX_QUANTITY, serverNext).catch(function(e) {
             DebugLog.warn('[Cart] volume nudges failed:', e && e.message);
         });
     },
@@ -3227,11 +3312,12 @@ const Cart = {
          * them into cart_analytics_events, which is the dataset that can audit
          * this one precisely because the two do not share a gate.
          *
-         * `brand` and `product_type` come from the CALLER's product, not the
-         * server payload, which carries neither. Both may be absent - on 3 of
-         * the 9 add-to-cart surfaces there is no brand, and product_type is
-         * supplied only by the PDP - and absent means the dimension is omitted,
-         * never inferred from a name. */
+         * `brand` comes from the CALLER's product - on 3 of the 9 add-to-cart
+         * surfaces there is none, and absent means the dimension is omitted,
+         * never inferred from a name. `product_type` (and `pack_type`) are read
+         * from the SERVER payload first: since 2026-09-21 the add response
+         * carries both on `data.product` (ERR-286), so the caller's
+         * product_type below is only the fallback for a payload without it. */
         if (serverConfirmed && typeof Ga4Ecommerce !== 'undefined') {
             const ga4Add = Ga4Ecommerce.addToCart(serverConfirmed, {
                 priorQuantity: priorQty,
@@ -4111,7 +4197,7 @@ const Cart = {
                             </div>\
                         </div>\
                         <div class="cart-item__total">\
-                            ' + formatPrice(item.price * item.quantity) + '\
+                            ' + self.lineTotalHtml(item) + '\
                         </div>\
                         <button type="button" class="cart-item__remove" aria-label="Remove ' + escapedName + '">\
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\

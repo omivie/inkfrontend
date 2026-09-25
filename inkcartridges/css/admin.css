@@ -4506,7 +4506,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 /* ---- KPI cards ---- */
 .gia-kpis {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 4 cards, or 5 when the backend sends the missing-image split (ERR-286). */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
   margin-bottom: 4px;
 }
@@ -4698,6 +4699,18 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 }
 .gia-status--clean    { background: var(--success); color: #03241a; }
 .gia-status--replaced { background: var(--cyan); color: #fff; }
+.gia-status--hold     { background: var(--yellow); color: #3a2a00; }
+
+/* ERR-286: the 2026-09-21 watermark hold shares the archive column with old
+   casualties — the page says so above the grid, beside the split that proves it. */
+.gia-hold-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  font-size: 13px; line-height: 1.45;
+  border-left: 3px solid var(--yellow);
+  background: var(--surface-hover);
+  border-radius: var(--radius-xs);
+}
 
 .gia-card__meta {
   padding: 10px 12px 8px;
@@ -4758,6 +4771,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 }
 .gia-icon-btn:hover { background: var(--surface); color: var(--text); }
 .gia-icon-btn--danger:hover { background: var(--danger-dim); color: var(--danger); }
+.gia-icon-btn--disabled { opacity: 0.35; cursor: not-allowed; }
+.gia-icon-btn--disabled:hover { background: transparent; color: inherit; }
 
 /* ---- Pagination ---- */
 .gia-pagination {
@@ -5196,6 +5211,11 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-paid input:focus-visible + .inv-paid__slider { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .admin[data-theme="light"] .inv-paid input:focus-visible + .inv-paid__slider { outline-color: #0e7490; }
 .inv-paid__void { color: var(--text-muted); font-size: 12px; }
+/* ERR-286: Portal column — which business customer's portal an invoice is on. */
+.inv-portal { font-size: 12px; }
+.inv-portal--none, .inv-portal__unknown { color: var(--text-muted); }
+.inv-portal-note { font-size: 13px; margin: 0 0 var(--spacing-2); color: var(--text-muted); }
+.inv-portal-note--warn { color: var(--danger); }
 
 /* "Sent" column — has this invoice's PDF been emailed to the customer?
    Both states are <button>s (they open the send-history modal), so they need the
@@ -6755,6 +6775,22 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .admin-sp-import { margin-top: 24px; padding: 12px 16px; }
 .admin-sp-import > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .admin-sp-import__body { padding-top: 10px; max-width: 84ch; }
+/* ERR-286: Ask 4 (mappings) and Ask 5 (upload + import) are live. */
+.admin-sp-import__slot { font-size: 13px; }
+.admin-sp-import__steps { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 8px 0; }
+.admin-sp-import__step { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.admin-sp-import__status { font-size: 13px; min-height: 1.4em; }
+.admin-sp-import__status--ok { color: var(--success); }
+.admin-sp-import__status--error { color: var(--danger); }
+.admin-loading__spinner--inline { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin: 0 4px 0 0; }
+.admin-sp-mappings { margin-top: 24px; padding: 12px 16px; }
+.admin-sp-mappings > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.admin-sp-mappings__intro { font-size: 13px; margin: 10px 0 8px; max-width: 84ch; }
+.admin-sp-mappings__search { max-width: 320px; margin-bottom: 8px; }
+.admin-sp-mappings__table { width: 100%; font-size: 13px; }
+.admin-sp-mappings__status { font-size: 13px; padding: 8px 0; }
+.admin-sp-mappings__status--error { color: var(--danger); }
+.admin-sp-mappings__pager { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; }
 .admin-sp-import__body p { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); margin: 0 0 10px; }
 .admin-sp-import__blocked {
   padding: 10px 12px; border-radius: var(--radius);

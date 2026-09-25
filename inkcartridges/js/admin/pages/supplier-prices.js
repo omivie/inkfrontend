@@ -36,16 +36,25 @@
  * (438), 2 for the review queue (345). A short set is reported as short — see
  * `renderIncompleteNote`, and `complete:false` from AdminAPI.supplierOffers.
  *
- * ── LOADING A NEW PRICE LIST IS NOT POSSIBLE FROM HERE ──────────────────────
+ * ── LOADING A NEW PRICE LIST (Ask 5, live 2026-09-21 — ERR-286) ──────────────
  *
- * The handoff's §8 asks for an upload button and an import trigger. Measured
- * 2026-08-31 with a live super_admin bearer token, BOTH answer
- * 403 `Cron endpoints require CRON_SECRET in production`:
- *   POST /api/admin/feed-files/product-list      → 403
- *   POST /api/admin/import/supplier-price-list   → 403
- * They are cron-gated upstream of the handler, so a browser cannot reach them at
- * all. The panel says so in words rather than rendering two buttons that 403 the
- * first time the owner trusts them. See supplier-price-comparison-FE-response-aug2026.md.
+ * Until 2026-09-21 both steps answered 403 `Cron endpoints require CRON_SECRET
+ * in production` to a live owner token (measured 2026-08-31), so the panel said
+ * so and had no buttons. The backend then opened a narrower gate: super_admin
+ * may list the feed slots, upload to the `product-list` slot, and run the
+ * supplier-price-list importer — which writes supplier_offers and nothing else.
+ * The genuine/compatible catalogue importers stay secret-gated.
+ *
+ * Measured 2026-09-25: GET /api/admin/feed-files is 200 to an owner token (it
+ * was 403). The two POSTs were NOT exercised from here — one overwrites the
+ * stored price list, the other rewrites the offer table — so the panel reports
+ * whatever the server answers, by status, the first time the owner uses it.
+ *
+ * ── MANUAL MAPPINGS (Ask 4, live 2026-09-21) ───────────────────────────────
+ *
+ * `GET /api/admin/supplier-offers/mappings` lists every pin, so the Undo on the
+ * success toast is no longer the only chance: the Mappings panel can unpin any
+ * of them later.
  *
  * Pinned by tests/admin-supplier-prices-aug2026.test.js.
  */
@@ -655,9 +664,10 @@ function openMapModal(offerId) {
         </div>
 
         <div class="admin-sp-map__permanence">
-          <strong>${esc('This is permanent.')}</strong>
+          <strong>${esc('This is permanent until you unpin it.')}</strong>
           ${esc('The mapping applies straight away and is re-applied on every future import, so this line '
-            + 'never comes back to this queue. Mapped once, remembered forever.')}
+            + 'never comes back to this queue. Mapped once, remembered forever. To undo it later, use '
+            + 'Manual mappings below the table.')}
         </div>
       </div>`,
     footer: `
@@ -730,12 +740,8 @@ function openMapModal(offerId) {
 }
 
 /**
- * Success toast with an Undo.
- *
- * This is the ONLY moment the mapping id is knowable: there is no endpoint that
- * lists existing mappings (measured — /map, /mappings, /maps, /map/list are all
- * 404), so once this toast goes, the pin can only be removed by the backend. The
- * toast says that rather than implying an undo history the page cannot load.
+ * Success toast with an Undo — the quick path. Since 2026-09-21 it is not the
+ * only one: the Mappings panel lists every pin and can remove any of them.
  */
 function toastWithUndo(message, mappingId) {
   const el = Toast.success(message, 12000);
@@ -745,7 +751,7 @@ function toastWithUndo(message, mappingId) {
   btn.type = 'button';
   btn.textContent = 'Undo';
   btn.title = 'Remove the pin and let automatic matching decide again. '
-    + 'This is the only chance — there is no list of existing mappings to undo from later.';
+    + 'You can also remove it later from the Manual mappings panel below the table.';
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     btn.textContent = 'Undoing…';
@@ -753,6 +759,7 @@ function toastWithUndo(message, mappingId) {
       await AdminAPI.supplierOffers.unmap(mappingId);
       Toast.info('Mapping removed. Automatic matching decides this line again.');
       await refreshAll();
+      if (_mapLoaded) loadMappings();
     } catch (e) {
       Toast.error(e.message || 'Could not undo that mapping.');
     }
@@ -765,6 +772,197 @@ async function refreshAll() {
   // product gains a supplier. Refetching one would leave the other lying.
   await loadReview();
   if (_tab !== 'review') await loadCompare();
+  if (_mapLoaded) loadMappings();
+}
+
+// ── Manual mappings (Ask 4) ────────────────────────────────────────────────
+
+let _mapPage = 1;
+let _mapSearch = '';
+let _mapLoaded = false;
+let _mapGen = 0;
+const MAP_LIMIT = 50;
+
+async function loadMappings() {
+  const host = _container && _container.querySelector('#sp-mappings-body');
+  if (!host) return;
+  _mapLoaded = true;
+  const gen = ++_mapGen;
+  host.innerHTML = '<div class="admin-sp-mappings__status">Loading mappings…</div>';
+  let res;
+  try {
+    res = await AdminAPI.supplierOffers.mappings({ page: _mapPage, limit: MAP_LIMIT, search: _mapSearch });
+  } catch (e) {
+    if (gen !== _mapGen || !_container) return;
+    // A failed read must not look like "no mappings".
+    host.innerHTML = `<div class="admin-sp-mappings__status admin-sp-mappings__status--error">
+      Could not load the mappings — ${esc(e.message || 'request failed')}. This is a failed read, not an empty list.</div>`;
+    return;
+  }
+  if (gen !== _mapGen || !_container) return;
+  const { rows, meta } = res;
+  const total = meta && Number.isFinite(Number(meta.total)) ? Number(meta.total) : null;
+  const count = _container.querySelector('#sp-mappings-count');
+  if (count) count.textContent = total === null ? '' : `(${total})`;
+  if (!rows.length) {
+    host.innerHTML = `<div class="admin-sp-mappings__status">${_mapSearch
+      ? `No mappings match “${esc(_mapSearch)}”.`
+      : 'No manual mappings. Automatic matching decides every supplier line.'}</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <table class="admin-table admin-sp-mappings__table">
+      <thead><tr><th>Supplier line</th><th>Pinned to</th><th>Note</th><th>Pinned</th><th></th></tr></thead>
+      <tbody>${rows.map((m) => `
+        <tr>
+          <td><div>${esc(m.supplier_name || MISSING)}</div><div class="cell-mono">${esc(m.supplier_sku || MISSING)}</div></td>
+          <td>${m.product_resolved === false
+            ? `<span class="admin-badge admin-badge--failed" title="The pinned product no longer resolves — it was deleted or its SKU changed">product gone</span> <span class="cell-mono">${esc(m.product_sku || m.product_id || MISSING)}</span>`
+            : `<div class="cell-mono">${esc(m.product_sku || MISSING)}</div><div class="admin-text-muted">${esc(m.product_name || '')}</div>`}</td>
+          <td>${esc(m.note || '')}</td>
+          <td>${esc(m.created_at ? new Date(m.created_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }) : MISSING)}</td>
+          <td><button class="admin-btn admin-btn--ghost admin-btn--sm" data-sp-unmap="${esc(m.id)}"
+            data-sp-unmap-label="${esc(`${m.supplier_sku || ''} → ${m.product_sku || ''}`)}">Unpin</button></td>
+        </tr>`).join('')}</tbody>
+    </table>
+    ${total !== null && total > MAP_LIMIT ? `<div class="admin-sp-mappings__pager">
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-sp-map-page="prev" ${_mapPage <= 1 ? 'disabled' : ''}>Previous</button>
+      <span>Page ${_mapPage} of ${Math.ceil(total / MAP_LIMIT)}</span>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-sp-map-page="next" ${_mapPage * MAP_LIMIT >= total ? 'disabled' : ''}>Next</button>
+    </div>` : ''}`;
+}
+
+function bindMappingsPanel() {
+  const panel = _container.querySelector('#sp-mappings');
+  if (!panel) return;
+  panel.addEventListener('toggle', () => { if (panel.open && !_mapLoaded) loadMappings(); });
+  let t = null;
+  panel.querySelector('#sp-mappings-search')?.addEventListener('input', (e) => {
+    clearTimeout(t);
+    t = setTimeout(() => { _mapSearch = e.target.value.trim(); _mapPage = 1; loadMappings(); }, 300);
+  });
+  panel.addEventListener('click', (e) => {
+    const pager = e.target.closest('[data-sp-map-page]');
+    if (pager && !pager.disabled) {
+      _mapPage += pager.dataset.spMapPage === 'next' ? 1 : -1;
+      loadMappings();
+      return;
+    }
+    const btn = e.target.closest('[data-sp-unmap]');
+    if (!btn) return;
+    Modal.confirm({
+      title: 'Unpin this mapping?',
+      message: `${btn.dataset.spUnmapLabel}. Automatic matching decides this supplier line again on the next import — it may match a different product, or none.`,
+      confirmLabel: 'Unpin',
+      onConfirm: async () => {
+        try {
+          await AdminAPI.supplierOffers.unmap(btn.dataset.spUnmap);
+          Toast.info('Mapping removed. Automatic matching decides this line again.');
+          await refreshAll();
+        } catch (e2) {
+          Toast.error(e2.message || 'Could not remove that mapping.');
+        }
+      },
+    });
+  });
+}
+
+// ── Loading a new price list (Ask 5) ───────────────────────────────────────
+
+const PRICE_LIST_MAX_BYTES = 20 * 1024 * 1024;
+const PRICE_LIST_TYPES = /\.(xlsx|ods|csv|txt)$/i;
+
+function bytesLabel(n) {
+  if (!Number.isFinite(n)) return MISSING;
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+async function loadFeedSlot() {
+  const host = _container && _container.querySelector('#sp-import-slot');
+  if (!host) return;
+  host.textContent = 'Reading the stored file…';
+  try {
+    const files = await AdminAPI.supplierOffers.feedFiles();
+    if (!_container) return;
+    const slot = files.find((f) => f && f.feedType === 'product-list');
+    host.innerHTML = !slot
+      ? 'The server lists no <code>product-list</code> slot.'
+      : slot.exists
+        ? `Stored now: <strong>${esc(slot.filename || MISSING)}</strong> · ${esc(bytesLabel(Number(slot.size)))} · uploaded ${esc(slot.updated_at ? new Date(slot.updated_at).toLocaleString('en-NZ') : MISSING)}`
+        : 'No price list is stored yet.';
+  } catch (e) {
+    if (_container) host.textContent = `Could not read the stored file — ${e.message || 'request failed'}.`;
+  }
+}
+
+function bindImportPanel() {
+  const panel = _container.querySelector('#sp-import');
+  if (!panel) return;
+  const input = panel.querySelector('#sp-import-file');
+  const uploadBtn = panel.querySelector('#sp-import-upload');
+  const runBtn = panel.querySelector('#sp-import-run');
+  const status = panel.querySelector('#sp-import-status');
+  const say = (html, tone = '') => { status.className = `admin-sp-import__status${tone ? ` admin-sp-import__status--${tone}` : ''}`; status.innerHTML = html; };
+  let slotLoaded = false;
+  panel.addEventListener('toggle', () => { if (panel.open && !slotLoaded) { slotLoaded = true; loadFeedSlot(); } });
+
+  input.addEventListener('change', () => {
+    const f = input.files && input.files[0];
+    uploadBtn.disabled = true;
+    if (!f) { say(''); return; }
+    if (!PRICE_LIST_TYPES.test(f.name)) { say(`${esc(f.name)} is not a .xlsx, .ods, .csv or .txt file.`, 'error'); return; }
+    if (f.size > PRICE_LIST_MAX_BYTES) { say(`${esc(f.name)} is ${esc(bytesLabel(f.size))} — the limit is 20 MB.`, 'error'); return; }
+    uploadBtn.disabled = false;
+    say(`Ready to upload ${esc(f.name)} (${esc(bytesLabel(f.size))}). It replaces the stored file.`);
+  });
+
+  uploadBtn.addEventListener('click', async () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    uploadBtn.disabled = true;
+    say(`Uploading ${esc(f.name)}…`);
+    try {
+      await AdminAPI.supplierOffers.uploadPriceList(f);
+      say(`<strong>${esc(f.name)} is stored.</strong> Nothing on this page changes until you run the import.`, 'ok');
+      input.value = '';
+      loadFeedSlot();
+    } catch (e) {
+      uploadBtn.disabled = false;
+      say(`Upload failed${e.status ? ` (HTTP ${e.status})` : ''}: ${esc(e.message || 'request failed')}`, 'error');
+    }
+  });
+
+  runBtn.addEventListener('click', () => {
+    Modal.confirm({
+      title: 'Run the price-list import?',
+      message: 'This parses the stored price list and rewrites every supplier offer from it. It can take a minute. Manual mappings are re-applied.',
+      confirmLabel: 'Run import',
+      confirmClass: 'admin-btn--primary',
+      onConfirm: async () => {
+        runBtn.disabled = true;
+        say('<span class="admin-loading__spinner admin-loading__spinner--inline"></span> Importing — this can take a minute. Keep this page open.');
+        try {
+          const r = await AdminAPI.supplierOffers.importPriceList();
+          const matched = Number(r && r.offers_matched);
+          const total = Number(r && r.offers_total);
+          const secs = Number(r && r.duration_ms) / 1000;
+          say(Number.isFinite(matched) && Number.isFinite(total)
+            ? `<strong>Import finished:</strong> ${matched.toLocaleString('en-NZ')} of ${total.toLocaleString('en-NZ')} lines matched a product${Number.isFinite(secs) ? ` in ${secs.toFixed(0)}s` : ''}. The rest are in the review tab.`
+            // Success without the counts is still success — but say the counts are missing.
+            : '<strong>Import finished.</strong> The server did not report how many lines matched.', 'ok');
+          await refreshAll();
+        } catch (e) {
+          const why = e.status === 409 ? 'an import is already running — wait for it to finish, then reload'
+            : e.status === 404 ? 'no price list is stored — upload one first'
+            : e.status === 403 ? 'the server refused this account (the gate may be cron-only again)'
+            : (e.message || 'request failed');
+          say(`Import did not run${e.status ? ` (HTTP ${e.status})` : ''}: ${esc(why)}.`, 'error');
+        } finally {
+          runBtn.disabled = false;
+        }
+      },
+    });
+  });
 }
 
 // ── The per-product drawer ─────────────────────────────────────────────────
@@ -1036,20 +1234,32 @@ function renderShell() {
 
     <div id="sp-table"></div>
 
-    <details class="admin-card admin-sp-import">
+    <details class="admin-card admin-sp-mappings" id="sp-mappings">
+      <summary>Manual mappings <span id="sp-mappings-count" class="admin-text-muted"></span></summary>
+      <div class="admin-sp-mappings__intro">${esc('Supplier lines pinned to a product by hand. A pin is re-applied on '
+        + 'every import. Unpin one to let automatic matching decide that line again.')}</div>
+      <div class="admin-search admin-sp-mappings__search">
+        <input type="search" id="sp-mappings-search" placeholder="Search supplier SKU or product…">
+      </div>
+      <div id="sp-mappings-body"></div>
+    </details>
+
+    <details class="admin-card admin-sp-import" id="sp-import">
       <summary>Loading a new price list</summary>
       <div class="admin-sp-import__body">
         <p>${esc('Two steps put a new supplier price list into this page: the file is stored, then an '
           + 'import parses it and matches every line to a product. Until the second step runs, an uploaded '
           + 'file changes nothing here.')}</p>
-        <p class="admin-sp-import__blocked"><strong>${esc('Neither step can be run from this page.')}</strong>
-          ${esc('Measured 2026-08-31 with a live owner sign-in, both endpoints answer 403 '
-            + '"Cron endpoints require CRON_SECRET in production" — POST /api/admin/feed-files/product-list '
-            + 'and POST /api/admin/import/supplier-price-list. The gate sits above the handler, so no admin '
-            + 'token reaches them. Buttons here would fail the first time you trusted them, so there are none.')}</p>
-        <p>${esc('Send the file to the backend and ask for the import to be run. When it is, the supplier '
-          + 'dates at the top of this page are what will change — there is no import-history endpoint to '
-          + 'read, so those dates are the record.')}</p>
+        <p class="admin-sp-import__slot" id="sp-import-slot"></p>
+        <div class="admin-sp-import__steps">
+          <label class="admin-sp-import__step"><span>1. Choose the file (.xlsx, .ods, .csv or .txt, up to 20 MB)</span>
+            <input type="file" id="sp-import-file" accept=".xlsx,.ods,.csv,.txt"></label>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="sp-import-upload" disabled>Upload</button>
+          <button class="admin-btn admin-btn--primary admin-btn--sm" id="sp-import-run">2. Run import</button>
+        </div>
+        <div class="admin-sp-import__status" id="sp-import-status" role="status" aria-live="polite"></div>
+        <p class="admin-text-muted">${esc('There is no import-history endpoint yet, so the supplier dates at the '
+          + 'top of this page are the record of when a list last landed.')}</p>
       </div>
     </details>`;
 
@@ -1065,6 +1275,8 @@ function renderShell() {
 
   renderFilters();
   renderBlurb();
+  bindMappingsPanel();
+  bindImportPanel();
 }
 
 function renderBlurb() {
@@ -1174,6 +1386,7 @@ export default {
 
   async init(container) {
     resetState();
+    _mapPage = 1; _mapSearch = ''; _mapLoaded = false; _mapGen++;
     _container = container;
     _alive = true;
 

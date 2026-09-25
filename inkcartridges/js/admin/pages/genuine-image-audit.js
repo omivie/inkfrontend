@@ -38,6 +38,7 @@ let _state = {
   excludeRibbons: true,
   missingOnly: false,
   externalOnly: false,
+  recoverableOnly: false,
   verdict: '',
   status: '',
   brand: '',
@@ -93,8 +94,13 @@ function humanReason(token) {
     // that rendering: humanReason's fallback is invertible for lowercase snake_case.
     filename_no_model_tokens: 'Filename does not mention the model',
     no_image_url: 'No image on the product',
+    // The two tokens that mean the ARCHIVED file itself is dead (ERR-286) — a
+    // restore would put a broken image live. See restoreEligibility().
+    image_object_missing: 'Archived image file is missing from storage',
   };
   if (map[token]) return map[token];
+  const http = /^http_status=(\d{3})$/.exec(token);
+  if (http) return `Image URL answered HTTP ${http[1]}`;
   return token.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
@@ -118,6 +124,33 @@ function imageState(p) {
     isLegacy: !live && !!legacy,
     hasAny: !!(live || legacy),
   };
+}
+
+/**
+ * Whether — and how — the archived image may be put back. ONE answer for the
+ * card, the drawer and the confirm copy (ERR-286).
+ *
+ * `legacy_image_url` holds two populations that look identical in SQL
+ * (backend note, 2026-09-21): old quarantine casualties worth restoring, and a
+ * deliberate 730-row WATERMARK quarantine from 2026-09-21 01:57Z awaiting
+ * review by eye — rows the backend marks `image_audit_status: 'watermark_hold'`.
+ * A third kind of row carries an archive whose FILE is dead
+ * (`image_object_missing` / `http_status=400`, 42 rows on 09-21): restoring it
+ * would put a broken image live, so it is not offered at all.
+ *
+ *   none            nothing archived
+ *   dead_archive    archived URL is itself broken — no restore
+ *   watermark_hold  restorable only after an explicit "I checked it" confirm
+ *   overwrite       live AND archived — needs `overwrite_live` (a /replace)
+ *   recoverable     the ordinary case
+ */
+function restoreEligibility(p) {
+  if (!p || !p.legacy_image_url_resolved) return 'none';
+  const reasons = Array.isArray(p.image_vision_reasons) ? p.image_vision_reasons : [];
+  if (reasons.some((r) => r === 'image_object_missing' || /^http_status=4\d\d$/.test(String(r)))) return 'dead_archive';
+  if (p.image_audit_status === 'watermark_hold') return 'watermark_hold';
+  if (p.image_url_resolved) return 'overwrite';
+  return 'recoverable';
 }
 
 function openImageLightbox(url, alt = '') {
@@ -183,6 +216,10 @@ function buildToolbar() {
         <input type="checkbox" id="gia-missing" ${_state.missingOnly ? 'checked' : ''}>
         <span>Missing image only</span>
       </label>
+      <label class="gia-pill${_state.recoverableOnly ? ' gia-pill--on' : ''}" title="Archived image present and still pending review. Excludes the 2026-09-21 watermark hold, which needs checking by eye first.">
+        <input type="checkbox" id="gia-recoverable" ${_state.recoverableOnly ? 'checked' : ''}>
+        <span>Recoverable only</span>
+      </label>
       <label class="gia-pill${_state.excludeRibbons ? ' gia-pill--on' : ''}">
         <input type="checkbox" id="gia-ribbons" ${_state.excludeRibbons ? 'checked' : ''}>
         <span>Exclude ribbons</span>
@@ -201,6 +238,17 @@ function buildKpis() {
   const total = s.total_with_image ?? 0;
   const missing = s.total_missing_image ?? 0;
   const pending = s.pending_review ?? 0;
+  // The split behind "missing" (backend 2026-09-21). ABSENT is not zero: an
+  // older backend that does not send it gets no sub-line, never "0 recoverable".
+  const split = s.missing_image_breakdown;
+  const hasSplit = split && typeof split === 'object';
+  const missingSub = hasSplit
+    ? [
+      Number.isFinite(split.recoverable) ? `${split.recoverable.toLocaleString('en-NZ')} recoverable` : null,
+      Number.isFinite(split.watermark_hold) ? `${split.watermark_hold.toLocaleString('en-NZ')} watermark hold` : null,
+      Number.isFinite(split.never_had_one) ? `${split.never_had_one.toLocaleString('en-NZ')} never had one` : null,
+    ].filter(Boolean).join(' · ')
+    : '';
   const card = (label, value, tone, sub = '') => `
     <button class="gia-kpi gia-kpi--${tone}" data-kpi="${label.toLowerCase().replace(/\s+/g, '-')}">
       <span class="gia-kpi__value">${esc(Number(value).toLocaleString('en-NZ'))}</span>
@@ -214,7 +262,15 @@ function buildKpis() {
       ${card('Pending review', pending, 'warn')}
       ${card('Bad', bad, 'bad', `${v.watermarked || 0} watermarked · ${v.wrong_product || 0} wrong`)}
       ${card('Verified', verified, 'good', `${v.verified_box || 0} box · ${v.verified_product || 0} product`)}
+      ${hasSplit ? card('Missing image', missing, 'warn', missingSub) : ''}
     </div>
+    ${hasSplit && split.watermark_hold > 0 ? `
+    <div class="gia-hold-note" role="note">
+      <strong>Restore one at a time.</strong> ${esc(split.watermark_hold.toLocaleString('en-NZ'))} archived images
+      are a deliberate <em>watermark hold</em> (2026-09-21): some carry a supplier or stock-library watermark
+      and Vision is out of credit to tell which. They share the archive column with old quarantine casualties,
+      so a sweep would put watermarked images back on the storefront. There is no bulk restore here on purpose.
+    </div>` : ''}
   `;
 }
 
@@ -287,6 +343,7 @@ function renderCard(p) {
           ${badge}
           ${status === 'replaced' ? '<span class="gia-status gia-status--replaced">REPLACED</span>' : ''}
           ${status === 'checked_clean' ? '<span class="gia-status gia-status--clean">CLEAN</span>' : ''}
+          ${status === 'watermark_hold' ? '<span class="gia-status gia-status--hold" title="Quarantined 2026-09-21 pending a by-eye watermark check">WATERMARK HOLD</span>' : ''}
         </div>
       </div>
       <div class="gia-card__meta">
@@ -303,12 +360,27 @@ function renderCard(p) {
         <button class="gia-icon-btn" data-action="mark-verified" title="Mark verified">✓</button>
         <button class="gia-icon-btn" data-action="reverify" title="Re-verify with Vision">🔍</button>
         <button class="gia-icon-btn" data-action="refetch" title="Refetch image">↻</button>
-        ${img.isLegacy ? '<button class="gia-icon-btn" data-action="restore-legacy" title="Restore the archived image">⤺</button>' : ''}
+        ${restoreButtonHtml(p, 'card')}
         <button class="gia-icon-btn" data-action="search-google" title="Search Google">🌐</button>
         <button class="gia-icon-btn gia-icon-btn--danger" data-action="quarantine" title="Quarantine">✗</button>
       </div>
     </article>
   `;
+}
+
+/** The restore control for one row, or the reason there is none. */
+function restoreButtonHtml(p, where) {
+  const kind = restoreEligibility(p);
+  if (kind === 'none') return '';
+  if (kind === 'dead_archive') {
+    return where === 'card'
+      ? '<span class="gia-icon-btn gia-icon-btn--disabled" title="The archived image file is dead (missing from storage or HTTP 4xx) — restoring it would put a broken image live. Refetch instead." aria-disabled="true">⤺</span>'
+      : '<button class="admin-btn admin-btn--ghost" disabled title="The archived image file is dead — refetch instead">⤺ Archived image is dead</button>';
+  }
+  const label = kind === 'overwrite' ? 'Replace live with archived' : kind === 'watermark_hold' ? 'Restore (check watermark first)' : 'Restore archived image';
+  return where === 'card'
+    ? `<button class="gia-icon-btn" data-action="restore-legacy" title="${esc(label)}">⤺</button>`
+    : `<button class="admin-btn admin-btn--ghost" data-drawer-action="restore-legacy">⤺ ${esc(label)}</button>`;
 }
 
 function renderGrid() {
@@ -372,7 +444,13 @@ function buildFilters() {
     missing_only: _state.missingOnly,
     external_only: _state.externalOnly && !_state.missingOnly,
     verdict: _state.verdict,
-    status: _state.status,
+    // "Recoverable only" = archive present AND pending. `recoverable_only` alone
+    // also returns the 730-row watermark hold (834 = 104 + 730, measured
+    // 2026-09-25), and `status=watermark_hold` is not a value the list accepts
+    // (400) — so pending is how the hold is excluded. An explicit status choice
+    // wins.
+    recoverable_only: _state.recoverableOnly,
+    status: _state.status || (_state.recoverableOnly ? 'pending' : ''),
     brand: _state.brand,
     search: _state.search,
     sort: _state.sort,
@@ -449,6 +527,10 @@ function bindToolbarEvents() {
 
   c.querySelector('#gia-missing')?.addEventListener('change', (e) => {
     _state.missingOnly = !!e.target.checked;
+    reload({ resetPage: true });
+  });
+  c.querySelector('#gia-recoverable')?.addEventListener('change', (e) => {
+    _state.recoverableOnly = !!e.target.checked;
     reload({ resetPage: true });
   });
   c.querySelector('#gia-ribbons')?.addEventListener('change', (e) => {
@@ -649,19 +731,41 @@ function quarantineOne(product, cardEl) {
  * on a bad verdict takes the image off the live storefront. Without this the only
  * copy sits in `legacy_image_url`, which nothing but this page can see.
  *
- * The endpoint may not be deployed yet. `_imageAuditFetch` throws on any non-2xx,
- * so a missing route surfaces as a named toast rather than a button that looks
- * like it worked — a silent no-op here would be indistinguishable from success.
+ * Live since the backend's 2026-09-21 deploy. `_imageAuditFetch` throws on any
+ * non-2xx with `status` attached, so a refusal surfaces as a named toast rather
+ * than a button that looks like it worked. Per row only — see restoreEligibility().
  */
 function restoreLegacy(product, cardEl) {
+  const kind = restoreEligibility(product);
+  if (kind === 'none' || kind === 'dead_archive') {
+    Toast.error(kind === 'dead_archive'
+      ? `${product.sku}: the archived image file is dead — refetch instead.`
+      : `${product.sku} has no archived image to restore.`);
+    return;
+  }
+  const copy = {
+    recoverable: {
+      title: 'Restore archived image?',
+      message: `Put the archived image back on ${product.sku} as its live image. It becomes visible to customers immediately.`,
+      confirmLabel: 'Restore',
+    },
+    overwrite: {
+      title: 'Replace the live image?',
+      message: `${product.sku} already HAS a live image. Restoring the archive replaces it, and the current live image is not kept. Only do this if the archived one is the right product.`,
+      confirmLabel: 'Replace live image',
+    },
+    watermark_hold: {
+      title: 'Restore an image held for a watermark check?',
+      message: `${product.sku} was pulled on 2026-09-21 because some images in its batch carry a supplier or stock-library watermark. Open the image full size and check its corners and centre first. It goes live to customers immediately.`,
+      confirmLabel: 'I checked it — restore',
+    },
+  }[kind];
   Modal.confirm({
-    title: 'Restore archived image?',
-    message: `Put the archived image back on ${product.sku} as its live image. It becomes visible to customers immediately.`,
-    confirmLabel: 'Restore',
+    ...copy,
     onConfirm: async () => {
       cardEl.classList.add('gia-card--busy');
       try {
-        const result = await AdminAPI.restoreLegacyImage(product.id);
+        const result = await AdminAPI.restoreLegacyImage(product.id, { overwriteLive: kind === 'overwrite' });
         // Trust the server's echo of what it wrote; fall back to the archive URL we
         // already had rather than inventing one.
         product.image_url_resolved = result?.image_url_resolved
@@ -678,7 +782,16 @@ function restoreLegacy(product, cardEl) {
         cardEl.outerHTML = renderCard(product);
         loadStats();
       } catch (err) {
-        Toast.error(`Could not restore ${product.sku}: ${err.message || 'request failed'}`);
+        // 409 = the server found nothing archived (someone else restored it, or the
+        // row changed under us). The card is stale, not the operator — say so and
+        // re-read rather than show a generic failure.
+        if (err && err.status === 409) {
+          Toast.warning(`${product.sku}: nothing archived to restore any more — refreshing.`);
+          loadList();
+          loadStats();
+        } else {
+          Toast.error(`Could not restore ${product.sku}: ${err.message || 'request failed'}`);
+        }
       } finally {
         document.querySelector(`.gia-card[data-product-id="${CSS.escape(product.id)}"]`)?.classList.remove('gia-card--busy');
       }
@@ -789,8 +902,10 @@ function openProductDrawer(product) {
       ${legacy && !cur ? `
       <div class="gia-drawer__notice">
         The archived image above is <strong>not</strong> on the storefront — customers
-        see a placeholder for this product. Use <em>Restore archived image</em> to put
-        it back, or <em>Refetch</em> to source a new one.
+        see a placeholder for this product. ${{
+          dead_archive: 'Its file is <strong>dead</strong> (missing from storage or an HTTP error), so it cannot be restored — use <em>Refetch</em> to source a new one.',
+          watermark_hold: 'It is on the 2026-09-21 <strong>watermark hold</strong>: open it full size and check for a watermark before restoring, or <em>Refetch</em> to source a new one.',
+        }[restoreEligibility(product)] || 'Use <em>Restore archived image</em> to put it back, or <em>Refetch</em> to source a new one.'}
       </div>` : ''}
 
       <div class="gia-drawer__section">
@@ -820,7 +935,7 @@ function openProductDrawer(product) {
     <button class="admin-btn admin-btn--ghost" data-drawer-action="search-google">🌐 Google search</button>
     <button class="admin-btn admin-btn--ghost" data-drawer-action="reverify">🔍 Re-verify</button>
     <button class="admin-btn admin-btn--ghost" data-drawer-action="refetch">↻ Refetch</button>
-    ${legacy && !cur ? '<button class="admin-btn admin-btn--ghost" data-drawer-action="restore-legacy">⤺ Restore archived image</button>' : ''}
+    ${restoreButtonHtml(product, 'drawer')}
     <button class="admin-btn admin-btn--danger" data-drawer-action="quarantine">✗ Quarantine</button>
     <button class="admin-btn admin-btn--primary" data-drawer-action="mark-verified">✓ Mark verified</button>
   `;
@@ -1005,7 +1120,7 @@ export default {
     _state = {
       page: 1, search: '',
       source: 'genuine', pack: 'singles_only',
-      excludeRibbons: true, missingOnly: false, externalOnly: false,
+      excludeRibbons: true, missingOnly: false, externalOnly: false, recoverableOnly: false,
       verdict: '', status: '', brand: '', sort: 'name_asc',
     };
     _products = [];

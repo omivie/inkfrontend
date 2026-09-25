@@ -58,6 +58,7 @@ const SITE = path.join(ROOT, 'inkcartridges');
 const ADMIN = path.join(SITE, 'js', 'admin');
 const read = (p) => fs.readFileSync(p, 'utf8');
 
+const API_JS = fs.readFileSync(path.join(ROOT, 'inkcartridges/js/admin/api.js'), 'utf8');
 const pageJs = read(path.join(ADMIN, 'pages', 'supplier-prices.js'));
 const utilJs = read(path.join(ADMIN, 'utils', 'supplier-offers.js'));
 const apiJs = read(path.join(ADMIN, 'api.js'));
@@ -568,13 +569,16 @@ test('mapPayload builds exactly the documented body', () => {
     'an empty note must be omitted entirely, not sent as ""');
 });
 
-test('the map modal states that the mapping is permanent', () => {
+test('the map modal states that the mapping is permanent — and how to undo it', () => {
   const body = fnBody(pageJs, 'openMapModal');
   assert.match(body, /permanent/i,
-    'the mapping applies immediately and is re-applied on every future import. An operator '
-    + 'pinning a wrong SKU has no list to undo it from — they must know that before they click.');
+    'the mapping applies immediately and is re-applied on every future import — the operator '
+    + 'must know that before they click.');
   assert.match(body, /remembered forever/i,
     'and the upside must be stated too — it is the payoff for the manual effort (handoff §7)');
+  // Since 2026-09-21 a mappings list exists (Ask 4, ERR-286): "permanent" with
+  // no way back would now be FALSE, so the modal must name the way back.
+  assert.match(body, /Manual mappings/, 'the modal must say where a pin can be undone');
 });
 
 test('typing after choosing a product invalidates the choice', () => {
@@ -584,16 +588,23 @@ test('typing after choosing a product invalidates the choice', () => {
     + 'operator pins a SKU they did not mean — permanently');
 });
 
-test('undo is offered once, and the page never implies a mapping history it cannot load', () => {
+// Inverted 2026-09-25 (ERR-286). GET /api/admin/supplier-offers/mappings went
+// live on 2026-09-21 (Ask 4), so the toast's Undo is the quick path, no longer
+// the only one — and a page still saying "only chance" would now be the lie.
+test('undo is offered on the toast AND from a mappings list the page can load', () => {
   const body = fnBody(pageJs, 'toastWithUndo');
-  assert.match(body, /only chance|only moment/i,
-    'GET /map, /mappings, /maps and /map/list are ALL 404 (measured 2026-08-31), so the id '
-    + 'returned by the POST is the only one the front-end can ever hold');
   assert.match(body, /unmap\(mappingId\)/);
-  // Check the CODE, not the comments: the module header says in as many words that
-  // no endpoint lists existing mappings, and that sentence must not trip its own guard.
-  assert.doesNotMatch(codeOnly(pageJs), /mapping history|view mappings|all mappings/i,
-    'the UI must not offer a mappings list it has no endpoint for');
+  assert.doesNotMatch(body, /only chance/i, 'a mappings list exists now — "only chance" is false');
+  assert.match(body, /Manual mappings/, 'the tooltip must name the later way back');
+  const load = fnBody(pageJs, 'loadMappings');
+  assert.match(load, /AdminAPI\.supplierOffers\.mappings\(/);
+  assert.match(load, /failed read, not an empty list/,
+    'a failed mappings read must not render as "No manual mappings"');
+  assert.match(load, /product_resolved === false/,
+    'a pin whose product no longer resolves must be flagged, not rendered as a normal row');
+  const bind = fnBody(pageJs, 'bindMappingsPanel');
+  assert.match(bind, /Modal\.confirm\(/, 'an unpin is a durable write — confirm it');
+  assert.match(bind, /supplierOffers\.unmap\(/);
 });
 
 test('a successful map refreshes both tabs', () => {
@@ -695,18 +706,27 @@ test('the page states the scope limit — this is not the whole catalogue', () =
   assert.match(body, /Compatible products only/i);
 });
 
-test('the import panel offers no button, and says why', () => {
-  const body = fnBody(pageJs, 'renderShell');
-  assert.match(body, /CRON_SECRET/,
-    'POST /api/admin/feed-files/product-list AND POST /api/admin/import/supplier-price-list '
-    + 'both answer 403 "Cron endpoints require CRON_SECRET in production" to a live owner '
-    + 'token (measured 2026-08-31). Two buttons that 403 the first time the owner trusted '
-    + 'them would be worse than none.');
-  assert.match(body, /Neither step can be run from this page/i);
-  assert.doesNotMatch(body, /admin-dropzone|type="file"/,
-    'no upload control may be rendered while the route is cron-gated');
-  assert.doesNotMatch(pageJs, /feed-files\/product-list['"`]\s*,|triggerImport|uploadPriceList/,
-    'and no code path may call the gated endpoints');
+// Inverted 2026-09-25 (ERR-286). The backend opened a super_admin gate for the
+// product-list upload and the price-list import (Ask 5). GET /api/admin/feed-files
+// measured 200 to an owner token on 2026-09-25 (it was 403 CRON_SECRET). The two
+// POSTs were NOT exercised by us — each is a write — so the panel must report
+// every refusal by status rather than assume the gate stayed open.
+test('the import panel wires both steps to the handoff §8 contract', () => {
+  const shell = fnBody(pageJs, 'renderShell');
+  assert.match(shell, /type="file" id="sp-import-file" accept="\.xlsx,\.ods,\.csv,\.txt"/);
+  assert.doesNotMatch(shell, /Neither step can be run from this page/i, 'the stale "blocked" copy must go');
+  const bind = fnBody(pageJs, 'bindImportPanel');
+  assert.match(bind, /PRICE_LIST_MAX_BYTES/, 'the 20 MB limit is checked before the upload');
+  assert.match(bind, /Modal\.confirm\(/, 'the import rewrites every offer — confirm it');
+  for (const st of ['409', '404', '403']) {
+    assert.match(bind, new RegExp(`e\\.status === ${st}`), `HTTP ${st} must get its own sentence`);
+  }
+  assert.match(bind, /offers_matched/, 'the result counts are the point of the import (handoff §8)');
+  const upload = API_JS.slice(API_JS.indexOf('async uploadPriceList('), API_JS.indexOf('async importPriceList('));
+  assert.match(upload, /form\.append\('file', file\)/, 'multipart field `file`');
+  const run = API_JS.slice(API_JS.indexOf('async importPriceList('));
+  const runBody = run.slice(0, run.indexOf('\n    },'));
+  assert.doesNotMatch(runBody, /body:|Content-Type/i, 'the import takes NO body — sending one is a 400');
 });
 
 test('the freshness strip is built from the data and survives an empty result', () => {

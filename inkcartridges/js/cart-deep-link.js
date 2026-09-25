@@ -260,13 +260,33 @@ const CartDeepLink = {
         };
     },
 
-    /** Toast copy for the backend's ?reorder= status values. */
+    /**
+     * Toast copy for the backend's ?reorder= status values — all FIVE (backend,
+     * 2026-09-21, ERR-286):
+     *
+     *   /cart?reorder=loaded        added > 0
+     *   /cart?reorder=unavailable   nothing addable
+     *   /cart?reorder=invalid       bad/expired token, or no such order
+     *   /cart?reorder=error         an exception on the backend's side
+     *   /shop?reorder=guest         the order has no user_id — lands on /SHOP
+     *
+     * `error` was the one missing: a real failure showed the shopper nothing.
+     * `guest` was written but only ever ran on /cart, where it never arrives.
+     */
     REORDER_MESSAGES: {
         loaded: { text: 'Your previous order is ready to review.', type: 'success' },
         unavailable: { text: 'Some items from that order are no longer available.', type: 'warning' },
         invalid: { text: 'That reorder link has expired. Please add items from your order history.', type: 'error' },
+        error: { text: 'We couldn’t load that order just now. Please try the link again, or add the items from your order history.', type: 'error' },
         guest: { text: 'Sign in to reorder with one click next time.', type: 'info' },
     },
+
+    /**
+     * An UNKNOWN status is still a reorder that did not say it succeeded. It
+     * used to be dropped silently; now it gets a neutral message, and the raw
+     * value goes to DebugLog so a new backend status is visible, not invisible.
+     */
+    REORDER_UNKNOWN: { text: 'We couldn’t confirm that reorder. Please check your cart.', type: 'info' },
 
     /** `?reorder=<status>` — a toast, nothing else. Param already stripped. */
     handleReorderParam(status) {
@@ -275,16 +295,34 @@ const CartDeepLink = {
         // would toast `[Function: Object]` at the shopper. Caught by this
         // file's own §3 test, which is why it is spelled out rather than
         // trusted to the truthiness check below.
-        if (typeof status !== 'string'
-            || !Object.prototype.hasOwnProperty.call(this.REORDER_MESSAGES, status)) {
-            return null;
+        if (typeof status !== 'string' || !status) return null;
+        let entry = Object.prototype.hasOwnProperty.call(this.REORDER_MESSAGES, status)
+            ? this.REORDER_MESSAGES[status]
+            : null;
+        if (!entry) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('[CartDeepLink] unknown ?reorder= status:', status);
+            entry = this.REORDER_UNKNOWN;
         }
-        const entry = this.REORDER_MESSAGES[status];
-        if (!entry) return null;
         if (typeof showToast === 'function') {
             showToast(entry.text, entry.type, 6000);
         }
         return entry;
+    },
+
+    /**
+     * `/shop?reorder=guest` (ERR-286). The shop page gets the toast and the
+     * strip, and NOTHING else: `?add=` is a cart-page feature and is left
+     * exactly where it is on any other page.
+     * @returns {?object} the toast entry, or null when there was no `?reorder=`.
+     */
+    applyReorderParamFromUrl() {
+        if (typeof window === 'undefined' || !window.location) return null;
+        let url;
+        try { url = new URL(window.location.href); } catch (_) { return null; }
+        const status = url.searchParams.get('reorder');
+        if (!status) return null;
+        this._stripParams(['reorder']);
+        return this.handleReorderParam(status);
     },
 
     /**
@@ -372,11 +410,18 @@ if (typeof window !== 'undefined') {
     // A feature that depends on someone remembering to call it has gone missing
     // here before (ERR-214 — ten dead search boxes for four months), so the
     // script tag in html/cart.html is pinned by a test instead.
+    //
+    // Two pages, two jobs: /cart runs the whole deep link; /shop only answers
+    // `?reorder=guest`, which the backend sends there (ERR-286). Both script
+    // tags are pinned by tests/cart-add-deep-link-sep2026.test.js.
     document.addEventListener('DOMContentLoaded', () => {
-        if (!document.querySelector('.cart-page')) return;
-        CartDeepLink.applyAddParamFromUrl().catch((err) => {
-            if (typeof DebugLog !== 'undefined') DebugLog.warn('cart deep link failed:', err);
-        });
+        if (document.querySelector('.cart-page')) {
+            CartDeepLink.applyAddParamFromUrl().catch((err) => {
+                if (typeof DebugLog !== 'undefined') DebugLog.warn('cart deep link failed:', err);
+            });
+        } else if (document.querySelector('.shop-page')) {
+            CartDeepLink.applyReorderParamFromUrl();
+        }
     });
 }
 

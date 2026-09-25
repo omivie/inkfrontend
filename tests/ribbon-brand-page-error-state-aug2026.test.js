@@ -675,3 +675,21 @@ test('§9 the cost columns are still absent from everything this page asks for',
         }
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ERR-286 — PAST THE END is not EMPTY
+// /api/ribbons answers `meta.past_the_end: true` since 2026-09-21 (measured
+// 2026-09-25: ?limit=200&page=2 → ribbons: [], past_the_end: true).
+// ─────────────────────────────────────────────────────────────────────────────
+test('ERR-286: a past-the-end page recovers to page 1 instead of "no ribbons yet"', () => {
+    const body = stripComments(bodyOf(PAGE_SRC, 'async loadProducts(navVersion)', '    renderProducts(ribbons)'));
+    const pte = body.indexOf('pagination.past_the_end === true');
+    const copy = body.indexOf('Check back soon');
+    assert.ok(pte !== -1, 'the page must read the server\'s past_the_end flag');
+    assert.ok(pte < copy, 'and decide it BEFORE the empty-shelf sentence can be reached');
+    const branch = body.slice(pte, body.indexOf('return this.loadProducts(navVersion);', pte) + 40);
+    assert.match(branch, /history\.replaceState\(/, 'replace, not push — Back must not walk into the dead page');
+    assert.doesNotMatch(branch, /pushState|navigateToPage/);
+    assert.match(branch, /this\.state\.page > 1/, 'page 1 can never be past the end — no loop');
+    assert.match(branch, /showToast\(/, 'the shopper is told why the page changed');
+});

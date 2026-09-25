@@ -784,3 +784,23 @@ test('order-totals normalise accepts volume_discount in every live shape', () =>
     const once = OT.normalise({ volume_discount: obj });
     assert.equal(OT.normalise(once).b2bMeta.company_name, 'Acme Print Co');
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ERR-286 — the cart line's own volume_next_break (backend, 2026-09-21)
+// Measured on a live guest cart 2026-09-25: C02CMY ×1 carries
+// volume_next_break {min_quantity:3, business_price:25.7, savings_amount:0.79,
+// units_away:2} — savings_amount is PER UNIT (26.49 − 25.70).
+// ─────────────────────────────────────────────────────────────────────────────
+test('ERR-286: nudgeFromServer renders the server\'s next break in the ladder\'s own words', () => {
+    const B = loadBusiness();
+    const html = B.nudgeFromServer({ min_quantity: 3, business_price: 25.7, savings_amount: 0.79, units_away: 2 });
+    assert.match(html, /Add 2 more to reach 3\+/);
+    assert.match(html, /\$25\.70 each/);
+    assert.match(html, /saving \$2\.37 on this line/, 'per-unit 0.79 × the break quantity 3');
+    assert.equal(B.nudgeFromServer(null), '', 'null = the server says there is no further break');
+    assert.equal(B.nudgeFromServer(undefined), null, 'absent = unusable, the caller falls back to the ladder');
+    assert.equal(B.nudgeFromServer({ min_quantity: 3 }), null, 'a partial figure is unusable, not zero');
+    assert.equal(B.nudgeFromServer({ min_quantity: 30, business_price: 1, savings_amount: 1, units_away: 29 }, 20), '',
+        'a break beyond the line cap is not offered');
+});

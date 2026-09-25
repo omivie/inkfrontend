@@ -1245,6 +1245,42 @@ const Business = {
      */
     nudgeMarkup(ladder, quantity, maxQuantity) {
         const next = this.nextBreak(ladder, quantity);
+        return this._nudgeHtml(next, maxQuantity);
+    },
+
+    /**
+     * The same nudge, from the CART LINE's own `volume_next_break` (backend,
+     * 2026-09-21 — ERR-286): `{min_quantity, business_price, savings_amount,
+     * units_away}`, computed server-side for the quantity the server holds. The
+     * server's rung already respects floors, the strictly-decreasing ladder and
+     * any contract price, so where it speaks it is the authority. Per-unit
+     * `savings_amount` × the break quantity is the same multiplication
+     * nextBreak() does.
+     *
+     * Returns null when the figure is unusable (so the caller falls back to the
+     * ladder), and '' when the server says there is no further break.
+     *
+     * @param {object|null} serverNext  the line's `volume_next_break`
+     * @param {number} [maxQuantity]
+     * @returns {string|null}
+     */
+    nudgeFromServer(serverNext, maxQuantity) {
+        if (serverNext === null) return '';
+        if (!serverNext || typeof serverNext !== 'object') return null;
+        const min = Number(serverNext.min_quantity);
+        const away = Number(serverNext.units_away);
+        const price = Number(serverNext.business_price);
+        const perUnit = Number(serverNext.savings_amount);
+        if (![min, away, price, perUnit].every(Number.isFinite) || away < 1) return null;
+        return this._nudgeHtml({
+            rung: { minQuantity: min, businessPrice: price },
+            unitsAway: away,
+            quantityAtBreak: min,
+            lineSavingsAtBreak: Math.round(perUnit * min * 100) / 100
+        }, maxQuantity);
+    },
+
+    _nudgeHtml(next, maxQuantity) {
         if (!next) return '';
         if (Number.isFinite(maxQuantity) && next.quantityAtBreak > maxQuantity) return '';
 
@@ -1268,11 +1304,18 @@ const Business = {
      *
      * Reads `data-sku` / `data-quantity` off each `.cart-item`.
      *
+     * `serverNext` (optional): Map sku -> { quantity, next } from the cart
+     * lines' `volume_next_break`. Used only while the line's on-screen quantity
+     * still equals the quantity the server priced — during an optimistic
+     * quantity change the server figure is for the OLD quantity, and the ladder
+     * answers instead (ERR-286).
+     *
      * @param {Element|Document} [root=document]
      * @param {number} [maxQuantity]
+     * @param {Map} [serverNext]
      * @returns {Promise<number>} how many lines were decorated
      */
-    async decorateCartLines(root, maxQuantity) {
+    async decorateCartLines(root, maxQuantity, serverNext) {
         const scope = root || document;
         if (!scope || typeof scope.querySelectorAll !== 'function') return 0;
 
@@ -1292,9 +1335,17 @@ const Business = {
 
         let decorated = 0;
         for (const line of lines) {
-            const ladder = this.describeLadder(items.get(line.getAttribute('data-sku')));
-            if (!ladder) continue;
-            const html = this.nudgeMarkup(ladder, Number(line.getAttribute('data-quantity')), maxQuantity);
+            const sku = line.getAttribute('data-sku');
+            const qty = Number(line.getAttribute('data-quantity'));
+            const fromServer = serverNext && serverNext.get ? serverNext.get(sku) : null;
+            let html = (fromServer && fromServer.quantity === qty)
+                ? this.nudgeFromServer(fromServer.next, maxQuantity)
+                : null;
+            if (html === null) {
+                const ladder = this.describeLadder(items.get(sku));
+                if (!ladder) continue;
+                html = this.nudgeMarkup(ladder, qty, maxQuantity);
+            }
             if (!html) continue;
             const target = line.querySelector('.cart-item__details') || line;
             target.insertAdjacentHTML('beforeend', html);

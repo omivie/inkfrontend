@@ -3340,6 +3340,22 @@ body.filter-sort-open { overflow: hidden; }
     white-space: nowrap;
 }
 
+/* ERR-286: the server's per-line volume figures. The pre-discount total stays
+   visible (struck) so the lines still add up to the pre-discount subtotal. */
+.cart-item__total-was {
+    font-weight: var(--font-weight-normal, 400);
+    color: var(--color-text-muted);
+    font-size: 0.85em;
+}
+
+.cart-item__total-unit {
+    display: block;
+    font-weight: var(--font-weight-normal, 400);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs, 0.75rem);
+    white-space: normal;
+}
+
 .cart-item__remove {
     color: var(--color-text-muted);
     transition: color var(--transition-fast);

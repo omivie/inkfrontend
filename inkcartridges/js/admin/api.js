@@ -67,6 +67,29 @@ function adminApiWarn(label, e) {
 // house object error shape `{ ok:false, error:{ code, message, details } }`,
 // so pull `.error.message` (never let an object coerce to "[object Object]");
 // stay tolerant of a legacy string `error`. Mirrors the createCoupon pattern.
+/**
+ * The saved invoice, carrying the server's `warnings[]` (ERR-286).
+ *
+ * Since 2026-09-21 a create/update whose post-RPC link patch fails for an
+ * infrastructure reason answers 201 WITH `warnings[]`: the invoice EXISTS, but
+ * something about it (the business-account link) did not land. Returning only
+ * `data.invoice` dropped that on the floor and the page said "saved". The
+ * warnings ride as a NON-enumerable `_warnings`, so nothing that spreads or
+ * serialises the record (buildPayload, documentDrift) can mistake them for a
+ * document field.
+ */
+function withInvoiceWarnings(resp) {
+  const inv = resp?.data?.invoice ?? resp?.data ?? null;
+  const raw = resp?.data?.warnings ?? resp?.warnings;
+  const warnings = Array.isArray(raw)
+    ? raw.map((w) => (typeof w === 'string' ? w : (w?.message || w?.code || ''))).filter(Boolean)
+    : [];
+  if (inv && typeof inv === 'object') {
+    Object.defineProperty(inv, '_warnings', { value: warnings, enumerable: false, configurable: true });
+  }
+  return inv;
+}
+
 function invoiceError(resp, fallback) {
   const e = resp?.error;
   let msg = (e && typeof e === 'object' ? e.message : e) || fallback;
@@ -1609,6 +1632,14 @@ const AdminAPI = {
       if (filters.has_images !== undefined && filters.has_images !== '') params.set('has_images', filters.has_images);
       if (filters.stock_status) params.set('stock_status', filters.stock_status);
       if (filters.is_reviewed !== undefined && filters.is_reviewed !== '') params.set('is_reviewed', filters.is_reviewed);
+      // Added by the backend 2026-09-21 (BF-044a / ERR-286). The endpoint is
+      // strictQuery since that deploy: an unknown param or out-of-enum value is
+      // a 400, which this method turns into `null` — an empty table. Values are
+      // the backend's enums, not ours: pack_type = single|value_pack|multipack|packs.
+      if (filters.pack_type) params.set('pack_type', filters.pack_type);
+      if (filters.supplier) params.set('supplier', filters.supplier);
+      if (filters.product_type_group) params.set('product_type_group', filters.product_type_group);
+      if (filters.color) params.set('color', filters.color);
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
@@ -1942,7 +1973,13 @@ const AdminAPI = {
       return json;
     }
     const msg = json?.error?.message || json?.error || `HTTP ${resp.status}`;
-    throw new Error(msg);
+    // Carry the status and code: a caller cannot branch on a message string, and
+    // restore-legacy's 409 ("nothing archived") needs a different answer from a
+    // 500 (ERR-286).
+    const err = new Error(msg);
+    err.status = resp.status;
+    err.code = json?.error?.code || null;
+    throw err;
   },
 
   async getImageAuditStats({ source, pack, exclude_ribbons, brand } = {}) {
@@ -1976,6 +2013,7 @@ const AdminAPI = {
       if (filters.search) params.set('search', filters.search);
       if (filters.status) params.set('status', filters.status);
       if (filters.sort) params.set('sort', filters.sort);
+      if (filters.recoverable_only) params.set('recoverable_only', 'true');
       const resp = await window.API.get(`/api/admin/image-audit/list?${params}`);
       return resp?.data ?? null;
     } catch (e) {
@@ -2058,16 +2096,20 @@ const AdminAPI = {
    * path ever looks at the archive, so a quarantine taken on a bad Vision verdict
    * leaves the storefront showing a placeholder with no route back through the UI.
    *
-   * NOT YET DEPLOYED on the backend as of 2026-09-17 — see
-   * backend-docs/outbox/image-audit-restore-legacy-sep2026.md. Until it lands this
-   * throws (404 → "HTTP 404" via _imageAuditFetch), which is the point: the caller
-   * shows the failure. Do not soften this into a resolved promise, or the button
-   * becomes indistinguishable from one that worked.
+   * Live since the backend's 2026-09-21 deploy (our contract, to the letter):
+   *   409  nothing archived — the error carries `status: 409` so the page can
+   *        say so instead of printing a generic failure;
+   *   a row holding BOTH a live and an archived image is refused unless
+   *        `overwrite_live: true` is sent — that is a /replace, and the page asks
+   *        for it explicitly.
+   * `bulk-restore-legacy` exists server-side and is deliberately NOT wrapped
+   * here: the archive column mixes old casualties with the 730-row watermark
+   * hold, and the backend asked that nobody sweep it (ERR-286).
    */
-  async restoreLegacyImage(productId) {
+  async restoreLegacyImage(productId, { overwriteLive = false } = {}) {
     const json = await this._imageAuditFetch(
       `/api/admin/image-audit/${encodeURIComponent(productId)}/restore-legacy`,
-      { method: 'POST' }
+      overwriteLive ? { method: 'POST', body: { overwrite_live: true } } : { method: 'POST' }
     );
     if (json && json.ok === false) {
       throw new Error(json.error?.message || 'Restore failed');
@@ -2518,18 +2560,47 @@ const AdminAPI = {
    * it to backend-derived series_codes on the storefront. Returns the cleaned
    * list that was actually persisted.
    */
-  async setProductCodes(productId, codes) {
+  /**
+   * Replace a product's manual codes. `chipCategory` maps code → the /shop
+   * category whose chip the product VISITS (a drum in the toner TN155 chip),
+   * or null to put it back under its own type. `renamed` ({from, to}) carries
+   * a visited chip across a rename. Every other code keeps the chip_category
+   * it already had — this is a delete-then-insert, so anything not carried
+   * forward would be silently dropped.
+   */
+  async setProductCodes(productId, codes, { chipCategory = {}, renamed = null } = {}) {
     try {
       const sb = this._sb();
       if (!sb) throw new Error('Supabase not available');
       const clean = [...new Set((codes || [])
         .map(c => this.normalizeProductCode(c))
         .filter(c => c.length >= 2 && c.length <= 24))];
+
+      // Read what each code visits BEFORE deleting anything.
+      const visits = {};
+      const { data: prev, error: prevErr } = await sb.from('product_codes')
+        .select('code, chip_category').eq('product_id', productId).not('chip_category', 'is', null);
+      if (!prevErr && Array.isArray(prev)) prev.forEach(r => { visits[r.code] = r.chip_category; });
+      if (renamed && visits[renamed.from]) visits[renamed.to] = visits[renamed.from];
+      Object.assign(visits, chipCategory);
+      const wantsVisit = clean.some(code => visits[code]);
+      if (prevErr && wantsVisit) {
+        // The column isn't there (sql/product_codes.sql's Sep 2026 block hasn't
+        // been run). Refuse now — after the delete, the insert would fail and
+        // leave this product with NO codes.
+        throw new Error('Putting a product under another type’s code needs the database update in '
+          + 'sql/product_codes.sql (chip_category) — nothing was changed');
+      }
+
       const { error: delErr } = await sb.from('product_codes')
         .delete().eq('product_id', productId);
       if (delErr) throw delErr;
       if (clean.length) {
-        const rows = clean.map(code => ({ product_id: productId, code }));
+        // Only visitor rows name the column, so ordinary writes work with or
+        // without the migration.
+        const rows = clean.map(code => (visits[code]
+          ? { product_id: productId, code, chip_category: visits[code] }
+          : { product_id: productId, code }));
         const { error: insErr } = await sb.from('product_codes').insert(rows);
         // 23505 = duplicate (product_id, code) PK. Delete-then-insert on a
         // de-duped Set means this should never fire, but per the backend
@@ -2789,6 +2860,12 @@ const AdminAPI = {
       } catch (e) {
         throw new Error('Couldn’t load the affected products: ' + e.message);
       }
+      // API.request() RESOLVES a structured 5xx / RATE_LIMITED as { ok:false }
+      // (ERR-188/264). Read as "no more pages", that failure became an EMPTY
+      // brand+type: the membership drawer listed nothing and never said so.
+      if (resp && resp.ok === false) {
+        throw new Error('Couldn’t load the affected products: ' + (resp.code || 'request failed'));
+      }
       const products = (resp && resp.ok && resp.data && Array.isArray(resp.data.products))
         ? resp.data.products : [];
       for (const p of products) {
@@ -2851,7 +2928,7 @@ const AdminAPI = {
    *
    * @returns {{ changed:number, failed:number }}
    */
-  async setCodeMembership({ brandSlug, category, code, add = [], remove = [] }) {
+  async setCodeMembership({ brandSlug, category, code, add = [], remove = [], chipCategory = null }) {
     const c = this.normalizeProductCode(code);
     if (c.length < 2 || c.length > 24) {
       throw new Error('The code must be 2–24 letters, numbers or “/”');
@@ -2864,7 +2941,7 @@ const AdminAPI = {
     // been holding — a concurrent edit elsewhere must not be clobbered.
     const pool = await this._walkShopProducts({ brandSlug, category });
 
-    let changed = 0, failed = 0;
+    let changed = 0, failed = 0, error = null;
     for (const id of new Set([...addSet, ...removeSet])) {
       const entry = pool.get(id);
       if (!entry) { failed++; continue; }
@@ -2874,15 +2951,18 @@ const AdminAPI = {
       if (next.length === entry.codes.length
           && next.every(x => entry.codes.includes(x))) continue;
       try {
-        await this.setProductCodes(id, next);
+        // An added product visits `chipCategory`'s chip when it lives in another
+        // type; null puts it under its own type.
+        await this.setProductCodes(id, next, addSet.has(id) ? { chipCategory: { [c]: chipCategory } } : {});
         changed++;
       } catch (e) {
         failed++;
+        error = error || e.message;   // the page shows WHY, not just how many
         DebugLog.warn('[AdminAPI] setCodeMembership row failed:', id, e.message);
       }
     }
     this._clearStorefrontCodeCache();
-    return { changed, failed };
+    return { changed, failed, error };
   },
 
   /**
@@ -2914,7 +2994,7 @@ const AdminAPI = {
       const next = codes.filter(c => c !== from);
       if (to && !next.includes(to)) next.push(to);
       try {
-        await this.setProductCodes(id, next);
+        await this.setProductCodes(id, next, to ? { renamed: { from, to } } : {});
         changed++;
       } catch (e) {
         failed++;
@@ -4429,13 +4509,13 @@ const AdminAPI = {
   async createInvoice(payload) {
     const resp = await window.API.post('/api/admin/invoices', payload);
     if (resp && resp.ok === false) throw invoiceError(resp, 'Create invoice failed');
-    return resp?.data?.invoice ?? resp?.data ?? null;
+    return withInvoiceWarnings(resp);
   },
 
   async updateInvoice(invoiceId, payload) {
     const resp = await window.API.put(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`, payload);
     if (resp && resp.ok === false) throw invoiceError(resp, 'Update invoice failed');
-    return resp?.data?.invoice ?? resp?.data ?? null;
+    return withInvoiceWarnings(resp);
   },
 
   async voidInvoice(invoiceId) {
@@ -5106,18 +5186,88 @@ const AdminAPI = {
     },
 
     /**
-     * Remove a pin and let automatic matching decide again.
-     *
-     * There is NO endpoint that lists existing mappings (measured 2026-08-31:
-     * GET /map, /mappings, /maps, /map/list are all 404), so the only id the
-     * front-end can ever hold is the one just returned by map(). Undo is
-     * therefore session-scoped by construction — the UI must not imply a
-     * managed list it cannot load.
+     * Remove a pin and let automatic matching decide again. The id comes from
+     * map()'s response or, since 2026-09-21, from mappings() below (ERR-286).
      */
     async unmap(id) {
       const resp = await window.API.delete(`/api/admin/supplier-offers/map/${encodeURIComponent(id)}`);
       if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Could not undo that mapping');
       return resp?.data ?? null;
+    },
+
+    /**
+     * Every manual pin, paginated (backend Ask 4, live 2026-09-21). strictQuery:
+     * only page / limit / supplier / search are sent — an unknown param is a 400.
+     * Throws on failure: an empty list and a failed read must not look alike.
+     */
+    async mappings({ page = 1, limit = 50, supplier = '', search = '' } = {}) {
+      const q = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (supplier) q.set('supplier', supplier);
+      if (search) q.set('search', search);
+      const resp = await window.API.get(`/api/admin/supplier-offers/mappings?${q}`);
+      if (!resp || resp.ok === false) throw errorFromEnvelope(resp, 'Could not load the mappings');
+      return { rows: resp.data?.mappings || [], meta: resp.meta || resp.data?.pagination || null };
+    },
+
+    /**
+     * The feed-file slots (GET /api/admin/feed-files). Cron-gated until the
+     * 2026-09-21 deploy, which opened listing, the `product-list` upload and the
+     * price-list import to super_admin (Ask 5). Genuine/compatible catalogue
+     * importers stay CRON_SECRET-gated server-side — they rename and reprice
+     * storefront products; this pipeline writes supplier_offers only.
+     */
+    async feedFiles() {
+      const resp = await window.API.get('/api/admin/feed-files');
+      if (!resp || resp.ok === false) throw errorFromEnvelope(resp, 'Could not list the feed files');
+      return resp.data?.files || [];
+    },
+
+    /**
+     * Step 1: store a new supplier price list in the `product-list` slot.
+     * Contract (supplier-price-comparison handoff §8): multipart field `file`,
+     * ≤ 20 MB, .xlsx/.ods/.csv/.txt. Raw fetch, because API.post() JSON-encodes.
+     * An upload changes NOTHING on the page until importPriceList() runs.
+     */
+    async uploadPriceList(file) {
+      const token = window.Auth?.session?.access_token;
+      if (!token) throw new Error('Not signed in');
+      const form = new FormData();
+      form.append('file', file);
+      const resp = await fetch(`${Config.API_URL}/api/admin/feed-files/product-list`, {
+        method: 'POST', credentials: 'omit', headers: { Authorization: `Bearer ${token}` }, body: form,
+      });
+      let json = null;
+      try { json = await resp.json(); } catch (_) { /* non-JSON */ }
+      if (!resp.ok || (json && json.ok === false)) {
+        const err = new Error(json?.error?.message || `Upload failed (HTTP ${resp.status})`);
+        err.status = resp.status;
+        err.code = json?.error?.code || null;
+        throw err;
+      }
+      return json?.data ?? null;
+    },
+
+    /**
+     * Step 2: parse the stored file and match every line (handoff §8). NO body
+     * and no Content-Type — sending one is a 400. Can take a minute; returns
+     * `{ offers_matched, offers_total, duration_ms }`. 409 = already running,
+     * 404 = no file in storage — both carried on `err.status`.
+     */
+    async importPriceList() {
+      const token = window.Auth?.session?.access_token;
+      if (!token) throw new Error('Not signed in');
+      const resp = await fetch(`${Config.API_URL}/api/admin/import/supplier-price-list`, {
+        method: 'POST', credentials: 'omit', headers: { Authorization: `Bearer ${token}` },
+      });
+      let json = null;
+      try { json = await resp.json(); } catch (_) { /* non-JSON */ }
+      if (!resp.ok || (json && json.ok === false)) {
+        const err = new Error(json?.error?.message || `Import failed (HTTP ${resp.status})`);
+        err.status = resp.status;
+        err.code = json?.error?.code || null;
+        throw err;
+      }
+      return json?.data ?? null;
     },
   },
 

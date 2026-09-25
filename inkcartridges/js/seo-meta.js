@@ -17,10 +17,13 @@
  * fetches with a regular Chrome UA, which gets the SPA shell, not the
  * prerender). If they diverge, the page is penalised.
  *
- * The new copy contains backend-curated counts ("935+", "1000+",
- * "200 products") that the SPA cannot recompute, and `/api/site/trust` carries
- * no counts. So the ONLY way to guarantee byte-identical parity is to mirror
- * the backend's authoritative output rather than rebuild it client-side:
+ * The new copy contains backend-curated counts ("934+", "1000+",
+ * "200 products") that the SPA cannot recompute. Since 2026-09-21
+ * `/api/site/trust` publishes the figure the homepage count derives from
+ * (`stats.catalog_claimable_count`), but only so a probe can assert
+ * claimed <= actual (`npm run probe:bundle-response`, ERR-286) — not so the SPA
+ * can rebuild the sentence. So the ONLY way to guarantee byte-identical parity
+ * is still to mirror the backend's authoritative output:
  *
  *   - Product pages already do this — product-detail-page.js renders the API
  *     `seo.title` / `seo.description` (the same buildSeoTitle/buildSeoDescription

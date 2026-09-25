@@ -106,12 +106,17 @@ test('Supabase path applies a grouped type via .in("product_type", …)', () => 
     'a single type must still be applied as .eq("product_type", _typeFilter)');
 });
 
-test('a grouped type is forced down the Supabase path', () => {
-  // The backend's product_type param takes ONE value — only .in() can span the
-  // three ribbon types. If image/stock/margin-sort routed a grouped type to the
-  // backend, the umbrella would silently collapse to a single type.
-  assert.match(PRODUCTS, /const\s+typeGroup\s*=\s*typeFilterGroup\(_typeFilter\)\s*;[\s\S]{0,600}?const\s+needsBackend\s*=\s*!typeGroup\s*&&/,
-    'needsBackend must AND with !typeGroup');
+// Inverted 2026-09-25 (ERR-286): /api/admin/products gained
+// `product_type_group`, which resolves a group through the storefront taxonomy
+// (ribbons = 109 active rows, the same three types). A grouped type no longer
+// has to force the Supabase leg; it crosses as its own param, and the backend
+// leg is where the page actually runs (ERR-220). What must still hold: the
+// group never collapses into ONE product_type.
+test('a grouped type crosses to the backend as product_type_group, not one arm', () => {
+  const builder = PRODUCTS.match(/function backendProductFilters\(\)[\s\S]+?\n\}/);
+  assert.ok(builder, 'backendProductFilters() must exist');
+  assert.match(builder[0], /if \(typeFilterGroup\(_typeFilter\)\) filters\.product_type_group = _typeFilter;\s*else if \(_typeFilter\) filters\.product_type = _typeFilter;/,
+    'a group must go out as product_type_group, and only a single type as product_type');
 });
 
 test('image, stock and margin-sort still work under a grouped type', () => {
@@ -137,11 +142,14 @@ test('image, stock and margin-sort still work under a grouped type', () => {
 // 4. Export sees the same scope as the table
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('export emits a grouped type as a comma list', () => {
-  const body = PRODUCTS.match(/function\s+getProductExportParams\s*\([^)]*\)\s*\{[\s\S]+?\n\}/);
-  assert.ok(body, 'getProductExportParams must exist');
-  assert.match(body[0], /if\s*\(typeGroup\)\s*p\.set\(\s*'product_type'\s*,\s*typeGroup\.join\(\s*','\s*\)\s*\)/,
-    'a grouped type must export as product_type=printer_ribbon,typewriter_ribbon,correction_tape');
+// Inverted 2026-09-25 (ERR-286): the server export ignored every filter, so
+// both exports are now built from backendProductFilters() — the grouped type
+// reaches them by the same product_type_group key the table uses.
+test('export sees a grouped type through the list\'s own builder', () => {
+  const body = PRODUCTS.match(/async function\s+fetchFilteredProductsForExport\s*\([\s\S]+?\n\}/);
+  assert.ok(body, 'fetchFilteredProductsForExport must exist');
+  assert.match(body[0], /backendProductFilters\(\)/,
+    'the export must use the same filters as the table, grouped type included');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
