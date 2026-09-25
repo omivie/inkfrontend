@@ -106,10 +106,17 @@
         return null;
     }
 
+    // The fallback is NOT a corner case (ERR-285). gtag.js runs synchronously
+    // in <head> and injects this file async; config.js is `defer` at the end of
+    // <body>. So this script routinely executes BEFORE `Config` exists, and the
+    // old fallback sent production beacons straight to the Render host —
+    // bypassing Cloudflare and pinning the origin hostname into the storefront
+    // (measured 0.88–1.90s, backend handoff 2026-09-21). The fallback therefore
+    // mirrors config.js's host rule exactly, so both branches give one answer.
     function getApiUrl() {
         if (typeof Config !== 'undefined' && Config.API_URL) return Config.API_URL;
-        return (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-            ? 'http://localhost:3001'
+        return (location.hostname === 'www.inkcartridges.co.nz' || location.hostname === 'inkcartridges.co.nz')
+            ? 'https://api.inkcartridges.co.nz'
             : 'https://ink-backend-zaeq.onrender.com';
     }
 

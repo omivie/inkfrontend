@@ -238,10 +238,14 @@ const API = {
         const anonymous = !!options.anonymous;
         const token = anonymous ? null : await this.getToken();
 
-        const headers = {
-            'Content-Type': 'application/json',
-            ...options.headers
-        };
+        // Content-Type ONLY when there is a body (ERR-282). `application/json`
+        // is not a CORS-safelisted value, so stamping it on a bodyless GET made
+        // every catalogue read non-simple and bought an OPTIONS round trip to
+        // the Render origin per distinct URL — the same cost the identity-header
+        // note below refuses to pay for analytics, paid here for nothing.
+        // Measured 2026-09-21: 480/784ms with it, 259/270ms without.
+        const headers = { ...options.headers };
+        if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
@@ -2273,7 +2277,9 @@ const API = {
         // admin mirror has to be applied for either of them (ERR-234).
         const route = this._catalogRoute(endpoint);
         const url = `${Config.API_URL}${route.endpoint}`;
-        const headers = { 'Content-Type': 'application/json' };
+        // No Content-Type: a bodyless GET must stay a CORS-simple request, or
+        // the PDP pays a preflight before its product read (ERR-282).
+        const headers = {};
 
         // The mirror is admin-gated and never edge-cached, so it is the one
         // catalogue read that must carry a token. The public route below stays

@@ -280,9 +280,14 @@ test('§4 product feeds proxy to backend', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§5 root + js + css advertise must-revalidate so the CDN re-checks each request', () => {
+    // /js and /css each have TWO rules since ERR-282: a URL carrying a
+    // deploy-stamped 8-hex content hash is immutable (a changed file is a
+    // changed URL), and every OTHER URL — bare imports, APP_VERSION imports,
+    // script-injected files — keeps this revalidate rule. Select that branch
+    // (the one with `missing`, or the only one for '/').
     const sources = ['/', '/js/(.*)', '/css/(.*)'];
     for (const src of sources) {
-        const block = (VERCEL_JSON.headers || []).find(h => h.source === src);
+        const block = (VERCEL_JSON.headers || []).find(h => h.source === src && !h.has);
         assert.ok(block, `vercel.json must define cache headers for ${src}`);
         const cacheCtl = block.headers.find(h => h.key === 'Cache-Control');
         assert.ok(cacheCtl, `${src} must declare Cache-Control`);

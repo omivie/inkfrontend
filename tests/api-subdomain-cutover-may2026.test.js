@@ -246,6 +246,40 @@ test('§5 no code fetches a bare relative /api/... (would 404 without the rewrit
   );
 });
 
+// ERR-283: the regex above only sees a LITERAL relative path. site-guard.js
+// spelled the same bug as `${BACKEND_URL}/api/admin/verify` with
+// BACKEND_URL = '' on production, and walked past it for four months. So
+// resolve every `${NAME}/api/` base constant declared in the same file and
+// refuse any whose declaration can evaluate to an empty string.
+test('§5 no base-URL constant that can be empty prefixes an /api/ fetch (ERR-283)', () => {
+  const files = walk(path.join(ICR, 'js'), ['.js']);
+  const offenders = [];
+  let resolved = 0;
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    const names = new Set([...src.matchAll(/\$\{(\w+)\}\/api\//g)].map((m) => m[1]));
+    for (const name of names) {
+      const decl = src.match(new RegExp(`(?:const|let|var)\\s+${name}\\s*=([^;]+);`));
+      if (!decl) continue; // a parameter or property, not a file-level constant
+      resolved++;
+      // `Config.API_URL ?? ''`-style declarations are exempt: '' is reached only
+      // if config.js never loaded, and every such caller runs after it (defer
+      // order). What this refuses is a production branch that is '' BY DESIGN.
+      // ponytail: the Config-first exemption trusts load order; a head-sync
+      // script adopting that spelling would pass — traffic-tracker (ERR-285)
+      // is why it spells its fallback host out instead.
+      const rhs = decl[1].trim();
+      if (/Config\.API_URL/.test(rhs)) continue;
+      if (/(?:^|[?:=]\s*)(?:''|""|``)/.test(rhs)) {
+        offenders.push(`${path.relative(ICR, f)}: ${name}`);
+      }
+    }
+  }
+  assert.ok(resolved > 0, 'positive control: at least one ${NAME}/api/ base constant must be resolved, or this test checks nothing');
+  assert.deepStrictEqual(offenders, [],
+    `these base-URL constants can be '' and so make a relative /api fetch that 404s on www: ${offenders.join(', ')}`);
+});
+
 test('§5 no cache-buster query param on the shared API request layer', () => {
   const api = read('js/api.js');
   assert.ok(!/[?&]_t=\$\{?Date\.now/.test(api), 'no ?_t=Date.now() cache-buster in api.js');

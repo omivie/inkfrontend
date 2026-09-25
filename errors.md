@@ -41,6 +41,127 @@ describing the same incident.
 
 ---
 
+## ERR-285 — The traffic beacon posted to the Render origin on production because gtag.js injects the tracker before the deferred config.js defines Config — **RESOLVED** (2026-09-25)
+
+The backend saw `traffic-event` beacons going to `ink-backend-zaeq.onrender.com` from the storefront.
+The code looked right: `getApiUrl()` returns `Config.API_URL`. **The fallback was the production path.**
+`gtag.js` is a sync `<head>` script that injects `traffic-tracker.js` async, and `config.js` is `defer` at the
+end of `<body>`. So the tracker routinely runs before `Config` exists and fell back to the Render host,
+bypassing Cloudflare (measured 0.88-1.90s by the backend). Confirmed live 2026-09-25 with the beacon aborted
+in-browser: host `ink-backend-zaeq.onrender.com` on both /shop and a PDP.
+
+**Fix.** The fallback mirrors `config.js`'s host rule exactly (www/apex → api subdomain, else Render), so
+both branches give one answer. The old `localhost:3001` branch was reachable only in that race, so it
+is gone.
+
+**Guards.** `page-load-latency §4` evaluates the shipped `getApiUrl` with `Config` undefined on www and apex
+(api subdomain) and on a preview host (Render), plus Config-wins. A second test pins the load order that
+makes the race real, so if the order ever changes, the comment gets re-read. Red-proofed against HEAD:
+1 fail.
+
+Files: `inkcartridges/js/api.js` · `inkcartridges/vercel.json` · `inkcartridges/js/shop-page.js` · `inkcartridges/js/traffic-tracker.js` · `inkcartridges/js/site-guard.js` · 41 HTML `?v=` restamps · `tests/page-load-latency-sep2026.test.js` · `tests/api-subdomain-cutover-may2026.test.js` · `tests/dense-pack-rollout-may2026.test.js` · `scripts/probe-page-latency.mjs` · `scripts/probe-edge-cache.mjs` · `package.json`
+
+---
+
+## ERR-284 — The /shop brand tiles made ten counts requests on every load and rendered nothing: the code read data.count, a field the endpoint has never returned — **RESOLVED** (2026-09-25)
+
+`shop-page.js` `_loadBrandCounts` sent one `/api/products/counts?brand=` per brand tile, in batches of
+5 (10 on a default /shop). It then read `res.data.count`. The endpoint has never returned `count`; it returns
+per-category counts `{ink, toner, drums, paper, …}`. So `n == null` on every brand, **every tile's
+"N products" was blank from the day it was written** (`0fde2e3`), and ten round trips painted nothing.
+Measured live pre-fix: 10 calls, all tiles blank. Fail-quiet was the documented intent ("a missing count is
+cosmetic"), which is also why nobody saw it.
+
+**Fix.** The backend added `?brands=a,b,c` (≤30 slugs, keyed by slug, unknown slugs in
+`meta.unknown_brands`). The FE sends ONE request per 30 slugs, de-duplicated and sorted so the grid always
+asks one URL (one edge key). The tile shows the sum across categories; a `total` key, if one ever appears,
+wins over the sum so nothing is counted twice. Unknown, failed, rate-limited or malformed stays **blank,
+never "0 products"**. Owner chose restore over delete.
+
+**Guards.** `page-load-latency §3` runs the shipped method in a vm: one call for 10 brands, sorted
+slugs, sums, blank-on-unknown, blank on every failure shape, and 61 brands chunk as 30/30/1. Red-proofed
+against HEAD: 3 fail.
+
+Files: `inkcartridges/js/api.js` · `inkcartridges/vercel.json` · `inkcartridges/js/shop-page.js` · `inkcartridges/js/traffic-tracker.js` · `inkcartridges/js/site-guard.js` · 41 HTML `?v=` restamps · `tests/page-load-latency-sep2026.test.js` · `tests/api-subdomain-cutover-may2026.test.js` · `tests/dense-pack-rollout-may2026.test.js` · `scripts/probe-page-latency.mjs` · `scripts/probe-edge-cache.mjs` · `package.json`
+
+---
+
+## ERR-283 — The site-lock overlay could not be dismissed by the owner on production: site-guard verified the admin at a relative /api path that 404s on www — **RESOLVED** (2026-09-25)
+
+**Found while verifying ERR-282, not in the handoff.** `site-guard.js` set `BACKEND_URL = ''` for
+every host except localhost. It predates the api-subdomain cutover, which removed the Vercel `/api`
+rewrite. On www, `fetch('/api/admin/verify')` returns **404** (measured 2026-09-25). `isAdminSession` treats
+a non-401/403 as a non-answer, retries after 4s, gets 404 again, and returns false. **With the site locked,
+the owner could not get past their own lock on production.** `api.inkcartridges.co.nz/api/admin/verify`
+answers 401 without a token, so the route exists there.
+
+**Why no guard saw it.** `api-subdomain-cutover §5` bans a literal `fetch('/api/…')`. This file spelled it
+`` `${BACKEND_URL}/api/admin/verify` `` with `BACKEND_URL = ''`. ***A guard cannot see what it does not
+spell*** (ERR-271).
+
+**Fix.** Production (www/apex) uses `https://api.inkcartridges.co.nz`; other hosts use the Render origin,
+the same host rule as `config.js`. §5 gains a resolver: every `${NAME}/api/` base constant in `js/` is looked
+up in its own file and refused if its declaration can be `''`. Declarations that consult
+`Config.API_URL` are exempt, with a `ponytail:` note naming the ceiling. Red-proofed: HEAD's site-guard
+fails it, and a positive control asserts the resolver found at least one constant.
+
+Files: `inkcartridges/js/api.js` · `inkcartridges/vercel.json` · `inkcartridges/js/shop-page.js` · `inkcartridges/js/traffic-tracker.js` · `inkcartridges/js/site-guard.js` · 41 HTML `?v=` restamps · `tests/page-load-latency-sep2026.test.js` · `tests/api-subdomain-cutover-may2026.test.js` · `tests/dense-pack-rollout-may2026.test.js` · `scripts/probe-page-latency.mjs` · `scripts/probe-edge-cache.mjs` · `package.json`
+
+---
+
+## ERR-282 — Every catalogue GET paid a CORS preflight because request() stamped Content-Type on bodyless GETs, and every static asset revalidated on every navigation because our own vercel.json said max-age=0 — **RESOLVED** (2026-09-25)
+
+**Context.** Backend handoff `~/Downloads/page-load-latency-findings-sep2026.md` (2026-09-21, copied to
+`backend-docs/inbox/`). They measured a first-time visitor's page load and found the time in round trips,
+not in HTML (0.20-0.43s) or queries (single-digit ms). Every claim was re-measured live on 2026-09-25 before
+any code changed.
+
+**Preflight.** `API.request()` built `{'Content-Type': 'application/json', ...}` for every call, and
+`_rawJsonFetch` (the PDP's product read) did the same. `application/json` is not a CORS-safelisted
+Content-Type, so a bodyless GET became non-simple and the browser sent an `OPTIONS` to the Render origin
+first (`cf-cache-status: DYNAMIC` on every OPTIONS, `access-control-max-age: 86400`, cache keyed by full
+URL). The same file's own comment refuses to pay exactly this cost for `X-Session-Id`. Measured pre-fix
+with `probe:page-latency --browser`, fresh context: **/shop 13 of 17 API GETs preflighted, PDP 9 of 22**.
+The backend measured the cost at 480/784ms against 259/270ms for the same endpoint. Fix: Content-Type only
+when `options.body !== undefined`; `_rawJsonFetch` sends none. No caller passes FormData to `request()`.
+
+**Static cache — the handoff's premise was wrong, and following it would have pinned stale code.**
+Assets were `public, max-age=0, must-revalidate`, which is true, but the cause was OUR `vercel.json`
+(explicit for /js and /css), not Vercel's default. The handoff asked for `immutable` on
+`/(css|js|assets)/(.*)` "because the URLs are hash-versioned". **Only HTML `<script>`/`<link>` tags are
+hash-versioned.** About 114 admin modules load by bare `import`; three lazy imports carry a hand-bumped
+`APP_VERSION`/`CC_VERSION`/`SETTINGS_VERSION`; `traffic-tracker.js` and `business-demo.js` are injected
+from JS with no token; 0 of 97 `/assets` references carry one. Under `immutable`, any of those edits would
+have stayed stale in browsers for a year. Fix: `/js` and `/css` each have two mutually exclusive rules,
+`has` / `missing` query `v` matching `^[0-9a-f]{8}$`. That matches the 8-hex md5 `stamp-versions.js`
+writes at deploy and nothing hand-maintained. Everything else keeps revalidating. `/assets` and root icons
+are unversioned, so they are capped at `max-age=86400`. HTML is untouched.
+***A date-style version like `20261001` IS 8 hex digits*** — pinned by a test so no hand token can ever
+look like a hash.
+
+**Also found and corrected** while measuring: the Cloudflare item was already done. `/api/search/*`,
+`/api/schema/collection`, `/api/prerender/category/*` and `/api/images/optimize` all go MISS→HIT as of
+2026-09-25 (BF-039 re-closed). `audit:edge-cache`'s search rows expected `header-only`, and **that
+expectation hid the fix**: `probe()` chases a HIT only for rows that expect `cached`, so it read a first
+MISS and stopped. ***An expectation is part of the instrument.*** `/api/schema/site` is now edge-cached too.
+Search payloads carry stock, so BF-064 (purge the search keyspace on a stock write) is live again.
+
+**Not changed, on purpose.** PDP's two 200-row pulls: the compat sidecar is kept under ERR-158/277 and
+re-measured by `probe:lookalike`. The search page's "three queries for one intent" is a conditional
+fallback (hard or soft miss, hijack, exact mode), because `/smart` mis-corrects numeric codes (q=511, q=650).
+Pinned by `search-results-parity`. The `pages.css` split is deferred by owner decision until after the
+caching fix is measured.
+
+**Guards.** `tests/page-load-latency-sep2026.test.js` §1-§2 run `api.js` in a vm (no Content-Type on
+`getPublic`/`get`/`_rawJsonFetch`; present on post/put/patch as a positive control) and pin the vercel.json
+rule pair. `dense-pack-rollout §5` now selects the revalidate branch. Red-proofed against HEAD: api.js 2
+fail, vercel.json 3 fail. Live: `npm run probe:page-latency -- --browser`, which has three negative controls
+(bare URL, non-hex `?v=`, APP_VERSION import) that must keep revalidating.
+
+Files: `inkcartridges/js/api.js` · `inkcartridges/vercel.json` · `inkcartridges/js/shop-page.js` · `inkcartridges/js/traffic-tracker.js` · `inkcartridges/js/site-guard.js` · 41 HTML `?v=` restamps · `tests/page-load-latency-sep2026.test.js` · `tests/api-subdomain-cutover-may2026.test.js` · `tests/dense-pack-rollout-may2026.test.js` · `scripts/probe-page-latency.mjs` · `scripts/probe-edge-cache.mjs` · `package.json`
+
+---
+
 ## ERR-281 — The pricing panel said "Saved, prices are repricing" after a PUT that since migration 187 only files a proposal, and a simulator whose "after" counts price cuts the system will not make — **RESOLVED** (2026-09-23)
 
 **Context.** Backend contract `backend-docs/inbox/tier-multiplier-approval-backend-contract-sep2026.md`

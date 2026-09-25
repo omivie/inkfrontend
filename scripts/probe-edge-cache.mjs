@@ -180,15 +180,32 @@ const ENDPOINTS = [
     // origin that is right cannot be blamed for a rule that is wrong, and leaving
     // the expectation at 'cached' would make every future run red for a reason
     // already known. Carried as an ask in the outbox reply.
-    { path: `/api/search/smart?q=${encodeURIComponent(probeQuery('edgecache'))}&limit=3`, expect: 'header-only',
-      note: 'BF-039 REOPENED 2026-09-20 — origin cacheable, edge says DYNAMIC. Whole '
-          + '/api/search/* family, measured with /api/brands + /api/site/nav HITting as controls' },
+    //
+    // ✅ BF-039 RE-CLOSED — measured 2026-09-25: /smart and /suggest both go
+    // MISS→HIT→HIT against the api subdomain with the browser Origin. The two
+    // rows below said `header-only` until then, and that expectation HID the
+    // fix: `probe()` only chases a HIT for rows that EXPECT 'cached', so a
+    // header-only row reads its first MISS and stops — it could never have
+    // observed the rule coming back. ***An expectation is part of the
+    // instrument.*** Consequence worth knowing: search payloads carry stock, so
+    // BF-064 (purge the search keyspace on a stock write) is LIVE again.
+    { path: `/api/search/smart?q=${encodeURIComponent(probeQuery('edgecache'))}&limit=3`, expect: 'cached',
+      note: 'BF-039 re-closed 2026-09-25 (was DYNAMIC 2026-09-20). Stock rides this payload ⇒ BF-064 applies' },
     // Its sibling, added the same day. The two search endpoints are separately
     // reachable and separately cacheable, so one row cannot speak for both —
     // and /suggest is the one the typeahead hits hardest.
-    { path: `/api/search/suggest?q=${encodeURIComponent(probeQuery('edgecache'))}&limit=5`, expect: 'header-only',
-      note: 'BF-039 REOPENED 2026-09-20 — same as /smart. This is the endpoint the typeahead '
-          + 'hits hardest, so the regression costs one origin read per keystroke-settle' },
+    { path: `/api/search/suggest?q=${encodeURIComponent(probeQuery('edgecache'))}&limit=5`, expect: 'cached',
+      note: 'BF-039 re-closed 2026-09-25 — the typeahead\'s hardest-hit endpoint; a repeat keystroke-settle '
+          + 'now answers at the edge and spends no rate-limit slot' },
+    // The three families the backend's 2026-09-21 latency handoff listed as
+    // DYNAMIC. All three measured MISS→HIT→HIT on 2026-09-25 — the Cache Rule
+    // was widened after that document was written. /api/images/optimize needs a
+    // real image URL (a bogus one BYPASSes), so it is measured by
+    // `npm run probe:page-latency`, which resolves one from the catalogue.
+    { path: '/api/schema/collection?category=ink', expect: 'cached',
+      note: 'latency handoff 2026-09-21 said DYNAMIC at 1.01s; public, max-age=900, s-maxage=3600' },
+    { path: '/api/prerender/category/ink', expect: 'cached',
+      note: 'latency handoff 2026-09-21 said DYNAMIC at 1.15s/121KB; public, max-age=3600, s-maxage=86400' },
     // ✅ BF-014 (/api/site/*) and BF-019 CLOSED 2026-09-17. The Cache Rule
     // expression gained /api/site, /api/ribbons and /api/printers, keeping "use
     // cache-control header if present" as the edge TTL — which matters, because a
@@ -234,8 +251,9 @@ const ENDPOINTS = [
 
     { path: '/api/settings', expect: 'uncached',
       note: 'BF-014' },
-    { path: '/api/schema/site', expect: 'uncached',
-      note: 'BF-014 — feeds JSON-LD; FE caches it 5 min in memory' },
+    { path: '/api/schema/site', expect: 'cached',
+      note: 'BF-014 — feeds JSON-LD. Was uncached; measured REVALIDATED (edge-served) 2026-09-25, '
+          + 'public, s-maxage=300. /api/settings stays the uncached control' },
 
     // ── THE NEGATIVE CONTROLS ───────────────────────────────────────────────
     //

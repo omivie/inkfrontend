@@ -1859,32 +1859,49 @@
         },
 
         /**
-         * Per-brand product counts, lazily and in small parallel batches.
+         * Per-brand product counts for the brand tiles — ONE request (ERR-284).
          *
-         * This used to be a strictly sequential `for..of`, which was fine while the
-         * grid was a hardcoded ten. It is not a hardcoded ten any more: the owner
-         * can now flip `show_on_shop` on any of the twenty-seven brands, and this
-         * would then issue twenty-seven SEQUENTIAL round trips on every /shop
-         * landing, each one blocking the next. Batching bounds the wall-clock cost
-         * while the small batch size keeps us from hammering a rate-limiter that is
-         * shared with the rest of the storefront.
+         * History: this issued one `/api/products/counts?brand=` per brand (ten
+         * on a default /shop, up to twenty-seven if the owner flips
+         * `show_on_shop` everywhere) and read `data.count` from each. The
+         * endpoint has never returned `count` — it returns per-category counts,
+         * `{ink, toner, drums, paper, …}` — so every tile's count was blank from
+         * the day this was written, and the requests painted nothing.
          *
-         * Still fail-quiet per brand on purpose — a missing count is a cosmetic
-         * absence on a tile that already works, not a reason to break the grid.
+         * The backend now takes `brands=a,b,c` (<= 30 slugs, 2026-09-21) and
+         * returns `data` keyed by slug, with unknown slugs listed in
+         * `meta.unknown_brands` and omitted from `data`. Slugs are sorted so the
+         * same grid always asks the same URL and shares one edge-cache entry.
+         * The tile shows the sum across categories.
+         *
+         * Still fail-quiet on purpose — a missing count is a cosmetic absence on
+         * a tile that already works (the span is aria-hidden), not a reason to
+         * break the grid. Absent stays BLANK, never "0 products".
          */
         async _loadBrandCounts(brands) {
-            const BATCH = 5;
-            const ids = brands.map(b => b.slug || b.id || '').filter(Boolean);
-            for (let i = 0; i < ids.length; i += BATCH) {
-                await Promise.all(ids.slice(i, i + BATCH).map(async (brandId) => {
-                    try {
-                        const res = await API.getProductCounts({ brand: brandId });
-                        const n = res?.data?.count ?? res?.count;
-                        if (n == null) return;
-                        const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
-                        if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
-                    } catch { /* a missing count is cosmetic */ }
-                }));
+            const MAX_PER_REQUEST = 30;
+            const ids = [...new Set(brands.map(b => b.slug || b.id || '').filter(Boolean))].sort();
+            for (let i = 0; i < ids.length; i += MAX_PER_REQUEST) {
+                const chunk = ids.slice(i, i + MAX_PER_REQUEST);
+                let byBrand;
+                try {
+                    const res = await API.getProductCounts({ brands: chunk.join(',') });
+                    byBrand = res && res.ok !== false ? res.data : null;
+                } catch { byBrand = null; }
+                if (!byBrand || typeof byBrand !== 'object') continue;
+                for (const brandId of chunk) {
+                    const counts = byBrand[brandId] ?? byBrand[brandId.toLowerCase()];
+                    if (!counts || typeof counts !== 'object') continue;
+                    // A `total` key, if the backend ever adds one, is the answer
+                    // — summing it with the categories would double-count.
+                    const values = Number.isFinite(counts.total)
+                        ? [counts.total]
+                        : Object.values(counts).filter(v => Number.isFinite(v));
+                    if (!values.length) continue;
+                    const n = values.reduce((a, b) => a + b, 0);
+                    const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
+                    if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
+                }
             }
         },
 

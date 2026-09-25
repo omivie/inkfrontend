@@ -10,9 +10,15 @@
 
   const SUPABASE_URL = 'https://lmdlgldjgcanknsjrcxh.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';
-  const BACKEND_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'https://ink-backend-zaeq.onrender.com'
-    : '';
+  // Production MUST name the api subdomain (ERR-283). This was '' — a relative
+  // `/api/admin/verify` — left over from before the api-subdomain cutover
+  // removed the Vercel `/api` rewrite. On www that path 404s (measured
+  // 2026-09-25), 404 is a non-answer, the retry 404s too, and the overlay stays
+  // up: with the site locked, the owner could not get past their own lock.
+  // Non-production hosts keep the Render origin, matching config.js.
+  const BACKEND_URL = (location.hostname === 'www.inkcartridges.co.nz' || location.hostname === 'inkcartridges.co.nz')
+    ? 'https://api.inkcartridges.co.nz'
+    : 'https://ink-backend-zaeq.onrender.com';
 
   let _sb = null;
 
