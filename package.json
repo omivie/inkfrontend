@@ -72,6 +72,7 @@
     "probe:stock-freshness": "node scripts/probe-stock-freshness.mjs",
     "probe:catalogue-outage": "node scripts/probe-catalogue-outage.mjs",
     "probe:mobile-cta": "node scripts/probe-mobile-cta-occlusion.mjs",
+    "probe:conversion-fixes": "node scripts/probe-conversion-fixes.mjs",
     "probe:page-latency": "node scripts/probe-page-latency.mjs",
     "probe:crux": "node scripts/probe-crux.mjs",
     "audit:css-coverage": "node scripts/audit-css-coverage.mjs",

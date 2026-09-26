@@ -186,70 +186,9 @@ edit("css/pages.css",
   ".sticky-atc {\n    display: none;\n    position: fixed;\n    bottom: 0;\n    left: 0;\n    right: 0;\n    z-index: var(--z-sticky, 100);",
   ".sticky-atc {\n    display: none;\n    position: fixed;\n    bottom: 0;\n    left: 0;\n    right: 0;\n    z-index: 700;")'
 
-echo
-echo "  the rewards nudge in flow — js/rewards-nudge.js"
-
-run_case "the card goes back to being a fixed overlay" \
-  "$H"'
-edit("css/components.css",
-  ".rewards-nudge--card {\n    /*",".rewards-nudge--card {\n    position: fixed;\n    /*")'
-
-run_case "z-index: auto removed, so --z-popover comes back" \
-  "$H"'
-edit("css/components.css","    z-index: auto;\n    width: auto;","    width: auto;")'
-
-run_case "top: auto removed, so --rn-top offsets the card" \
-  "$H"'
-edit("css/components.css","    top: auto;\n    left: auto;","    left: auto;")'
-
-run_case "the straddling block is no longer descended into first" \
-  "$H"'
-edit("js/rewards-nudge.js",
-  """        if (straddling && depth < 4 && isBlockLevel(straddling)) {
-            var inner = searchForFold(straddling, depth + 1);
-            if (inner) return inner;
-        }
-        return firstBelow ? { parent: container, before: firstBelow } : null;""",
-  """        if (firstBelow) return { parent: container, before: firstBelow };
-        if (straddling && depth < 4 && isBlockLevel(straddling)) {
-            var inner = searchForFold(straddling, depth + 1);
-            if (inner) return inner;
-        }
-        return null;""")'
-
-run_case "a grid row is split open to insert into" \
-  "$H"'
-edit("js/rewards-nudge.js",
-  "if (straddling && depth < 4 && isBlockLevel(straddling)) {",
-  "if (straddling && depth < 4) {")'
-
-run_case "a short page gets an insertion point it should not have" \
-  "$H"'
-edit("js/rewards-nudge.js",
-  "        return firstBelow ? { parent: container, before: firstBelow } : null;",
-  "        return { parent: container, before: firstBelow || container.children[0] };")'
-
-run_case "click-outside deletes the in-flow card again" \
-  "$H"'
-edit("js/rewards-nudge.js",
-  q("        if (state.placedInFlow) return;\n        softClose(\"outside\");"),
-  q("        softClose(\"outside\");"))'
-
-run_case "placeInFlow loses its once-guard and walks down the page" \
-  "$H"'
-edit("js/rewards-nudge.js",
-  "        if (state.placedInFlow && el.parentNode && el.parentNode !== document.body) return;",
-  "        void 0;")'
-
-run_case "position() pins the card with --rn-top again" \
-  "$H"'
-edit("js/rewards-nudge.js",
-  "            placeInFlow(el);",
-  q("            el.style.setProperty(\"--rn-top\", \"72px\");") + "\n            placeInFlow(el);")'
-
-run_case "the desktop popover loses its caret arithmetic" \
-  "$H"'
-edit("js/rewards-nudge.js","--rn-caret-x","--rn-caret-gone",1)'
+# The rewards-nudge mutations were removed with js/rewards-nudge.js itself
+# (retired 2026-09-27, conversion handoff D-P0-1); tests/mobile-cta-occlusion
+# §0 pins its absence.
 
 echo
 echo "────────────────────────────────────────────────────────"

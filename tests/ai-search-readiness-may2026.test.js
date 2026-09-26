@@ -194,33 +194,30 @@ test('§3 legacy ?printer= alias for printer_slug is preserved', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §4 — bare /shop (no brand, no printer) falls through to the SPA
+// §4 — every /shop prerenderPath is gated (bare /shop is gated on ZERO params)
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// Until Sep 2026 bare /shop fell through to the SPA shell and Google indexed
+// api.inkcartridges.co.nz/api/prerender/shop instead (conversion handoff
+// 2026-09-23 §6.2). It now prerenders — but ONLY when the URL carries no
+// params; the behaviour is executed in tests/conversion-fixes-sep2026.test.js.
 
-test('§4 /shop branch only sets prerenderPath when brand or printer is present', () => {
-    // We extract the /shop branch and assert that prerenderPath is never
-    // assigned unconditionally — it must be gated on a query-param check.
+test('§4 /shop branch only sets prerenderPath behind a guard', () => {
     const shopBlockStart = middlewareSrc.indexOf("path === '/shop'");
     const shopBlockEnd = middlewareSrc.indexOf('if (!prerenderPath)', shopBlockStart);
     const block = middlewareSrc.slice(shopBlockStart, shopBlockEnd);
-    // Every prerenderPath assignment inside the block must be inside an `if (...)`.
-    const assigns = block.match(/prerenderPath\s*=\s*`/g) || [];
-    assert.ok(assigns.length >= 2,
-        '/shop branch must assign prerenderPath at least twice (brand + printer)');
-    // No bare assignment outside an `if` — search for assignment at column 4
-    // / 6 (function-body indents) outside a conditional. We approximate by
-    // requiring an `if (` appears between the branch start and every
-    // assignment.
-    let cursor = 0;
-    let m;
-    const ifRe = /if\s*\(/g;
+    const assigns = block.match(/prerenderPath\s*=\s*[`']/g) || [];
+    assert.ok(assigns.length >= 3,
+        '/shop branch must assign prerenderPath for printer, brand, category and bare');
     const assignRe = /prerenderPath\s*=/g;
+    let m;
     while ((m = assignRe.exec(block)) !== null) {
         const lastIf = block.lastIndexOf('if (', m.index);
         assert.ok(lastIf > -1 && lastIf < m.index,
             'every prerenderPath= inside /shop branch must follow an `if (...)` guard');
-        cursor = m.index;
     }
+    assert.match(block, /else if \(\[\.\.\.url\.searchParams\.keys\(\)\]\.length === 0\) prerenderPath = '\/api\/prerender\/shop'/,
+        'bare /shop must be gated on zero params');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

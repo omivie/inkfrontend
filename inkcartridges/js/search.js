@@ -504,17 +504,28 @@
             }
         }
 
+        /* body.smart-ac-open while ANY suggestion list is open, so fixed
+           bottom chrome can step aside — the mobile #filter-sort-bar (z 200)
+           floated over the open list (conversion handoff 2026-09-23 §2).
+           Re-derived from the DOM, not counted: several search boxes mount a
+           dropdown each, and a counter would drift on a missed close. */
+        function syncBodyFlag() {
+            if (typeof document === 'undefined' || !document.body) return;
+            document.body.classList.toggle('smart-ac-open', !!document.querySelector('.smart-ac-dropdown.is-open'));
+        }
         function open() {
             if (state.isOpen) return;
             state.isOpen = true;
             state.dropdown.classList.add('is-open');
             state.input.setAttribute('aria-expanded', 'true');
             positionDropdown();
+            syncBodyFlag();
         }
         function close() {
             if (!state.isOpen) return;
             state.isOpen = false;
             state.dropdown.classList.remove('is-open');
+            syncBodyFlag();
             state.input.setAttribute('aria-expanded', 'false');
             state.input.removeAttribute('aria-activedescendant');
             state.highlightIndex = -1;
@@ -674,7 +685,11 @@
             state.activeSource = null;
             state.list.setAttribute('role', 'listbox');
             let cards = '';
-            for (let i = 0; i < 12; i++) {
+            // SIX, not twelve: three rows of the two-column list. Twelve
+            // placeholders made the loading list taller than the screen on a
+            // phone and pushed the page's own chrome around under it
+            // (conversion handoff 2026-09-23 §2, "cap the skeleton at 3 rows").
+            for (let i = 0; i < 6; i++) {
                 cards += `
                     <div class="product-card product-card--skeleton" aria-hidden="true">
                         <div class="product-card__image-wrapper"><div class="smart-ac__skel smart-ac__skel--thumb"></div></div>

@@ -57,7 +57,6 @@ const PAGES = read('inkcartridges/css/pages.css');
 const COMPACT = read('inkcartridges/css/checkout-compact.css');
 const HTML = read('inkcartridges/html/checkout.html');
 const JS = read('inkcartridges/js/checkout-page.js');
-const NUDGE = read('inkcartridges/js/rewards-nudge.js');
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 /** The balanced `{ … }` block that follows `marker`. */
@@ -231,51 +230,6 @@ test('§4 and its sibling still has the same fix', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. The nudge no longer interrupts before anything has been seen
+// 5. RETIRED 2026-09-27 — the rewards nudge was deleted (conversion handoff
+//    D-P0-1); its absence is pinned by mobile-cta-occlusion-sep2026 §0.
 // ═══════════════════════════════════════════════════════════════════════════
-
-test('§5 the rewards nudge waits for a scroll', () => {
-    // Measured at 390x844 on /ink-cartridges: on a 3s timer it covered 27.5% of
-    // the first screen with ZERO product cards rendered.
-    assert.match(NUDGE, /trigger:\s*'scroll'/);
-    assert.match(NUDGE, /scrollThresholdPx:\s*\d+/);
-    assert.match(NUDGE, /function scheduleByTrigger\(/);
-});
-
-test('§5 delayMs is a floor in BOTH modes, never the whole condition', () => {
-    const fn = blockAfter(NUDGE, 'function scheduleByTrigger(');
-    assert.match(fn, /CAMPAIGN\.delayMs/);
-    assert.match(fn, /floorPassed/, 'the dwell floor still applies before a scroll can fire it');
-    assert.match(fn, /scrolledEnough/);
-});
-
-test('§5 there is deliberately NO timer fallback in scroll mode', () => {
-    // A visitor who never scrolled has not looked at anything. Showing them the
-    // nudge anyway is precisely the behaviour being replaced, so a "fallback"
-    // here would quietly restore the bug.
-    const fn = blockAfter(NUDGE, 'function scheduleByTrigger(');
-    // Everything after the non-scroll early return is the scroll path.
-    const guard = fn.indexOf("CAMPAIGN.trigger !== 'scroll'");
-    const scrollPath = fn.slice(fn.indexOf('}', fn.indexOf('return;', guard)));
-    assert.doesNotMatch(scrollPath, /setTimeout\(tryShow/,
-        'in scroll mode nothing may call tryShow on a timer — that IS the old behaviour');
-    // The one timer on this path is the dwell floor, and it must not show anything itself.
-    const timers = (scrollPath.match(/setTimeout\(/g) || []).length;
-    assert.equal(timers, 1, `expected exactly one setTimeout (the dwell floor), found ${timers}`);
-    assert.match(scrollPath, /floorPassed = true/, 'and that timer only lifts the floor');
-});
-
-test('§5 the listener is passive and unhooks itself', () => {
-    const fn = blockAfter(NUDGE, 'function scheduleByTrigger(');
-    assert.match(fn, /\{ passive: true \}/, 'never block scrolling for an ad');
-    assert.match(fn, /removeEventListener\('scroll', attempt\)/);
-});
-
-test('§5 the timer mode still works for anything configured to use it', () => {
-    const fn = blockAfter(NUDGE, 'function scheduleByTrigger(');
-    assert.match(fn, /if \(CAMPAIGN\.trigger !== 'scroll'\)[\s\S]{0,120}setTimeout\(tryShow, CAMPAIGN\.delayMs\)/);
-});
-
-test('§5 the mid-funnel skip is untouched', () => {
-    assert.match(NUDGE, /skipPaths:\s*\['\/cart'\]/, 'never interrupt a shopper mid-funnel');
-});

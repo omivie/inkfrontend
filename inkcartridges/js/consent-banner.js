@@ -76,6 +76,11 @@
         skipPathPrefixes: ['/admin'],   // staff tooling, not a public visitor
         heading: 'Analytics cookies',
         body: 'We use Google Analytics to understand which pages help people find the right cartridge. No advertising profile is built from it.',
+        /* The ≤768px wording. The long body + heading made the bar 148px on a
+           390x664 phone — 22% of the screen, over the Add button (conversion
+           handoff 2026-09-23 D-P0-2). One line beside inline buttons targets
+           56–64px. Same meaning, same link, same two choices. */
+        bodyShort: 'We use analytics cookies.',
         acceptText: 'Accept',
         declineText: 'Decline',
         privacyText: 'Privacy policy',
@@ -152,7 +157,14 @@
 
         var p = document.createElement('p');
         p.className = 'consent-banner__body';
-        p.textContent = CONSENT.body;
+        var longText = document.createElement('span');
+        longText.className = 'consent-banner__body-long';
+        longText.textContent = CONSENT.body;
+        var shortText = document.createElement('span');
+        shortText.className = 'consent-banner__body-short';
+        shortText.textContent = CONSENT.bodyShort;
+        p.appendChild(longText);
+        p.appendChild(shortText);
 
         var link = document.createElement('a');
         link.className = 'consent-banner__link';
@@ -292,7 +304,7 @@
         reserveSpace(el);
         unwatchSize = watchSize(el);
 
-        /* Two-step reveal so the CSS transition runs (rewards-nudge.js pattern). */
+        /* Two-step reveal so the CSS transition runs (the retired rewards-nudge.js pattern). */
         void el.offsetWidth;
         el.classList.add('is-open');
     }

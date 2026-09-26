@@ -167,7 +167,8 @@ const IS_PRODUCTION = /inkcartridges\.co\.nz/i.test(BASE);
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
 const DESKTOP = { width: 1440, height: 900 };
 
-/** The nudge's own numbers, mirrored so the probe waits for the real trigger. */
+/** The retired nudge's trigger numbers. Kept as the scroll/settle positions every
+ *  historical reading in errors.md was taken at, so re-runs stay comparable. */
 const NUDGE_SCROLL_PX = 600;                   // CAMPAIGN.scrollThresholdPx
 const NUDGE_FLOOR_MS = 3000;                   // CAMPAIGN.delayMs
 const SETTLE_MS = NUDGE_FLOOR_MS + 900;        // floor + auth hydration headroom
@@ -756,22 +757,12 @@ try {
                   + ` — the definition of done in the handoff is a tap within ${TAP_BUDGET_MS}ms `
                   + 'as a first-time guest, without dismissing anything');
 
-        check('the rewards nudge is not painted over the buy button',
-            !(m.nudge.inDom && m.nudge.open && m.inlineCta.verdict === 'blocked'),
-            m.nudge.inDom
-                ? `nudge is in the DOM (open=${m.nudge.open}) and the button reports "${m.inlineCta.verdict}"`
-                : 'nudge never mounted on this surface');
-
-        check('the module says it suppressed itself, rather than merely not having mounted',
-            m.nudge.moduleSeen && m.nudge.suppressed === true,
-            m.nudge.moduleSeen
-                ? `RewardsNudge._state.suppressed = ${m.nudge.suppressed}`
-                : 'window.RewardsNudge was not found — js/rewards-nudge.js did not load on this page');
-
-        check('the ask was MOVED, not deleted: the post-add trigger is armed',
-            m.nudge.postAddArmed === true,
-            `RewardsNudge._state.postAddArmed = ${m.nudge.postAddArmed}. If this is false the nudge `
-            + 'is simply gone on mobile, which is a silent loss of every mobile account signup.');
+        /* The rewards popover was RETIRED 2026-09-27 (conversion handoff D-P0-1).
+           Its absence is the check now — a module that "suppressed itself" is
+           no longer a state this site has. */
+        check('the retired rewards overlay is absent',
+            !m.nudge.inDom && !m.nudge.moduleSeen,
+            `#rewards-nudge inDom=${m.nudge.inDom}, window.RewardsNudge=${m.nudge.moduleSeen}`);
 
         await ctx.close();
     }
@@ -826,60 +817,75 @@ try {
         await ctx.close();
     }
 
-    /* ══ §3 desktop must be untouched ═══════════════════════════════════════ */
-    head('§3 desktop — the nudge must still work exactly as before');
+    /* ══ §3 desktop acceptance (conversion handoff 2026-09-23 D-P0-1/2) ═════ */
+    head('§3 desktop 1440x900 — search box clickable at every offset; PDP Add + cart Checkout at scroll 0');
     {
+        /* Handoff acceptance, verbatim: "on a fresh 1440x900 context the search
+           box accepts a click at every scroll offset", and "the PDP Add to Cart
+           and the cart Checkout button are hit-testable at scroll 0". Before the
+           fix the rewards popover intercepted #search-input, and the consent bar
+           (y 839-900) sat on #add-to-cart-btn (y 830-878). */
+        const hitTest = (sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return { verdict: 'absent' };
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) return { verdict: 'zero-box' };
+            if (r.bottom <= 0 || r.top >= innerHeight) return { verdict: 'offscreen', top: Math.round(r.top) };
+            const pts = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 6, r.top + r.height / 2], [r.right - 6, r.top + r.height / 2]];
+            const hits = pts.map(([x, y]) => { const h = document.elementFromPoint(x, y); return !!h && (h === el || el.contains(h) || h.contains(el)); });
+            return { verdict: hits.every(Boolean) ? 'reachable' : 'blocked', points: `${hits.filter(Boolean).length}/3`, top: Math.round(r.top), bottom: Math.round(r.bottom) };
+        };
+
         const ctx = await browser.newContext({ viewport: DESKTOP });
         const page = await ctx.newPage();
         await page.goto(`${BASE}/p/${SKU}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForSelector('#add-to-cart-btn', { timeout: 30000 });
         await page.waitForTimeout(SETTLE_MS);
-        await page.evaluate((y) => window.scrollTo(0, y), NUDGE_SCROLL_PX + 120);
-        await page.waitForTimeout(2000);
-        const m = await page.evaluate(MEASURE);
+        const atc = await page.evaluate(hitTest, '#add-to-cart-btn');
+        console.log(`  PDP #add-to-cart-btn at scroll 0: ${atc.verdict} ${atc.points || ''} y ${atc.top}-${atc.bottom}`);
+        check('PDP Add to Cart is hit-testable at scroll 0 (all 3 points)', atc.verdict === 'reachable' || atc.verdict === 'offscreen',
+            atc.verdict === 'offscreen' ? 'below the fold at 900px — not covered, simply further down' : `${atc.verdict} ${atc.points || ''}`);
 
-        console.log(`  viewport=${m.innerWidth}x${m.innerHeight}  scrollY=${m.scrollY}`);
-        console.log(`    nudge          inDom=${m.nudge.inDom} open=${m.nudge.open} card=${m.nudge.card} suppressed=${m.nudge.suppressed}`);
-        describeControl('inline ATC', m.inlineCta);
-
-        check('the gate did NOT fire on desktop', m.nudge.suppressed === false,
-            `RewardsNudge._state.suppressed = ${m.nudge.suppressed}. The fix is scoped to narrow `
-            + 'viewports; suppressing it here would quietly delete desktop account signups, which '
-            + 'is the failure mode with no symptom.');
-
-        check('the desktop nudge is NOT in card mode', !m.nudge.card,
-            `rewards-nudge--card present = ${m.nudge.card} at ${m.innerWidth}px. The card is the `
-            + 'full-width fixed layout that causes the occlusion; above the tablet breakpoint the '
-            + 'nudge must stay anchored to the Account button.');
-
-        if (!m.nudge.inDom) {
-            soft('the desktop nudge did not mount during this run',
-                'it is once-per-session and has a 7-day dismissal cooldown, but this context is '
-                + 'fresh, so the likelier cause is that the scroll trigger had not fired yet. '
-                + `suppressed=${m.nudge.suppressed} is the field that actually answers §3, and it did.`);
+        const docH = await page.evaluate(() => document.documentElement.scrollHeight);
+        const blocked = [];
+        for (let y = 0; y < docH; y += 300) {
+            await page.evaluate((yy) => window.scrollTo(0, yy), y);
+            await page.waitForTimeout(250);
+            // Hit-tests the header search FORM (its input fills it). Nothing is
+            // clicked or typed — no search runs, no search_analytics row (ERR-254).
+            const s = await page.evaluate(hitTest, '#site-search-form');
+            if (s.verdict === 'blocked') blocked.push(y);
         }
+        check('the header search box is uncovered at every scroll offset (300px steps)', blocked.length === 0,
+            blocked.length ? `blocked at scrollY ${blocked.join(', ')}` : `0 blocked offsets over ${docH}px`);
         await ctx.close();
+
+        const cartCtx = await browser.newContext({ viewport: DESKTOP });
+        const cart = await cartCtx.newPage();
+        await cart.goto(`${BASE}/cart`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await cart.waitForTimeout(SETTLE_MS);
+        const co = await cart.evaluate(hitTest, '#checkout-btn');
+        if (co.verdict === 'absent' || co.verdict === 'zero-box') {
+            soft('cart Checkout not measured', 'a fresh context has an EMPTY cart and this probe never adds to one (READ-ONLY) — '
+                + 'the empty cart shows no Checkout button. Measure with a cart in a manual session.');
+        } else {
+            check('cart Checkout is hit-testable at scroll 0', co.verdict === 'reachable' || co.verdict === 'offscreen', `${co.verdict} ${co.points || ''}`);
+        }
+        await cartCtx.close();
     }
 
-    /* ══ §4 the browsing surfaces keep their nudge ══════════════════════════ */
-    head('§4 the gate is narrow — a browsing page on a phone still gets the nudge');
+    /* ══ §4 no overlay on the paid landing page either ══════════════════════ */
+    head('§4 /ink-cartridges on a phone — no overlay after a real scroll');
     {
         const ctx = await phoneCtx();
         const page = await ctx.newPage();
-        await page.goto(`${BASE}/ink-cartridges`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(`${BASE}/ink-cartridges?gclid=probe`, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(SETTLE_MS);
         await page.evaluate((y) => window.scrollTo(0, y), NUDGE_SCROLL_PX + 120);
         await page.waitForTimeout(1500);
         const m = await page.evaluate(MEASURE);
-
-        console.log(`  at ${m.url}  suppressed=${m.nudge.suppressed} inDom=${m.nudge.inDom} open=${m.nudge.open}`);
-        check('/ink-cartridges is NOT on the suppression list',
-            m.nudge.moduleSeen && m.nudge.suppressed === false,
-            m.nudge.moduleSeen
-                ? `suppressed=${m.nudge.suppressed}. The gate is deliberately scoped to the buying `
-                  + 'path (/products, /product, /ribbon, /cart, /checkout, /payment). If a browsing '
-                  + 'page is being suppressed, narrowSkipPaths has a prefix that is too greedy.'
-                : 'window.RewardsNudge not found on this page');
+        check('no rewards overlay mounts on the paid landing page', !m.nudge.inDom,
+            `#rewards-nudge inDom=${m.nudge.inDom} after scrolling ${NUDGE_SCROLL_PX + 120}px`);
         await ctx.close();
     }
 

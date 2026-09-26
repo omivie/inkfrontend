@@ -182,6 +182,17 @@ const Products = {
             ? `<div class="product-card__chip-stack">${fitsPrinterBadgeHTML}${compatMatchBadgeHTML}${discountBadgeHTML}</div>`
             : '';
 
+        // Pack cards read as the better buy, not a dearer single (conversion
+        // handoff 2026-09-27 §8.4). Same ribbon + wording as the shop grid
+        // (shop-page.js createProductCard) — one vocabulary, both renderers.
+        const packRibbonHTML = String(product.pack_type || '').toLowerCase() === 'value_pack'
+            ? '<span class="product-card__ribbon product-card__ribbon--value-pack">Full-set value pack</span>'
+            : '';
+        // "Fits <two models> +N" from the product's own compatible_printers
+        // (§8.1). Empty until listing payloads carry the field.
+        const fitsText = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers) : '';
+        const fitsLineHTML = fitsText ? `<p class="product-card__fits">${Security.escapeHtml(fitsText)}</p>` : '';
+
         // Brand eyebrow — suppressed when the product name already leads with
         // the brand (most DB names do, e.g. "Brother 1030 Compatible…"), so the
         // card doesn't read "Brother / Brother 1030…". Only shown when it adds
@@ -203,10 +214,12 @@ const Products = {
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
                         ${chipStackHTML}
+                        ${packRibbonHTML}
                     </div>
                     <div class="product-card__content">
                         ${brandEyebrowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayTitle)}">${Security.escapeHtml(displayTitle)}</h3>
+                        ${fitsLineHTML}
                         ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
                         ${qualifiesForFreeShipping(product) ? '<div class="product-card__info-row"><span class="product-card__free-shipping">Free Shipping</span></div>' : ''}

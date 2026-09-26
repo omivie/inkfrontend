@@ -1681,9 +1681,15 @@ a.product-card__contact-btn {
     color: var(--color-text, #111827);
 }
 .crosssell-modal__foot {
-    margin-top: 20px;
-    text-align: right;
+    margin: 4px 0 20px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
 }
+.crosssell-modal__checkout { min-height: 48px; }
+.crosssell-modal__keep { min-height: 48px; }
+.crosssell-modal__cart-link { color: var(--cyan-dark); text-decoration: underline; }
 
 .product-detail__savings {
     color: var(--color-success, #22c55e);
@@ -3726,210 +3732,11 @@ a.product-card__contact-btn {
 }
 
 
-/* =============================================
-   REWARDS NUDGE — guest loyalty popover (Jul 2026)
-   =============================================
-   Non-modal card anchored under the header Account button (js/rewards-nudge.js
-   sets --rn-top/--rn-left/--rn-width/--rn-caret-x). No overlay, no focus trap.
-   --rewards-nudge--card is the <768px mode: full-width card below the header,
-   caret hidden. Pinned by tests/rewards-nudge-jul2026.test.js. */
-
-.rewards-nudge {
-    position: fixed;
-    top: var(--rn-top, 72px);
-    left: var(--rn-left, auto);
-    width: var(--rn-width, 360px);
-    z-index: var(--z-popover);
-    background: var(--white-primary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-xl);
-    /* Zero-alpha copy of --shadow-lg so the shadow can fade IN on entrance —
-       shadow lists must match in shape to interpolate. */
-    box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0), 0 4px 6px -4px rgba(15, 23, 42, 0);
-    padding: var(--spacing-5) var(--spacing-5) var(--spacing-4);
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-    /* This base transition governs the EXIT (class removal animates with the
-       target state's transition) — kept fast so closing feels immediate and
-       the 250ms hide-fallback in rewards-nudge.js still outlives it. */
-    transition: opacity 160ms ease, transform 160ms ease, box-shadow 160ms ease;
-}
-
-.rewards-nudge.is-open {
-    opacity: 1;
-    transform: none;
-    box-shadow: var(--shadow-lg);
-    /* "Soft settle" ENTRANCE (owner-tuned Jul 17): decelerating fade + 8px
-       drift + 98%→100% grow, shadow landing last. Deliberately slower than
-       the exit so it arrives gently but leaves promptly. */
-    transition:
-        opacity 300ms cubic-bezier(0.16, 1, 0.3, 1),
-        transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
-        box-shadow 400ms ease;
-}
-
-/* Caret pointing up at the Account button (desktop/tablet mode only) */
-.rewards-nudge::before {
-    content: '';
-    position: absolute;
-    top: -6px;
-    left: var(--rn-caret-x, 50%);
-    width: 10px;
-    height: 10px;
-    margin-left: -5px;
-    background: var(--white-primary);
-    border-top: 1px solid var(--color-border);
-    border-left: 1px solid var(--color-border);
-    transform: rotate(45deg);
-}
-
-/* ERR-280 — BELOW THE TABLET BREAKPOINT THIS CARD IS NOT AN OVERLAY.
-   It was `position: fixed` at --z-popover (600), pinned under the sticky
-   header. A fixed box owns a constant band of the viewport, and on a 390px
-   phone every band is either chrome or product — so anything in flow travelled
-   up through it and could not be tapped while it was inside. That is ERR-224
-   (27.5% of the first screen), ERR-276 (the PDP buy button) and, measured by
-   `npm run probe:mobile-cta` §7, a card Add button at 32 of 92 scroll offsets
-   on /ink-cartridges AFTER ERR-276's path gate had shipped.
-
-   js/rewards-nudge.js#placeInFlow() inserts it into the document just below
-   the fold instead. Static positioning is what makes that true rather than
-   merely intended: with `position: static`, --rn-top/--rn-left/--rn-width and
-   z-index are all inert, so no later rule can quietly restore the overlay by
-   setting one of them. Pinned by tests/mobile-atc-dead-zone-sep2026.test.js. */
-.rewards-nudge--card {
-    /* `relative`, NOT `static`, and the difference is a control that vanishes.
-       .rewards-nudge__close is `position: absolute; top: 2px; right: 2px`, and
-       absolute resolves against the nearest POSITIONED ancestor — so under
-       `static` the dismiss button left the card entirely and was painted
-       against whatever ancestor happened to be positioned. Measured: the x was
-       not on the card at all. `relative` keeps the card in normal flow (it
-       occupies space and scrolls with the page, which is the entire point of
-       ERR-280) while giving the close button its containing block back.
-
-       z-index: auto is what keeps `relative` honest. A positioned element with
-       a z-index would create a stacking context at --z-popover (600) and paint
-       over its neighbours; with `auto` it participates in flow like any other
-       card. tests/mobile-atc-dead-zone-sep2026.test.js pins both, because the
-       one-word edit that turns this back into an overlay is `position: fixed`. */
-    position: relative;
-    /* The base rule is `top: var(--rn-top, 72px); left: var(--rn-left, auto)`,
-       written for the fixed popover. `static` ignored those; `relative` does
-       NOT — it OFFSETS by them. Measured: the card painted 72px below its own
-       layout box, so the next .shop-section-card was laid out against the box
-       and overlapped the "Maybe later" button by 52px. Neutralise both here
-       rather than deleting them from the base rule, which the desktop popover
-       still needs. */
-    top: auto;
-    left: auto;
-    z-index: auto;
-    width: auto;
-    /* Full container width, matching the .shop-section-card blocks it now sits
-       between — the card is part of the page, so it should not read as an
-       inset pop-up that forgot to float. */
-    margin: var(--spacing-5) 0;
-}
-
-.rewards-nudge--card::before {
-    display: none;
-}
-
-.rewards-nudge__close {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    min-width: 44px;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    border-radius: var(--radius-md);
-    color: var(--color-text-muted);
-    cursor: pointer;
-}
-
-.rewards-nudge__close:hover,
-.rewards-nudge__close:focus-visible {
-    color: var(--color-text-heading);
-    background: var(--steel-100);
-}
-
-.rewards-nudge__head {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-2);
-    padding-right: var(--spacing-8); /* keep clear of the close button */
-    margin-bottom: var(--spacing-2);
-}
-
-.rewards-nudge__icon {
-    flex: 0 0 auto;
-    display: flex;
-    color: var(--color-secondary); /* small magenta rewards accent */
-}
-
-.rewards-nudge__title {
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-text-heading);
-    margin: 0;
-}
-
-.rewards-nudge__body {
-    font-size: var(--font-size-sm);
-    color: var(--color-text);
-    line-height: 1.5;
-    margin: 0 0 var(--spacing-4);
-}
-
-.rewards-nudge__cta {
-    display: block;
-    width: 100%;
-    text-align: center;
-    background: var(--color-primary);
-    color: var(--color-text-inverse);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
-    padding: var(--spacing-3) var(--spacing-4);
-    border-radius: var(--radius-md);
-    text-decoration: none;
-    transition: background var(--transition-fast);
-}
-
-.rewards-nudge__cta:hover,
-.rewards-nudge__cta:focus-visible {
-    background: var(--color-primary-dark);
-    color: var(--color-text-inverse);
-}
-
-.rewards-nudge__later {
-    display: block;
-    width: 100%;
-    min-height: 44px;
-    margin-top: var(--spacing-1);
-    background: none;
-    border: none;
-    color: var(--color-text-light);
-    font-size: var(--font-size-xs);
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.rewards-nudge__later:hover,
-.rewards-nudge__later:focus-visible {
-    color: var(--color-text-heading);
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .rewards-nudge,
-    .rewards-nudge.is-open {
-        transition-duration: 0.01ms;
-        transform: none;
-    }
-}
+/* REWARDS NUDGE — RETIRED Sep 2026 (conversion handoff 2026-09-23 D-P0-1).
+   The fixed popover covered the search box and product titles on desktop and
+   Add buttons on phones (76 shows, 1 click in 30 days). The programme facts
+   now render INLINE: .value-strip under the header, the PDP value lines and
+   the cart/checkout loyalty lines. Nothing fixed-position over content. */
 
 /* ERR-094 (Jul 2026): buttons wrap below 480px instead of clipping; .btn--large
    is fluid. See tests/text-fit-jul2026.test.js. */
@@ -4081,6 +3888,27 @@ body.has-consent-banner {
    and the property on dismissal, so the badge drops back to the corner by itself.
    Pinned by tests/consent-mode-sep2026.test.js and measured by
    `npm run probe:consent-banner`. */
+/* A fixed box FROM THE START (conversion handoff 2026-09-23 §2: "the Google
+   reviews badge adds ~0.07 [CLS] everywhere"). footer.js renders an empty
+   in-flow div at the end of the footer; platform.js later restyles it as
+   position:fixed bottom-right and parks a 450x150 measuring iframe inside it.
+   Each of those moves was a layout shift of a box that had been in the
+   document. Declaring the fixed corner box ourselves means Google's inline
+   styles only restate where it already is. Same corner Google uses; the
+   consent-banner lift below still wins (!important). */
+#google-reviews-badge {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    z-index: 2147483647;
+    /* The measuring iframe is 450x150 and starts in view before platform.js
+       parks it at top:-10000px; clipping to the badge's real footprint (it
+       renders at 86px wide or less) keeps that hop from being a visible shift. */
+    max-width: 100px;
+    max-height: 100px;
+    overflow: hidden;
+}
+
 body.has-consent-banner #google-reviews-badge {
     bottom: var(--consent-banner-height, 0px) !important;
 }
@@ -4508,23 +4336,43 @@ a.drilldown-box.drilldown-box--ribbon,
     min-height: 44px;
 }
 
-/* Below the tablet breakpoint the bar stacks: text over a full-width button row.
-   Keeping the buttons on one line at 390px would leave the body text a ~120px
-   column (the ERR-218 lesson — one row plus 44px targets does not fit). */
+/* ≥769px shows the long wording; the short line is for phones only. */
+.consent-banner__body-short { display: none; }
+
+/* Below the tablet breakpoint: ONE ROW — a one-line summary + privacy link
+   beside inline Decline/Accept (conversion handoff 2026-09-23 D-P0-2).
+
+   This used to stack text over a full-width button row, 148px tall on a
+   390x664 iPhone: 22% of the screen, the band the Add button scrolls through.
+   The stack existed because the LONG body left a ~120px column beside the
+   buttons (ERR-218). The fix is the copy, not the layout: the heading and long
+   body hide here and a one-sentence summary shows, which fits two short lines
+   beside two 44px buttons — measured by `npm run probe:consent-banner`.
+   The long wording is still the policy; /privacy is one tap away. */
 @media (max-width: 768px) {
     .consent-banner {
-        flex-direction: column;
-        align-items: stretch;
         gap: var(--spacing-sm, 8px);
+        padding-top: 6px;
+        padding-bottom: calc(6px + var(--safe-bottom, 0px));
+        padding-left: 12px;
+        /* padding-right keeps the base rule's badge-aware calc(). */
     }
 
-    .consent-banner__actions {
-        /* flex-basis is MAIN-AXIS and the axis just flipped to vertical (ERR-224).
-           Nothing here sets a basis, and nothing here may start to. */
-        justify-content: stretch;
+    .consent-banner__heading,
+    .consent-banner__body-long {
+        display: none;
+    }
+
+    .consent-banner__body-short { display: inline; }
+
+    .consent-banner__body {
+        margin: 0;
+        font-size: 0.875rem;
+        line-height: 1.3;
+        color: var(--steel-800, #1e293b);
     }
 
     .consent-banner__btn {
-        flex: 1 1 auto;
+        padding: 0 12px;
     }
 }

@@ -41,6 +41,103 @@ describing the same incident.
 
 ---
 
+## ERR-289 — The paid landing pages were covered by our own overlays, the phone card put the first Add button at y 881 on a 664px screen, and every desktop PDP shifted 0.28 CLS — **RESOLVED (frontend)** (2026-09-27)
+
+**Source.** Backend handoff `inbox/conversion-fixes-and-value-props-FE-handoff-sep2026.md` (09-23, §8 added 09-27).
+The owner kept mobile and tablet on in Google Ads, so every defect below was paid for per click.
+Paid mobile converted at 1.35% against 8.02% on desktop. Reply: `outbox/conversion-fixes-FE-reply-sep2026.md`.
+
+**Measured, HEAD `12e5733` → fix.** Measured on localhost:3000 against the live API, iPhone 13 viewport 390x664 and desktop 1440x900, fresh context each run.
+
+| | before | after |
+|---|---|---|
+| rewards popover | desktop popover over the search box and PDP titles (35 of 58 paid sessions, 1 click in 30 days) | **deleted** everywhere |
+| consent bar, phone | 148 px | 57 px |
+| phone header | 180 px, 3 rows | 128 px |
+| phone card | 471–525 px, two per row | 243 px, list layout |
+| first Add, `/ink-cartridges` · `/toner-cartridges` · `/shop?brand=hp&code=65` | 881 · 881 · 861 | 571 · 571 · 505 |
+| desktop PDP Add, genuine | y 830, under the bar at y 839 | y 769 |
+| CLS, desktop PDP | 0.275 / 0.307 | 0.02–0.08 |
+| CLS, `/ink-cartridges` desktop | 0.053 | 0.009 |
+
+**What was wrong, one line each.**
+- **The popover.** ERR-276 and ERR-280 made it safe on phones. On desktop it stayed a fixed overlay, and it earned 1 click in 30 days. Deleted, not moved: the facts it carried now appear inline — the value strip, the PDP lines, and the cart and checkout lines.
+- **The cross-sell modal.** It opened full-screen at z 10000 on phones, with no way on to checkout. It no longer opens on phones. On desktop, Checkout comes first.
+- **The PDP CLS was pre-existing.**
+  - The footer painted at y 581 around a 373 px skeleton, and the product then pushed it 1,900 px down.
+  - Fixed with `.site-main { min-height: 100vh }`.
+  - The pricing block, the title, and the hidden Genuine/Compatible pill now reserve their space. The pill needed `!important`, because base.css has `[hidden] { display:none !important }`: a reservation on a `[hidden]` element does nothing without it.
+  - The phone breadcrumb wrapped from 2 lines to 3 when the product name arrived (0.157 on its own); it is now one line.
+  - The Google badge's 450x150 measuring iframe hopped across the viewport (0.052 on every page); it is now clipped to a fixed corner box.
+- **Pre-existing overflow on phones.** The PDP info column was 390 px wide in a 358 px track, because a grid item's `min-width: auto` equals the min-content width of the ladder's four chips. The right edge of the delivery line and the last chip were cut off. Fixed with `.product-detail__layout > * { min-width: 0 }`.
+- **My own first cut regressed the desktop PDP.** Printer fit and points above Add pushed Add to y 1,051 on a 900 px screen. `probe:mobile-cta` §3 caught it. On wide screens those lines now render below Add. On phones they stay above it, where the sticky Add bar covers the first screen.
+
+> ***Reassurance placed above a button can cost the button its first screen. Measure the button, not the copy.***
+
+**Honest misses.**
+- The paid landings miss the 520 px target by 51 px. §8.1 asked for the printer box first, which costs 106 px.
+- Compatible PDPs on desktop sit at y 867, 28 px under the bar. The Ads compliance panel is above Add, and we did not move it without the owner.
+
+**Guards.**
+- `tests/conversion-fixes-sep2026.test.js`: 43 tests, executed in a vm or through module imports, not grepped. `scripts/redproof-conversion-fixes.py` runs 24 mutations on a temp copy and catches all 24.
+- `npm run probe:conversion-fixes`: 48 passed. Its negative control, a synthetic full-screen overlay, produces dead offsets.
+- `probe:mobile-cta` §3 and §4 were rewritten for the retirement: desktop search form uncovered at every offset, PDP Add at scroll 0, no overlay on the landing page.
+
+---
+
+## ERR-288 — Checkout promised "Human support 8am–8pm, 7 days" while the footer said Mon–Fri 9–5, and every PDP promised same-day dispatch while the API said it could not be kept — **RESOLVED** (2026-09-27)
+
+**The hours.** Neither spelling came from `/api/site/trust`.
+- "8am–8pm, 7 days" appeared on checkout, payment and 9 account pages.
+- "Mon–Fri 9am–5pm" appeared on home, footer, contact and quote.
+- The owner confirmed **Mon–Fri 9am–5pm**. The other spelling is removed, and a test fails on 8am, 8pm or 7 days anywhere in the storefront.
+- This is the claim class that got the Ads account suspended in May.
+
+**The dispatch line.**
+- `product-detail-page.js` printed "Order before 2pm NZT for same-day dispatch" unconditionally.
+- Measured 2026-09-27: `delivery_estimate.same_day_eligible:false` came back for GTN258BK (a Sunday), and the PDP made the promise anyway.
+- `_dispatchClause()` now reads the flag:
+  - `true`: the locked copy, plus "(Auckland metro)" when the backend's own `promise` scopes it that way.
+  - `false`: "Ships next business day".
+  - absent: nothing.
+- The locked string survives verbatim for `product-buybox-may2026`. The backend prerender carries no same-day line, so there is no parity to break.
+
+**Also fixed in this round.**
+- The cart said "Calculated at checkout" while checkout said $7.00. It now says "From $7.00 · free over $100", from `summary.shipping`, `is_shipping_estimate` and `free_shipping_threshold`.
+- "BULK PRICE" is now "3+ price", using the entry rung's own quantity.
+- Hard-coded "Free shipping over $100" text on checkout and payment is bound to `/api/site/value-props`. If the read fails, the row hides.
+
+> ***A promise is a function of state. If the API says it cannot be kept, the page may not say it.***
+
+---
+
+## ERR-287 — Googlebot on a legacy SKU URL got a 200 and the target's body, because middleware.js followed the backend's 301 instead of passing it on — **RESOLVED** (2026-09-27)
+
+**Measured 2026-09-27.**
+- `curl -sI -A Googlebot https://www.inkcartridges.co.nz/products/x/G-BRO-LC531BK-INK-BK` returned **HTTP 200**.
+- `/api/prerender/product/G-BRO-LC531BK-INK-BK` returned **301** to `…/GLC531BK`.
+
+`fetch()` follows redirects by default, so the middleware served the target's HTML at the old URL. Google kept the duplicate. The backend counts 1,744 PDP URLs with impressions outside the sitemap, 752 of them in legacy grammar.
+
+**Fix** (`inkcartridges/middleware.js`):
+- The prerender fetch now uses `redirect: 'manual'`, and any 3xx is passed on as **our 301**. A relative `Location` is resolved against the requested www URL, never the backend host. A 3xx with no `Location` falls through to the SPA.
+- **Bare `/shop`** (zero params) is now prerendered from `/api/prerender/shop`. Before this, Google indexed the API host's copy instead. `js/seo-meta.js` `prerenderPathForLocation` mirrors the change, so the SPA's reconcile reads the same page the crawler got (the ERR-270 lesson: fix both sides of a mirror).
+- `x-robots-tag` is deleted explicitly from the response headers we build. Upstream sends `noarchive` today.
+
+**Guards.** `tests/conversion-fixes-sep2026.test.js` §1 imports the real middleware and stubs `fetch`. It checks:
+- 301, 302, 307 and 308 all come out as a 301, and a relative `Location` resolves to www.
+- A redirect with no `Location` falls through to the SPA.
+- The 200 path still works as the negative control.
+- The robots header is dropped.
+- Bare `/shop` prerenders, and `/shop` with any param does not.
+- Humans are never prerendered.
+
+The old §4 test in `ai-search-readiness`, which said bare `/shop` must not prerender, was updated with its reason.
+
+**To verify after deploy:** `curl -sI -A Googlebot "https://www.inkcartridges.co.nz/products/x/G-BRO-LC531BK-INK-BK"` must return 301 with a `location` ending in `/GLC531BK`.
+
+---
+
 ## ERR-286 — Admin Products went blank on a column click, its Brand filter had done nothing for weeks, and its export ignored every filter — the backend's 42-doc answer, measured before it was built on — **RESOLVED (frontend)** (2026-09-25)
 
 **Context.** The backend answered all 42 documents of `backend-asks-2026-09-20.md` in one response

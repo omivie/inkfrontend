@@ -651,7 +651,8 @@ const Auth = {
         // sessionStorage token it accompanies. Remembered mode is byte-for-byte
         // the pre-ERR-209 cookie.
         //
-        // Both readers (middleware.js:45, rewards-nudge.js:139) test only for
+        // Its reader (middleware.js's /admin gate; rewards-nudge.js was the
+        // other until it was retired in Sep 2026) tests only for
         // the presence of `__ink_auth=1`, and a session cookie is serialised
         // into the Cookie header identically to a persistent one for as long as
         // it exists — so the /admin edge gate is unaffected within a browsing

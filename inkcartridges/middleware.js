@@ -259,38 +259,80 @@ export default async function middleware(request) {
         && !url.searchParams.get('search') && !url.searchParams.get('type')
         && !url.searchParams.get('printer_model');
       if (soleFilter) prerenderPath = `/api/prerender/category/${cat}`;
+      // Truly bare /shop (no query at all) → the backend's shop prerender.
+      // Until Sep 2026 this fell through to the SPA shell, and Google indexed
+      // api.inkcartridges.co.nz/api/prerender/shop in its place (conversion
+      // handoff 2026-09-23 §6.2). "Bare" means zero params, the same rule
+      // js/seo-meta.js uses for its 'shop-landing' surface and mirrors in
+      // prerenderPathForLocation — any param narrows the page, and a prerender
+      // of the whole shop would misdescribe it.
+      else if ([...url.searchParams.keys()].length === 0) prerenderPath = '/api/prerender/shop';
     }
   }
 
   if (!prerenderPath) return;
 
   try {
+    // `redirect: 'manual'` — the backend 301s legacy-grammar SKUs
+    // (G-BRO-LC531BK-INK-BK → GLC531BK), deactivated products and renamed
+    // printers. A default fetch FOLLOWS that 301 and we served the target's
+    // body as a 200 at the OLD url, so Google kept every duplicate: 1,744 PDP
+    // URLs with impressions sat outside the sitemap, 752 of them legacy
+    // grammar (conversion handoff 2026-09-23 §6.1). Measured 2026-09-27:
+    // Googlebot on www/products/x/G-BRO-LC531BK-INK-BK got 200 while
+    // /api/prerender/product/G-BRO-LC531BK-INK-BK answered 301.
     const response = await fetch(`${BACKEND}${prerenderPath}`, {
       headers: {
         'User-Agent': ua,
         'Accept': 'text/html',
       },
+      redirect: 'manual',
     });
+
+    // Pass a backend redirect through as OUR 301 so the crawler moves to the
+    // canonical URL. The backend answers with an absolute www location; a
+    // relative one is resolved against the requested URL, never the backend
+    // host (that would send the crawler to the API origin). A 3xx without a
+    // Location falls through to the SPA, like any other non-200.
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) return;
+      const target = new URL(location, url);
+      return new Response(null, {
+        status: 301,
+        headers: {
+          'Location': target.toString(),
+          'Cache-Control': 'public, s-maxage=3600, max-age=3600',
+          'X-Prerender-Redirect': 'true',
+        },
+      });
+    }
 
     if (!response.ok) return;
 
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        // s-maxage caps how long the CDN serves a single response without
-        // revalidating; stale-while-revalidate lets the next request after
-        // expiry serve stale immediately while a fresh fetch happens in the
-        // background. Without SWR, post-backend-deploy catalog changes
-        // (e.g. May 2026 pack-resolver fix that surfaced ~232 more packs)
-        // can stay invisible to crawlers for a full hour. With SWR=86400,
-        // the first crawler hit after s-maxage expiry triggers a refresh
-        // without blocking, so subsequent hits see the new HTML almost
-        // immediately. Pinned by tests/dense-pack-rollout-may2026.test.js.
-        'Cache-Control': 'public, s-maxage=3600, max-age=3600, stale-while-revalidate=86400',
-        'X-Prerendered': 'true',
-      },
+    // Headers are BUILT, never copied from upstream. The backend's prerender
+    // sends `x-robots-tag: noarchive` today and its API host is noindex; a
+    // future "copy upstream headers" refactor would carry that onto www and
+    // could deindex the site. The explicit delete keeps that true even if
+    // someone does seed this object from `response.headers`
+    // (conversion handoff 2026-09-23 §6.3).
+    const headers = new Headers({
+      'Content-Type': 'text/html; charset=utf-8',
+      // s-maxage caps how long the CDN serves a single response without
+      // revalidating; stale-while-revalidate lets the next request after
+      // expiry serve stale immediately while a fresh fetch happens in the
+      // background. Without SWR, post-backend-deploy catalog changes
+      // (e.g. May 2026 pack-resolver fix that surfaced ~232 more packs)
+      // can stay invisible to crawlers for a full hour. With SWR=86400,
+      // the first crawler hit after s-maxage expiry triggers a refresh
+      // without blocking, so subsequent hits see the new HTML almost
+      // immediately. Pinned by tests/dense-pack-rollout-may2026.test.js.
+      'Cache-Control': 'public, s-maxage=3600, max-age=3600, stale-while-revalidate=86400',
+      'X-Prerendered': 'true',
     });
+    headers.delete('x-robots-tag');
+
+    return new Response(response.body, { status: 200, headers });
   } catch {
     return;
   }

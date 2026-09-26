@@ -145,9 +145,13 @@ test('§1 the brand skeleton is the height of the tile it stands in for', () => 
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('§2 both shelves ship placeholders, one per row the shelf will render', () => {
-    const LIMIT = Number((SHOP_JS.match(/POPULAR_ROW_LIMIT:\s*(\d+)/) || [])[1]);
-    assert.equal(LIMIT, 4, 'POPULAR_ROW_LIMIT is the number of placeholders that must be present');
-    for (const [name, html] of [['shop.html', SHOP_HTML], ['ribbons.html', RIBBONS_HTML]]) {
+    // Each shelf reads ITS OWN limit: /ink-cartridges and /toner-cartridges show
+    // 8 since the conversion handoff (2026-09-23 D-P0-4); /ribbons still shows 4.
+    const limitOf = (src) => Number((src.match(/POPULAR_ROW_LIMIT:\s*(\d+)/) || [])[1]);
+    const RIBBONS_JS = fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'js', 'ribbons-page.js'), 'utf8');
+    assert.equal(limitOf(SHOP_JS), 8, 'shop POPULAR_ROW_LIMIT');
+    assert.equal(limitOf(RIBBONS_JS), 4, 'ribbons POPULAR_ROW_LIMIT');
+    for (const [name, html, LIMIT] of [['shop.html', SHOP_HTML, limitOf(SHOP_JS)], ['ribbons.html', RIBBONS_HTML, limitOf(RIBBONS_JS)]]) {
         const count = (markupOnly(html).match(/class="product-card product-card--placeholder"/g) || []).length;
         assert.equal(count, LIMIT,
             `${name} must ship exactly ${LIMIT} placeholders — the same number of cards the shelf `

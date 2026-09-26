@@ -3224,11 +3224,11 @@ const Cart = {
 
         /* THE ADD-TO-CART MOMENT, ANNOUNCED (ERR-276).
          *
-         * js/rewards-nudge.js is the one listener today. On a phone it is now
-         * suppressed on the whole buying path, because below 768px it renders as
-         * a fixed full-width card at --z-popover pinned under the header, and it
-         * was landing on #add-to-cart-btn. The ask is not deleted, it is MOVED to
-         * here: once the buy button has been pressed, a popover costs nothing.
+         * Its first listener, js/rewards-nudge.js, was RETIRED in Sep 2026
+         * (conversion handoff D-P0-1 — the popover itself was the defect). The
+         * event stays: it is the one place "the shopper just added something"
+         * is announced, and a future inline surface should listen here rather
+         * than re-derive it. No listener today.
          *
          * DELIBERATELY OUTSIDE THE `!product.silent` GUARD ABOVE. `silent` is an
          * opt-in flag for callers that add several lines in one gesture — the
@@ -3358,6 +3358,16 @@ const Cart = {
      * Accepts either { products: [...] } (warm cache) or { url } (cold cache).
      */
     async _showCrossSellModal(payload) {
+        // NEVER ON A PHONE (conversion handoff 2026-09-23 D-P0-3). Below the
+        // tablet breakpoint this was a full-screen z-10000 sheet opened right
+        // after a successful add, offering only × and more products — no way on
+        // to the cart or checkout. The PDP already shows the pack upsell under
+        // the Add button (#pack-upsell) and the in-flow confirmation carries
+        // View cart + Checkout, so on a phone the modal is simply dropped.
+        if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+            const tablet = (typeof Config !== 'undefined' && Config.BREAKPOINTS && Config.BREAKPOINTS.tablet) || 768;
+            if (!window.matchMedia(`(min-width: ${tablet}px)`).matches) return;
+        }
         let products = payload.products || null;
         if (!products && payload.url) {
             // Lazy-fetch on idle — backend says hot path is cache.set'd for 1h
@@ -3464,10 +3474,14 @@ const Cart = {
                     <h3 id="crosssell-title">Customers also bought</h3>
                     <button type="button" class="crosssell-modal__close" aria-label="Close">&times;</button>
                 </div>
-                <div class="crosssell-modal__grid">${cards}</div>
+                <!-- The way ON comes first (D-P0-3): Checkout is the primary,
+                     Keep shopping closes, the upsell sits below both. -->
                 <div class="crosssell-modal__foot">
-                    <a href="/cart" class="btn btn--primary">Go to cart</a>
+                    <a href="/checkout" class="btn btn--primary crosssell-modal__checkout" data-track="cta_click" data-track-cta="crosssell_checkout">Checkout</a>
+                    <button type="button" class="btn btn--secondary crosssell-modal__keep">Keep shopping</button>
+                    <a href="/cart" class="crosssell-modal__cart-link">View cart</a>
                 </div>
+                <div class="crosssell-modal__grid">${cards}</div>
             </div>
         `;
         // ERR-218: the modal's cards get the same stepper as every other
@@ -3477,6 +3491,7 @@ const Cart = {
 
         const close = () => overlay.remove();
         overlay.querySelector('.crosssell-modal__close').addEventListener('click', close);
+        overlay.querySelector('.crosssell-modal__keep').addEventListener('click', close);
         overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
         document.addEventListener('keydown', function escClose(e) {
             if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
@@ -4082,9 +4097,16 @@ const Cart = {
 
     /**
      * Render the loyalty message chip on the cart page (earn nudge or applied summary).
-     * Hidden for guests and when the loyalty service couldn't be queried.
+     * Hidden when the loyalty service couldn't be queried (no `message`).
      * Uses loyalty.message verbatim — do not interpolate from numeric fields.
      * The interactive redeem control (amount/Max/Apply/Remove) lives in cart-page.js.
+     *
+     * GUESTS (conversion handoff 2026-09-23 §5): the backend now populates
+     * `loyalty` for guest carts too — `{guest: true, earn_on_this_order,
+     * earn_value_dollars, welcome_bonus_points, redemption_rate, message}` —
+     * where it used to be null. The message is still rendered verbatim; a guest
+     * additionally gets the link that makes it actionable. It never blocks
+     * checkout — it is a link, not a gate.
      */
     _renderLoyaltyChip: function() {
         const chipEl = document.getElementById('cart-loyalty-chip');
@@ -4096,7 +4118,47 @@ const Cart = {
             return;
         }
         chipEl.textContent = lo.message;
+        if (lo.guest === true) {
+            const link = document.createElement('a');
+            link.className = 'cart-summary__loyalty-link';
+            link.href = '/account/login?tab=register&redirect=' + encodeURIComponent('/cart');
+            link.textContent = 'Create a free account';
+            chipEl.appendChild(document.createTextNode(' '));
+            chipEl.appendChild(link);
+        }
         chipEl.hidden = false;
+    },
+
+    /**
+     * The cart's Shipping row (conversion handoff 2026-09-23 §3).
+     *
+     * It used to say "Calculated at checkout" and checkout then said "$7.00" —
+     * the first time a shopper saw shipping was one step from paying. The cart
+     * response already carries the figure. Rules, SERVER NUMBERS ONLY:
+     *   qualifies                          → "Free"
+     *   shipping > 0, is_shipping_estimate → "From $7.00 · free over $100"
+     *   shipping > 0, not an estimate      → "$7.00"
+     *   anything else (absent, null, 0)    → "Calculated at checkout"
+     * The threshold is the cart's own `free_shipping_threshold`; no local
+     * constant. A 0 that is not "qualifies" is NOT printed as free — that
+     * would be absence-read-as-zero (ERR-063 family).
+     *
+     * @param {object|null} summary  server cart summary
+     * @param {boolean} serverQualifies
+     * @returns {string}
+     */
+    _shippingRowText: function(summary, serverQualifies) {
+        if (serverQualifies) return 'Free';
+        const s = summary || {};
+        const ship = typeof s.shipping === 'number' ? s.shipping : NaN;
+        if (!(ship > 0)) return 'Calculated at checkout';
+        const money = (n) => (typeof formatPrice === 'function' ? formatPrice(n) : '$' + Number(n).toFixed(2));
+        if (s.is_shipping_estimate === false) return money(ship);
+        const t = typeof s.free_shipping_threshold === 'number' && s.free_shipping_threshold > 0
+            ? s.free_shipping_threshold : null;
+        // "$100", not "$100.00", for a whole-dollar threshold — it is a headline.
+        const tStr = t === null ? '' : (Number.isInteger(t) ? '$' + t : money(t));
+        return 'From ' + money(ship) + (tStr ? ' · free over ' + tStr : '');
     },
 
     /**
@@ -4257,7 +4319,7 @@ const Cart = {
             const serverQualifies = !!(this.serverSummary
                 && this.serverSummary.qualifies_for_free_shipping === true);
             if (shipEl) {
-                shipEl.textContent = serverQualifies ? 'Free' : 'Calculated at checkout';
+                shipEl.textContent = this._shippingRowText(this.serverSummary, serverQualifies);
             }
 
             if (shippingMsgEl) {

@@ -217,8 +217,12 @@ test('§5 home', () => {
     assert.equal(P('/'), '/api/prerender/home');
     assert.equal(P('/index.html'), '/api/prerender/home');
 });
-test('§5 bare /shop -> null (middleware does NOT prerender it — ai-search §4)', () => {
-    assert.equal(P('/shop'), null);
+test('§5 bare /shop -> shop prerender (middleware prerenders it since Sep 2026 — handoff §6.2)', () => {
+    assert.equal(P('/shop'), '/api/prerender/shop');
+    assert.equal(P('/shop/'), '/api/prerender/shop');
+    // Any param narrows the page — no whole-shop prerender for it.
+    assert.equal(P('/shop', '?q=hp'), null);
+    assert.equal(P('/shop', '?gclid=x'), null);
 });
 test('§5 category landings', () => {
     assert.equal(P('/ink-cartridges'), '/api/prerender/category/ink');

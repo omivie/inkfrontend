@@ -750,6 +750,14 @@
             // its condition is met, so each renderer hides its own element and
             // the page looks identical to today when nothing qualifies.
             this.renderPackSavingsVsSingles(info);
+
+            // Printer fit + value props, ABOVE the Add button (conversion
+            // handoff 2026-09-23 §4.2 / 2026-09-27 §8.1). A shopper unsure the
+            // cartridge fits does not add it; 51% of orders are one unit.
+            this._unitPrice = price;
+            this.renderFitCheck(info);
+            this.renderValueLines(info);
+
             this.renderWaitlistProof(info);
             this.renderPrinterPurchaseProof(info);
 
@@ -892,7 +900,10 @@
                 }
             }
 
-            // Product image with color fallback
+            // Product image with color fallback. The hero is the PDP's LCP
+            // element: `fetchpriority="high"` so it is not queued behind the
+            // below-fold rails' images (conversion handoff 2026-09-23 §2). The
+            // box is already reserved by .product-gallery__main { aspect-ratio: 1 }.
             const productImageEl = document.getElementById('product-image');
             const colorStyle = ProductColors.getProductStyle(info);
             // Build srcset for responsive product detail images (400/600/800w)
@@ -918,12 +929,12 @@
                 if (colorStyle && info.isCompatible) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
-                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} style="max-width: 100%; height: auto;"
+                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
                         <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
                     // Image with placeholder fallback
-                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} style="max-width: 100%; height: auto;"
+                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
                         data-fallback="placeholder">`;
                 }
 
@@ -1069,8 +1080,7 @@
             if (deliveryEl) {
                 deliveryEl.innerHTML =
                     `<span class="buy-box__delivery-label">${Security.escapeHtml(dLabel)}</span>`
-                    + ` <span class="buy-box__sep" aria-hidden="true">·</span> `
-                    + `<span class="buy-box__delivery-cutoff">Order before ${Security.escapeHtml(dCutoff)} NZT for same-day dispatch</span>`;
+                    + this._dispatchClause(delivery, dCutoff);
             }
 
             // Returns row — `${days}-day returns · Policy ›` linking to ${url_path}.
@@ -1106,6 +1116,37 @@
             if (countdownEl && typeof DispatchCountdown !== 'undefined') {
                 DispatchCountdown.mount(countdownEl, delivery);
             }
+        },
+
+        /**
+         * The dispatch clause after the delivery label, driven by
+         * `delivery_estimate.same_day_eligible` (conversion handoff 2026-09-23 §3).
+         *
+         * Until Sep 2026 the "Order before 2pm NZT for same-day dispatch" line
+         * printed UNCONDITIONALLY: at 20:55 NZT the PDP made that promise while
+         * the same response said `same_day_eligible: false` — a claim the
+         * business could not keep, on a page paid ad clicks land on.
+         *
+         *   true   → the locked copy (still pinned verbatim by
+         *            product-buybox-may2026 §C), scoped "(Auckland metro)" when
+         *            the backend's own promise text scopes it that way
+         *   false  → "Ships next business day"
+         *   absent → NO clause. Unknown eligibility is not a promise either way.
+         */
+        _dispatchClause(delivery, dCutoff) {
+            const sep = ` <span class="buy-box__sep" aria-hidden="true">·</span> `;
+            const eligible = delivery ? delivery.same_day_eligible : undefined;
+            if (eligible === true) {
+                const scope = typeof delivery.promise === 'string' && /auckland metro/i.test(delivery.promise)
+                    ? ' (Auckland metro)' : '';
+                return sep + `<span class="buy-box__delivery-cutoff">Order before ${Security.escapeHtml(dCutoff)} NZT for same-day dispatch${scope}</span>`;
+            }
+            if (eligible === false) {
+                // Short enough to stay on the delivery row's one line at desktop
+                // width — two lines here cost the Add button its first screen.
+                return sep + '<span class="buy-box__delivery-cutoff">Ships next business day</span>';
+            }
+            return '';
         },
 
         /**
@@ -1276,6 +1317,8 @@
             });
 
             this.syncVolumePricing();
+            // The ladder can arrive after the points line rendered at retail.
+            this.syncPointsLine();
         },
 
         /**
@@ -1409,6 +1452,166 @@
             }
         },
 
+        /** Printer names as the backend's crawler pages spell them (PrinterName, utils.js). */
+        _printerLabel(name) {
+            return (typeof PrinterName !== 'undefined') ? PrinterName.display(name) : name;
+        },
+
+        /** Letters and digits only, lower-cased — "MFC-J5930DW" and "mfc j5930dw" are one query. */
+        _fitKey(s) {
+            return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+        },
+
+        /**
+         * "Fits these printers" + "Check your printer" + the compatibility
+         * promise, directly under the price (conversion handoff 2026-09-27 §8.1).
+         *
+         * Source: the product's OWN `compatible_printers` (never a sibling's —
+         * ERR-135). The first two are named; all of them are in the checker.
+         * The check box filters that same list client-side; a query that matches
+         * nothing says so and points at printer search — it never claims the
+         * cartridge does not fit, because the compatibility data has known gaps.
+         *
+         * `trust_signals.compatibility_promise` is restated verbatim; nothing
+         * here may say "guaranteed to fit" or "zero risk" (inv 13 — pinned by
+         * tests/conversion-fixes-sep2026.test.js).
+         *
+         * Ribbons are owner-manual (ERR-086) and render nothing here.
+         */
+        renderFitCheck(info) {
+            const el = document.getElementById('product-fit');
+            if (!el) return;
+            const printers = info && info.category !== 'ribbon' && Array.isArray(info.compatible_printers)
+                ? info.compatible_printers.filter(p => p && (p.full_name || p.model_name))
+                : [];
+            const promise = info && info.trust_signals && info.trust_signals.compatibility_promise;
+            const hasPromise = promise && typeof promise.label === 'string' && promise.label.trim();
+            if (!printers.length && !hasPromise) { el.hidden = true; el.innerHTML = ''; return; }
+
+            const labelOf = (p) => this._printerLabel(p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '));
+            const items = printers.map((p) => {
+                const raw = p.full_name || [p.brand, p.model_name].filter(Boolean).join(' ');
+                const href = this._printerHubHref(p);
+                return `<li class="product-fit__item" data-fit-key="${Security.escapeAttr(this._fitKey(raw))}">`
+                    + `<a href="${Security.escapeAttr(href)}">${Security.escapeHtml(labelOf(p))}</a></li>`;
+            }).join('');
+
+            /* COMPACT BY DESIGN. The first cut listed six printers and the full
+             * promise above the button, and pushed a desktop PDP's Add to Cart to
+             * y 1400 on a 900px screen (measured, probe:mobile-cta §3) — the
+             * reassurance cost the buy button its first screen. Now: one summary
+             * line and the promise label stay visible; the checker, the full list
+             * and the promise's detail open on demand. */
+            const shown = printers.slice(0, 2).map(labelOf);
+            const more = printers.length - shown.length;
+            let html = '';
+            if (printers.length) {
+                html += `<p class="product-fit__summary"><strong>Fits:</strong> ${Security.escapeHtml(shown.join(', '))}`
+                    + (more > 0 ? ` <span class="product-fit__more-count">+${more} more</span>` : '') + `</p>`
+                    + `<details class="product-fit__details" id="product-fit-details">`
+                    + `<summary>Check your printer${printers.length > 2 ? ` (${printers.length} listed)` : ''}</summary>`
+                    + `<label class="product-fit__check"><span class="visually-hidden">Your printer model</span>`
+                    + `<input type="search" class="product-fit__input" id="product-fit-input" placeholder="Type your printer model, e.g. ${Security.escapeAttr(this._printerLabel(printers[0].model_name || printers[0].full_name || ''))}" autocomplete="off" enterkeyhint="search"></label>`
+                    + `<p class="product-fit__result" id="product-fit-result" role="status" aria-live="polite" hidden></p>`
+                    + `<ul class="product-fit__list" id="product-fit-list">${items}</ul>`;
+            }
+            if (hasPromise) {
+                const desc = typeof promise.description === 'string' ? promise.description.trim() : '';
+                const how = typeof promise.how_to_check === 'string' ? promise.how_to_check.trim() : '';
+                const extra = (desc ? `<p class="product-fit__promise-desc">${Security.escapeHtml(desc)}</p>` : '')
+                    + (how ? `<p class="product-fit__how"><strong>How do I know it fits?</strong> ${Security.escapeHtml(how)}</p>` : '');
+                if (printers.length) html += extra + `</details>`;
+                html += `<p class="product-fit__promise-label">${Security.escapeHtml(promise.label.trim())}</p>`;
+                if (!printers.length && extra) html += `<details class="product-fit__details"><summary>How do I know it fits?</summary>${extra}</details>`;
+            } else if (printers.length) {
+                html += `</details>`;
+            }
+            el.innerHTML = html;
+            el.hidden = false;
+
+            const input = el.querySelector('#product-fit-input');
+            const result = el.querySelector('#product-fit-result');
+            const list = el.querySelector('#product-fit-list');
+            if (!input || !list) return;
+            input.addEventListener('input', () => {
+                const q = this._fitKey(input.value);
+                let hits = 0;
+                list.querySelectorAll('.product-fit__item').forEach(li => {
+                    const match = !q || li.getAttribute('data-fit-key').includes(q);
+                    li.hidden = !match;
+                    if (q && match) hits++;
+                });
+                if (!result) return;
+                if (!q) { result.hidden = true; result.textContent = ''; return; }
+                result.hidden = false;
+                result.classList.toggle('product-fit__result--miss', hits === 0);
+                if (hits > 0) {
+                    result.textContent = hits === 1 ? 'Listed for your printer:' : `${hits} matching printers listed:`;
+                } else {
+                    result.innerHTML = `Not listed for this cartridge. <a href="/shop?q=${encodeURIComponent(input.value.trim())}">Search your printer model</a> to see the cartridges listed for it.`;
+                }
+            });
+        },
+
+        /**
+         * Programme facts above the Add button (conversion handoff §4.2):
+         * points this order earns, free-shipping threshold, and the phone number
+         * with the founding year (older buyers call before they buy — §8.2).
+         *
+         * Loyalty + free-shipping numbers come ONLY from /api/site/value-props;
+         * phone + founded year ONLY from this product's trust_signals. Each line
+         * is omitted when its source is missing — never a default number.
+         */
+        async renderValueLines(info) {
+            const el = document.getElementById('product-value-lines');
+            if (!el) return;
+            const contact = info && info.trust_signals && info.trust_signals.contact;
+            const org = info && info.trust_signals && info.trust_signals.organization;
+            const vp = (typeof ValueProps !== 'undefined') ? await ValueProps.load() : { ok: false, error: 'ValueProps missing' };
+            this._loyalty = vp.ok ? ValueProps.loyalty(vp.data) : null;
+            const ship = vp.ok ? ValueProps.freeShipping(vp.data) : null;
+            el.dataset.valueProps = vp.ok ? 'ok' : 'unavailable';
+
+            const lines = [];
+            // Points and free shipping share ONE line ("Earn 142 points ($1.42)
+            // · Free shipping on orders over $100") so the block stays two lines
+            // tall above the Add button.
+            const facts = [];
+            if (this._loyalty) facts.push(`<span class="product-value-lines__points" id="product-points-line" hidden></span>`);
+            if (ship && ship.headline) facts.push(`<span class="product-value-lines__ship">${Security.escapeHtml(ship.headline)}</span>`);
+            if (facts.length) lines.push(`<p class="product-value-lines__facts">${facts.join('')}</p>`);
+            const phone = contact && typeof contact.phone_display === 'string' ? contact.phone_display.trim() : '';
+            const tel = contact && typeof contact.phone_tel_href === 'string' ? contact.phone_tel_href.replace(/[^+\d]/g, '') : '';
+            if (phone && tel) {
+                const year = org && Number.isInteger(org.founded_year) ? org.founded_year : null;
+                lines.push(`<p class="product-value-lines__call">Questions? Call <a href="tel:${Security.escapeAttr(tel)}">${Security.escapeHtml(phone)}</a>`
+                    + (year ? ` · NZ company since ${year}` : '') + `</p>`);
+            }
+            el.innerHTML = lines.join('');
+            el.hidden = lines.length === 0;
+            this.syncPointsLine();
+        },
+
+        /**
+         * "Earn N points ($X) on this order" for the quantity in the box.
+         * Goods only (earn_basis goods_excluding_shipping), at the unit price
+         * this add-to-cart will charge: the ladder rung when one applies,
+         * else retail. Integer-cent maths lives in ValueProps.pointsFor.
+         */
+        syncPointsLine() {
+            const line = document.getElementById('product-points-line');
+            if (!line || !this._loyalty || typeof ValueProps === 'undefined') return;
+            const qtyInput = document.getElementById('qty-input');
+            const qty = Math.max(1, parseInt(qtyInput && qtyInput.value, 10) || 1);
+            const ladder = this._volumeLadder;
+            const rung = ladder && typeof Business !== 'undefined' ? Business.offerAtQuantity(ladder, qty) : null;
+            const unit = rung ? rung.businessPrice : this._unitPrice;
+            const earn = ValueProps.pointsFor(Math.round(Number(unit) * 100) * qty / 100, this._loyalty);
+            if (!earn) { line.hidden = true; line.textContent = ''; return; }
+            line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} points (${formatPrice(earn.value)}) on this order`;
+            line.hidden = false;
+        },
+
         /**
          * Value-pack upsell (IA reorg Jul 2026). The backend's product payload
          * carries `pack_suggestion` — the multipack of the SKU being viewed —
@@ -1441,14 +1644,22 @@
             const imgHtml = imgSrc && imgSrc !== '#'
                 ? `<img class="pack-upsell__thumb" src="${Security.escapeAttr(imgSrc)}" alt="" loading="lazy">`
                 : '';
+            // "…vs buying the 4 separately" only with a real count from the
+            // backend (`cartridge_count`, corrected 2026-09-23 along with
+            // individual_total — conversion handoff §5). No count ⇒ the generic
+            // wording, never a guessed number.
+            const count = parseInt(ps.cartridge_count, 10);
+            const vs = Number.isFinite(count) && count > 1
+                ? `vs buying the ${count} separately`
+                : 'vs buying them separately';
             el.innerHTML =
-                `<div class="pack-upsell__eyebrow">Buying more than one?</div>`
+                `<div class="pack-upsell__eyebrow">Buy the full set</div>`
                 + `<a href="${Security.escapeAttr(href)}" class="pack-upsell__body" data-track="cta_click" data-track-cta="pack_upsell" data-track-location="product_page">`
                 +     imgHtml
                 +     `<span class="pack-upsell__copy">`
                 +         `<span class="pack-upsell__name">${Security.escapeHtml(ps.name || ps.sku)}</span>`
                 +         `<span class="pack-upsell__price">${Security.escapeHtml(formatPrice(price))}${compareHtml}</span>`
-                +         `<span class="pack-upsell__savings">Save ${Security.escapeHtml(formatPrice(savings))} vs buying singles</span>`
+                +         `<span class="pack-upsell__savings">Saves ${Security.escapeHtml(formatPrice(savings))} ${vs}</span>`
                 +     `</span>`
                 +     `<span class="pack-upsell__arrow" aria-hidden="true">›</span>`
                 + `</a>`;
@@ -1659,9 +1870,10 @@
                 const models = Array.isArray(group.top_models) ? group.top_models.filter(m => m && m.full_name) : [];
                 const linked = models.map(m => {
                     const href = this._printerHubHref({ slug: m.slug, brand_slug: group.brand_slug, brand: group.brand, full_name: m.full_name });
-                    const label = (typeof ProductName !== 'undefined' && ProductName.compatModel)
-                        ? (ProductName.compatModel(m.full_name, group.brand) || m.full_name)
-                        : m.full_name;
+                    const label = this._printerLabel(
+                        (typeof ProductName !== 'undefined' && ProductName.compatModel)
+                            ? (ProductName.compatModel(m.full_name, group.brand) || m.full_name)
+                            : m.full_name);
                     return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
                 }).join(', ');
                 const total = Number(group.total) || models.length;
@@ -1718,6 +1930,7 @@
                 if (typeof ProductName !== 'undefined' && ProductName.compatModel) {
                     label = ProductName.compatModel(label, p.brand) || label;
                 }
+                label = this._printerLabel(label);
                 const href = this._printerHubHref(p);
                 return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
             }).join(', ');
@@ -2456,7 +2669,7 @@
             // path that moves it repaints the ladder. One call site each rather
             // than a single listener, because the decrease/increase buttons set
             // .value directly and never fire a `change` event.
-            const onQtyChanged = () => this.syncVolumePricing();
+            const onQtyChanged = () => { this.syncVolumePricing(); this.syncPointsLine(); };
             document.getElementById('qty-decrease').addEventListener('click', () => {
                 if (qtyInput.value > 1) qtyInput.value = parseInt(qtyInput.value) - 1;
                 qtyIncreaseBtn.disabled = false;

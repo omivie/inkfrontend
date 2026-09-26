@@ -1066,7 +1066,11 @@ const Business = {
             : `Buy ${this.breakLabel(entry)}`;
         return (
             `<span class="product-card__biz-price" data-testid="business-card-price">` +
-                `<span class="product-card__biz-label">Bulk price</span>` +
+                // "3+ price", not "Bulk price" (conversion handoff 2026-09-23 §3):
+                // at quantity 1 a bare "BULK PRICE $45.58 ea" beside the retail
+                // price read as the price. The rung's own quantity is the label,
+                // so a $100+ product says "2+ price".
+                `<span class="product-card__biz-label">${Security.escapeHtml(this.breakLabel(entry))} price</span>` +
                 `<span class="product-card__biz-amount">${Security.escapeHtml(this._money(entry.businessPrice))}` +
                     `<span class="product-card__biz-unit"> ea</span></span>` +
                 `<span class="product-card__biz-save">${Security.escapeHtml(sub)}</span>` +

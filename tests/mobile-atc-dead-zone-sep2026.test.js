@@ -38,7 +38,8 @@
  * It is the SHIPPED code being asked, not a replica of it — ERR-231's probe
  * certified a replica of the search escaper while the real one was broken.
  *
- * §7 does the same for the rewards nudge's insertion point. ERR-276 stopped
+ * §7 (RETIRED 2026-09-27 with the nudge itself) did the same for the rewards
+ * nudge's insertion point. ERR-276 stopped
  * that card covering the PDP buy button with a PATH LIST, so it could only ever
  * be as complete as the list — and `probe:mobile-cta` §7 then measured it
  * covering a card Add button at 32 of 92 scroll offsets on /ink-cartridges,
@@ -69,8 +70,6 @@ const read = (...p) => fs.readFileSync(path.join(INK, ...p), 'utf8');
 
 const PDP_SRC = read('js', 'product-detail-page.js');
 const PDP_CODE = stripComments(PDP_SRC);
-const NUDGE_SRC = read('js', 'rewards-nudge.js');
-const NUDGE_CODE = stripComments(NUDGE_SRC);
 const COMPONENTS_CSS = stripComments(read('css', 'components.css'));
 const PAGES_CSS = stripComments(read('css', 'pages.css'));
 
@@ -501,149 +500,11 @@ test('§6 the bar is still painted BELOW the consent banner', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// §7 the rewards nudge is no longer an overlay on a phone
+// §7 RETIRED 2026-09-27 — the rewards nudge was deleted outright
 // ═══════════════════════════════════════════════════════════════════════════
-
-function loadNudge() {
-    const ctx = {
-        document: { addEventListener() {}, querySelector: () => null, getElementById: () => null, cookie: '' },
-        Config: { BREAKPOINTS: { compact: 480, tablet: 768, desktopNav: 1100 }, MQ_DESKTOP_NAV: '(min-width: 1100px)' },
-        Security: { escapeHtml: (s) => s, escapeAttr: (s) => s },
-        DebugLog: { error() {}, log() {} },
-        getStorage: () => null,
-        setStorage: () => {},
-        sessionStorage: { getItem: () => null, setItem() {} },
-        localStorage: { getItem: () => null, setItem() {} },
-        location: { pathname: '/ink-cartridges', search: '' },
-        matchMedia: () => ({ matches: true }),
-        innerHeight: VIEWPORT_H,
-        getComputedStyle: (el) => ({ display: (el && el._display) || 'block' }),
-        console,
-    };
-    ctx.window = ctx;
-    ctx.globalThis = ctx;
-    vm.createContext(ctx);
-    vm.runInContext(NUDGE_SRC, ctx, { filename: 'rewards-nudge.js' });
-    return ctx.window.RewardsNudge;
-}
-
-/** A container whose children are laid out at the given [top, height] pairs. */
-function container(boxes, display = 'block') {
-    const kids = boxes.map(([top, h, label, childBoxes, kidDisplay]) => {
-        const el = makeEl('', label || '', { rect: rect(top, h), display: kidDisplay || 'block' });
-        el._display = kidDisplay || 'block';
-        if (childBoxes) el.children = container(childBoxes).children;
-        return el;
-    });
-    const c = makeEl('', '', { display });
-    c._display = display;
-    c.children = kids;
-    return c;
-}
-
-test('§7 the insertion point is the first thing that starts BELOW the fold', () => {
-    const nudge = loadNudge();
-    const main = container([
-        [0, 300, 'above'],
-        [VIEWPORT_H + 40, 200, 'below-1'],
-        [VIEWPORT_H + 300, 200, 'below-2'],
-    ]);
-    const spot = nudge._searchForFold(main, 0);
-    assert.ok(spot, 'a page with content below the fold must offer an insertion point');
-    assert.equal(spot.before.className, 'below-1',
-        'the card is inserted before the FIRST block starting below the fold, so the layout shift it '
-        + 'causes moves only pixels nobody can currently see — which is why this costs no CLS');
-});
-
-test('§7 a block straddling the fold is descended into BEFORE a later sibling is taken', () => {
-    const nudge = loadNudge();
-    /* The shop family exactly: main > .shop-page (straddles, holds everything
-       the shopper is looking at) and a .container far below it. */
-    const main = container([
-        [0, 1400, 'shop-page', [[0, 300, 'popular-row'], [VIEWPORT_H + 100, 400, 'brand-picker']]],
-        [2000, 300, 'far-below-container'],
-    ]);
-    const spot = nudge._searchForFold(main, 0);
-    assert.equal(spot.before.className, 'brand-picker',
-        'taking the first TOP-LEVEL child below the fold skips the entire page: measured, that put '
-        + 'the card 740px below the viewport, after everything. Descending into the straddler first '
-        + 'puts it 117px below the fold, where the next flick reveals it.');
-});
-
-test('§7 a grid or flex row is never split open to insert into', () => {
-    const nudge = loadNudge();
-    const main = container([
-        [0, 1400, 'product-grid', [[0, 300, 'card-1'], [VIEWPORT_H + 100, 400, 'card-2']], 'grid'],
-        [2000, 300, 'after-the-grid'],
-    ]);
-    const spot = nudge._searchForFold(main, 0);
-    assert.equal(spot.before.className, 'after-the-grid',
-        'inserting between grid items would make the card a GRID ITEM one column wide — a different '
-        + 'bug wearing this fix\'s clothes. A non-block container is stepped over, not into.');
-});
-
-test('§7 a page with nothing below the fold offers no insertion point', () => {
-    const nudge = loadNudge();
-    const spot = nudge._searchForFold(container([[0, 100, 'only-thing']]), 0);
-    assert.equal(spot, null,
-        'the caller appends to <main> in that case. Returning a wrong answer here would put the card '
-        + 'above the fold, on top of the content — which is the entire defect.');
-});
-
-test('§7 position() places the card in flow and stops setting fixed-overlay offsets', () => {
-    const narrowBranch = NUDGE_CODE.slice(
-        NUDGE_CODE.indexOf('function position()'),
-        NUDGE_CODE.indexOf('function position()') + 1400);
-    assert.ok(narrowBranch.includes('placeInFlow'),
-        'the narrow branch must place the card in the document rather than pin it to the viewport');
-    const narrowOnly = narrowBranch.slice(0, narrowBranch.indexOf('} else {'));
-    assert.doesNotMatch(narrowOnly, /--rn-top/,
-        'the narrow branch must not keep setting --rn-top. The base .rewards-nudge rule spends that '
-        + 'property on `top:`, and with position:relative it OFFSETS the card out of its own layout '
-        + 'box — measured, the next .shop-section-card then overlapped "Maybe later" by 52px.');
-});
-
-test('§7 the card is in normal flow, and cannot quietly become an overlay again', () => {
-    const start = COMPONENTS_CSS.indexOf('.rewards-nudge--card {');
-    assert.notEqual(start, -1, '.rewards-nudge--card must have a rule of its own');
-    const block = COMPONENTS_CSS.slice(start, COMPONENTS_CSS.indexOf('}', start));
-
-    assert.match(block, /position:\s*relative/,
-        'relative keeps the card in flow (it occupies space and scrolls with the page) while giving '
-        + '.rewards-nudge__close its containing block back — under `static` the dismiss button was '
-        + 'positioned against a different ancestor and left the card entirely');
-    assert.doesNotMatch(block, /position:\s*(fixed|absolute|sticky)/,
-        'a fixed card owns a CONSTANT BAND of the viewport, and every in-flow buy button travels '
-        + 'through it. That is ERR-224, ERR-276 and ERR-280 — one mechanism, three incidents.');
-    assert.match(block, /z-index:\s*auto/,
-        'the base rule is --z-popover (600). Left in place, a later `position:` would restore a '
-        + '600-stacked overlay over the product grid without anything else changing.');
-    assert.match(block, /top:\s*auto/, 'the base rule\'s top: var(--rn-top, 72px) must be neutralised');
-});
-
-test('§7 click-outside no longer deletes the card the moment a product is tapped', () => {
-    const fn = NUDGE_CODE.slice(NUDGE_CODE.indexOf('function onDocClick'), NUDGE_CODE.indexOf('function onFocusIn'));
-    assert.match(fn, /state\.placedInFlow/,
-        'in flow the card is a block of the page like any other. Closing it on an outside click '
-        + 'would delete it on the shopper\'s first tap — on the very surface it was moved in-flow '
-        + 'to serve.');
-    assert.ok(fn.indexOf('state.placedInFlow') < fn.indexOf("softClose('outside')"),
-        'the guard has to come BEFORE the softClose it guards, or it guards nothing');
-});
-
-test('§7 the placement runs once, not on every scroll frame', () => {
-    assert.match(NUDGE_CODE, /state\.placedInFlow\s*=\s*true/,
-        'placeInFlow must record that it ran');
-    const fn = NUDGE_CODE.slice(NUDGE_CODE.indexOf('function placeInFlow'), NUDGE_CODE.indexOf('function restoreToBody'));
-    assert.match(fn, /if\s*\(state\.placedInFlow/,
-        'position() is called from onReflow() on every scroll frame. Re-running the search each time '
-        + 'would walk the card down the page ahead of the shopper and never let them reach it.');
-});
-
-test('§7 the desktop popover is untouched', () => {
-    assert.match(NUDGE_CODE, /--rn-caret-x/,
-        'the anchored popover keeps its caret arithmetic — this fix is scoped to narrow viewports, '
-        + 'and quietly changing desktop would delete account signups with no symptom (ERR-276 §3)');
-    assert.match(NUDGE_CODE, /restoreToBody/,
-        'a rotation that crosses the breakpoint must return the card to the popover');
-});
+//
+// This section pinned the nudge's in-flow placement below the fold on phones
+// (ERR-280). The conversion handoff (2026-09-23 D-P0-1) measured it still
+// covering the desktop search box and PDP titles and the owner removed the
+// overlay on every device; its absence is pinned by
+// tests/mobile-cta-occlusion-sep2026.test.js §0.

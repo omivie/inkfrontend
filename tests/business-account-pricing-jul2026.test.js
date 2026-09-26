@@ -1201,7 +1201,8 @@ test('PDP: the sticky buy-bar tracks the QUANTITY, it is not locked to one price
 
     // And the quantity controls repaint it.
     const code = stripComments(PDP_SRC);
-    assert.match(code, /onQtyChanged\s*=\s*\(\)\s*=>\s*this\.syncVolumePricing\(\)/);
+    // The points line (conversion handoff 2026-09-23 §4.2) rides the same hook.
+    assert.match(code, /onQtyChanged\s*=\s*\(\)\s*=>\s*\{?\s*this\.syncVolumePricing\(\);?\s*this\.syncPointsLine\(\)/);
     const wired = code.match(/onQtyChanged\(\);/g) || [];
     assert.equal(wired.length, 3, 'decrease, increase and change must all repaint the ladder');
 });
@@ -1266,9 +1267,11 @@ test('PDP: the floored explainer never advertises the ceiling it did not reach',
 test('cardMarkup: the quantity is part of the claim — never a bare "business price"', () => {
     const B = loadBusiness();
     const html = B.cardMarkup(B.describeLadder(LIVE_LADDER_CLEAN));
-    // "Bulk price", not "Business bulk price": every shopper gets the ladder now,
-    // so naming an account type on a public card would be false for most readers.
-    assert.match(html, /Bulk price/);
+    // "3+ price" — the rung's quantity IS the label (conversion handoff
+    // 2026-09-23 §3: "BULK PRICE $X ea" at qty 1 read as the price). Never an
+    // account type either: every shopper gets the ladder.
+    assert.match(html, /3\+ price/);
+    assert.doesNotMatch(html, /Bulk price/);
     assert.doesNotMatch(html, /Business/);
     assert.match(html, /\$33\.94/, 'the ENTRY rung — the achievable one');
     assert.match(html, / ea/);
@@ -1280,6 +1283,7 @@ test('cardMarkup: the quantity is part of the claim — never a bare "business p
     const dear = B.cardMarkup(B.describeLadder(LIVE_LADDER_ENTRY_TWO));
     assert.match(dear, /Buy 2\+/);
     assert.match(dear, /down to \$102\.11 at 7\+/);
+    assert.match(dear, /2\+ price/, 'the label carries the ENTRY rung quantity, never a constant 3');
 });
 
 test('cardMarkup: a single-rung ladder does not claim a second, better price', () => {

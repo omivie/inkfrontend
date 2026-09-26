@@ -380,7 +380,7 @@ test('decorateCards decorates a GUEST grid, with no request', async () => {
     const decorated = await B.decorateCards(fakeGrid(cards));
 
     assert.equal(decorated, 2, 'both guest cards must carry a bulk price');
-    assert.match(cards[0]._priceBlock._html, /Bulk price/);
+    assert.match(cards[0]._priceBlock._html, /3\+ price/);
     assert.match(cards[0]._priceBlock._html, /Buy 3\+/, 'a price with no quantity is a lie at qty 1');
     assert.deepEqual(B.__calls, []);
 });
@@ -476,7 +476,7 @@ test('the card overlay label names no account type', () => {
     const B = loadBusiness();
     B.ingest(productWithLadder('A', 22.49));
     const html = B.cardMarkup(B.describeLadder(B._ladderCache.get('A')));
-    assert.match(html, /Bulk price/);
+    assert.match(html, /3\+ price/);
 
     // Assert on what a SHOPPER reads, not the markup: the class names and the
     // `business-card-price` test id are internal and are pinned by the sibling

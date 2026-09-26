@@ -340,6 +340,11 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     // above, and never for anything that touches the search dropdown. A
     // feature with its own geometry belongs in its own file (see landing.js /
     // window.InkFinderScroll, ERR-137), not here.
-    assert.ok(lines <= 790,
-        `main.js is ${lines} lines; expected ≤790. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    //
+    // Sep 2026 (conversion handoff D-P0-4): hide-on-scroll-down /
+    // show-on-scroll-up for the pinned phone header, in initStickyHeader —
+    // a header feature, nothing to do with search. ~36 lines incl. comments,
+    // lifting the ceiling to 830.
+    assert.ok(lines <= 830,
+        `main.js is ${lines} lines; expected ≤830. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

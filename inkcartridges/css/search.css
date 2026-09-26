@@ -626,6 +626,24 @@ mark.smart-ac__mark {
     box-shadow: 0 2px 4px rgba(0,0,0,0.12);
 }
 .product-card__ribbon--multipack { background: #8b5cf6; }
+/* "Full-set value pack" (conversion handoff 2026-09-27 §8.4). #b45309 not the
+   base #f59e0b: white on amber-500 is ~2.2:1, under WCAG AA (handoff §8.2);
+   amber-700 is ~5:1. The longer label may wrap inside the image corner. */
+.product-card__ribbon--value-pack {
+    background: #b45309;
+    max-width: calc(100% - 16px);
+    white-space: normal;
+    line-height: 1.2;
+}
+.product-card__fits {
+    margin: 2px 0 4px;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    color: var(--color-text-light, #475569);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .product-card__image-wrapper { position: relative; }
 
 /* Spec §2.3 — zero-results recovery rails. */

@@ -1813,6 +1813,13 @@
     gap: var(--spacing-xl);
     align-items: stretch;
 }
+/* Grid items default to min-width:auto (= min-content). The ladder's four
+   84px-minimum chips made the info column's min-content 390px, so on a 390px
+   phone the whole column overflowed its 358px track by 32px and the right
+   edge of the delivery line, the value lines and the last chip was cut off
+   (measured on HEAD too — pre-existing). min-width:0 lets the column be its
+   track; the chip row already scrolls horizontally inside itself. */
+.product-detail__layout > * { min-width: 0; }
 
 .product-detail__layout .product-gallery {
     position: relative;
@@ -2028,6 +2035,19 @@
     padding: var(--spacing-xs) 0;
 }
 
+/* CLS (conversion handoff 2026-09-23 §2): the price block grew from its
+   skeleton (95-168px) to ~208px when the product landed, and the title from
+   one skeleton line to two — together a 0.10 shift on desktop PDPs and most
+   of the 0.04 left on a phone. Reserve the settled sizes up front. */
+.product-info__pricing { min-height: 208px; align-content: flex-start; }
+.product-info__title { min-height: 2.5em; }
+/* The Genuine/Compatible pill ships [hidden] and appears when the product
+   lands — 34px pushing title, SKU, price and Add down (0.096 CLS on a desktop
+   PDP). Keep its line reserved while hidden; it still shows nothing, and an
+   unknown-source product (some ribbons) just keeps a blank line. */
+/* !important because base.css's `[hidden] { display: none !important }` wins otherwise. */
+.product-info__badge[hidden] { display: inline-block !important; visibility: hidden; }
+
 .product-info__price {
     font-size: var(--font-size-2xl);
     font-weight: var(--font-weight-bold);
@@ -2074,7 +2094,8 @@
     margin-top: 0;
 }
 .atc-confirmation.atc-confirmation--visible {
-    max-height: 56px;
+    /* Room for the Checkout button (48px) on its own row on a phone. */
+    max-height: 160px;
     opacity: 1;
     padding: 12px 16px;
     margin-top: 12px;
@@ -2107,6 +2128,25 @@
 .atc-confirmation__cta:hover {
     background: #15803d;
     color: #fff;
+}
+/* After Add, the way on is CHECKOUT (conversion handoff 2026-09-23 D-P0-3):
+   it is the one filled button; View Cart steps down to a text link. */
+.atc-confirmation { flex-wrap: wrap; }
+.atc-confirmation__cta {
+    padding: 6px 4px;
+    background: none;
+    color: #15803d;
+    text-decoration: underline;
+    min-height: 44px;
+}
+.atc-confirmation__cta:hover { background: none; color: #166534; }
+.atc-confirmation__checkout {
+    min-height: 48px;
+    padding: 0 20px;
+    white-space: nowrap;
+}
+@media (max-width: 767px) {
+    .atc-confirmation__checkout { flex: 1 1 100%; justify-content: center; }
 }
 
 
@@ -2925,6 +2965,10 @@
    full-screen. Reuses --tap-min / --tap-gap / --safe-bottom / --header-h and
    the .btn system. shop-page.js#initFilterSort drives open/close + apply.
    ========================================================================== */
+/* Never over an open search suggestion list (conversion handoff 2026-09-23
+   §2): search.js sets body.smart-ac-open while any list is open. */
+body.smart-ac-open .filter-sort-bar { display: none !important; }
+
 .filter-sort-bar {
     display: none; /* revealed only inside the mobile breakpoint below */
     position: fixed;
@@ -4148,6 +4192,15 @@ body.filter-sort-open { overflow: hidden; }
     font-size: 0.875rem;
     line-height: 1.35;
 }
+.cart-summary__loyalty-chip { flex-wrap: wrap; }
+/* Guest carts (backend `loyalty.guest`, Sep 2026): the earn message plus the
+   link that makes it actionable. A link, never a gate on checkout. */
+.cart-summary__loyalty-link {
+    color: #065f46;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    white-space: nowrap;
+}
 
 /* Loyalty points redemption control (cart + checkout) */
 .cart-loyalty {
@@ -4914,6 +4967,23 @@ body.filter-sort-open { overflow: hidden; }
     border-top: 1px solid var(--color-border);
 }
 
+/* bindAll() hides a scope whose fact could not be confirmed; `display:flex`
+   below would otherwise override the [hidden] attribute. */
+[data-value-prop-scope][hidden] { display: none !important; }
+.checkout-summary__points {
+    margin: 8px 0 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--cyan-dark);
+}
+.checkout-summary__points a { font-weight: 400; color: var(--cyan-dark); text-decoration: underline; }
+.pay-reassurance {
+    margin: 10px 0 0;
+    text-align: center;
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+}
+.pay-reassurance a { font-weight: 700; color: var(--cyan-dark); white-space: nowrap; }
 .checkout-summary__trust-item {
     display: flex;
     align-items: center;
@@ -9672,6 +9742,82 @@ body.page-shop {
     color: var(--color-text-muted, #6b7280);
 }
 
+/* Printer fit + programme facts above Add to Cart (conversion handoff
+   2026-09-23 §4.2 / 2026-09-27 §8.1). Inline, in flow — never an overlay.
+   Helper text uses --color-text-light (steel-600): --color-text-muted
+   (steel-400) is below 4.5:1 on white (handoff §8.2, WCAG AA). */
+.product-fit {
+    margin: 10px 0 0;
+    font-size: 1rem;
+    color: var(--color-text);
+}
+.product-fit[hidden],
+.product-value-lines[hidden] { display: none; }
+.product-fit__summary { margin: 0; }
+.product-fit__more-count { color: var(--color-text-light); }
+.product-fit__details { margin: 2px 0 0; }
+.product-fit__details > summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--cyan-dark);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.product-fit__details[open] {
+    padding: 0 12px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+}
+.product-fit__check { display: block; margin: 4px 0 8px; }
+.product-fit__input {
+    width: 100%;
+    min-height: 48px;
+    padding: 10px 12px;
+    font-size: 1rem; /* 16px+ stops iOS zooming the page on focus */
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--radius-md);
+    background: var(--color-background);
+    color: var(--color-text);
+}
+.product-fit__result {
+    margin: 0 0 6px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-success-green);
+}
+.product-fit__result--miss { color: var(--color-text); font-weight: 400; }
+.product-fit__result a,
+.product-fit__list a { color: var(--cyan-dark); text-decoration: underline; text-underline-offset: 2px; }
+.product-fit__list {
+    margin: 0 0 8px;
+    padding: 0 0 0 1.1em;
+    columns: 2 200px;
+    column-gap: 16px;
+    line-height: 1.7;
+    max-height: 320px;
+    overflow-y: auto;
+}
+.product-fit__item { break-inside: avoid; }
+.product-fit__promise-label { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text); }
+.product-fit__promise-desc,
+.product-fit__how { margin: 6px 0 0; font-size: var(--font-size-sm); color: var(--color-text-light); }
+
+.product-value-lines {
+    margin: 10px 0 0;
+    display: grid;
+    gap: 4px;
+    font-size: 1rem;
+    color: var(--color-text);
+}
+.product-value-lines p { margin: 0; }
+.product-value-lines__points { font-weight: 700; color: var(--cyan-dark); }
+.product-value-lines__facts { display: block; }
+.product-value-lines__points:not([hidden]) + .product-value-lines__ship::before { content: "·"; margin: 0 6px; color: var(--color-text-light); }
+.product-value-lines__call a { font-weight: 700; color: var(--cyan-dark); white-space: nowrap; }
+
 .product-info__printer-proof,
 .product-info__waitlist-proof {
     margin: 8px 0 0;
@@ -13742,4 +13888,331 @@ body.page-shop {
     font-size: 0.72em;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+}
+
+/* =============================================
+   COMPACT PHONE CARD on the shop + paid landing pages
+   (conversion handoff 2026-09-23 D-P0-4; owner decision 2026-09-27:
+   "compact card, keep bulk line")
+   =============================================
+   At 390x664 the first Add button on /ink-cartridges sat at page y 881:
+   410px of chrome + a 471-525px two-up card (image 117, 4-line title,
+   stacked colour/stock, price + GST + cost-per-page, an 83px bulk block,
+   stepper stacked over Add). Paid mobile converted at 1/6 of desktop.
+
+   Below 480px these grids become a LIST: image left (96px), the facts
+   right, the bulk line on ONE line, stepper + Add on one row. Every piece
+   of information the two-up card had is still on the card — nothing is
+   removed, only re-flowed. Scoped to .shop-page: the search dropdown, the
+   PDP rails and favourites keep their own layouts (.product-card is a
+   GLOBAL class — ERR-222).
+
+   Measured by the Playwright check in tests/conversion-fixes-sep2026's
+   companion probe; numbers in errors.md. */
+@media (max-width: 479.98px) {
+    .shop-page .popular-row__grid,
+    .shop-page .product-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: var(--spacing-sm);
+    }
+    .shop-page .products-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    /* Beat the split-grid's two-up basis + 195px cap (.products-sections--split
+       .products-row .product-card, specificity 0,3,0) — without this the list
+       card was squeezed to 195px and its Add button to 12px wide. */
+    .shop-page .product-card,
+    .shop-page .products-sections .products-row .product-card {
+        flex: 0 0 auto;
+        max-width: none;
+        width: 100%;
+    }
+    .shop-page .product-card__link {
+        display: grid;
+        grid-template-columns: 96px minmax(0, 1fr);
+        column-gap: 12px;
+        align-items: start;
+        padding: 10px;
+    }
+    .shop-page .product-card__image-wrapper {
+        width: 96px;
+        height: 96px;
+        aspect-ratio: 1;
+        margin: 0;
+        padding: 0;
+    }
+    .shop-page .product-card__image-wrapper img,
+    .shop-page .product-card__image-wrapper .product-card__image {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    /* `display: contents` lifts the content + footer children into the
+       link's grid, so the buy row can span BOTH columns (under the image). */
+    .shop-page .product-card__content,
+    .shop-page .product-card__footer {
+        display: contents;
+    }
+    .shop-page .product-card__image-wrapper { grid-column: 1; grid-row: 1 / span 6; }
+    .shop-page .product-card__link > .product-card__content > *,
+    .shop-page .product-card__footer > * {
+        grid-column: 2;
+        min-width: 0;
+    }
+    .shop-page .product-card__footer > .product-card__footer-row:last-child {
+        display: contents;
+    }
+    .shop-page .product-card__footer-row:last-child > .product-card__price-block,
+    .shop-page .product-card__footer-row:last-child > .product-card__pricing {
+        grid-column: 2;
+    }
+    .shop-page .product-card__footer-row:last-child > .product-card__buy,
+    .shop-page .product-card__footer-row:last-child > .product-card__add-btn {
+        grid-column: 1 / -1;
+        margin-top: 8px;
+    }
+    .shop-page .product-card__brand {
+        margin: 0 0 2px;
+        min-height: 0;
+    }
+    .shop-page .product-card__title {
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        min-height: 0;
+        margin: 0 0 4px;
+        font-size: 1rem;
+        line-height: 1.3;
+    }
+    .shop-page .product-card__info-row { margin: 0 0 4px; }
+    .shop-page .product-card__footer { margin: 0; padding: 0; gap: 4px; }
+    /* Colour + stock on one line. */
+    .shop-page .product-card__footer-row:first-child {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 10px;
+        min-height: 0;
+    }
+    /* Price block: price + GST on one line, the bulk line on the next. */
+    .shop-page .product-card__price-block,
+    .shop-page .product-card__pricing {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 8px;
+    }
+    .shop-page .product-card__price-block > *,
+    .shop-page .product-card__pricing > *,
+    .shop-page .product-card__biz-price > * {
+        width: auto;
+        margin: 0;
+    }
+    .shop-page .product-card__price { font-size: 1.25rem; }
+    .shop-page .product-card__biz-price {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 6px;
+        width: 100%;
+        margin: 2px 0 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        min-height: 0;
+    }
+    .shop-page .product-card__biz-amount { font-size: 1rem; }
+    .shop-page .product-card__biz-save { width: 100%; font-size: 0.8125rem; }
+    /* The last row spans BOTH columns: stepper + Add side by side, full width. */
+    .shop-page .product-card__footer .product-card__footer-row:last-child {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+    .shop-page .product-card__buy {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        gap: 8px;
+        width: 100%;
+    }
+    .shop-page .product-card__buy .product-card__add-btn,
+    .shop-page .product-card__buy .add-to-cart-btn {
+        flex: 1 1 auto;
+        min-height: 44px;
+        width: auto;
+    }
+}
+
+/* "Enter your printer model" on the paid landing pages (conversion handoff
+   2026-09-27 §8.1). In flow, first on the page; 48px targets, 16px+ text. */
+.landing-printer-search {
+    margin: 0 0 var(--spacing-md);
+    padding: 12px;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+}
+.landing-printer-search[hidden] { display: none; }
+.landing-printer-search__label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 1.0625rem;
+    font-weight: 700;
+    color: var(--color-text-heading);
+}
+.landing-printer-search__row { display: flex; gap: 8px; }
+.landing-printer-search__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px 12px;
+    font-size: 1rem;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--radius-md);
+    background: var(--color-background);
+    color: var(--color-text);
+}
+.landing-printer-search__btn { min-height: 48px; padding: 0 20px; }
+.landing-printer-search__results {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--color-border-light);
+}
+.landing-printer-search__results[hidden] { display: none; }
+.landing-printer-search__hit {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 4px;
+    color: var(--cyan-dark);
+    font-size: 1rem;
+    text-decoration: none;
+    border-bottom: 1px solid var(--color-border-light);
+}
+.landing-printer-search__hit:hover,
+.landing-printer-search__hit:focus-visible { text-decoration: underline; }
+.landing-printer-search__none { padding: 10px 4px; color: var(--color-text); font-size: var(--font-size-sm); }
+.value-pack-rail__lead {
+    margin: 0 0 var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-light);
+}
+
+/* Paid landing chrome on a phone (D-P0-4): the per-page h1 is one to two
+   short lines, and the printer box is the first control, tight. */
+@media (max-width: 479.98px) {
+    .shop-page .drilldown-title {
+        font-size: 1.375rem;
+        line-height: 1.2;
+        margin-bottom: 8px;
+    }
+    .landing-printer-search { padding: 10px; margin-bottom: var(--spacing-sm); }
+    .landing-printer-search__label { font-size: 1rem; margin-bottom: 4px; }
+    .shop-page.shop-page--drilldown { padding-top: 8px; }
+    .shop-page .drilldown-breadcrumb { min-height: 0; padding-top: 0; padding-bottom: 0; }
+    .shop-page .drilldown-header { margin-bottom: 4px; }
+    .shop-page #popular-row,
+    .shop-page #value-pack-rail { padding: 10px; }
+    .shop-page #popular-row .shop-section-card__header,
+    .shop-page #value-pack-rail .shop-section-card__header { margin-bottom: 6px; padding-bottom: 4px; }
+    .shop-page #popular-row .shop-section-card__title,
+    .shop-page #value-pack-rail .shop-section-card__title { font-size: 1.0625rem; }
+    /* On the two PAID landing pages the printer box is the way in; the
+       "Shop › Ink Cartridges" trail above it is one level deep and cost 44px
+       of the 664px phone viewport — enough to put the first Add button under
+       the consent bar at scroll 0. The box and the trail change in the same
+       render (renderBrands), so hiding the trail shifts nothing already seen. */
+    .shop-page:has(#landing-printer-search:not([hidden])) .drilldown-breadcrumb { display: none; }
+    .shop-page .product-card__title { padding-right: 40px; }  /* clear the favourite heart */
+}
+
+/* Explainer pages — /rewards, /bulk-pricing, /value-packs (conversion
+   handoff 2026-09-23 §4.3). Content pages; 16px+ body, 48px buttons. */
+.value-page { padding: var(--spacing-md) 0 var(--spacing-xl); }
+.value-page__title {
+    margin: 0 0 var(--spacing-sm);
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+    color: var(--color-text-heading);
+}
+.value-page__lead { margin: 0 0 var(--spacing-sm); font-size: 1.125rem; font-weight: 600; color: var(--color-text); }
+.value-page__detail,
+.value-page__note { margin: 0 0 var(--spacing-md); font-size: 1rem; color: var(--color-text); max-width: 70ch; }
+.value-page__note { color: var(--color-text-light); }
+.value-page__list { margin: 0 0 var(--spacing-md); padding-left: 1.2em; font-size: 1rem; line-height: 1.6; max-width: 70ch; }
+.value-page__loading,
+.value-page__error { font-size: 1rem; color: var(--color-text-light); }
+.value-page__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: var(--spacing-md);
+}
+.value-page__actions .btn { min-height: 48px; }
+.value-page__link { color: var(--cyan-dark); text-decoration: underline; }
+.value-page__table-wrap { overflow-x: auto; margin: 0 0 var(--spacing-md); }
+.value-page__table { border-collapse: collapse; font-size: 0.9375rem; width: 100%; max-width: 760px; }
+.value-page__table caption { text-align: left; font-weight: 600; margin-bottom: 6px; color: var(--color-text); }
+.value-page__table th,
+.value-page__table td { padding: 8px 10px; border: 1px solid var(--color-border); text-align: left; }
+.value-page__table th[scope="row"] { text-align: left; white-space: nowrap; }
+.value-page__table thead th { background: var(--color-background-alt); }
+.value-page__grid { margin-top: var(--spacing-md); }
+
+/* Guest cart-copy consent (dark until the backend endpoint is live). */
+.checkout-optin {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+    min-height: 44px;
+    font-size: 1rem;
+    color: var(--color-text);
+    cursor: pointer;
+}
+.checkout-optin[hidden] { display: none; }
+.checkout-optin input { width: 20px; height: 20px; margin-top: 2px; flex: 0 0 auto; }
+
+/* /review — guest review-by-link (dark until the backend ships). */
+.review-page__form { margin: 0 0 var(--spacing-lg); padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); max-width: 640px; }
+.review-page__product { margin: 0 0 8px; font-size: 1.125rem; }
+.review-page__stars { border: 0; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 1rem; }
+.review-page__stars legend { font-weight: 600; margin-bottom: 4px; }
+.review-page__star { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+.review-page__label { display: block; margin: 8px 0 4px; font-weight: 600; font-size: 1rem; }
+.review-page__input { width: 100%; min-height: 48px; padding: 10px 12px; font-size: 1rem; border: 1px solid var(--color-border-dark); border-radius: var(--radius-md); }
+.review-page__textarea { min-height: 120px; }
+.review-page__error { margin: 8px 0 0; color: var(--color-error); font-weight: 600; font-size: 1rem; }
+.review-page__submit { margin-top: 12px; min-height: 48px; }
+
+/* DESKTOP: the Add button keeps its first screen (conversion handoff D-P0-2:
+   "on a fresh 1440x900 context the PDP Add to Cart is hit-testable at scroll
+   0"). The printer-fit summary and the points/phone lines add ~170px; above
+   the button on a 900px window they pushed it to y 1051 (measured). On a
+   wide layout they move BELOW the Add button and its pack card — same
+   content, one screen down. On phones they stay ABOVE Add (handoff §4.2/§8.1),
+   where the sticky Add bar already covers the first screen. */
+@media (min-width: 1100px) {
+    .product-info {
+        display: flex;
+        flex-direction: column;
+    }
+    .product-info > #product-fit,
+    .product-info > #product-value-lines,
+    .product-info > #product-specs {
+        order: 1;   /* colour + page yield also restate the title; one screen down on desktop */
+    }
+    .product-info > #product-fit { margin-top: 16px; }
+    /* Tighter ladder box: same chips (each still >= 48px tall), less air.
+       Together with the reorder this is what brings Add to Cart back above
+       the consent bar at scroll 0 on a 900px window. */
+    .volume-pricing { margin-top: 10px; padding: 10px 14px; }
+    .volume-pricing__eyebrow { margin-bottom: 6px; }
+    .volume-pricing__status { margin-top: 6px; }
+    .product-info__pricing { margin-bottom: 0; }
+    .product-detail { padding-top: 12px; }
 }

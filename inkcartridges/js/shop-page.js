@@ -885,6 +885,20 @@
             }
         },
 
+        /** True on /ink-cartridges and /toner-cartridges — the paid Search landings. */
+        _isPaidLanding() {
+            const p = (window.location.pathname || '').replace(/\/+$/, '');
+            return p === '/ink-cartridges' || p === '/toner-cartridges';
+        },
+
+        /** Per-landing h1, or null for every other brands-level URL. */
+        landingH1() {
+            const p = (window.location.pathname || '').replace(/\/+$/, '');
+            if (p === '/ink-cartridges') return 'Ink Cartridges NZ — Genuine & Compatible';
+            if (p === '/toner-cartridges') return 'Toner Cartridges NZ — Genuine & Compatible';
+            return null;
+        },
+
         parseURLState() {
             const params = new URLSearchParams(window.location.search);
             this.state.brand = params.get('brand');
@@ -1670,7 +1684,15 @@
             paper: 'paper',
             label_tape: 'label',
         },
-        POPULAR_ROW_LIMIT: 4,
+        /* How many the shelf SHOWS, and how many it ASKS for. The paid landing
+         * pages must show at least 8 products with real images above the brand
+         * chooser (conversion handoff 2026-09-23 D-P0-4 — /toner-cartridges
+         * showed 4, all placeholder tiles, on desktop). Asking for 24 lets the
+         * shelf skip image-less rows AND lets the "Full colour sets" rail be
+         * cut from the same response, instead of a second request. */
+        POPULAR_ROW_LIMIT: 8,
+        POPULAR_FETCH_LIMIT: 24,
+        VALUE_PACK_RAIL_LIMIT: 8,
 
         /**
          * Paint the shelf above the brand picker on a category landing.
@@ -1692,7 +1714,7 @@
             if (!section || !grid) return;
 
             const hide = () => { section.hidden = true; grid.innerHTML = ''; };
-            if (!category) { hide(); return; }
+            if (!category) { hide(); this.renderValuePackRail([]); return; }
 
             const apiCategory = this.POPULAR_CATEGORY_API[category];
             if (!apiCategory) {
@@ -1738,7 +1760,7 @@
 
             let rows = [];
             try {
-                const resp = await API.getPopularProducts({ category: apiCategory, limit: this.POPULAR_ROW_LIMIT });
+                const resp = await API.getPopularProducts({ category: apiCategory, limit: this.POPULAR_FETCH_LIMIT });
                 if (resp && resp.ok && resp.data && Array.isArray(resp.data.products)) {
                     rows = resp.data.products;
                 } else {
@@ -1752,11 +1774,16 @@
             }
 
             if (token !== this._popularRowToken) return;
-            if (!rows.length || typeof Products === 'undefined') { hide(); return; }
+            if (!rows.length || typeof Products === 'undefined') { hide(); this.renderValuePackRail([]); return; }
+
+            const { shelf, packs } = this.splitPopularRows(rows);
+            this.renderValuePackRail(packs);
+            if (!shelf.length) { hide(); return; }
 
             const title = document.getElementById('popular-row-title');
             if (title) title.textContent = label ? `Popular ${label} right now` : 'Popular right now';
 
+            rows = shelf;
             grid.innerHTML = Products.renderCards(rows);
             // All three binds. The zero-results rail calls only the middle one
             // and its cards silently lose image retry and the bulk-price
@@ -1765,6 +1792,87 @@
             Products.attachCardListeners(grid);
             Products.decorateBusinessPricing(grid, rows);
             section.hidden = false;
+        },
+
+        /**
+         * Cut one /api/products/popular response into the shelf and the pack
+         * rail, keeping the backend's ranking order in both.
+         *   shelf — the first POPULAR_ROW_LIMIT rows WITH an image (a paid
+         *           landing page of grey placeholder tiles sells nothing)
+         *   packs — `pack_type === 'value_pack'` rows NOT already on the shelf,
+         *           image-bearing first, up to VALUE_PACK_RAIL_LIMIT
+         * Pure: no DOM, no request — tests/conversion-fixes-sep2026 runs it.
+         */
+        splitPopularRows(rows) {
+            const list = Array.isArray(rows) ? rows.filter(r => r && r.sku) : [];
+            const hasImg = (r) => !!(r.image_url || r.image_thumbnail_url);
+            const shelf = list.filter(hasImg).slice(0, this.POPULAR_ROW_LIMIT);
+            const onShelf = new Set(shelf.map(r => r.sku));
+            const packsAll = list.filter(r => String(r.pack_type || '').toLowerCase() === 'value_pack' && !onShelf.has(r.sku));
+            const packs = packsAll.filter(hasImg).concat(packsAll.filter(r => !hasImg(r))).slice(0, this.VALUE_PACK_RAIL_LIMIT);
+            return { shelf, packs };
+        },
+
+        /** "Full colour sets" rail (conversion handoff 2026-09-27 §8.4). Hidden when empty. */
+        renderValuePackRail(packs) {
+            const section = document.getElementById('value-pack-rail');
+            const grid = document.getElementById('value-pack-rail-grid');
+            if (!section || !grid) return;
+            if (!Array.isArray(packs) || !packs.length || typeof Products === 'undefined') {
+                section.hidden = true;
+                grid.innerHTML = '';
+                return;
+            }
+            grid.innerHTML = Products.renderCards(packs);
+            Products.bindImageFallbacks(grid);
+            Products.attachCardListeners(grid);
+            Products.decorateBusinessPricing(grid, packs);
+            section.hidden = false;
+        },
+
+        /**
+         * "Enter your printer model" on the paid landing pages (conversion
+         * handoff 2026-09-27 §8.1). Typeahead over GET /api/printers/search
+         * (NOT /api/search/* — no search_analytics row is written, ERR-254);
+         * each suggestion links to that printer's hub. Enter / Find submits the
+         * native form to /shop?q=…, which is the site's smart search.
+         */
+        renderLandingPrinterSearch(show) {
+            const section = document.getElementById('landing-printer-search');
+            if (!section) return;
+            section.hidden = !show;
+            if (!show || section.dataset.bound === '1') return;
+            section.dataset.bound = '1';
+            const input = document.getElementById('landing-printer-search-input');
+            const list = document.getElementById('landing-printer-search-results');
+            if (!input || !list || typeof API === 'undefined') return;
+            let seq = 0;
+            const clear = () => { list.hidden = true; list.innerHTML = ''; };
+            const run = async () => {
+                const q = input.value.trim();
+                const mine = ++seq;
+                if (q.length < 2) { clear(); return; }
+                let printers = [];
+                try {
+                    const resp = await API.searchPrinters(q);
+                    printers = resp && resp.ok && Array.isArray(resp.data) ? resp.data : [];
+                } catch (_) { printers = []; }
+                if (mine !== seq) return;
+                const items = printers.slice(0, 6).map(p => {
+                    const href = (typeof buildPrinterUrl === 'function' && buildPrinterUrl(p)) || `/shop?q=${encodeURIComponent(p.full_name || q)}`;
+                    const name = (typeof PrinterName !== 'undefined') ? PrinterName.display(p.full_name || '') : (p.full_name || '');
+                    return `<li><a class="landing-printer-search__hit" href="${Security.escapeAttr(href)}">${Security.escapeHtml(name)}</a></li>`;
+                });
+                if (!items.length) {
+                    list.innerHTML = `<li class="landing-printer-search__none">No printer found for “${Security.escapeHtml(q)}”. Press Find to search every product.</li>`;
+                } else {
+                    list.innerHTML = items.join('');
+                }
+                list.hidden = false;
+            };
+            const debounced = (typeof debounce === 'function') ? debounce(run, 250) : run;
+            input.addEventListener('input', debounced);
+            input.addEventListener('keydown', (e) => { if (e.key === 'Escape') clear(); });
         },
 
         renderBrands(brands) {
@@ -1792,6 +1900,7 @@
                 const label = labels[this.state.category] || `${this.state.category} products`;
                 if (sectionTitle) sectionTitle.textContent = `Choose a brand to see ${label}`;
                 if (ribbonsSection) ribbonsSection.hidden = true;
+                this.renderLandingPrinterSearch(this._isPaidLanding());
                 this.renderPopularRow(this.state.category, label);
             } else {
                 if (sectionTitle) sectionTitle.textContent = 'Select your ink cartridge or toner brand';
@@ -1799,6 +1908,7 @@
                 // Bare /shop knows no category. Inventing one to have something
                 // to show would be a guess printed as a recommendation.
                 this.renderPopularRow(null);
+                this.renderLandingPrinterSearch(false);
             }
 
             // WHICH BRANDS APPEAR IS DATA, NOT A LIST IN THIS FILE — and the rule
@@ -4969,7 +5079,7 @@
                     breaker.setAttribute('aria-hidden', 'true');
                     container.appendChild(breaker);
                 }
-                const card = this.createProductCard(product, isCompatible);
+                const card = this.createProductCard(product, isCompatible, i);
                 container.appendChild(card);
             });
 
@@ -5005,7 +5115,14 @@
             }
         },
 
-        createProductCard(product, isCompatible) {
+        createProductCard(product, isCompatible, index) {
+            // First row of the results grid loads eagerly at high priority — it
+            // is the landing page's LCP candidate on /ink-cartridges and /shop
+            // (conversion handoff 2026-09-23 §2). Mirrors Products.renderCard's
+            // `index < 4` rule (products.js); everything after stays lazy.
+            const loadAttrs = typeof index === 'number' && index < 4
+                ? 'fetchpriority="high" decoding="async"'
+                : 'loading="lazy" decoding="async"';
             const card = document.createElement('article');
             card.className = 'product-card';
             // Business-pricing overlay finds cards by SKU (see Business.decorateCards).
@@ -5075,10 +5192,10 @@
                 // failed to load, which is the one path the
                 // genuine-no-colour-tile invariant was never tested on.
                 if (colorStyle && isCompatible) {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="color-block"${rawAttr}>
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="placeholder"${rawAttr}>`;
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="placeholder"${rawAttr}>`;
                 }
             } else if (isCompatible) {
                 imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
@@ -5124,7 +5241,9 @@
             // Spec §4 — bundle-pack visual differentiation.
             const packTypeRibbon = (() => {
                 const pt = (product.pack_type || '').toLowerCase();
-                if (pt === 'value_pack') return `<span class="product-card__ribbon product-card__ribbon--value-pack">Value Pack</span>`;
+                // "Full-set value pack" (conversion handoff 2026-09-27 §8.4): the
+                // pack should read as the better buy, not a dearer single.
+                if (pt === 'value_pack') return `<span class="product-card__ribbon product-card__ribbon--value-pack">Full-set value pack</span>`;
                 if (pt === 'multipack')  return `<span class="product-card__ribbon product-card__ribbon--multipack">Multipack</span>`;
                 return '';
             })();
@@ -5202,6 +5321,7 @@
                     <div class="product-card__content">
                         ${infoRowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
+                        ${(() => { const t = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers) : ''; return t ? `<p class="product-card__fits">${Security.escapeHtml(t)}</p>` : ''; })()}
                         ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${ratingHTML}
                         <div class="product-card__footer">
@@ -5814,8 +5934,12 @@
                     this.elements.title.hidden = false;
                     this.elements.title.classList.remove('visually-hidden');
                 } else {
-                    // Brands level — visible H1 for SEO and heading hierarchy
-                    this.elements.title.textContent = 'Shop Ink Cartridges & Toner NZ';
+                    // Brands level — visible H1 for SEO and heading hierarchy.
+                    // The two paid landing pages get their OWN h1 (conversion
+                    // handoff 2026-09-23 D-P0-4 / §6.4): the "Toner NZ" ad group
+                    // landed on a page titled "Shop Ink Cartridges & Toner NZ",
+                    // identical to the ink page.
+                    this.elements.title.textContent = this.landingH1() || 'Shop Ink Cartridges & Toner NZ';
                     this.elements.title.hidden = false;
                     this.elements.title.classList.remove('visually-hidden');
                 }

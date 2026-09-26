@@ -239,6 +239,12 @@ const SeoMeta = {
                 && !params.get('printer_model')) {
                 return `/api/prerender/category/${cat}`;
             }
+            // Truly bare /shop → the backend's shop prerender. MIRROR of the
+            // middleware arm added Sep 2026 (conversion handoff §6.2): the edge
+            // now serves crawlers /api/prerender/shop here, so reconcile() must
+            // read the same page or it would overwrite the crawler's title with
+            // the fallback builder's. Same "zero params" rule as surfaceForLocation.
+            if (Array.from(params.keys()).length === 0) return '/api/prerender/shop';
             return null;
         }
         return null;

@@ -649,6 +649,44 @@
          * omitted one, defaulted unknown shipping to 0, and reimplemented the
          * backend's points-earn rule inline — all three are gone.
          */
+        /**
+         * The guest's points, told to the guest (conversion handoff 2026-09-23
+         * §4.2): "You earned N points — create an account with {email} to
+         * collect them". True since 2026-09-23: the backend credits past guest
+         * orders on first sign-in (POST /api/account/sync → `retro`).
+         *
+         * N is the SAME figure the totals block shows — the backend's exact earn
+         * when reported, else OrderTotals' marked estimate ("about N") — never a
+         * third computation. No figure ⇒ the sentence without a number. The
+         * welcome bonus comes only from /api/site/value-props; unavailable ⇒ the
+         * clause is omitted, not defaulted.
+         */
+        async renderGuestPointsLine() {
+            const el = document.getElementById('create-account-points');
+            if (!el) return;
+            const row = this._earnedRow;
+            const email = this._orderEmail;
+            const who = email ? `create a free account with ${email}` : 'create a free account with the email you used';
+            let text;
+            if (row && row.amount > 0) {
+                const n = OrderTotals.formatPoints(row.amount);
+                text = row.kind === 'points' && row.note
+                    ? `This order earns about ${n} points — ${who} to collect them.`
+                    : `You earned ${n} points on this order — ${who} to collect them.`;
+            } else {
+                text = `Points from this order are waiting — ${who} to collect them.`;
+            }
+            if (typeof ValueProps !== 'undefined') {
+                const vp = await ValueProps.load();
+                const loyalty = vp.ok ? ValueProps.loyalty(vp.data) : null;
+                if (loyalty && loyalty.welcomeBonus) {
+                    text += ` New accounts also get ${loyalty.welcomeBonus.toLocaleString('en-NZ')} welcome points.`;
+                }
+            }
+            el.textContent = text;
+            el.hidden = false;
+        },
+
         renderTotals(order) {
             if (typeof OrderTotals === 'undefined') {
                 DebugLog.error('order-totals.js missing — cannot render order totals');
@@ -669,6 +707,10 @@
 
             const byKey = {};
             OrderTotals.rows(t).forEach((r) => { byKey[r.key] = r; });
+            // Kept for the guest account card (guestPointsLine), which renders
+            // later, once Auth has said this visitor is a guest.
+            this._earnedRow = byKey.earned || null;
+            this._orderEmail = order && order.email ? String(order.email) : '';
 
             const setText = (id, value) => {
                 const el = document.getElementById(id);
@@ -833,6 +875,7 @@
                 if (!Auth.isAuthenticated()) {
                     const prompt = document.getElementById('create-account-prompt');
                     if (prompt) prompt.hidden = false;
+                    ConfirmationPage.renderGuestPointsLine();
                 }
             });
         }

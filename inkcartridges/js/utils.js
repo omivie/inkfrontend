@@ -2705,6 +2705,291 @@ const TrustStats = {
 if (typeof window !== 'undefined') window.TrustStats = TrustStats;
 
 /**
+ * VALUE PROPS  (conversion handoff 2026-09-23 §4.1)
+ * =================================================
+ * The programme facts — loyalty, volume pricing, value packs, free shipping —
+ * from `GET /api/site/value-props` (public, edge-cached like /api/site/trust).
+ *
+ * RULE: every number the storefront prints about these programmes comes from
+ * here. A hard-coded "$49" and "5%" had to be pulled from our own emails in
+ * Sep 2026; the fix for that class is one source, not better literals.
+ *
+ * FAIL-SOFT, LOUDLY: `load()` resolves `{ ok:false, error }` on any failure
+ * and each accessor returns `null`. A consumer that gets `null` renders
+ * NOTHING — never a remembered or default number (absence is not a fact:
+ * ERR-063/068/150). DebugLog is a no-op in production, so the failure is
+ * carried in the return value, where a caller or a test can see it.
+ *
+ * Programmes with `active: false` read as `null` too: an inactive programme
+ * must not be advertised.
+ *
+ * Copy rules the backend's compliance list enforces (and
+ * tests/conversion-fixes-sep2026.test.js re-checks on OUR strings): no
+ * "save up to", "lowest", "best", "cheapest"; never print
+ * `max_discount_percent` as a promise.
+ */
+const ValueProps = {
+    ENDPOINT: '/api/site/value-props',
+    CACHE_KEY: 'ic_value_props_v1',
+    TTL_MS: 60 * 60 * 1000,
+
+    _promise: null,
+    _last: null,
+
+    _apiUrl() {
+        const base = (typeof Config !== 'undefined' && Config.API_URL != null) ? Config.API_URL : '';
+        return `${base}${this.ENDPOINT}`;
+    },
+
+    /**
+     * @returns {Promise<{ok:true, data:Object}|{ok:false, error:string}>}
+     */
+    async load() {
+        try {
+            const raw = sessionStorage.getItem(this.CACHE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && (Date.now() - parsed.ts) <= this.TTL_MS && parsed.data) {
+                    return (this._last = { ok: true, data: parsed.data });
+                }
+            }
+        } catch { /* private mode / corrupt entry — refetch */ }
+        if (this._promise) return this._promise;
+        this._promise = (async () => {
+            if (typeof fetch !== 'function') return { ok: false, error: 'no fetch' };
+            try {
+                // Public read: no cookies (ERR-124), no Content-Type (ERR-282 —
+                // a bodyless GET must stay CORS-simple).
+                const res = await fetch(this._apiUrl(), { headers: { 'Accept': 'application/json' }, credentials: 'omit' });
+                if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+                const json = await res.json();
+                const data = json && typeof json === 'object' && json.data && typeof json.data === 'object' ? json.data : null;
+                if (!data) return { ok: false, error: 'malformed envelope' };
+                try { sessionStorage.setItem(this.CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch { /* ignore */ }
+                return { ok: true, data };
+            } catch (e) {
+                return { ok: false, error: (e && e.message) || 'network error' };
+            } finally {
+                this._promise = null;
+            }
+        })();
+        this._last = await this._promise;
+        if (!this._last.ok && typeof DebugLog !== 'undefined') DebugLog.warn('[ValueProps] unavailable:', this._last.error);
+        return this._last;
+    },
+
+    _section(data, key) {
+        const sec = data && data[key];
+        return sec && typeof sec === 'object' && sec.active === true ? sec : null;
+    },
+
+    /** @returns {{pointsPerDollar:number, pointsPerDollarOff:number, welcomeBonus:number|null, headline:string, detail:string}|null} */
+    loyalty(data) {
+        const s = this._section(data, 'loyalty');
+        if (!s) return null;
+        const ppd = Number(s.points_per_dollar);
+        const off = Number(s.points_per_dollar_off);
+        if (!(ppd > 0) || !(off > 0)) return null;
+        const welcome = Number(s.welcome_bonus_points);
+        return {
+            pointsPerDollar: ppd,
+            pointsPerDollarOff: off,
+            welcomeBonus: welcome > 0 ? welcome : null,
+            headline: typeof s.headline === 'string' ? s.headline : '',
+            detail: typeof s.detail === 'string' ? s.detail : '',
+        };
+    },
+
+    /** @returns {{threshold:number, headline:string, detail:string}|null} */
+    freeShipping(data) {
+        const s = this._section(data, 'free_shipping');
+        if (!s) return null;
+        const t = Number(s.threshold);
+        if (!(t > 0)) return null;
+        return { threshold: t, headline: s.headline || '', detail: s.detail || '' };
+    },
+
+    /** @returns {{startsAt:number|null, tiers:Array, headline:string, detail:string}|null} */
+    volume(data) {
+        const s = this._section(data, 'volume_pricing');
+        if (!s) return null;
+        return {
+            startsAt: Number(s.starts_at_quantity) > 0 ? Number(s.starts_at_quantity) : null,
+            tiers: Array.isArray(s.tiers) ? s.tiers.filter((t) => t && typeof t === 'object') : [],
+            headline: s.headline || '',
+            detail: s.detail || '',
+        };
+    },
+
+    /** @returns {{headline:string, detail:string}|null} */
+    packs(data) {
+        const s = this._section(data, 'value_packs');
+        return s ? { headline: s.headline || '', detail: s.detail || '' } : null;
+    },
+
+    /**
+     * Points a goods total earns, in integer arithmetic on CENTS (never float
+     * money): floor(cents × points_per_dollar / 100). Returns null when the
+     * input is not a positive amount — "earn 0 points" is not a thing to print.
+     * @param {number} goodsTotal  dollars, GST-inclusive goods (no shipping)
+     * @param {{pointsPerDollar:number, pointsPerDollarOff:number}} loyalty
+     * @returns {{points:number, value:number}|null}
+     */
+    pointsFor(goodsTotal, loyalty) {
+        const cents = Math.round(Number(goodsTotal) * 100);
+        if (!loyalty || !(cents > 0)) return null;
+        const points = Math.floor((cents * loyalty.pointsPerDollar) / 100);
+        if (points < 1) return null;
+        // value in dollars, rounded to the cent: points / points_per_dollar_off.
+        const value = Math.floor((points * 100) / loyalty.pointsPerDollarOff) / 100;
+        return { points, value };
+    },
+};
+/**
+ * Fill every `[data-value-prop="<section>.<field>"]` from the live facts, e.g.
+ * `data-value-prop="free_shipping.headline"`. The static text in the markup is
+ * only what shows before the fetch lands; on failure, or when the programme is
+ * inactive, the element — or its `[data-value-prop-scope]` ancestor — is
+ * HIDDEN rather than left asserting a number we could not confirm.
+ * @returns {Promise<{ok:boolean, bound:number}>}
+ */
+ValueProps.bindAll = async function (root) {
+    const scope = root || (typeof document !== 'undefined' ? document : null);
+    if (!scope || typeof scope.querySelectorAll !== 'function') return { ok: false, bound: 0 };
+    const els = Array.from(scope.querySelectorAll('[data-value-prop]'));
+    if (!els.length) return { ok: true, bound: 0 };
+    const res = await this.load();
+    let bound = 0;
+    els.forEach((el) => {
+        const [section, field] = String(el.getAttribute('data-value-prop')).split('.');
+        const sec = res.ok ? this._section(res.data, section) : null;
+        const value = sec && typeof sec[field] === 'string' && sec[field].trim() ? sec[field].trim() : null;
+        const target = (el.closest && el.closest('[data-value-prop-scope]')) || el;
+        if (value) { el.textContent = value; target.hidden = false; bound++; }
+        else target.hidden = true;
+    });
+    return { ok: res.ok, bound };
+};
+/**
+ * The site-wide value strip under the header (conversion handoff 2026-09-23
+ * §4.2): "Free shipping over $100 · Earn points on every order · Lower prices
+ * when you buy more", each linking to its explainer. IN FLOW, one line,
+ * dismissible — nothing fixed-position over content.
+ *
+ * The markup ships VISIBLE and EMPTY, with its height reserved in CSS, so
+ * filling it moves nothing (CLS). The items are built from the numeric fields
+ * (threshold) or are programme names with no number in them; an inactive
+ * programme contributes no item. Read failure or every programme inactive ⇒
+ * the strip is removed from view: a strip with no facts says nothing true.
+ *
+ * Pure `stripItems()` so tests can run the wording without a DOM.
+ */
+ValueProps.DISMISS_KEY = 'ic_value_strip_dismissed_v1';
+ValueProps.stripItems = function (data) {
+    const items = [];
+    const ship = this.freeShipping(data);
+    if (ship) {
+        const t = Number.isInteger(ship.threshold) ? `$${ship.threshold}` : `$${ship.threshold.toFixed(2)}`;
+        items.push({ text: `Free shipping over ${t}`, href: '/shipping' });
+    }
+    if (this.loyalty(data)) items.push({ text: 'Earn points on every order', short: 'Earn points', href: '/rewards' });
+    if (this.volume(data)) items.push({ text: 'Lower prices when you buy more', href: '/bulk-pricing' });
+    if (this.packs(data)) items.push({ text: 'Full sets in value packs', href: '/value-packs', wideOnly: true });
+    return items;
+};
+ValueProps.renderStrip = async function () {
+    if (typeof document === 'undefined') return { ok: false, rendered: 0 };
+    const strip = document.getElementById('value-strip');
+    const list = document.getElementById('value-strip-list');
+    if (!strip || !list) return { ok: true, rendered: 0 };
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(this.DISMISS_KEY) === '1'; } catch { /* storage blocked */ }
+    if (dismissed) { strip.hidden = true; return { ok: true, rendered: 0, dismissed: true }; }
+    const res = await this.load();
+    const items = res.ok ? this.stripItems(res.data) : [];
+    if (!items.length) { strip.hidden = true; return { ok: res.ok, rendered: 0 }; }
+    list.innerHTML = items.map((it) =>
+        `<li class="value-strip__item${it.wideOnly ? ' value-strip__item--wide' : ''}"><a href="${it.href}">`
+        + (it.short
+            ? `<span class="value-strip__long">${esc(it.text)}</span><span class="value-strip__short">${esc(it.short)}</span>`
+            : esc(it.text))
+        + `</a></li>`
+    ).join('');
+    strip.hidden = false;
+    const close = document.getElementById('value-strip-close');
+    if (close && !close.dataset.bound) {
+        close.dataset.bound = '1';
+        close.addEventListener('click', () => {
+            strip.hidden = true;
+            try { localStorage.setItem(this.DISMISS_KEY, '1'); } catch { /* storage blocked */ }
+        });
+    }
+    return { ok: true, rendered: items.length };
+};
+if (typeof window !== 'undefined') window.ValueProps = ValueProps;
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('DOMContentLoaded', () => {
+        ValueProps.bindAll();
+        ValueProps.renderStrip();
+    });
+}
+
+/**
+ * PRINTER DISPLAY NAME  (conversion handoff 2026-09-23 §5, last row)
+ * ==================================================================
+ * The catalogue stores many printer names in capitals ("HP COLOR LASERJET
+ * 5500"). The backend's crawler pages now display-case them
+ * (`printerDisplayName` in its src/utils/seoHelpers.js), so the SPA must print
+ * the SAME name or users and Google see two spellings of one printer.
+ *
+ * We cannot read the backend's source, so this is calibrated against its
+ * OUTPUT: every entry below was measured from /api/prerender/printer/<brand>/
+ * <slug> <h1>s on 2026-09-27 (fixtures in tests/conversion-fixes-sep2026.test.js).
+ * Words the backend leaves alone (ENVY, ECOSYS, PIXMA, PHASER, DOCUPRINT, MFP,
+ * MFC…) are left alone here too — prettier is not the goal, SAME is.
+ *
+ * Whole-word, exact-uppercase matches only: a mixed-case token ("M428fdw",
+ * "LaserJet") is already how the data wants it and is never touched.
+ */
+const PrinterName = {
+    WORDS: {
+        LASERJET: 'LaserJet',
+        OFFICEJET: 'OfficeJet',
+        DESKJET: 'DeskJet',
+        PAGEWIDE: 'PageWide',
+        DESK: 'Desk',
+        COLOR: 'Color',
+        PRO: 'Pro',
+        ENTERPRISE: 'Enterprise',
+    },
+    display(name) {
+        if (typeof name !== 'string') return '';
+        return name.replace(/\b[A-Z]+\b/g, (w) => (Object.prototype.hasOwnProperty.call(this.WORDS, w) ? this.WORDS[w] : w));
+    },
+
+    /**
+     * "Fits Brother MFC J5930DW, MFC J6935DW +12" for a listing card
+     * (conversion handoff 2026-09-27 §8.1), from the product's OWN
+     * `compatible_printers`. Returns '' when the row carries none — listing
+     * payloads (/api/shop, /api/products, /popular) do not include the field as
+     * of 2026-09-27, so this renders nothing until the backend adds it, and
+     * then lights up with no FE change. Never "guaranteed" anything.
+     * @returns {string} plain text (caller escapes)
+     */
+    fitsLine(printers) {
+        const names = (Array.isArray(printers) ? printers : [])
+            .map((p) => (p && (p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '))) || '')
+            .filter(Boolean)
+            .map((n) => this.display(n));
+        if (!names.length) return '';
+        const shown = names.slice(0, 2);
+        const rest = names.length - shown.length;
+        return `Fits ${shown.join(', ')}${rest > 0 ? ` +${rest}` : ''}`;
+    },
+};
+if (typeof window !== 'undefined') window.PrinterName = PrinterName;
+
+/**
  * DISPATCH COUNTDOWN  (traffic-conversion-jul2026 §4)
  * ===================================================
  * "Order within 1h 59m for same-day dispatch", ticking client-side.
@@ -4042,6 +4327,8 @@ if (typeof module !== 'undefined' && module.exports) {
         CompatSource,
         canonicalizeCategory,
         TrustStats,
+        ValueProps,
+        PrinterName,
         DispatchCountdown,
         CouponSuggestion,
         AdminAccess,

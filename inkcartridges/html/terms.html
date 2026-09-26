@@ -19,17 +19,17 @@
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js?v=aaa71047"></script>
-    <script defer src="/js/consent-banner.js?v=96a0b0a8"></script>
+    <script defer src="/js/consent-banner.js?v=1f4ce648"></script>
 
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=52ca6c3c">
-    <link rel="stylesheet" href="/css/components.css?v=871ef432">
+    <link rel="stylesheet" href="/css/layout.css?v=6c31b559">
+    <link rel="stylesheet" href="/css/components.css?v=49be8b64">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=6cdb0229">
-    <link rel="stylesheet" href="/css/search.css?v=6aaf67b9">
+    <link rel="stylesheet" href="/css/pages.css?v=81e79445">
+    <link rel="stylesheet" href="/css/search.css?v=2d1d8e23">
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -147,6 +147,17 @@
             </div>
         </div>
     </header>
+
+    <!-- Value strip (conversion handoff 2026-09-23 §4.2): in flow, one line,
+         dismissible — never an overlay. Filled by ValueProps.renderStrip()
+         (utils.js) from GET /api/site/value-props; stays hidden if that
+         read fails. Same markup on every header page. -->
+    <aside class="value-strip" id="value-strip" aria-label="Why shop with us">
+        <div class="container value-strip__inner">
+            <ul class="value-strip__list" id="value-strip-list"></ul>
+            <button type="button" class="value-strip__close" id="value-strip-close" aria-label="Hide this message">&times;</button>
+        </div>
+    </aside>
 
     <main id="main-content" class="site-main">
         <nav class="breadcrumb" aria-label="Breadcrumb">
@@ -286,23 +297,22 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=57d2621d"></script>
+    <script defer src="/js/config.js?v=d494bea1"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/utils.js?v=64c9a954"></script>
-    <script defer src="/js/api.js?v=94410d2c"></script>
+    <script defer src="/js/utils.js?v=e2125480"></script>
+    <script defer src="/js/api.js?v=e0d54c24"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=276f4880"></script>
-    <script defer src="/js/business.js?v=a38f2207"></script>
+    <script defer src="/js/auth.js?v=8aa5730e"></script>
+    <script defer src="/js/business.js?v=73a85697"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=40ec540e"></script>
+    <script defer src="/js/cart.js?v=167e4d43"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
-    <script defer src="/js/products.js?v=ca93ef4c"></script>
-    <script defer src="/js/search.js?v=93f4714f"></script>
-    <script defer src="/js/main.js?v=7bae8728"></script>
+    <script defer src="/js/products.js?v=d47c9fd0"></script>
+    <script defer src="/js/search.js?v=035426e6"></script>
+    <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=3e9b6eea"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
-    <script defer src="/js/rewards-nudge.js?v=3973cc58"></script>
     <script defer src="/js/legal-page.js?v=98b0cd30"></script>
     <script defer src="/js/site-guard.js?v=90b9f8e2"></script>
 </body>

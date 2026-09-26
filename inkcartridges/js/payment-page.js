@@ -106,10 +106,40 @@
             // Setup event handlers
             this.setupEventHandlers();
 
+            // "No card surcharges" + phone beside the Pay button. Fire-and-forget:
+            // a trust read must never delay or block payment.
+            this.renderPayReassurance();
+
             // Track payment page view for analytics
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackPaymentStarted();
             }
+        },
+
+        /**
+         * Beside the Pay button (conversion handoff 2026-09-27 §8.3 / §8.2):
+         *   "Prices in NZD, GST inclusive. No card surcharges." — verbatim from
+         *   /api/site/trust organization.pricing_footer_note, and
+         *   "Questions? Call 027 474 0115 · NZ company since 2008" — the number
+         *   the site header prints, the year from organization.founded_year.
+         * Each piece renders only when its fact arrived; nothing is defaulted.
+         */
+        async renderPayReassurance() {
+            const el = document.getElementById('pay-reassurance');
+            if (!el || typeof TrustStats === 'undefined') return;
+            let org = null;
+            try {
+                const data = await TrustStats.raw();
+                org = data && data.organization && typeof data.organization === 'object' ? data.organization : null;
+            } catch (_) { org = null; }
+            const note = org && typeof org.pricing_footer_note === 'string' ? org.pricing_footer_note.trim() : '';
+            const year = org && Number.isInteger(org.founded_year) ? org.founded_year : null;
+            const parts = [];
+            if (note) parts.push(Security.escapeHtml(note));
+            parts.push('Questions? Call <a href="tel:+64274740115">027 474 0115</a>'
+                + (year ? ` · NZ company since ${year}` : ''));
+            el.innerHTML = parts.join('<br>');
+            el.hidden = false;
         },
 
         /**

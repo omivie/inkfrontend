@@ -701,6 +701,34 @@ const API = {
     },
 
     /**
+     * Guest checkout-abandonment consent (conversion handoff 2026-09-23 §6a.1).
+     * Proposed contract (backend-docs outbox, 2026-09-27):
+     *   POST /api/cart/guest-contact
+     *   { guest_session_id, email, consent: true }  →  { ok: true }
+     * Only ever called with consent === true, from an UNTICKED-by-default box
+     * (NZ UEMA). Behind Config.DARK_FEATURES.guestCartEmail.
+     */
+    async guestContact(email) {
+        const guestSessionId = this.getGuestSessionId();
+        if (!guestSessionId || !email) return { ok: false, error: 'missing guest session or email' };
+        return this.post('/api/cart/guest-contact', { guest_session_id: guestSessionId, email, consent: true });
+    },
+
+    /**
+     * Review-by-link for guests (conversion handoff 2026-09-23 §6a.2).
+     * Proposed contract (backend-docs outbox, 2026-09-27):
+     *   GET  /api/reviews/by-token/:token → { order_number, items:[{sku,name,image_url,reviewed}] }
+     *   POST /api/reviews/by-token        { token, sku, rating 1-5, title, body } → { ok }
+     * Behind Config.DARK_FEATURES.guestReviews.
+     */
+    async getReviewToken(token) {
+        return this.getPublic(`/api/reviews/by-token/${encodeURIComponent(token)}`);
+    },
+    async submitReviewByToken(payload) {
+        return this.post('/api/reviews/by-token', payload);
+    },
+
+    /**
      * POST request helper
      */
     async post(endpoint, body) {
@@ -2296,7 +2324,20 @@ const API = {
 
         // Use a raw fetch (not this.get) so we can distinguish 404 from 5xx.
         // request() throws on both; we need to fall back only on 5xx/network.
-        const primary = await this._rawJsonFetch(primaryPath);
+        //
+        // js/pdp-prefetch.js may already have started this exact read from
+        // <head>; take it (once) when it is for the same path AND this read
+        // would go to the public route anyway (an admin preview never uses it).
+        // A prefetch that failed on the network is retried here rather than
+        // trusted — the head ran before the page settled.
+        let primary = null;
+        const pre = (typeof window !== 'undefined') ? window.__pdpPrefetch : null;
+        if (pre && pre.path === primaryPath && pre.promise && this._catalogRoute(primaryPath).anonymous) {
+            window.__pdpPrefetch = null;
+            try { primary = await pre.promise; } catch (_) { primary = null; }
+            if (primary && primary.kind === 'network-error') primary = null;
+        }
+        if (!primary) primary = await this._rawJsonFetch(primaryPath);
 
         // Happy path: primary returned a healthy envelope.
         if (primary.kind === 'ok' && primary.body && primary.body.ok && primary.body.data) {

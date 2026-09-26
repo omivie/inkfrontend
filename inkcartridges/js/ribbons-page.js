@@ -500,7 +500,7 @@ const RibbonsPage = {
      * have changed nothing at all.
      *
      * ONE CHANNEL, NOT TWO, AND THE MISSING ONE IS NAMED. The house dual-send
-     * (rewards-nudge.js) is GA plus our own first-party tracker. GA takes an
+     * (the retired rewards-nudge.js) is GA plus our own first-party tracker. GA takes an
      * arbitrary event name and is used here. The first-party tracker CANNOT carry
      * this yet — measured against production 2026-09-01:
      *

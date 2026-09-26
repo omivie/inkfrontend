@@ -57,6 +57,39 @@ function initStickyHeader() {
     // clamp can never re-cross the boundary that produced it. Keep the gap.
     const SCROLL_ON = 80;
     const SCROLL_OFF = 24;
+
+    // HIDE ON SCROLL-DOWN, SHOW ON SCROLL-UP, below the desktop nav
+    // (conversion handoff 2026-09-23 D-P0-4). The pinned header was 180px of a
+    // 664px iPhone viewport — the first product card's Add button started at
+    // y 881. While the shopper reads DOWN the header gets out of the way; any
+    // upward scroll brings it straight back, so search and the cart are never
+    // more than a flick away. Never hidden while anything inside it has focus
+    // (typing in search) or the hamburger menu is open, and never in the top
+    // HIDE_AFTER px. CSS does the motion (layout.css, reduced-motion aware).
+    //
+    // `site-header--offscreen` is set only AFTER the slide finishes (and
+    // cleared only after the slide back finishes). The PDP's sticky-ATC
+    // observer re-measures the header's rendered box on every class change;
+    // measuring at the START of a slide would read the wrong band and could
+    // retire the sticky bar onto a button the header is about to cover again
+    // (ERR-280). This class is the "geometry has settled" signal.
+    const HIDE_AFTER = 200;
+    const DELTA = 8;
+    const mq = window.matchMedia ? window.matchMedia('(max-width: 1099.98px)') : null;
+    let lastY = window.scrollY;
+    const canHide = function() {
+        if (mq && !mq.matches) return false;
+        if (header.matches(':focus-within')) return false;
+        const menu = header.querySelector('.nav-menu');
+        if (menu && menu.classList.contains('is-open')) return false;
+        return true;
+    };
+    header.addEventListener('transitionend', function(e) {
+        if (e.target !== header || e.propertyName !== 'transform') return;
+        header.classList.toggle('site-header--offscreen', header.classList.contains('site-header--hidden'));
+    });
+    header.addEventListener('focusin', function() { header.classList.remove('site-header--hidden'); });
+
     let ticking = false;
     const apply = function() {
         ticking = false;
@@ -64,6 +97,13 @@ function initStickyHeader() {
         if (y > SCROLL_ON) header.classList.add('site-header--scrolled');
         else if (y < SCROLL_OFF) header.classList.remove('site-header--scrolled');
         // Between OFF and ON: leave the current state as-is (the dead band).
+
+        if (y > lastY + DELTA && y > HIDE_AFTER && canHide()) {
+            header.classList.add('site-header--hidden');
+        } else if (y < lastY - DELTA || y <= HIDE_AFTER || !canHide()) {
+            header.classList.remove('site-header--hidden');
+        }
+        if (Math.abs(y - lastY) > DELTA) lastY = y;
     };
     const onScroll = function() {
         if (ticking) return;
@@ -422,9 +462,9 @@ function initNavigation() {
  * correctly leaves it open (`brandsPanel.contains(e.target)`), while this file's
  * document handler set `aria-expanded="false"` on a visibly open menu.
  *
- * That is not cosmetic. rewards-nudge.js:164 reads exactly that attribute to
- * decide whether to suppress itself, so the desync let the rewards nudge fire
- * over an open mega menu — on a phone, one overlay on top of another.
+ * That is not cosmetic: assistive tech reads that attribute, and the (since
+ * retired) rewards nudge used it to decide whether to suppress itself — the
+ * desync let it fire over an open mega menu, one overlay on top of another.
  *
  * mega-nav.js owns these panels: open/close, the aria state, ESC, outside
  * click, and the mobile DOM relocation into .nav-menu so a panel scrolls with

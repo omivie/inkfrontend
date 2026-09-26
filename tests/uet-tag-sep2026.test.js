@@ -943,7 +943,8 @@ test('§8 every page with a call site actually loads gtag.js', () => {
     // The enrolment fact, asked of the HTML rather than assumed. This is the
     // claim that UET adds no new surface to maintain: its reach IS gtag.js's.
     const owners = {
-        'product-detail-page.js': 1, 'cart.js': 33, 'checkout-page.js': 1,
+        // cart.js 33 → 37 (Sep 2026): /rewards, /bulk-pricing, /value-packs, /review.
+        'product-detail-page.js': 1, 'cart.js': 37, 'checkout-page.js': 1,
         'contact-page.js': 1, 'quote-page.js': 1,
     };
     const pages = htmlFiles().map((f) => [f, fs.readFileSync(f, 'utf8')]);

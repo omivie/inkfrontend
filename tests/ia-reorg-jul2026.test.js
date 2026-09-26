@@ -119,8 +119,11 @@ test('§1 no categories-mega anywhere; shared headers stay byte-identical', () =
     // (html/business.html) rather than html/business/ on purpose — four parity
     // walkers skip a directory named `business`, so a folder would silently
     // exempt it from this very check.
-    assert.equal(PAGES_WITH_NAV.length, 30,
-        `expected 30 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
+    // 34 since Sep 2026: the three explainer pages the value strip links to
+    // (/rewards, /bulk-pricing, /value-packs) and /review (guest review-by-link,
+    // dark until the backend ships) — conversion handoff 2026-09-23 §4.3/§6a.
+    assert.equal(PAGES_WITH_NAV.length, 34,
+        `expected 34 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
     const hashes = new Set(PAGES_WITH_NAV.map(({ file, html }) => {
         const header = extractSiteHeader(html);
         assert.ok(header, `${file} has a nav but no site-header block`);

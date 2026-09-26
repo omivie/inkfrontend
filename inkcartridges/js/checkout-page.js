@@ -52,6 +52,7 @@
             await this.preloadShippingRates();
             this.renderCart();
             this.setupFormHandlers();
+            this.setupGuestCartEmail();
             this.setupShippingHandlers();
             this.setupBillingAddressToggle();
             this.initAddressAutocomplete();
@@ -651,6 +652,70 @@
         },
 
         // Update totals display
+        /**
+         * Guest cart-copy consent (conversion handoff 2026-09-23 §6a.1), DARK
+         * until Config.DARK_FEATURES.guestCartEmail is true. Guests only; the
+         * box starts unticked and the call carries consent only when ticked.
+         * It fires on email blur and on ticking, once per (email) — never on
+         * every keystroke. The outcome is written to
+         * data-guest-contact="sent|failed" on the label: DebugLog is silent in
+         * production, so the attribute is the signal a probe can read. A failed
+         * call never blocks or interrupts checkout.
+         */
+        setupGuestCartEmail() {
+            const flag = typeof Config !== 'undefined' && Config.DARK_FEATURES && Config.DARK_FEATURES.guestCartEmail === true;
+            const label = document.getElementById('guest-cart-email-optin');
+            const box = document.getElementById('guest-cart-email-consent');
+            const email = document.getElementById('email');
+            if (!flag || !label || !box || !email) return;
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return;
+            label.hidden = false;
+            let sentFor = null;
+            const send = async () => {
+                const value = (email.value || '').trim();
+                if (!box.checked || !email.checkValidity() || !value || value === sentFor) return;
+                sentFor = value;
+                try {
+                    const resp = await API.guestContact(value);
+                    label.dataset.guestContact = resp && resp.ok ? 'sent' : 'failed';
+                    if (!(resp && resp.ok)) sentFor = null;
+                } catch (_) {
+                    label.dataset.guestContact = 'failed';
+                    sentFor = null;
+                }
+            };
+            email.addEventListener('blur', send);
+            box.addEventListener('change', send);
+        },
+
+        /**
+         * "Earn N points ($X) on this order" under the total — from the cart's
+         * own `loyalty` (earn_on_this_order / earn_value_dollars), never a local
+         * computation (conversion handoff 2026-09-23 §4.2). Guests get a link to
+         * collect them that opens the sign-up in a NEW TAB so a half-filled
+         * checkout is never navigated away from. No earn figure ⇒ no line.
+         */
+        renderPointsLine() {
+            const el = document.getElementById('checkout-points-line');
+            if (!el) return;
+            const lo = (typeof Cart !== 'undefined' && Cart.loyalty) || null;
+            const pts = lo && typeof lo.earn_on_this_order === 'number' ? lo.earn_on_this_order : 0;
+            if (!(pts >= 1)) { el.hidden = true; el.textContent = ''; return; }
+            const val = lo && typeof lo.earn_value_dollars === 'number' && lo.earn_value_dollars > 0
+                ? ` (${formatPrice(lo.earn_value_dollars)})` : '';
+            el.textContent = `Earn ${pts.toLocaleString('en-NZ')} points${val} on this order.`;
+            if (lo.guest === true) {
+                const a = document.createElement('a');
+                a.href = '/account/login?tab=register';
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.textContent = 'Create an account with this email to collect them';
+                el.appendChild(document.createTextNode(' '));
+                el.appendChild(a);
+            }
+            el.hidden = false;
+        },
+
         updateTotalsDisplay() {
             const subtotalEl = document.getElementById('checkout-subtotal');
             const shippingEl = document.getElementById('checkout-shipping');
@@ -673,6 +738,8 @@
                     discountRow.hidden = true;
                 }
             }
+
+            this.renderPointsLine();
 
             // Show loyalty points discount if applied
             const loyaltyRow = document.getElementById('checkout-loyalty-row');

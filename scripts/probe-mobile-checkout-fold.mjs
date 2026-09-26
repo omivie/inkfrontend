@@ -291,7 +291,7 @@ try {
         await ctx.close();
     }
 
-    /* ── 3. /ink-cartridges — the nudge must not greet a first-time visitor ── */
+    /* ── 3. /ink-cartridges — no overlay greets a first-time visitor (nudge retired 2026-09-27) ── */
     {
         const ctx = await browser.newContext({
             viewport: PHONE, userAgent: IPHONE_UA, isMobile: true, hasTouch: true,
@@ -324,16 +324,10 @@ try {
             const r = n ? n.getBoundingClientRect() : null;
             return { present: !!n && !n.hidden, width: r ? Math.round(r.width) : 0, height: r ? Math.round(r.height) : 0 };
         });
-        if (after.present) {
-            ok('the nudge still arrives after a real scroll', `${after.width}x${after.height}`);
-            check('and it stays inside the viewport', after.width <= PHONE.width - 16,
-                `${after.width}px wide in a ${PHONE.width}px viewport`);
-        } else {
-            // Not a failure: a signed-in visitor, a cooldown, or a paused campaign
-            // all legitimately suppress it. But say so BY NAME — a skip is not a pass.
-            soft('the nudge did not appear after scrolling',
-                'campaign disabled, cooldown active, or visitor treated as signed in — the scroll gate itself was NOT exercised');
-        }
+        // RETIRED 2026-09-27 (conversion handoff D-P0-1): the overlay must not
+        // appear AT ALL now — not before a scroll and not after one.
+        check('no rewards overlay after a real scroll either', after.present === false,
+            `after scrolling 900px, .rewards-nudge present = ${after.present}`);
         await ctx.close();
     }
 } catch (err) {

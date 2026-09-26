@@ -16,17 +16,17 @@
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js?v=aaa71047"></script>
-    <script defer src="/js/consent-banner.js?v=96a0b0a8"></script>
+    <script defer src="/js/consent-banner.js?v=1f4ce648"></script>
 
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=52ca6c3c">
-    <link rel="stylesheet" href="/css/components.css?v=871ef432">
+    <link rel="stylesheet" href="/css/layout.css?v=6c31b559">
+    <link rel="stylesheet" href="/css/components.css?v=49be8b64">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=6cdb0229">
-    <link rel="stylesheet" href="/css/search.css?v=6aaf67b9">
+    <link rel="stylesheet" href="/css/pages.css?v=81e79445">
+    <link rel="stylesheet" href="/css/search.css?v=2d1d8e23">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Checkout | InkCartridges.co.nz">
@@ -115,6 +115,14 @@
                                         <label for="email" class="form-label">Email Address <span class="required">*</span></label>
                                         <input type="email" id="email" name="email" class="form-input" required autocomplete="email">
                                         <span class="form-hint">We'll send your order confirmation here</span>
+                                        <!-- Guest cart-copy consent (conversion handoff §6a.1). UNTICKED by
+                                             default — NZ UEMA needs the shopper's own consent. Ships hidden;
+                                             shown only for guests when Config.DARK_FEATURES.guestCartEmail
+                                             is on (checkout-page.js setupGuestCartEmail). -->
+                                        <label class="checkout-optin" id="guest-cart-email-optin" hidden>
+                                            <input type="checkbox" id="guest-cart-email-consent" name="guest-cart-email-consent">
+                                            <span>Email me a copy of my cart if I don't finish</span>
+                                        </label>
                                     </div>
                                     <div class="form-group">
                                         <label for="phone" class="form-label">Phone Number <span class="required">*</span></label>
@@ -446,6 +454,10 @@
                                     <span id="checkout-total"><span class="skeleton" style="display:inline-block;width:80px;height:1em;"></span></span>
                                 </div>
                             </div>
+                            <!-- Points this order earns, from the cart's own `loyalty`
+                                 (conversion handoff 2026-09-23 §4.2). Guests also get a
+                                 link to collect them — a link, never a step. -->
+                            <p class="checkout-summary__points" id="checkout-points-line" data-testid="checkout-points" hidden></p>
 
                             <div class="checkout-summary__shipping-info" id="checkout-shipping-info">
                                 <p class="checkout-summary__spend-more" id="checkout-spend-more" hidden>
@@ -463,13 +475,13 @@
                             </div>
 
                             <div class="checkout-summary__trust">
-                                <div class="checkout-summary__trust-item">
+                                <div class="checkout-summary__trust-item" data-value-prop-scope>
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                                    <span>Free shipping over $100</span>
+                                    <span data-value-prop="free_shipping.headline">Free shipping over $100</span>
                                 </div>
                                 <div class="checkout-summary__trust-item">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                    <span>Human support 8am–8pm, 7 days</span>
+                                    <span>Human support Mon–Fri, 9am–5pm</span>
                                 </div>
                                 <div class="checkout-summary__trust-item">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -488,26 +500,26 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=57d2621d"></script>
+    <script defer src="/js/config.js?v=d494bea1"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
     <script defer src="/js/shipping.js?v=570c7bc4"></script>
-    <script defer src="/js/api.js?v=94410d2c"></script>
+    <script defer src="/js/api.js?v=e0d54c24"></script>
     <script defer src="/js/address-autocomplete.js?v=80cdcf13"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=64c9a954"></script>
-    <script defer src="/js/auth.js?v=276f4880"></script>
-    <script defer src="/js/business.js?v=a38f2207"></script>
+    <script defer src="/js/utils.js?v=e2125480"></script>
+    <script defer src="/js/auth.js?v=8aa5730e"></script>
+    <script defer src="/js/business.js?v=73a85697"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=40ec540e"></script>
+    <script defer src="/js/cart.js?v=167e4d43"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
-    <script defer src="/js/products.js?v=ca93ef4c"></script>
-    <script defer src="/js/search.js?v=93f4714f"></script>
-    <script defer src="/js/main.js?v=7bae8728"></script>
+    <script defer src="/js/products.js?v=d47c9fd0"></script>
+    <script defer src="/js/search.js?v=035426e6"></script>
+    <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=3e9b6eea"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/checkout-page.js?v=2993866c"></script>
+    <script defer src="/js/checkout-page.js?v=8957c573"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
 
     <style>

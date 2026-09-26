@@ -50,6 +50,21 @@ const Config = {
     CURRENCY: 'NZD',
     LOCALE: 'en-NZ',
 
+    /**
+     * FE halves built ahead of their backend halves (conversion handoff
+     * 2026-09-23 §6a). Each ships OFF and renders nothing until the backend
+     * confirms its endpoint is live — a checkbox promising an email that
+     * nothing stores, or a review form that posts to a missing route, would be
+     * a promise we cannot keep. Flip to true in the same commit that the
+     * backend's "endpoint is live" note is recorded in backend-docs/.
+     *   guestCartEmail → POST /api/cart/guest-contact   (checkout opt-in)
+     *   guestReviews   → GET/POST /api/reviews/by-token (html/review.html)
+     */
+    DARK_FEATURES: {
+        guestCartEmail: false,
+        guestReviews: false,
+    },
+
     // Business settings (loaded from server, these are fallback defaults)
     // Shipping fees are now zone + weight + delivery-type based (see shipping.js)
     settings: {

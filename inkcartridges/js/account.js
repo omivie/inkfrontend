@@ -24,7 +24,7 @@ const AccountPage = {
             // "Sign up & claim your points" CTA points at /account; without this
             // the visitor lands on the SIGN IN tab, which is the wrong ask for
             // someone who has no account. `?intent=signup` opens the register tab
-            // instead — the same `tab=register` param rewards-nudge.js already
+            // instead — the same `tab=register` param the retired rewards-nudge.js
             // uses, so both entry points converge (BF-011 asks the backend to
             // append it to the email link).
             //

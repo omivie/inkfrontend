@@ -2071,6 +2071,14 @@
 
 .site-main {
     flex: 1;
+    /* The footer must not be on the first screen while the page's content is
+       still arriving (conversion handoff 2026-09-23 §2, CLS). The PDP painted
+       its footer at y 581 of a 900px window with a 373px skeleton, then the
+       product pushed it 1900px down: one shift of 0.34 on every desktop PDP
+       view. Reserving a viewport keeps the footer below the fold until the
+       real height lands, and on a genuinely short page it only moves the
+       footer down, never content. */
+    min-height: 100vh;
 }
 
 /* Shop layout with sidebar */
@@ -2184,9 +2192,14 @@
    ========================================================================== */
 
 .breadcrumb {
-    padding: var(--spacing-md) 0;
+    /* 6px, not 16px: the crumbs are 44px tap targets already (components.css),
+       so the old padding made the trail 76px tall — room the PDP's Add button
+       needed on a 900px screen (conversion handoff D-P0-2). */
+    padding: 6px 0;
     font-size: var(--font-size-sm);
 }
+/* The current page sits on the linked crumbs' 44px centre line. */
+.breadcrumb__item--current { min-height: 44px; }
 
 .breadcrumb__list {
     display: flex;
@@ -2205,6 +2218,31 @@
 .breadcrumb__item:not(:last-child)::after {
     content: '/';
     color: var(--color-text-muted);
+}
+
+/* Phones: ONE line. The PDP breadcrumb wrapped from two lines to three when
+   the product name replaced its skeleton, pushing the whole product block
+   52px down on every mobile PDP view — a CLS of 0.157 by itself (measured
+   2026-09-27, iPhone 13; conversion handoff §2). The trail items keep their
+   size; the current page (last item, the long product name) truncates. */
+@media (max-width: 767.98px) {
+    .breadcrumb__list {
+        flex-wrap: nowrap;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+    .breadcrumb__item { flex: 0 0 auto; }
+    .breadcrumb__item--current,
+    .breadcrumb__item:last-child {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        /* Same 44px row the linked crumbs occupy (their <a> is min-height
+           44px), so the current page sits on their centre line. */
+        line-height: 44px;
+    }
 }
 
 .breadcrumb__link {
@@ -2398,7 +2436,140 @@ summary.footer-column__heading::-webkit-details-marker {
         padding-top: var(--spacing-1);
         padding-bottom: var(--spacing-1);
     }
+
+    /* Hide on scroll-down, show on scroll-up (conversion handoff 2026-09-23
+       D-P0-4; main.js#initStickyHeader owns the state). transform, not top or
+       height: no layout shift, no reflow of the page under it. */
+    .site-header {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .site-header--hidden {
+        transform: translateY(-100%);
+        box-shadow: none;
+    }
+}
+
+@media (max-width: 1099.98px) and (prefers-reduced-motion: reduce) {
+    .site-header { transition-duration: 0.01ms; }
+}
+
+/* PHONE: the tap-to-call row folds into an ICON in the top row
+   (conversion handoff D-P0-4; §8.2 "phone one tap away"). It used to be a
+   full-width third row of the pinned header — ~44px of a 664px viewport
+   spent on a phone number. The header markup is byte-locked across 30 pages
+   (navbar-parity), so this is CSS only: the lead joins the logo/actions row
+   (order 2 sorts it after the logo and, by DOM order, before the actions),
+   and the visible number is dropped to font-size 0 — the link keeps its text
+   for screen readers and its 44px target. It is NOT hidden on scroll: the
+   number must stay reachable. */
+@media (max-width: 767.98px) {
+    .header-lead {
+        order: 2;
+        width: auto;
+        flex: 0 0 auto;
+    }
+    .header-contact__item[href^="tel:"] {
+        font-size: 0;
+        min-width: 44px;
+        justify-content: center;
+        color: var(--cyan-dark);
+    }
+    .header-contact__item[href^="tel:"] svg {
+        width: 22px;
+        height: 22px;
+    }
+    .site-header--scrolled .header-lead {
+        display: flex;
+    }
+    /* Make room on ONE row for logo + phone + the three actions at 390px:
+       the logo yields first (it has min-width:0 and truncates last), the
+       48px action targets sit edge to edge (each still >= --tap-min). */
+    .logo-block { flex: 1 1 0; }
+    .header-actions { gap: 0; }
+}
+@media (max-width: 479.98px) {
+    .header-main .container { column-gap: var(--spacing-1); }
 }
 
 /* ERR-094 (Jul 2026): footer logo text is fluid (clamp) so the lockup fits a
    320px viewport. See tests/text-fit-jul2026.test.js. */
+
+/* ==========================================================================
+   VALUE STRIP (conversion handoff 2026-09-23 §4.2) — under the header, IN
+   FLOW, one line, dismissible. Height is reserved before JS fills it
+   (ValueProps.renderStrip in utils.js) so filling it shifts nothing; it only
+   ever collapses (failed read, or the shopper dismissed it).
+   ========================================================================== */
+.value-strip {
+    min-height: 32px;
+    background: var(--cyan-light);
+    color: var(--cyan-dark);
+    font-size: 0.875rem;
+    line-height: 1.3;
+}
+.value-strip[hidden] { display: none; }
+.value-strip__inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+}
+.value-strip__list {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.value-strip__item + .value-strip__item::before {
+    content: "·";
+    margin: 0 8px;
+    color: var(--cyan-primary);
+}
+.value-strip__item a {
+    color: var(--cyan-dark);
+    font-weight: 600;
+    text-decoration: none;
+}
+.value-strip__item a:hover,
+.value-strip__item a:focus-visible { text-decoration: underline; }
+.value-strip__close {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--cyan-dark);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.value-strip__short { display: none; }
+@media (max-width: 767.98px) {
+    .value-strip__long { display: none; }
+    .value-strip__short { display: inline; }
+    /* The strip states free shipping on every page; on a phone the shop
+       pages' own shipping pill said it a second time, 50px lower. CSS-only
+       (no shift on load). If the strip is dismissed or its facts could not be
+       read, the pill stays hidden too: a threshold we could not confirm is
+       not re-asserted from a literal. */
+    .value-strip ~ main .shipping-info-bar--inline,
+    .value-strip ~ * .shipping-info-bar--inline { display: none; }
+    .value-strip { font-size: 0.8125rem; }
+    .value-strip__item--wide { display: none; }
+    .value-strip__list { justify-content: flex-start; }
+    .value-strip__item + .value-strip__item::before { margin: 0 5px; }
+}
+/* On the narrowest phones three facts do not fit one line: keep the two with
+   numbers/links a shopper acts on, drop "Lower prices…" (it is on every card). */
+@media (max-width: 400px) {
+    .value-strip__item:nth-child(3) { display: none; }
+}

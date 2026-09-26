@@ -383,7 +383,15 @@ test('login-page.js still honours ?tab=register (the other half of the contract)
         'the login page must still read the tab param the redirect appends');
 });
 
-test('rewards-nudge.js and /account converge on the same register-tab param', () => {
-    assert.match(JS('rewards-nudge.js'), /\/account\/login\?tab=register/,
-        'one param for the register tab, used by both signup entry points');
+// rewards-nudge.js was RETIRED in Sep 2026 (conversion handoff D-P0-1); the
+// signup asks it made now live INLINE — the cart's guest loyalty link, the
+// checkout points line and the /rewards page. They must keep the one param.
+test('every inline signup ask converges on the same register-tab param', () => {
+    for (const f of ['cart.js', 'checkout-page.js']) {
+        assert.match(JS(f), /\/account\/login\?tab=register/, `${f}: one param for the register tab`);
+    }
+    const rewards = fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'html', 'rewards.html'), 'utf8');
+    assert.match(rewards, /\/account\/login\?tab=register/, 'rewards.html CTA: same param');
+    assert.ok(!fs.existsSync(path.join(__dirname, '..', 'inkcartridges', 'js', 'rewards-nudge.js')),
+        'the popover is retired — it must not come back as a file');
 });

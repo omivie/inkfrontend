@@ -16,17 +16,17 @@
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js?v=aaa71047"></script>
-    <script defer src="/js/consent-banner.js?v=96a0b0a8"></script>
+    <script defer src="/js/consent-banner.js?v=1f4ce648"></script>
 
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=52ca6c3c">
-    <link rel="stylesheet" href="/css/components.css?v=871ef432">
+    <link rel="stylesheet" href="/css/layout.css?v=6c31b559">
+    <link rel="stylesheet" href="/css/components.css?v=49be8b64">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=6cdb0229">
-    <link rel="stylesheet" href="/css/search.css?v=6aaf67b9">
+    <link rel="stylesheet" href="/css/pages.css?v=81e79445">
+    <link rel="stylesheet" href="/css/search.css?v=2d1d8e23">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Order Confirmed | InkCartridges.co.nz">
@@ -237,31 +237,24 @@
 
                     <div class="confirmation-relationship" id="post-purchase-hooks">
                         <!-- THIS IS THE POST-PURCHASE ACCOUNT ASK, AND IT IS THE ONLY ONE.
-                             ERR-276 suppressed js/rewards-nudge.js on the phone buying
-                             path and re-armed it for the add-to-cart moment. The handoff
-                             also asked for it on this page; it is deliberately NOT here,
-                             for two reasons that are worth writing down so nobody adds it
-                             later. First, this card already is that ask, shown to guests
-                             only (order-confirmation-page.js, on Auth.readyPromise), and
-                             two account prompts on one page is not twice the conversion.
-                             Second, the nudge would bail here anyway: it anchors to
-                             `a.header-actions__item[href="/account"]` and this page runs
-                             the stripped .site-header--checkout, which has no such link.
+                             Shown to guests only (order-confirmation-page.js, on
+                             Auth.readyPromise). The rewards popover that used to make the
+                             same ask elsewhere was RETIRED in Sep 2026 (conversion handoff
+                             D-P0-1); this card and the inline lines are what remain.
 
-                             What was missing was the OFFER. The nudge's whole proposition
-                             is loyalty points, and this card never mentioned them even
-                             though the totals block above it prints "Loyalty points
-                             earned". The earn/redeem rates below are the same claim
-                             js/rewards-nudge.js makes and the same one
-                             html/account/loyalty.html:276 states — one vocabulary, three
-                             surfaces, pinned by
-                             tests/mobile-cta-occlusion-sep2026.test.js so a rate change
-                             cannot land on some of them. -->
+                             #create-account-points states THIS order's points and the
+                             email to claim them with (renderGuestPointsLine) — true since
+                             the backend began crediting past guest orders on first
+                             sign-in (2026-09-23). The earn/redeem rates below are the same
+                             claim html/account/loyalty.html:276 states — pinned by
+                             tests/conversion-fixes-sep2026.test.js so a rate change
+                             cannot land on one of them only. -->
                         <div class="confirmation-card confirmation-card--accent" id="create-account-prompt" hidden>
                             <h3>Save Your Details for Next Time</h3>
                             <p>Create an account to track orders, reorder in one click, and get new-product updates.</p>
+                            <p class="confirmation-card__points" id="create-account-points" hidden></p>
                             <p>You'll also earn 1 point for every $1 you spend (excluding shipping). 100 points = $1 off a future order.</p>
-                            <a href="/account/login" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
+                            <a href="/account/login?tab=register" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
                         </div>
 
                         <div class="confirmation-card confirmation-card--subtle">
@@ -323,28 +316,28 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=57d2621d"></script>
+    <script defer src="/js/config.js?v=d494bea1"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/utils.js?v=64c9a954"></script>
-    <script defer src="/js/api.js?v=94410d2c"></script>
+    <script defer src="/js/utils.js?v=e2125480"></script>
+    <script defer src="/js/api.js?v=e0d54c24"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=276f4880"></script>
-    <script defer src="/js/business.js?v=a38f2207"></script>
-    <script defer src="/js/products.js?v=ca93ef4c"></script>
-    <script defer src="/js/search.js?v=93f4714f"></script>
-    <script defer src="/js/main.js?v=7bae8728"></script>
+    <script defer src="/js/auth.js?v=8aa5730e"></script>
+    <script defer src="/js/business.js?v=73a85697"></script>
+    <script defer src="/js/products.js?v=d47c9fd0"></script>
+    <script defer src="/js/search.js?v=035426e6"></script>
+    <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=3e9b6eea"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=40ec540e"></script>
+    <script defer src="/js/cart.js?v=167e4d43"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
 
     <!-- defer = DOCUMENT ORDER: order-totals.js must precede both the page
          controller and order-receipt.js, which read window.OrderTotals. -->
     <script defer src="/js/order-totals.js?v=4d4a743f"></script>
     <script defer src="/js/order-receipt.js?v=8d7f6a13"></script>
-    <script defer src="/js/order-confirmation-page.js?v=cd636537"></script>
+    <script defer src="/js/order-confirmation-page.js?v=9937a330"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=90b9f8e2"></script>
 </body>
