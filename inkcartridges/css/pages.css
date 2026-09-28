@@ -8369,7 +8369,11 @@ a.account-review-card__product:focus-visible {
 .drilldown-box__logo--oki { height: 24px; }
 .drilldown-box__logo--fuji-xerox { height: 29px; }
 .drilldown-box__logo--kyocera { height: 26px; }
-.drilldown-box__logo--dymo { height: 28px; }
+/* dymo.png is 3000x2000 with the artwork in the middle 37% of its height, so
+   the box must be 80px (same as the mega nav) to show ~30px of logo. The
+   negative margins give back the transparent padding so the tile keeps the
+   same height as its neighbours. */
+.drilldown-box__logo--dymo { height: 80px; max-height: none; margin: -25px 0; }
 
 .drilldown-box__name {
     font-size: var(--font-size-md);
