@@ -82,6 +82,7 @@
     "probe:product-write": "node scripts/probe-product-write-fields.mjs",
     "probe:chip-prerender": "node scripts/probe-chip-prerender.mjs",
     "probe:cart-deep-link": "node scripts/probe-cart-deep-link.mjs",
+    "probe:four-replies": "node scripts/probe-four-replies-sep2026.mjs",
     "probe:bundle-response": "node scripts/probe-bundle-response-sep2026.mjs"
   },
   "dependencies": {

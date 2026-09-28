@@ -102,9 +102,12 @@ test('shop section headers use the base label so the source word is not doubled'
     const body = m[0];
     assert.ok(body.includes('getBaseProductTypeLabel()'),
         'displayProductInfo must use getBaseProductTypeLabel() (not the prefixed getProductTypeLabel) for the two section headers');
-    assert.ok(body.includes('${brandName} Compatible ${productType}')
-        && body.includes('${brandName} Original ${productType}'),
-        'section headers add exactly one source word');
+    // ERR-294: the <h2> opens with its badge ("Compatible" / "Genuine"), so the
+    // text span carries NO source word at all — one word, from the badge.
+    assert.ok(body.includes('sectionTitleText(`${brandName} ${productType}`)'),
+        'section header text is brand + base label, through sectionTitleText');
+    assert.ok(!/\$\{brandName\} (Compatible|Original) /.test(body),
+        'the text span must not repeat the badge\'s source word');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

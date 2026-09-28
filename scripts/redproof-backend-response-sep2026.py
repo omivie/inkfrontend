@@ -42,7 +42,8 @@ PRB = 'scripts/probe-bundle-response-sep2026.mjs'
 # (file, fixed text, the broken text). Each fixed text must appear exactly once.
 M = [
  # BF-070 h — import health
- (IMP, "  if (latest.status === 'failed') { worse('bad'); reasons.push('The latest run failed.'); }\n", ""),
+ # ERR-294 reshaped this line (the reason now carries error_message); same undo.
+ (IMP, "  if (latest.status === 'failed') {\n    worse('bad');", "  if (false) {\n    worse('bad');"),
  (IMP, "  if (failed.length && latest.status !== 'failed') {", "  if (false) {"),
  (IMP, "  const lastReal = [latest, ...runs].find((r) => r && !r.dry_run) || null;", "  const lastReal = latest;"),
  (IMP, "  if (!data || typeof data !== 'object') return null;", "  if (!data || typeof data !== 'object') data = {};"),
@@ -54,7 +55,9 @@ M = [
  (API, "      if (filters.linked === 'true' || filters.linked === 'false') params.set('linked', filters.linked);", "      if (filters.linked) params.set('portal', filters.linked);"),
  # BF-070 d + the brand 404 — image audit
  (GIA, "  { key: 'watermark_hold', label: 'Watermark hold' },\n", ""),
- (GIA, "    const val = (typeof b === 'object' && b.slug) ? b.slug : name;", "    const val = (typeof b === 'object' && b.id) ? b.id : name;"),
+ # ERR-294: the backend now accepts slug OR id (BF-081), so an id is no longer
+ # the defect — a brand NAME still is (400 UNKNOWN_BRAND).
+ (GIA, "(b.slug || b.id || '')", "(b.name || '')"),
  (GIA, "  _listFailed = data === null;", "  _listFailed = false;"),
  # BF-070 c — brand on /api/admin/products
  (PRD, "      return { ...filters, brand: hit.id };", "      return { ...filters, brand: (hit && hit.slug) || name };"),

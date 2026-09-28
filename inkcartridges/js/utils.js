@@ -2959,48 +2959,104 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
  *
  * We cannot read the backend's source, so this is calibrated against its
  * OUTPUT: every entry below was measured from /api/prerender/printer/<brand>/
- * <slug> <h1>s on 2026-09-27 (fixtures in tests/conversion-fixes-sep2026.test.js).
- * Words the backend leaves alone (ENVY, ECOSYS, PIXMA, PHASER, DOCUPRINT, MFP,
- * MFC…) are left alone here too — prettier is not the goal, SAME is.
+ * <slug> <h1>s. First cut 2026-09-27 (8 words). RE-MEASURED 2026-09-28
+ * (ERR-294) after the backend's re-check showed "Brother MFC L2740DW" on our
+ * fit line against "Brother MFC-L2740DW" on its page: the backend had widened
+ * its rule in the meantime, so a mirror calibrated once had silently drifted
+ * (the ERR-270 shape — the other half of a mirror moved). The 2026-09-28 pass
+ * measured EVERY all-caps word (3+ letters) in every brand's printer list —
+ * 119 words — against one prerender each. Fixtures: tests/four-replies-
+ * backend-response-sep2026.test.js §H. Words the backend leaves alone (ENVY,
+ * ECOSYS, PIXMA, IMAGECLASS, APEOSPORT, MAXIFY, WORKCENTRE, LABELWRITER, MFP…)
+ * are left alone here too — prettier is not the goal, SAME is.
  *
  * Whole-word, exact-uppercase matches only: a mixed-case token ("M428fdw",
  * "LaserJet") is already how the data wants it and is never touched.
+ *
+ * Brother: the backend hyphenates the series prefix that DIRECTLY follows the
+ * brand — "Brother HL 1110" → "Brother HL-1110" — for DCP, FAX, HL, MFC, PT and
+ * QL only (measured: BF, DPC, GL, TD and VC are left spaced, and so is the PT
+ * in "Brother P-TOUCH PT 90", which does not follow the brand).
+ *
+ * One word is BRAND-SCOPED: HP's LASER becomes "Laser" ("HP LASER JET
+ * ENTERPRISE M651" → "HP Laser Jet Enterprise M651", "HP NEVERSTOP LASER
+ * 1001NW" → "… Laser 1001NW") while Canon's stays ("Canon LASER SHOT LBP 2900").
+ * Every other word was measured on one brand and is applied to all — the
+ * backend may scope more of them than we can see; the display-name ask covers it.
+ *
+ * Known gap: one HP row, "HP DESKJET 3520 E-ALL-IN-ONE-PRINTER", is rewritten
+ * by the backend to "e-All-in-One Printer"; that compound is not mirrored.
+ * The permanent fix is a display name on the printer rows (asked: BF-093, ERR-294).
  */
 const PrinterName = {
     WORDS: {
-        LASERJET: 'LaserJet',
-        OFFICEJET: 'OfficeJet',
-        DESKJET: 'DeskJet',
-        PAGEWIDE: 'PageWide',
-        DESK: 'Desk',
+        BUSINESS: 'Business',
         COLOR: 'Color',
-        PRO: 'Pro',
+        COLOUR: 'Colour',
+        COPIER: 'Copier',
+        DESIGNJET: 'DesignJet',
+        DESK: 'Desk',
+        DESKJ: 'Deskj',
+        DESKJET: 'DeskJet',
+        DOCUCENTRE: 'DocuCentre',
+        DOCUPRINT: 'DocuPrint',
+        ECOTANK: 'EcoTank',
         ENTERPRISE: 'Enterprise',
+        EXPRESSION: 'Expression',
+        FLOW: 'Flow',
+        FUJI: 'Fuji',
+        HOME: 'Home',
+        INKJET: 'Inkjet',
+        INSPIRE: 'Inspire',
+        JET: 'Jet',
+        LASERJET: 'LaserJet',
+        MOBILE: 'Mobile',
+        NEVERSTOP: 'Neverstop',
+        OFFICEJET: 'OfficeJet',
+        PAGEWIDE: 'PageWide',
+        PHASER: 'Phaser',
+        PHOTO: 'Photo',
+        PLUS: 'Plus',
+        POSTSCRIPT: 'PostScript',
+        PRINETR: 'Prinetr',
+        PRINT: 'Print',
+        PRINTER: 'Printer',
+        PRO: 'Pro',
+        RANGE: 'Range',
+        SERIES: 'Series',
+        STYLUS: 'Stylus',
+        TASKALFA: 'TASKalfa',
+        TONER: 'Toner',
+        WIRELESS: 'Wireless',
+        WORKFORCE: 'WorkForce',
     },
+    BROTHER_PREFIX: /^(Brother )(DCP|FAX|HL|MFC|PT|QL) (?=\S*\d)/,
     display(name) {
         if (typeof name !== 'string') return '';
-        return name.replace(/\b[A-Z]+\b/g, (w) => (Object.prototype.hasOwnProperty.call(this.WORDS, w) ? this.WORDS[w] : w));
+        let out = name
+            .replace(/\b[A-Z]+\b/g, (w) => (Object.prototype.hasOwnProperty.call(this.WORDS, w) ? this.WORDS[w] : w))
+            .replace(this.BROTHER_PREFIX, '$1$2-');
+        if (/^HP /.test(out)) out = out.replace(/\bLASER\b/g, 'Laser');
+        return out;
     },
 
     /**
-     * "Fits Brother DCP J525W, Brother DCP J725DW +9" for a listing card
-     * (conversion handoff 2026-09-27 §8.1), from the product's OWN
-     * `compatible_printers`. Returns '' when the row carries none.
-     * Never "guaranteed" anything.
-     *
-     * `total` is the row's `compatible_printers_count` (ERR-293). Listing rows
-     * (/api/shop, /api/products, /popular) cap `compatible_printers` at TWO on
-     * purpose — a page of 200 cartridges would otherwise carry thousands of
-     * links — and put the real total in that field. Counting the array (the
-     * first cut) printed "Fits A, B" with no "+9" on an LC73 that fits 11.
-     * `+N = total − shown`, not `total − array length`: the two agree only
-     * while the cap is 2. An absent/null/garbage total, or one SMALLER than
-     * the list we hold, falls back to the list's own length (the PDP passes
-     * none; it carries the full list).
-     * @param {Array} printers
-     * @param {number} [total] compatible_printers_count
-     * @returns {string} plain text (caller escapes)
+     * The same name with its brand taken off the front, for a row that
+     * already prints the brand ("Fits Brother" + "HL-L2300D, MFC-L2740DW").
+     * Display-cased FIRST: the Brother hyphen needs the brand to find the
+     * prefix. A name that does not start with the brand is returned whole.
+     * Backend re-check 2026-09-28 §5 #9: "Fits Brother Brother HL L2300D".
+     * @param {string} name
+     * @param {string} brand
+     * @returns {string}
      */
+    withoutBrand(name, brand) {
+        const shown = this.display(name);
+        const b = typeof brand === 'string' ? brand.trim() : '';
+        if (!b || shown.length <= b.length) return shown;
+        return shown.slice(0, b.length + 1).toLowerCase() === `${b.toLowerCase()} ` ? shown.slice(b.length + 1) : shown;
+    },
+
     fitsLine(printers, total) {
         const names = (Array.isArray(printers) ? printers : [])
             .map((p) => (p && (p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '))) || '')

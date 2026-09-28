@@ -170,6 +170,41 @@
         return candidates.filter((p) => (p ? !seen.has(p) : false));
     }
 
+    // REGIONAL ALIAS (backend re-check 2026-09-28 §5a-e, ERR-294). A query for a
+    // code that is sold under another name here ("canon pg540" — PG-540 is the
+    // UK/EU code, NZ printers take PG-640) comes back from /smart with NO
+    // products of its own, no correction, and:
+    //   alias_suggestion: { from, to[], note, search_query }
+    //   alias_results:    [ …the rows for `to`… ]
+    // Returns { note, searchQuery, from, rows } when that answer is usable, else
+    // null. Only when /smart's own list is empty: the backend documents the
+    // shape for that case, and a query with rows of its own keeps them.
+    function searchAlias(smartData, products) {
+        if (!smartData || (Array.isArray(products) && products.length)) return null;
+        const s = smartData.alias_suggestion;
+        const rows = Array.isArray(smartData.alias_results)
+            ? smartData.alias_results.filter((p) => p && typeof p.sku === 'string' && p.sku)
+            : [];
+        if (!s || typeof s !== 'object' || typeof s.note !== 'string' || !s.note.trim() || !rows.length) return null;
+        const to = Array.isArray(s.to) ? s.to.filter((t) => typeof t === 'string' && t) : [];
+        return {
+            note: s.note.trim(),
+            from: typeof s.from === 'string' ? s.from : '',
+            to,
+            searchQuery: typeof s.search_query === 'string' && s.search_query.trim() ? s.search_query.trim() : (to[0] || ''),
+            rows,
+        };
+    }
+
+    // A section heading's text, after its badge: whitespace collapsed, and a
+    // leading source word dropped because the badge already says it — the
+    // shopper reads "Compatible Brother Cartridges", never "Compatible
+    // Compatible …" (ERR-294). Pinned by tests/four-replies-backend-response-sep2026.test.js.
+    function sectionTitleText(text) {
+        return String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
+            .replace(/^(compatible|genuine|original)\s+/i, '');
+    }
+
     function mergeLiteralResults(suggestList, fallbackProducts) {
         const fallback = Array.isArray(fallbackProducts) ? fallbackProducts : [];
         const suggest = Array.isArray(suggestList) ? suggestList : [];
@@ -423,7 +458,7 @@
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
             partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn, identityIndex,
-            reattachCompatProvenance,
+            reattachCompatProvenance, searchAlias, sectionTitleText,
         };
     }
 
@@ -1278,8 +1313,6 @@
             this.elements.levelProducts.hidden = true;
             this.elements.empty.hidden = true;
             if (this.elements.error) this.elements.error.hidden = true;
-            const colorPacksSection = document.getElementById('color-packs-section');
-            if (colorPacksSection) colorPacksSection.hidden = true;
         },
 
         showLoading(show, level = null) {
@@ -1786,14 +1819,40 @@
          * returns `data` keyed by slug, with unknown slugs listed in
          * `meta.unknown_brands` and omitted from `data`. Slugs are sorted so the
          * same grid always asks the same URL and shares one edge-cache entry.
-         * The tile shows the sum across categories.
          *
-         * Still fail-quiet on purpose — a missing count is a cosmetic absence on
-         * a tile that already works (the span is aria-hidden), not a reason to
-         * break the grid. Absent stays BLANK, never "0 products".
+         * WHICH NUMBER a tile shows depends on the page (backend re-check
+         * 2026-09-28 §5a-c, ERR-294). On /shop (no category) it is the brand's
+         * sum across categories. On a category picker — /ink-cartridges,
+         * /toner-cartridges, /shop?category=… — it is THAT category's count,
+         * `data[brand][category]`: the sum printed "HP 870" on both landings and
+         * listed Dymo (103 label tapes) on the toner page.
+         *
+         * On a category picker a brand whose count is 0 or ABSENT is hidden —
+         * but only once `API.getCategoryTotal()` has confirmed it. The counts
+         * endpoint omits keys it has nothing for (`dymo: {label: 103}`), and it
+         * undercounts multi-type families exactly like the /api/shop facet did
+         * (2026-09-28: epson drums absent vs 5 served, canon 9 vs 12 — ERR-215,
+         * BF-056; asked again for this endpoint as BF-091), so an absent key is
+         * UNMEASURED, never zero. Tri-state:
+         *   confirmed > 0 → show that number and WARN (the drift detector)
+         *   confirmed 0   → hide the tile
+         *   null          → keep the tile, blank, and say so out loud
+         *
+         * Still fail-quiet on the count itself — a missing count is a cosmetic
+         * absence on a tile that already works (the span is aria-hidden), not a
+         * reason to break the grid. Absent stays BLANK, never "0 products".
          */
         async _loadBrandCounts(brands) {
             const MAX_PER_REQUEST = 30;
+            const navVersion = this.navigationVersion;
+            const cat = this.state.brand ? null : this.categories.find(c => c.id === this.state.category);
+            // The counts endpoint keys ribbons as `ribbon`; every other key is the apiCategory.
+            const key = cat ? (cat.apiCategory === 'ribbons' ? 'ribbon' : cat.apiCategory) : null;
+            const setCount = (brandId, n) => {
+                const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
+                if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
+            };
+            const suspects = [];
             const ids = [...new Set(brands.map(b => b.slug || b.id || '').filter(Boolean))].sort();
             for (let i = 0; i < ids.length; i += MAX_PER_REQUEST) {
                 const chunk = ids.slice(i, i + MAX_PER_REQUEST);
@@ -1806,17 +1865,43 @@
                 for (const brandId of chunk) {
                     const counts = byBrand[brandId] ?? byBrand[brandId.toLowerCase()];
                     if (!counts || typeof counts !== 'object') continue;
+                    if (key) {
+                        const n = counts[key];
+                        if (Number.isFinite(n) && n > 0) setCount(brandId, n);
+                        else suspects.push(brandId);
+                        continue;
+                    }
                     // A `total` key, if the backend ever adds one, is the answer
                     // — summing it with the categories would double-count.
                     const values = Number.isFinite(counts.total)
                         ? [counts.total]
                         : Object.values(counts).filter(v => Number.isFinite(v));
                     if (!values.length) continue;
-                    const n = values.reduce((a, b) => a + b, 0);
-                    const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
-                    if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
+                    setCount(brandId, values.reduce((a, b) => a + b, 0));
                 }
             }
+            if (!key || !suspects.length) return;
+
+            const confirmed = await Promise.all(suspects.map(brandId =>
+                API.getCategoryTotal(brandId, cat.apiCategory)
+                    .then(total => ({ brandId, total }))
+                    .catch(() => ({ brandId, total: null }))));
+            if (this.navigationVersion !== navVersion) return;
+            confirmed.forEach(({ brandId, total }) => {
+                if (total === null) {
+                    DebugLog.warn(`[brand-counts] ${brandId}/${cat.apiCategory}: the counts endpoint said 0/absent `
+                        + 'and the confirming query could not be read — tile KEPT, count unconfirmed.');
+                    return;
+                }
+                if (total > 0) {
+                    setCount(brandId, total);
+                    DebugLog.warn(`[brand-counts] ${brandId}/${cat.apiCategory}: /api/products/counts said 0/absent `
+                        + `but ?category=${cat.apiCategory} serves ${total} — showing the real total.`);
+                    return;
+                }
+                const box = this.elements.brandsGrid?.querySelector(`[data-brand="${CSS.escape(brandId)}"]`);
+                if (box) box.hidden = true;
+            });
         },
 
         async renderRibbonBrands() {
@@ -3359,7 +3444,12 @@
                     const products = response.data.products || response.data.compatible_products || [];
 
                     // Store printer name for display
-                    this.state.printerName = printerData?.full_name || this.state.printer;
+                    // Display-cased once, here, so the breadcrumb, the H1 fallback
+                    // and the section headings all print the name the backend's
+                    // page prints ("Brother HL-L2375DW", not "Brother HL L2375DW").
+                    const rawPrinterName = printerData?.full_name || this.state.printer;
+                    this.state.printerName = (typeof PrinterName !== 'undefined' && rawPrinterName)
+                        ? PrinterName.display(rawPrinterName) : rawPrinterName;
                     this.updateBreadcrumb();
                     this.updateTitle();
 
@@ -3376,9 +3466,14 @@
                         genuine = []; // Hide genuine products
                     }
 
-                    const printerDisplayName = this.state.printerName || '';
-                    this.elements.compatibleTitleText.textContent = `${printerDisplayName} Compatible Products`;
-                    this.elements.genuineTitleText.textContent = `${printerDisplayName} Original Products`;
+                    // The badge carries the source word (displayProductInfo): "Compatible
+                    // cartridges for Brother HL-L2375DW", never "… Compatible Products".
+                    const printerDisplayName = (typeof PrinterName !== 'undefined')
+                        ? PrinterName.display(this.state.printerName || '')
+                        : (this.state.printerName || '');
+                    const forPrinter = sectionTitleText(printerDisplayName ? `cartridges for ${printerDisplayName}` : 'cartridges');
+                    this.elements.compatibleTitleText.textContent = forPrinter;
+                    this.elements.genuineTitleText.textContent = forPrinter;
 
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
@@ -3388,8 +3483,6 @@
                         this.showEmpty('No compatible products found for this printer.');
                     } else {
                         this.elements.levelProducts.hidden = false;
-                        // Load color packs (non-blocking)
-                        this.loadColorPacks(this.state.printer);
                     }
                 } else {
                     this.showError(
@@ -3414,108 +3507,11 @@
             this.showLoading(false);
         },
 
-        // Load and render color pack bundles for a printer
-        async loadColorPacks(printerSlug) {
-            const section = document.getElementById('color-packs-section');
-            const grid = document.getElementById('color-packs-grid');
-            if (!section || !grid) return;
-
-            try {
-                const res = await API.getColorPacks(printerSlug);
-                if (!res.ok || !res.data) return;
-
-                const data = res.data;
-                const allPacks = [];
-                if (data.genuine?.packs?.length) {
-                    data.genuine.packs.forEach(p => allPacks.push({ ...p, source: 'genuine' }));
-                }
-                if (data.compatible?.packs?.length) {
-                    data.compatible.packs.forEach(p => allPacks.push({ ...p, source: 'compatible' }));
-                }
-                if (allPacks.length === 0) return;
-
-                grid.innerHTML = allPacks.map(pack => {
-                    const items = pack.items || [];
-                    // ONE colour vocabulary — ProductColors in js/utils.js, never
-                    // a private map (ERR-141). The literal that used to sit here
-                    // was PascalCase-keyed with only K/C/M/Y, so 'Tri-Colour',
-                    // 'CMY' and every lowercase value fell through to grey. It
-                    // also interpolated `item.color_hex` directly, and that field
-                    // is an ARRAY — `background:${['#a','#b']}` stringifies to
-                    // "background:#a,#b", which is invalid CSS and paints
-                    // nothing. getProductStyle handles the array, the gradient
-                    // colours and the name fallback.
-                    const swatches = items.map(item => {
-                        const style = ProductColors.getProductStyle(item, 'background-color: #888;');
-                        return `<span class="color-pack-card__swatch" style="${style}" title="${Security.escapeHtml(item.color || '')}"></span>`;
-                    }).join('');
-
-                    const itemList = items.map(item =>
-                        `<li>${Security.escapeHtml(item.color || '')} - ${formatPrice(item.retail_price)}</li>`
-                    ).join('');
-
-                    const originalTotal = items.reduce((sum, i) => sum + (i.retail_price || 0), 0);
-                    const packPrice = pack.pack_price || originalTotal;
-                    const savings = originalTotal - packPrice;
-                    const savingsPct = originalTotal > 0 ? Math.round((savings / originalTotal) * 100) : 0;
-                    const sourceLabel = pack.source === 'genuine' ? 'Genuine' : 'Compatible';
-                    const sourceClass = pack.source === 'genuine' ? 'genuine' : 'compatible';
-                    const packName = pack.pack_type === 'KCMY' ? 'KCMY Full Set' : 'CMY Colour Pack';
-
-                    return `
-                        <div class="color-pack-card" data-pack='${Security.escapeAttr(JSON.stringify({ items: items.map(i => ({ product_id: i.product_id || i.id, name: i.name, price: i.retail_price })) }))}'>
-                            ${savingsPct > 0 ? `<span class="color-pack-card__badge">SAVE ${savingsPct}%</span>` : ''}
-                            <div class="color-pack-card__source color-pack-card__source--${sourceClass}">${sourceLabel}</div>
-                            <div class="color-pack-card__name">${Security.escapeHtml(packName)}</div>
-                            <div class="color-pack-card__swatches">${swatches}</div>
-                            <ul class="color-pack-card__items">${itemList}</ul>
-                            <div class="color-pack-card__pricing">
-                                <span class="color-pack-card__pack-price">${formatPrice(packPrice)}</span>
-                                ${savings > 0 ? `<span class="color-pack-card__original-price">${formatPrice(originalTotal)}</span>` : ''}
-                            </div>
-                            <button type="button" class="color-pack-card__add-btn">Add All to Cart</button>
-                        </div>`;
-                }).join('');
-
-                // Bind add-all-to-cart buttons
-                grid.querySelectorAll('.color-pack-card__add-btn').forEach(btn => {
-                    btn.addEventListener('click', async function() {
-                        const card = this.closest('.color-pack-card');
-                        const packData = JSON.parse(card.dataset.pack);
-                        this.disabled = true;
-                        this.textContent = 'Adding...';
-                        try {
-                            for (const item of packData.items) {
-                                await Cart.addItem({
-                                    id: item.product_id,
-                                    name: item.name,
-                                    price: item.price,
-                                    quantity: 1,
-                                    product_source: item.source || null,
-                                    // Colour-pack "Add all" — a whole pack bought
-                                    // for the printer hub currently in the URL.
-                                    printer_slug: (typeof PrinterContext !== 'undefined')
-                                        ? PrinterContext.fromLocation()
-                                        : null
-                                });
-                            }
-                            this.textContent = 'Added!';
-                            setTimeout(() => {
-                                this.textContent = 'Add All to Cart';
-                                this.disabled = false;
-                            }, 2000);
-                        } catch (e) {
-                            this.textContent = 'Error - Try Again';
-                            this.disabled = false;
-                        }
-                    });
-                });
-
-                section.hidden = false;
-            } catch (e) {
-                // Color packs are non-critical
-            }
-        },
+        // "Colour Pack Bundles" (loadColorPacks) is DELETED, not hidden: both
+        // color-packs routes 404 since the backend removed them on 2026-04-01
+        // (`98ab64e`), so the block never rendered and cost one dead request per
+        // printer page. A printer's packs already come back in its own product
+        // list (backend re-check 2026-09-28 §4/§5a-a, ERR-294).
 
         // =====================================================================
         // ?printer_model=<free text> — RESOLVE, THEN HAND OFF (ERR-135)
@@ -3750,6 +3746,7 @@
                 // Smart-search envelope (matched_printer / did_you_mean /
                 // corrected_from / facets / pagination / intent / recovery).
                 let smartData = null;
+                let alias = null;
                 let pagination = null;
                 // SKUs /api/search/smart returned for THIS query — the click
                 // beacon's provenance allow-list (search-click-beacon.js rule 2).
@@ -3789,6 +3786,11 @@
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     smartData = (response && response.ok) ? (response.data || null) : null;
                     products = (smartData && Array.isArray(smartData.products)) ? smartData.products : [];
+                    // A regional alias answers the query with ANOTHER code's rows
+                    // (searchAlias). They are /smart's own rows, so they count as
+                    // smart-sourced for the click beacon below.
+                    alias = searchAlias(smartData, products);
+                    if (alias) products = alias.rows;
 
                     // search-click-tracking-aug2026 — snapshot which SKUs came
                     // from /smart, HERE, before the reconciliation block below
@@ -3800,7 +3802,9 @@
                     for (const p of products) {
                         if (p && typeof p.sku === 'string' && p.sku) smartSkus.add(p.sku);
                     }
-                    if (smartData && smartData.pagination && smartData.pagination.total_pages != null) {
+                    // An alias page is a curated set whose pagination counts the
+                    // searched code (total 0), not the rows on screen: no pager.
+                    if (!alias && smartData && smartData.pagination && smartData.pagination.total_pages != null) {
                         pagination = smartData.pagination;
                     }
 
@@ -3917,11 +3921,17 @@
                     const { direct: directRows, compat: compatRows } = partitionCompatRows(products);
                     const directCount = directRows.length;
                     const hardMiss = products.length === 0 && !smartData?.matched_printer;
+                    // An alias answer is not a miss (searchAlias): the backend chose
+                    // those rows on purpose, and a literal "pg540" search can only
+                    // undo that. hardMiss and hijack cannot fire on one (its rows are
+                    // non-empty and it carries no correction); softMiss could, so it
+                    // is gated. exactMode still wins — the shopper asked for the raw query.
                     const softMiss = queryHasDigits
                         && smartCount > 0
                         && directCount < SOFT_MISS_THRESHOLD
                         && !smartData?.matched_printer
-                        && !smartData?.did_you_mean;
+                        && !smartData?.did_you_mean
+                        && !alias;
                     const hijack = smartCorrected
                         && smartCount > 0
                         && !smartHasLiteralMatch
@@ -4213,15 +4223,23 @@
                     // Update section titles
                     const brandDisplay = detectedBrand ? this.brandName(detectedBrand) + ' ' : '';
                     const typeDisplay = isTypeQuery ? searchQuery.charAt(0).toUpperCase() + searchQuery.slice(1).toLowerCase() + ' ' : '';
-                    this.elements.compatibleTitleText.textContent = isTypeQuery
-                        ? `Compatible ${typeDisplay}Products`
-                        : `${brandDisplay}Compatible Products for "${searchQuery}"`;
-                    this.elements.genuineTitleText.textContent = isTypeQuery
-                        ? `Original ${typeDisplay}Products`
-                        : `${brandDisplay}Original Products for "${searchQuery}"`;
 
 
                     await this.displayProductInfo(filteredProducts, { skipPrinters: true });
+
+                    // AFTER displayProductInfo, which writes its own brand/category
+                    // headings: set before it (as this was until ERR-294), the
+                    // search headings were overwritten on every search and the
+                    // page read " Compatible Cartridges" for any query.
+                    // No source word — the badge says it (displayProductInfo). An
+                    // alias page names the code whose rows these are ("canon pg640"),
+                    // not the code typed: the banner above says why.
+                    const titleQuery = alias ? alias.searchQuery : searchQuery;
+                    const searchTitle = sectionTitleText(isTypeQuery
+                        ? `${typeDisplay}products`
+                        : `${brandDisplay}products for "${titleQuery}"`);
+                    this.elements.compatibleTitleText.textContent = searchTitle;
+                    this.elements.genuineTitleText.textContent = searchTitle;
 
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
@@ -4385,6 +4403,10 @@
 
             if (!smartData) return;
 
+            // The regional-alias note leads (searchAlias): the rows below it are
+            // for a DIFFERENT code than the one typed, and the shopper must be
+            // told why before they read a single card.
+            const alias = searchAlias(smartData, smartData.products);
             const matchedPrinter = smartData.matched_printer;
             const didYouMean = smartData.did_you_mean;
             const correctedFrom = smartData.corrected_from;
@@ -4392,6 +4414,18 @@
             const wrap = document.createElement('div');
             wrap.id = 'search-banners';
             wrap.className = 'search-banners';
+
+            if (alias) {
+                const banner = document.createElement('div');
+                banner.className = 'search-alias-banner';
+                banner.setAttribute('role', 'note');
+                const toLabel = alias.to.length ? alias.to.join(' / ') : alias.searchQuery;
+                banner.innerHTML = `
+                    <p class="search-alias-banner__note">${Security.escapeHtml(alias.note)}</p>
+                    ${alias.searchQuery ? `<a class="search-alias-banner__link" href="/search?q=${encodeURIComponent(alias.searchQuery)}">See every ${Security.escapeHtml(toLabel)} result</a>` : ''}
+                `;
+                wrap.appendChild(banner);
+            }
 
             // Hero banner — printer match takes precedence (spec §3.1).
             if (matchedPrinter && matchedPrinter.name) {
@@ -5509,13 +5543,15 @@
             this.elements.yieldBanner.hidden = true;
 
             const brandName = this.brandName(this.state.brand) || '';
-            // Base label only — each header adds its own "Compatible"/"Original"
-            // word, so using the prefixed label here produced "Brother Compatible
-            // Compatible Inkjet Cartridges" under ?type= filters (MC audit).
+            // Base label only, and NO source word: each <h2> already opens with
+            // its badge ("Compatible" / "Genuine", shop.html), so the text span
+            // saying it again read "Compatible Compatible Cartridges" whenever
+            // the brand was empty (backend re-check 2026-09-28 §5a-f, ERR-294;
+            // the MC audit had removed only the doubled word INSIDE the span).
             const productType = this.getBaseProductTypeLabel();
 
-            this.elements.compatibleTitleText.textContent = `${brandName} Compatible ${productType}`;
-            this.elements.genuineTitleText.textContent = `${brandName} Original ${productType}`;
+            this.elements.compatibleTitleText.textContent = sectionTitleText(`${brandName} ${productType}`);
+            this.elements.genuineTitleText.textContent = sectionTitleText(`${brandName} ${productType}`);
         },
 
         updateSEO() {
@@ -5690,7 +5726,11 @@
 
             // Noindex deep filter combinations to avoid thin content
             let robotsMeta = document.querySelector('meta[name="robots"]');
-            if (brand && category && code) {
+            // Search results are noindexed too (backend re-check 2026-09-28 §5
+            // P0 — /shop?search= was the main Soft-404 source). vercel.json sends
+            // the same answer as an X-Robots-Tag header, so a crawler that never
+            // runs this script reads it as well: BOTH sides of the mirror.
+            if ((brand && category && code) || this.state.level === 'search-results') {
                 if (!robotsMeta) {
                     robotsMeta = document.createElement('meta');
                     robotsMeta.name = 'robots';
@@ -5732,17 +5772,29 @@
             // Hide product type label by default
             this.elements.productTypeLabel.hidden = true;
 
-            if (this.state.level === 'products' || this.state.level === 'printer-products' || this.state.level === 'printer-model-products' || this.state.level === 'search-results') {
+            if (this.state.level === 'printer-products') {
+                // A printer hub prints the SAME visible <h1> the crawler gets
+                // (backend re-check 2026-09-28 §5a-d, ERR-294): SeoMeta mirrors
+                // the prerender's <h1> ("Brother HL-L2375DW Toner NZ"); until it
+                // lands — or if the prerender is down — the printer's display
+                // name stands in. It used to stay visually hidden on the generic
+                // "Shop Ink Cartridges & Toner NZ", which the crawler never saw.
+                const mirrored = (typeof SeoMeta !== 'undefined' && SeoMeta.h1For && typeof window !== 'undefined')
+                    ? SeoMeta.h1For(SeoMeta.prerenderPathForLocation(window.location))
+                    : null;
+                const name = this.state.printerName || this.state.printer || '';
+                const shown = (typeof PrinterName !== 'undefined') ? PrinterName.display(name) : name;
+                this.elements.title.textContent = mirrored || shown || 'Compatible Ink & Toner';
+                this.elements.title.hidden = false;
+                this.elements.title.classList.remove('visually-hidden');
+            } else if (this.state.level === 'products' || this.state.level === 'printer-model-products' || this.state.level === 'search-results') {
                 // Hide main title on products level (keep accessible for SEO)
                 this.elements.title.hidden = false;
                 this.elements.title.classList.add('visually-hidden');
 
                 // Show product type inline with breadcrumb
                 let productType = this.getProductTypeLabel();
-                if (this.state.level === 'printer-products') {
-                    const name = this.state.printerName || this.state.printer || '';
-                    productType = name ? `Compatible Ink for ${name}` : 'Compatible Ink';
-                } else if (this.state.level === 'printer-model-products') {
+                if (this.state.level === 'printer-model-products') {
                     productType = this.state.printerModelDisplay || this.state.printerModel || 'Products';
                 } else if (this.state.level === 'search-results') {
                     productType = `Search Results for "${this.state.search}"`;

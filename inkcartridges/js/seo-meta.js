@@ -62,7 +62,9 @@ const SeoMeta = {
     TRUST_CACHE_KEY: 'ic_seo_trust_v1',
     TRUST_TTL_MS: 60 * 60 * 1000,     // 1h (spec)
 
-    PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v1:',
+    // v2 (ERR-294): a cached head now carries the prerender's <h1> too; a v1
+    // entry has none and would leave the printer H1 on its fallback for an hour.
+    PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v2:',
     PRERENDER_TTL_MS: 60 * 60 * 1000, // 1h listings (products use API seo, not this)
 
     _seq: 0,            // bumped on every render() — guards against stale async applies
@@ -144,11 +146,12 @@ const SeoMeta = {
     },
 
     /**
-     * Pull the decoded <title> + <meta name="description"> out of a prerender
-     * HTML document. Returns { title, description } (either may be null).
+     * Pull the decoded <title> + <meta name="description"> + first <h1> out of
+     * a prerender HTML document. Returns { title, description, h1 } (any may be
+     * null). The h1 is text only: inner tags are dropped before decoding.
      */
     extractHead(html) {
-        if (typeof html !== 'string' || !html) return { title: null, description: null };
+        if (typeof html !== 'string' || !html) return { title: null, description: null, h1: null };
         const titleM = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
         // meta name="description" — attribute order independent
         let desc = null;
@@ -161,9 +164,12 @@ const SeoMeta = {
                 if (cM) { desc = this.decodeEntities(cM[1]).trim(); break; }
             }
         }
+        const h1M = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+        const h1 = h1M ? this.decodeEntities(h1M[1].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim() : '';
         return {
             title: titleM ? this.decodeEntities(titleM[1]).trim() : null,
             description: desc,
+            h1: h1 || null,
         };
     },
 
@@ -541,8 +547,15 @@ const SeoMeta = {
      * a bot is served. Cached (head only, not the full HTML). Fail-open: a
      * missing path, non-200, or thrown error leaves the page's own copy intact.
      * `seq` guards against applying a stale result after the user navigated.
+     *
+     * On the PRINTER surface the visible <h1> is mirrored too (backend re-check
+     * 2026-09-28 §5a-d, ERR-294): a crawler read "Brother HL-L2375DW Toner NZ"
+     * while a browser read "Shop Ink Cartridges & Toner NZ", and a visible page
+     * that differs from the crawled one is what Google's cloaking check looks
+     * for. shop-page.js updateTitle() reads the same answer through h1For(), so
+     * whichever of the two runs last prints the prerender's words.
      */
-    async reconcile(prerenderPath, seq) {
+    async reconcile(prerenderPath, seq, surface) {
         if (!prerenderPath) return false;
         let head = this._readPrerenderCache(prerenderPath);
         if (!head) {
@@ -562,7 +575,28 @@ const SeoMeta = {
         if (seq !== undefined && seq !== this._seq) return false; // navigated away
         if (head.title) this._setTitle(head.title);
         if (head.description) this._setDescription(head.description);
+        if (surface === 'printer' && head.h1) {
+            this._h1 = { path: prerenderPath, h1: head.h1 };
+            this._setH1(head.h1);
+        }
         return true;
+    },
+
+    /** The mirrored prerender <h1> for this path, or null when not (yet) known. */
+    h1For(prerenderPath) {
+        if (!prerenderPath) return null;
+        if (this._h1 && this._h1.path === prerenderPath) return this._h1.h1;
+        const head = this._readPrerenderCache(prerenderPath);
+        return (head && head.h1) || null;
+    },
+
+    _setH1(text) {
+        if (typeof document === 'undefined' || !text) return;
+        const el = document.getElementById('drilldown-title');
+        if (!el) return;
+        el.textContent = text;
+        el.hidden = false;
+        el.classList.remove('visually-hidden');
     },
 
     // ── public entry point ────────────────────────────────────────────────────
@@ -605,7 +639,7 @@ const SeoMeta = {
         }
 
         // Authoritative parity overwrite (the bot's exact strings).
-        await this.reconcile(prerenderPath, seq);
+        await this.reconcile(prerenderPath, seq, surface);
     },
 };
 

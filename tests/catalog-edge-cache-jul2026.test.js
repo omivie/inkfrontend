@@ -198,7 +198,7 @@ test('§2 no catalog builder hand-rolls a query string', () => {
         'async getProducts',
         'async _productsForCode',
         'async getProductsByPrinter',
-        'async getColorPacks',
+        // getColorPacks: deleted with the printer colour-pack block (ERR-294).
         'async getProductCounts',
         'async getProductReviews',
     ];
@@ -370,7 +370,6 @@ test('§5 each edge-cached helper is an anonymous read', () => {
         ['async getShopData', /_catalogReadWithPublicFallback\(/],
         ['async _productsForCode', /anonymous: true/],
         ['async getProductsByPrinter', /getPublic\(/],
-        ['async getColorPacks', /getPublic\(/],
         ['async getRelatedProducts', /getPublic\(/],
         ['async getBoughtTogether', /getPublic\(/],
         ['async getProductJsonLd', /getPublic\(/],
@@ -516,7 +515,7 @@ test('§9 every public catalog/search/ribbon read uses getPublic', () => {
     // These are all identity-invariant. They were left on the authenticated path
     // by the first sweep simply because they were not on the list.
     const publicReads = [
-        'async getColorPackConfig', 'async getRibbonDeviceBrands', 'async getRibbonDeviceModels',
+        'async getRibbonDeviceBrands', 'async getRibbonDeviceModels',
         'async getRibbonBrands(', 'async getRibbonModels', 'async getRibbons(', 'async getRibbon(',
         'async searchPrinters(', 'async smartSearch', 'async searchSuggest',
         'async getPrintersByBrand', 'async getCompatiblePrinters', 'async searchByPrinter',

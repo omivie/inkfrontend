@@ -203,8 +203,13 @@ function loadBrandCounts() {
             const id = sel.match(/data-count="([^"]+)"/)[1];
             return (tiles[id] = tiles[id] || { textContent: '' });
         } };
-        const obj = vm.runInNewContext(`({ ${body} })`, { API: api, CSS: { escape: (s) => s }, Number, Object, Set });
+        const obj = vm.runInNewContext(`({ ${body} })`, { API: api, CSS: { escape: (s) => s }, Number, Object, Set, Promise, DebugLog: { warn() {} } });
         obj.elements = { brandsGrid: grid };
+        // /shop with no category: the SUM path these §3 tests pin. The
+        // per-category path (landings) is pinned in four-replies-backend-response-sep2026 §D.
+        obj.state = {};
+        obj.categories = [];
+        obj.navigationVersion = 0;
         return { run: (brands) => obj._loadBrandCounts(brands), tiles };
     };
 }

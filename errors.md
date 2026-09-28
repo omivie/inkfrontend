@@ -41,9 +41,56 @@ describing the same incident.
 
 ---
 
+## ERR-294 — The backend's answer to our four replies: eleven storefront fixes, two direct Supabase reads retired, and a printer-name mirror that had drifted in a day — **RESOLVED (frontend)** (2026-09-28)
+
+**Source.** `backend-docs/inbox/fe-four-replies-backend-response-sep2026.md` (backend `ef47bc6`). It answers our four 09-28 replies (ERR-290/291/292/293). It built BF-079/080/081 and the backend-move asks, which are renumbered **BF-084..087** because our two replies had both used BF-080..083. It declined BF-087 (literal set inside `/smart`), deleted both popular endpoints and both color-packs routes, and listed eleven frontend defects from its own Playwright re-check. Every claim was **measured on production before any code was deleted**, and every claim held.
+
+**Retired reads (the "removing a fallback is a behaviour change" rule, ERR-158, applied in reverse).**
+- **BF-084:** `/api/ribbons/:sku` carries `description_html` and `related_product_skus` (16/16 sampled).
+- **BF-085:** a ribbon's `series_codes` is its override, else `[]` (16/16).
+- **BF-086:** `/api/shop` lists and counts `chip_category` visitors.
+
+So the ribbon-only `product_codes` read (PDP and `_applyManualCodes` step 1) is **deleted**. So are the `product_code_visitors` summary, the per-code visitor-id read, and the cross-category pool recovery (steps 2 and 3). ***Keeping the visitor arithmetic would now have DOUBLE-COUNTED:*** the server's `series` already includes the visitors. BF-086 is **UNMEASURED on live data** (0 tagged rows); the probe prints UNMEASURED there, never a pass. **One read stays, on purpose, because it was measured:** `product_code_chip_counts`. `C950XLBK`'s override `950XL` is served by `?code=950XL` but missing from `series` (**BF-088**), so without that read the owner's 950XL tile would vanish.
+
+**Also built.**
+- Printer-page "Colour Pack Bundles" **deleted**. ERR-290 had "kept" it and named the wrong route. It called a route that has returned 404 since April, which is why it "never rendered".
+- for-use-in is keyed on the **response** SKU. A 404 is not retried.
+- Landing brand tiles read `counts[brand][category]`. Before a tile is hidden, the zero or absent count is confirmed with `getCategoryTotal()`, because `/api/products/counts` undercounts drums exactly like the facet in ERR-215 (**BF-091**). Tri-state; an unmeasured count keeps the tile.
+- The printer hub's visible H1 is mirrored from the prerender's `<h1>`: `SeoMeta.reconcile` plus `h1For`, with the cache bumped to v2.
+- Regional-alias search: banner plus rows. The literal repair's softMiss is gated so it cannot undo an alias page.
+- Search URLs are noindexed on **both** sides: a `vercel.json` header for crawlers that run no script, and the SPA meta.
+- Old-site slugs redirect to `?search=$1+$2`, keeping the part number.
+- The grouped "Fits Brother" row no longer repeats the brand.
+- "Model:" is shown on genuine rows only. On a compatible row it is the supplier's code (`IBTN2345`).
+- Section headings drop the word their badge already says.
+- `/ribbons`' duplicate h2 is renamed.
+- Admin: a failed import run shows its `error_message`. The image-audit brand filter sends the slug or the id, never a name.
+
+**Two defects found while building, neither in the handoff.**
+1. **The search results' own section headings had never rendered.** `displayProductInfo()` ran AFTER they were set and overwrote them with the brand/category label on every search. That is the backend's "Compatible Compatible Cartridges": an empty brand plus "Cartridges". The search headings are now set after it.
+2. ***The printer-name mirror drifted within a day.*** `PrinterName.display` was calibrated on 2026-09-27 against prerender `<h1>`s, which then printed "Brother MFC J5930DW" and "Fuji Xerox PHASER 5500". On 09-28 the backend printed "MFC-J5930DW" and "Phaser". It had widened its rule, and our test fixture still pinned the old output. **Re-measured every all-caps word in every brand's printer list (119 words) plus the Brother prefixes** (DCP/FAX/HL/MFC/PT/QL hyphenate; BF/DPC/GL/TD/VC do not). At least one word is brand-scoped: HP `LASER` becomes "Laser", Canon's stays `LASER`. So the permanent fix is theirs: a `display_name` on printer rows (**BF-093**). §N of the probe compares the two live. ***A mirror calibrated once is a constant with a good alibi*** (the ERR-233 lesson, on a copy of their code instead of a layout).
+
+**Our own claim, corrected.** Our backend-move reply said BF-084 would remove "the last direct Supabase read" on the ribbon PDP. The browser probe found another one: the curated related rail's `products?sku=in.(…)` lookup. It stays until a public endpoint takes SKUs (**BF-092**).
+
+**Not built.**
+- `/business` "Apply": the only Apply is the approved-account chart's date-range button, and no application flow exists (`/api/business/apply` returns 404). The turnaround doc it came from **was never received**; asked for.
+- Apex 307→308 is a Vercel dashboard setting; the owner will change it.
+- `CT201304` is not in the catalogue (backend data).
+- The header typeahead does not render aliases.
+
+**Live data used.** Five real searches, approved by the user, recorded here so the rows can be filtered: `canon pg540` (twice: curl and one browser load, which also fired `/suggest`), `fuji-xerox-ct201304 cyan`, `brother-lc73 black-lc73bk`, `fuji-xerox-ct201304`, `ct201304`.
+
+**Checks.**
+- `tests/four-replies-backend-response-sep2026.test.js`: 31 tests, each running shipped code.
+- `scripts/redproof-four-replies-sep2026.py`: 29/29 mutations caught.
+- `probe:four-replies`: READ-ONLY; `--admin` / `--browser` / `--search`.
+- `probe:backend-move`: 43/43, ribbon softs now hard.
+- 14 older suites updated. Each old pin now asserts the read is **gone**, and each change was read against its docstring first.
+- Full suite: 6743 pass / 0 fail. The only failures seen along the way came from other sessions: Finder `.DS_Store` files, removed; `probe-best-sellers.mjs`, since registered.
+
 ## ERR-292 — The backend moved to Singapore and asked for seven speed fixes; three of its premises were wrong for ribbons, cross-type tags and search, and the brand page had been waiting 8.6 s for a number it never showed — **RESOLVED (frontend)** (2026-09-28)
 
-**Source.** `backend-docs/inbox/fe-handoff-page-speed-and-backend-move-sep2026.md`: the API moved from Render Oregon (`ink-backend-zaeq`) to Singapore (`ink-backend-sg`), next to the database, and new API fields replace direct Supabase reads. Reply: `outbox/backend-move-FE-reply-sep2026.md` (BF-080..083).
+**Source.** `backend-docs/inbox/fe-handoff-page-speed-and-backend-move-sep2026.md`: the API moved from Render Oregon (`ink-backend-zaeq`) to Singapore (`ink-backend-sg`), next to the database, and new API fields replace direct Supabase reads. Reply: `outbox/backend-move-FE-reply-sep2026.md` (BF-084..083).
 
 **Measured before building on it.** `npm run probe:backend-move` is READ-ONLY.
 - **§H hosts.** All 15 Render-bound rewrite paths return the same bytes on both hosts. The one exception is `google-promotions.xml`, whose generation timestamps differ.
@@ -56,9 +103,9 @@ describing the same incident.
 
 **Where the handoff was wrong, and what we did instead:**
 1. **Search.** "Three requests per search" is the miss-only repair path. `/products?search=` and `/suggest` fire only on hardMiss, softMiss, hijack or exact searches, and on those paths they fix real bugs (ERR-133/144/264). Dropping them would re-open those bugs. What we did: they now START WITH `/smart` on a digit or exact query, and are discarded when no repair fires. The owner accepted the cost, two reads per digit search including one `/suggest` analytics row.
-2. **Ribbon PDP.** It reads `/api/ribbons/:sku`, which lacks `description_html` and `related_product_skus`. So its enrich stays, gated on `hasOwnProperty`, and it is loud when a non-ribbon row ever needs it (BF-080).
-3. **Ribbon codes.** "Override-aware `series_codes`" still gives a ribbon with no override its derived codes (691.01 → `LZ24`). ERR-086 says such a ribbon has none. So `product_codes` is still read, **for ribbon rows only**, on the PDP and in `_applyManualCodes` (BF-081).
-4. **Cross-type tags.** The handoff does not cover them (`chip_category`). There are 0 rows today. The recovery stays, but is now gated on the brand's `product_code_visitors` summary (one cached read per brand), so today a code grid makes no per-code read. `_fetchProductIdsForCode` is deleted, because the backend now lists same-type overrides itself (BF-082).
+2. **Ribbon PDP.** It reads `/api/ribbons/:sku`, which lacks `description_html` and `related_product_skus`. So its enrich stays, gated on `hasOwnProperty`, and it is loud when a non-ribbon row ever needs it (BF-084).
+3. **Ribbon codes.** "Override-aware `series_codes`" still gives a ribbon with no override its derived codes (691.01 → `LZ24`). ERR-086 says such a ribbon has none. So `product_codes` is still read, **for ribbon rows only**, on the PDP and in `_applyManualCodes` (BF-085).
+4. **Cross-type tags.** The handoff does not cover them (`chip_category`). There are 0 rows today. The recovery stays, but is now gated on the brand's `product_code_visitors` summary (one cached read per brand), so today a code grid makes no per-code read. `_fetchProductIdsForCode` is deleted, because the backend now lists same-type overrides itself (BF-086).
 5. **Brand-page ribbons count.** `getRibbons({limit:1})`, awaited before the tiles painted (8.6 s for Brother before the backend fix), fed a tile that **never rendered**: `availableCategories` filters `ribbons` out. We deleted the call, not only its wait.
 
 **What changed:**
@@ -72,13 +119,13 @@ describing the same incident.
 - **PDP.** The first image starts **18 ms** after the product response (the handoff measured 1.4 s). The hero is downloaded once. There is no `/api/cart` call. `platform.js` loads at 1241 ms, against DCL 443 ms.
 - **Brand page.** The schema request starts at 493 ms, alongside `/api/shop`. There is no `/api/ribbons` call.
 - **Search.** The literal set starts at 449 ms, alongside `/smart` (which ends at 2155 ms).
-- **Still made on a non-ribbon PDP:** one direct read, `product_code_visitors` (BF-082). The probe prints it.
+- **Still made on a non-ribbon PDP:** one direct read, `product_code_visitors` (BF-086). The probe prints it.
 
 **Live, after deploy** (`npm run probe:backend-move -- --browser`, production, 2026-09-28): **53/53**.
 - **PDP C02BK.** The first image starts **1 ms** after the product response (product 815→1352 ms, image 1353 ms), and is downloaded once. LCP was 1116 ms on one load; the handoff measured 4.70 s.
 - **Brand page.** Schema starts at 748 ms, alongside `/api/shop` (748→857 ms). LCP 888 ms.
 - **Digit search.** The literal set starts at 760 ms, with `/smart` (761→1156 ms).
-- **Still made on the PDP:** `product_code_visitors` (1 read, BF-082).
+- **Still made on the PDP:** `product_code_visitors` (1 read, BF-086).
 - **The LCP figures are single loads without CPU throttling, and the API itself is faster since the move.** They show the direction. They are not a before/after of the frontend change alone. The search LCP (1052 ms) is for a zero-result `zzprobe_` term, so it is not comparable to the handoff's `tn2450`.
 
 **Guards.**
@@ -111,7 +158,7 @@ describing the same incident.
 
 **The backend's no-`recovery` case.** They dropped `kind:"popular"` from `recovery.rails[]` and asked for "the contact / printer-finder help". We never rendered `popular`, and the brand grid still renders whenever brands load. Added: a "Still can't find it?" rail linking to the Ink Finder (`/?scroll=ink-finder`). Contact is NOT repeated in that rail, because `html/shop.html`'s `.need-help` box (phone + email) already sits under every `/search` page. The test pins that the box stays.
 
-**Kept, per the handoff, each pinned as a POSITIVE CONTROL** (§4 of the new test, green on both trees): `/value-packs` and its "Full colour sets" h1 and request; the "Full-set value pack" card badge; PDP `pack_suggestion`; cart `pack_suggestion_for_line`. Also kept: the printer page's "Colour Pack Bundles" (`GET /api/printers/:slug/color-packs`). Those are the printer's OWN packs, so they satisfy the owner's rule, and they did not render on the printer page the probe measured. The probe warns if they ever sit above the product list.
+**Kept, per the handoff, each pinned as a POSITIVE CONTROL** (§4 of the new test, green on both trees): `/value-packs` and its "Full colour sets" h1 and request; the "Full-set value pack" card badge; PDP `pack_suggestion`; cart `pack_suggestion_for_line`. Also kept, at the time: the printer page's "Colour Pack Bundles". **It was DELETED on 2026-09-28 (ERR-294):** the backend's re-check showed it called `/api/products/printer/:slug/color-packs` (not the `/api/printers/…` path this line named), and that both routes had 404'd since 2026-04-01 — which is why it "did not render". It was a dead request on every printer page, not a kept feature.
 
 **🚨 The probe's first local run failed on a DIFFERENT URL each time.** The first run failed `/shop?brand=brother&code=LC73` desktop, and the second failed `/search` desktop. Both render fine on re-measure (3/3). The instrumented third run showed why: **429** on `/api/shop`, `/api/products/printer/*`, `/api/site/*` and `/api/settings`. The probe's own 19 unpaced page loads had spent the per-IP limit (ERR-266, 100/60s shared across endpoints), and the page rendered its error pane. ***A failure that moves is not the page. It was the instrument.*** The probe now paces 6s between loads, retries once after a 65s window on a 429, and reports a 429 that survives the retry as **NOT EXERCISED**, never as a pass.
 

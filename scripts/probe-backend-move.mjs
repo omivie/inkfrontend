@@ -16,9 +16,11 @@
  *   §N  /api/site/nav `ribbon_brands` = the direct ribbon_brands read, row for row
  *   §O  EVERY product_codes override row: GET /api/products/:sku carries the
  *       override as series_codes, and GET /api/shop?brand&category&code lists it
- *   §R  the ribbon gaps the handoff does not mention (BF-080, BF-081): /api/ribbons/:sku
- *       lacks description_html/related_product_skus, and a ribbon with NO override
- *       still gets derived series_codes (ERR-086 says it has none)
+ *   §R  the ribbon gaps the handoff did not mention, BUILT by the backend on
+ *       2026-09-28 (BF-084, BF-085; ERR-294): /api/ribbons/:sku carries
+ *       description_html/related_product_skus, and a ribbon with NO override
+ *       carries series_codes [] (ERR-086). Hard checks now — the storefront
+ *       deleted its own reads on the strength of them.
  *   §W  (--browser) a first-time visitor's real load, against --site (default live):
  *       PDP, brand page and a zzprobe_-prefixed digit search (writes one excluded
  *       search_analytics row per search endpoint — the notice is printed)
@@ -186,11 +188,13 @@ try {
         ].filter(Boolean).join(' · '));
     }
     check(held === checked, `override rows honoured by the backend: ${held}/${checked} active products`,
-        `${checked - held} product(s) above — the storefront must not drop its own override read for these`);
-    if (visitors.length) soft('cross-type visitors', `${visitors.length} row(s) with chip_category — the handoff does not cover these; api.js keeps its visitor recovery`);
+        `${checked - held} product(s) above — the storefront no longer reads product_codes (ERR-294), so these are WRONG on the site`);
+    // Cross-type visitors are the backend's since BF-086 (ERR-294). Each one is
+    // checked by probe:four-replies §V; 0 rows is UNMEASURED there, not a pass.
+    if (visitors.length) soft('cross-type visitors', `${visitors.length} row(s) with chip_category — run probe:four-replies §V`);
 
     // ── §R ─────────────────────────────────────────────────────────────────
-    console.log('\n§R ribbons (not covered by the handoff — BF-080, BF-081)');
+    console.log('\n§R ribbons (BF-084, BF-085 — built 2026-09-28)');
     const ribbonList = await get(`${API}/api/ribbons?limit=20`);
     const ribbons = ((ribbonList.body && (ribbonList.body.data?.ribbons || ribbonList.body.data?.products || ribbonList.body.data)) || [])
         .filter((r) => r && r.sku).slice(0, 8);
@@ -205,8 +209,10 @@ try {
         const codes = (prod.body && prod.body.data && prod.body.data.series_codes) || [];
         if (codes.length) derived++;
     }
-    soft('GET /api/ribbons/:sku', `${missingFields}/${ribbons.length} sampled ribbons lack description_html/related_product_skus — the ribbon PDP keeps its Supabase enrich`);
-    soft('ribbon series_codes', `${derived} sampled ribbon(s) with NO override still get derived series_codes — ERR-086 says none; the storefront keeps the ribbon override read`);
+    check(missingFields === 0, `GET /api/ribbons/:sku carries description_html + related_product_skus (${ribbons.length - missingFields}/${ribbons.length})`,
+        'the ribbon PDP now falls back to its LOUD Supabase enrich for these');
+    check(derived === 0, `a ribbon with NO override carries series_codes [] (${ribbons.length - derived} sampled)`,
+        `${derived} still derived — ERR-086 says none, and the storefront no longer clears them`);
 
     } // !BROWSER_ONLY
 
@@ -253,10 +259,10 @@ try {
                 .filter((r) => r.start >= (prod ? prod.start : 0));
             check(!find(pdp.reqs, /supabase\.co\/rest\/v1\/(products|product_codes)\b/).length,
                 'PDP: no direct Supabase products/product_codes read', find(pdp.reqs, /supabase\.co\/rest/).map((r) => r.url.slice(0, 110)).join(' | '));
-            // Say what is LEFT, not only what is gone: the visitor summary
-            // (product_code_visitors) stays until BF-082.
+            // BF-086 built (ERR-294): the visitor summary read is gone too, so a
+            // non-ribbon PDP makes NO direct Supabase REST read at all.
             const leftover = find(pdp.reqs, /supabase\.co\/rest\/v1\//).map((r) => r.url.replace(/^.*\/rest\/v1\//, '').split('?')[0]);
-            soft('PDP: direct Supabase reads still made', leftover.length ? `${leftover.length}: ${[...new Set(leftover)].join(', ')}` : 'none');
+            check(!leftover.length, 'PDP: no direct Supabase REST read of any table', `${leftover.length}: ${[...new Set(leftover)].join(', ')}`);
             const preload = await pdp.page.$('link[rel="preload"][data-lcp-product="pdp-hero"]');
             check(!!preload, 'PDP: hero preload injected by pdp-prefetch', 'no link[data-lcp-product=pdp-hero]');
             const heroSrc = await pdp.page.$eval('#product-image img', (i) => i.currentSrc).catch(() => null);

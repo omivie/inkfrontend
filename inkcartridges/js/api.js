@@ -843,7 +843,7 @@ const API = {
      * Params NOT in CATALOG_PARAM_ORDER are still emitted — sorted
      * alphabetically, after the known ones. Dropping them would be far worse
      * than a cache miss: endpoint-specific filters like `include_unavailable`
-     * (color-packs) would vanish silently and the caller would get a
+     * (the retired color-packs route had one) would vanish silently and the caller would get a
      * wrong-but-plausible result set, which is exactly the failure mode that
      * bit us in ERR-075. Sorting keeps them deterministic, so an unknown param
      * costs at most one extra cache key, never a wrong answer.
@@ -1813,48 +1813,6 @@ const API = {
         return value;
     },
 
-    /**
-     * Manual codes for a set of product IDs → Map(productId → string[]).
-     * IDs are chunked so the PostgREST `in.(…)` URL never grows unbounded.
-     */
-    async _fetchManualCodesByProduct(ids) {
-        const map = new Map();
-        const unique = [...new Set((ids || []).filter(Boolean))];
-        if (!unique.length) return map;
-        const CHUNK = 60;
-        for (let i = 0; i < unique.length; i += CHUNK) {
-            const slice = unique.slice(i, i + CHUNK);
-            const cacheKey = 'codes:' + slice.join(',');
-            let rows = this._manualCodeCacheGet(cacheKey);
-            if (rows === undefined) {
-                const list = slice.map(encodeURIComponent).join(',');
-                rows = await this._supabaseSelect(`product_codes?select=product_id,code&product_id=in.(${list})`);
-                this._manualCodeCacheSet(cacheKey, rows);
-            }
-            if (Array.isArray(rows)) {
-                for (const r of rows) {
-                    if (!r || !r.product_id || !r.code) continue;
-                    if (!map.has(r.product_id)) map.set(r.product_id, []);
-                    map.get(r.product_id).push(String(r.code).toUpperCase());
-                }
-            }
-        }
-        return map;
-    },
-
-    /**
-     * Effective override codes for ONE product (the product_codes table) → string[].
-     * The PDP uses this to honour a manually-assigned code the same way /shop does:
-     * the override merge (_applyManualCodes) only runs on the getShopData path, so a
-     * singly-loaded product (getProduct/getRibbon) never sees its manual codes. Reuses
-     * the cached anon read below rather than forking a second query.
-     */
-    async getManualProductCodes(productId) {
-        if (!productId) return [];
-        const map = await this._fetchManualCodesByProduct([productId]);
-        return (map && map.get(productId)) || [];
-    },
-
     /** Manual chip counts for a brand+category → [{ code, count }]. */
     async _fetchManualChipCounts(brandSlug, productTypes) {
         if (!brandSlug || !Array.isArray(productTypes) || !productTypes.length) return [];
@@ -1879,67 +1837,23 @@ const API = {
     },
 
     /**
-     * Normalise a code to the form stored in product_codes: uppercase, A-Z/0-9
-     * and "/", with slashes collapsed and trimmed. Mirrors AdminAPI's
-     * normalizeProductCode — the two must agree or a code the admin writes can't
-     * be looked up here. "/" is kept because the backend's merged pair chips
-     * (PG40/CL41) are real codes; stripping it made them unmatchable.
-     */
-    _normManualCode(code) {
-        return String(code || '')
-            .toUpperCase()
-            .replace(/[^A-Z0-9/]/g, '')
-            .replace(/\/{2,}/g, '/')
-            .replace(/^\/+|\/+$/g, '');
-    },
-
-    /**
-     * Cross-type rows for a brand (product_codes.chip_category, Sep 2026) →
-     * [{ code, category, visits, count }]: `count` products of type `category`
-     * appear under chip `code` in category `visits`, not in their own.
-     * null = couldn't ask (view missing before the migration, or an outage) —
-     * callers must treat that as "unknown", never as "no visitors".
-     */
-    async _fetchVisitorRows(brandSlug) {
-        if (!brandSlug) return [];
-        const cacheKey = `visitors:${brandSlug}`;
-        let rows = this._manualCodeCacheGet(cacheKey);
-        if (rows === undefined) {
-            rows = await this._supabaseSelect(
-                `product_code_visitors?select=code,product_type,chip_category,product_count`
-                + `&brand_slug=eq.${encodeURIComponent(brandSlug)}`);
-            this._manualCodeCacheSet(cacheKey, rows);
-        }
-        if (!Array.isArray(rows)) return null;
-        const categoryOf = {};
-        for (const [cat, types] of Object.entries(this._CATEGORY_PRODUCT_TYPES)) {
-            for (const t of types) categoryOf[t] = cat;
-        }
-        return rows
-            .filter(r => r && r.code && r.chip_category && categoryOf[r.product_type])
-            .map(r => ({ code: String(r.code).toUpperCase(), category: categoryOf[r.product_type],
-                visits: String(r.chip_category).toLowerCase(), count: Number(r.product_count) || 0 }));
-    },
-
-    /** Ids of products tagged `code` as visitors of `category`'s chip. null = couldn't ask. */
-    async _fetchVisitorIdsForCode(code, category) {
-        const c = this._normManualCode(code);
-        if (c.length < 2 || !category) return [];
-        const cat = String(category).toLowerCase();
-        const cacheKey = `visitorids:${c}:${cat}`;
-        let rows = this._manualCodeCacheGet(cacheKey);
-        if (rows === undefined) {
-            rows = await this._supabaseSelect(`product_codes?select=product_id`
-                + `&code=eq.${encodeURIComponent(c)}&chip_category=eq.${encodeURIComponent(cat)}`);
-            this._manualCodeCacheSet(cacheKey, rows);
-        }
-        return Array.isArray(rows) ? rows.map(r => r && r.product_id).filter(Boolean) : null;
-    },
-
-    /**
      * Apply the product_codes override layer to a /api/shop response, in place.
      * Runs at the tail of getShopData on the SWR-cloned response we own.
      * Fail-open: never throws — returns `primary` whatever happens.
+     *
+     * ONE step is left, and it reads no product_codes row (ERR-294). Since
+     * 2026-09-28 the backend does the rest itself:
+     *   - every row's `series_codes` is override-aware (`74fb234`), and a ribbon
+     *     with no override carries `[]` (BF-085, ERR-086) — so the ribbon-only
+     *     product_codes read that corrected it is deleted;
+     *   - /api/shop?brand&category&code lists products of another type tagged
+     *     into this chip (`chip_category`) and counts them in `series` (BF-086)
+     *     — so the product_code_visitors summary, the per-code visitor-id read
+     *     and the cross-category pool recovery are deleted. KEEPING the visitor
+     *     arithmetic would now DOUBLE-COUNT: the server's `series` already
+     *     includes them. 0 visitor rows exist today (measured 2026-09-28), so
+     *     this is pinned by the backend's own test, not by live data;
+     *     probe:four-replies re-checks it the day a row appears.
      *
      * @param {Object} primary - the /api/shop response
      * @param {Object} params  - the original getShopData params
@@ -1948,39 +1862,19 @@ const API = {
         try {
             if (!primary || !primary.ok || !primary.data) return primary;
             const data = primary.data;
-            const products = Array.isArray(data.products) ? data.products : [];
 
-            // (1) RIBBONS ONLY since 2026-09-28. Every /api/shop and
-            //     /api/products row now carries override-aware series_codes
-            //     (backend `74fb234`; probe:backend-move §O checks every override
-            //     row), so a non-ribbon row is already right and reading
-            //     product_codes for it was a Mumbai round trip for nothing.
-            //     Ribbons are owner-manual (ERR-086): a ribbon with NO override
-            //     carries no codes at all — but the backend still sends it the
-            //     DERIVED ones (measured: 691.01 → LZ24), so for ribbon rows we
-            //     still ask whether an override exists. BF-081 asks the backend
-            //     to apply that rule; then this goes too.
-            const ribbonTypes = this._CATEGORY_PRODUCT_TYPES.ribbons;
-            const ribbonRows = products.filter(p => p && ribbonTypes.includes(p.product_type));
-            if (ribbonRows.length) {
-                const codeMap = await this._fetchManualCodesByProduct(ribbonRows.map(p => p.id));
-                for (const p of ribbonRows) {
-                    p.series_codes = (p.id && codeMap.has(p.id)) ? [...new Set(codeMap.get(p.id))] : [];
-                }
-            }
-
-            // (2) Codes drilldown — ensure a chip exists for every manual code,
-            //     so a purely-manual code (the LC57 case) still shows a tile.
-            //     Cross-type tags (a drum ticked into the TN155 toner chip) are
-            //     VISITORS: they add to the chip they visit, and grow no chip at home.
+            // Codes drilldown — ensure a chip exists for every manual code, so a
+            // purely-manual code (the LC57 case) still shows a tile. Still needed,
+            // measured 2026-09-28: C950XLBK's override is ["950XL","951"] and
+            // /api/shop?code=950XL lists it, but `series` has no 950XL chip
+            // (only "950"), so without this the owner's 950XL tile vanishes. The
+            // product_code_chip_counts view is a per-code COUNT, not a product_codes
+            // read. (Asked of the backend as BF-088.)
             if (!params.code && params.brand && params.category && Array.isArray(data.series)) {
                 const own = String(params.category).toLowerCase();
                 const types = this._CATEGORY_PRODUCT_TYPES[own];
                 if (types) {
-                    const [manualChips, visitorRows] = await Promise.all([
-                        this._fetchManualChipCounts(params.brand, types),
-                        this._fetchVisitorRows(params.brand),
-                    ]);
+                    const manualChips = await this._fetchManualChipCounts(params.brand, types);
                     const have = new Set(data.series
                         .map(s => s && s.code && String(s.code).toUpperCase())
                         .filter(Boolean));
@@ -1996,136 +1890,16 @@ const API = {
                     const coveredByPair = code =>
                         suspects.has(code) || halves.some(h => code === h || code.startsWith(h));
 
-                    // Unknown visitors (view missing before the migration, or an
-                    // outage) ⇒ behave as before this feature, and SAY so.
-                    if (visitorRows === null && typeof DebugLog !== 'undefined' && DebugLog.warn) {
-                        DebugLog.warn(`[API._applyManualCodes] ${params.brand}/${own}: product_code_visitors `
-                            + 'did not load — products ticked into another type\'s chip are not counted here');
-                    }
-                    const visitors = visitorRows || [];
-                    const sum = (rows) => rows.reduce((n, r) => n + r.count, 0);
-
                     let added = false;
                     for (const { code, count } of manualChips) {
-                        if (have.has(code) || coveredByPair(code)) continue;
-                        // Products of this type that VISIT another type's chip grow
-                        // no tile here — the drum ticked into Toner · TN155 makes no
-                        // TN155 tile under Drums.
-                        const stay = count - sum(visitors.filter(v => v.category === own && v.code === code));
-                        if (stay <= 0) continue;
-                        data.series.push({ code, count: stay });
+                        if (have.has(code) || coveredByPair(code) || !(count > 0)) continue;
+                        data.series.push({ code, count });
                         have.add(code);
                         added = true;
-                    }
-
-                    // Visitors INTO this type add to the tile they visit — or make
-                    // it, for a code nothing here carries — so the tile count
-                    // matches the cards the click shows.
-                    for (const v of visitors.filter(v => v.visits === own && v.category !== own)) {
-                        const chip = data.series.find(s => s && String(s.code).toUpperCase() === v.code);
-                        if (chip) {
-                            chip.count = (Number(chip.count) || 0) + v.count;
-                        } else if (!coveredByPair(v.code)) {
-                            data.series.push({ code: v.code, count: v.count });
-                            have.add(v.code);
-                            added = true;
-                        }
                     }
                     if (added) {
                         data.series.sort((a, b) => String(a.code)
                             .localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
-                    }
-                }
-            }
-
-            // (3) Code-filtered grid — recover products tagged with the code as
-            //     VISITORS from another type. Since 2026-09-28 /api/shop?code=
-            //     itself lists every product filed under the code by a
-            //     same-type override (backend `74fb234`; probe:backend-move §O),
-            //     so the old "read every product_codes row for this code, fetch
-            //     whatever is missing" pass found nothing and cost two Mumbai
-            //     reads per grid. What the handoff does NOT cover is a
-            //     cross-type tag (chip_category — a drum ticked into the TN155
-            //     toner chip): /api/shop filtered by category never returns it.
-            //     So only visitors are asked for here, and only when the
-            //     brand's visitor summary (one cached read per brand, shared
-            //     with step 2) says this chip has any — today none do, so a
-            //     code grid makes no per-code product_codes read at all.
-            //     BF-082 asks the backend to honour chip_category; then this
-            //     goes too.
-            if (params.code && params.brand && params.category) {
-                const ownCategory = String(params.category).toLowerCase();
-                const chip = this._normManualCode(params.code);
-                const summary = await this._fetchVisitorRows(params.brand);
-                // Can't ask the summary ⇒ ask for the ids directly (the old,
-                // costlier path) rather than silently assume "no visitors".
-                const hasVisitors = summary === null
-                    || summary.some(v => v.visits === ownCategory && v.category !== ownCategory
-                        && this._normManualCode(v.code) === chip);
-                const visitorIdsForCode = hasVisitors
-                    ? await this._fetchVisitorIdsForCode(params.code, ownCategory)
-                    : [];
-                if (visitorIdsForCode === null && typeof DebugLog !== 'undefined' && DebugLog.warn) {
-                    DebugLog.warn(`[API._applyManualCodes] code=${params.code}: product_code visitors did not load — `
-                        + 'products ticked into this chip from another type may be missing from this grid');
-                }
-                const manualIds = visitorIdsForCode || [];
-                if (manualIds.length) {
-                    const present = new Set(products.map(p => p && p.id).filter(Boolean));
-                    const missing = new Set(manualIds.filter(id => !present.has(id)));
-                    if (missing.size) {
-                        // One batched read of every recoverable product's codes.
-                        const ownCodes = await this._fetchManualCodesByProduct([...missing]);
-                        const fallbackCode = this._normManualCode(params.code);
-                        const recovered = [];
-                        const failedPools = [];
-                        // Canonical (ERR-124) — this pool is the same shape the
-                        // compat sidecar asks for minus `source`, so sharing the
-                        // serializer keeps both on predictable keys.
-                        // ponytail: each pool is capped at 200 rows, the ceiling the
-                        // same-category pool always had; page it if a brand+type outgrows it.
-                        const recoverFrom = async (category, only = null) => {
-                            const poolEndpoint = this.catalogEndpoint('/api/products', {
-                                brand: params.brand,
-                                category,
-                                limit: 200
-                            });
-                            const pool = await this.getWithSWR(poolEndpoint, { anonymous: true }).catch(() => null);
-                            if (!pool || !pool.ok) failedPools.push(category);
-                            const poolProducts = (pool && pool.ok && pool.data && Array.isArray(pool.data.products))
-                                ? pool.data.products : [];
-                            for (const p of poolProducts) {
-                                if (!p || !p.id || !missing.has(p.id)) continue;
-                                if (only && !only.has(p.id)) continue;
-                                // Reflect the product's full manual code set.
-                                p.series_codes = ownCodes.has(p.id)
-                                    ? [...new Set(ownCodes.get(p.id))]
-                                    : [fallbackCode];
-                                recovered.push(p);
-                                missing.delete(p.id);
-                                if (only) only.delete(p.id);
-                            }
-                        };
-                        // Every id here is a visitor of THIS chip from another
-                        // type, so look only in the brand's other types.
-                        const others = Object.keys(this._CATEGORY_PRODUCT_TYPES).filter(c => c !== ownCategory);
-                        for (const c of others) {
-                            if (!missing.size) break;
-                            await recoverFrom(c, missing);
-                        }
-                        // Fail-soft, never silent: a failed pool means a tagged
-                        // product may be missing from this grid.
-                        if (failedPools.length && typeof DebugLog !== 'undefined' && DebugLog.warn) {
-                            DebugLog.warn(`[API._applyManualCodes] code=${params.code}: product pool(s) `
-                                + `${failedPools.join(', ')} failed to load — up to ${missing.size} hand-tagged `
-                                + 'product(s) may be missing from this grid');
-                        }
-                        if (recovered.length) {
-                            data.products = products.concat(recovered);
-                            if (primary.meta && typeof primary.meta.total === 'number') {
-                                primary.meta.total += recovered.length;
-                            }
-                        }
                     }
                 }
             }
@@ -2523,25 +2297,6 @@ const API = {
      */
     async getForUseIn(sku) {
         return this.getPublic(`/api/products/${encodeURIComponent(sku)}/for-use-in`);
-    },
-
-    /**
-     * Get auto-generated color packs for a printer
-     * @param {string} printerSlug - Printer slug
-     * @param {object} [params] - Optional query params (include_unavailable, source)
-     */
-    async getColorPacks(printerSlug, params = {}) {
-        // catalogEndpoint keeps `include_unavailable`/`source` (they fall through
-        // the alphabetical extras tail) while making the order deterministic.
-        const url = this.catalogEndpoint(`/api/products/printer/${encodeURIComponent(printerSlug)}/color-packs`, params);
-        return this.getPublic(url);
-    },
-
-    /**
-     * Get color pack configuration constants
-     */
-    async getColorPackConfig() {
-        return this.getPublic('/api/color-packs/config');
     },
 
     // =========================================================================

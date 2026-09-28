@@ -204,8 +204,9 @@ test('§4 extractHead is attribute-order independent and tolerant of single quot
     assert.equal(SeoMeta.extractHead(html).description, 'Desc here');
 });
 test('§4 extractHead returns nulls for empty / missing tags', () => {
-    sameShape(SeoMeta.extractHead(''), { title: null, description: null });
-    sameShape(SeoMeta.extractHead('<html></html>'), { title: null, description: null });
+    // h1 since ERR-294 (the printer hub mirrors the prerender's visible heading).
+    sameShape(SeoMeta.extractHead(''), { title: null, description: null, h1: null });
+    sameShape(SeoMeta.extractHead('<html></html>'), { title: null, description: null, h1: null });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

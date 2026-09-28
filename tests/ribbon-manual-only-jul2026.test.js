@@ -66,45 +66,40 @@ function loadApi() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. _applyManualCodes — ribbons are override-only (behavioural)
+// 1. _applyManualCodes — the override-only rule is now the BACKEND's (ERR-294)
+//
+// Until 2026-09-28 the storefront read product_codes and cleared a ribbon's
+// backend-derived codes itself. The backend now applies the rule on every
+// endpoint (BF-085): a ribbon carries only its override, else `series_codes: []`
+// (measured: 691.01 and 72200.01 → [], C-OKI-720-RIB-BK → ["720"]). So the
+// storefront passes series_codes through UNTOUCHED — a second, client-side
+// opinion could only disagree with the server. probe:backend-move §R re-measures
+// the rule live, every ribbon row.
 // ═══════════════════════════════════════════════════════════════════════════
-async function applyWith(overrideMap, products) {
+async function applyWith(products) {
   const API = loadApi();
-  // Isolate the code-clearing rule from Supabase — inject the override map.
-  API._fetchManualCodesByProduct = async () => overrideMap;
+  let reads = 0;
+  API._supabaseSelect = async () => { reads++; return []; };
   const primary = { ok: true, data: { products, series: [] } };
-  const out = await API._applyManualCodes(primary, {}, null); // empty params → steps 2/3 skip
-  return out.data.products;
+  const out = await API._applyManualCodes(primary, {}, null);
+  return { products: out.data.products, reads };
 }
 
-test('a ribbon with NO override has its backend-derived codes cleared to []', async () => {
-  const [ribbon] = await applyWith(new Map(), [
-    { id: 'r1', product_type: 'typewriter_ribbon', series_codes: ['02'] },
+test('ribbon series_codes pass through untouched — the backend already applied the rule', async () => {
+  const { products, reads } = await applyWith([
+    { id: 'a', product_type: 'printer_ribbon', series_codes: [] },
+    { id: 'b', product_type: 'typewriter_ribbon', series_codes: ['720'] },
+    { id: 'c', product_type: 'correction_tape', series_codes: [] },
   ]);
-  assert.equal(ribbon.series_codes.length, 0, 'ribbon codes must be emptied — no derived fallback');
+  assert.deepEqual(products.map((p) => [...p.series_codes]), [[], ['720'], []]);
+  assert.equal(reads, 0, 'no product_codes read for ribbon rows any more');
 });
 
-test('all three ribbon types are treated as override-only', async () => {
-  const out = await applyWith(new Map(), [
-    { id: 'a', product_type: 'printer_ribbon', series_codes: ['X'] },
-    { id: 'b', product_type: 'typewriter_ribbon', series_codes: ['Y'] },
-    { id: 'c', product_type: 'correction_tape', series_codes: ['Z'] },
-  ]);
-  for (const p of out) assert.equal(p.series_codes.length, 0, `${p.product_type} must be cleared`);
-});
-
-test('a NON-ribbon keeps its backend-derived codes (unchanged)', async () => {
-  const [ink] = await applyWith(new Map(), [
+test('a NON-ribbon keeps its backend codes (unchanged)', async () => {
+  const { products: [ink] } = await applyWith([
     { id: 'i1', product_type: 'ink_cartridge', series_codes: ['LC40'] },
   ]);
   assert.deepEqual([...ink.series_codes], ['LC40']);
-});
-
-test('a ribbon WITH an override keeps exactly the override (manual wins)', async () => {
-  const [ribbon] = await applyWith(new Map([['r1', ['CUSTOM']]]), [
-    { id: 'r1', product_type: 'typewriter_ribbon', series_codes: ['02'] },
-  ]);
-  assert.deepEqual([...ribbon.series_codes], ['CUSTOM']);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -122,12 +117,9 @@ test('renderCompatiblePrinters short-circuits for ribbons BEFORE the Supabase fa
 // ═══════════════════════════════════════════════════════════════════════════
 // 3. Product Codes — ribbons carry only owner-assigned codes
 // ═══════════════════════════════════════════════════════════════════════════
-test('the PDP clears a ribbon\'s series_codes when there is no manual override', () => {
-  // Since 2026-09-28 the backend's series_codes applies overrides, but still sends
-  // a ribbon with no override its DERIVED codes (691.01 → LZ24), so the PDP reads
-  // the override for ribbon rows only and clears when there is none.
-  assert.match(PDP, /if \(isRibbonRow\) \{[\s\S]{0,300}?this\.product\.series_codes = manualCodes\.length \? manualCodes : \[\];/,
-    'no override + ribbon → no codes on the PDP either');
+test('the PDP takes a ribbon\'s series_codes from the response (backend applies ERR-086 since BF-085)', () => {
+  assert.doesNotMatch(PDP, /getManualProductCodes|isRibbonRow/,
+    'no PDP-side override read: the ribbon endpoint already sends override-or-[]');
 });
 
 test('the admin picker deriveSeed returns [] for ribbon types (no machine pre-tick)', () => {

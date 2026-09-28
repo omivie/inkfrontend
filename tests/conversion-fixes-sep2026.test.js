@@ -240,7 +240,10 @@ test('§2 bindAll hides the scope of a fact it could not confirm', async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§3 PrinterName.display matches the backend prerender <h1> for every measured printer', () => {
-    // raw full_name (GET /api/printers/search) → backend h1 (GET /api/prerender/printer/…), 2026-09-27
+    // raw full_name (GET /api/printers/search) → backend h1 (GET /api/prerender/printer/…), 2026-09-27.
+    // RE-MEASURED 2026-09-28 (ERR-294): the backend now display-cases PHASER and
+    // hyphenates Brother series prefixes; the two rows below changed with it. The
+    // full 119-word calibration lives in four-replies-backend-response-sep2026 §H.
     const MEASURED = [
         ['HP COLOR LASERJET 5500', 'HP Color LaserJet 5500'],
         ['HP OFFICEJET PRO 8710', 'HP OfficeJet Pro 8710'],
@@ -251,8 +254,8 @@ test('§3 PrinterName.display matches the backend prerender <h1> for every measu
         ['HP COLOR LASERJET CM 1312', 'HP Color LaserJet CM 1312'],
         ['HP ENVY 4500', 'HP ENVY 4500'],
         ['Kyocera ECOSYS M2040DN', 'Kyocera ECOSYS M2040DN'],
-        ['Fuji Xerox PHASER 5500', 'Fuji Xerox PHASER 5500'],
-        ['Brother MFC J5930DW', 'Brother MFC J5930DW'],
+        ['Fuji Xerox PHASER 5500', 'Fuji Xerox Phaser 5500'],
+        ['Brother MFC J5930DW', 'Brother MFC-J5930DW'],
         ['HP LaserJet Pro MFP M428fdw', 'HP LaserJet Pro MFP M428fdw'],
         ['Lexmark CS310dn', 'Lexmark CS310dn'],
         ['Canon PIXMA MG3660', 'Canon PIXMA MG3660'],
@@ -265,7 +268,7 @@ test('§3 PrinterName.display matches the backend prerender <h1> for every measu
 test('§3 fitsLine: two models then +N, nothing when the row has no list', () => {
     const P = (n) => ({ full_name: n });
     assert.equal(U.PrinterName.fitsLine([P('Brother MFC J5930DW'), P('Brother MFC J6935DW'), P('A'), P('B')]),
-        'Fits Brother MFC J5930DW, Brother MFC J6935DW +2');
+        'Fits Brother MFC-J5930DW, Brother MFC-J6935DW +2');
     assert.equal(U.PrinterName.fitsLine([P('HP COLOR LASERJET 5500')]), 'Fits HP Color LaserJet 5500');
     assert.equal(U.PrinterName.fitsLine(undefined), '', 'a row with no list renders nothing');
     assert.equal(U.PrinterName.fitsLine([]), '');

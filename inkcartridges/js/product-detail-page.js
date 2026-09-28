@@ -243,41 +243,40 @@
                 // gallery (backend handoff 2026-09-28 §2). It used to gate the
                 // first paint; renderCompatiblePrinters awaits the promise and
                 // paints the machine list when it lands.
-                this._forUseInPromise = this._fetchForUseIn(sku);
+                // The SKU from the RESPONSE, not the URL: a renamed product is
+                // reached through its old SKU (/products/x/C65BK serves C65XLBK's
+                // row), and for-use-in keyed on the URL SKU 404s — backend re-check
+                // 2026-09-28 §5a-b, ERR-294.
+                this._forUseInPromise = this._fetchForUseIn(this.product.sku || sku);
 
-                // Ribbons are owner-manual (ERR-086): a ribbon with no override
-                // carries NO codes. The backend's `series_codes` applies the
-                // product_codes override, but for a ribbon without one it still
-                // sends the DERIVED codes (measured 2026-09-28: 691.01 → LZ24,
-                // 72200.01 → DIN2103) — so only for ribbons do we still need to
-                // know whether an override row exists. BF-081 asks the backend to
-                // apply the ribbon rule itself; then this read can go too.
-                const isRibbonRow = this._productType === 'ribbon'
-                    || this.product.category === 'ribbon'
-                    || API._CATEGORY_PRODUCT_TYPES.ribbons.includes(this.product.product_type);
+                // Codes: the backend applies the owner-manual ribbon rule itself
+                // since 2026-09-28 (BF-085, ERR-086) — a ribbon carries only its
+                // product_codes override, else `series_codes: []` (measured: 691.01
+                // and 72200.01 → [], C-OKI-720-RIB-BK → ["720"]). The direct
+                // product_codes read that used to correct it is deleted (ERR-294).
                 const hasOwn = (k) => Object.prototype.hasOwnProperty.call(this.product, k);
 
-                // `description_html`, `related_product_skus` and `id` ride on
-                // GET /api/products/:sku since 2026-09-28, so the direct Supabase
-                // enrich runs ONLY when the row arrived without them: every ribbon
-                // (GET /api/ribbons/:sku does not carry them — BF-080), and the
-                // smart-search fallback API.getProduct takes on a 5xx. hasOwn, not
-                // `== null`: an ABSENT key means "not sent", null means "none"
-                // (ERR-199). It is loud when it runs on a non-ribbon row, because
-                // that means the endpoint regressed.
+                // `description_html`, `related_product_skus` and `id` ride on BOTH
+                // GET /api/products/:sku and GET /api/ribbons/:sku (BF-084, built
+                // 2026-09-28; 72200.01 → 142-char description, ["72200.02"]). The
+                // direct Supabase enrich is now a FALLBACK ONLY — the smart-search
+                // path API.getProduct takes on a 5xx, or an endpoint regression —
+                // and it is LOUD on every row it runs for, ribbons included.
+                // hasOwn, not `== null`: an ABSENT key means "not sent", null
+                // means "none" (ERR-199).
                 //
                 // `compatible_devices_html` is DELIBERATELY NOT in this select
                 // (ERR-243): read this way the admin-authored machine list was
                 // bulk-dumpable. It comes from /api/products/:sku/for-use-in.
                 const needsEnrich = this.product.id == null
                     || !hasOwn('description_html') || !hasOwn('related_product_skus');
-                const enrichPromise = needsEnrich ? (async () => {
-                    if (!isRibbonRow && typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                if (needsEnrich) {
+                    if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
                         DebugLog.warn('[PDP] product row lacks description_html/related_product_skus/id; '
                             + 'falling back to the direct Supabase read', { sku });
                     }
                     try {
-                        const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=id,description_html,related_product_skus&limit=1`;
+                        const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(this.product.sku || sku)}&select=id,description_html,related_product_skus&limit=1`;
                         const enrichResp = await fetch(enrichUrl, {
                             headers: {
                                 'apikey': Config.SUPABASE_ANON_KEY,
@@ -294,19 +293,6 @@
                             }
                         }
                     } catch (_) { /* non-critical enrichment */ }
-                })() : null;
-
-                // Ribbon codes need the id, so they wait for the enrich; nothing
-                // else does. A ribbon's breadcrumb code and related rail depend
-                // on the answer, so the ribbon path still awaits it before render.
-                if (isRibbonRow) {
-                    if (enrichPromise) await enrichPromise;
-                    try {
-                        const manualCodes = await API.getManualProductCodes(this.product.id);
-                        this.product.series_codes = manualCodes.length ? manualCodes : [];
-                    } catch (_) { /* non-critical — fall back to the backend series_codes */ }
-                } else if (enrichPromise) {
-                    await enrichPromise;
                 }
 
                 // Hide an admin-only product from anyone the server has not called
@@ -715,7 +701,12 @@
 
             // Title and SKU
             document.getElementById('product-title').textContent = info.displayName;
-            document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
+            // "Model:" only on a genuine row. On a compatible row the
+            // manufacturer_part_number is the SUPPLIER's own code (CTN2345BK →
+            // "IBTN2345"), which names no printer and no OEM part (backend
+            // re-check 2026-09-28 §5 #9, ERR-294).
+            const showModel = info.manufacturer_part_number && info.source !== 'compatible';
+            document.getElementById('product-sku').textContent = `SKU: ${info.sku}${showModel ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
             // Aggregate rating badge — surface accumulating ratings at the top of
             // the buy-box so the review flywheel is visible (review-flywheel FE,
@@ -1933,10 +1924,15 @@
                 const models = Array.isArray(group.top_models) ? group.top_models.filter(m => m && m.full_name) : [];
                 const linked = models.map(m => {
                     const href = this._printerHubHref({ slug: m.slug, brand_slug: group.brand_slug, brand: group.brand, full_name: m.full_name });
-                    const label = this._printerLabel(
-                        (typeof ProductName !== 'undefined' && ProductName.compatModel)
-                            ? (ProductName.compatModel(m.full_name, group.brand) || m.full_name)
-                            : m.full_name);
+                    // The row already says "Fits <brand>", so each model drops the
+                    // brand: "Fits Brother HL-L2300D", never "Fits Brother Brother
+                    // HL L2300D" (backend re-check 2026-09-28 §5 #9, ERR-294).
+                    const cleaned = (typeof ProductName !== 'undefined' && ProductName.compatModel)
+                        ? (ProductName.compatModel(m.full_name, group.brand) || m.full_name)
+                        : m.full_name;
+                    const label = (typeof PrinterName !== 'undefined')
+                        ? PrinterName.withoutBrand(cleaned, group.brand)
+                        : cleaned;
                     return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
                 }).join(', ');
                 const total = Number(group.total) || models.length;
@@ -2055,6 +2051,11 @@
                 // dead code), so the try/catch is load-bearing, not decorative.
                 try {
                     const resp = await API.getForUseIn(sku);
+                    // A 404 is an ANSWER about this SKU, not a transient failure:
+                    // asking again cannot change it (backend re-check 2026-09-28
+                    // §5a-b saw every redirected PDP ask twice). API.request()
+                    // resolves a 404 as { ok:false, code:'NOT_FOUND' }.
+                    if (resp && resp.ok === false && resp.code === 'NOT_FOUND') return { failed: true, final: true };
                     if (!resp || resp.ok !== true || !resp.data) return { failed: true };
                     // hasOwnProperty, not `?? null`: ABSENT and null are different
                     // answers and only one of them means "no list" (ERR-199).
@@ -2065,8 +2066,10 @@
                 }
             };
 
+            // One retry, for the transient failures only (the 40/min limiter, a
+            // 5xx, the network) — never for a 404 (ERR-294).
             let out = await ask();
-            if (out.failed) out = await ask();
+            if (out.failed && !out.final) out = await ask();
 
             if (out.failed) {
                 if (typeof DebugLog !== 'undefined' && DebugLog.warn) {

@@ -176,19 +176,22 @@ test('§2 a non-ribbon PDP awaits nothing between the product response and rende
     // well-formed non-ribbon /api/products/:sku row does not enter.
     // (The two inside the enrich IIFE run off the main path: nothing awaits
     // the IIFE unless the row lacks its fields.)
+    //
+    // ERR-294 (backend BF-084/085 built 2026-09-28): /api/ribbons/:sku carries
+    // the fields and a ribbon's series_codes is override-or-[] server-side, so
+    // the ribbon branch and its product_codes read are GONE. The only awaits
+    // left are the enrich fallback's own, inside `if (needsEnrich)`.
     const awaits = (PDP_INIT.match(/await [^;(]+/g) || []).map((a) => a.trim());
-    assert.deepEqual(awaits, ['await fetch', 'await enrichResp.json', 'await enrichPromise',
-        'await API.getManualProductCodes', 'await enrichPromise'],
-        'only the enrich fallback, the ribbon branch and the missing-fields branch may await');
+    assert.deepEqual(awaits, ['await fetch', 'await enrichResp.json'],
+        'only the missing-fields enrich fallback may await');
     assert.match(PDP_INIT, /const needsEnrich = this\.product\.id == null\s*\|\| !hasOwn\('description_html'\) \|\| !hasOwn\('related_product_skus'\);/,
         'the Supabase enrich runs only when the row lacks the fields');
-    assert.match(PDP_INIT, /const enrichPromise = needsEnrich \?/);
-    assert.match(PDP_INIT, /if \(isRibbonRow\) \{[\s\S]*?getManualProductCodes[\s\S]*?\} else if \(enrichPromise\) \{/,
-        'product_codes is read for ribbons only');
+    assert.match(PDP_INIT, /if \(needsEnrich\) \{/);
+    assert.doesNotMatch(PDP_INIT, /getManualProductCodes|isRibbonRow/, 'no ribbon-only product_codes read survives');
 });
 
-test('§2 the enrich fallback is LOUD when a non-ribbon row arrives without the fields', () => {
-    assert.match(PDP_INIT, /if \(!isRibbonRow && typeof DebugLog !== 'undefined' && DebugLog\.warn\) \{\s*DebugLog\.warn\('\[PDP\] product row lacks/);
+test('§2 the enrich fallback is LOUD on EVERY row it runs for, ribbons included', () => {
+    assert.match(PDP_INIT, /if \(needsEnrich\) \{\s*if \(typeof DebugLog !== 'undefined' && DebugLog\.warn\) \{\s*DebugLog\.warn\('\[PDP\] product row lacks/);
 });
 
 function utilsImageFns(apiUrl) {
@@ -252,7 +255,7 @@ test('§2 renderCompatiblePrinters paints the machine list when it lands, not be
     const fn = PDP_SRC.match(/async renderCompatiblePrinters\(info\) \{[\s\S]*?const forUseIn = this\._forUseIn \|\| \{\};/);
     assert.ok(fn);
     assert.match(fn[0], /if \(this\._forUseInPromise\) await this\._forUseInPromise;/);
-    assert.match(PDP_SRC, /this\._forUseInPromise = this\._fetchForUseIn\(sku\);/);
+    assert.match(PDP_SRC, /this\._forUseInPromise = this\._fetchForUseIn\(this\.product\.sku \|\| sku\);/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -438,11 +441,13 @@ test('§4b getRibbonBrandsList reads site/nav first; the direct read is the null
     assert.match(fn, /DebugLog\.warn\(/, 'the fallback says so');
 });
 
-test('§2 _applyManualCodes: ribbon rows only in step 1, no by-code product_codes read in step 3', () => {
+test('§2 _applyManualCodes reads NO product_codes / product_code_visitors row (ERR-294)', () => {
+    // BF-085 (ribbon codes) and BF-086 (chip_category in /api/shop) are built,
+    // so the ribbon override read, the visitor summary and the per-code
+    // visitor recovery are deleted. Only the manual chip-count view survives.
     const fn = API_CODE.match(/async _applyManualCodes\(primary, params, truncated\) \{[\s\S]*?\n    \},/)[0];
-    assert.match(fn, /const ribbonRows = products\.filter\(p => p && ribbonTypes\.includes\(p\.product_type\)\);/);
-    assert.match(fn, /this\._fetchManualCodesByProduct\(ribbonRows\.map\(p => p\.id\)\)/);
-    assert.doesNotMatch(API_CODE, /_fetchProductIdsForCode/, 'the same-type recovery reader is gone');
-    assert.match(fn, /const summary = await this\._fetchVisitorRows\(params\.brand\);/,
-        'visitor ids are asked for only when the brand summary says the chip has visitors');
+    assert.match(fn, /this\._fetchManualChipCounts\(params\.brand, types\)/);
+    assert.doesNotMatch(API_CODE, /_fetchProductIdsForCode|_fetchManualCodesByProduct|_fetchVisitorRows|_fetchVisitorIdsForCode|getManualProductCodes/,
+        'every product_codes / visitor reader is gone');
+    assert.doesNotMatch(API_CODE, /product_codes\?select|product_code_visitors\?/, 'no direct read of either table');
 });

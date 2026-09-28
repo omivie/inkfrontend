@@ -468,6 +468,23 @@ mark.smart-ac__mark {
 .search-did-you-mean a { color: #92400e; text-decoration: underline; }
 .search-did-you-mean a:hover { text-decoration: none; }
 
+/* Regional alias (ERR-294): the rows below are for ANOTHER code than the one
+   typed ("PG-540" → "PG-640"), so the note reads first and reads as a caution. */
+.search-alias-banner {
+    padding: 12px 16px;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #78350f;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.search-alias-banner__note { margin: 0; line-height: 1.45; }
+.search-alias-banner__link { color: #92400e; font-size: 13px; font-weight: 600; text-decoration: underline; }
+.search-alias-banner__link:hover { text-decoration: none; }
+
 /* search-ux-frontend-jul2026 §1 — "Showing results similar to 'X'" banner for a
    fuzzy (SKU/model typo) result set. Amber, like did-you-mean, since both signal
    "we adjusted your query". */

@@ -114,7 +114,8 @@ test('§2 the PDP starts it before the enrich and NEVER holds the gallery for it
     // all — renderCompatiblePrinters awaits the load's promise and paints it
     // when it lands. What must still hold: it starts first, and nothing between
     // the start and renderProduct() awaits it.
-    const idxStart = PDP.indexOf('this._forUseInPromise = this._fetchForUseIn(sku);');
+    // ERR-294: keyed on the RESPONSE's SKU (a redirected PDP's URL SKU 404s).
+    const idxStart = PDP.indexOf('this._forUseInPromise = this._fetchForUseIn(this.product.sku || sku);');
     const idxEnrich = PDP.indexOf('const enrichUrl =');
     const idxRender = PDP.indexOf('this.renderProduct();', idxStart);
     assert.ok(idxStart > -1, 'the for-use-in fetch must be started explicitly');

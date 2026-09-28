@@ -213,9 +213,9 @@ test('§2 fit headline: "Fits: {first two} +N more" from the PDP\'s full list; n
     const { byId, document } = pdpDom();
     const P = pdp(document);
     P.renderFitCheck({ category: 'ink', compatible_printers: printers(11) });
-    assert.equal(byId['product-headline-fit'].innerHTML, '<strong>Fits:</strong> Brother MFC J5910DW, Brother MFC J5911DW +9 more');
+    assert.equal(byId['product-headline-fit'].innerHTML, '<strong>Fits:</strong> Brother MFC-J5910DW, Brother MFC-J5911DW +9 more');
     P.renderFitCheck({ category: 'ink', compatible_printers: printers(2) });
-    assert.equal(byId['product-headline-fit'].innerHTML, '<strong>Fits:</strong> Brother MFC J5910DW, Brother MFC J5911DW');
+    assert.equal(byId['product-headline-fit'].innerHTML, '<strong>Fits:</strong> Brother MFC-J5910DW, Brother MFC-J5911DW');
     P.renderFitCheck({ category: 'ink', compatible_printers: [] });
     assert.equal(byId['product-headline-fit'].hidden, true, 'no list ⇒ no line (next product must not inherit the last one)');
     P.renderFitCheck({ category: 'ribbon', compatible_printers: printers(3) });
@@ -279,11 +279,11 @@ test('§2 CSS: desktop-only lines; compliance + chips order 1, reassurance order
 test('§3 fitsLine reads compatible_printers_count: LC73 (2 of 11) ⇒ +9', () => {
     const P = (n) => ({ full_name: n });
     const row = [P('Brother DCP J525W'), P('Brother DCP J725DW')];
-    assert.equal(U.PrinterName.fitsLine(row, 11), 'Fits Brother DCP J525W, Brother DCP J725DW +9');
-    assert.equal(U.PrinterName.fitsLine(row, 2), 'Fits Brother DCP J525W, Brother DCP J725DW', 'nothing extra at 0');
-    assert.equal(U.PrinterName.fitsLine(row, '11'), 'Fits Brother DCP J525W, Brother DCP J725DW +9', 'a numeric string counts');
+    assert.equal(U.PrinterName.fitsLine(row, 11), 'Fits Brother DCP-J525W, Brother DCP-J725DW +9');
+    assert.equal(U.PrinterName.fitsLine(row, 2), 'Fits Brother DCP-J525W, Brother DCP-J725DW', 'nothing extra at 0');
+    assert.equal(U.PrinterName.fitsLine(row, '11'), 'Fits Brother DCP-J525W, Brother DCP-J725DW +9', 'a numeric string counts');
     for (const bad of [undefined, null, '', 'abc', NaN]) {
-        assert.equal(U.PrinterName.fitsLine(row, bad), 'Fits Brother DCP J525W, Brother DCP J725DW', `count ${String(bad)} ⇒ list length`);
+        assert.equal(U.PrinterName.fitsLine(row, bad), 'Fits Brother DCP-J525W, Brother DCP-J725DW', `count ${String(bad)} ⇒ list length`);
     }
     assert.equal(U.PrinterName.fitsLine([P('A'), P('B'), P('C')], 3), 'Fits A, B +1', 'total − SHOWN, not total − array length');
     assert.equal(U.PrinterName.fitsLine([P('A'), P('B'), P('C'), P('D')], 1), 'Fits A, B +2', 'a count below the list we hold never hides printers');

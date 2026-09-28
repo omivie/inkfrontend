@@ -44,38 +44,26 @@ const PDP = read('inkcartridges/js/product-detail-page.js');
 // 1. The manual override is readable for a single product
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('API exposes getManualProductCodes, reusing the shared override reader', () => {
-  assert.match(API, /async getManualProductCodes\(productId\)/,
-    'the PDP needs a per-product read of the product_codes override');
-  const start = API.indexOf('async getManualProductCodes(');
-  const body = API.slice(start, API.indexOf('\n    },', start));
-  assert.match(body, /this\._fetchManualCodesByProduct\(\[productId\]\)/,
-    'it must delegate to the existing cached anon reader, not fork a second query');
-  assert.match(body, /if \(!productId\) return \[\];/,
-    'a missing id returns no codes rather than querying for everything');
+// UPDATE (ERR-294, 2026-09-28): §1–§2 are now the BACKEND's job. It applies the
+// owner-manual ribbon rule itself (BF-085): a ribbon carries only its
+// product_codes override, else `series_codes: []` — measured 691.01/72200.01 → [],
+// C-OKI-720-RIB-BK → ["720"], on both /api/ribbons/:sku and /api/products/:sku.
+// So the per-product override reader and the PDP's load-merge are DELETED, and
+// what these tests pin now is that they stay deleted.
+
+test('the per-product product_codes reader is gone from api.js (BF-085)', () => {
+  assert.doesNotMatch(API, /async getManualProductCodes\(|_fetchManualCodesByProduct/,
+    'the backend emits override-aware series_codes for ribbons; a second read could only disagree with it');
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. The PDP applies the override on load (so /shop and the PDP agree)
-// ─────────────────────────────────────────────────────────────────────────────
-
-test('the PDP enrichment fetches the product id', () => {
-  assert.match(PDP, /rest\/v1\/products\?sku=eq\.\$\{encodeURIComponent\(sku\)\}&select=id,/,
-    'the enrichment select must include id — product_codes is keyed by product id, not sku');
+test('the PDP enrichment fallback still fetches the product id', () => {
+  assert.match(PDP, /rest\/v1\/products\?sku=eq\.\$\{encodeURIComponent\(this\.product\.sku \|\| sku\)\}&select=id,/,
+    'the enrichment select must include id when it runs (a row that arrived without one)');
 });
 
-test('a manual product_codes override replaces series_codes on the PDP', () => {
-  // Non-ribbons: GET /api/products/:sku applies the product_codes override
-  // itself since 2026-09-28 (backend handoff §2, measured by
-  // probe:backend-move over every override row), so the PDP no longer reads
-  // product_codes for them. Ribbons still do: the backend sends a ribbon with
-  // no override its DERIVED codes, and ERR-086 says it has none.
-  assert.match(PDP, /if \(isRibbonRow\) \{[\s\S]{0,300}?const manualCodes = await API\.getManualProductCodes\(this\.product\.id\)/,
-    'the PDP must read the override for a loaded ribbon');
-  assert.match(PDP, /this\.product\.series_codes = manualCodes\.length \? manualCodes : \[\];/,
-    'a non-empty override fully replaces series_codes; none ⇒ a ribbon carries no codes');
-  assert.equal((PDP.match(/API\.getManualProductCodes\(/g) || []).length, 1,
-    'exactly one call site — inside the ribbon branch');
+test('the PDP takes series_codes from the product response — no override read on load', () => {
+  assert.doesNotMatch(PDP, /API\.getManualProductCodes\(/, 'no PDP-side product_codes read');
+  assert.doesNotMatch(PDP, /manualCodes/, 'no load-merge of an override');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

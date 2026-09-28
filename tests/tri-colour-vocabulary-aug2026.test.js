@@ -297,10 +297,11 @@ test('ProductColors is the ONLY cartridge-colour vocabulary in inkcartridges/js'
         `private cartridge-colour maps must not exist — use ProductColors.getProductStyle(). Found: ${offenders.join(', ')}`);
 });
 
-test('shop-page loadColorPacks paints swatches through ProductColors', () => {
+// The printer page's colour-pack block, whose swatches this pinned, is DELETED
+// (its route 404s since 2026-04-01 — ERR-294). What survives is the rule.
+test('shop-page carries no private colorHex map (loadColorPacks is gone)', () => {
     const src = stripComments(SHOP_SRC);
-    assert.match(src, /ProductColors\.getProductStyle\(item,\s*['"]background-color: #888;['"]\)/,
-        'colour-pack swatches must use getProductStyle (handles color_hex arrays + gradients)');
+    assert.doesNotMatch(src, /loadColorPacks/, 'the colour-pack block is deleted, not hidden');
     assert.doesNotMatch(src, /const\s+colorHex\s*=\s*\{/,
         'the private colorHex literal must be gone');
 });

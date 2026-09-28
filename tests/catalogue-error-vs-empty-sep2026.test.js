@@ -922,8 +922,9 @@ function liftManualCodes(supabaseSelect, src = API_SRC) {
     const API = liftInto(src, [
         '_manualCodeCacheGet(key)',
         '_manualCodeCacheSet(key, value)',
-        '_normManualCode(code)',
-        'async _fetchVisitorIdsForCode(code, category)',
+        // ERR-294: the visitor-id reader is deleted with the rest of the
+        // product_codes reads; the chip-count view is the cache's last reader.
+        'async _fetchManualChipCounts(brandSlug, productTypes)',
         'purgeCatalogCache()',
     ], { DebugLog: QUIET, window: {} });
     API._manualCodeCache = new Map();
@@ -936,15 +937,13 @@ function liftManualCodes(supabaseSelect, src = API_SRC) {
 
 test('§8 a FAILED manual-code read is not memoised — the retry asks again', async () => {
     let calls = 0;
-    const API = liftManualCodes(async () => (++calls === 1 ? null : [{ product_id: 'p1' }]));
+    const API = liftManualCodes(async () => (++calls === 1 ? null : [{ code: 'lc431', product_count: 2 }]));
 
-    // Spread it: the `[]` on the failure path is built INSIDE the vm realm, so
-    // its prototype is not the host's Array.prototype and a strict deepEqual
-    // fails on two arrays that print identically.
-    assert.equal(await API._fetchVisitorIdsForCode('LC431', 'ink'), null,
-        'a failed read says "could not ask" (null), never "no visitors"');
-    assert.deepEqual(await API._fetchVisitorIdsForCode('LC431', 'ink'), ['p1'],
-        'the immediate retry must reach Supabase, not the memoised failure');
+    // Spread it: arrays built INSIDE the vm realm have a different prototype, so
+    // a strict deepEqual fails on two arrays that print identically.
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
+    assert.deepEqual([...(await API._fetchManualChipCounts('brother', ['ink_cartridge']))].map((r) => ({ ...r })),
+        [{ code: 'LC431', count: 2 }], 'the immediate retry must reach Supabase, not the memoised failure');
     assert.equal(calls, 2, 'the failure must not have been cached');
 });
 
@@ -953,28 +952,28 @@ test('§8 POSITIVE CONTROL — an empty ARRAY is a real answer and IS cached', a
     // would delete the cache's whole reason to exist.
     let calls = 0;
     const API = liftManualCodes(async () => { calls++; return []; });
-    await API._fetchVisitorIdsForCode('LC431', 'ink');
-    await API._fetchVisitorIdsForCode('LC431', 'ink');
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
     assert.equal(calls, 1, 'a genuine "no manual codes" answer must still be memoised');
 });
 
 test('§8 POSITIVE CONTROL — a successful read is cached', async () => {
     let calls = 0;
-    const API = liftManualCodes(async () => { calls++; return [{ product_id: 'p1' }]; });
-    assert.deepEqual(await API._fetchVisitorIdsForCode('LC431', 'ink'), ['p1']);
-    assert.deepEqual(await API._fetchVisitorIdsForCode('LC431', 'ink'), ['p1']);
+    const API = liftManualCodes(async () => { calls++; return [{ code: 'LC431', product_count: 1 }]; });
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
+    assert.equal((await API._fetchManualChipCounts('brother', ['ink_cartridge'])).length, 1);
     assert.equal(calls, 1, 'a good read must be memoised');
 });
 
 test('§8 purgeCatalogCache clears the manual-code layer too', async () => {
     let calls = 0;
-    const API = liftManualCodes(async () => { calls++; return [{ product_id: 'p1' }]; });
-    await API._fetchVisitorIdsForCode('LC431', 'ink');
+    const API = liftManualCodes(async () => { calls++; return [{ code: 'LC431', product_count: 1 }]; });
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
     assert.equal(API._manualCodeCache.size, 1);
     API.purgeCatalogCache();
     assert.equal(API._manualCodeCache.size, 0,
         'the manual-code layer is catalogue data and must not outlive a purge');
-    await API._fetchVisitorIdsForCode('LC431', 'ink');
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
     assert.equal(calls, 2, 'after a purge the next read must reach the network');
 });
 
@@ -1110,9 +1109,9 @@ test('§9 MUTANT — delete the manual-code null guard and the failure sticks fo
         'if (value === null || value === undefined) return value;',
         '');
     let calls = 0;
-    const API = liftManualCodes(async () => (++calls === 1 ? null : [{ product_id: 'p1' }]), broken);
-    await API._fetchVisitorIdsForCode('LC431', 'ink');
-    await API._fetchVisitorIdsForCode('LC431', 'ink');
+    const API = liftManualCodes(async () => (++calls === 1 ? null : [{ code: 'LC431', product_count: 1 }]), broken);
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
+    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
     assert.equal(calls, 1,
         'without the guard the failed read must be served back out of cache — that is the bug');
 });

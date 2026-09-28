@@ -241,7 +241,9 @@ test('vercel.json — admin noindex header is on /admin and /admin/* (not the le
         h.headers.some((kv) => kv.key === 'X-Robots-Tag' && /noindex/.test(kv.value)),
     );
     assert.ok(noindexRules.length > 0, 'admin noindex header rule must exist');
-    const sources = noindexRules.map((r) => r.source).sort();
+    // Search URLs are noindexed too since ERR-294 (/shop?search=, ?q=, /search);
+    // this test is about the ADMIN pair, so it reads the admin rules only.
+    const sources = noindexRules.map((r) => r.source).filter((s) => s.startsWith('/admin')).sort();
 
     // `/admin/(.*)` does NOT match the bare `/admin`, so the admin index page
     // was served without the header — measured live Sep 2026, ERR-202. Both

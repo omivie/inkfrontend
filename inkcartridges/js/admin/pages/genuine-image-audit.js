@@ -182,11 +182,14 @@ function buildToolbar() {
   let brandOpts = '<option value="">All brands</option>';
   for (const b of _brands) {
     const name = typeof b === 'string' ? b : b.name || b.brand || String(b);
-    // The SLUG. /image-audit/list and /stats resolve `brand` by slug only: a
-    // brand UUID (what this sent until 2026-09-28) and a brand NAME both answer
-    // 404 "Brand not found" (measured 2026-09-28) — so picking any brand
-    // emptied the grid, and the grid then said "All clean".
-    const val = (typeof b === 'object' && b.slug) ? b.slug : name;
+    // The SLUG, else the id. Until 2026-09-28 /image-audit/list and /stats took
+    // a slug ONLY and answered a UUID or a name with 404 "Brand not found" — the
+    // grid then said "All clean". The backend's BF-081 fix (ERR-294, measured
+    // 2026-09-28) resolves a slug OR an id, like /api/admin/products, and any
+    // other value is 400 UNKNOWN_BRAND. A NAME was never valid, so a brand row
+    // with neither slug nor id is not offered: it could only ever 400.
+    const val = (typeof b === 'object' && b) ? (b.slug || b.id || '') : '';
+    if (!val) continue;
     const sel = String(val) === String(_state.brand) ? ' selected' : '';
     brandOpts += `<option value="${esc(val)}"${sel}>${esc(name)}</option>`;
   }

@@ -8,7 +8,12 @@
  * every card read "No import data". Now each feed returns
  *   { latest, recent_runs: [ ≤5 runs, newest first ] }
  * and each run carries `status`, `dry_run`, `started_at`, `finished_at`,
- * `products_upserted`, `errors`, `warnings`, `feed_row_count`.
+ * `products_upserted`, `errors`, `warnings`, `feed_row_count`, and — since the
+ * backend's BF-080 fix (2026-09-28, ERR-294) — `error_message`: WHY a failed run
+ * failed ("Parent process: import-all.js killed by timeout", "Detected abandoned
+ * run …"). null on a run that did not fail. A failed run found by the next
+ * night's sweep has `finished_at` = when the failure was DETECTED, not when it
+ * stopped (the 09-26 run's "24 hours").
  *
  * `latest` is the latest run of ANY status. The backend's own warning: "Read its
  * status field: the genuine feed has had failed runs". Measured 2026-09-28: the
@@ -36,6 +41,13 @@ function runTime(run) {
   return Number.isFinite(t) ? t : null;
 }
 
+// The recorded reason for a failed run, or null. Trimmed; an empty string is
+// no reason. The text is the backend's and is escaped by the caller.
+function failureReason(run) {
+  const m = run && typeof run.error_message === 'string' ? run.error_message.trim() : '';
+  return m || null;
+}
+
 function summarizeFeed(feed, now = Date.now()) {
   if (feed === null || feed === undefined) return { tone: 'none', latest: null, runs: [], failed: [], reasons: ['No import run on record.'] };
   const runs = Array.isArray(feed.recent_runs) ? feed.recent_runs : [];
@@ -47,7 +59,11 @@ function summarizeFeed(feed, now = Date.now()) {
   let tone = 'ok';
   const worse = (t) => { if (t === 'bad' || (t === 'warn' && tone === 'ok')) tone = t; };
 
-  if (latest.status === 'failed') { worse('bad'); reasons.push('The latest run failed.'); }
+  if (latest.status === 'failed') {
+    worse('bad');
+    const why = failureReason(latest);
+    reasons.push(why ? `The latest run failed: ${why}` : 'The latest run failed, and it recorded no reason.');
+  }
   // Staleness is judged on the latest REAL run: a dry run moves no product.
   const lastReal = [latest, ...runs].find((r) => r && !r.dry_run) || null;
   const t = runTime(lastReal);
@@ -91,7 +107,7 @@ function fmtWhen(iso) {
 function runRowHtml(r, esc) {
   return `<tr class="${r.status === 'failed' ? 'cc2-infra__runfail' : ''}">
     <td>${esc(fmtWhen(r.started_at))}</td>
-    <td><span class="admin-badge admin-badge--${FEED_BADGE[r.status] || 'pending'}">${esc(r.status || 'unknown')}</span>${r.dry_run ? ' <span class="admin-badge admin-badge--pending" title="A dry run changes no product">dry run</span>' : ''}</td>
+    <td><span class="admin-badge admin-badge--${FEED_BADGE[r.status] || 'pending'}">${esc(r.status || 'unknown')}</span>${r.dry_run ? ' <span class="admin-badge admin-badge--pending" title="A dry run changes no product">dry run</span>' : ''}${r.status === 'failed' ? `<div class="cc2-infra__runreason">${esc(failureReason(r) || 'No reason recorded.')}</div>` : ''}</td>
     <td class="num">${fmtNum(r.products_upserted)}</td>
     <td class="num">${fmtNum(r.feed_row_count)}</td>
     <td class="num ${r.errors > 0 ? 'cc2-infra__warn' : ''}">${fmtNum(r.errors)}</td>
@@ -134,6 +150,6 @@ function importFeedsHtml(data, esc, now = Date.now()) {
   }).join('');
 }
 
-const ImportStatus = { STALE_MS, summarizeFeed, summarizeImportStatus, importFeedsHtml };
-export { STALE_MS, summarizeFeed, summarizeImportStatus, importFeedsHtml, ImportStatus };
+const ImportStatus = { STALE_MS, failureReason, summarizeFeed, summarizeImportStatus, importFeedsHtml };
+export { STALE_MS, failureReason, summarizeFeed, summarizeImportStatus, importFeedsHtml, ImportStatus };
 export default ImportStatus;
