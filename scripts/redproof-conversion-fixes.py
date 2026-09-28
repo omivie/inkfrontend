@@ -25,7 +25,6 @@ M = [
  ("inkcartridges/js/cart.js", "        if (!(ship > 0)) return 'Calculated at checkout';", "        if (!(ship >= 0)) return 'Calculated at checkout';"),
  ("inkcartridges/js/cart.js", "            if (!window.matchMedia(`(min-width: ${tablet}px)`).matches) return;", ""),
  ("inkcartridges/js/checkout-page.js", "                a.target = '_blank';", ""),
- ("inkcartridges/js/shop-page.js", "const shelf = list.filter(hasImg).slice(0, this.POPULAR_ROW_LIMIT);", "const shelf = list.slice(0, this.POPULAR_ROW_LIMIT);"),
  ("inkcartridges/js/shop-page.js", "if (p === '/toner-cartridges') return 'Toner Cartridges NZ — Genuine & Compatible';", ""),
  ("inkcartridges/js/pdp-prefetch.js", "if (params.get('printer_slug')) return null;", ""),
  ("inkcartridges/js/pdp-prefetch.js", "? 'https://api.inkcartridges.co.nz'", "? 'https://www.inkcartridges.co.nz'"),

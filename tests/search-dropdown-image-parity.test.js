@@ -281,7 +281,8 @@ test('repo — every card-rendering surface that uses renderCard also binds imag
     // The dropdown was the lone omission. Guard against a NEW surface shipping
     // renderCard output without binding fallbacks. We only assert search.js
     // here (the historically-broken one); the broad invariant is documented.
-    const surfaces = ['shop-page.js', 'filters.js', 'landing.js', 'search.js'];
+    // landing.js left this list in ERR-290 (its featured grid was deleted).
+    const surfaces = ['shop-page.js', 'filters.js', 'search.js'];
     for (const f of surfaces) {
         const src = fs.readFileSync(JS(f), 'utf8');
         assert.match(src, /bindImageFallbacks/,

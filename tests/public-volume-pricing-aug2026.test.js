@@ -415,7 +415,7 @@ test('every grid that renders product cards ingests the payload it rendered from
     const GRIDS = [
         ['shop-page.js', /Business\.ingest\(products\)/],
         ['ribbons-page.js', /Business\.ingest\(ribbons\)/],
-        ['landing.js', /Business\.ingest\(products\)/],
+        // landing.js left this list in ERR-290 (its featured grid was deleted).
         ['favourites.js', /Business\.ingest\(/],
         ['products.js', /Business\.ingest\(products\)/],
         ['filters.js', /decorateBusinessPricing\(productGrid, products\)/]

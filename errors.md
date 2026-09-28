@@ -41,6 +41,45 @@ describing the same incident.
 
 ---
 
+## ERR-290 — The owner removed the "Popular … right now" and "Full colour sets" rows from every page, and the handoff's own list missed a caller of the endpoint it was about to delete — **RESOLVED (frontend)** (2026-09-28)
+
+**Source.** Backend handoff `remove-popular-and-colour-set-rows-FE-sep2026.md` (P1, 2026-09-28), passing on the owner's decision: *"these two rows are no longer needed since users have different printers requiring different cartridges. Please remove this logic across all pages."* A best-seller or colour-set row shows cartridges for printers the visitor does not own. Reply: `backend-docs/outbox/remove-popular-rows-FE-reply-sep2026.md`.
+
+**Measured.** `npm run probe:popular-rows-removed` checks every URL in the handoff's table at 1440x900 and 390x664, plus `/value-packs` as the negative control.
+
+| | production, before (pre-deploy) | localhost:3000, after |
+|---|---|---|
+| result | **35 passed, 46 failed** | **81 passed, 0 failed** (one 429 retried, see below) |
+| row h2/h3 in the DOM | on all 9 URLs, both viewports | none |
+| `/api/products/popular` requests | `/ink-cartridges`, `/toner-cartridges` (`limit=24`), `/ribbons` (desktop: **3 identical requests** per load) | none |
+| first block under the title on `/ribbons` | `section#popular-row` | the brand picker |
+| negative control `/value-packs` | h1 "Full colour sets", 24 cards, its own `pack=value_pack` request | same, unchanged |
+
+**What the handoff got right, for a reason it did not state.** The rows were in `#level-brands` only, so a SHOPPER saw them only on the two paid landings and `/ribbons`. But `html/shop.html` serves every `/shop*`, `/ink-cartridges`, `/toner-cartridges` and `/search` URL, and it shipped both sections as `hidden` markup. So the backend's DOM check found the h2s on brand, code, printer and search pages too. Hiding them again would have passed a visual check and failed theirs. Deleted, not hidden.
+
+**What the handoff missed.** It lists the pages that SHOW a row. It asks us to stop calling `/api/products/popular` so that the backend can delete the endpoint. `js/landing.js` `loadFeaturedProducts()` also called it, from the HOME page, which the handoff lists as "not affected". That caller was inert: no HTML ships `#featured-products-grid`. It would have become a call to a deleted route the day anyone added the markup, which is the same landmine the ERR-254 addendum documented for the search call it replaced. ***An inert caller is still a caller: the endpoint's deletion is what arms it.*** Deleted, and the five card-parity test lists that enrolled `landing.js` now leave it out. A new guard fails if `landing.js` ever renders a card again without re-joining them.
+
+**A heading that was not a row but would have failed the acceptance check.** The zero-results page's OFFLINE fallback rail was titled "Browse popular categories" (an h3). That matches the backend's `/Popular/` regex without being a best-seller row. It is renamed "Browse by category". The six tiles are KEPT, because removing a fallback is a behaviour change (ERR-158).
+
+**The backend's no-`recovery` case.** They dropped `kind:"popular"` from `recovery.rails[]` and asked for "the contact / printer-finder help". We never rendered `popular`, and the brand grid still renders whenever brands load. Added: a "Still can't find it?" rail linking to the Ink Finder (`/?scroll=ink-finder`). Contact is NOT repeated in that rail, because `html/shop.html`'s `.need-help` box (phone + email) already sits under every `/search` page. The test pins that the box stays.
+
+**Kept, per the handoff, each pinned as a POSITIVE CONTROL** (§4 of the new test, green on both trees): `/value-packs` and its "Full colour sets" h1 and request; the "Full-set value pack" card badge; PDP `pack_suggestion`; cart `pack_suggestion_for_line`. Also kept: the printer page's "Colour Pack Bundles" (`GET /api/printers/:slug/color-packs`). Those are the printer's OWN packs, so they satisfy the owner's rule, and they did not render on the printer page the probe measured. The probe warns if they ever sit above the product list.
+
+**🚨 The probe's first local run failed on a DIFFERENT URL each time.** The first run failed `/shop?brand=brother&code=LC73` desktop, and the second failed `/search` desktop. Both render fine on re-measure (3/3). The instrumented third run showed why: **429** on `/api/shop`, `/api/products/printer/*`, `/api/site/*` and `/api/settings`. The probe's own 19 unpaced page loads had spent the per-IP limit (ERR-266, 100/60s shared across endpoints), and the page rendered its error pane. ***A failure that moves is not the page. It was the instrument.*** The probe now paces 6s between loads, retries once after a 65s window on a 429, and reports a 429 that survives the retry as **NOT EXERCISED**, never as a pass.
+
+**Removed:**
+- markup: `#popular-row` and `#value-pack-rail` from `html/shop.html`, `#popular-row` from `html/ribbons.html`;
+- `ShopPage.POPULAR_CATEGORY_API`, `POPULAR_ROW_LIMIT`, `POPULAR_FETCH_LIMIT`, `VALUE_PACK_RAIL_LIMIT`, `renderPopularRow`, `splitPopularRows`, `renderValuePackRail`;
+- `RibbonsPage.renderPopularRow`, `API.getPopularProducts`, `landing.js` `loadFeaturedProducts`;
+- 68 lines of `pages.css`, including `.product-card--placeholder`, whose only users were the shelves;
+- `scripts/probe-landing-popular.mjs`, `scripts/probe-popular-categories.mjs`, `tests/landing-popular-products-sep2026.test.js`.
+
+The ERR-276 CLS reservation §2/§3 is retired with a note, because nothing opens above the brand picker any more.
+
+**Guards:**
+- `tests/popular-rows-removed-sep2026.test.js`: 13 tests. **Red-proof: 9 fail against HEAD's tree** (copied into a worktree of `d3d4be5`), and the 4 keep-list controls pass on both trees.
+- `npm run probe:popular-rows-removed`: READ-ONLY, runs a `zzprobe_` search term, uses no `ctx.route()` on the API, and puts its negative control first.
+
 ## ERR-293 — A compatible PDP still put Add to Cart under the consent bar, cards dropped the "+N" printers, the countdown promised same-day dispatch without its Auckland-metro scope, and /review was still dark after the backend went live — **RESOLVED (frontend)** (2026-09-28)
 
 **Source.** Backend post-deploy check `inbox/fe-post-deploy-fixes-sep2026.md` (2026-09-28). The backend measured the ERR-287/288/289 deploy on production. Reply: `outbox/post-deploy-fixes-FE-reply-sep2026.md`.

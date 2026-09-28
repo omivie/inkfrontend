@@ -1304,7 +1304,7 @@ test('every grid that renders product cards invokes the bulk overlay', () => {
         'filters.js': /decorateBusinessPricing\(/,
         'ribbons-page.js': /Business\.decorateCards\(/,
         'favourites.js': /Business\.decorateCards\(/,
-        'landing.js': /Business\.decorateCards\(/
+        // landing.js left this list in ERR-290 (its featured grid was deleted).
     };
     for (const [file, re] of Object.entries(grids)) {
         assert.match(stripComments(JS(file)), re,
@@ -1314,7 +1314,7 @@ test('every grid that renders product cards invokes the bulk overlay', () => {
 });
 
 test('every card renderer emits the data-sku the overlay finds cards by', () => {
-    for (const file of ['products.js', 'shop-page.js', 'ribbons-page.js', 'favourites.js', 'landing.js']) {
+    for (const file of ['products.js', 'shop-page.js', 'ribbons-page.js', 'favourites.js']) {
         assert.match(stripComments(JS(file)), /data-sku|dataset\.sku/, `${file} emits no SKU`);
     }
 });

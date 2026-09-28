@@ -2525,29 +2525,6 @@ const API = {
     },
 
     /**
-     * The most-bought products in one category — the ad landing pages' shelf.
-     *
-     * ERR-236: /ink-cartridges, /toner-cartridges and /ribbons are where Google
-     * Ads lands (`buy ink cartridges` alone is 53% of spend) and all three
-     * painted a brand chooser and not one price. This endpoint has been live
-     * and answering correctly the entire time — measured 2026-09-09, 200 with
-     * real rows on all three categories, cost_price stripped, quantity_breaks
-     * present. Nothing on the frontend was asking it.
-     *
-     * getWithSWR + catalogEndpoint, deliberately. The response IS edge-cached
-     * (measured the same day: `s-maxage=300, stale-while-revalidate=600`,
-     * `vary: Origin, Accept-Encoding`), so the URL is the cache key and two
-     * spellings of one question are two entries — the ERR-124/159 hazard.
-     * catalogEndpoint fixes the param order; `anonymous: true` keeps identity
-     * off an entry that is shared with every other visitor.
-     *
-     * @param {object} params - { category: 'ink'|'toner'|'ribbons', limit }
-     */
-    async getPopularProducts(params = {}) {
-        return this.getWithSWR(this.catalogEndpoint('/api/products/popular', params), { anonymous: true });
-    },
-
-    /**
      * Get auto-generated color packs for a printer
      * @param {string} printerSlug - Printer slug
      * @param {object} [params] - Optional query params (include_unavailable, source)

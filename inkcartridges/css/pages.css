@@ -8702,53 +8702,6 @@ a.account-review-card__product:focus-visible {
     transform: translateY(-2px);
 }
 
-/* PLACED HERE, AFTER .product-card, AND THAT IS LOAD-BEARING.
-   It was first written up beside the other skeletons at ~4400, six thousand
-   lines ABOVE .product-card — where the base rule's `background` and
-   `border-radius` simply won, because equal specificity is decided by source
-   order and the base came last. The shimmer never rendered and the reservation
-   still worked, so nothing looked wrong. Caught by
-   tests/order-pathway-three-step-sep2026.test.js, which exists for exactly this
-   ("a BEM modifier never redeclares a property its base sets LATER in the
-   file") — a rule I had to be told by a test I did not know was watching. */
-/* ── THE /ribbons SHELF HOLDS ITS OWN SPACE (ERR-276) ───────────────────────
-   /ribbons is the one landing whose popular shelf is UNCONDITIONAL — it is a
-   single-category page, so there is no route on which the shelf fails to
-   appear and the reservation has nothing to be wrong about. That is why these
-   placeholders ship visible in html/ribbons.html and nowhere else: on
-   html/shop.html the same markup serves /shop, which has no shelf, and
-   reserving 1,121px there would trade two good pages for one bad one.
-
-   The rest of the drilldown reserves its space through the loading skeleton
-   instead (#drilldown-loading now ships visible, the levels ship hidden) —
-   see the note at .skeleton--brand-box.
-
-   WHY IT IS NEEDED HERE AND NOT ON /shop. ribbons-page.js#showLevel un-hides
-   the level and THEN calls renderPopularRow(), so the shelf always arrives
-   after the page is already on screen; shop-page.js calls renderPopularRow
-   from inside renderBrands, before its caller reveals the level. Measured on
-   production 2026-09-20, Pixel-5 profile at 4x CPU throttle: /ribbons CLS
-   0.607 POOR, all of it one shift — the "Typewriter & Printer Ribbons" card
-   pushed off the bottom of the viewport when the 1,121px shelf opened above it.
-
-   The CARD HEIGHT is the only constant here; the row count comes from the same
-   .popular-row__grid the real cards use, so it follows the same 2-up/4-up
-   breakpoints. Measured card heights: 525px at 390 wide, 511 at 768, 522 at
-   1440 — one value covers all three to within 14px, about 1% of the section.
-   `npm run probe:shop-cls` re-measures and fails if this drifts. */
-.product-card--placeholder {
-    min-height: 520px;
-    border-radius: var(--radius-lg, 12px);
-    background: linear-gradient(90deg, #f4f6f8 25%, #eceff2 50%, #f4f6f8 75%);
-    background-size: 200% 100%;
-    animation: skeleton-loading 1.5s infinite;
-    pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .product-card--placeholder { animation: none; }
-}
-
 
 /* CARDS PER ROW IN THE TWO SOURCE COLUMNS.
    SCOPED TO .products-row ON PURPOSE. The .product-card rule above is GLOBAL:
@@ -9559,15 +9512,7 @@ body.page-shop {
     .shop-section-card .shop-products__grid,
     .shop-section-card .related-products__grid,
     .shop-section-card .color-packs-grid,
-    .shop-section-card .ribbon-products-grid,
-    /* ERR-236: the landing-page popular shelf. It MUST be in this list. The
-       rule below gives cards in a grid parent `max-width: none; width: 100%`,
-       which is right for a 2-up track and wrong for a 1-up one: measured at
-       390px the shelf's cards came out 324px, past the 200px container query
-       on .product-card, which flips the footer to price-BESIDE-button and
-       clips the Add label. A wider card producing a smaller button — the
-       ERR-218 shape. 2-up puts them at ~167px, inside the window. */
-    .shop-section-card .popular-row__grid {
+    .shop-section-card .ribbon-products-grid {
         grid-template-columns: repeat(2, 1fr);
         gap: var(--spacing-sm);
     }
@@ -13910,7 +13855,6 @@ body.page-shop {
    Measured by the Playwright check in tests/conversion-fixes-sep2026's
    companion probe; numbers in errors.md. */
 @media (max-width: 479.98px) {
-    .shop-page .popular-row__grid,
     .shop-page .product-grid {
         grid-template-columns: minmax(0, 1fr) !important;
         gap: var(--spacing-sm);
@@ -14096,11 +14040,6 @@ body.page-shop {
 .landing-printer-search__hit:hover,
 .landing-printer-search__hit:focus-visible { text-decoration: underline; }
 .landing-printer-search__none { padding: 10px 4px; color: var(--color-text); font-size: var(--font-size-sm); }
-.value-pack-rail__lead {
-    margin: 0 0 var(--spacing-sm);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-light);
-}
 
 /* Paid landing chrome on a phone (D-P0-4): the per-page h1 is one to two
    short lines, and the printer box is the first control, tight. */
@@ -14115,12 +14054,6 @@ body.page-shop {
     .shop-page.shop-page--drilldown { padding-top: 8px; }
     .shop-page .drilldown-breadcrumb { min-height: 0; padding-top: 0; padding-bottom: 0; }
     .shop-page .drilldown-header { margin-bottom: 4px; }
-    .shop-page #popular-row,
-    .shop-page #value-pack-rail { padding: 10px; }
-    .shop-page #popular-row .shop-section-card__header,
-    .shop-page #value-pack-rail .shop-section-card__header { margin-bottom: 6px; padding-bottom: 4px; }
-    .shop-page #popular-row .shop-section-card__title,
-    .shop-page #value-pack-rail .shop-section-card__title { font-size: 1.0625rem; }
     /* On the two PAID landing pages the printer box is the way in; the
        "Shop › Ink Cartridges" trail above it is one level deep and cost 44px
        of the 664px phone viewport — enough to put the first Add button under

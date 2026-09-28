@@ -384,20 +384,9 @@ test('§5 checkout points line comes from the cart, and the guest link opens a n
 // §6 paid landing pages
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§6 the shelf takes 8 rows WITH images; the pack rail takes packs not already shown', () => {
-    const self = { POPULAR_ROW_LIMIT: 8, VALUE_PACK_RAIL_LIMIT: 8 };
-    const split = method('js/shop-page.js', 'splitPopularRows', self);
-    const rows = [];
-    for (let i = 0; i < 20; i++) rows.push({ sku: `S${i}`, image_url: i % 5 === 4 ? null : 'x', pack_type: i % 3 === 0 ? 'value_pack' : 'single' });
-    const { shelf, packs } = split(rows);
-    assert.equal(shelf.length, 8);
-    assert.ok(shelf.every((r) => r.image_url), 'a paid landing page of placeholder tiles sells nothing');
-    const onShelf = new Set(shelf.map((r) => r.sku));
-    assert.ok(packs.every((r) => r.pack_type === 'value_pack' && !onShelf.has(r.sku)));
-    assert.ok(packs.findIndex((r) => !r.image_url) === -1 || packs.slice(packs.findIndex((r) => !r.image_url)).every((r) => !r.image_url),
-        'image-bearing packs first');
-    assert.deepEqual(JSON.parse(JSON.stringify(split(null))), { shelf: [], packs: [] });
-});
+// "§6 the shelf takes 8 rows WITH images; the pack rail takes packs not already
+// shown" was RETIRED with both rows (owner, 2026-09-28, ERR-290). Their absence
+// is pinned in tests/popular-rows-removed-sep2026.test.js.
 
 test('§6 each paid landing has its own h1; every other URL keeps the old one', () => {
     for (const [p, want] of [['/ink-cartridges', 'Ink Cartridges NZ — Genuine & Compatible'],
@@ -409,17 +398,18 @@ test('§6 each paid landing has its own h1; every other URL keeps the old one', 
 
 test('§6 the printer box is FIRST on the landing, uses /api/printers/search (no search_analytics write)', () => {
     const html = read('html/shop.html');
-    const box = html.indexOf('id="landing-printer-search"'), shelf = html.indexOf('id="popular-row"');
-    assert.ok(box > 0 && box < shelf);
+    // FIRST inside #level-brands, directly above the brand picker — nothing
+    // between them since the popular shelf and the "Full colour sets" rail went
+    // (ERR-290).
+    const level = html.indexOf('id="level-brands"'), box = html.indexOf('id="landing-printer-search"'),
+        brands = html.indexOf('id="brands-grid"');
+    assert.ok(level > 0 && box > level && box < brands);
+    assert.doesNotMatch(html.slice(level, brands).replace(/<!--[\s\S]*?-->/g, ''), /<section(?![^>]*landing-printer-search)/,
+        'no section may sit between the printer box and the brand picker');
     const fn = extractMethod(stripComments(read('js/shop-page.js')), 'renderLandingPrinterSearch').body;
     assert.match(fn, /API\.searchPrinters\(q\)/);
     assert.doesNotMatch(fn, /smartSearch|\/api\/search\//, 'ERR-254: a typeahead must not file searches');
     assert.match(fn, /PrinterName\.display/);
-});
-
-test('§6 the popular grid reserves one placeholder per shelf slot', () => {
-    const grid = read('html/shop.html').match(/id="popular-row-grid">([\s\S]*?)<\/div>\s*<\/section>/)[1];
-    assert.equal((grid.match(/product-card--placeholder/g) || []).length, 8);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -488,7 +478,7 @@ test('§8 the three pages + /review are routed in BOTH rewrite tables and carry 
 
 test('§8 cart email ships DARK, reviews LIVE (2026-09-28), and the consent box is unticked', () => {
     const cfg = read('js/config.js');
-    // guestReviews went live with the backend's confirmation (ERR-293,
+    // guestReviews went live with the backend's confirmation (ERR-290,
     // backend-docs/inbox/fe-post-deploy-fixes-sep2026.md §1).
     assert.match(cfg, /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*false,\s*guestReviews:\s*true,?\s*\}/);
     const box = read('html/checkout.html').match(/<input type="checkbox" id="guest-cart-email-consent"[^>]*>/)[0];

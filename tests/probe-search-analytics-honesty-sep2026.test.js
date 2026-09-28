@@ -389,8 +389,8 @@ test('§11 no front-end file issues a HARDCODED search term', () => {
     // ***AND IT IS THE ONE KIND OF POLLUTION THAT CANNOT BE FILTERED.*** A probe term
     // can carry `zz`. "ink cartridge" is what a real shopper types, so excluding it
     // would delete real demand — the same argument that keeps `test` unfiltered on the
-    // backend's side. The only fix is not to send it, which is why landing.js now reads
-    // /api/products/popular instead.
+    // backend's side. The only fix is not to send it: landing.js moved the rail to
+    // /api/products/popular, and in ERR-290 the rail itself was deleted.
     //
     // It was INERT when found (no HTML in this repo has #featured-products-grid, so the
     // call was unreachable). That is why this test exists rather than just the fix: the
@@ -407,8 +407,8 @@ test('§11 no front-end file issues a HARDCODED search term', () => {
     }
     assert.deepEqual(offenders, [],
         'these pass a hardcoded term to a search endpoint, so the site writes that term to '
-        + '`search_analytics` on every page view. Use a non-search source — /api/products/popular '
-        + 'for a featured rail (API.getPopularProducts) — or the term becomes an unfilterable '
+        + '`search_analytics` on every page view. Use a non-search source, or no rail at all — the '
+        + 'site has no best-seller rails since ERR-290 — or the term becomes an unfilterable '
         + 'entry in the live top-search-terms list.');
 
     // POSITIVE CONTROL: the pattern must actually match the shape it forbids, or this
@@ -424,21 +424,19 @@ test('§11 no front-end file issues a HARDCODED search term', () => {
     }
 });
 
-test('§11 the featured rail reads the popular endpoint, not the search one', () => {
-    // Naming the replacement, not just forbidding the original. Without this, the fix
-    // could be "delete the rail", and the next person to want a featured rail starts
-    // from the search endpoint again because nothing records which source is correct.
+test('§11 the featured rail is DELETED — not refilled from search', () => {
+    // This used to name the replacement (API.getPopularProducts) so that "delete the
+    // rail" could not pass for a fix. In ERR-290 deleting it WAS the fix: the owner
+    // removed every best-seller row on 2026-09-28 and the backend is retiring
+    // /api/products/popular. What still has to hold is the ERR-254 half — whoever
+    // brings a home-page rail back must not bring it back from the search endpoint.
     const src = fs.readFileSync(path.join(FE_JS, 'landing.js'), 'utf8');
     const code = stripComments(src);
-    assert.match(code, /API\.getPopularProducts\(/,
-        'js/landing.js must fill the featured rail from /api/products/popular');
     assert.doesNotMatch(code, /API\.smartSearch\(/,
-        'and must not search for products to feature');
-    // No category is passed, deliberately — `consumable` resolves to NO filter rather
-    // than drums (shop-page.js:1562), so a guessed category silently changes the shelf.
-    assert.doesNotMatch(code, /getPopularProducts\(\s*\{[^}]*category/,
-        'no category should be guessed here — bare popular is the whole-catalogue rail');
-    assert.match(src, /ERR-254/, 'the reason must survive next to the call');
+        'js/landing.js must not search for products to feature');
+    assert.doesNotMatch(code, /getPopularProducts|featured-products-grid/,
+        'the featured rail was deleted in ERR-290 — it must not come back half-wired');
+    assert.match(src, /ERR-290/, 'the reason must survive where the rail was');
 });
 
 test('§12 the endpoint detector keys on a URL being BUILT, not on the endpoint being named', () => {

@@ -14,9 +14,10 @@
  *
  * tests/shop-cls-reservation-sep2026.test.js pins the STRUCTURE that makes the
  * reservation work — the levels ship hidden, the loading block ships visible,
- * the /ribbons shelf ships its placeholders. It cannot prove a box is the size
- * it claims, and it stays green through a stylesheet that changes a tile's
- * height, a script that reveals a level earlier, or a shelf that grows a row.
+ * (the popular shelves and their placeholders were removed in ERR-290). It
+ * cannot prove a box is the size it claims, and it stays green through a
+ * stylesheet that changes a tile's height or a script that reveals a level
+ * earlier.
  *
  * MEASURED BEFORE AND AFTER, same machine, same profile (2026-09-20):
  *
@@ -171,7 +172,6 @@ try {
                  * This is the control that stops a broken render reading green. */
                 rendered: {
                     brandTiles: document.querySelectorAll('#brands-grid .drilldown-box, #ribbons-brands-grid .drilldown-box').length,
-                    popularCards: document.querySelectorAll('#popular-row-grid .product-card:not(.product-card--placeholder)').length,
                     placeholdersLeft: document.querySelectorAll('.product-card--placeholder').length,
                     levelVisible: !!document.querySelector('.drilldown-level:not([hidden])'),
                     loadingVisible: !(document.getElementById('drilldown-loading') || { hidden: true }).hidden,
@@ -184,7 +184,7 @@ try {
                 console.log(`    ${String(s.value).padEnd(8)} @${String(s.t).padStart(6)}ms  ${s.sources.join('\n                            ')}`);
             }
             if (!r.shifts.length) console.log('    (no shift above 0.0005)');
-            console.log(`    rendered: ${r.rendered.brandTiles} brand tile(s), ${r.rendered.popularCards} popular card(s), `
+            console.log(`    rendered: ${r.rendered.brandTiles} brand tile(s), `
                 + `${r.rendered.placeholdersLeft} placeholder(s) left, level visible=${r.rendered.levelVisible}, `
                 + `loading visible=${r.rendered.loadingVisible}`);
 
@@ -207,8 +207,8 @@ try {
 
             if (r.rendered.placeholdersLeft > 0) {
                 bad(`${route} left ${r.rendered.placeholdersLeft} placeholder(s) on screen`,
-                    'the /ribbons shelf placeholders must be replaced by real cards or the section '
-                    + 'hidden. A shimmering card that never resolves promises content that is not coming.');
+                    'no page ships placeholders since the popular shelves were removed (ERR-290) — '
+                    + 'something put one back. A shimmering card that never resolves promises content that is not coming.');
             }
         }
         await ctx.close();

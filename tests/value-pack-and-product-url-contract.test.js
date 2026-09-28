@@ -162,11 +162,7 @@ test('js/favourites.js — favourite item link prefers canonical_url', () => {
         'favourites.js must read item.canonical_url');
 });
 
-test('js/landing.js — featured product card prefers canonical_url', () => {
-    const src = readText(path.join(INK, 'js', 'landing.js'));
-    assert.ok(/canonical_url/.test(src),
-        'landing.js must read p.canonical_url');
-});
+// js/landing.js's featured product card was deleted in ERR-290 — no card, no href to check.
 
 test('js/search.js — productHref prefers canonical_url when present', () => {
     const src = readText(path.join(INK, 'js', 'search.js'));

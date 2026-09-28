@@ -55,7 +55,6 @@ const PDP_SRC = READ(JS('product-detail-page.js'));
 const PRODUCTS_SRC = READ(JS('products.js'));
 const CART_SRC = READ(JS('cart.js'));
 const SHOP_SRC = READ(JS('shop-page.js'));
-const LANDING_SRC = READ(JS('landing.js'));
 const FAVOURITES_SRC = READ(JS('favourites.js'));
 
 // stripComments now has ONE owner (ERR-253). Every test file used to carry its
@@ -113,7 +112,7 @@ const CARD_SURFACES = [
     { label: 'products.js (card listings)', src: PRODUCTS_SRC },
     { label: 'shop-page.js (chip drilldown + listings)', src: SHOP_SRC },
     { label: 'cart.js (cart line items + remove flow)', src: CART_SRC },
-    { label: 'landing.js (homepage promo rows)', src: LANDING_SRC },
+    // landing.js (homepage promo rows) left this list in ERR-290: the featured grid was deleted.
     { label: 'favourites.js (saved items)', src: FAVOURITES_SRC },
 ];
 

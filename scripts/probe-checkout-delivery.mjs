@@ -60,7 +60,10 @@ const PHONE = MOBILE_PHONE;
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
     + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-const LANDING = LOCAL ? '/html/shop?category=ink' : '/ink-cartridges';
+// A code listing, not /ink-cartridges: the landing's popular row was the seed until
+// ERR-290 removed it, and a category landing now shows only the brand picker.
+// brand+category is not a listing either (it opens the code grid); brand+code is.
+const LANDING = LOCAL ? '/html/shop?brand=brother&code=LC73' : '/shop?brand=brother&code=LC73';
 const CHECKOUT = LOCAL ? '/html/checkout' : '/checkout';
 
 const URBAN_ADDRESS = { address1: '12 Great North Road', city: 'Auckland', region: 'auckland', postcode: '1021' };
@@ -107,16 +110,19 @@ const money = (s) => {
     return m ? Number(m[1]) : null;
 };
 
-/** Seed a cart from the popular row — which also proves that row's Add works. */
+// Listing cards use __cart-btn; __contact-btn is the same class on an unpriced card, which adds nothing.
+const SEED_BTN = '#level-products .products-row .product-card__cart-btn:not(.product-card__contact-btn)';
+
+/** Seed a cart from the listing's first card — which also proves a listing's Add works. */
 async function seedCart(page) {
     await page.goto(`${BASE}${LANDING}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     try {
-        await page.waitForSelector('#popular-row-grid .product-card__add-btn', { timeout: 25000 });
+        await page.waitForSelector(SEED_BTN, { timeout: 25000 });
     } catch {
-        return `no Add button appeared in the popular row on ${LANDING} — either ERR-236 has `
-            + 'regressed or this landing page is not rendering products at all';
+        return `no Add button appeared in the product list on ${LANDING} — `
+            + 'this listing is not rendering products at all';
     }
-    await page.evaluate(() => document.querySelector('#popular-row-grid .product-card__add-btn').click());
+    await page.evaluate((sel) => document.querySelector(sel).click(), SEED_BTN);
     for (let i = 0; i < 20; i++) {
         await page.waitForTimeout(750);
         const stored = await page.evaluate(() => localStorage.getItem('inkcartridges_cart'));

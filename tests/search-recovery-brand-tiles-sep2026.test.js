@@ -170,20 +170,20 @@ test('the six category tiles are KEPT — as the fallback, not the default', () 
 
   // Reachable ONLY from the else branch: the brand rail is what renders normally.
   const elseAt = body.indexOf('} else {');
-  const popularAt = body.indexOf('const popular = [');
+  const tilesAt = body.indexOf('const categoryTiles = [');
   assert.notEqual(elseAt, -1, 'the fallback must live behind an else');
-  assert.ok(popularAt > elseAt,
+  assert.ok(tilesAt > elseAt,
     'the six tiles must render only when the brand grid could not be read');
 
   const brandRailAt = body.indexOf('Browse by brand');
-  assert.ok(brandRailAt !== -1 && brandRailAt < popularAt,
+  assert.ok(brandRailAt !== -1 && brandRailAt < tilesAt,
     'the brand rail is the primary; the category tiles come after it');
 });
 
 test('a degraded brand list is never silent', () => {
   const body = recoveryBody();
   const elseAt = body.indexOf('} else {');
-  const fallback = body.slice(elseAt, body.indexOf('const popular = [', elseAt));
+  const fallback = body.slice(elseAt, body.indexOf('const categoryTiles = [', elseAt));
 
   assert.match(fallback, /DebugLog\.error/,
     'a rail frozen at the last deploy must say so — a silent fallback that renders a '

@@ -246,7 +246,7 @@ test('§1 every card renderer gates on review_count > 0 — identically', () => 
     const surfaces = {
         'products.js': JS('products.js'),
         'shop-page.js': JS('shop-page.js'),
-        'landing.js': JS('landing.js'),
+        // landing.js left this list in ERR-290 (its featured grid was deleted).
         'ribbons-page.js': JS('ribbons-page.js'),
         'favourites.js': JS('favourites.js'),
     };

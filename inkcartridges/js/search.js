@@ -55,8 +55,9 @@
     //
     // The old 120 in this comment was real — it is just the limit on a
     // DIFFERENT endpoint than the one this file calls. None of the four carry
-    // `x-ratelimit-*`; the global /api/ limiter (100) skips /search/, and
-    // /api/products/popular is the endpoint that carries both (60 + 100).
+    // `x-ratelimit-*`; the global /api/ limiter (100) skips /search/, whereas
+    // catalogue routes carried both (measured on /api/products/popular, 60 +
+    // 100, before that endpoint was retired in ERR-290).
     // Do not port a number between any of them.
     //
     // 250ms STAYS, because the thing that actually pays the bill changed in our

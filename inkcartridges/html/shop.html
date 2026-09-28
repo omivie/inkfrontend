@@ -40,7 +40,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=6c31b559">
     <link rel="stylesheet" href="/css/components.css?v=49be8b64">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=2c887a0b">
+    <link rel="stylesheet" href="/css/pages.css?v=bdb9188c">
     <link rel="stylesheet" href="/css/search.css?v=2d1d8e23">
 
     <script type="application/ld+json" id="shop-schema">
@@ -240,12 +240,6 @@
                         </style>
                     </noscript>
                     <div class="drilldown-level" id="level-brands" hidden>
-                        <!-- ERR-236: the ad landing pages' shelf. Hidden until a
-                             category landing (/ink-cartridges, /toner-cartridges)
-                             fills it, so bare /shop is unchanged. Reuses
-                             .shop-section-card + .product-grid, the same pairing
-                             the PDP related and bought-together rows use, so it
-                             needs no CSS of its own. -->
                         <!-- "Enter your printer model" — the FIRST thing on the paid
                              landing pages (conversion handoff 2026-09-27 §8.1): the
                              typical buyer owns one printer and wants one cartridge that
@@ -263,45 +257,6 @@
                                 </div>
                                 <ul class="landing-printer-search__results" id="landing-printer-search-results" hidden></ul>
                             </form>
-                        </section>
-
-                        <section class="shop-section-card" id="popular-row" hidden>
-                            <div class="shop-section-card__header">
-                                <h2 class="shop-section-card__title" id="popular-row-title">Popular right now</h2>
-                            </div>
-                            <!-- Eight placeholders, because POPULAR_ROW_LIMIT is 8 (was 4 until the
-                                 conversion handoff 2026-09-23 asked for 8 real products). Unlike
-                                 /ribbons, this shelf is CONDITIONAL — bare /shop has no
-                                 category and shows none — so the section still ships
-                                 `hidden`, and shop-page.js#renderPopularRow un-hides it
-                                 synchronously, before its fetch, once it knows the route
-                                 has a shelf. These hold the height across that fetch so
-                                 the shelf does not open on top of the brand picker
-                                 (ERR-276). They sit in the same grid as the real cards,
-                                 so the row count follows the same breakpoints. -->
-                            <div class="popular-row__grid product-grid" id="popular-row-grid">
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                                <div class="product-card product-card--placeholder" aria-hidden="true"></div>
-                            </div>
-                        </section>
-
-                        <!-- "Full colour sets" — value packs among what this category
-                             actually sells (conversion handoff 2026-09-27 §8.4). Filled
-                             from the SAME /api/products/popular response as the shelf
-                             above: packs only, never a second request. Hidden when the
-                             response holds no pack. -->
-                        <section class="shop-section-card" id="value-pack-rail" hidden>
-                            <div class="shop-section-card__header">
-                                <h2 class="shop-section-card__title">Full colour sets</h2>
-                            </div>
-                            <p class="value-pack-rail__lead" id="value-pack-rail-lead" data-value-prop="value_packs.detail" hidden></p>
-                            <div class="popular-row__grid product-grid" id="value-pack-rail-grid"></div>
                         </section>
 
                         <div class="shop-section-card">
@@ -534,14 +489,14 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=d8fb6971"></script>
+    <script defer src="/js/shop-page.js?v=317be1f3"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=068d4cd4"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/api.js?v=e0d54c24"></script>
+    <script defer src="/js/api.js?v=dc8c3558"></script>
     <script defer src="/js/seo-meta.js?v=01f6ecf3"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=ef747a72"></script>
@@ -553,7 +508,7 @@
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=4482d91c"></script>
     <script defer src="/js/products.js?v=d3b78e7f"></script>
-    <script defer src="/js/search.js?v=035426e6"></script>
+    <script defer src="/js/search.js?v=c2997f45"></script>
     <!-- search-click-tracking-aug2026 — POST /api/search/click for results-page
          card clicks. THIS PAGE ONLY: /search is a rewrite to this HTML, so the
          results grid lives here and nowhere else. Never add it to a page that

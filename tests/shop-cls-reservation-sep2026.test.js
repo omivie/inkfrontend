@@ -51,8 +51,8 @@
  *   - `hidden` on #level-brands looks redundant (JS un-hides it anyway) — §1
  *   - a VISIBLE #drilldown-loading looks like a bug, because every other
  *     loading block on the site ships hidden — §1
- *   - `section.hidden = false` before a fetch looks premature — §3
- *   - four empty divs in the markup look like leftovers — §2
+ *   - (§2/§3, the shelf's placeholders and reveal order, retired with the
+ *     shelf itself in ERR-290 — see the note where they were)
  *   - the <noscript> block looks like dead weight — §4
  * None of them has a visible symptom when removed: the page still works, it
  * just shifts again, and layout shift has no error message.
@@ -141,85 +141,15 @@ test('§1 the brand skeleton is the height of the tile it stands in for', () => 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// §2 the shelf's own height
+// §2 + §3 RETIRED (ERR-290, 2026-09-28)
 // ═══════════════════════════════════════════════════════════════════════════
-
-test('§2 both shelves ship placeholders, one per row the shelf will render', () => {
-    // Each shelf reads ITS OWN limit: /ink-cartridges and /toner-cartridges show
-    // 8 since the conversion handoff (2026-09-23 D-P0-4); /ribbons still shows 4.
-    const limitOf = (src) => Number((src.match(/POPULAR_ROW_LIMIT:\s*(\d+)/) || [])[1]);
-    const RIBBONS_JS = fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'js', 'ribbons-page.js'), 'utf8');
-    assert.equal(limitOf(SHOP_JS), 8, 'shop POPULAR_ROW_LIMIT');
-    assert.equal(limitOf(RIBBONS_JS), 4, 'ribbons POPULAR_ROW_LIMIT');
-    for (const [name, html, LIMIT] of [['shop.html', SHOP_HTML, limitOf(SHOP_JS)], ['ribbons.html', RIBBONS_HTML, limitOf(RIBBONS_JS)]]) {
-        const count = (markupOnly(html).match(/class="product-card product-card--placeholder"/g) || []).length;
-        assert.equal(count, LIMIT,
-            `${name} must ship exactly ${LIMIT} placeholders — the same number of cards the shelf `
-            + 'renders, so the reserved row count matches the real one at every breakpoint');
-    }
-});
-
-test('§2 the placeholders are inert', () => {
-    for (const html of [SHOP_HTML, RIBBONS_HTML]) {
-        const tags = markupOnly(html).match(/<div class="product-card product-card--placeholder"[^>]*>/g) || [];
-        for (const t of tags) {
-            assert.match(t, /aria-hidden="true"/,
-                'a placeholder must be hidden from assistive technology — it is a box, not a product');
-        }
-    }
-    const rule = PAGES_CSS.match(/\.product-card--placeholder\s*\{[^}]*\}/);
-    assert.ok(rule, '.product-card--placeholder must be styled');
-    assert.match(rule[0], /min-height:\s*\d+px/, 'it must reserve a height — that is its whole job');
-    assert.match(rule[0], /pointer-events:\s*none/, 'and it must never swallow a tap');
-    assert.match(PAGES_CSS, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.product-card--placeholder\s*\{\s*animation:\s*none/,
-        'the shimmer must respect prefers-reduced-motion');
-});
-
-test('§2 only /ribbons ships its shelf visible', () => {
-    /* The asymmetry is deliberate and is the easiest thing here to "tidy up".
-     * /ribbons is single-category, so its shelf is unconditional and its height
-     * can be claimed at parse. html/shop.html serves /shop as well, which has
-     * no shelf at all — reserving 1,140px there would trade two good pages for
-     * one bad one. */
-    assert.doesNotMatch(openTag(RIBBONS_HTML, 'popular-row'), /\bhidden\b/,
-        '/ribbons shelf is unconditional and must ship visible');
-    assert.match(openTag(SHOP_HTML, 'popular-row'), /\bhidden\b/,
-        'html/shop.html also serves /shop, which has no shelf — this one must stay hidden and be '
-        + 'un-hidden by shop-page.js once it knows the route has one');
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// §3 the ordering that makes the reservation land in time
-// ═══════════════════════════════════════════════════════════════════════════
-
-test('§3 renderPopularRow claims its height BEFORE it awaits the fetch', () => {
-    /* This is cause 2, and the assertion is about ORDER, not presence. Moving
-     * `section.hidden = false` back below the await restores the defect exactly
-     * and changes nothing else about the function. */
-    const fn = SHOP_JS.match(/async renderPopularRow\(category, label\) \{[\s\S]*?\n        \},/);
-    assert.ok(fn, 'renderPopularRow must exist');
-    const body = fn[0];
-    const reveal = body.indexOf('section.hidden = false;');
-    const await_ = body.indexOf('await API.getPopularProducts');
-    assert.ok(reveal > -1, 'the shelf must be revealed somewhere in this function');
-    assert.ok(await_ > -1, 'the fetch must still be awaited');
-    assert.ok(reveal < await_,
-        'the shelf must be un-hidden BEFORE the fetch is awaited. renderBrands does not await '
-        + 'renderPopularRow and loadBrands reveals the level as soon as renderBrands returns, so '
-        + 'a reveal after the await opens a 1,140px section on top of a page the shopper is '
-        + 'already looking at — measured CLS 0.53 on a cold cache, 0.007 on a warm one.');
-});
-
-test('§3 a failed read still collapses the shelf rather than leaving it empty', () => {
-    /* The reservation must not turn a missing shelf into an empty one. ERR-193
-     * printed empty-shelf copy on 63 brand pages for 44 hours. */
-    const fn = SHOP_JS.match(/async renderPopularRow\(category, label\) \{[\s\S]*?\n        \},/)[0];
-    assert.match(fn, /const hide = \(\) => \{ section\.hidden = true; grid\.innerHTML = ''; \};/,
-        'hide() must clear the grid as well as the section, so the placeholders cannot survive a failure');
-    assert.ok((fn.match(/hide\(\);/g) || []).length >= 3,
-        'every early return after the reveal must collapse the section: no category, no api mapping, '
-        + 'and an empty or unreadable response');
-});
+// They pinned cause 2 — the popular shelf's placeholders and the order of its
+// reveal. The owner removed the shelf itself ("Popular … right now" and "Full
+// colour sets", every page), so there is no longer anything that opens above
+// the brand picker after the level is revealed. tests/popular-rows-removed-
+// sep2026.test.js pins that the shelf, its placeholders and its fetch stay
+// gone; if anything is ever put back above the brand picker, cause 2 comes back
+// with it and these two sections are the history of how to fix it.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §4 without scripts there is no loading, so there must be no skeleton

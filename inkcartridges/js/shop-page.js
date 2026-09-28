@@ -1631,205 +1631,6 @@
                 });
         },
 
-        /* ── Popular products on the category landings (ERR-236, ERR-253) ────
-         *
-         * FE category id -> the name /api/products/popular answers to.
-         *
-         * This is a vocabulary translation between two systems, not a list of
-         * what we stock. `npm run audit:types` already counts six type
-         * vocabularies in this repo, which is exactly why this one lives in a
-         * single place with a test on it.
-         *
-         * MEASURED 2026-09-12 against production, replacing the 2026-09-09
-         * measurement this comment used to carry:
-         *
-         *   ink · toner · ribbons · drums · paper       200
-         *   label_tape · label-tape · photo_paper       200   ← WERE a hard 400
-         *   consumable · cartridge                      200   ← WERE a hard 400
-         *   bogus                                       400
-         *
-         * ⚠️ THE STATUS CODE CAN NO LONGER TELL YOU YOU ARE WRONG. `consumable`
-         * stopped 400ing, but it does NOT mean drums — it resolves to NO FILTER.
-         * Measured, by reading product_type on the rows it returns:
-         *
-         *   ?category=consumable → ink_cartridge 4, typewriter_ribbon 3,
-         *                          printer_ribbon 2, toner_cartridge 2,
-         *                          correction_tape 1
-         *   ?category=drums      → drum_unit 6, waste_toner 3, fuser_kit 1,
-         *                          maintenance_box 1, fax_film_refill 1
-         *
-         * So `consumable: 'drums'` STAYS. Deleting it — which one of the two
-         * backend documents covering this change explicitly invites ("you can
-         * drop your client-side mapping whenever suits") — would silently put
-         * ink and toner on a drums shelf, with a 200 and no error anywhere.
-         * ***THE ONLY DETECTOR IS READING product_type ON THE ROWS***, which is
-         * why probe:landing-popular now does exactly that.
-         *
-         * And `cartridge` must never be added: it is the same no-filter alias.
-         *
-         * `label_tape: 'label'` is the spelling `categories[].apiCategory`
-         * already uses (see `categories` above) — one vocabulary, not a seventh.
-         * The backend reports 244 active in-stock label tapes were behind that
-         * 400, making it the largest category the outage covered.
-         *
-         * A category absent from this map asks for nothing and shows nothing —
-         * it never fires a request we know will 400. `ribbons` is absent on
-         * purpose: /ribbons is a different page with its own controller
-         * (ribbons-page.js), which hardcodes its one category.
-         */
-        POPULAR_CATEGORY_API: {
-            ink: 'ink',
-            toner: 'toner',
-            consumable: 'drums',   // NOT passthrough — see above
-            paper: 'paper',
-            label_tape: 'label',
-        },
-        /* How many the shelf SHOWS, and how many it ASKS for. The paid landing
-         * pages must show at least 8 products with real images above the brand
-         * chooser (conversion handoff 2026-09-23 D-P0-4 — /toner-cartridges
-         * showed 4, all placeholder tiles, on desktop). Asking for 24 lets the
-         * shelf skip image-less rows AND lets the "Full colour sets" rail be
-         * cut from the same response, instead of a second request. */
-        POPULAR_ROW_LIMIT: 8,
-        POPULAR_FETCH_LIMIT: 24,
-        VALUE_PACK_RAIL_LIMIT: 8,
-
-        /**
-         * Paint the shelf above the brand picker on a category landing.
-         *
-         * /ink-cartridges and /toner-cartridges are where Google Ads lands and
-         * both rendered a brand chooser and not one price. The endpoint was
-         * live the whole time; nothing was asking it.
-         *
-         * IT HIDES RATHER THAN EMPTIES. If the read fails or returns nothing,
-         * the section stays `hidden` and the page is exactly what it is today —
-         * never an empty shelf over a working catalogue. ERR-193 printed
-         * empty-shelf copy on 63 brand pages for 44 hours after one failed
-         * read, so a failure here is LOUD in the log and INVISIBLE on the page,
-         * in that order.
-         */
-        async renderPopularRow(category, label) {
-            const section = document.getElementById('popular-row');
-            const grid = document.getElementById('popular-row-grid');
-            if (!section || !grid) return;
-
-            const hide = () => { section.hidden = true; grid.innerHTML = ''; };
-            if (!category) { hide(); this.renderValuePackRail([]); return; }
-
-            const apiCategory = this.POPULAR_CATEGORY_API[category];
-            if (!apiCategory) {
-                DebugLog.warn(`[popular] no /api/products/popular category maps to "${category}" — shelf not shown`);
-                hide();
-                return;
-            }
-
-            /* CLAIM THE HEIGHT BEFORE THE FETCH, NOT AFTER IT (ERR-276).
-             *
-             * This section sits ABOVE the brand picker (ERR-236 put it there on
-             * purpose) and used to be un-hidden only once the request came back.
-             * renderBrands calls this without awaiting it, and loadBrands
-             * reveals the level as soon as renderBrands returns — so the shelf
-             * opened INTO a page the shopper was already looking at, pushing the
-             * brand picker off the bottom of the screen.
-             *
-             * Measured on a Pixel-5 profile at 4x CPU throttle: CLS 0.68 POOR on
-             * /ink-cartridges and /toner-cartridges, essentially all of it one
-             * shift — div.shop-section-card [y 343->0, h 501->0], the brand card
-             * leaving the viewport at 7.6s.
-             *
-             * IT IS A RACE, WHICH IS WHY ONE MEASUREMENT WAS NOT ENOUGH. When
-             * /api/products/popular answered from a warm cache the shelf landed
-             * BEFORE the level was revealed and the page scored 0.007 — good,
-             * and a fluke. The same page on a cold cache scored 0.53. A
-             * measurement taken once is a constant with a good alibi (ERR-233);
-             * `npm run probe:shop-cls` is what takes it more than once.
-             *
-             * The markup already holds the space — four
-             * .product-card--placeholder tiles in the same grid as the real
-             * cards. This line only stops hiding them, and it runs SYNCHRONOUSLY
-             * before the first await, so the height is in place by the time
-             * loadBrands reveals the level. hide() below still collapses the
-             * section on an unreadable or empty response, so a failure is a
-             * missing shelf, never an empty one. */
-            section.hidden = false;
-
-            // A shopper who navigates on while this is in flight must not have
-            // the shelf painted over the level they actually landed on. Same
-            // reason loadCurrentLevel carries a nav version.
-            const token = (this._popularRowToken = (this._popularRowToken || 0) + 1);
-
-            let rows = [];
-            try {
-                const resp = await API.getPopularProducts({ category: apiCategory, limit: this.POPULAR_FETCH_LIMIT });
-                if (resp && resp.ok && resp.data && Array.isArray(resp.data.products)) {
-                    rows = resp.data.products;
-                } else {
-                    DebugLog.error(`[popular] /api/products/popular?category=${apiCategory} was unreadable — `
-                        + 'this landing page is showing its brand picker with no products, which is '
-                        + 'the state ERR-236 exists to fix.');
-                }
-            } catch (e) {
-                DebugLog.error(`[popular] /api/products/popular?category=${apiCategory} threw — `
-                    + 'landing page falls back to the brand picker alone:', e.message);
-            }
-
-            if (token !== this._popularRowToken) return;
-            if (!rows.length || typeof Products === 'undefined') { hide(); this.renderValuePackRail([]); return; }
-
-            const { shelf, packs } = this.splitPopularRows(rows);
-            this.renderValuePackRail(packs);
-            if (!shelf.length) { hide(); return; }
-
-            const title = document.getElementById('popular-row-title');
-            if (title) title.textContent = label ? `Popular ${label} right now` : 'Popular right now';
-
-            rows = shelf;
-            grid.innerHTML = Products.renderCards(rows);
-            // All three binds. The zero-results rail calls only the middle one
-            // and its cards silently lose image retry and the bulk-price
-            // overlay; this row does not copy that omission.
-            Products.bindImageFallbacks(grid);
-            Products.attachCardListeners(grid);
-            Products.decorateBusinessPricing(grid, rows);
-            section.hidden = false;
-        },
-
-        /**
-         * Cut one /api/products/popular response into the shelf and the pack
-         * rail, keeping the backend's ranking order in both.
-         *   shelf — the first POPULAR_ROW_LIMIT rows WITH an image (a paid
-         *           landing page of grey placeholder tiles sells nothing)
-         *   packs — `pack_type === 'value_pack'` rows NOT already on the shelf,
-         *           image-bearing first, up to VALUE_PACK_RAIL_LIMIT
-         * Pure: no DOM, no request — tests/conversion-fixes-sep2026 runs it.
-         */
-        splitPopularRows(rows) {
-            const list = Array.isArray(rows) ? rows.filter(r => r && r.sku) : [];
-            const hasImg = (r) => !!(r.image_url || r.image_thumbnail_url);
-            const shelf = list.filter(hasImg).slice(0, this.POPULAR_ROW_LIMIT);
-            const onShelf = new Set(shelf.map(r => r.sku));
-            const packsAll = list.filter(r => String(r.pack_type || '').toLowerCase() === 'value_pack' && !onShelf.has(r.sku));
-            const packs = packsAll.filter(hasImg).concat(packsAll.filter(r => !hasImg(r))).slice(0, this.VALUE_PACK_RAIL_LIMIT);
-            return { shelf, packs };
-        },
-
-        /** "Full colour sets" rail (conversion handoff 2026-09-27 §8.4). Hidden when empty. */
-        renderValuePackRail(packs) {
-            const section = document.getElementById('value-pack-rail');
-            const grid = document.getElementById('value-pack-rail-grid');
-            if (!section || !grid) return;
-            if (!Array.isArray(packs) || !packs.length || typeof Products === 'undefined') {
-                section.hidden = true;
-                grid.innerHTML = '';
-                return;
-            }
-            grid.innerHTML = Products.renderCards(packs);
-            Products.bindImageFallbacks(grid);
-            Products.attachCardListeners(grid);
-            Products.decorateBusinessPricing(grid, packs);
-            section.hidden = false;
-        },
-
         /**
          * "Enter your printer model" on the paid landing pages (conversion
          * handoff 2026-09-27 §8.1). Typeahead over GET /api/printers/search
@@ -1887,12 +1688,10 @@
             const categoryPicker = !this.state.brand && !!this.state.category;
             const ribbonsSection = document.getElementById('ribbons-section');
             // Scoped to the card that HOLDS THE BRAND GRID, not to "the first
-            // .shop-section-card__title inside #level-brands". Those were the
-            // same element until ERR-236 put the popular-products shelf above
-            // it, at which point the unscoped query would have relabelled the
-            // shelf "Choose a brand to see ink cartridges" and left the brand
-            // picker with the wrong heading — a positional selector quietly
-            // meaning something else the moment anything moves.
+            // .shop-section-card__title inside #level-brands". From ERR-236 until
+            // ERR-290 a popular-products shelf sat above it and the unscoped query
+            // would have relabelled the shelf; the shelf is gone, but a positional
+            // selector still means something else the moment anything moves.
             const sectionTitle = grid.closest('.shop-section-card')?.querySelector('.shop-section-card__title');
             if (categoryPicker) {
                 // Keys are the INTERNAL tab ids (see this.categories).
@@ -1900,14 +1699,14 @@
                 const label = labels[this.state.category] || `${this.state.category} products`;
                 if (sectionTitle) sectionTitle.textContent = `Choose a brand to see ${label}`;
                 if (ribbonsSection) ribbonsSection.hidden = true;
+                // No "Popular … right now" / "Full colour sets" rows here or
+                // anywhere (owner, 2026-09-28, ERR-290): a best-seller shows
+                // cartridges for printers the visitor does not own. The printer
+                // search and the brand picker are the whole landing.
                 this.renderLandingPrinterSearch(this._isPaidLanding());
-                this.renderPopularRow(this.state.category, label);
             } else {
                 if (sectionTitle) sectionTitle.textContent = 'Select your ink cartridge or toner brand';
                 if (ribbonsSection) ribbonsSection.hidden = false;
-                // Bare /shop knows no category. Inventing one to have something
-                // to show would be a guess printed as a recommendation.
-                this.renderPopularRow(null);
                 this.renderLandingPrinterSearch(false);
             }
 
@@ -4702,7 +4501,7 @@
         // (2) cartridges-for-your-printer via /by-printer,
         // (3) the brand grid — the SAME tiles /shop renders, from the SAME rows.
         //
-        // Rail 3 was a hardcoded six-item `popular` array until Sep 2026: six brands
+        // Rail 3 was a hardcoded six-item category array until Sep 2026: six brands
         // out of twenty-seven, frozen at whatever was typed here in May, while /shop
         // three lines up the same file had already been moved onto `show_on_shop`
         // (ERR-192). Flipping a brand's visibility in the admin moved one surface and
@@ -4744,8 +4543,13 @@
 
             // The compat-printers rail ships its `printers: [...]` inline, so
             // we skip the second `API.getCompatiblePrinters` round-trip when
-            // the payload is present. Same for `popular` (products inline).
-            // by-printer still needs a follow-up fetch for the product cards.
+            // the payload is present. by-printer still needs a follow-up fetch
+            // for the product cards.
+            //
+            // `kind: "popular"` is GONE from the backend as of 2026-09-28
+            // (owner's decision, ERR-290) and is not rendered here: a best-seller
+            // is a cartridge for a printer the visitor does not own. Any kind we
+            // do not know — including a stale cached `popular` — is skipped.
             const railPromises = [];
             for (const rail of backendRails) {
                 if (rail.kind === 'compat-printers') {
@@ -4767,9 +4571,6 @@
                             .catch(() => ({ kind: 'by-printer', data: null }))
                     );
                 }
-                // 'popular' rail handled below as the safety net (backend may
-                // also ship `rail.products` inline; we render the brand grid
-                // regardless).
             }
 
             // Brands load ALONGSIDE the rails, not after them. API.getBrands() is
@@ -4875,7 +4676,7 @@
                 DebugLog.error('[brands] zero-results recovery could not read the shop brand grid '
                     + `(${this._brandsAreOffline ? '/api/brands unreadable' : 'no row has show_on_shop'})`
                     + ' — falling back to the six hardcoded category tiles.');
-                const popular = [
+                const categoryTiles = [
                     { label: 'Brother Ink',   href: '/shop?brand=brother&category=ink' },
                     { label: 'HP Toner',      href: '/shop?brand=hp&category=toner' },
                     { label: 'Canon Ink',     href: '/shop?brand=canon&category=ink' },
@@ -4883,16 +4684,32 @@
                     { label: 'Samsung Toner', href: '/shop?brand=samsung&category=toner' },
                     { label: 'OKI Toner',     href: '/shop?brand=oki&category=toner' },
                 ];
-                const popularCards = popular.map(p =>
+                const categoryCards = categoryTiles.map(p =>
                     `<a class="recovery-tile" href="${Security.escapeAttr(p.href)}">${Security.escapeHtml(p.label)}</a>`
                 ).join('');
                 railsHost.insertAdjacentHTML('beforeend', `
                     <section class="search-recovery__rail">
-                        <h3 class="search-recovery__rail-title">Browse popular categories</h3>
-                        <div class="search-recovery__rail-grid">${popularCards}</div>
+                        <h3 class="search-recovery__rail-title">Browse by category</h3>
+                        <div class="search-recovery__rail-grid">${categoryCards}</div>
                     </section>
                 `);
             }
+
+            // Rail 4: the printer finder — always. When the backend sends no
+            // `recovery` at all (neither printer rail applies) this and the brand
+            // grid are the whole answer, and the backend asked for the printer
+            // finder and contact help there (ERR-290). Contact is NOT repeated
+            // here: html/shop.html's `.need-help` box (phone + email) already sits
+            // under every /search page, and a second copy one screen above it is
+            // noise. Static link: no request, cannot fail.
+            railsHost.insertAdjacentHTML('beforeend', `
+                <section class="search-recovery__rail search-recovery__rail--help">
+                    <h3 class="search-recovery__rail-title">Still can’t find it?</h3>
+                    <div class="search-recovery__rail-grid">
+                        <a class="recovery-tile" href="/?scroll=ink-finder">Find cartridges by printer model</a>
+                    </div>
+                </section>
+            `);
 
             // Bind add-to-cart on any product cards in the by-printer rail
             if (typeof Products !== 'undefined' && Products.attachCardListeners) {
