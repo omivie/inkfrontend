@@ -229,6 +229,18 @@ try {
             page.on('domcontentloaded', () => { dcl = Date.now() - t0; });
             await page.goto(SITE + urlPath, { waitUntil: 'load', timeout: 60000 });
             await page.waitForTimeout(7000);
+            // LCP as the browser reports it (buffered), for comparison with the
+            // handoff's single-sample numbers. A measurement, not a check: one
+            // load, from wherever this runs.
+            const lcp = await page.evaluate(() => new Promise((res) => {
+                let last = null;
+                try {
+                    new PerformanceObserver((l) => { const e = l.getEntries(); last = e[e.length - 1]; })
+                        .observe({ type: 'largest-contentful-paint', buffered: true });
+                } catch (_) { /* unsupported */ }
+                setTimeout(() => res(last ? Math.round(last.startTime) : null), 100);
+            }));
+            console.log(`  ·  ${urlPath}: LCP ${lcp == null ? 'n/a' : lcp + ' ms'} (one load)`);
             const out = { reqs, dcl, page, ctx };
             return out;
         };

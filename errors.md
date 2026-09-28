@@ -74,6 +74,13 @@ describing the same incident.
 - **Search.** The literal set starts at 449 ms, alongside `/smart` (which ends at 2155 ms).
 - **Still made on a non-ribbon PDP:** one direct read, `product_code_visitors` (BF-082). The probe prints it.
 
+**Live, after deploy** (`npm run probe:backend-move -- --browser`, production, 2026-09-28): **53/53**.
+- **PDP C02BK.** The first image starts **1 ms** after the product response (product 815→1352 ms, image 1353 ms), and is downloaded once. LCP was 1116 ms on one load; the handoff measured 4.70 s.
+- **Brand page.** Schema starts at 748 ms, alongside `/api/shop` (748→857 ms). LCP 888 ms.
+- **Digit search.** The literal set starts at 760 ms, with `/smart` (761→1156 ms).
+- **Still made on the PDP:** `product_code_visitors` (1 read, BF-082).
+- **The LCP figures are single loads without CPU throttling, and the API itself is faster since the move.** They show the direction. They are not a before/after of the frontend change alone. The search LCP (1052 ms) is for a zero-result `zzprobe_` term, so it is not comparable to the handoff's `tn2450`.
+
 **Guards.**
 - `tests/backend-move-sep2026.test.js`: 23 tests. Red-proof: every test fails against the pre-change sources except two labelled PRESERVED, which pin the fail-open and order-confirmation behaviours that did not change.
 - Updated because they pinned the OLD order or semantics, with their intent kept: for-use-in-cutover §2, pdp-ribbon-related-by-code, ribbon-manual-only §3, product-codes §5, catalogue-error-vs-empty §8 (retargeted to `_fetchVisitorIdsForCode`), ribbon-brand-page-error-state §2.

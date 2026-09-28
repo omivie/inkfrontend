@@ -16,7 +16,7 @@ labelled PRESERVED.
 
 | # | Item | Status | Measured |
 |---|---|---|---|
-| 0 | **Vercel → `ink-backend-sg`** | **Live since commit `eae0781`.** It covers `middleware.js`, every Render-bound rewrite in `vercel.json` (sitemaps, the three feeds, robots, llms, `/p`, `/html/p`, `/shop`, `/html/shop`, `/product-by-name`), CSP `connect-src`, and the four non-production fallbacks. It also covers ~40 probe defaults. | Before the switch, all 15 rewrite paths returned the same bytes on both hosts. The one exception is `google-promotions.xml`, which differs only in its generation timestamps. After the deploy, `www…/sitemap.xml`, `/robots.txt` and `/feeds/google-shopping.xml` return 200. Googlebot-UA fetches of `/`, `/shop?brand=hp` and a product page return the prerendered HTML. **From our side, the old host can go.** The `GET /` pinger is the owner's; they are repointing it to `https://api.inkcartridges.co.nz/health`. |
+| 0 | **Vercel → `ink-backend-sg`** | **Live since commit `eae0781`.** Items 1–6 went live in `13595a7` (with ERR-292's log entry in `6aef5f40`). It covers `middleware.js`, every Render-bound rewrite in `vercel.json` (sitemaps, the three feeds, robots, llms, `/p`, `/html/p`, `/shop`, `/html/shop`, `/product-by-name`), CSP `connect-src`, and the four non-production fallbacks. It also covers ~40 probe defaults. | Before the switch, all 15 rewrite paths returned the same bytes on both hosts. The one exception is `google-promotions.xml`, which differs only in its generation timestamps. After the deploy, `www…/sitemap.xml`, `/robots.txt` and `/feeds/google-shopping.xml` return 200. Googlebot-UA fetches of `/`, `/shop?brand=hp` and a product page return the prerendered HTML. **From our side, the old host can go.** The `GET /` pinger is the owner's; they are repointing it to `https://api.inkcartridges.co.nz/health`. |
 | 1 | **Search: stop chaining** | **Built, but not as asked (see §2.1).** | For a query with a digit, or an exact search, `/products?search=` and `/search/suggest` now start together with `/search/smart`. |
 | 2 | **PDP gallery from the product response** | **Built.** The gallery renders as soon as `/api/products/:sku` returns. The hero image is also preloaded from `pdp-prefetch.js` (in `<head>`) the moment the prefetched response lands. | Local run, first visit, 390×664: the first image request starts **11 ms after the product response** (the handoff measured 1.4 s). The hero is downloaded **exactly once**: the preload and the `<img>` use the same URL. For-use-in no longer gates the gallery. |
 | 2a | Direct Supabase reads on the PDP | **Non-ribbon: all four removed.** Ribbons: two kept (§2.2). | `probe:backend-move` §O: **19/19** active override products carry their override as `series_codes` on `/api/products/:sku`, and are listed under every override code by `/api/shop?brand&category&code`. |
@@ -55,7 +55,21 @@ labelled PRESERVED.
 - **BF-082: honour `chip_category` in `/api/shop?brand&category&code`.** It should include products of another type that are tagged into this category's chip, and `series` should count them. Then the last `product_code_visitors` / `product_codes` reads go.
 - **BF-083: return the literal-match set with `/search/smart` when it would be needed.** One option is `include=literal`, returning the `/products?search=` rows and the suggest shortlist whenever `/smart` corrected the query or returned fewer than 50 direct rows. Then a digit search is one request, with nothing wasted when the repair does not fire.
 
-## 4. How to check
+## 4. Measured on production after the deploy
+
+`npm run probe:backend-move -- --browser`, 2026-09-28: **53/53**.
+
+| Page | What we measured |
+|---|---|
+| PDP `C02BK` | The product arrives 815→1352 ms, and the first image starts at **1353 ms**, 1 ms later (your waterfall: 2.74 s → 4.16 s). The hero is downloaded once. There is no `/api/cart` call and no `site_settings`/`ribbon_brands` read. `platform.js` starts at 1686 ms (DCL 1470 ms). LCP 1116 ms on one load (yours: 4.70 s). |
+| `/shop?brand=brother` | There is no `/api/ribbons` call. `/api/schema/collection` starts at 748 ms, together with `/api/shop` (748→857 ms). LCP 888 ms. |
+| Search, digit query | `/products?search=` and `/suggest` start at 760 ms, together with `/smart` (761→1156 ms). |
+
+These are single loads without CPU throttling, and your API is faster since the move. So the LCP figures show the direction of the change; they do not measure the frontend change on its own. The search load used a zero-result `zzprobe_` term (so it is excluded from analytics), so its LCP is not comparable to your `tn2450`.
+
+One direct read remains on a non-ribbon PDP: `product_code_visitors`, which is the cross-type summary. BF-082 removes it.
+
+## 5. How to check
 
 ```sh
 npm run probe:backend-move                       # §H hosts, §L lock, §N nav, §O every override row, §R ribbons
