@@ -45,7 +45,7 @@ const FAST = ARGS.includes('--fast');
 
 const SUPABASE = process.env.SUPABASE_URL || 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const ANON = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 
 // Lower than the 650 ms the credentialed probes use: these are unauthenticated
 // public catalogue reads with no rate limiter in front of them, and there are 63.

@@ -114,7 +114,7 @@ async function prerenderFetchFor(url, opts) {
     return fetched;
 }
 
-const BACKEND = 'https://ink-backend-zaeq.onrender.com';
+const BACKEND = 'https://ink-backend-sg.onrender.com';
 const SITE = 'https://www.inkcartridges.co.nz';
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -50,7 +50,7 @@ import { createRequire } from 'node:module';
 import { SEARCH_ANALYTICS_NOTICE } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = 'https://ink-backend-zaeq.onrender.com';
+const BASE = 'https://ink-backend-sg.onrender.com';
 
 const require = createRequire(import.meta.url);
 const { QtyStepper } = require(path.join(ROOT, 'inkcartridges', 'js', 'utils.js'));

@@ -59,7 +59,7 @@ import { fileURLToPath } from 'node:url';
 
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const API = process.env.PROBE_API || 'https://ink-backend-zaeq.onrender.com';
+const API = process.env.PROBE_API || 'https://ink-backend-sg.onrender.com';
 const ORIGIN = 'https://www.inkcartridges.co.nz';
 const ARGS = new Set(process.argv.slice(2));
 const WRITE = ARGS.has('--write');

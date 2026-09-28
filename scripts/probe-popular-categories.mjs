@@ -52,7 +52,7 @@
  * output directory and is served publicly (ERR-229).
  *
  * Usage:  npm run probe:popular-categories
- *         API_BASE=https://ink-backend-zaeq.onrender.com npm run probe:popular-categories
+ *         API_BASE=https://ink-backend-sg.onrender.com npm run probe:popular-categories
  * Exit:   0 = every hard check passed · 1 = at least one failed · 2 = could not run
  */
 

@@ -38,7 +38,7 @@
  */
 
 const PROD_API = 'https://api.inkcartridges.co.nz';
-const RENDER_API = 'https://ink-backend-zaeq.onrender.com';
+const RENDER_API = 'https://ink-backend-sg.onrender.com';
 const PATHNAME = '/api/search/click';
 
 // Config.API_URL resolves to PROD_API on the apex/www origins and to RENDER_API

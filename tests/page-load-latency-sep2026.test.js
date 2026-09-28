@@ -269,7 +269,7 @@ function trackerApiUrl(hostname, Config) {
 test('§4 production beacon goes through Cloudflare even when Config is not defined yet', () => {
     assert.equal(trackerApiUrl('www.inkcartridges.co.nz'), 'https://api.inkcartridges.co.nz');
     assert.equal(trackerApiUrl('inkcartridges.co.nz'), 'https://api.inkcartridges.co.nz');
-    assert.equal(trackerApiUrl('feink-preview.vercel.app'), 'https://ink-backend-zaeq.onrender.com');
+    assert.equal(trackerApiUrl('feink-preview.vercel.app'), 'https://ink-backend-sg.onrender.com');
     assert.equal(trackerApiUrl('www.inkcartridges.co.nz', { API_URL: 'https://c.test' }), 'https://c.test',
         'Config, once loaded, is still the source of truth');
 });
@@ -291,7 +291,7 @@ test('§5 site-guard BACKEND_URL is the api subdomain on www/apex, never a relat
     const at = (hostname) => vm.runInNewContext(m[1], { location: { hostname } });
     assert.equal(at('www.inkcartridges.co.nz'), 'https://api.inkcartridges.co.nz');
     assert.equal(at('inkcartridges.co.nz'), 'https://api.inkcartridges.co.nz');
-    assert.equal(at('localhost'), 'https://ink-backend-zaeq.onrender.com');
+    assert.equal(at('localhost'), 'https://ink-backend-sg.onrender.com');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

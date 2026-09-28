@@ -1520,7 +1520,7 @@ const LIVE = process.env.LIVE_API === '1' && !!process.env.BUSINESS_TOKEN;
 
 test('LIVE: the backend still sends the volume shape these fixtures assume',
     { skip: !LIVE && 'set LIVE_API=1 and BUSINESS_TOKEN to run' }, async () => {
-        const base = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+        const base = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
         const headers = { Authorization: 'Bearer ' + process.env.BUSINESS_TOKEN };
 
         const status = await (await fetch(base + '/api/business/status', { headers })).json();

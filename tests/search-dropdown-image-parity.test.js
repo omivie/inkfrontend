@@ -50,7 +50,7 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '..');
 const JS = (rel) => path.join(ROOT, 'inkcartridges', 'js', rel);
 
-const API_URL = 'https://ink-backend-zaeq.onrender.com';
+const API_URL = 'https://ink-backend-sg.onrender.com';
 const SUPABASE_URL = 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const SAMPLE_PATH = 'images/products/G-HP-915XL-INK-MG/product.webp';
 

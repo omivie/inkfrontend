@@ -71,7 +71,7 @@ const SITE = path.join(ROOT, 'inkcartridges');
 const ARGS = new Set(process.argv.slice(2));
 const JSON_OUT = ARGS.has('--json');
 
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 const PAGE_LIMIT = 200;
 
 /**

@@ -152,7 +152,7 @@ test('§1 the UET host was ADDED, not swapped in for something else', () => {
             'https://*.paypalobjects.com', 'https://apis.google.com', 'https://*.js.stripe.com',
             "'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk='"],
         'connect-src': ["'self'", 'https://*.google.co.nz', 'https://api.inkcartridges.co.nz',
-            'https://ink-backend-zaeq.onrender.com', 'https://*.supabase.co', 'https://*.stripe.com',
+            'https://ink-backend-sg.onrender.com', 'https://*.supabase.co', 'https://*.stripe.com',
             'https://*.google-analytics.com', 'https://www.googletagmanager.com',
             'https://*.google.com', 'https://*.doubleclick.net', 'https://www.googleadservices.com',
             'https://cdn.jsdelivr.net', 'https://challenges.cloudflare.com',

@@ -32,7 +32,7 @@
     function apiBase(host) {
         return (host === 'www.inkcartridges.co.nz' || host === 'inkcartridges.co.nz')
             ? 'https://api.inkcartridges.co.nz'
-            : 'https://ink-backend-zaeq.onrender.com';
+            : 'https://ink-backend-sg.onrender.com';
     }
 
     /** SKU from the URL, or null when this page should not prefetch. */

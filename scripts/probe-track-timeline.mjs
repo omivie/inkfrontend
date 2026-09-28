@@ -65,7 +65,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = 'https://ink-backend-zaeq.onrender.com';
+const BASE = 'https://ink-backend-sg.onrender.com';
 
 /** The pathway, as agreed. Step KEYS — the labels are the backend's to word. */
 const EXPECTED_STEPS = ['placed', 'shipped', 'delivered'];

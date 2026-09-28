@@ -184,7 +184,7 @@ test('§2 Turnstile is still allowed — a guest cannot pay without it', () => {
 
 test('§3 connect-src still reaches both API hosts', () => {
     const c = directive('connect-src');
-    for (const host of ['https://api.inkcartridges.co.nz', 'https://ink-backend-zaeq.onrender.com']) {
+    for (const host of ['https://api.inkcartridges.co.nz', 'https://ink-backend-sg.onrender.com']) {
         assert.ok(c.includes(host), `${host} must stay reachable`);
     }
 });

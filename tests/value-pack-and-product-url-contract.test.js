@@ -43,7 +43,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const INK = path.join(ROOT, 'inkcartridges');
 const VERCEL_JSON = path.join(INK, 'vercel.json');
-const RENDER_BASE = 'https://ink-backend-zaeq.onrender.com';
+const RENDER_BASE = 'https://ink-backend-sg.onrender.com';
 
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function readText(file) { return fs.readFileSync(file, 'utf8'); }
@@ -390,6 +390,6 @@ test('vercel.json — connect-src CSP allows ink-backend (for /api/schema/site f
     const cfg = readJson(VERCEL_JSON);
     const csp = cfg.headers.flatMap(h => h.headers.filter(x => x.key === 'Content-Security-Policy'));
     assert.ok(csp.length > 0, 'CSP header must be present');
-    assert.ok(/connect-src[^;]*ink-backend-zaeq\.onrender\.com/.test(csp[0].value),
-        'CSP connect-src must allow ink-backend-zaeq.onrender.com (for /api/schema/site etc.)');
+    assert.ok(/connect-src[^;]*ink-backend-sg\.onrender\.com/.test(csp[0].value),
+        'CSP connect-src must allow ink-backend-sg.onrender.com (for /api/schema/site etc.)');
 });

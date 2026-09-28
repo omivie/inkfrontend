@@ -89,7 +89,7 @@ const WRITE = ARGS.has('--write');
 // The only row this probe may ever write to. Not configurable on purpose.
 const TARGET_SKU = 'ADMIN-INK-001';
 
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 
 let pass = 0;
 const findings = [];

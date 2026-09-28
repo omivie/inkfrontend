@@ -1,4 +1,6 @@
-const BACKEND = 'https://ink-backend-zaeq.onrender.com';
+// Render Singapore since 2026-09-28 (backend handoff §0): the Oregon service
+// ink-backend-zaeq is switched off once nothing calls it. tests/backend-move-sep2026.test.js §0.
+const BACKEND = 'https://ink-backend-sg.onrender.com';
 
 // `adsbot-google` and `storebot-google` are intentionally listed even though
 // `googlebot` is already present — the AdsBot ("AdsBot-Google", "AdsBot-Google-

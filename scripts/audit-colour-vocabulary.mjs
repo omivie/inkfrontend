@@ -85,7 +85,7 @@ const STATIC_ONLY = ARGS.has('--static');
 const JSON_OUT = ARGS.has('--json');
 const UPDATE_BASELINE = ARGS.has('--update-baseline');
 
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 const PAGE_LIMIT = 200;
 
 /**

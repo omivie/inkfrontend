@@ -23,7 +23,7 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 const GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
 const HUMAN = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1';
-const BACKEND = 'https://ink-backend-zaeq.onrender.com';
+const BACKEND = 'https://ink-backend-sg.onrender.com';
 const SITE = 'https://www.inkcartridges.co.nz';
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -100,7 +100,7 @@ const HAS = (f) => ARGS.includes(f);
 const JSON_OUT = HAS('--json');
 const FAST = HAS('--fast');
 
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 40;               // 8,000 rows — well past the ~4,100 live
 const MIN_PLAUSIBLE_PRODUCTS = 500; // a short catalogue means we did not look

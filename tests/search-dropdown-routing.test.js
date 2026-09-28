@@ -400,7 +400,7 @@ test('vercel.json — /shop?printer= legacy URLs rewrite to backend for brand lo
     );
     assert.notEqual(idx, -1, 'expected a /shop rewrite filtered on `?printer=` query');
     const rule = REWRITES[idx];
-    assert.match(rule.destination, /^https:\/\/ink-backend-zaeq\.onrender\.com\/shop$/,
+    assert.match(rule.destination, /^https:\/\/ink-backend-sg\.onrender\.com\/shop$/,
         'spec: legacy ?printer= URLs must proxy to backend (Render) — only it can compute brand_slug from printer_slug');
 });
 
@@ -428,7 +428,7 @@ test('vercel.json — /html/shop?printer= legacy URLs also proxy to backend', ()
         r.has.some(h => h.type === 'query' && h.key === 'printer')
     );
     assert.ok(rule, 'spec: defense-in-depth rule for /html/shop?printer= legacy URLs');
-    assert.match(rule.destination, /^https:\/\/ink-backend-zaeq\.onrender\.com\/html\/shop$/,
+    assert.match(rule.destination, /^https:\/\/ink-backend-sg\.onrender\.com\/html\/shop$/,
         'spec: /html/shop?printer= must proxy to backend so the printer_models→brands lookup runs');
 });
 

@@ -139,7 +139,7 @@ try {
         for (const sku of PDP_SKUS) {
             const ctx = await ctxFor(kind);
             const page = await ctx.newPage();
-            const api = await (await fetch(`https://ink-backend-zaeq.onrender.com/api/products/${sku}`)).json().catch(() => null);
+            const api = await (await fetch(`https://ink-backend-sg.onrender.com/api/products/${sku}`)).json().catch(() => null);
             await page.goto(`${BASE}/p/${sku}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForSelector('#product-title:not(:empty)', { timeout: 30000 }).catch(() => {});
             await page.waitForTimeout(5000);

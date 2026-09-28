@@ -64,7 +64,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
 const FAST = ARGS.includes('--fast');
 
-const BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 const SUPABASE = process.env.SUPABASE_URL || 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const ANON = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';
 

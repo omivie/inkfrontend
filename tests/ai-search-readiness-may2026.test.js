@@ -271,7 +271,7 @@ test('§7 /llms.txt rewrites to the backend', () => {
     // returns 404 and agents never discover the catalog.
     const r = (vercelCfg.rewrites || []).find(x => x.source === '/llms.txt');
     assert.ok(r, 'vercel.json must rewrite /llms.txt to the backend');
-    assert.match(r.destination, /ink-backend-zaeq\.onrender\.com\/llms\.txt$/,
+    assert.match(r.destination, /ink-backend-sg\.onrender\.com\/llms\.txt$/,
         '/llms.txt destination must be the backend');
 });
 
@@ -280,7 +280,7 @@ test('§7 /robots.txt is still proxied (regression guard)', () => {
     // the backend robots.txt is the source of truth for AI bot allow lists.
     const r = (vercelCfg.rewrites || []).find(x => x.source === '/robots.txt');
     assert.ok(r, 'vercel.json must keep the /robots.txt proxy');
-    assert.match(r.destination, /ink-backend-zaeq\.onrender\.com\/robots\.txt$/);
+    assert.match(r.destination, /ink-backend-sg\.onrender\.com\/robots\.txt$/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

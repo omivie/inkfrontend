@@ -36,7 +36,7 @@ import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const API = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 const SUPABASE = process.env.SUPABASE_URL || 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const SKU = process.env.TEST_SKU || 'TEST-ADMIN-001';
 // The CDN host, which is NOT where API points by default. ERR-124 lives at the

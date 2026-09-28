@@ -249,14 +249,14 @@ test('§3 middleware prerender cache emits stale-while-revalidate', () => {
 test('§4 sitemap.xml proxies to backend (single source of truth)', () => {
     const sitemap = (VERCEL_JSON.rewrites || []).find(r => r.source === '/sitemap.xml');
     assert.ok(sitemap, 'vercel.json must rewrite /sitemap.xml');
-    assert.ok(/^https:\/\/ink-backend-zaeq\.onrender\.com\//.test(sitemap.destination),
+    assert.ok(/^https:\/\/ink-backend-sg\.onrender\.com\//.test(sitemap.destination),
         '/sitemap.xml must proxy to the Render backend, not be served statically');
 });
 
 test('§4 sub-sitemaps proxy to backend', () => {
     const sub = (VERCEL_JSON.rewrites || []).find(r => r.source === '/sitemap-:path.xml');
     assert.ok(sub, 'vercel.json must rewrite /sitemap-*.xml');
-    assert.ok(/^https:\/\/ink-backend-zaeq\.onrender\.com\//.test(sub.destination),
+    assert.ok(/^https:\/\/ink-backend-sg\.onrender\.com\//.test(sub.destination),
         '/sitemap-*.xml must proxy to the Render backend');
 });
 
@@ -269,7 +269,7 @@ test('§4 product feeds proxy to backend', () => {
     for (const src of feeds) {
         const r = (VERCEL_JSON.rewrites || []).find(x => x.source === src);
         assert.ok(r, `vercel.json must rewrite ${src}`);
-        assert.ok(/^https:\/\/ink-backend-zaeq\.onrender\.com\//.test(r.destination),
+        assert.ok(/^https:\/\/ink-backend-sg\.onrender\.com\//.test(r.destination),
             `${src} must proxy to backend`);
     }
 });

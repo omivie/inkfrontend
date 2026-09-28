@@ -167,7 +167,7 @@ function configConstant(name) {
 
 const SUPABASE_URL = configConstant('SUPABASE_URL');
 const SUPABASE_ANON_KEY = configConstant('SUPABASE_ANON_KEY');
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Output helpers

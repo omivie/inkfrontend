@@ -21,7 +21,7 @@
  * reach it. If the backend ships the BF-064 purge, this probe is how we find
  * out; if the purge regresses, this is the only thing that would notice.
  *
- * 🚨 MEASURE THE HOST THE BROWSER CALLS. `ink-backend-zaeq.onrender.com` answers
+ * 🚨 MEASURE THE HOST THE BROWSER CALLS. `ink-backend-sg.onrender.com` answers
  * `cf-cache-status: DYNAMIC` on EVERY request, so measuring the Render origin
  * makes the cache look absent and clears it of suspicion falsely. That cost an
  * hour. `js/config.js:19-21` points production at `api.inkcartridges.co.nz`, and

@@ -59,7 +59,7 @@ import { fileURLToPath } from 'node:url';
 import { printSearchAnalyticsNotice, probeQuery } from './lib/probe-search-notice.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 // The CDN-fronted host. Edge-cache questions can ONLY be asked here — see §2.
 const PROD = process.env.PROD_BASE || 'https://api.inkcartridges.co.nz';
 const ORIGIN = 'https://inkcartridges.co.nz';
@@ -186,7 +186,7 @@ const run = async () => {
     // which therefore answers DYNAMIC permanently. Measured 2026-09-16, the
     // same request to both hosts:
     //
-    //     ink-backend-zaeq.onrender.com   cf-cache-status: DYNAMIC
+    //     ink-backend-sg.onrender.com   cf-cache-status: DYNAMIC
     //     api.inkcartridges.co.nz         cf-cache-status: MISS -> HIT
     //
     // So search joined the Cache Rule on 2026-09-10, the frontend took the ids

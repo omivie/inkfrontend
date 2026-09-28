@@ -113,7 +113,7 @@ const BRAND_LIMIT = (() => {
   return i >= 0 ? Math.max(1, parseInt(ARGS[i + 1], 10) || 0) : 0;
 })();
 
-const API_BASE = process.env.API_BASE || 'https://ink-backend-zaeq.onrender.com';
+const API_BASE = process.env.API_BASE || 'https://ink-backend-sg.onrender.com';
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 40;              // 8,000 products — well past the ~4,000 live
 const MIN_PLAUSIBLE_PRODUCTS = 500; // a short catalogue means we did not look

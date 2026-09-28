@@ -71,14 +71,14 @@ const stripComments = require('./helpers/strip-comments');
 test('§1 vercel.json rewrites /p/:sku to backend (so backend can issue the 301 / serve prerendered HTML)', () => {
     const rw = VERCEL_JSON.rewrites.find((r) => r.source === '/p/:sku');
     assert.ok(rw, '/p/:sku rewrite must exist in vercel.json');
-    assert.match(rw.destination, /ink-backend-zaeq\.onrender\.com\/p\/:sku$/,
+    assert.match(rw.destination, /ink-backend-sg\.onrender\.com\/p\/:sku$/,
         '/p/:sku must proxy to backend so the 301 / bot-prerender are reachable');
 });
 
 test('§1 vercel.json rewrites /html/p/:sku to backend (alt entry into bot-prerender)', () => {
     const rw = VERCEL_JSON.rewrites.find((r) => r.source === '/html/p/:sku');
     assert.ok(rw, '/html/p/:sku rewrite must exist');
-    assert.match(rw.destination, /ink-backend-zaeq\.onrender\.com\/html\/p\/:sku$/);
+    assert.match(rw.destination, /ink-backend-sg\.onrender\.com\/html\/p\/:sku$/);
 });
 
 test('§1 vercel.json rewrites sitemap-*.xml to backend (Googlebot must reach the live sitemap)', () => {
@@ -86,8 +86,8 @@ test('§1 vercel.json rewrites sitemap-*.xml to backend (Googlebot must reach th
     const sub = VERCEL_JSON.rewrites.find((r) => r.source === '/sitemap-:path.xml');
     assert.ok(root, '/sitemap.xml rewrite required');
     assert.ok(sub, '/sitemap-:path.xml rewrite required');
-    assert.match(root.destination, /ink-backend-zaeq\.onrender\.com\/sitemap\.xml$/);
-    assert.match(sub.destination, /ink-backend-zaeq\.onrender\.com\/sitemap-:path\.xml$/);
+    assert.match(root.destination, /ink-backend-sg\.onrender\.com\/sitemap\.xml$/);
+    assert.match(sub.destination, /ink-backend-sg\.onrender\.com\/sitemap-:path\.xml$/);
 });
 
 test('§1 vercel.json keeps brand-listing redirects permanent (301, not 302)', () => {
@@ -102,7 +102,7 @@ test('§1 vercel.json keeps brand-listing redirects permanent (301, not 302)', (
 test('§1 vercel.json /robots.txt is proxied to backend (not a stale static file)', () => {
     const rw = VERCEL_JSON.rewrites.find((r) => r.source === '/robots.txt');
     assert.ok(rw, '/robots.txt rewrite required');
-    assert.match(rw.destination, /ink-backend-zaeq\.onrender\.com\/robots\.txt$/);
+    assert.match(rw.destination, /ink-backend-sg\.onrender\.com\/robots\.txt$/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

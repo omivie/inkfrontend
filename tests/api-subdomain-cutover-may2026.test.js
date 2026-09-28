@@ -44,7 +44,7 @@ const ICR = path.join(ROOT, 'inkcartridges');
 const read = (rel) => fs.readFileSync(path.join(ICR, rel), 'utf8');
 
 const API_SUBDOMAIN = 'https://api.inkcartridges.co.nz';
-const RENDER_ORIGIN = 'https://ink-backend-zaeq.onrender.com';
+const RENDER_ORIGIN = 'https://ink-backend-sg.onrender.com';
 
 // ───────────────────────────────────────────────────────────────────────────
 // §1  Config.API_URL

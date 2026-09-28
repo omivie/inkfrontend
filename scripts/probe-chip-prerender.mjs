@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SITE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
-const API = process.env.PROBE_API || 'https://ink-backend-zaeq.onrender.com';
+const API = process.env.PROBE_API || 'https://ink-backend-sg.onrender.com';
 const GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
 const HUMAN = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/128.0 Safari/537.36';
 

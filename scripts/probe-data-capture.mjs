@@ -61,7 +61,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PROD = 'https://api.inkcartridges.co.nz';
-const RENDER = 'https://ink-backend-zaeq.onrender.com';
+const RENDER = 'https://ink-backend-sg.onrender.com';
 const ORIGIN = 'https://inkcartridges.co.nz';
 const SUPABASE = 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo';

@@ -18,7 +18,7 @@
   // Non-production hosts keep the Render origin, matching config.js.
   const BACKEND_URL = (location.hostname === 'www.inkcartridges.co.nz' || location.hostname === 'inkcartridges.co.nz')
     ? 'https://api.inkcartridges.co.nz'
-    : 'https://ink-backend-zaeq.onrender.com';
+    : 'https://ink-backend-sg.onrender.com';
 
   let _sb = null;
 
@@ -39,17 +39,19 @@
     return _sb;
   }
 
+  // GET /api/site/lock (backend handoff 2026-09-28 §4, BF-069), not a direct
+  // Supabase read of site_settings: that was an uncached trip to the database
+  // in Mumbai on every page view. Same row, same shape — `{ enabled, message }`.
+  // The endpoint is edge-cached (s-maxage=60), so a lock or unlock takes up to
+  // a minute to reach shoppers. credentials:'omit' keeps the request anonymous
+  // so every visitor shares one cache entry. Every failure — network, non-2xx,
+  // a body without `ok: true` — returns null, and null means OPEN, as before.
   async function getLockStatus() {
-    const sb = initClient();
-    if (!sb) return null;
     try {
-      const { data, error } = await sb
-        .from('site_settings')
-        .select('value')
-        .eq('key', 'site_locked')
-        .single();
-      if (error || !data) return null;
-      return data.value;
+      const res = await fetch(BACKEND_URL + '/api/site/lock', { credentials: 'omit' });
+      if (!res.ok) return null;
+      const body = await res.json();
+      return (body && body.ok === true && body.data) ? body.data : null;
     } catch {
       return null;
     }
@@ -274,12 +276,15 @@
 
   async function run() {
     const path = location.pathname;
-    if (path.startsWith('/admin') || path.startsWith('/admin')) return;
+    if (path.startsWith('/admin')) return;
 
-    if (!window.supabase?.createClient) return;
-
+    // Lock first: on an unlocked site (every normal page view) supabase-js is
+    // never touched here. Without supabase-js the admin check cannot run, and
+    // that has always meant open.
     const lock = await getLockStatus();
     if (!lock?.enabled) return;
+
+    if (!window.supabase?.createClient) return;
 
     const sb = initClient();
     if (sb) {

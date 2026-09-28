@@ -117,7 +117,7 @@
         if (typeof Config !== 'undefined' && Config.API_URL) return Config.API_URL;
         return (location.hostname === 'www.inkcartridges.co.nz' || location.hostname === 'inkcartridges.co.nz')
             ? 'https://api.inkcartridges.co.nz'
-            : 'https://ink-backend-zaeq.onrender.com';
+            : 'https://ink-backend-sg.onrender.com';
     }
 
     // Resolve the current Supabase access token, optionally waiting for Auth.init().

@@ -75,7 +75,7 @@
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://static.cloudflareinsights.com https://challenges.cloudflare.com https://www.paypal.com https://*.paypal.com https://*.paypalobjects.com https://apis.google.com https://*.js.stripe.com https://bat.bing.com 'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://*.google.co.nz https://api.inkcartridges.co.nz https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://www.googletagmanager.com https://*.google.com https://*.doubleclick.net https://www.googleadservices.com https://cdn.jsdelivr.net https://challenges.cloudflare.com https://static.cloudflareinsights.com https://*.paypal.com https://*.paypalobjects.com https://fonts.googleapis.com https://link.com https://*.link.com https://bat.bing.com; base-uri 'none'; object-src 'none'; form-action 'self' https://www.paypal.com https://*.paypal.com https://js.stripe.com https://hooks.stripe.com; frame-ancestors 'none'; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://link.com https://*.link.com https://pay.google.com https://challenges.cloudflare.com https://*.paypal.com https://*.paypalobjects.com https://www.google.com; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://static.cloudflareinsights.com https://challenges.cloudflare.com https://www.paypal.com https://*.paypal.com https://*.paypalobjects.com https://apis.google.com https://*.js.stripe.com https://bat.bing.com 'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://*.google.co.nz https://api.inkcartridges.co.nz https://ink-backend-sg.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://www.googletagmanager.com https://*.google.com https://*.doubleclick.net https://www.googleadservices.com https://cdn.jsdelivr.net https://challenges.cloudflare.com https://static.cloudflareinsights.com https://*.paypal.com https://*.paypalobjects.com https://fonts.googleapis.com https://link.com https://*.link.com https://bat.bing.com; base-uri 'none'; object-src 'none'; form-action 'self' https://www.paypal.com https://*.paypal.com https://js.stripe.com https://hooks.stripe.com; frame-ancestors 'none'; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://link.com https://*.link.com https://pay.google.com https://challenges.cloudflare.com https://*.paypal.com https://*.paypalobjects.com https://www.google.com; upgrade-insecure-requests"
         }
       ]
     }
@@ -138,7 +138,7 @@
     {
       "source": "/html/shop",
       "has": [{ "type": "query", "key": "printer" }],
-      "destination": "https://ink-backend-zaeq.onrender.com/html/shop"
+      "destination": "https://ink-backend-sg.onrender.com/html/shop"
     },
     {
       "source": "/shop",
@@ -147,7 +147,7 @@
         { "type": "query", "key": "brand" },
         { "type": "query", "key": "printer_slug" }
       ],
-      "destination": "https://ink-backend-zaeq.onrender.com/shop"
+      "destination": "https://ink-backend-sg.onrender.com/shop"
     },
 
     { "source": "/shop", "destination": "/html/shop" },
@@ -180,17 +180,17 @@
     { "source": "/admin/:path*", "destination": "/html/admin/:path*" },
     { "source": "/auth/reset-password", "destination": "/html/account/reset-password" },
     { "source": "/ribbon/:sku", "destination": "/html/product" },
-    { "source": "/product-by-name", "destination": "https://ink-backend-zaeq.onrender.com/html/product-by-name" },
+    { "source": "/product-by-name", "destination": "https://ink-backend-sg.onrender.com/html/product-by-name" },
     { "source": "/products/:slug/:sku", "destination": "/html/product?sku=:sku" },
     { "source": "/product/:slug", "destination": "/html/product?slug=:slug" },
-    { "source": "/p/:sku", "destination": "https://ink-backend-zaeq.onrender.com/p/:sku" },
-    { "source": "/html/p/:sku", "destination": "https://ink-backend-zaeq.onrender.com/html/p/:sku" },
-    { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
-    { "source": "/sitemap-:path.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-:path.xml" },
-    { "source": "/feeds/google-shopping.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-shopping.xml" },
-    { "source": "/feeds/facebook-catalog.tsv", "destination": "https://ink-backend-zaeq.onrender.com/feeds/facebook-catalog.tsv" },
-    { "source": "/feeds/google-promotions.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-promotions.xml" },
-    { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" },
-    { "source": "/llms.txt", "destination": "https://ink-backend-zaeq.onrender.com/llms.txt" }
+    { "source": "/p/:sku", "destination": "https://ink-backend-sg.onrender.com/p/:sku" },
+    { "source": "/html/p/:sku", "destination": "https://ink-backend-sg.onrender.com/html/p/:sku" },
+    { "source": "/sitemap.xml", "destination": "https://ink-backend-sg.onrender.com/sitemap.xml" },
+    { "source": "/sitemap-:path.xml", "destination": "https://ink-backend-sg.onrender.com/sitemap-:path.xml" },
+    { "source": "/feeds/google-shopping.xml", "destination": "https://ink-backend-sg.onrender.com/feeds/google-shopping.xml" },
+    { "source": "/feeds/facebook-catalog.tsv", "destination": "https://ink-backend-sg.onrender.com/feeds/facebook-catalog.tsv" },
+    { "source": "/feeds/google-promotions.xml", "destination": "https://ink-backend-sg.onrender.com/feeds/google-promotions.xml" },
+    { "source": "/robots.txt", "destination": "https://ink-backend-sg.onrender.com/robots.txt" },
+    { "source": "/llms.txt", "destination": "https://ink-backend-sg.onrender.com/llms.txt" }
   ]
 }

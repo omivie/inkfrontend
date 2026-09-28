@@ -30,7 +30,7 @@
  *   SUPABASE_JWT=<token> npm run probe:search-escaping   # includes §3
  */
 
-const API = process.env.API_URL || 'https://ink-backend-zaeq.onrender.com';
+const API = process.env.API_URL || 'https://ink-backend-sg.onrender.com';
 import { SEARCH_ANALYTICS_NOTICE, probeQuery } from './lib/probe-search-notice.mjs';
 const SB = 'https://lmdlgldjgcanknsjrcxh.supabase.co';
 const ANON = process.env.SUPABASE_ANON_KEY
