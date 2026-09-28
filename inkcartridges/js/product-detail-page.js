@@ -1137,8 +1137,7 @@
             const sep = ` <span class="buy-box__sep" aria-hidden="true">·</span> `;
             const eligible = delivery ? delivery.same_day_eligible : undefined;
             if (eligible === true) {
-                const scope = typeof delivery.promise === 'string' && /auckland metro/i.test(delivery.promise)
-                    ? ' (Auckland metro)' : '';
+                const scope = DispatchCountdown.scope(delivery);   // utils.js loads first (defer order)
                 return sep + `<span class="buy-box__delivery-cutoff">Order before ${Security.escapeHtml(dCutoff)} NZT for same-day dispatch${scope}</span>`;
             }
             if (eligible === false) {
@@ -1171,6 +1170,12 @@
          * must NOT return.) Genuine / unknown-source products render nothing.
          */
         renderComplianceDisclaimer(info) {
+            // Desktop headline twin (ERR-293): ONE line under the title, the
+            // owner's wording; the full panel below still carries every word.
+            this._setHeadline('product-headline-compliance',
+                info && info.source === 'compatible'
+                    ? `Compatible — not made by ${Security.escapeHtml(info.brandName || 'the printer manufacturer')}`
+                    : '');
             if (!info || info.source !== 'compatible') return;
             const pricingEl = document.querySelector('.product-info__pricing');
             if (!pricingEl || document.getElementById('compat-disclaimer')) return;
@@ -1191,6 +1196,41 @@
                     Compatible (third-party) ${type} for ${oem} printers — not made or endorsed by ${oem}. Sold by Office Consumables Ltd.
                 </div>`;
             pricingEl.insertAdjacentHTML('afterend', html);
+        },
+
+        /**
+         * Fill (or clear, with '') one line of #product-headline — the desktop
+         * strip under the title (ERR-293). `html` is ALREADY ESCAPED by the
+         * caller. The strip hides itself when both lines are empty, and CSS
+         * hides it below 1100px, where the full blocks already sit above Add.
+         */
+        _setHeadline(id, html) {
+            const line = document.getElementById(id);
+            if (!line) return;
+            line.innerHTML = html;
+            line.hidden = !html;
+            const strip = document.getElementById('product-headline');
+            if (strip) strip.hidden = !strip.querySelector('.product-headline__line:not([hidden])');
+        },
+
+        /**
+         * "3+ from $5.56 each · See all prices" — the ladder as ONE line above
+         * Add on desktop (ERR-293); the chips render below Add at >=1100px.
+         * The rung is `ladder.entry` (the first real rung after describeLadder's
+         * clean-up — never a constant, the entry rung is band-dependent) and
+         * the price is its backend `business_price`, rendered as-is. Never a
+         * maximum saving: the owner ruled "up to" claims out. No ladder, or an
+         * entry without a price ⇒ the line stays hidden.
+         */
+        renderVolumeSummary(ladder) {
+            const el = document.getElementById('volume-pricing-summary');
+            if (!el) return;
+            const entry = ladder && ladder.entry;
+            const label = entry && typeof Business !== 'undefined' ? Business.breakLabel(entry) : '';
+            if (!label || !Number.isFinite(entry.businessPrice)) { el.hidden = true; el.innerHTML = ''; return; }
+            el.innerHTML = `${Security.escapeHtml(label)} from ${Security.escapeHtml(formatPrice(entry.businessPrice))} each`
+                + ` <span aria-hidden="true">·</span> <a href="#volume-pricing">See all prices</a>`;
+            el.hidden = false;
         },
 
         /**
@@ -1229,6 +1269,7 @@
          */
         async renderVolumePricing(info) {
             const sku = info && info.sku;
+            this.renderVolumeSummary(null);   // never carry a previous product's line
             const section = document.getElementById('volume-pricing');
             if (!sku || !section || typeof Business === 'undefined') return;
 
@@ -1256,6 +1297,7 @@
             if (!this.product || this.product.sku !== sku) return;
 
             this._contractPrice = contract || null;
+            this.renderVolumeSummary(ladder);
             // A contract price is worth showing even when there is no ladder at
             // all: it IS the price this customer pays. Returning early on a null
             // ladder would hide the negotiated rate on every product whose band
@@ -1486,7 +1528,7 @@
                 : [];
             const promise = info && info.trust_signals && info.trust_signals.compatibility_promise;
             const hasPromise = promise && typeof promise.label === 'string' && promise.label.trim();
-            if (!printers.length && !hasPromise) { el.hidden = true; el.innerHTML = ''; return; }
+            if (!printers.length && !hasPromise) { el.hidden = true; el.innerHTML = ''; this._setHeadline('product-headline-fit', ''); return; }
 
             const labelOf = (p) => this._printerLabel(p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '));
             const items = printers.map((p) => {
@@ -1504,6 +1546,11 @@
              * and the promise's detail open on demand. */
             const shown = printers.slice(0, 2).map(labelOf);
             const more = printers.length - shown.length;
+            // Desktop headline twin (ERR-293): at >=1100px #product-fit sits
+            // below Add, so the same summary is printed under the title.
+            this._setHeadline('product-headline-fit', printers.length
+                ? `<strong>Fits:</strong> ${Security.escapeHtml(shown.join(', '))}${more > 0 ? ` +${more} more` : ''}`
+                : '');
             let html = '';
             if (printers.length) {
                 html += `<p class="product-fit__summary"><strong>Fits:</strong> ${Security.escapeHtml(shown.join(', '))}`

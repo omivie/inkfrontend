@@ -2968,22 +2968,33 @@ const PrinterName = {
     },
 
     /**
-     * "Fits Brother MFC J5930DW, MFC J6935DW +12" for a listing card
+     * "Fits Brother DCP J525W, Brother DCP J725DW +9" for a listing card
      * (conversion handoff 2026-09-27 §8.1), from the product's OWN
-     * `compatible_printers`. Returns '' when the row carries none — listing
-     * payloads (/api/shop, /api/products, /popular) do not include the field as
-     * of 2026-09-27, so this renders nothing until the backend adds it, and
-     * then lights up with no FE change. Never "guaranteed" anything.
+     * `compatible_printers`. Returns '' when the row carries none.
+     * Never "guaranteed" anything.
+     *
+     * `total` is the row's `compatible_printers_count` (ERR-293). Listing rows
+     * (/api/shop, /api/products, /popular) cap `compatible_printers` at TWO on
+     * purpose — a page of 200 cartridges would otherwise carry thousands of
+     * links — and put the real total in that field. Counting the array (the
+     * first cut) printed "Fits A, B" with no "+9" on an LC73 that fits 11.
+     * `+N = total − shown`, not `total − array length`: the two agree only
+     * while the cap is 2. An absent/null/garbage total, or one SMALLER than
+     * the list we hold, falls back to the list's own length (the PDP passes
+     * none; it carries the full list).
+     * @param {Array} printers
+     * @param {number} [total] compatible_printers_count
      * @returns {string} plain text (caller escapes)
      */
-    fitsLine(printers) {
+    fitsLine(printers, total) {
         const names = (Array.isArray(printers) ? printers : [])
             .map((p) => (p && (p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '))) || '')
             .filter(Boolean)
             .map((n) => this.display(n));
         if (!names.length) return '';
         const shown = names.slice(0, 2);
-        const rest = names.length - shown.length;
+        const count = Number(total);
+        const rest = Math.max(Number.isFinite(count) ? count : 0, names.length) - shown.length;
         return `Fits ${shown.join(', ')}${rest > 0 ? ` +${rest}` : ''}`;
     },
 };
@@ -3044,6 +3055,23 @@ const DispatchCountdown = {
     },
 
     /**
+     * " (Auckland metro)" when the backend's own promise text scopes same-day
+     * dispatch that way, else ''. ONE owner for the rule (ERR-293): the
+     * countdown printed "for same-day dispatch" with no qualifier while the
+     * delivery row two lines above correctly said "(Auckland metro)" — the
+     * promise covers Auckland metro only. The PDP delivery row
+     * (`_dispatchClause`) and this countdown (PDP + cart) both call it, so
+     * the two lines can no longer disagree. Scoped from the DATA, never
+     * assumed: a promise that stops naming a region stops being scoped.
+     * @param {Object} deliveryEstimate
+     * @returns {string}
+     */
+    scope(deliveryEstimate) {
+        const promise = deliveryEstimate && deliveryEstimate.promise;
+        return typeof promise === 'string' && /auckland metro/i.test(promise) ? ' (Auckland metro)' : '';
+    },
+
+    /**
      * Mount a live countdown into `el`. Returns a handle with `.stop()`.
      * Calling mount() again on the same element stops the previous timer
      * first (Cart.renderCartSignals re-runs on every mutation — without this
@@ -3090,7 +3118,7 @@ const DispatchCountdown = {
                 el.hidden = true;
                 return;
             }
-            el.textContent = `Order within ${this.format(remaining)} for same-day dispatch`;
+            el.textContent = `Order within ${this.format(remaining)} for same-day dispatch${this.scope(deliveryEstimate)}`;
             el.hidden = false;
         };
 

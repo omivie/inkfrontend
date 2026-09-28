@@ -41,6 +41,44 @@ describing the same incident.
 
 ---
 
+## ERR-293 — A compatible PDP still put Add to Cart under the consent bar, cards dropped the "+N" printers, the countdown promised same-day dispatch without its Auckland-metro scope, and /review was still dark after the backend went live — **RESOLVED (frontend)** (2026-09-28)
+
+**Source.** Backend post-deploy check `inbox/fe-post-deploy-fixes-sep2026.md` (2026-09-28). The backend measured the ERR-287/288/289 deploy on production. Reply: `outbox/post-deploy-fixes-FE-reply-sep2026.md`.
+
+**Measured.** The "before" figures are the backend's, from production. The "after" figures are from `npm run probe:post-deploy-fixes` on localhost:3000 against the live API, desktop 1440x900, first visit, consent bar open at y 839.
+
+| | before | after |
+|---|---|---|
+| Add to Cart, compatible PDP (`CLC73BK`, `CTN2445BK`, `CTN258XLBK`) | y 881–929, under the bar | **y 688–736**, hit-testable at scroll 0 |
+| Add to Cart, genuine control `GLC3329XLBK` | — | y 664–712 |
+| printer fit on desktop | y 1160, below Add | "Fits: … +9 more" under the title, above Add |
+| card fits line, LC73 family (13 cards) | "Fits A, B" | "Fits A, B **+9**" (count 11) |
+| `/review?token=…` | "isn't active yet"; no request | live GET; bogus token returns 404 and shows "expired" |
+
+**What was wrong, per item:**
+1. **`/review`.** `Config.DARK_FEATURES.guestReviews` was still `false`. The nightly review email (16:00 NZT) now links every product to this page, and for guests it is the only way to review.
+2. **Compatible PDP, desktop.** The two-line compliance box and the four-chip "Buy more, save more" ladder both sat above Add. The owner decided on 2026-09-27 to change this:
+   - Above Add there is now ONE compliance line under the title ("Compatible — not made by Brother"), ONE fit line, and ONE ladder line ("3+ from $5.56 each · See all prices", from `ladder.entry`'s backend `business_price`, never a maximum saving).
+   - The full compliance text and the chips moved BELOW Add (`order:1` at ≥1100px). They are still on the page, and every word of the panel is kept. The reassurance group moved to `order:2`.
+   - Phones are unchanged. The new lines are `display:none` below 1100px, and the probe checks that.
+3. **Card "+N".** `PrinterName.fitsLine` counted the ARRAY. Listing rows cap `compatible_printers` at 2 on purpose and carry the total in `compatible_printers_count`.
+   - It now takes the count: `+N = max(count, list length) − shown`.
+   - The backend's `count − length` equals this only while the cap is 2. A 3-row list would have lost its +1.
+   - A null or garbage count falls back to the list. Both card renderers pass the count: `products.js` and the `shop-page.js` duplicate.
+4. **Countdown.** The countdown printed "Order within 5h 03m for same-day dispatch" with no qualifier. Two lines above it, the delivery row correctly said "(Auckland metro)".
+   - The scope rule now lives in ONE place, `DispatchCountdown.scope()`, which both the delivery row (`_dispatchClause`) and the countdown (PDP and cart) call. The two can no longer disagree.
+   - The scope comes from the DATA (`delivery_estimate.promise`). It is never assumed.
+
+**Found on the way:**
+- The handoff's toner example `CTN2450` does not exist: `GET /api/products/CTN2450` returns 404. The check ran on `CTN2445BK` and `CTN258XLBK`.
+- The handoff lists the checkout "Email me a copy of my cart" box as **working**. On production it has never rendered: `guestCartEmail` is `false` and the label ships `hidden`. `POST /api/cart/guest-contact` is live and validates exactly our three fields (400 `VALIDATION_FAILED`, against a 404 on a control route). The flag was left off pending the owner's call. See the reply.
+- A fixed 5s wait in the probe measured a half-rendered PDP on a cold backend. A missing Add button (y 0) also counted as "above the bar". The probe now waits for the rendered buy box and fails on a zero-height Add. ***A button that is not there is not above anything.***
+
+**Guards:**
+- `tests/post-deploy-fixes-sep2026.test.js`: 19 tests, run against the shipped code in a vm.
+- `python3 scripts/redproof-post-deploy-fixes.py`: 22 of 22 mutations caught, run on a TEMP COPY.
+- `npm run probe:post-deploy-fixes`: READ-ONLY. It has a negative control: a 200px spacer above Add must fail §1. A 429 is reported as not measured, never as a pass.
+
 ## ERR-289 — The paid landing pages were covered by our own overlays, the phone card put the first Add button at y 881 on a 664px screen, and every desktop PDP shifted 0.28 CLS — **RESOLVED (frontend)** (2026-09-27)
 
 **Source.** Backend handoff `inbox/conversion-fixes-and-value-props-FE-handoff-sep2026.md` (09-23, §8 added 09-27).

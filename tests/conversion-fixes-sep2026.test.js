@@ -267,7 +267,7 @@ test('§3 fitsLine: two models then +N, nothing when the row has no list', () =>
     assert.equal(U.PrinterName.fitsLine([P('Brother MFC J5930DW'), P('Brother MFC J6935DW'), P('A'), P('B')]),
         'Fits Brother MFC J5930DW, Brother MFC J6935DW +2');
     assert.equal(U.PrinterName.fitsLine([P('HP COLOR LASERJET 5500')]), 'Fits HP Color LaserJet 5500');
-    assert.equal(U.PrinterName.fitsLine(undefined), '', 'listing payloads carry no compatible_printers today');
+    assert.equal(U.PrinterName.fitsLine(undefined), '', 'a row with no list renders nothing');
     assert.equal(U.PrinterName.fitsLine([]), '');
 });
 
@@ -276,7 +276,7 @@ test('§3 fitsLine: two models then +N, nothing when the row has no list', () =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§4 dispatch clause: true → locked copy (+ scope), false → next business day, absent → nothing', () => {
-    const clause = method('js/product-detail-page.js', '_dispatchClause');
+    const clause = method('js/product-detail-page.js', '_dispatchClause', {}, { DispatchCountdown: U.DispatchCountdown });
     const promise = 'Auckland metro orders placed before 14:00 NZT on a business day are dispatched the same day.';
     const yes = clause({ same_day_eligible: true, promise }, '2pm');
     assert.match(yes, /Order before 2pm NZT for same-day dispatch \(Auckland metro\)/);
@@ -486,9 +486,11 @@ test('§8 the three pages + /review are routed in BOTH rewrite tables and carry 
     assert.match(read('html/review.html'), /<meta name="robots" content="noindex, nofollow">/);
 });
 
-test('§8 the §6a halves ship DARK and the consent box is unticked', () => {
+test('§8 cart email ships DARK, reviews LIVE (2026-09-28), and the consent box is unticked', () => {
     const cfg = read('js/config.js');
-    assert.match(cfg, /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*false,\s*guestReviews:\s*false,?\s*\}/);
+    // guestReviews went live with the backend's confirmation (ERR-293,
+    // backend-docs/inbox/fe-post-deploy-fixes-sep2026.md §1).
+    assert.match(cfg, /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*false,\s*guestReviews:\s*true,?\s*\}/);
     const box = read('html/checkout.html').match(/<input type="checkbox" id="guest-cart-email-consent"[^>]*>/)[0];
     assert.doesNotMatch(box, /checked/, 'NZ UEMA: consent is given by the shopper, never pre-ticked');
     assert.match(read('html/checkout.html'), /id="guest-cart-email-optin" hidden/);
@@ -579,11 +581,11 @@ test('§10 the phone header hides on scroll-down only when it is safe to', () =>
     assert.match(stripComments(read('css/layout.css')), /\.site-header--hidden\s*\{\s*transform:\s*translateY\(-100%\)/);
 });
 
-test('§10 desktop: fit + value lines move BELOW Add (order), phones keep DOM order (above)', () => {
+test('§10 desktop: fit + value lines move BELOW Add (order 2, after the ladder + compliance at order 1), phones keep DOM order (above)', () => {
     const css = stripComments(read('css/pages.css'));
     const i = css.indexOf('@media (min-width: 1100px) {\n    .product-info {\n        display: flex;');
     assert.ok(i > 0, 'the wide-layout reorder block must exist');
     const block = css.slice(i, css.indexOf('\n}', i));
-    assert.match(block, /#product-fit,\s*\.product-info > #product-value-lines,\s*\.product-info > #product-specs\s*\{\s*order:\s*1;/);
+    assert.match(block, /#product-fit,\s*\.product-info > #product-value-lines,\s*\.product-info > #product-specs\s*\{\s*order:\s*2;/);
     assert.match(css, /\.product-detail__layout > \* \{ min-width: 0; \}/, 'the info column must not overflow its phone track');
 });

@@ -14177,9 +14177,10 @@ body.page-shop {
 .checkout-optin[hidden] { display: none; }
 .checkout-optin input { width: 20px; height: 20px; margin-top: 2px; flex: 0 0 auto; }
 
-/* /review — guest review-by-link (dark until the backend ships). */
+/* /review — guest review-by-link (live 2026-09-28). */
 .review-page__form { margin: 0 0 var(--spacing-lg); padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); max-width: 640px; }
-.review-page__product { margin: 0 0 8px; font-size: 1.125rem; }
+.review-page__product { margin: 0 0 8px; font-size: 1.125rem; display: flex; align-items: center; gap: 12px; }
+.review-page__image { width: 64px; height: 64px; object-fit: contain; flex: 0 0 auto; }
 .review-page__stars { border: 0; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 1rem; }
 .review-page__stars legend { font-weight: 600; margin-bottom: 4px; }
 .review-page__star { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
@@ -14195,18 +14196,39 @@ body.page-shop {
    the button on a 900px window they pushed it to y 1051 (measured). On a
    wide layout they move BELOW the Add button and its pack card — same
    content, one screen down. On phones they stay ABOVE Add (handoff §4.2/§8.1),
-   where the sticky Add bar already covers the first screen. */
+   where the sticky Add bar already covers the first screen.
+
+   2026-09-28 (backend post-deploy check, ERR-293): a COMPATIBLE PDP still had
+   Add at y 881-929 under the consent bar (from y 839) — the two-line
+   compliance box and the four-chip ladder sat above it. Owner's decision:
+   above Add, ONE compliance line + ONE fit line under the title
+   (#product-headline) and ONE ladder line (#volume-pricing-summary); the full
+   compliance text and the chips move below Add (order 1), still on the page.
+   The reassurance group follows them (order 2). Phones are unchanged: the
+   headline and summary lines are hidden below 1100px. */
+.product-headline,
+.volume-pricing-summary { display: none; }
 @media (min-width: 1100px) {
     .product-info {
         display: flex;
         flex-direction: column;
     }
+    .product-info > #compat-disclaimer,
+    .product-info > #volume-pricing {
+        order: 1;   /* full compliance text + every price break, directly below Add */
+    }
     .product-info > #product-fit,
     .product-info > #product-value-lines,
     .product-info > #product-specs {
-        order: 1;   /* colour + page yield also restate the title; one screen down on desktop */
+        order: 2;   /* colour + page yield also restate the title; one screen down on desktop */
     }
     .product-info > #product-fit { margin-top: 16px; }
+    /* The fit summary is printed under the title at this width. */
+    #product-fit .product-fit__summary { display: none; }
+    .product-info > #compat-disclaimer { margin-top: 12px; }
+    .product-headline:not([hidden]) { display: block; margin: 4px 0 0; }
+    .product-headline__line { margin: 2px 0 0; font-size: 0.9375rem; color: var(--color-text); }
+    .volume-pricing-summary:not([hidden]) { display: block; margin: 8px 0 0; font-size: 0.9375rem; }
     /* Tighter ladder box: same chips (each still >= 48px tall), less air.
        Together with the reorder this is what brings Add to Cart back above
        the consent bar at scroll 0 on a 900px window. */

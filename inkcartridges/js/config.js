@@ -59,10 +59,14 @@ const Config = {
      * backend's "endpoint is live" note is recorded in backend-docs/.
      *   guestCartEmail → POST /api/cart/guest-contact   (checkout opt-in)
      *   guestReviews   → GET/POST /api/reviews/by-token (html/review.html)
+     *                    LIVE 2026-09-28: backend-docs/inbox/fe-post-deploy-fixes-sep2026.md
+     *                    §1 (the review-request email links every product here;
+     *                    for guests it is the only way to review). Measured the
+     *                    same day: an unknown token → 404 NOT_FOUND, no-store.
      */
     DARK_FEATURES: {
         guestCartEmail: false,
-        guestReviews: false,
+        guestReviews: true,
     },
 
     // Business settings (loaded from server, these are fallback defaults)

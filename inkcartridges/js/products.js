@@ -190,7 +190,7 @@ const Products = {
             : '';
         // "Fits <two models> +N" from the product's own compatible_printers
         // (§8.1). Empty until listing payloads carry the field.
-        const fitsText = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers) : '';
+        const fitsText = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count) : '';
         const fitsLineHTML = fitsText ? `<p class="product-card__fits">${Security.escapeHtml(fitsText)}</p>` : '';
 
         // Brand eyebrow — suppressed when the product name already leads with

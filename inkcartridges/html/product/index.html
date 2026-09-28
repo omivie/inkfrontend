@@ -63,7 +63,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=6c31b559">
     <link rel="stylesheet" href="/css/components.css?v=49be8b64">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=81e79445">
+    <link rel="stylesheet" href="/css/pages.css?v=2c887a0b">
     <link rel="stylesheet" href="/css/search.css?v=2d1d8e23">
 </head>
 <body>
@@ -226,6 +226,18 @@
                         <div class="product-info__header">
                             <span class="product-info__badge" id="product-badge" hidden>COMPATIBLE</span>
                             <h1 class="product-info__title" id="product-title"><span class="skeleton" style="display:inline-block;width:280px;height:1.2em;"></span></h1>
+                            <!--
+                              Desktop (>=1100px) only: one compliance line and one
+                              printer-fit line directly under the title, so both are
+                              read BEFORE Add to Cart without pushing it under the
+                              consent bar (ERR-293). Filled by renderComplianceDisclaimer
+                              and renderFitCheck; the full compliance text and the full
+                              printer list stay on the page below Add.
+                            -->
+                            <div class="product-headline" id="product-headline" hidden>
+                                <p class="product-headline__line" id="product-headline-compliance" hidden></p>
+                                <p class="product-headline__line" id="product-headline-fit" hidden></p>
+                            </div>
                             <p class="product-info__sku" id="product-sku"><span class="skeleton" style="display:inline-block;width:100px;height:1em;"></span></p>
                             <!--
                               Aggregate star rating. Display-only, populated by
@@ -366,6 +378,9 @@
                         <section class="volume-pricing" id="volume-pricing"
                                  data-testid="volume-pricing" hidden
                                  aria-label="Quantity price breaks"></section>
+                        <!-- Desktop (>=1100px) only: the ladder's first rung as one
+                             line above Add; the chips sit below Add (ERR-293). -->
+                        <p class="volume-pricing-summary" id="volume-pricing-summary" data-testid="volume-summary" hidden></p>
 
                         <div class="product-info__actions">
                             <div class="quantity-selector">
@@ -497,18 +512,18 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=0baa2a3d"></script>
+    <script defer src="/js/config.js?v=068d4cd4"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
     <script defer src="/js/api.js?v=e0d54c24"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=e2125480"></script>
+    <script defer src="/js/utils.js?v=ef747a72"></script>
     <script defer src="/js/auth.js?v=8aa5730e"></script>
     <script defer src="/js/business.js?v=73a85697"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
     <script defer src="/js/cart.js?v=167e4d43"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=4482d91c"></script>
-    <script defer src="/js/products.js?v=d47c9fd0"></script>
+    <script defer src="/js/products.js?v=d3b78e7f"></script>
     <script defer src="/js/search.js?v=035426e6"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
@@ -516,7 +531,7 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=9c5e2ddb"></script>
+    <script defer src="/js/product-detail-page.js?v=beb9c104"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

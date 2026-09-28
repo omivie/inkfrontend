@@ -5321,7 +5321,7 @@
                     <div class="product-card__content">
                         ${infoRowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
-                        ${(() => { const t = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers) : ''; return t ? `<p class="product-card__fits">${Security.escapeHtml(t)}</p>` : ''; })()}
+                        ${(() => { const t = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count) : ''; return t ? `<p class="product-card__fits">${Security.escapeHtml(t)}</p>` : ''; })()}
                         ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${ratingHTML}
                         <div class="product-card__footer">
