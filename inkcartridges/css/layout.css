@@ -2260,6 +2260,39 @@
     font-weight: var(--font-weight-medium);
 }
 
+/* PDP trail wears the /shop drilldown look (pages.css .drilldown-breadcrumb):
+   mono font, chevron separators, cyan links, muted current page. A shopper
+   clicking from /shop into a product saw the trail change font and shape (ERR-298). */
+.breadcrumb--pdp .breadcrumb__item {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+}
+.breadcrumb--pdp .breadcrumb__item a {
+    padding: 0 var(--spacing-sm);
+    color: var(--cyan-primary);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+}
+.breadcrumb--pdp .breadcrumb__item a:hover {
+    background-color: var(--cyan-light);
+    color: var(--cyan-dark);
+    text-decoration: none;
+}
+.breadcrumb--pdp .breadcrumb__item:not(:last-child)::after {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-right: 2px solid var(--color-text-muted);
+    border-bottom: 2px solid var(--color-text-muted);
+    transform: rotate(-45deg);
+}
+.breadcrumb--pdp .breadcrumb__item--current {
+    padding: 0 var(--spacing-sm);
+    color: var(--color-text-muted);
+}
+
 
 /* ==========================================================================
    RESPONSIVE LAYOUT

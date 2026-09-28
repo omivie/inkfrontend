@@ -41,6 +41,16 @@ describing the same incident.
 
 ---
 
+## ERR-298 — The product page breadcrumb read as a staircase, and changed font from the /shop trail the shopper had just clicked — **RESOLVED (frontend)** (2026-09-29)
+
+**Report.** Owner screenshot of `/products/oki-genuine-mc860m-drum-unit-mc860-magenta-20000-pages/GMC860M-2`: the crumbs under the blue nav were not on one line, and the font differed from the `/shop` drilldown trail.
+
+**Cause.** The tap-target rule in `components.css` gives `.breadcrumb__item a` `min-height: 44px` and `min-width: 44px`, but the `<a>` was not a flex box, so its text sat at the TOP of the 44px box. The `/` separator (`::after`) and the current page (`.breadcrumb__item--current`, flex-centred) sat on the centre line. `min-width` with left-aligned text also left the gap after "OKI". The font difference is a second, separate cause: the PDP uses the generic sans `.breadcrumb`, and `/shop` uses `.drilldown-breadcrumb` (mono, chevrons, cyan links).
+
+**Measured (text-node centres, Playwright, 1440x900).** Live before: links y=204, product name y=214. Local after: all six at y=215 (390x664: all links at 188). A first measurement read the `<a>` BOX through a Range over the `<li>` and reported both builds aligned — it measured the tap target, not the text. Measure the text node.
+
+**Fix.** `.breadcrumb__item a` is now `inline-flex` + centred (every page that uses `.breadcrumb` gets the alignment). The PDP nav carries `breadcrumb--pdp`, which in `layout.css` mirrors the drilldown look: mono font, chevron separators, cyan links, muted current page. Other pages keep the sans `/` trail. The phone one-line/ellipsis CLS rules are untouched. Test: `tests/pdp-breadcrumb-alignment-sep2026.test.js` (red-proofed against HEAD CSS).
+
 ## ERR-294 — The backend's answer to our four replies: eleven storefront fixes, two direct Supabase reads retired, and a printer-name mirror that had drifted in a day — **RESOLVED (frontend)** (2026-09-28)
 
 **Source.** `backend-docs/inbox/fe-four-replies-backend-response-sep2026.md` (backend `ef47bc6`). It answers our four 09-28 replies (ERR-290/291/292/293). It built BF-079/080/081 and the backend-move asks, which are renumbered **BF-084..087** because our two replies had both used BF-080..083. It declined BF-087 (literal set inside `/smart`), deleted both popular endpoints and both color-packs routes, and listed eleven frontend defects from its own Playwright re-check. Every claim was **measured on production before any code was deleted**, and every claim held.

@@ -4172,6 +4172,16 @@ label.form-label--checkbox {
     min-width: 44px;
 }
 
+/* The 44px box above pinned each crumb's TEXT to the top of it, while the "/"
+   separator and the current page (flex-centred) sat on the 44px centre line —
+   the PDP trail read as a staircase. Centre the text inside the tap target
+   (ERR-298). */
+.breadcrumb__item a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 /* The last of them, all height misses on links that sit alone in their own row:
    the "edit" links back from a summary, and the payment page's back link. */
 /* --tap-min, not 44, for the same measured reason as the group above: at
