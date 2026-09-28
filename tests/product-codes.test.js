@@ -750,7 +750,7 @@ function loadAPI({ debugLog } = {}) {
 test('api.js loads cleanly and exposes the manual-code helpers', () => {
   const API = loadAPI();
   for (const m of ['_applyManualCodes', '_fetchManualCodesByProduct', '_fetchManualChipCounts',
-                   '_fetchProductIdsForCode', '_supabaseSelect', '_CATEGORY_PRODUCT_TYPES']) {
+                   '_fetchVisitorIdsForCode', '_supabaseSelect', '_CATEGORY_PRODUCT_TYPES']) {
     assert.ok(API[m] !== undefined, `API.${m} must exist`);
   }
 });
@@ -762,19 +762,39 @@ test('_CATEGORY_PRODUCT_TYPES maps each /shop category to its product_types', ()
   assert.ok(API._CATEGORY_PRODUCT_TYPES.ribbons.includes('typewriter_ribbon'));
 });
 
-test('(1) override — a product with manual codes has series_codes fully replaced', async () => {
+test('(1) override — non-ribbon rows are the backend\'s (override-aware since 2026-09-28); ribbons are read', async () => {
+  // GET /api/shop and /api/products rows apply product_codes overrides
+  // server-side (backend 74fb234, probe:backend-move §O). Ribbons are the
+  // exception (ERR-086): the backend still sends a ribbon with no override its
+  // DERIVED codes, so only ribbon rows are looked up — and cleared when none.
   const API = loadAPI();
+  const asked = [];
   API._supabaseSelect = async (q) => {
+    asked.push(q);
     assert.match(q, /^product_codes\?select=product_id,code/);
-    return [{ product_id: 'p1', code: 'LC57' }, { product_id: 'p1', code: 'LC40' }];
+    return [{ product_id: 'r1', code: 'DIN2103' }, { product_id: 'r1', code: 'GR51' }];
   };
   const primary = { ok: true, data: { products: [
-    { id: 'p1', series_codes: ['LC40'] },     // auto said LC40; manual says LC40+LC57
-    { id: 'p2', series_codes: ['TN253'] },     // no manual rows → untouched
+    { id: 'p1', product_type: 'ink_cartridge', series_codes: ['LC40', 'LC57'] },   // backend already applied it
+    { id: 'r1', product_type: 'typewriter_ribbon', series_codes: ['DIN2103'] },   // override: DIN2103 + GR51
+    { id: 'r2', product_type: 'printer_ribbon', series_codes: ['LZ24'] },         // derived, no override
   ] } };
   await API._applyManualCodes(primary, { brand: 'brother', category: 'ink' });
-  assert.deepEqual(plain(primary.data.products[0].series_codes).sort(), ['LC40', 'LC57']);
-  assert.deepEqual(plain(primary.data.products[1].series_codes), ['TN253'], 'uncoded product untouched');
+  assert.deepEqual(plain(primary.data.products[0].series_codes), ['LC40', 'LC57'], 'non-ribbon row untouched');
+  assert.deepEqual(plain(primary.data.products[1].series_codes).sort(), ['DIN2103', 'GR51'], 'ribbon override applied');
+  assert.deepEqual(plain(primary.data.products[2].series_codes), [], 'ribbon with no override carries no codes');
+  assert.equal(asked.length, 1);
+  assert.doesNotMatch(asked[0], /p1/, 'the non-ribbon id is never looked up');
+});
+
+test('(1) override — a grid with no ribbon rows makes NO product_codes read', async () => {
+  const API = loadAPI();
+  let calls = 0;
+  API._supabaseSelect = async () => { calls++; return []; };
+  const primary = { ok: true, data: { products: [{ id: 'p1', product_type: 'toner_cartridge', series_codes: ['TN253'] }] } };
+  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner' });
+  assert.equal(calls, 0, 'one Mumbai round trip per grid, for nothing, is what this removed');
+  assert.deepEqual(plain(primary.data.products[0].series_codes), ['TN253']);
 });
 
 test('(2) chip injection — a purely-manual code gains its own drilldown chip', async () => {
@@ -796,23 +816,21 @@ test('(2) chip injection — a purely-manual code gains its own drilldown chip',
   assert.equal(lc40.count, 9, 'an already-present chip keeps its backend count');
 });
 
-test('(3) recovery — a manually-tagged product is merged into the ?code= grid', async () => {
+test('(3) recovery — a SAME-type override is the backend\'s job now: no product_codes?code= read, nothing merged', async () => {
+  // /api/shop?code= lists products filed under the code by an override since
+  // 2026-09-28 (backend 74fb234; e.g. ?brand=hp&code=57 returns C56BK). The old
+  // pass read every product_codes row for the code and fetched the missing ones.
   const API = loadAPI();
-  API._supabaseSelect = async (q) => {
-    if (q.startsWith('product_codes?select=product_id&code=eq.LC57')) return [{ product_id: 'pX' }];
-    if (q.startsWith('product_codes?select=product_id,code')) return [{ product_id: 'pX', code: 'LC57' }];
-    return [];
-  };
-  API.getWithSWR = async () => ({ ok: true, data: { products: [
-    { id: 'pX', name: 'Manually tagged', series_codes: [] },
-    { id: 'pZ', name: 'Unrelated', series_codes: [] },
-  ] } });
-  const primary = { ok: true, data: { products: [] }, meta: { total: 0 } };
+  const asked = [];
+  API._supabaseSelect = async (q) => { asked.push(q); return []; };
+  let pools = 0;
+  API.getWithSWR = async () => { pools++; return { ok: true, data: { products: [] } }; };
+  const primary = { ok: true, data: { products: [{ id: 'pX', series_codes: ['LC57'] }] }, meta: { total: 1 } };
   await API._applyManualCodes(primary, { brand: 'brother', category: 'ink', code: 'LC57' });
-  const ids = primary.data.products.map(p => p.id);
-  assert.deepEqual(plain(ids), ['pX'], 'only the LC57-tagged product is recovered');
-  assert.equal(primary.meta.total, 1, 'meta.total reflects the recovered row');
-  assert.deepEqual(plain(primary.data.products[0].series_codes), ['LC57']);
+  assert.ok(!asked.some(q => /^product_codes\?select=product_id&code=eq\./.test(q) && !/chip_category/.test(q)),
+    `no by-code read: ${JSON.stringify(asked)}`);
+  assert.equal(pools, 0, 'no pool fetched');
+  assert.deepEqual(plain(primary.data.products.map(p => p.id)), ['pX']);
 });
 
 // Sep 2026 — an admin can tick a product of ANOTHER type into a code (a drum
@@ -877,7 +895,8 @@ test('(3) recovery — a product ticked in from ANOTHER type joins the ?code= gr
   await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
   assert.deepEqual(plain(primary.data.products.map(p => p.id)), ['t1', 'drum'], 'the drum shows under Toner · TN155');
   assert.deepEqual(plain(primary.data.products[1].series_codes).sort(), ['DR150', 'TN155']);
-  assert.equal(asked[0], 'brother|toner', 'the own category is searched first');
+  assert.ok(!asked.includes('brother|toner'),
+    'the own category is NOT searched: the backend already lists same-type tags (2026-09-28)');
   assert.ok(!asked.includes('brother|paper'), 'the search stops once every visitor is found');
 });
 
@@ -886,7 +905,7 @@ test('(3) recovery — a product that shares the code AT HOME never crosses (HP 
   const primary = { ok: true, data: { products: [{ id: 'toner61', series_codes: ['61'] }] } };
   await API._applyManualCodes(primary, { brand: 'hp', category: 'toner', code: '61' });
   assert.deepEqual(plain(primary.data.products.map(p => p.id)), ['toner61'], 'no ink cartridge leaks into Toner · 61');
-  assert.deepEqual(plain(asked), ['hp|toner'], 'no visitor rows ⇒ no other type is fetched');
+  assert.deepEqual(plain(asked), [], 'no visitor rows ⇒ no pool is fetched at all');
 });
 
 test('(3) recovery — an unreadable visitor list keeps everyone home and SAYS so', async () => {
@@ -894,7 +913,7 @@ test('(3) recovery — an unreadable visitor list keeps everyone home and SAYS s
   const primary = { ok: true, data: { products: [] } };
   await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
   assert.equal(primary.data.products.length, 0, 'unknown ⇒ do not cross over');
-  assert.ok(warned.some(w => /product_code_visitors failed to load/.test(w)), `got ${JSON.stringify(warned)}`);
+  assert.ok(warned.some(w => /visitors did not load/.test(w)), `got ${JSON.stringify(warned)}`);
 });
 
 test('(3) recovery — no other type is fetched when the own category already holds every tagged id', async () => {
@@ -907,15 +926,18 @@ test('(3) recovery — no other type is fetched when the own category already ho
 test('(3) recovery — a failed pool is LOGGED, not silent', async () => {
   const warned = [];
   const API = loadAPI({ debugLog: { warn: (...a) => warned.push(a.join(' ')), error() {}, log() {}, info() {} } });
-  API._supabaseSelect = async (q) => (q.includes('code=eq.TN155') ? [{ product_id: 'drum' }] : []);
+  API._supabaseSelect = async (q) => {
+    if (q.startsWith('product_code_visitors')) return [{ code: 'TN155', product_type: 'drum_unit', chip_category: 'toner', product_count: 1 }];
+    return q.includes('code=eq.TN155') ? [{ product_id: 'drum' }] : [];
+  };
   API.getWithSWR = async (endpoint) => {
     const cat = new URL(endpoint, 'https://x').searchParams.get('category');
-    return cat === 'toner' ? { ok: false, code: 'SERVER_ERROR' } : { ok: true, data: { products: [] } };
+    return cat === 'drums' ? { ok: false, code: 'SERVER_ERROR' } : { ok: true, data: { products: [] } };
   };
   const primary = { ok: true, data: { products: [] } };
   await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
   assert.equal(primary.data.products.length, 0);
-  assert.ok(warned.some(w => /toner failed to load/.test(w) && /1 hand-tagged/.test(w)),
+  assert.ok(warned.some(w => /drums failed to load/.test(w) && /1 hand-tagged/.test(w)),
     `expected a warning naming the failed pool, got: ${JSON.stringify(warned)}`);
 });
 
@@ -1035,13 +1057,13 @@ test('_fetchManualChipCounts sums product_count across product_types of a catego
   assert.deepEqual(plain(chips), [{ code: 'LC40', count: 4 }]);
 });
 
-test('_fetchProductIdsForCode normalises the code before the lookup', async () => {
+test('_fetchVisitorIdsForCode normalises the code before the lookup', async () => {
   const API = loadAPI();
   let seen = '';
   API._supabaseSelect = async (q) => { seen = q; return [{ product_id: 'p1' }]; };
-  const ids = await API._fetchProductIdsForCode('lc-40');
-  assert.match(seen, /code=eq\.LC40/, 'code is upper-cased and stripped before query');
-  assert.deepEqual(ids, ['p1']);
+  const ids = await API._fetchVisitorIdsForCode('lc-40', 'Ink');
+  assert.match(seen, /code=eq\.LC40&chip_category=eq\.ink/, 'code is upper-cased and stripped, category lower-cased');
+  assert.deepEqual(plain(ids), ['p1']);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

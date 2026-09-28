@@ -1691,6 +1691,14 @@ const Cart = {
             try {
                 if (this.isAuthenticated) {
                     await this.syncWithServer();
+                } else if (this._noServerCartToRead(localItemCount)) {
+                    // A first-time visitor: no login, no guest session, nothing in
+                    // this browser. There is no cart the server could answer with —
+                    // the server MINTS the session on the first add (ERR-269) — so
+                    // GET /api/cart could only say "empty", from the origin, on
+                    // every first page view (backend handoff 2026-09-28 §6). Same
+                    // end state as the "both sides empty" branch below.
+                    this._losePricing(PRICING.LOCAL_ONLY);
                 } else {
                     // Guest users: Server-first with localStorage fallback
                     const epoch = this._beginSnapshot();
@@ -1771,6 +1779,20 @@ const Cart = {
             this.loading = false;
             this.updateUI();
         }
+    },
+
+    /**
+     * True when a signed-out browser has nothing the server could hold: no
+     * guest session id, no local lines, no pending removal to confirm. Local
+     * lines WITHOUT a session (a first add that failed or was rate-limited)
+     * are the opposite case — they still need the read-then-re-push path.
+     */
+    _noServerCartToRead(localItemCount) {
+        if (localItemCount > 0) return false;
+        if (Array.isArray(this._pendingOps) && this._pendingOps.length > 0) return false;
+        const sid = typeof API !== 'undefined' && typeof API.getGuestSessionId === 'function'
+            ? API.getGuestSessionId() : null;
+        return !sid;
     },
 
     /**

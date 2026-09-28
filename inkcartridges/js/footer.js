@@ -840,30 +840,76 @@
 
       window.renderOptIn = function () {
         // Badge on all pages, for everyone — it collects nothing.
-        window.gapi.load('ratingbadge', function () {
-          window.gapi.ratingbadge.render(
-            document.getElementById('google-reviews-badge'),
-            { merchant_id: 5748243992, position: 'BOTTOM_RIGHT' }
-          );
-        });
+        renderBadgeNow();
         // Opt-in survey on the order-confirmation page, only with consent.
         renderSurveyIfConsented();
       };
 
-      if (!document.querySelector('script[src*="apis.google.com/js/platform.js"]')) {
-        var s = document.createElement('script');
-        s.src = 'https://apis.google.com/js/platform.js?onload=renderOptIn';
-        s.async = true;
-        s.defer = true;
-        document.head.appendChild(s);
-      } else if (window.gapi) {
-        // platform.js already loaded — render badge directly
+      // The order-confirmation page renders the opt-in survey through this
+      // one gated renderer, never gapi.surveyoptin directly: calling it there
+      // bypassed the consent check above, and data that arrived after
+      // platform.js had loaded never rendered at all.
+      window.__gcrRenderSurvey = renderSurveyIfConsented;
+
+      function renderBadgeNow() {
         window.gapi.load('ratingbadge', function () {
           window.gapi.ratingbadge.render(
             document.getElementById('google-reviews-badge'),
             { merchant_id: 5748243992, position: 'BOTTOM_RIGHT' }
           );
         });
+      }
+
+      function injectPlatform() {
+        if (!document.querySelector('script[src*="apis.google.com/js/platform.js"]')) {
+          var s = document.createElement('script');
+          s.src = 'https://apis.google.com/js/platform.js?onload=renderOptIn';
+          s.async = true;
+          s.defer = true;
+          document.head.appendChild(s);
+        } else if (window.gapi) {
+          // platform.js already loaded — render badge directly
+          renderBadgeNow();
+        }
+      }
+
+      /* DEFERRED until the page is idle (backend handoff 2026-09-28 §5).
+         platform.js + the ratingbadge module are ~450 KB of third-party script
+         that ran on the main thread of every page view, competing with the
+         shopper's first scroll and tap. The badge is a bottom-right trust mark,
+         not content, so it waits for requestIdleCallback (5 s ceiling) or the
+         first scroll / pointer / key, whichever comes first, and never before load. The ERR-233
+         footprint observer above already copes with a badge that appears late.
+         The ORDER-CONFIRMATION page loads it at once: the opt-in survey is the
+         point of that page's integration and it is the one page where it runs. */
+      var platformQueued = false;
+      function loadPlatformOnce() {
+        if (platformQueued) return;
+        platformQueued = true;
+        ['scroll', 'pointerdown', 'keydown'].forEach(function (t) {
+          window.removeEventListener(t, loadPlatformOnce, true);
+        });
+        injectPlatform();
+      }
+      if (/^\/(?:html\/)?order-confirmation/.test(location.pathname)) {
+        loadPlatformOnce();
+      } else {
+        ['scroll', 'pointerdown', 'keydown'].forEach(function (t) {
+          window.addEventListener(t, loadPlatformOnce, { capture: true, passive: true, once: true });
+        });
+        // Idle AFTER load: the first idle slot after DOMContentLoaded arrives
+        // while the hero image and the product request are still in flight
+        // (measured locally: 3 ms after DCL), which is the window this exists
+        // to keep clear.
+        var queueIdle = function () {
+          if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(loadPlatformOnce, { timeout: 5000 });
+          } else {
+            setTimeout(loadPlatformOnce, 3000);
+          }
+        };
+        if (document.readyState === 'complete') queueIdle();
+        else window.addEventListener('load', queueIdle, { once: true });
       }
     })();
   }

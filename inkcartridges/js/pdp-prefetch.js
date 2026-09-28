@@ -24,6 +24,17 @@
  *   - legacy slug-only URLs need a lookup first
  * The request is anonymous and cookieless, exactly like the public read
  * (ERR-124); an admin preview never consumes it (API._catalogRoute decides).
+ *
+ * HERO PRELOAD (backend handoff 2026-09-28 §2). When the product arrives, a
+ * <link rel=preload> for the hero image goes into <head> at once, so the LCP
+ * image starts with the product response instead of after every deferred
+ * script has run and renderProduct() has written the <img>. The URLs MUST be
+ * the ones the <img> will ask for, or the browser downloads the image twice:
+ * heroImage() mirrors storageUrl() + imageSrcset(raw, [400, 600, 800]) in
+ * js/utils.js and the `sizes` in product-detail-page.js renderProduct, and
+ * tests/backend-move-sep2026.test.js §2 runs both and asserts they agree.
+ * The link carries `data-lcp-product`, which also stops Products.renderCards
+ * from promoting the below-fold "bought together" card to high priority.
  */
 'use strict';
 (function () {
@@ -33,6 +44,41 @@
         return (host === 'www.inkcartridges.co.nz' || host === 'inkcartridges.co.nz')
             ? 'https://api.inkcartridges.co.nz'
             : 'https://ink-backend-sg.onrender.com';
+    }
+
+    // MIRROR of the PDP hero <img> (see the header). null ⇒ no preload: a local
+    // asset or placeholder, or the legacy colour-swatch image renderProduct
+    // replaces with a colour block.
+    var HERO_WIDTHS = [400, 600, 800];
+    var HERO_SIZES = '(max-width: 480px) 400px, (max-width: 768px) 600px, 800px';
+    function heroImage(raw, base) {
+        if (!raw || typeof raw !== 'string' || raw.charAt(0) === '/') return null;
+        if (/\/color-swatch(?:-v\d+)?\.(?:png|jpe?g|webp)(?:\?.*)?$/i.test(raw)) return null;
+        var opt = function (w) {
+            return base + '/api/images/optimize?url=' + encodeURIComponent(raw) + '&w=' + w + '&format=webp';
+        };
+        return {
+            href: opt(400),
+            srcset: HERO_WIDTHS.map(function (w) { return opt(w) + ' ' + w + 'w'; }).join(', '),
+            sizes: HERO_SIZES
+        };
+    }
+
+    function preloadHero(doc, body, base) {
+        var data = body && body.ok !== false && body.data;
+        var hero = data && heroImage(data.image_url, base);
+        if (!hero || !doc || !doc.head) return null;
+        if (doc.querySelector('link[rel="preload"][data-lcp-product]')) return null;
+        var link = doc.createElement('link');
+        link.rel = 'preload';
+        link.as = 'image';
+        link.href = hero.href;
+        link.setAttribute('imagesrcset', hero.srcset);
+        link.setAttribute('imagesizes', hero.sizes);
+        link.setAttribute('fetchpriority', 'high');
+        link.setAttribute('data-lcp-product', 'pdp-hero');
+        doc.head.appendChild(link);
+        return link;
     }
 
     /** SKU from the URL, or null when this page should not prefetch. */
@@ -48,11 +94,12 @@
         return raw.trim() || null;
     }
 
-    function start(loc) {
+    function start(loc, doc) {
         var sku = skuFromLocation(loc);
         if (!sku || typeof fetch !== 'function') return null;
         var path = '/api/products/' + encodeURIComponent(sku);
-        var promise = fetch(apiBase(loc.hostname) + path, { method: 'GET', headers: {}, credentials: 'omit' })
+        var base = apiBase(loc.hostname);
+        var promise = fetch(base + path, { method: 'GET', headers: {}, credentials: 'omit' })
             .then(function (res) {
                 return res.json().then(function (body) { return body; }, function () { return null; })
                     .then(function (body) {
@@ -63,13 +110,17 @@
             }, function (err) {
                 return { kind: 'network-error', error: err && err.message };
             });
+        // Side branch: a preload failure must never touch the consumed promise.
+        promise.then(function (r) {
+            if (r.kind === 'ok') { try { preloadHero(doc, r.body, base); } catch (e) { /* preload is a hint */ } }
+        });
         return { path: path, promise: promise };
     }
 
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { skuFromLocation: skuFromLocation, apiBase: apiBase, start: start };
+        module.exports = { skuFromLocation: skuFromLocation, apiBase: apiBase, start: start, heroImage: heroImage, preloadHero: preloadHero };
     }
     if (typeof window !== 'undefined' && window.location) {
-        try { window.__pdpPrefetch = start(window.location); } catch (e) { window.__pdpPrefetch = null; }
+        try { window.__pdpPrefetch = start(window.location, window.document); } catch (e) { window.__pdpPrefetch = null; }
     }
 })();

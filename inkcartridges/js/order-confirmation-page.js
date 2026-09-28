@@ -520,9 +520,12 @@
             // Store for renderOptIn callback (fires when platform.js loads)
             window._googleReviewsOptInData = data;
 
-            // If platform.js already loaded and gapi.surveyoptin is ready, render immediately
-            if (window.gapi && window.gapi.surveyoptin) {
-                window.gapi.surveyoptin.render(data);
+            // platform.js may already have loaded (renderOptIn ran before this
+            // data existed): hand over to footer.js's gated renderer. Never call
+            // gapi.surveyoptin.render here — that skipped the consent check
+            // (ERR-227) and, before surveyoptin was loaded, rendered nothing.
+            if (typeof window.__gcrRenderSurvey === 'function') {
+                window.__gcrRenderSurvey();
             }
         },
 

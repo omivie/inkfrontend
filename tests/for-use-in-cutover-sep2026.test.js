@@ -108,15 +108,23 @@ test('§2 API.getForUseIn goes through getPublic', () => {
         'SKUs contain dots and slashes-adjacent characters; encode them');
 });
 
-test('§2 the PDP fetches it in PARALLEL with the enrich, not after it', () => {
-    // Both are needed before render. Awaiting them in series would have made a
-    // security fix cost a round trip on every product page.
-    const idxStart = PDP.indexOf('const forUseInPromise = this._fetchForUseIn(sku);');
+test('§2 the PDP starts it before the enrich and NEVER holds the gallery for it', () => {
+    // 2026-09-23: both were awaited before render, in parallel. 2026-09-28
+    // (backend handoff §2): the gallery no longer waits for the machine list at
+    // all — renderCompatiblePrinters awaits the load's promise and paints it
+    // when it lands. What must still hold: it starts first, and nothing between
+    // the start and renderProduct() awaits it.
+    const idxStart = PDP.indexOf('this._forUseInPromise = this._fetchForUseIn(sku);');
     const idxEnrich = PDP.indexOf('const enrichUrl =');
-    const idxAwait = PDP.indexOf('await forUseInPromise;');
+    const idxRender = PDP.indexOf('this.renderProduct();', idxStart);
     assert.ok(idxStart > -1, 'the for-use-in fetch must be started explicitly');
     assert.ok(idxStart < idxEnrich, 'it must START before the enrich fetch');
-    assert.ok(idxAwait > idxEnrich, 'and be AWAITED after it, so the two overlap');
+    assert.ok(idxRender > idxStart, 'renderProduct follows the start');
+    assert.doesNotMatch(PDP.slice(idxStart, idxRender), /await (this\._)?forUseInPromise/,
+        'nothing between the start and renderProduct() may await the machine list');
+    const fn = PDP.match(/async renderCompatiblePrinters\(info\) \{[\s\S]*?const forUseIn = this\._forUseIn \|\| \{\};/);
+    assert.ok(fn && /await this\._forUseInPromise/.test(fn[0]),
+        'the renderer awaits the promise, then reads _forUseIn (which the retry refreshes)');
 });
 
 test('§2 _fetchForUseIn is the ONLY caller of API.getForUseIn', () => {

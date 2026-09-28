@@ -589,15 +589,20 @@
             // Parse URL params to restore state
             this.parseURLState();
 
+            // Inject CollectionPage / BreadcrumbList JSON-LD for the current
+            // view BEFORE the level loads (backend handoff 2026-09-28 §3): it
+            // needs only brand/category/printer, which parseURLState has just
+            // set, and waiting made /api/schema/collection start after the
+            // slowest level request. It is not awaited. navigateTo and popstate
+            // re-inject when the view changes.
+            this.injectCollectionSchema();
+
             // Load initial level based on state
             this.navigationVersion++;
             await this.loadCurrentLevel(this.navigationVersion);
 
             // Render active filter indicators
             this.renderActiveFilters();
-
-            // Inject CollectionPage / BreadcrumbList JSON-LD for the current view
-            this.injectCollectionSchema();
 
             // Set up browser navigation
             window.addEventListener('popstate', (e) => {
@@ -1890,7 +1895,7 @@
             if (!families) return;
 
             const suspects = this.categories.filter(cat => {
-                if (cat.id === 'ribbons') return false;       // counted separately, never a tile
+                if (cat.id === 'ribbons') return false;       // never a tile here (nav only)
                 if ((categoryCounts[cat.id] || 0) > 0) return false;
                 const family = families[cat.apiCategory];
                 return Array.isArray(family) && family.length > 1;
@@ -1943,12 +1948,14 @@
 
             if (!categoryCounts) {
                 try {
-                    // Fire shop (counts) and ribbons count in parallel — ribbons aren't in /api/shop
+                    // No ribbons count here any more (backend handoff 2026-09-28
+                    // §3). A `getRibbons({limit:1})` ran beside this and was
+                    // awaited before the tiles painted — 8.6 s for Brother before
+                    // the backend fix — for a number nothing showed:
+                    // availableCategories below drops `ribbons` (they are reached
+                    // from the nav only), so its tile and redirect never ran.
                     const shopPromise = this._shopEndpointAvailable
                         ? API.getShopData({ brand: this.state.brand })
-                        : Promise.resolve(null);
-                    const ribbonPromise = this.state.brand
-                        ? API.getRibbons({ printer_brand: this.state.brand, limit: 1 }).catch(() => null)
                         : Promise.resolve(null);
 
                     if (this._shopEndpointAvailable) {
@@ -2031,13 +2038,6 @@
                         categoryCounts['ribbons'] = 0;
                     }
 
-                    // Resolve the parallel ribbons count (fired alongside the shop call above)
-                    if (categoryCounts && this.state.brand) {
-                        const ribbonRes = await ribbonPromise;
-                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                        const ribbonTotal = ribbonRes?.meta?.total_items || ribbonRes?.data?.pagination?.total || 0;
-                        categoryCounts.ribbons = ribbonTotal;
-                    }
 
                     this.cache.products[cacheKey] = categoryCounts;
                 } catch (error) {
@@ -2066,10 +2066,6 @@
             // If there's only one category, skip the selection step and go straight to codes
             if (availableCategories.length === 1) {
                 const onlyCat = availableCategories[0];
-                if (onlyCat.id === 'ribbons') {
-                    window.location.href = `/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
-                    return;
-                }
                 this.navigateTo('codes', { category: onlyCat.id });
                 return;
             }
@@ -2084,13 +2080,7 @@
                     <span class="drilldown-box__name">${cat.name}</span>
                     <span class="drilldown-box__count">${count} product${count !== 1 ? 's' : ''}</span>
                 `;
-                if (cat.id === 'ribbons') {
-                    box.addEventListener('click', () => {
-                        window.location.href = `/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
-                    });
-                } else {
-                    box.addEventListener('click', () => this.navigateTo('codes', { category: cat.id }));
-                }
+                box.addEventListener('click', () => this.navigateTo('codes', { category: cat.id }));
                 grid.appendChild(box);
             });
 
@@ -3769,6 +3759,27 @@
                 // throw in the temporal dead zone (the CompatSource lesson).
                 const clickBeacon = (typeof window !== 'undefined' && window.SearchClickBeacon) || null;
 
+                // SPECULATIVE LITERAL SET (backend handoff 2026-09-28 §1). The
+                // repair reads below (/api/products?search= + /api/search/suggest)
+                // are decided by /smart's answer, so they used to start only
+                // after it: a missed digit query (tn2450) painted at 7.5 s,
+                // 1.7 s of it waiting for them. The repair triggers that need
+                // digits (softMiss) or are known up front (exactMode) are where
+                // this bites, so for those queries both start WITH /smart and
+                // are simply dropped when no trigger fires. Word queries do not
+                // speculate. The cost, accepted by the owner: two extra reads
+                // per digit search, one of them a /suggest analytics row.
+                // Removing these calls instead would re-open ERR-133/144/264 —
+                // they are the literal-match repair, not duplicates of /smart.
+                const speculate = /\d/.test(String(searchQuery || '')) || !!this.state.exact;
+                const speculative = speculate ? {
+                    fallback: API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage }),
+                    suggest: requestedPage === 1 ? API.searchSuggest(searchQuery, 20) : Promise.resolve([]),
+                } : null;
+                // A rejection nobody awaits (no trigger fired) must not surface
+                // as an unhandled rejection; the awaited copy below still sees it.
+                if (speculative) speculative.fallback.catch(() => {});
+
                 {
                     const response = await API.smartSearch(searchQuery, {
                         limit: SEARCH_PAGE_SIZE,
@@ -3921,13 +3932,16 @@
                         // ranked shortlist (incl. loose digit matches that
                         // /products misses, e.g. the "165.11" ribbon for
                         // q=511). Fired in parallel; suggest only on page 1
-                        // (it is a typeahead endpoint with no pager).
-                        const [fallback, suggestList] = await Promise.all([
-                            API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage }),
-                            requestedPage === 1
-                                ? API.searchSuggest(searchQuery, 20)
-                                : Promise.resolve([]),
-                        ]);
+                        // (it is a typeahead endpoint with no pager). Already in
+                        // flight since before /smart for a speculated query.
+                        const [fallback, suggestList] = await Promise.all(speculative
+                            ? [speculative.fallback, speculative.suggest]
+                            : [
+                                API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage }),
+                                requestedPage === 1
+                                    ? API.searchSuggest(searchQuery, 20)
+                                    : Promise.resolve([]),
+                            ]);
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                         // ERR-264 — DISTINGUISH "the literal search found nothing"
                         // from "the literal search never ran". Both used to arrive

@@ -1936,19 +1936,6 @@ const API = {
         return Array.isArray(rows) ? rows.map(r => r && r.product_id).filter(Boolean) : null;
     },
 
-    /** Product IDs carrying a given manual code. */
-    async _fetchProductIdsForCode(code) {
-        const c = this._normManualCode(code);
-        if (c.length < 2) return [];
-        const cacheKey = 'forcode:' + c;
-        let rows = this._manualCodeCacheGet(cacheKey);
-        if (rows === undefined) {
-            rows = await this._supabaseSelect(`product_codes?select=product_id&code=eq.${encodeURIComponent(c)}`);
-            this._manualCodeCacheSet(cacheKey, rows);
-        }
-        return Array.isArray(rows) ? rows.map(r => r && r.product_id).filter(Boolean) : [];
-    },
-
     /**
      * Apply the product_codes override layer to a /api/shop response, in place.
      * Runs at the tail of getShopData on the SWR-cloned response we own.
@@ -1963,23 +1950,22 @@ const API = {
             const data = primary.data;
             const products = Array.isArray(data.products) ? data.products : [];
 
-            // (1) Override series_codes on every returned product carrying
-            //     manual codes — "manual fully replaces auto". Ribbons are
-            //     owner-manual (ERR-086): a ribbon with NO override carries no
-            //     codes at all — never a backend-derived fallback — so its
-            //     /shop membership is exactly what the owner assigned. (The loop
-            //     runs even when no product has an override so ribbon-clearing
-            //     still happens.)
-            if (products.length) {
-                const codeMap = await this._fetchManualCodesByProduct(products.map(p => p && p.id));
-                const ribbonTypes = this._CATEGORY_PRODUCT_TYPES.ribbons;
-                for (const p of products) {
-                    if (!p) continue;
-                    if (p.id && codeMap.has(p.id)) {
-                        p.series_codes = [...new Set(codeMap.get(p.id))];
-                    } else if (ribbonTypes.includes(p.product_type)) {
-                        p.series_codes = [];
-                    }
+            // (1) RIBBONS ONLY since 2026-09-28. Every /api/shop and
+            //     /api/products row now carries override-aware series_codes
+            //     (backend `74fb234`; probe:backend-move §O checks every override
+            //     row), so a non-ribbon row is already right and reading
+            //     product_codes for it was a Mumbai round trip for nothing.
+            //     Ribbons are owner-manual (ERR-086): a ribbon with NO override
+            //     carries no codes at all — but the backend still sends it the
+            //     DERIVED ones (measured: 691.01 → LZ24), so for ribbon rows we
+            //     still ask whether an override exists. BF-081 asks the backend
+            //     to apply that rule; then this goes too.
+            const ribbonTypes = this._CATEGORY_PRODUCT_TYPES.ribbons;
+            const ribbonRows = products.filter(p => p && ribbonTypes.includes(p.product_type));
+            if (ribbonRows.length) {
+                const codeMap = await this._fetchManualCodesByProduct(ribbonRows.map(p => p.id));
+                for (const p of ribbonRows) {
+                    p.series_codes = (p.id && codeMap.has(p.id)) ? [...new Set(codeMap.get(p.id))] : [];
                 }
             }
 
@@ -2052,10 +2038,38 @@ const API = {
                 }
             }
 
-            // (3) Code-filtered grid — recover products manually tagged with
-            //     the code that the backend's series_codes filter dropped.
+            // (3) Code-filtered grid — recover products tagged with the code as
+            //     VISITORS from another type. Since 2026-09-28 /api/shop?code=
+            //     itself lists every product filed under the code by a
+            //     same-type override (backend `74fb234`; probe:backend-move §O),
+            //     so the old "read every product_codes row for this code, fetch
+            //     whatever is missing" pass found nothing and cost two Mumbai
+            //     reads per grid. What the handoff does NOT cover is a
+            //     cross-type tag (chip_category — a drum ticked into the TN155
+            //     toner chip): /api/shop filtered by category never returns it.
+            //     So only visitors are asked for here, and only when the
+            //     brand's visitor summary (one cached read per brand, shared
+            //     with step 2) says this chip has any — today none do, so a
+            //     code grid makes no per-code product_codes read at all.
+            //     BF-082 asks the backend to honour chip_category; then this
+            //     goes too.
             if (params.code && params.brand && params.category) {
-                const manualIds = await this._fetchProductIdsForCode(params.code);
+                const ownCategory = String(params.category).toLowerCase();
+                const chip = this._normManualCode(params.code);
+                const summary = await this._fetchVisitorRows(params.brand);
+                // Can't ask the summary ⇒ ask for the ids directly (the old,
+                // costlier path) rather than silently assume "no visitors".
+                const hasVisitors = summary === null
+                    || summary.some(v => v.visits === ownCategory && v.category !== ownCategory
+                        && this._normManualCode(v.code) === chip);
+                const visitorIdsForCode = hasVisitors
+                    ? await this._fetchVisitorIdsForCode(params.code, ownCategory)
+                    : [];
+                if (visitorIdsForCode === null && typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                    DebugLog.warn(`[API._applyManualCodes] code=${params.code}: product_code visitors did not load — `
+                        + 'products ticked into this chip from another type may be missing from this grid');
+                }
+                const manualIds = visitorIdsForCode || [];
                 if (manualIds.length) {
                     const present = new Set(products.map(p => p && p.id).filter(Boolean));
                     const missing = new Set(manualIds.filter(id => !present.has(id)));
@@ -2092,25 +2106,12 @@ const API = {
                                 if (only) only.delete(p.id);
                             }
                         };
-                        await recoverFrom(params.category);
-                        // A code may carry products of ANOTHER type: an admin ticked
-                        // a drum into the TN155 toner chip, which stores
-                        // chip_category='toner' on that row. /api/shop filtered by
-                        // category never returns it, so look in the brand's other
-                        // types — but ONLY for those rows. A code match alone is a
-                        // collision, not a membership: HP ink carries "61" at home
-                        // under Ink, and HP Toner has its own "61" chip.
-                        if (missing.size) {
-                            const own = String(params.category).toLowerCase();
-                            const visitorIds = await this._fetchVisitorIdsForCode(params.code, own);
-                            // Can't ask ⇒ nobody crosses over, and the warning says so.
-                            if (visitorIds === null) failedPools.push('product_code_visitors');
-                            const visiting = new Set((visitorIds || []).filter(id => missing.has(id)));
-                            const others = Object.keys(this._CATEGORY_PRODUCT_TYPES).filter(c => c !== own);
-                            for (const c of others) {
-                                if (!visiting.size) break;
-                                await recoverFrom(c, visiting);
-                            }
+                        // Every id here is a visitor of THIS chip from another
+                        // type, so look only in the brand's other types.
+                        const others = Object.keys(this._CATEGORY_PRODUCT_TYPES).filter(c => c !== ownCategory);
+                        for (const c of others) {
+                            if (!missing.size) break;
+                            await recoverFrom(c, missing);
                         }
                         // Fail-soft, never silent: a failed pool means a tagged
                         // product may be missing from this grid.
@@ -2678,7 +2679,32 @@ const API = {
         return settled;
     },
 
+    /**
+     * The list rides on GET /api/site/nav as `ribbon_brands` since 2026-09-28
+     * (backend handoff §4) — same fields, filter and order as the direct read,
+     * verified row for row by probe:backend-move §N — and mega-nav already
+     * fetches site/nav on every page through the same deduped SWR entry, so
+     * this costs no request at all. The direct Supabase read was one uncached
+     * round trip to Mumbai per page view.
+     *
+     * CONTRACT: `ribbon_brands: null` (or absent) means the backend could not
+     * load the list — NOT "no brands". Only then do we fall back to the direct
+     * read, and we say so. An empty array is an answer and is returned as one.
+     */
     async _fetchRibbonBrandsList() {
+        try {
+            const nav = await this.getSiteNav();
+            const list = nav && nav.ok !== false && nav.data ? nav.data.ribbon_brands : undefined;
+            if (Array.isArray(list)) return { ok: true, data: { brands: list } };
+            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                DebugLog.warn('[API.getRibbonBrandsList] /api/site/nav gave ribbon_brands='
+                    + (list === null ? 'null' : typeof list) + ' — falling back to the direct Supabase read');
+            }
+        } catch (_) { /* fall through to the direct read */ }
+        return this._fetchRibbonBrandsDirect();
+    },
+
+    async _fetchRibbonBrandsDirect() {
         const url = `${Config.SUPABASE_URL}/rest/v1/ribbon_brands?is_active=eq.true&order=sort_order.asc&select=id,name,slug,image_url,sort_order`;
         const res = await this._anonRest(url, {
             headers: {

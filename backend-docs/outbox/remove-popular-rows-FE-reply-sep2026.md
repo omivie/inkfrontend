@@ -21,8 +21,8 @@ table at 1440x900 and 390x664.
 The probe checks `/value-packs` first. If it cannot see that page's own `pack=value_pack` request, the
 probe stops, because its request detector would then be blind.
 
-Please re-check production after our deploy. The same command against production (no `PROBE_BASE`)
-should read 81 pass, 0 fail.
+**Deployed as `bd26709` on 2026-09-28. The same probe against production now reads 81 pass, 0 fail**
+(no 429s, and the `/value-packs` control passed). Please run your own re-check.
 
 ## Why you saw the rows on brand, printer and search pages
 

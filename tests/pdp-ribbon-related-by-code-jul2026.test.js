@@ -65,13 +65,17 @@ test('the PDP enrichment fetches the product id', () => {
 });
 
 test('a manual product_codes override replaces series_codes on the PDP', () => {
-  assert.match(PDP, /const manualCodes = await API\.getManualProductCodes\(this\.product\.id\)/,
-    'the PDP must read the override for the loaded product');
-  assert.match(PDP, /if \(manualCodes\.length\)\s*\{?\s*this\.product\.series_codes = manualCodes;/,
-    'a non-empty override fully replaces series_codes — matching /shop\'s "codes set here replace the auto-detected ones"');
-  // ERR-086: with no override, a ribbon carries NO codes (never a derived fallback).
-  assert.match(PDP, /else if \(this\.product\.category === 'ribbon'\)[\s\S]{0,400}?this\.product\.series_codes = \[\];/,
-    'a ribbon with no override is cleared to no codes (owner-manual)');
+  // Non-ribbons: GET /api/products/:sku applies the product_codes override
+  // itself since 2026-09-28 (backend handoff §2, measured by
+  // probe:backend-move over every override row), so the PDP no longer reads
+  // product_codes for them. Ribbons still do: the backend sends a ribbon with
+  // no override its DERIVED codes, and ERR-086 says it has none.
+  assert.match(PDP, /if \(isRibbonRow\) \{[\s\S]{0,300}?const manualCodes = await API\.getManualProductCodes\(this\.product\.id\)/,
+    'the PDP must read the override for a loaded ribbon');
+  assert.match(PDP, /this\.product\.series_codes = manualCodes\.length \? manualCodes : \[\];/,
+    'a non-empty override fully replaces series_codes; none ⇒ a ribbon carries no codes');
+  assert.equal((PDP.match(/API\.getManualProductCodes\(/g) || []).length, 1,
+    'exactly one call site — inside the ribbon branch');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

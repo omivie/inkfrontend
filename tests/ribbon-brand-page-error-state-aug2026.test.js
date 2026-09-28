@@ -275,17 +275,45 @@ test('§2 the double-escape is gone — showEmpty writes textContent, so pre-esc
 });
 
 test('§2 the brand list is memoised on success but never on failure', async () => {
-    const good = loadApi(async () => jsonResponse(200, [{ id: '1', name: 'HP', slug: 'hp' }]));
+    // Since 2026-09-28 the list comes from /api/site/nav (`ribbon_brands`); the
+    // direct Supabase read is only the fallback when site/nav cannot say.
+    const brands = [{ id: '1', name: 'HP', slug: 'hp' }];
+    const good = loadApi(async (url) => (/\/api\/site\/nav/.test(url)
+        ? jsonResponse(200, { ok: true, data: { brands: [], ribbon_brands: brands } })
+        : jsonResponse(200, brands)));
+    const first = await good.API.getRibbonBrandsList();
     await good.API.getRibbonBrandsList();
-    await good.API.getRibbonBrandsList();
+    assert.deepEqual(JSON.parse(JSON.stringify(first.data.brands)), brands);
     assert.equal(good.calls.length, 1,
         'the grid, the label resolver and the mega-nav all want this list — one round trip, not three');
+    assert.match(good.calls[0].url, /\/api\/site\/nav/, 'and that round trip is site/nav, not Supabase');
 
-    const bad = loadApi(async () => jsonResponse(401, { code: '42501', message: 'nope' }));
+    const bad = loadApi(async (url) => (/\/api\/site\/nav/.test(url)
+        ? jsonResponse(500, { ok: false, error: { code: 'SERVER_ERROR' } })
+        : jsonResponse(401, { code: '42501', message: 'nope' })));
     await bad.API.getRibbonBrandsList();
     await bad.API.getRibbonBrandsList();
-    assert.equal(bad.calls.length, 2,
+    const direct = bad.calls.filter((c) => /ribbon_brands/.test(c.url)).length;
+    assert.equal(direct, 2,
         'a cached failure would leave the brand grid permanently broken for the session');
+});
+
+test('§2 ribbon_brands: null on site/nav means "could not load" — fall back to the direct read', async () => {
+    const brands = [{ id: '1', name: 'HP', slug: 'hp' }];
+    const api = loadApi(async (url) => (/\/api\/site\/nav/.test(url)
+        ? jsonResponse(200, { ok: true, data: { brands: [], ribbon_brands: null } })
+        : jsonResponse(200, brands)));
+    const res = await api.API.getRibbonBrandsList();
+    assert.equal(res.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(res.data.brands)), brands);
+    assert.ok(api.calls.some((c) => /rest\/v1\/ribbon_brands/.test(c.url)), 'the fallback ran');
+
+    const empty = loadApi(async (url) => (/\/api\/site\/nav/.test(url)
+        ? jsonResponse(200, { ok: true, data: { brands: [], ribbon_brands: [] } })
+        : jsonResponse(200, brands)));
+    const none = await empty.API.getRibbonBrandsList();
+    assert.deepEqual(JSON.parse(JSON.stringify(none.data.brands)), [], 'an empty array is an ANSWER');
+    assert.ok(!empty.calls.some((c) => /rest\/v1\/ribbon_brands/.test(c.url)), 'no fallback for an answer');
 });
 
 test('§2 the empty sentence waits for the properly-cased brand label', () => {

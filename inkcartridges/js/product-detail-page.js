@@ -239,59 +239,75 @@
 
                 this.product = response.data;
 
-                // The "FOR USE IN" list, in flight ALONGSIDE the Supabase enrich
-                // below rather than after it (ERR-243). Both are needed before
-                // render, so awaiting them in series would have made the cutover
-                // cost a round trip; started here, it costs none.
-                const forUseInPromise = this._fetchForUseIn(sku);
+                // The "FOR USE IN" list starts now and is NOT awaited before the
+                // gallery (backend handoff 2026-09-28 §2). It used to gate the
+                // first paint; renderCompatiblePrinters awaits the promise and
+                // paints the machine list when it lands.
+                this._forUseInPromise = this._fetchForUseIn(sku);
 
-                // Enrich products from Supabase (description, related products).
-                // Also pull `id` so we can honour the manual product_codes override below.
+                // Ribbons are owner-manual (ERR-086): a ribbon with no override
+                // carries NO codes. The backend's `series_codes` applies the
+                // product_codes override, but for a ribbon without one it still
+                // sends the DERIVED codes (measured 2026-09-28: 691.01 → LZ24,
+                // 72200.01 → DIN2103) — so only for ribbons do we still need to
+                // know whether an override row exists. BF-081 asks the backend to
+                // apply the ribbon rule itself; then this read can go too.
+                const isRibbonRow = this._productType === 'ribbon'
+                    || this.product.category === 'ribbon'
+                    || API._CATEGORY_PRODUCT_TYPES.ribbons.includes(this.product.product_type);
+                const hasOwn = (k) => Object.prototype.hasOwnProperty.call(this.product, k);
+
+                // `description_html`, `related_product_skus` and `id` ride on
+                // GET /api/products/:sku since 2026-09-28, so the direct Supabase
+                // enrich runs ONLY when the row arrived without them: every ribbon
+                // (GET /api/ribbons/:sku does not carry them — BF-080), and the
+                // smart-search fallback API.getProduct takes on a 5xx. hasOwn, not
+                // `== null`: an ABSENT key means "not sent", null means "none"
+                // (ERR-199). It is loud when it runs on a non-ribbon row, because
+                // that means the endpoint regressed.
                 //
                 // `compatible_devices_html` is DELIBERATELY NOT in this select
-                // (ERR-243). It is the admin-authored machine list, and read this
-                // way it was bulk-dumpable — drop the `sku=eq.` filter and every
-                // list came back in one request, with the anon key that ships in
-                // the page. It now comes from /api/products/:sku/for-use-in above.
-                // Backend migration 132 drops the column; do not re-add it here,
-                // and note the request will simply stop returning it when they do.
-                try {
-                    const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=id,description_html,related_product_skus&limit=1`;
-                    const enrichResp = await fetch(enrichUrl, {
-                        headers: {
-                            'apikey': Config.SUPABASE_ANON_KEY,
-                            'Accept': 'application/json',
-                        },
-                    });
-                    if (enrichResp.ok) {
-                        const rows = await enrichResp.json();
-                        const extra = rows[0];
-                        if (extra) {
-                            if (this.product.id == null) this.product.id = extra.id;
-                            if (this.product.description_html == null) this.product.description_html = extra.description_html;
-                            if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
+                // (ERR-243): read this way the admin-authored machine list was
+                // bulk-dumpable. It comes from /api/products/:sku/for-use-in.
+                const needsEnrich = this.product.id == null
+                    || !hasOwn('description_html') || !hasOwn('related_product_skus');
+                const enrichPromise = needsEnrich ? (async () => {
+                    if (!isRibbonRow && typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                        DebugLog.warn('[PDP] product row lacks description_html/related_product_skus/id; '
+                            + 'falling back to the direct Supabase read', { sku });
+                    }
+                    try {
+                        const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=id,description_html,related_product_skus&limit=1`;
+                        const enrichResp = await fetch(enrichUrl, {
+                            headers: {
+                                'apikey': Config.SUPABASE_ANON_KEY,
+                                'Accept': 'application/json',
+                            },
+                        });
+                        if (enrichResp.ok) {
+                            const rows = await enrichResp.json();
+                            const extra = rows[0];
+                            if (extra) {
+                                if (this.product.id == null) this.product.id = extra.id;
+                                if (this.product.description_html == null) this.product.description_html = extra.description_html;
+                                if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
+                            }
                         }
-                    }
-                } catch (_) { /* non-critical enrichment */ }
+                    } catch (_) { /* non-critical enrichment */ }
+                })() : null;
 
-                await forUseInPromise;
-
-                // Honour the manual product_codes override on the PDP. The /shop merge
-                // (api.js _applyManualCodes) only runs on getShopData, so a singly-loaded
-                // product never sees its assigned codes; apply them here so a code set in
-                // the admin drives the PDP (breadcrumb code, Related Products) exactly as
-                // it does /shop — "codes set here fully replace the auto-detected ones".
-                try {
-                    const manualCodes = await API.getManualProductCodes(this.product.id);
-                    if (manualCodes.length) {
-                        this.product.series_codes = manualCodes;
-                    } else if (this.product.category === 'ribbon') {
-                        // Ribbons are owner-manual (ERR-086): with no explicit
-                        // override they carry NO codes — never a backend-derived
-                        // fallback. Mirrors _applyManualCodes' ribbon rule.
-                        this.product.series_codes = [];
-                    }
-                } catch (_) { /* non-critical — fall back to the backend series_codes */ }
+                // Ribbon codes need the id, so they wait for the enrich; nothing
+                // else does. A ribbon's breadcrumb code and related rail depend
+                // on the answer, so the ribbon path still awaits it before render.
+                if (isRibbonRow) {
+                    if (enrichPromise) await enrichPromise;
+                    try {
+                        const manualCodes = await API.getManualProductCodes(this.product.id);
+                        this.product.series_codes = manualCodes.length ? manualCodes : [];
+                    } catch (_) { /* non-critical — fall back to the backend series_codes */ }
+                } else if (enrichPromise) {
+                    await enrichPromise;
+                }
 
                 // Hide an admin-only product from anyone the server has not called
                 // an admin (ERR-234). LIVE since 2026-09-09; it was dormant from
@@ -2064,9 +2080,12 @@
 
         async renderCompatiblePrinters(info) {
             // The admin-authored machine list, from /api/products/:sku/for-use-in
-            // (ERR-243). `_fetchForUseIn` ran in parallel with the Supabase enrich
-            // during load, so this is already resolved; the `|| {}` covers a
-            // renderer called on a path that did not load (tests, re-render).
+            // (ERR-243). Since 2026-09-28 the gallery no longer waits for it, so
+            // the first call here usually arrives BEFORE the answer: await the
+            // load's promise, then read `_forUseIn` — which the retry button
+            // below also refreshes, so the value, not the promise, is the truth.
+            // The `|| {}` covers a renderer called on a path that did not load.
+            if (this._forUseInPromise) await this._forUseInPromise;
             const forUseIn = this._forUseIn || {};
 
             if (forUseIn.state === 'ok' && forUseIn.html) {

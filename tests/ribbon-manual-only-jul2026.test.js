@@ -123,7 +123,10 @@ test('renderCompatiblePrinters short-circuits for ribbons BEFORE the Supabase fa
 // 3. Product Codes — ribbons carry only owner-assigned codes
 // ═══════════════════════════════════════════════════════════════════════════
 test('the PDP clears a ribbon\'s series_codes when there is no manual override', () => {
-  assert.match(PDP, /else if \(this\.product\.category === 'ribbon'\) \{\s*this\.product\.series_codes = \[\];/,
+  // Since 2026-09-28 the backend's series_codes applies overrides, but still sends
+  // a ribbon with no override its DERIVED codes (691.01 → LZ24), so the PDP reads
+  // the override for ribbon rows only and clears when there is none.
+  assert.match(PDP, /if \(isRibbonRow\) \{[\s\S]{0,300}?this\.product\.series_codes = manualCodes\.length \? manualCodes : \[\];/,
     'no override + ribbon → no codes on the PDP either');
 });
 

@@ -50,6 +50,8 @@ describing the same incident.
 | | production, before (pre-deploy) | localhost:3000, after |
 |---|---|---|
 | result | **35 passed, 46 failed** | **81 passed, 0 failed** (one 429 retried, see below) |
+
+**Production after the deploy (`bd26709`, measured 2026-09-28 once `shop-page.js?v=317be1f3` was live): 81 passed, 0 failed, 0 warnings, no 429.** The same probe, same URLs, same control.
 | row h2/h3 in the DOM | on all 9 URLs, both viewports | none |
 | `/api/products/popular` requests | `/ink-cartridges`, `/toner-cartridges` (`limit=24`), `/ribbons` (desktop: **3 identical requests** per load) | none |
 | first block under the title on `/ribbons` | `section#popular-row` | the brand picker |
