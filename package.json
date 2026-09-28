@@ -83,7 +83,8 @@
     "probe:chip-prerender": "node scripts/probe-chip-prerender.mjs",
     "probe:cart-deep-link": "node scripts/probe-cart-deep-link.mjs",
     "probe:four-replies": "node scripts/probe-four-replies-sep2026.mjs",
-    "probe:bundle-response": "node scripts/probe-bundle-response-sep2026.mjs"
+    "probe:bundle-response": "node scripts/probe-bundle-response-sep2026.mjs",
+    "probe:best-sellers": "node scripts/probe-best-sellers.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

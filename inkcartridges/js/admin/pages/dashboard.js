@@ -29,6 +29,7 @@ import {
   unrealisedDeduction, bucketDeduction, applyCashBasis, cashBasisNote,
 } from '../utils/invoice-cash-basis.js';
 import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
+import { METRICS, rankBy, metricIncomplete } from '../utils/best-sellers.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
 const MISSING = '—';
@@ -84,7 +85,7 @@ let _storageHydrated = false;   // seed the Map from localStorage exactly once p
 // payload can carry up to 1000 expense rows + 18 chart series).
 // BUMP DASH_CACHE_SCHEMA whenever the `payload` object shape (in loadDashboard) changes, so
 // a stale-shape blob from a previous deploy is ignored rather than fed to render().
-const DASH_CACHE_SCHEMA = 2; // 2: added payload.sTraffic (Performance overview traffic overlay)
+const DASH_CACHE_SCHEMA = 3; // 2: added payload.sTraffic (Performance overview traffic overlay); 3: topProducts is getBestSellers()' object, not a row array
 function _dashCacheKey() {
   const uid = (typeof Auth !== 'undefined' && Auth.user && Auth.user.id) ? Auth.user.id : 'anon';
   return `admin_dash_cache:${uid}`;
@@ -1292,7 +1293,7 @@ async function runDashboardLoad(mySeq) {
     AdminAPI.getRefundAnalytics(params, signal),             // 3  refund reasons + rate KPI
     AdminAPI.getOutOfStock({ limit: 5 }, signal),            // 4  out-of-stock KPI
     AdminAPI.getOrders({ from, to }, 1, 8, signal),          // 5  recent orders table
-    AdminAPI.getTopProducts(params, signal),                 // 6  most-bought table
+    AdminAPI.getBestSellers(params, signal),                 // 6  most-bought card (revenue / units / orders)
     AdminAPI.getTrackingRequests({ status: 'pending' }, signal), // 7  alert: orders needing tracking
     AdminAPI.getOrders({ from, to, statuses: ['paid', 'processing'] }, 1, 50, signal), // 8  alert: untracked open orders
     // Worst-margin SKUs + low-margin alert. The endpoint needs a concrete source ('' → 400),
@@ -1501,6 +1502,7 @@ function render(d) {
 
   drawAllCharts(d);
   wireOrderRowClicks();
+  wireTopProductsToggle();
   wireAlertToggles();
 }
 
@@ -2643,46 +2645,75 @@ function wireOrderRowClicks() {
   });
 }
 
+// Most Bought: one card, three rankings (utils/best-sellers.js). The toggle re-renders
+// the body from the loaded set — no refetch. Full list: Performance → Best Sellers.
+let _topMetric = 'revenue';
+let _topData = null;
+
+function renderTopProductsBody() {
+  const items = _topData?.items || [];
+  const ranked = rankBy(items, _topMetric).slice(0, 10);
+  const showBrand = ranked.some(p => p.brand);
+  const cell = (v, fmt = String) => (v == null ? MISSING : esc(fmt(v)));
+  const rows = ranked.map(p => `
+      <tr>
+        <td class="cell-truncate">${esc(p.name)}</td>
+        ${showBrand ? `<td class="cell-muted">${esc(p.brand || '')}</td>` : ''}
+        <td class="cell-mono cell-right">${cell(p.units)}</td>
+        <td class="cell-mono cell-right">${cell(p.orders)}</td>
+        <td class="cell-mono cell-right">${cell(p.revenue, formatPrice)}</td>
+      </tr>`).join('');
+  // Partial-ness is said on the card, never left to look like a full ranking.
+  const notes = [];
+  if (_topData?.truncated) notes.push('Server row cap reached — ranking covers a partial set.');
+  if (metricIncomplete(items, _topMetric)) notes.push(`Some products have no ${_topMetric} figure and rank last.`);
+  return `
+      ${notes.map(n => `<div class="admin-dash-inline-empty">${esc(n)}</div>`).join('')}
+      <table class="admin-dash-table">
+        <thead><tr>
+          <th>Product</th>${showBrand ? '<th>Brand</th>' : ''}<th class="cell-right">Units</th><th class="cell-right">Orders</th><th class="cell-right">Revenue</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+}
+
 function renderTopProductsCard(data) {
-  const items = Array.isArray(data) ? data : (data ? firstArray(data, ['products', 'items', 'data']) : []);
-  if (!items.length) {
+  _topData = data && Array.isArray(data.items) ? data : null;
+  if (!_topData?.items.length) {
     return `
       <div class="admin-dash__cell--6 admin-card">
         <div class="admin-card__title">Most Bought <small>top sellers</small></div>
-        <div class="admin-dash-inline-empty">Top product data unavailable</div>
+        <div class="admin-dash-inline-empty">${_topData ? 'No sales in this range' : 'Top product data unavailable'}</div>
       </div>
     `;
   }
-
-  const rows = items.slice(0, 10).map(p => {
-    const name = p.product_name || p.name || p.sku || 'Unknown';
-    const brand = p.brand || '';
-    const units = p.units_sold ?? p.units ?? p.quantity ?? p.qty ?? p.quantity_sold ?? null;
-    const revenue = p.revenue ?? p.total ?? 0;
-    return `
-      <tr>
-        <td class="cell-truncate">${esc(name)}</td>
-        <td class="cell-muted">${esc(brand)}</td>
-        <td class="cell-mono cell-right">${units != null ? esc(String(units)) : MISSING}</td>
-        <td class="cell-mono cell-right">${esc(formatPrice(revenue))}</td>
-      </tr>
-    `;
-  }).join('');
-
   return `
-    <div class="admin-dash__cell--6 admin-card">
+    <div class="admin-dash__cell--6 admin-card" id="dash-top-products">
       <div class="admin-card__title">
-        <span>Most Bought <small>top ${Math.min(items.length, 10)}</small></span>
-        <a href="#products" class="admin-mini-card__sub">View products →</a>
+        <span>Most Bought <small>top ${Math.min(_topData.items.length, 10)}</small></span>
+        <div class="admin-segmented" role="group" aria-label="Rank by">
+          ${METRICS.map(m => `<button type="button" class="admin-segmented__btn${m.id === _topMetric ? ' admin-segmented__btn--active' : ''}" data-top-metric="${esc(m.id)}" aria-pressed="${m.id === _topMetric}">${esc(m.label)}</button>`).join('')}
+        </div>
+        <a href="#analytics?tab=best-sellers" class="admin-mini-card__sub">View all →</a>
       </div>
-      <table class="admin-dash-table">
-        <thead><tr>
-          <th>Product</th><th>Brand</th><th class="cell-right">Units</th><th class="cell-right">Revenue</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div data-top-body>${renderTopProductsBody()}</div>
     </div>
   `;
+}
+
+function wireTopProductsToggle() {
+  const card = _container?.querySelector('#dash-top-products');
+  card?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-top-metric]');
+    if (!btn) return;
+    _topMetric = btn.dataset.topMetric;
+    card.querySelectorAll('[data-top-metric]').forEach(b => {
+      const on = b === btn;
+      b.classList.toggle('admin-segmented__btn--active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    card.querySelector('[data-top-body]').innerHTML = renderTopProductsBody();
+  });
 }
 
 // ---------- page lifecycle ----------

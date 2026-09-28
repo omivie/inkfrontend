@@ -186,10 +186,8 @@ test('PDF and CSV share ONE filtered fetch, and neither re-filters by colour', (
 });
 
 test('the CSV cell escaper defuses formula injection and keeps negatives', async () => {
-  const fn = PRODUCTS.match(/function csvCell\(v\) \{[\s\S]+?\n\}/);
-  assert.ok(fn, 'csvCell must exist');
-  // eslint-disable-next-line no-new-func
-  const csvCell = new Function(`${fn[0]}; return csvCell;`)();
+  assert.match(PRODUCTS, /import \{ csvCell \} from '\.\.\/utils\/csv\.js'/, 'products.js must use the shared escaper');
+  const { csvCell } = await import('../inkcartridges/js/admin/utils/csv.js');
   assert.equal(csvCell('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
   assert.equal(csvCell('@SUM(A1)'), "'@SUM(A1)");
   assert.equal(csvCell('-12.5'), '-12.5', 'a negative number is data, not a formula');

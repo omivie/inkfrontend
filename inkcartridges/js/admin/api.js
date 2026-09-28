@@ -9,6 +9,7 @@ import { BusinessAccountRegistry } from './utils/business-accounts.js';
 // pages/orders.js — see the module header for why it is not defined twice.
 import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './utils/order-invoice-sent.js';
 import { pgrstLike } from './utils/pgrst.js';
+import { TOP_PRODUCTS_MAX_LIMIT, mergeBySku, attachCatalog } from './utils/best-sellers.js';
 
 // The carrier registry (GET /api/admin/shipping/carriers) is a constant per
 // deploy — names, number labels, whether a product code is required, whether the
@@ -1280,15 +1281,50 @@ const AdminAPI = {
     return adaptCustomerSummary(sum.ok ? sum.data : null) ?? http;
   },
 
-  async getTopProducts(filterParams, signal) {
-    const qs = analyticsQuery(filterParams, { result_limit: 10 });
+  /**
+   * Every product sold in the filter range, merged by SKU, with catalogue brand /
+   * type / pack attached — the input to every Best Sellers ranking (utils/best-sellers.js
+   * has the measured facts behind each step). Returns null when the sales fetch fails.
+   * `truncated`: the server filled its row cap, so rankings cover a cut, not the set.
+   * `catalogFailed`: the lookup failed, so brand/type/pack are unknown on every row.
+   */
+  async getBestSellers(filterParams, signal) {
+    const qs = analyticsQuery(filterParams, { result_limit: TOP_PRODUCTS_MAX_LIMIT });
     const res = noteAnalyticsHealth('top-products-rpc',
       await analyticsHttpGetNamed(`/api/admin/analytics/top-products-rpc?${qs}`, signal));
-    if (!res.ok) return null;
-    const d = res.data;
-    if (Array.isArray(d)) return d;
-    if (Array.isArray(d?.products)) return d.products;  // tolerate { products: [...] }
-    return null;
+    const raw = !res.ok ? null : Array.isArray(res.data) ? res.data
+      : Array.isArray(res.data?.products) ? res.data.products : null;  // tolerate { products: [...] }
+    if (!raw) return null;
+    const merged = mergeBySku(raw);
+    let meta = null;
+    try { meta = await this.getProductMetaBySku(merged.map(i => i.sku).filter(Boolean)); } catch (_) { meta = null; }
+    return {
+      items: attachCatalog(merged, meta),
+      truncated: raw.length >= TOP_PRODUCTS_MAX_LIMIT,
+      catalogFailed: meta == null,
+    };
+  },
+
+  /**
+   * sku -> { brand, product_type, pack_type } straight from Supabase, INCLUDING
+   * inactive products (a best seller may since have been retired). Explicit
+   * columns only (ERR-170). Chunked so the `in.(…)` URL stays short.
+   * Throws on a failed read — the caller must tell "unknown" from "not in catalogue".
+   */
+  async getProductMetaBySku(skus) {
+    const sb = this._sb();
+    if (!sb) throw new Error('Supabase client unavailable');
+    const out = new Map();
+    for (let i = 0; i < skus.length; i += 150) {
+      const { data, error } = await sb.from('products')
+        .select('sku, product_type, pack_type, brands(name), ribbon_brands!products_ribbon_brand_id_fkey(name)')
+        .in('sku', skus.slice(i, i + 150));
+      if (error) throw error;
+      for (const p of data || []) {
+        out.set(p.sku, { brand: p.brands?.name || p.ribbon_brands?.name || null, product_type: p.product_type, pack_type: p.pack_type });
+      }
+    }
+    return out;
   },
 
   // ---- Dashboard graph series (paired-row redesign, Jun 2026) ----

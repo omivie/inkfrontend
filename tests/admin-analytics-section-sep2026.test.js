@@ -175,7 +175,7 @@ test('§4b the tab redirects land on their TAB, not just the hub', () => {
 test('§5 the tab manifest is a shared module, read by BOTH surfaces', () => {
   assert.match(TABS, /export const ANALYTICS_TABS\s*=\s*\[/,
     'utils/analytics-tabs.js must export ANALYTICS_TABS.');
-  for (const id of ['revenue', 'health', 'margins', 'pricing', 'market-intel', 'traffic', 'acquisition']) {
+  for (const id of ['revenue', 'best-sellers', 'health', 'margins', 'pricing', 'market-intel', 'traffic', 'acquisition']) {
     assert.ok(TABS.includes(`id: '${id}'`), `The manifest is missing the "${id}" tab.`);
   }
   assert.match(HUB, /import\s*\{[^}]*ANALYTICS_TABS[^}]*\}\s*from\s*'\.\.\/utils\/analytics-tabs\.js'/,

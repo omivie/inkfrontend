@@ -32,6 +32,7 @@
 
 export const ANALYTICS_TABS = [
   { id: 'revenue',      label: 'Revenue' },
+  { id: 'best-sellers', label: 'Best Sellers',     lazy: './best-sellers.js' },
   { id: 'health',       label: 'Financial Health', lazy: './financial-health.js' },
   { id: 'margins',      label: 'Margins',          lazy: './margin.js' },
   { id: 'pricing',      label: 'Pricing',          lazy: './cc-profit.js' },

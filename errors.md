@@ -99,6 +99,25 @@ So the ribbon-only `product_codes` read (PDP and `_applyManualCodes` step 1) is 
   - Names: 47/47.
 - ***The probe's first run failed two redirects that were correct.*** Vercel serves vercel.json's `+` as `%20`. The probe compared `Location` headers as text; it now compares the decoded search term, which is what the page reads. **A check must compare what the consumer reads, not the bytes on the wire.**
 
+## ERR-295 — The dashboard's "Most Bought" top 10 split one product across two rows, and the ranking the owner asked for (units, orders) could not be built from a top-10-by-revenue call — **RESOLVED (frontend)** (2026-09-28)
+
+**Ask.** The owner wanted best sellers three ways (revenue, units, and orders a product appeared in), as a full section with a top-10 preview on the dashboard. Built as a Performance hub tab, **Best Sellers** (`pages/best-sellers.js`), plus a Revenue | Units | Orders toggle on the dashboard card with "View all →" to `#analytics?tab=best-sellers`.
+
+**Measured first (`npm run probe:best-sellers`, READ-ONLY):**
+- `top-products-rpc` already returns **`order_count`**. The old card never read it. No backend change was needed to ship.
+- `result_limit` is capped at **500**, and all time is 209 rows, so the FULL set arrives and every ranking is done client-side. The old call asked for 10 rows ranked by revenue: *a units or orders top 10 cannot be derived from a revenue top 10.* A response that fills the cap is flagged `truncated` on screen.
+- **One SKU came back as several rows**, one per historical product name (7 of 202, e.g. `CLC431XLKCMY` "… 4-Pack" + "… 4-Pack (500 pages)"). The old card could show one product twice, or rank it too low. `mergeBySku` sums them. **Reconciled against `/api/admin/orders`: 202/202 SKUs match exactly on order count, units and revenue, with cancelled orders excluded.** BF-089.
+- **`status_filter` and `category_filter` are silently ignored.** Negative control: an impossible value still returned 10 rows, while `brand_filter` with an impossible value gave 0. The tab shows only Period + Brand. BF-090.
+- No `brand` on the row, which is why the Brand column was blank. It is now looked up from `products` by SKU (explicit columns, inactive rows included). **33 of 202 sold SKUs are no longer in the catalogue.** For those, type/pack is UNKNOWN (not "single"), and a type or pack filter drops them *and says how many* (`inCatalog: false`). A failed lookup is `null`, a third state, so it never reads as "not in catalogue".
+
+**Changes.** `utils/best-sellers.js` (merge, rank, attach, filter; pure functions), `AdminAPI.getBestSellers()` replaces `getTopProducts()`, `DASH_CACHE_SCHEMA` 2→3 (the payload changed shape), `utils/csv.js` (the CSV-injection escaper moved out of `products.js`, one owner). Brief: `backend-docs/outbox/best-sellers-top-products-backend-brief-sep2026.md`.
+
+**Verified.** Headless browser against local + live API: card toggles re-rank (orders #1 = Brother 1030 ribbon, 8 orders), Brand column now populated, "View all" lands on the tab, packs filter shows the 33-unplaced note, CSV 50 rows + header. `tests/best-sellers-sep2026.test.js` 8/8, red-proofed with three mutants (no merge, rank ignores metric, silent drop), each red.
+
+**Lesson.** *A top-N is a ranking, not a data set.* You cannot re-sort someone else's top 10 into a different top 10.
+
+---
+
 ## ERR-292 — The backend moved to Singapore and asked for seven speed fixes; three of its premises were wrong for ribbons, cross-type tags and search, and the brand page had been waiting 8.6 s for a number it never showed — **RESOLVED (frontend)** (2026-09-28)
 
 **Source.** `backend-docs/inbox/fe-handoff-page-speed-and-backend-move-sep2026.md`: the API moved from Render Oregon (`ink-backend-zaeq`) to Singapore (`ink-backend-sg`), next to the database, and new API fields replace direct Supabase reads. Reply: `outbox/backend-move-FE-reply-sep2026.md` (BF-084..083).

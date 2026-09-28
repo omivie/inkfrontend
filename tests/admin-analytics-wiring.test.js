@@ -46,7 +46,8 @@
  *   4. getDashboardKPIs uses HTTP and has NO RPC arm left (ERR-247).
  *   5. getCustomerStats fills New Customers from /summary/customers when the
  *      RPC's grant is dropped (returning % honestly stays absent).
- *   6. getTopProducts always returns an array (tolerating { products: [...] }).
+ *   6. getBestSellers reads the bare array or a { products: [...] } envelope,
+ *      merges by SKU, and says when the catalogue lookup failed.
  *   9. every failure is named, not swallowed into a bare null.
  *
  * Run with: node --test tests/admin-analytics-wiring.test.js
@@ -317,24 +318,39 @@ test('getCustomerStats reads the ROUTE, never the RPC, even for returning_pct', 
 });
 
 // =====================================================================
-// 6. getTopProducts — always an array
+// 6. getBestSellers — merged by SKU, catalogue failure named
 // =====================================================================
-test('getTopProducts returns the bare array shape verbatim', async () => {
+test('getBestSellers reads the bare array, asks for the full set, and merges by SKU', async () => {
+  let url = '';
   installGlobals({
-    apiGet: async () => ({ ok: true, data: [{ product_name: 'X', product_sku: 'GX', revenue: 10, units_sold: 1 }] }),
+    apiGet: async (u) => { url = u; return { ok: true, data: [
+      { product_name: 'X', product_sku: 'GX', revenue: 10, units_sold: 1, order_count: 1 },
+      { product_name: 'X (old name)', product_sku: 'GX', revenue: 5, units_sold: 2, order_count: 1 },
+    ] }; },
   });
-  const out = await AdminAPI.getTopProducts(params({ from: '2026-05-05', to: '2026-06-04' }));
-  assert.ok(Array.isArray(out));
-  assert.equal(out[0].product_sku, 'GX');
+  globalThis.Auth = { supabase: { from: () => ({ select: () => ({ in: async () => ({ data: [
+    { sku: 'GX', product_type: 'ink_cartridge', pack_type: 'single', brands: { name: 'HP' } },
+  ], error: null }) }) }) } };
+  try {
+    const out = await AdminAPI.getBestSellers(params({ from: '2026-05-05', to: '2026-06-04' }));
+    assert.match(url, /result_limit=500/);
+    assert.equal(out.items.length, 1);
+    assert.deepEqual([out.items[0].revenue, out.items[0].units, out.items[0].orders], [15, 3, 2]);
+    assert.equal(out.items[0].brand, 'HP');
+    assert.equal(out.truncated, false);
+    assert.equal(out.catalogFailed, false);
+  } finally { delete globalThis.Auth; }
 });
 
-test('getTopProducts unwraps a { products: [...] } envelope to the array', async () => {
+test('getBestSellers unwraps { products: [...] } and NAMES a failed catalogue lookup', async () => {
   installGlobals({
-    apiGet: async () => ({ ok: true, data: { products: [{ product_name: 'Y' }] } }),
+    apiGet: async () => ({ ok: true, data: { products: [{ product_name: 'Y', product_sku: 'GY', revenue: 1 }] } }),
   });
-  const out = await AdminAPI.getTopProducts(params({ from: '2026-05-05', to: '2026-06-04' }));
-  assert.ok(Array.isArray(out));
-  assert.equal(out[0].product_name, 'Y');
+  // No Auth.supabase: the lookup cannot run, so brand/type/pack are unknown — not "absent".
+  const out = await AdminAPI.getBestSellers(params({ from: '2026-05-05', to: '2026-06-04' }));
+  assert.equal(out.items[0].name, 'Y');
+  assert.equal(out.catalogFailed, true);
+  assert.equal(out.items[0].inCatalog, null);
 });
 
 // =====================================================================

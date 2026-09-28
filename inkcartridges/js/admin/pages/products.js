@@ -31,6 +31,7 @@ import { pgrstLike } from '../utils/pgrst.js';
 // (backend mig 132) and no admin write route replaced it. One owner for the
 // markup, the copy, the read and the three states.
 import { forUseInPanelHtml, wireForUseInPanel } from '../utils/for-use-in.js';
+import { csvCell } from '../utils/csv.js';
 import {
   typesForCategory, defaultTypeForCategory, previewCodeForSku,
   needsCodeOverride, mergeCodeIntoEffective, normCode, partitionDerivedCodes,
@@ -4285,18 +4286,7 @@ async function handleExport(format = 'csv') {
   }
 }
 
-/**
- * One CSV cell. Quoted when it must be, and a leading = + @ (or tab/CR) is
- * defused with an apostrophe: a product name is operator-typed text, and a
- * spreadsheet executes a cell that starts with "=" (CSV injection). A leading
- * "-" is left alone — negative numbers are real data here.
- */
-function csvCell(v) {
-  let s = v == null ? '' : String(v);
-  if (/^[=+@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
+// csvCell lives in utils/csv.js — one escaper for every client-side export.
 async function exportProductsCSV(format = 'csv') {
   Toast.info(`Preparing ${format === 'excel' ? 'Excel (CSV)' : 'CSV'} export\u2026`);
   const all = await fetchFilteredProductsForExport();
