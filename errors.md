@@ -41,6 +41,45 @@ describing the same incident.
 
 ---
 
+## ERR-292 — The backend moved to Singapore and asked for seven speed fixes; three of its premises were wrong for ribbons, cross-type tags and search, and the brand page had been waiting 8.6 s for a number it never showed — **RESOLVED (frontend)** (2026-09-28)
+
+**Source.** `backend-docs/inbox/fe-handoff-page-speed-and-backend-move-sep2026.md`: the API moved from Render Oregon (`ink-backend-zaeq`) to Singapore (`ink-backend-sg`), next to the database, and new API fields replace direct Supabase reads. Reply: `outbox/backend-move-FE-reply-sep2026.md` (BF-080..083).
+
+**Measured before building on it.** `npm run probe:backend-move` is READ-ONLY.
+- **§H hosts.** All 15 Render-bound rewrite paths return the same bytes on both hosts. The one exception is `google-promotions.xml`, whose generation timestamps differ.
+- **§L site lock.** `/api/site/lock` equals `site_settings`.
+- **§N ribbon brands.** `/api/site/nav` `ribbon_brands` matches the direct read: 63/63 rows, same order.
+- **§O overrides.** 19/19 active override products carry their override as `series_codes`, and `/api/shop?code=` lists each of them under every override code.
+- **§R ribbons.** 8/8 sampled ribbons lack the new fields on `/api/ribbons/:sku`. 6/8 ribbons with no override get derived codes.
+
+**§0 host.** Shipped first as `eae0781`, built from HEAD plus only these hunks (three peers held uncommitted edits in the same files). It covers `middleware.js`, every Render-bound rewrite, CSP `connect-src`, the four pre-Config mirrors of `Config.API_URL`, and ~40 probe defaults. Live check: sitemap, robots and feeds return 200, and Googlebot-UA fetches of home, brand and PDP return the prerender. The `GET /` pinger is the owner's, repointed to `api.…/health`.
+
+**Where the handoff was wrong, and what we did instead:**
+1. **Search.** "Three requests per search" is the miss-only repair path. `/products?search=` and `/suggest` fire only on hardMiss, softMiss, hijack or exact searches, and on those paths they fix real bugs (ERR-133/144/264). Dropping them would re-open those bugs. What we did: they now START WITH `/smart` on a digit or exact query, and are discarded when no repair fires. The owner accepted the cost, two reads per digit search including one `/suggest` analytics row.
+2. **Ribbon PDP.** It reads `/api/ribbons/:sku`, which lacks `description_html` and `related_product_skus`. So its enrich stays, gated on `hasOwnProperty`, and it is loud when a non-ribbon row ever needs it (BF-080).
+3. **Ribbon codes.** "Override-aware `series_codes`" still gives a ribbon with no override its derived codes (691.01 → `LZ24`). ERR-086 says such a ribbon has none. So `product_codes` is still read, **for ribbon rows only**, on the PDP and in `_applyManualCodes` (BF-081).
+4. **Cross-type tags.** The handoff does not cover them (`chip_category`). There are 0 rows today. The recovery stays, but is now gated on the brand's `product_code_visitors` summary (one cached read per brand), so today a code grid makes no per-code read. `_fetchProductIdsForCode` is deleted, because the backend now lists same-type overrides itself (BF-082).
+5. **Brand-page ribbons count.** `getRibbons({limit:1})`, awaited before the tiles painted (8.6 s for Brother before the backend fix), fed a tile that **never rendered**: `availableCategories` filters `ribbons` out. We deleted the call, not only its wait.
+
+**What changed:**
+- **PDP.** The gallery paints straight from `/api/products/:sku`. `renderCompatiblePrinters` awaits the for-use-in promise instead of gating render on it. `pdp-prefetch.js` injects a `<link rel=preload>` for the hero the moment the prefetched product lands. Its URLs are a mirror of `storageUrl`/`imageSrcset`, pinned by a parity test, so the image is fetched once, not twice. `data-lcp-product` also stops the below-fold bought-together card from being promoted to high priority.
+- **Brand page.** Schema is injected before the level loads.
+- **Ribbon brands.** They come from `/api/site/nav`, the same deduped SWR entry mega-nav already fetches. `null` falls back to the direct read, and says so.
+- **GCR badge.** It loads after `load`, then on idle (5 s ceiling) or on the first scroll, tap or key. `/order-confirmation` loads it at once. **Bug fixed:** that page called `gapi.surveyoptin.render` directly, which skipped the ERR-227 consent gate, and it never rendered when its data arrived after `platform.js` had loaded. It now uses footer.js's one gated renderer.
+- **Cart.** `GET /api/cart` is skipped only with no login, no guest session, no local lines and no pending removal.
+
+**Measured after, locally** (fresh context, 390×664, `probe:backend-move --browser-only --site=http://localhost:3000`): 12/12, where it was 6/12 before the api.js/shop-page.js half.
+- **PDP.** The first image starts **18 ms** after the product response (the handoff measured 1.4 s). The hero is downloaded once. There is no `/api/cart` call. `platform.js` loads at 1241 ms, against DCL 443 ms.
+- **Brand page.** The schema request starts at 493 ms, alongside `/api/shop`. There is no `/api/ribbons` call.
+- **Search.** The literal set starts at 449 ms, alongside `/smart` (which ends at 2155 ms).
+- **Still made on a non-ribbon PDP:** one direct read, `product_code_visitors` (BF-082). The probe prints it.
+
+**Guards.**
+- `tests/backend-move-sep2026.test.js`: 23 tests. Red-proof: every test fails against the pre-change sources except two labelled PRESERVED, which pin the fail-open and order-confirmation behaviours that did not change.
+- Updated because they pinned the OLD order or semantics, with their intent kept: for-use-in-cutover §2, pdp-ribbon-related-by-code, ribbon-manual-only §3, product-codes §5, catalogue-error-vs-empty §8 (retargeted to `_fetchVisitorIdsForCode`), ribbon-brand-page-error-state §2.
+
+**Lesson.** ***A handoff's "use instead" is a claim about the rows it looked at.*** All four "remove this read" rows were true for ink and toner and false for ribbons, which go through a different endpoint and a different rule. Measure the claim over EVERY row it covers (§O did all 19), and name the rows it does not cover.
+
 ## ERR-290 — The owner removed the "Popular … right now" and "Full colour sets" rows from every page, and the handoff's own list missed a caller of the endpoint it was about to delete — **RESOLVED (frontend)** (2026-09-28)
 
 **Source.** Backend handoff `remove-popular-and-colour-set-rows-FE-sep2026.md` (P1, 2026-09-28), passing on the owner's decision: *"these two rows are no longer needed since users have different printers requiring different cartridges. Please remove this logic across all pages."* A best-seller or colour-set row shows cartridges for printers the visitor does not own. Reply: `backend-docs/outbox/remove-popular-rows-FE-reply-sep2026.md`.
