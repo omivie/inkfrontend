@@ -88,6 +88,17 @@ So the ribbon-only `product_codes` read (PDP and `_applyManualCodes` step 1) is 
 - 14 older suites updated. Each old pin now asserts the read is **gone**, and each change was read against its docstring first.
 - Full suite: 6743 pass / 0 fail. The only failures seen along the way came from other sessions: Finder `.DS_Store` files, removed; `probe-best-sellers.mjs`, since registered.
 
+**Production (deployed `215a0c4`, 2026-09-28; measured after).**
+- `probe:backend-move --browser`: **56/56**. The non-ribbon PDP makes NO direct Supabase REST read; that is a hard check now.
+- `probe:four-replies --admin --browser`: every hard check passes.
+  - Search URLs: `noindex, follow` on 6/6 (browser + Googlebot); the control is clean.
+  - The toner landing shows HP 430, and Dymo is hidden.
+  - The printer H1 equals the prerender's.
+  - `/products/x/C65BK` asks for-use-in once, as `C65XLBK`.
+  - No color-packs request.
+  - Names: 47/47.
+- ***The probe's first run failed two redirects that were correct.*** Vercel serves vercel.json's `+` as `%20`. The probe compared `Location` headers as text; it now compares the decoded search term, which is what the page reads. **A check must compare what the consumer reads, not the bytes on the wire.**
+
 ## ERR-292 — The backend moved to Singapore and asked for seven speed fixes; three of its premises were wrong for ribbons, cross-type tags and search, and the brand page had been waiting 8.6 s for a number it never showed — **RESOLVED (frontend)** (2026-09-28)
 
 **Source.** `backend-docs/inbox/fe-handoff-page-speed-and-backend-move-sep2026.md`: the API moved from Render Oregon (`ink-backend-zaeq`) to Singapore (`ink-backend-sg`), next to the database, and new API fields replace direct Supabase reads. Reply: `outbox/backend-move-FE-reply-sep2026.md` (BF-084..083).

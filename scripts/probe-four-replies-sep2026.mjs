@@ -204,7 +204,10 @@ for (const [from, want] of [
 ]) {
     const r = await headOf(`${SITE}${from}`);
     const loc = (r?.location || '').replace(/^https?:\/\/[^/]+/, '');
-    check(`${from} → ${want}`, r?.status === 308 && loc === want, `${r?.status} ${loc}`);
+    // Compare what the page READS: Vercel serves vercel.json's "+" as "%20",
+    // and both decode to the same search term (measured 2026-09-28).
+    const parse = (u) => { const x = new URL(u, SITE); return `${x.pathname}|${x.searchParams.get('search') ?? ''}`; };
+    check(`${from} → ${want}`, r?.status === 308 && parse(loc) === parse(want), `${r?.status} ${loc}`);
 }
 
 // ── §N printer display names ────────────────────────────────────────────────

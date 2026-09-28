@@ -106,6 +106,26 @@ We have re-measured every all-caps word in every brand's printer list (119 words
 
 Please send `display_name` next to `full_name` on printer rows (`compatible_printers[]`, `compatible_printers_grouped[].top_models[]`, `/api/printers/by-brand`, `/api/printers/:slug`). Then we can delete our copy. `probe:four-replies` §N compares the two live until you do.
 
-## 7. Production
+## 7. Production (deployed as `215a0c4`, 2026-09-28)
 
-All of the above is built and tested locally. We deploy it to production next and will append the production re-measurements here.
+These were measured on production after the deploy.
+
+- **`npm run probe:four-replies -- --admin --browser`:**
+  - 26 hard checks passed. The redirect checks first failed because the probe compared the `Location` header text literally: Vercel sends vercel.json's `+` as `%20`. We fixed the comparison to use the decoded search term, and a second run passed with no failures.
+  - Soft results: BF-088, BF-091 and BF-092 are shown as warnings, not failures.
+  - Unmeasured: BF-086 visitors, because 0 rows exist.
+- **`npm run probe:backend-move -- --browser`: 56/56.** A non-ribbon PDP (`C02BK`) now makes **no direct Supabase REST read of any table**. That check is a hard failure now, not a warning.
+
+| Check | Before (production) | After (production) |
+|---|---|---|
+| `/shop?search=`, `/shop?q=`, `/search?q=`: `X-Robots-Tag` (browser and Googlebot) | none, on 6 of 6 | `noindex, follow` on 6 of 6. Control `/shop?brand=hp`: none |
+| `/brother-lc73-inkjet-cartridge-black-lc73bk` | 308 `?search=black-lc73bk` | 308 `?search=brother-lc73%20black-lc73bk` |
+| `/fuji-xerox-ct201304-toner-cartridge-cyan` | 308 `?search=cyan` | 308 `?search=fuji-xerox-ct201304%20cyan` |
+| `/toner-cartridges` HP tile | 870 (the sum across categories) | **430** |
+| `/toner-cartridges` Dymo tile | shown | hidden, after the confirming read returned 0 |
+| Printer hub `brother-hl-l2375dw` visible H1 | "Shop Ink Cartridges & Toner NZ" (hidden) | "Brother HL-L2375DW Toner NZ", the same as the prerender |
+| `/products/x/C65BK` for-use-in | `C65BK` 404, asked twice | asked **once**, as `C65XLBK` |
+| Printer page `color-packs` request | 1 per load, 404 | none |
+| Section headings | " Compatible Cartridges" | "Compatible · cartridges for Brother HL-L2375DW" |
+| `/ribbons` h1/h2 | "Typewriter & Printer Ribbons" twice | once |
+| Printer names: our fit line vs your page | drifted (all Brother, and PHASER etc.) | 47 of 47 sampled match |
