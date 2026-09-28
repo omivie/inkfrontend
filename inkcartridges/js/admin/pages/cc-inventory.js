@@ -5,6 +5,7 @@
 import { AdminAPI, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Toast } from '../components/toast.js';
+import { importFeedsHtml } from '../utils/importStatus.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 
@@ -14,57 +15,12 @@ let _page = 1;
 let _minChangePct = 20;
 let _days = 30;
 
-function timeAgo(dateStr) {
-  if (!dateStr) return '\u2014';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
-function statusBadge(status) {
-  const map = { completed: 'delivered', failed: 'failed', running: 'pending' };
-  const cls = map[status] || 'pending';
-  return `<span class="admin-badge admin-badge--${cls}">${esc(status)}</span>`;
-}
-
+// One renderer for supplier feed health, shared with Site Health → Infra
+// (which is where it is reachable from the navigation). It reads the last 5
+// runs, not `latest` alone — see utils/importStatus.js (BF-070 h).
 function renderImportCards(data) {
   const wrap = _el.querySelector('#cc-import-cards');
-  if (!data) {
-    wrap.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">Could not load import status</div></div>';
-    return;
-  }
-  const sources = [
-    { key: 'genuine', label: 'DSNZ (Genuine)' },
-    { key: 'compatible', label: 'Augmento (Compatible)' },
-  ];
-  wrap.innerHTML = sources.map(s => {
-    const d = data[s.key];
-    if (!d?.latest) return `<div class="admin-card cc-import-card"><div class="cc-import-card__title">${esc(s.label)}</div><div class="admin-text-muted">No import data</div></div>`;
-    const latest = d.latest;
-    return `
-      <div class="admin-card cc-import-card">
-        <div class="cc-import-card__header">
-          <div class="cc-import-card__title">${esc(s.label)}</div>
-          ${statusBadge(latest.status)}
-        </div>
-        <div class="cc-import-card__stats">
-          <div class="cc-import-card__stat-label">Finished</div>
-          <div class="cc-import-card__stat-value">${timeAgo(latest.finished_at)}</div>
-          <div class="cc-import-card__stat-label">Products</div>
-          <div class="cc-import-card__stat-value">${(latest.products_upserted || 0).toLocaleString()}</div>
-          <div class="cc-import-card__stat-label">Errors</div>
-          <div class="cc-import-card__stat-value" style="${latest.errors > 0 ? 'color:var(--danger)' : ''}">${latest.errors || 0}</div>
-          <div class="cc-import-card__stat-label">Started</div>
-          <div class="cc-import-card__stat-value">${timeAgo(latest.started_at)}</div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  wrap.innerHTML = importFeedsHtml(data, esc);
 }
 
 const COLUMNS = [

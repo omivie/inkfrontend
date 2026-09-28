@@ -15,7 +15,9 @@
  *
  * Measured 2026-09-25 (`npm run probe:bundle-response`):
  *   - hold rows carry `image_audit_status: 'watermark_hold'`;
- *   - `/list?status=watermark_hold` is a 400 (enum: pending|checked_clean|replaced);
+ *   - `/list?status=watermark_hold` was a 400 (enum: pending|checked_clean|replaced);
+ *     the backend added it on 2026-09-25 (BF-070 d) — 736 rows, 200, measured
+ *     2026-09-28 — so the hold is now a Status choice of its own (§6);
  *   - `recoverable_only=true` = 834 = 104 pending + 730 hold, so "recoverable"
  *     alone INCLUDES the hold; with `status=pending` it is the true 104;
  *   - `/stats.missing_image_breakdown` = { recoverable, never_had_one, watermark_hold }.
@@ -108,6 +110,7 @@ function loadModule({ restoreImpl } = {}) {
       buildToolbar: typeof buildToolbar === 'function' ? buildToolbar : null,
       setStats: (s) => { _stats = s; },
       setState: (o) => { Object.assign(_state, o); },
+      setBrands: (b) => { _brands = b; },
     };
   `;
   vm.runInContext(body + bridge, sandbox);
@@ -267,4 +270,33 @@ test('there is no bulk restore anywhere on the admin surface', () => {
     'the page must not call the sweep the backend asked nobody to run');
   assert.ok(!/bulk-restore-legacy/.test(stripComments(ADMIN_API)), 'and the admin API must not wrap it');
   assert.ok(!/NOT YET DEPLOYED/.test(ADMIN_API), 'the endpoint is live — the stale caveat must go');
+});
+
+/* ── 6. 2026-09-28: the backend's BF-070 answer, and a brand filter that lied ── */
+
+test('"Watermark hold" is a Status choice now that the list accepts it', () => {
+  const m = loadModule();
+  m.setState({ status: 'watermark_hold', recoverableOnly: false });
+  assert.match(m.buildToolbar(), /<option value="watermark_hold" selected>Watermark hold<\/option>/);
+  assert.equal(m.buildFilters().status, 'watermark_hold');
+});
+
+test('the brand filter sends the SLUG — a UUID or a name is 404 "Brand not found" on /list and /stats', () => {
+  // Measured 2026-09-28: brand=hp → 200 (982 rows); brand=<hp uuid> and
+  // brand=HP → 404 NOT_FOUND on both /image-audit/list and /image-audit/stats.
+  const m = loadModule();
+  m.setBrands([{ id: 'ab434033-68c9-4c6a-94d7-3525a42074c5', slug: 'hp', name: 'HP' }]);
+  m.setState({ brand: 'hp' });
+  const html = m.buildToolbar();
+  assert.match(html, /<option value="hp" selected>HP<\/option>/);
+  assert.doesNotMatch(html, /ab434033/, 'a UUID must never be the option value');
+});
+
+test('a failed list read is an ERROR, never "All clean"', () => {
+  const live = stripComments(SRC);
+  assert.match(live, /_listFailed = data === null;/);
+  const grid = live.slice(live.indexOf('function renderGrid'), live.indexOf('function renderCount'));
+  assert.ok(grid.indexOf('if (_listFailed)') > -1 && grid.indexOf('if (_listFailed)') < grid.indexOf('All clean'),
+    'the failure branch must run BEFORE the empty-state branch');
+  assert.match(grid, /This is not an empty result/);
 });

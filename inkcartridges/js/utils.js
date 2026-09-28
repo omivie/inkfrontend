@@ -1035,7 +1035,9 @@ const ProductSort = (function() {
     // ─── yield + accessory + source ──────────────────────────────────────
 
     function yieldTier(product) {
-        // Two signals, and we take the STRONGER of the two.
+        // The backend `yield_tier` when the row carries it; the FE detector
+        // below only when it does not. (Until 2026-09-28 this returned the
+        // STRONGER of the two — the history below is why, and why it ended.)
         //
         // The backend `yield_tier` ('STD'|'XL'|'XXL' from detectYieldTier) is
         // now emitted on every product-list endpoint AND, since Jul 2026, on
@@ -1074,6 +1076,18 @@ const ProductSort = (function() {
         // (HY0, 2,500pp) and G288BXLCMY (the SKU says XL, the NAME says "STD"
         // — a data question, raised with the backend). Keep max() until that
         // count is 0; removing a fallback is a behaviour change (ERR-158).
+        //
+        // IT IS 0 — max() REMOVED 2026-09-28. The backend's 2026-09-25 answer
+        // (backend-docs/inbox/fe-replies-round-backend-response-sep2026.md §2 e)
+        // taught its detector glued `XLHY` and Lexmark `…H[KCMY]0` (46 rows moved,
+        // none lost), and `npm run probe:bundle-response` §6 re-measured the
+        // whole catalogue: 0 raised, net of ONE exemption. G288BXLCMY stays STD
+        // ON PURPOSE: the supplier's "Epson 288 BXL CMY STD PACK" is a 288XL
+        // black plus STANDARD C/M/Y — no single tier is true, and three of its
+        // four cartridges are standard. max() read "BXL" and called the pack XL,
+        // which is exactly the one thing it is not. So the merge was no longer
+        // inert: it had become the only thing CONTRADICTING a deliberate answer.
+        // The detector still stands alone for a row with no yield_tier.
         const yt = (product && product.yield_tier || '').toString().toUpperCase();
         const backendTier = yt === 'XXL' ? 2 : yt === 'XL' ? 1 : yt === 'STD' ? 0 : -1;
 
@@ -1104,9 +1118,10 @@ const ProductSort = (function() {
         // trailing-Y/letter cases collide with colour/model data the FE can't
         // disambiguate. Those stay at whatever the backend says.
         //
-        // Stronger signal wins. With no backend field, backendTier is -1 and
-        // the detector stands alone exactly as it used to.
-        return Math.max(backendTier, detected);
+        // The backend's answer when it gave one — in BOTH directions. With no
+        // backend field, backendTier is -1 and the detector stands alone
+        // exactly as it used to.
+        return backendTier >= 0 ? backendTier : detected;
     }
 
     // accessoryTier: cartridges first (0), drums (1), other consumable units —
@@ -3041,20 +3056,6 @@ const DispatchCountdown = {
     },
 
     /**
-     * True when the payload says an order placed right now still makes today's
-     * courier. Requires BOTH the flag and a positive seed — a `true` flag with
-     * 0 seconds left is an expired cache, not an opportunity.
-     * @param {Object} deliveryEstimate
-     * @returns {boolean}
-     */
-    isEligible(deliveryEstimate) {
-        const d = deliveryEstimate || {};
-        if (d.same_day_eligible !== true) return false;
-        const secs = Number(d.cutoff_remaining_seconds);
-        return Number.isFinite(secs) && secs > 0;
-    },
-
-    /**
      * " (Auckland metro)" when the backend's own promise text scopes same-day
      * dispatch that way, else ''. ONE owner for the rule (ERR-293): the
      * countdown printed "for same-day dispatch" with no qualifier while the
@@ -3069,6 +3070,20 @@ const DispatchCountdown = {
     scope(deliveryEstimate) {
         const promise = deliveryEstimate && deliveryEstimate.promise;
         return typeof promise === 'string' && /auckland metro/i.test(promise) ? ' (Auckland metro)' : '';
+    },
+
+    /**
+     * True when the payload says an order placed right now still makes today's
+     * courier. Requires BOTH the flag and a positive seed — a `true` flag with
+     * 0 seconds left is an expired cache, not an opportunity.
+     * @param {Object} deliveryEstimate
+     * @returns {boolean}
+     */
+    isEligible(deliveryEstimate) {
+        const d = deliveryEstimate || {};
+        if (d.same_day_eligible !== true) return false;
+        const secs = Number(d.cutoff_remaining_seconds);
+        return Number.isFinite(secs) && secs > 0;
     },
 
     /**

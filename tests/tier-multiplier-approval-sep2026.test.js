@@ -202,22 +202,27 @@ test('§1 the simulate body keys brands by id, always carries the draft offset, 
   assert.equal(body.global_offset, 0.01, 'an offset left out simulates "no change" for a change that moves every price');
   assert.equal(body.preview_limit, 25);
   assert.equal(JSON.stringify(body).includes('ribbon'), false);
-  const base = T.baselineSimulateBody(body, live);
-  assert.deepEqual(base.proposed_tiers, {});
-  assert.equal(base.global_offset, 0.01, 'the baseline uses the LIVE offset');
-  assert.deepEqual(base.scope, body.scope);
+  assert.equal(T.baselineSimulateBody, undefined, 'the client-side baseline is gone — the server returns `baseline`');
+});
+
+test('§1 a proposed offset of 0 is SENT — an omitted global_offset now means "the offset in force"', () => {
+  // Backend 2026-09-25 §5 2.3: omitted = live offset, not 0. The old `if (offset)`
+  // dropped a 0, so "cut +0.02 back to 0" previewed at +0.02: a store-wide cut
+  // shown as "no change".
+  const live = liveFixture({ global_offset: 0.02 });
+  const d = draftOf(live);
+  d.offset = 0;
+  const body = T.buildSimulateBody(d, live, {});
+  assert.ok(Object.prototype.hasOwnProperty.call(body, 'global_offset'), 'global_offset must be present');
+  assert.equal(body.global_offset, 0);
+  // An untouched draft sends the live offset explicitly, never relies on the default.
+  assert.equal(T.buildSimulateBody(draftOf(live), live, {}).global_offset, 0.02);
+  assert.equal(T.buildSimulateBody(draftOf(liveFixture()), liveFixture(), {}).global_offset, 0);
 });
 
 // ── §2 reading the response ──────────────────────────────────────────────────
-// Numbers measured on live 2026-09-23 (compatible scope).
-const BASELINE_COMPAT = {
-  affected: 620,
-  aggregate: { total_skus_with_increase: 51, total_skus_with_decrease: 141, total_skus_unchanged: 428,
-    net_profit_per_unit_after: 7686.95, net_profit_per_unit_delta: -524.67, catalogue_value_after: 27201.6,
-    avg_net_margin_after: 36.96, below_survival_floor_after: 0 },
-  no_decrease_ratchet: { enforced: true, blocked_skus: 141, will_change_skus: 51 },
-  by_tier: [{ source: 'compatible', tier: '12-18', products: 47, products_increasing: 10, blocked_by_no_decrease: 20, net_profit_per_unit_delta: -20 }],
-};
+// Numbers measured on live 2026-09-23 (compatible scope). A snapshot of this
+// age carries NO `baseline`/`edit_only`/`delivered` — the pre-2026-09-25 shape.
 const EDIT_COMPAT = {
   affected: 620,
   aggregate: { total_skus_with_increase: 51, total_skus_with_decrease: 175, total_skus_unchanged: 394,
@@ -226,24 +231,48 @@ const EDIT_COMPAT = {
   no_decrease_ratchet: { enforced: true, blocked_skus: 175, will_change_skus: 51 },
   by_tier: [{ source: 'compatible', tier: '12-18', products: 47, products_increasing: 10, blocked_by_no_decrease: 37, net_profit_per_unit_delta: -52.23 }],
 };
+// Live 2026-09-28, backend a1c9c67: compatible band 18-25 lowered by 0.1.
+// The shape the backend shipped for BF-068 2.1/2.2, verbatim.
+const EDIT_COMPAT_SPLIT = {
+  affected: 602,
+  aggregate: { avg_retail_change_pct: -1.72, total_skus_with_increase: 51, total_skus_with_decrease: 177, total_skus_unchanged: 374,
+    avg_net_margin_before: 37.8, avg_net_margin_after: 36.7, net_profit_per_unit_before: 8004.68, net_profit_per_unit_after: 7394.76,
+    net_profit_per_unit_delta: -609.92, catalogue_value_before: 27134.78, catalogue_value_after: 26414.28,
+    below_survival_floor_before: 0, below_survival_floor_after: 0,
+    delivered: { avg_retail_change_pct: 1.41, avg_net_margin_after: 38.62, net_profit_per_unit_after: 8155.79,
+      net_profit_per_unit_delta: 151.1, catalogue_value_after: 27313.28, below_survival_floor_after: 0 } },
+  baseline: { global_offset: 0, total_skus_with_increase: 51, total_skus_with_decrease: 147, will_change_skus: 51, blocked_skus: 147,
+    net_profit_per_unit_delta: -542.03, net_profit_per_unit_delta_delivered: 166.76 },
+  edit_only: { skus_priced_differently: 10, net_profit_per_unit_delta_delivered: -15.66 },
+  no_decrease_ratchet: { enforced: true, blocked_skus: 177, will_change_skus: 51 },
+};
 
-test('§2 attribute() separates the edit from drift a reprice would apply anyway', () => {
-  const a = T.attribute(EDIT_COMPAT, BASELINE_COMPAT);
+test('§2 attribute() reads the SERVER split; the edit + drift add up to the delivered total', () => {
+  const a = T.attribute(EDIT_COMPAT_SPLIT);
   assert.equal(a.available, true);
-  // Lowering 12-18 moves NOTHING extra: every one of its cuts is held by the ratchet.
-  assert.equal(a.edit_will_change, 0);
-  assert.equal(a.edit_blocked, 34);
-  assert.equal(a.edit.net_profit_per_unit_after, -62.9);
+  assert.equal(a.edit.skus_priced_differently, 10);
+  assert.equal(a.edit.net_profit_per_unit_delta_delivered, -15.66);
   assert.equal(a.drift.will_change_skus, 51, 'the 51 rises happen with NO edit — they are drift');
-  assert.equal(T.attribute(EDIT_COMPAT, null).available, false);
+  assert.equal(a.drift.net_profit_per_unit_delta_delivered, 166.76);
+  // Self-consistency of the live response: drift + edit = the delivered delta.
+  assert.equal(Math.round((a.drift.net_profit_per_unit_delta_delivered + a.edit.net_profit_per_unit_delta_delivered) * 100) / 100,
+    EDIT_COMPAT_SPLIT.aggregate.delivered.net_profit_per_unit_delta);
 });
 
-test('§2 attributeBands() joins on (source, tier); an unmatched band is null, never zero', () => {
-  const rows = T.attributeBands(EDIT_COMPAT, BASELINE_COMPAT);
-  assert.equal(rows[0].edit_products_increasing, 0);
-  assert.equal(rows[0].edit_net_profit_per_unit_delta, -32.23);
-  const moved = T.attributeBands({ by_tier: [{ source: 'genuine', tier: '<=20', products_increasing: 3, net_profit_per_unit_delta: 1 }] }, BASELINE_COMPAT);
-  assert.equal(moved[0].edit_products_increasing, null);
+test('§2 an old snapshot is NOT split — available:false, never a zero edit', () => {
+  assert.deepEqual(T.attribute(EDIT_COMPAT), { available: false });
+  assert.deepEqual(T.attribute({ ...EDIT_COMPAT, edit_only: { skus_priced_differently: 0 } }), { available: false }, 'half a split is no split');
+  assert.deepEqual(T.attribute(null), { available: false });
+});
+
+test('§2 shelfFigure() prefers delivered, and FLAGS a table-price fallback', () => {
+  const a = EDIT_COMPAT_SPLIT.aggregate;
+  // Table says −609.92; the shelf (ratchet applied) says +151.10. Opposite signs.
+  assert.deepEqual(T.shelfFigure(a, 'net_profit_per_unit_delta'), { value: 151.1, delivered: true });
+  assert.deepEqual(T.shelfFigure(a, 'catalogue_value_after'), { value: 27313.28, delivered: true });
+  assert.deepEqual(T.shelfFigure(EDIT_COMPAT.aggregate, 'net_profit_per_unit_delta'), { value: -587.57, delivered: false });
+  assert.deepEqual(T.shelfFigure(EDIT_COMPAT.aggregate, 'no_such_field'), { value: null, delivered: false }, 'absent is null, not 0');
+  assert.deepEqual(T.shelfFigure(null, 'x'), { value: null, delivered: false });
 });
 
 test('§2 ratchetSummary() words the §4.2 warning and is silent when nothing is blocked', () => {
@@ -313,7 +342,7 @@ function extractBlock(src, signature) {
 const CC = API_SRC.slice(API_SRC.indexOf('  controlCenter: {'));
 const METHODS = ['simulatePricing(payload)', 'getTierMultipliers()', 'proposeTierMultipliers(body)', 'proposeGlobalOffset(offset, notes)',
   'listTierProposals({ status, limit = 20 } = {})', 'getTierProposal(id)', 'approveTierProposal(id, notes)', 'rejectTierProposal(id, notes)',
-  'retryReprice()', 'getRepriceJob(jobId)'];
+  'retryReprice(proposalId)', 'getRepriceJob(jobId)'];
 
 function buildCC(transport) {
   const invoiceErrorSrc = extractBlock(API_SRC, 'function invoiceError(resp, fallback)');
@@ -381,6 +410,16 @@ test('§3 listTierProposals throws on failure (an empty history must not look li
   assert.equal(calls[0].url, '/api/admin/pricing/tier-multipliers/proposals?status=pending&limit=100');
 });
 
+test('§3 retry queues a JOB via /reprice-jobs {proposal_id} — never the synchronous 2,000-row /reprice', async () => {
+  const { cc, calls } = buildCC(() => ({ ok: true, data: { job_id: 'j9', status: 'queued' } }));
+  assert.deepEqual(await cc.retryReprice('p1'), { job_id: 'j9', status: 'queued' });
+  assert.deepEqual(calls[0], { verb: 'post', url: '/api/admin/pricing/reprice-jobs', body: { proposal_id: 'p1' } });
+  await cc.retryReprice();
+  assert.deepEqual(calls[1].body, {}, 'no proposal id → an unattached job, still the full catalogue');
+  await assert.rejects(buildCC(() => ({ ok: false, error: 'x', code: 'RATE_LIMITED' })).cc.retryReprice('p1'), (e) => e.code === 'RATE_LIMITED');
+  assert.doesNotMatch(stripComments(API_SRC), /['"`]\/api\/admin\/pricing\/reprice['"`]/, 'POST /pricing/reprice is capped at 2,000 rows and returns no job id');
+});
+
 test('§3 the dead/wrong-shape wrappers are gone', () => {
   const live = stripComments(API_SRC);
   assert.doesNotMatch(live, /commitPricing/);
@@ -425,13 +464,33 @@ test('§4 polling uses the tested constants and resumes from the latest approved
   assert.match(PANEL, /latest\.reprice_job_id/);
 });
 
-test('§4 simulate is debounced, sequence-guarded, validated first, and runs a drift baseline', () => {
+test('§4 simulate is debounced, sequence-guarded, validated first, and runs ONCE per preview', () => {
   assert.match(PANEL, /setTimeout\(runSimulate, SIM_DEBOUNCE_MS\)/);
   assert.match(PANEL, /seq !== _state\.simSeq/);
   const run = PANEL.slice(PANEL.indexOf('async function runSimulate'), PANEL.indexOf('function onInput'));
   const gate = run.indexOf("if (_state.validation.some((e) => e.reason !== 'no_change')) return;");
   assert.ok(gate > -1 && gate < run.indexOf('simulatePricing'), 'validation must gate the simulate call');
-  assert.match(run, /baselineSimulateBody\(body, _state\.live\)/);
+  assert.equal((run.match(/simulatePricing\(/g) || []).length, 1, 'ONE simulate per preview — the server returns baseline + edit_only');
+  assert.doesNotMatch(PANEL, /baselineSimulateBody|reviewBaseline|attributeBands/);
+});
+
+test('§4 headline figures are the SHELF (delivered); a table-only snapshot says so', () => {
+  const m = PANEL.slice(PANEL.indexOf('function metricsHtml'), PANEL.indexOf('function renderSample'));
+  for (const f of ['avg_net_margin_after', 'net_profit_per_unit_delta', 'catalogue_value_after', 'below_survival_floor_after', 'avg_retail_change_pct']) {
+    assert.match(m, new RegExp(`shelf\\('${f}'\\)`), `${f} must lead with the delivered figure`);
+  }
+  assert.match(m, /no shelf figure in this snapshot/);
+  assert.match(m, /Not split: this snapshot predates/);
+  const dlg = PANEL.slice(PANEL.indexOf('async function openApproveDialog'), PANEL.indexOf('function handleApproved'));
+  assert.match(dlg, /shelfFigure\(a, 'net_profit_per_unit_delta'\)/, 'the approve dialog quotes the shelf delta');
+  assert.doesNotMatch(dlg, /signedMoney\(a\.net_profit_per_unit_delta\)/, 'never the table delta as the headline');
+});
+
+test('§4 a retry re-attaches to the approved proposal', () => {
+  assert.match(PANEL, /handleApproved\(data, id\)/);
+  assert.match(PANEL, /outcome: 'enqueue_failed', message: r\.message, packs, proposalId/);
+  assert.match(PANEL, /retryReprice\(job\.proposalId\)/);
+  assert.match(PANEL, /startPolling\(latest\.reprice_job_id, null, latest\.id\)/);
 });
 
 test('§4 the ratchet warning and "keeps" rows are rendered', () => {

@@ -37,6 +37,13 @@ M = [
  ('inkcartridges/js/admin/pages/cc2-pricing.js', "Toast.success('Proposed. It is awaiting approval, and no price has moved.');", "Toast.success('Saved — prices are repricing.');"),
  ('inkcartridges/js/admin/pages/cc2-pricing.js', "  if (_state.validation.some((e) => e.reason !== 'no_change')) return;\n", ""),
  ('inkcartridges/js/admin/pages/cc-profit.js', "Toast.success('Offset proposed. It is awaiting approval in Site Health → Pricing, and no price has moved.');", "Toast.success('Saved');"),
+ # 2026-09-28 — the backend's BF-068 answer (fe-replies-round-backend-response-sep2026.md §5)
+ ('inkcartridges/js/admin/utils/tierProposal.js', "  body.global_offset = draft.offset != null ? Number(draft.offset) : Number((live && live.global_offset) || 0);", "  if (draft.offset) body.global_offset = Number(draft.offset);"),
+ ('inkcartridges/js/admin/utils/tierProposal.js', "  if (!e || !b) return { available: false };", "  if (!e && !b) return { available: false };"),
+ ('inkcartridges/js/admin/utils/tierProposal.js', "  if (d && d[field] != null) return { value: d[field], delivered: true };\n", ""),
+ ('inkcartridges/js/admin/api.js', "window.API.post('/api/admin/pricing/reprice-jobs',", "window.API.post('/api/admin/pricing/reprice',"),
+ ('inkcartridges/js/admin/api.js', "proposalId ? { proposal_id: proposalId } : {}", "{}"),
+ ('inkcartridges/js/admin/pages/cc2-pricing.js', "${signedMoney(shelfFigure(a, 'net_profit_per_unit_delta').value)}", "${signedMoney(a.net_profit_per_unit_delta)}"),
  ('scripts/probe-tier-approval.mjs', "const job = await api('GET',", "await fetch(API_BASE + '/api/admin/pricing/tier-multipliers', { method: 'PUT' });\nconst job = await api('GET',"),
 ]
 

@@ -128,6 +128,56 @@ The ERR-276 CLS reservation §2/§3 is retired with a note, because nothing open
 - `tests/popular-rows-removed-sep2026.test.js`: 13 tests. **Red-proof: 9 fail against HEAD's tree** (copied into a worktree of `d3d4be5`), and the 4 keep-list controls pass on both trees.
 - `npm run probe:popular-rows-removed`: READ-ONLY, runs a `zzprobe_` search term, uses no `ctx.route()` on the API, and puts its negative control first.
 
+## ERR-291 — The backend's answer to our four replies changed five contracts under us: a proposed offset of 0 previewed as the live offset, Retry reprice called a capped 2,000-row route, Product Review sent brand names the server now refuses, and the image-audit brand filter had always 404'd into "All clean" — **RESOLVED (frontend)** (2026-09-28)
+
+**Source.** `backend-docs/inbox/fe-replies-round-backend-response-sep2026.md` (dated 2026-09-25). It answers `bundle-response-FE-reply` (BF-070, ERR-286), `page-load-latency-FE-response` (BF-069, ERR-282..285), `tier-multiplier-approval-FE-response` (BF-068, ERR-281) and `mobile-atc-dead-zone-FE-response` (ERR-280). Reply: `outbox/fe-replies-round-FE-reply-sep2026.md`.
+
+**Measured before anything was built** (2026-09-28, backend `a1c9c67`, then `8d1b6f8` after a mid-session redeploy). Every claim in their document held. `npm run probe:bundle-response` (43 pass, 1 fail) and `npm run probe:tier-approval` (23/23) now re-run each measurement. The one probe failure is a NEW backend defect, not one of their claims: **BF-079**. `/api/products` at `limit` ≥ 100 drops `G252VPVP` and `G728300MLCMY` from their pages AFTER the slice, while `meta.total` still counts them (4,112 rows read vs 4,114). At `limit=10` both are present.
+
+| Claim | Measured |
+|---|---|
+| `brand=` on `/api/admin/products` takes a slug or an id | `hp` 870 = `<hp uuid>` 870 of 4,115; `HP` and `hp,canon` → 400 `UNKNOWN_BRAND` |
+| `/image-audit/list?status=watermark_hold` | 200, 736 rows |
+| `/export/products` retired | 400 |
+| invoices: `linked`, `strictQuery` | `linked=true` 0 + `false` 21 = 21; `zz=1` → 400; `sort=total/invoice_number/issue_date` → 200 |
+| import-status | 5 `recent_runs` per feed with `dry_run`; **genuine failed 2026-09-23 and 09-26** while `latest` read `completed` |
+| `/api/ribbons` past the end | `total: 109` |
+| simulate: `delivered`, `baseline`, `edit_only` | present; baseline + edit = delivered to the cent (166.76 − 15.66 = 151.10); table Δ −609.92 vs shelf Δ **+151.10** — opposite signs |
+| simulate refuses what PUT refuses | `UNKNOWN_TIER_BAND`, `INVALID_BAND_LADDER`, `UNKNOWN_BRAND`; a slug-keyed brand → 400 |
+| `/api/site/lock` | `{enabled:false,message:null}`, `s-maxage=60`, MISS → HIT on `api.inkcartridges.co.nz` |
+| yield detector vs backend | 0 rows raised net of `G288BXLCMY` (was 3) |
+
+**What was wrong, or about to be:**
+1. **An omitted `global_offset` now means "the offset in force", not 0.** `buildSimulateBody` sent it only `if (offset)`, so a proposed 0 against a live +0.02 would have previewed at +0.02: a store-wide cut shown as "no change". It is always sent now, 0 included.
+2. **Retry reprice called the route the backend says never to use.** `POST /admin/pricing/reprice {}` is synchronous, stops at 2,000 rows (`capped: true`) and returns no job id. It is now `POST /admin/pricing/reprice-jobs {proposal_id}` → 202 `{job_id}`, and the proposal id is carried from approval (and from the resume path) to the retry.
+3. **Product Review sent brand NAMES** (`brand=HP`) — 400 `UNKNOWN_BRAND` since 2026-09-25 — and `getUnreviewedProducts` read the refusal as `null` → an empty queue → **"All products reviewed"**. It sends the slug, and a refused read says "Could not load … The count is unknown, not zero".
+4. **The image-audit brand dropdown has sent a brand UUID since April 2026, and `/image-audit/list` + `/stats` resolve `brand` by SLUG only** — a UUID or a name is **404 "Brand not found"**. The list read that as `null` → no products → **"🎉 All clean"**. Not part of the backend's document, found while verifying it. It sends the slug, and a failed read is an error card.
+5. **`#product-review` had failed to load since 2026-04-09.** It imported `updateReviewBadge`, which `0764fdb` stopped exporting from `app.js`. An unresolved named import stops the ES module from LINKING, so the page showed "Page Not Found" with one console line. It is not in the navigation, and every source-grep test passed it. Found only because the brand fix in item 3 was checked in a real browser. The import is gone. `backend-response-fe-replies-sep2026` §5 now checks the whole class: every `import { x } from './local.js'` under `js/` must name a real export (300+ imports).
+6. **The invoice list is `strictQuery`.** A refusal resolved as `{ok:false}` and painted an empty table. `listInvoices` throws on a refusal and the page says "NOT an empty list". A test enumerates every param it can send against the measured allow-list, and every sortable column against the measured sorts.
+
+**Built on it (not defects, the answers):**
+- **Tier panel (BF-068):** one simulate per preview. The client baseline run (`baselineSimulateBody`, `attributeBands`, the review-screen baseline) is deleted, and `attribute()` reads the server's `edit_only`/`baseline`. Headline figures are the SHELF (`aggregate.delivered`) with the table figure beside them. A snapshot filed before 2026-09-25 has neither block and is labelled "Not split" / "table price", never back-filled with zero.
+- **Admin products (BF-070 c):** `backendBrandSlug()` deleted, the UUID is sent. The export fan-out sends one brand **id** per pass and refuses an unresolvable name by name, never sending it for a 400.
+- **Image audit (BF-070 d):** "Watermark hold" is a Status choice.
+- **Invoices (BF-070 g):** the 20×100 client-side page walk (`loadPortalFiltered`) is deleted. `linked=true|false` is sent and the table paginates normally.
+- **Import health (BF-070 h):** `utils/importStatus.js` reads the whole 5-run window. Tones: `bad` = latest failed or no real run in 48h; `warn` = a failure in the window or a dry run. The card lives on **Site Health → Infra**, because `cc-inventory` (the only renderer) is not in the navigation. That page reuses the same renderer.
+- **Yield tier (BF-070 e):** `max(backend, detected)` REMOVED. The count reached 0, and the one remaining raise was **wrong**: `G288BXLCMY` is a 288XL black plus STANDARD C/M/Y, which the backend keeps STD on purpose. The probe's §6 would then have compared `yieldTier()` to itself, a guard that cannot fail (ERR-258). It now strips `yield_tier` to measure the DETECTOR and FAILS on any new disagreement.
+- **Site lock (BF-069):** the storefront switch shipped in a peer's `eae0781`. This change adds the admin copy "Shoppers see it within about a minute" (60 s edge TTL, no purge by design).
+
+**Not changed, on purpose:** BF-064 (the backend declined; it cannot oversell, because `create_order_atomic` re-checks stock). The two CMY kits stay `single` (backend (f)). `/shop` past the end is still `null` (backend). `/api/printers/browse` has no FE caller. `/api/ribbons` needed nothing: `ribbons-page.js` already renders the real total when it arrives.
+
+**The probe measured its own request rate first.** The first full run hit the origin's 100 req / 60 s limit. §6 stopped paging at 1,799 of 4,114 and still PASSED, and `/api/site/trust` read as "catalog_claimable_count absent". Both were 429s (the ERR-243 trap again). `get()` now waits out a 429 via `retry-after`. §6 fails on a partial read and names BF-079 when pages do not add up to `meta.total`. **New asks:** BF-079 (above), BF-080 (the genuine feed failed 2 of 5 nights with `errors: 0`: 09-23 after 45 min, and 09-26 reaped at exactly 24 h), BF-081 (image-audit `brand` is slug-only and 404s an id).
+
+**Lessons.**
+- ***A stricter server turns every silent fallback into a lie.*** Three of the five were `resp?.data ?? null` read as "empty": the queue said "All products reviewed", the audit said "All clean", and invoices showed an empty table. Every one of those is a refusal now rendered as a refusal.
+- ***The last raise a merge makes can be the wrong one.*** max() was right for 16 rows, then 3, then 1, and that 1 was the row the backend had decided on deliberately. "Keep it until 0" should have been "keep it until every remaining raise is checked".
+- ***Retire a guard's subject and you retire the guard.*** Removing max() made probe §6 compare a value to itself. Red-proof it after the change, not before.
+- ***A page nobody links to is a page nobody loads.*** Product Review was dead for 5½ months behind a missing export, and nothing short of a browser could see it.
+
+Guards: `tests/backend-response-fe-replies-sep2026.test.js` + the five suites it names; `python3 scripts/redproof-backend-response-sep2026.py` and `scripts/redproof-tier-approval.py` (19/19); `npm run probe:bundle-response`, `npm run probe:tier-approval`.
+
+---
+
 ## ERR-293 — A compatible PDP still put Add to Cart under the consent bar, cards dropped the "+N" printers, the countdown promised same-day dispatch without its Auckland-metro scope, and /review was still dark after the backend went live — **RESOLVED (frontend)** (2026-09-28)
 
 **Source.** Backend post-deploy check `inbox/fe-post-deploy-fixes-sep2026.md` (2026-09-28). The backend measured the ERR-287/288/289 deploy on production. Reply: `outbox/post-deploy-fixes-FE-reply-sep2026.md`.
@@ -856,7 +906,9 @@ red at HEAD. 33 mutants killed across the three new test files.
 
 **Open, for the backend.** The homepage count is theirs to own (§3). The ads-side stop-loss should be
 reversed the day this deploys: `node scripts/ads/pause-mobile-until-checkout-fixed.js --restore
---apply`, in their tree.
+--apply`, in their tree. **Moot (backend, 2026-09-25 §6; see ERR-291):** that script was deleted
+on 2026-09-23 when the owner ruled out device exclusion, mobile and tablet have served since that
+day, and the live Search campaign carries no device bid adjustment. Nothing is left to reverse.
 
 ---
 

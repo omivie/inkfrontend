@@ -117,9 +117,13 @@ async function saveLock(enabled) {
     return;
   }
 
+  // Visitors read the lock through GET /api/site/lock, edge-cached for 60 s
+  // with no purge on write (BF-069, 2026-09-28): the change reaches shoppers
+  // within about a minute, not instantly. Say so, or a check straight after
+  // unlocking reads as "the unlock did not work".
   Toast.success(enabled
-    ? 'Site locked — only admin accounts can access any page.'
-    : 'Site unlocked — open to all visitors.');
+    ? 'Site locked. Shoppers see it within about a minute. Only admin accounts can access any page.'
+    : 'Site unlocked. Shoppers see it within about a minute.');
 }
 
 async function saveMessage() {
@@ -150,7 +154,7 @@ async function saveMessage() {
   if (btn2) { btn2.disabled = false; btn2.textContent = 'Save message'; }
 
   if (error) { Toast.error('Failed to save message.'); return; }
-  Toast.success('Lockdown message saved.');
+  Toast.success('Lockdown message saved. Shoppers see it within about a minute.');
 }
 
 function renderStatus() {
@@ -178,7 +182,7 @@ function render() {
   _container.innerHTML = `
     <div class="admin-page-header">
       <h1>Site Lock</h1>
-      <p class="admin-page-header__sub">Control public access to the store. When locked, visitors see a login prompt — only admin accounts can get through.</p>
+      <p class="admin-page-header__sub">Control public access to the store. When locked, visitors see a login prompt — only admin accounts can get through. A change reaches shoppers within about a minute (the lock is cached for 60 seconds).</p>
     </div>
 
     <div id="sl-banner" class="admin-card" style="padding:var(--spacing-md);margin-bottom:var(--spacing-md);border:1.5px solid;transition:background 0.2s,border-color 0.2s">

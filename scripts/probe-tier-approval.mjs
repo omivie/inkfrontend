@@ -27,13 +27,19 @@
  *   §3 the key grammar         keys rebuilt from boundaries by the shipped util
  *                              match the server's keys, band for band
  *   §4 a one-band simulate     the edited band echoes the proposed multiplier
- *   §5 drift                   what a no-change reprice would move today (note)
- *   §6 the ratchet             blocked rows still count as decreases in the
- *                              aggregate (note, BF-068)
- *   §7 silent acceptance       an unknown band key → 200 "no change" (note,
- *                              BF-068; the panel validates first)
+ *   §5 drift                   what a no-change reprice would move today (note);
+ *                              the server's `baseline` block must equal it and
+ *                              `edit_only` must be zero for a no-change simulate
+ *   §6 the ratchet             `aggregate.delivered` exists (BF-068 2.1) and the
+ *                              `baseline`/`edit_only` blocks add up to it (2.2)
+ *                              — the panel's headline figures READ these
+ *   §7 simulate refuses        unknown band key, bad ladder, non-id brand key,
+ *                              unknown brand id → 400 with PUT's codes (2.3)
  *   §8 job 404                 a made-up reprice job id → NOT_FOUND, the state
  *                              the panel's poller stops on
+ *
+ * NOT exercised: POST /reprice-jobs (the retry route). It QUEUES A FULL
+ * CATALOGUE REPRICE — that is a write, and the transport below refuses it.
  *
  * Needs ADMIN_EMAIL / ADMIN_PASSWORD (a super_admin) in .env or the environment.
  * Lives in scripts/, not inkcartridges/scripts/ (that tree is served publicly).
@@ -184,6 +190,15 @@ else {
   const r = base.json.data.no_decrease_ratchet || {};
   if (r.will_change_skus > 0) soft('a reprice with NO edit would still move prices', `${r.will_change_skus} SKUs rise, ${r.blocked_skus} held by the ratchet — the panel shows this as drift, separate from the edit`);
   else ok('no drift', 'a no-change reprice moves nothing');
+  const b = base.json.data.baseline;
+  const e = base.json.data.edit_only;
+  if (!b || !e) bad('baseline / edit_only blocks', 'ABSENT — the panel prints "Not split" on every preview (BF-068 2.2 regressed)');
+  else {
+    if (b.will_change_skus === r.will_change_skus && b.blocked_skus === r.blocked_skus) ok('`baseline` of a no-change simulate is the simulate itself', `${b.will_change_skus} change · ${b.blocked_skus} held`);
+    else bad('baseline self-consistency', `baseline ${b.will_change_skus}/${b.blocked_skus} vs ratchet ${r.will_change_skus}/${r.blocked_skus}`);
+    if (e.skus_priced_differently === 0 && e.net_profit_per_unit_delta_delivered === 0) ok('`edit_only` of a no-change simulate is zero');
+    else bad('edit_only of no change', JSON.stringify(e));
+  }
 }
 
 // §6 ratchet inside the aggregate
@@ -197,18 +212,38 @@ else {
   const rs = ratchetSummary(d);
   if (d.no_decrease_ratchet?.enforced === true) ok('ratchet enforced', `${rs.blocked} blocked, ${rs.willChange} will change`);
   else bad('ratchet', `enforced = ${d.no_decrease_ratchet?.enforced} — the contract says always true in production`);
-  const blockedLower = (d.sample || []).filter((r) => r.blocked_by_no_decrease && r.new_retail < r.current_retail);
-  if (blockedLower.length && d.aggregate?.total_skus_with_decrease >= rs.blocked) {
-    soft('aggregate counts ratchet-blocked rows as decreases (BF-068)', `${blockedLower.length} blocked rows show new_retail < current_retail (e.g. ${blockedLower[0].sku} ${blockedLower[0].current_retail} → ${blockedLower[0].new_retail}); total_skus_with_decrease ${d.aggregate.total_skus_with_decrease}. The panel renders them as "keeps".`);
-  } else ok('blocked rows are not counted as decreases');
+  // BF-068 2.1: the plain *_after fields keep their TABLE meaning; `delivered`
+  // holds the ratchet-applied twins the panel leads with.
+  const dl = d.aggregate?.delivered;
+  const twins = ['avg_retail_change_pct', 'avg_net_margin_after', 'net_profit_per_unit_after', 'net_profit_per_unit_delta', 'catalogue_value_after', 'below_survival_floor_after'];
+  const missing = dl ? twins.filter((k) => !Number.isFinite(dl[k])) : twins;
+  if (missing.length) bad('aggregate.delivered', `missing ${missing.join(', ')} — the panel falls back to TABLE figures and says so`);
+  else if (rs.blocked > 0 && !(dl.net_profit_per_unit_delta > d.aggregate.net_profit_per_unit_delta)) {
+    bad('delivered applies the ratchet', `${rs.blocked} rows held, yet delivered Δ ${dl.net_profit_per_unit_delta} is not above table Δ ${d.aggregate.net_profit_per_unit_delta}`);
+  } else ok('aggregate.delivered carries all six shelf twins', `profit/unit Δ table ${d.aggregate.net_profit_per_unit_delta} vs shelf ${dl.net_profit_per_unit_delta}`);
+  const b = d.baseline;
+  const e = d.edit_only;
+  if (b && e && dl) {
+    const sum = Math.round((b.net_profit_per_unit_delta_delivered + e.net_profit_per_unit_delta_delivered) * 100) / 100;
+    if (Math.abs(sum - dl.net_profit_per_unit_delta) <= 0.02) ok('drift + this edit = the delivered total', `${b.net_profit_per_unit_delta_delivered} + ${e.net_profit_per_unit_delta_delivered} = ${dl.net_profit_per_unit_delta}`);
+    else bad('baseline + edit_only ≠ delivered', `${b.net_profit_per_unit_delta_delivered} + ${e.net_profit_per_unit_delta_delivered} = ${sum}, delivered ${dl.net_profit_per_unit_delta}`);
+  } else bad('baseline / edit_only on an edit', 'ABSENT');
 }
 
-// §7 unknown band key
-say('\n§7 unknown band key');
-const typo = await api('POST', '/api/admin/pricing/simulate', { proposed_tiers: { genuine: { '<=100': 1.4 } }, preview_limit: 1 });
-if (typo.status === 400) ok('simulate refuses an unknown band key', 'the panel pre-check is now belt-and-braces');
-else if (typo.status === 200) soft('simulate silently accepts an unknown band key (BF-068)', 'answers 200 "no change" — PUT would 400. The panel validates keys before simulating.');
-else bad('unknown-key simulate', String(typo.status));
+// §7 simulate refuses what PUT refuses (BF-068 2.3). A 200 here previews a
+// typo as "no change".
+say('\n§7 simulate refuses what PUT refuses');
+for (const [what, body, want] of [
+  ['an unknown band key', { proposed_tiers: { genuine: { '<=100': 1.4 } } }, 'UNKNOWN_TIER_BAND'],
+  ['a descending ladder', { proposed_tiers: { bands: { genuine: [{ max_cost: 10, mult: 1.5 }, { max_cost: 5, mult: 1.4 }, { max_cost: null, mult: 1.3 }] } } }, 'INVALID_BAND_LADDER'],
+  ['a brand keyed by slug', { proposed_tiers: { brands: { hp: { genuine: { '<=10': 1.5 } } } } }, 'VALIDATION_FAILED'],
+  ['an unknown brand id', { proposed_tiers: { brands: { '00000000-0000-0000-0000-000000000000': { genuine: { '<=10': 1.5 } } } } }, 'UNKNOWN_BRAND'],
+]) {
+  const r = await api('POST', '/api/admin/pricing/simulate', { ...body, preview_limit: 1 });
+  const code = r.json?.error?.code || r.json?.code;
+  if (r.status === 400 && code === want) ok(`${what} → 400 ${want}`);
+  else bad(`${what}`, `HTTP ${r.status} ${code || ''} — expected 400 ${want}`);
+}
 
 // §8 reprice job 404
 say('\n§8 reprice job');

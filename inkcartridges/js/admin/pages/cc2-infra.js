@@ -1,11 +1,19 @@
 /**
- * Control Center — Infra tab (prerender cache + image pipeline)
+ * Control Center — Infra tab (prerender cache + image pipeline + supplier feeds)
  *
- * Two cards from /infra/prerender-health and /infra/image-pipeline plus
+ * Cards from /infra/prerender-health and /infra/image-pipeline plus
  * a deep link out to the existing /admin/image-audit page where humans
  * approve/replace pending images. Spec §5.10 / §5.11.
+ *
+ * Supplier feeds (2026-09-28): /supplier/import-status returns the last 5 runs
+ * per feed since the backend fixed it (BF-070 h). The only page that rendered
+ * it (cc-inventory) is not in the navigation, and it showed `latest` alone —
+ * which read "completed" while the genuine feed had failed 2 of its last 5
+ * nights. The card lives here, where Site Health is read; cc-inventory renders
+ * the same importFeedsHtml() from utils/importStatus.js.
  */
 import { AdminAPI, esc, icon } from '../app.js';
+import { importFeedsHtml } from '../utils/importStatus.js';
 
 function fmtPct(n) {
   return n == null ? '—' : `${Number(n).toFixed(1)}%`;
@@ -85,19 +93,20 @@ export default {
     _host.innerHTML = `
       <div class="cc2-section-header">
         <h2>Infrastructure</h2>
-        <span class="cc2-meta">Prerender cache + image pipeline counters</span>
+        <span class="cc2-meta">Prerender cache, image pipeline and supplier feed counters</span>
       </div>
       <div class="cc2-infra-grid" id="cc2-infra-grid">
         <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
       </div>
     `;
-    const [prerender, image] = await Promise.all([
+    const [prerender, image, feeds] = await Promise.all([
       AdminAPI.controlCenter.getPrerenderHealth(),
       AdminAPI.controlCenter.getImagePipeline(),
+      AdminAPI.getSupplierImportStatus(),
     ]);
     if (!_host) return;
     const grid = _host.querySelector('#cc2-infra-grid');
-    grid.innerHTML = `${renderPrerender(prerender)}${renderImagePipeline(image)}`;
+    grid.innerHTML = `${importFeedsHtml(feeds, esc)}${renderPrerender(prerender)}${renderImagePipeline(image)}`;
   },
   destroy() { _host = null; },
 };

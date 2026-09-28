@@ -361,7 +361,7 @@ test('yieldTier: HP short-series 975X tiers XL via backend signal, 975A stays ST
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2c. yieldTier — STRONGER SIGNAL WINS (ERR-134)
+// 2c. yieldTier — STRONGER SIGNAL WINS (ERR-134) — HISTORY, see 2d
 //
 // Jul 2026: the backend now emits yield_tier on every endpoint including
 // /api/products/:sku — measured present on 3,910/3,910 products. That made the
@@ -378,29 +378,40 @@ test('yieldTier: HP short-series 975X tiers XL via backend signal, 975A stays ST
 // Verified across the full catalogue: 16 raised, 0 lowered.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('yieldTier: backend STD over a trailing-H high-yield name is RAISED to XL', () => {
-    // Lexmark 708H — 3,000 pages against the plain 708's 1,000.
+// 2d. 2026-09-28 — max() RETIRED. The backend's detector learned trailing-H,
+// glued XLHY and Lexmark H[KCMY]0 (BF-027 → BF-070 e, 46 rows moved, none
+// lost). probe:bundle-response §6: 0 raised over the whole catalogue, net of
+// G288BXLCMY — which the backend keeps STD ON PURPOSE (a 288XL black + three
+// STANDARD colours; no single tier is true). max() read "BXL" and raised it:
+// the merge had become the one thing contradicting a deliberate answer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('yieldTier: the backend answer wins in BOTH directions once present', () => {
+    // The mixed-capacity pack: backend STD on purpose, the name says BXL.
     assert.equal(
-        ProductSort.yieldTier({ name: 'Lexmark Genuine 708HC Toner Cartridge 708H Cyan (3,000 pages)', sku: 'G708HC', color: 'Cyan', yield_tier: 'STD' }),
-        1, '708H must not share a yield row with the 1,000-page 708');
-    // Canon CART069H — the SKU rule the detector was written for.
+        ProductSort.yieldTier({ name: 'Epson Genuine 288BXLCMY Ink Cartridge 288 CMY 3-Pack', sku: 'G288BXLCMY', yield_tier: 'STD' }),
+        0, 'G288BXLCMY is a 288XL black + STANDARD C/M/Y — the backend keeps it STD on purpose');
+    // The rows max() used to rescue now arrive as XL from the backend itself.
     assert.equal(
-        ProductSort.yieldTier({ name: 'Canon Genuine CART069HC Toner Cartridge CART069H Cyan', sku: 'GCART069HC', color: 'Cyan', yield_tier: 'STD' }),
-        1, 'CART069H must tier XL despite the backend saying STD');
-    // Its plain sibling is untouched — the raise is not indiscriminate.
+        ProductSort.yieldTier({ name: 'Lexmark Genuine 708HC Toner Cartridge 708H Cyan (3,000 pages)', sku: 'G708HC', color: 'Cyan', yield_tier: 'XL' }), 1);
     assert.equal(
-        ProductSort.yieldTier({ name: 'Canon Genuine CART069C Toner Cartridge CART069 Cyan', sku: 'GCART069C', color: 'Cyan', yield_tier: 'STD' }),
-        0, 'the standard CART069 must stay STD');
+        ProductSort.yieldTier({ name: 'Canon Genuine PG660XLHYBK Ink Cartridge PG660XLHY Black', sku: 'GPG660XLHYBK', color: 'Black', yield_tier: 'XL' }), 1);
+    // A stronger backend value still wins over a weaker detector reading.
+    assert.equal(ProductSort.yieldTier({ name: 'Brother TN3480XL Toner Black', yield_tier: 'XXL' }), 2);
+    assert.equal(ProductSort.yieldTier({ name: 'Lexmark Genuine 808SC Toner Cartridge 808S Cyan', sku: 'G808SC', color: 'Cyan', yield_tier: 'XL' }), 1,
+        'bare-letter yields the FE deliberately cannot read keep the backend answer');
+    assert.equal(ProductSort.yieldTier({ name: 'Brother TN2030BK Toner Cartridge TN2030 Black', sku: 'GTN2030BK', color: 'Black', yield_tier: 'STD' }), 0);
+    // [CONTROL] garbage in the field is "absent", so the detector answers.
+    assert.equal(ProductSort.yieldTier({ name: 'Epson Genuine 200HYBK Ink Cartridge 200HY Black', color: 'Black', yield_tier: 'HUGE' }), 1);
 });
 
-test('yieldTier: the merge NEVER lowers a tier — a stronger backend value wins', () => {
-    // Backend XXL, detector would say XL: keep XXL.
-    assert.equal(ProductSort.yieldTier({ name: 'Brother TN3480XL Toner Black', yield_tier: 'XXL' }), 2);
-    // Backend XL, name carries nothing the detector recognises: keep XL.
-    assert.equal(ProductSort.yieldTier({ name: 'Lexmark Genuine 808SC Toner Cartridge 808S Cyan', sku: 'G808SC', color: 'Cyan', yield_tier: 'XL' }), 1,
-        'bare-letter yields the FE deliberately cannot read must keep the backend answer');
-    // Backend STD, nothing detectable: stays STD.
-    assert.equal(ProductSort.yieldTier({ name: 'Brother TN2030BK Toner Cartridge TN2030 Black', sku: 'GTN2030BK', color: 'Black', yield_tier: 'STD' }), 0);
+test('yieldTier: the max() merge is gone from the source', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'js', 'utils.js'), 'utf8');
+    const fn = src.slice(src.indexOf('function yieldTier(product)'), src.indexOf('// accessoryTier:'));
+    assert.match(fn, /return backendTier >= 0 \? backendTier : detected;/);
+    assert.doesNotMatch(fn, /return Math\.max\(backendTier, detected\)/);
 });
 
 test('yieldTier: with no backend field the detector still stands alone (unchanged)', () => {

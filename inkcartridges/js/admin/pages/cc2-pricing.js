@@ -18,12 +18,13 @@
  * price change that had not happened.
  *
  * Two readings of the simulate response are deliberate (measured on live on
- * 2026-09-23; see tierProposal.js):
- *   - A reprice applies DRIFT as well as the edit. The panel runs a no-change
- *     baseline and splits "this edit" from "drift a reprice applies anyway".
- *   - Rows blocked by the no-decrease ratchet KEEP their price. The aggregate
- *     "after" figures still count them at the lower table price, so the panel
- *     says so, and sample rows read "keeps $X" rather than showing a price drop.
+ * 2026-09-23, answered server-side 2026-09-25 as BF-068; see tierProposal.js):
+ *   - A reprice applies DRIFT as well as the edit. The server's `baseline` and
+ *     `edit_only` blocks split "this edit" from "drift a reprice applies
+ *     anyway" — one simulate per preview, no client-side baseline run.
+ *   - Rows blocked by the no-decrease ratchet KEEP their price. The panel
+ *     leads with `aggregate.delivered` (the shelf) and prints the table-price
+ *     figure beside it; sample rows read "keeps $X", never a price drop.
  */
 import { AdminAPI, AdminAuth, esc, icon } from '../app.js';
 import { Toast } from '../components/toast.js';
@@ -34,8 +35,8 @@ import {
   EDITABLE_SOURCES, MULT_MIN, MULT_MAX, OFFSET_LIMIT,
   SIM_DEBOUNCE_MS, POLL_MS, EDIT_PREVIEW_LIMIT, FULL_PREVIEW_LIMIT,
   sameMult, ladderKeys, bandsFromServer, validateBandLadder,
-  buildProposeBody, buildSimulateBody, baselineSimulateBody,
-  attribute, attributeBands, ratchetSummary, rowOutcome, diffLadders,
+  buildProposeBody, buildSimulateBody,
+  attribute, shelfFigure, ratchetSummary, rowOutcome, diffLadders,
   errorMessage, pollDecision,
 } from '../utils/tierProposal.js';
 
@@ -82,8 +83,6 @@ function freshState() {
     includeOverrides: false,
     draft: null,
     sim: null,
-    baseline: null,
-    baselineKey: null,
     simError: null,
     simLoading: false,
     simSeq: 0,
@@ -91,7 +90,6 @@ function freshState() {
     sampleLimit: EDIT_PREVIEW_LIMIT,
     view: 'edit',          // 'edit' | 'review'
     review: null,          // GET /proposals/:id data
-    reviewBaseline: null,
     reviewError: null,
     job: null,             // { id, status, counts, outcome, error, startedAt, packs, message }
     history: null,
@@ -399,7 +397,7 @@ function paintKeys() {
 function paintBandStats() {
   if (!_host) return;
   const s = _state.source;
-  const rows = _state.sim ? attributeBands(_state.sim, _state.baseline) : [];
+  const rows = (_state.sim && _state.sim.by_tier) || [];
   const idx = new Map(rows.filter((r) => r.source === s).map((r) => [r.tier, r]));
   _host.querySelectorAll('tr[data-row-key]').forEach((tr) => {
     const r = idx.get(tr.dataset.rowKey);
@@ -421,7 +419,7 @@ function renderValidation() {
   if (!el) return;
   const errs = _state.validation.filter((e) => e.reason !== 'no_change');
   el.innerHTML = errs.length
-    ? `<div class="cc2-tiers__banner cc2-tiers__banner--danger" role="alert"><div><strong>Not simulated. Fix these first</strong> (the simulator would quietly ignore them and show “no change”):<ul>${errs.map((e) => `<li>${e.source ? `${esc(SOURCE_LABEL[e.source] || e.source)}: ` : ''}${esc(e.message || e.reason)}</li>`).join('')}</ul></div></div>`
+    ? `<div class="cc2-tiers__banner cc2-tiers__banner--danger" role="alert"><div><strong>Not simulated. Fix these first</strong> (the server would refuse them too; this lists every problem at once):<ul>${errs.map((e) => `<li>${e.source ? `${esc(SOURCE_LABEL[e.source] || e.source)}: ` : ''}${esc(e.message || e.reason)}</li>`).join('')}</ul></div></div>`
     : '';
 }
 
@@ -439,7 +437,7 @@ function renderMetrics() {
     el.innerHTML = `<div class="admin-card cc2-tiers__metrics"><div class="admin-loader"><div class="admin-loading__spinner"></div></div></div>`;
     return;
   }
-  el.innerHTML = metricsHtml(sim, _state.baseline, { dirty: draftDirty(), loading: _state.simLoading, scope: scopeLabel() });
+  el.innerHTML = metricsHtml(sim, { dirty: draftDirty(), loading: _state.simLoading, scope: scopeLabel() });
 }
 
 function scopeLabel() {
@@ -448,42 +446,54 @@ function scopeLabel() {
 }
 
 // Shared by the edit strip and the review card.
-function metricsHtml(sim, baseline, { dirty = true, loading = false, scope = '' } = {}) {
+//
+// Every "after" figure leads with the SHELF (`aggregate.delivered`, the
+// ratchet applied) and prints the TABLE figure beside it. A snapshot filed
+// before 2026-09-25 has no `delivered`: its figures are labelled "table
+// price" and the banner says ratchet-held rows are counted at the lower price.
+function metricsHtml(sim, { dirty = true, loading = false, scope = '' } = {}) {
   const a = sim.aggregate || {};
-  const att = attribute(sim, baseline);
+  const att = attribute(sim);
   const rat = ratchetSummary(sim);
+  const hasShelf = !!a.delivered;
+  const shelf = (f) => shelfFigure(a, f).value;
+  // "table X" beside a delivered figure; nothing when there is no shelf twin.
+  const tableNote = (txt) => (hasShelf ? `<span class="cc2-tiers__muted"> · table ${txt}</span>` : '');
   const brandRows = (sim.by_brand || []).map((b) => `<tr>
       <td>${esc(b.name || b.slug || b.brand_id)}</td><td class="num">${int(b.products)}</td>
       <td class="num">${int(b.products_increasing)}</td><td class="num">${int(b.blocked_by_no_decrease)}</td>
       <td class="num">${pct(b.avg_net_margin_before_pct)} → ${pct(b.avg_net_margin_after_pct)}</td>
       <td class="num">${signedPct(b.avg_retail_change_pct)}</td><td class="num">${signedMoney(b.net_profit_per_unit_delta)}</td></tr>`).join('');
   const editLine = !att.available
-    ? '<span class="cc2-tiers__muted">Drift baseline unavailable. The figures below mix this edit with pending drift.</span>'
+    ? '<span class="cc2-tiers__warntext">Not split: this snapshot predates the server\'s drift/edit split (2026-09-25). The figures below mix this edit with drift a reprice would apply anyway.</span>'
     : !dirty
       ? '<span>No edit yet. These figures are the <strong>drift</strong> a reprice would apply to the live ladder today.</span>'
-      : `<span><strong>This edit alone:</strong> ${signedInt(att.edit_will_change)} SKUs will move · ${signedMoney(att.edit.net_profit_per_unit_after)} net profit per unit · ${signedInt(att.edit_blocked)} newly held by the ratchet.</span>`;
+      : `<span><strong>This edit alone:</strong> ${int(att.edit.skus_priced_differently)} SKUs priced differently · ${signedMoney(att.edit.net_profit_per_unit_delta_delivered)} net profit per unit at shelf prices.</span>`;
   const driftLine = att.available && att.drift.will_change_skus
-    ? `<p class="cc2-tiers__muted cc2-tiers__drift">Approving reprices the <strong>whole catalogue</strong>, not only these bands. With no edit at all, ${int(att.drift.will_change_skus)} SKUs would still rise (supplier-cost drift since the last reprice). That is included in “will change” above.</p>`
+    ? `<p class="cc2-tiers__muted cc2-tiers__drift">Approving reprices the <strong>whole catalogue</strong>, not only these bands. With no edit at all, ${int(att.drift.will_change_skus)} SKUs would still rise (supplier-cost drift since the last reprice), worth ${signedMoney(att.drift.net_profit_per_unit_delta_delivered)} net profit per unit. That is included in “will change” above.</p>`
     : '';
+  const floorAfter = shelf('below_survival_floor_after');
   return `<div class="admin-card cc2-tiers__metrics ${loading ? 'is-loading' : ''}">
     <header class="cc2-section-header"><h3>Impact${loading ? ' <span class="cc2-tiers__muted">updating…</span>' : ''}</h3><span class="cc2-tiers__muted">${scope}</span></header>
     <div class="cc2-tiers__editline">${editLine}</div>
     <div class="admin-kpi-grid admin-kpi-grid--4">
       <div class="admin-kpi"><div class="admin-kpi__label">SKUs priced by this table</div><div class="admin-kpi__value">${int(sim.affected)}</div></div>
-      <div class="admin-kpi"><div class="admin-kpi__label">Will change</div><div class="admin-kpi__value">${int(rat.willChange)}</div><div class="admin-kpi__sub">${int(a.total_skus_with_increase)} rise · ${int(a.total_skus_unchanged)} unchanged</div></div>
-      <div class="admin-kpi"><div class="admin-kpi__label">Avg net margin after Stripe fees</div><div class="admin-kpi__value">${pct(a.avg_net_margin_before)} → ${pct(a.avg_net_margin_after)}</div><div class="admin-kpi__sub">“after” is at the table's price</div></div>
-      <div class="admin-kpi"><div class="admin-kpi__label">Net profit per unit Δ</div><div class="admin-kpi__value">${signedMoney(a.net_profit_per_unit_delta)}</div><div class="admin-kpi__sub">one unit of each SKU. Not revenue, not a forecast</div></div>
+      <div class="admin-kpi"><div class="admin-kpi__label">Will change</div><div class="admin-kpi__value">${int(rat.willChange)}</div><div class="admin-kpi__sub">${int(a.total_skus_with_increase)} rise · ${int(rat.blocked)} keep their price</div></div>
+      <div class="admin-kpi"><div class="admin-kpi__label">Avg net margin after Stripe fees</div><div class="admin-kpi__value">${pct(a.avg_net_margin_before)} → ${pct(shelf('avg_net_margin_after'))}</div><div class="admin-kpi__sub">${hasShelf ? 'at shelf prices' : 'at the table price (no shelf figure in this snapshot)'}${tableNote(pct(a.avg_net_margin_after))}</div></div>
+      <div class="admin-kpi"><div class="admin-kpi__label">Net profit per unit Δ</div><div class="admin-kpi__value">${signedMoney(shelf('net_profit_per_unit_delta'))}</div><div class="admin-kpi__sub">one unit of each SKU. Not revenue, not a forecast${tableNote(signedMoney(a.net_profit_per_unit_delta))}</div></div>
     </div>
     <div class="cc2-tiers__minor">
-      <span>Avg retail change ${signedPct(a.avg_retail_change_pct)}</span>
-      <span>Catalogue value (sum of retail, incl. GST) ${money(a.catalogue_value_before)} → ${money(a.catalogue_value_after)}</span>
-      <span>Below 5% survival floor: ${int(a.below_survival_floor_before)} → <strong class="${a.below_survival_floor_after > a.below_survival_floor_before ? 'cc2-tiers__warntext' : ''}">${int(a.below_survival_floor_after)}</strong></span>
+      <span>Avg retail change ${signedPct(shelf('avg_retail_change_pct'))}${tableNote(signedPct(a.avg_retail_change_pct))}</span>
+      <span>Catalogue value (sum of retail, incl. GST) ${money(a.catalogue_value_before)} → ${money(shelf('catalogue_value_after'))}${tableNote(money(a.catalogue_value_after))}</span>
+      <span>Below 5% survival floor: ${int(a.below_survival_floor_before)} → <strong class="${floorAfter > a.below_survival_floor_before ? 'cc2-tiers__warntext' : ''}">${int(floorAfter)}</strong>${tableNote(int(a.below_survival_floor_after))}</span>
       ${sim.global_offset_applied != null ? `<span>Offset in these figures ${offsetPct(sim.global_offset_applied)}</span>` : ''}
     </div>
     ${rat.warning ? `<div class="cc2-tiers__banner cc2-tiers__banner--warn" role="status"><div><strong>No-decrease ratchet:</strong> ${esc(rat.warning)}
-      <br><span class="cc2-tiers__muted">The “after” margin, value and profit figures above still count these ${int(rat.blocked)} rows at the lower table price. Delivered figures will be higher by that amount.</span></div></div>` : ''}
+      <br><span class="cc2-tiers__muted">${hasShelf
+        ? `The headline figures above keep these ${int(rat.blocked)} rows at their current price. The smaller “table” figures count them at the lower table price.`
+        : `This snapshot has no shelf figures, so the “after” figures above still count these ${int(rat.blocked)} rows at the lower table price. Delivered figures will be higher by that amount.`}</span></div></div>` : ''}
     ${driftLine}
-    ${brandRows ? `<div class="admin-table-wrap"><table class="admin-table cc2-pricing__table"><thead><tr><th>Brand ladder</th><th class="num">Products</th><th class="num">Rise</th><th class="num">Keep</th><th class="num">Net margin</th><th class="num">Price Δ</th><th class="num">Profit/unit Δ</th></tr></thead><tbody>${brandRows}</tbody></table></div>` : ''}
+    ${brandRows ? `<div class="admin-table-wrap"><table class="admin-table cc2-pricing__table"><thead><tr><th>Brand ladder</th><th class="num">Products</th><th class="num">Rise</th><th class="num">Keep</th><th class="num">Net margin (table)</th><th class="num">Price Δ (table)</th><th class="num">Profit/unit Δ (table)</th></tr></thead><tbody>${brandRows}</tbody></table></div>` : ''}
     <p class="cc2-tiers__muted cc2-tiers__fineprint">Net margin = profit after GST and Stripe ${(STRIPE_RATE * 100).toFixed(2)}% as a share of ex-GST revenue. There is no sales-volume weighting anywhere in these figures. Generated ${esc(when(sim.generated_at))}.</p>
   </div>`;
 }
@@ -552,10 +562,9 @@ async function runSimulate() {
     brandSlug: brand ? brand.slug : undefined,
     brandsMeta: brandsMeta(),
   };
+  // ONE call. With no edit the body is the live ladder, so the answer IS the
+  // drift; with an edit the server's `baseline`/`edit_only` split it.
   const body = buildSimulateBody(_state.draft, _state.live, opts);
-  const baseBody = baselineSimulateBody(body, _state.live);
-  const baseKey = JSON.stringify(baseBody);
-  const dirty = !(check.errors || []).some((e) => e.reason === 'no_change');
 
   // API.request drops AbortSignal, so a slower earlier response is discarded
   // by sequence number instead of cancelled.
@@ -564,16 +573,9 @@ async function runSimulate() {
   _state.simError = null;
   renderMetrics(); paintBandStats();
   try {
-    const needBaseline = _state.baselineKey !== baseKey;
-    const [sim, baseline] = await Promise.all([
-      dirty ? AdminAPI.controlCenter.simulatePricing(body) : null,
-      needBaseline ? AdminAPI.controlCenter.simulatePricing(baseBody) : _state.baseline,
-    ]);
+    const sim = await AdminAPI.controlCenter.simulatePricing(body);
     if (!_host || seq !== _state.simSeq) return;
-    _state.baseline = baseline;
-    _state.baselineKey = baseKey;
-    // No edit: the baseline IS the answer, so the strip reads it as drift.
-    _state.sim = dirty ? sim : baseline;
+    _state.sim = sim;
   } catch (e) {
     if (!_host || seq !== _state.simSeq) return;
     _state.simError = errorMessage(e);
@@ -699,7 +701,6 @@ async function onClick(e) {
       break;
     case 'sample-all':
       _state.sampleLimit = FULL_PREVIEW_LIMIT;
-      _state.baselineKey = null; // the baseline carries preview_limit too
       runSimulate();
       break;
     case 'resimulate':
@@ -725,7 +726,7 @@ async function onClick(e) {
       retryReprice(btn);
       break;
     case 'poll-again':
-      if (_state.job) startPolling(_state.job.id, _state.job.packs);
+      if (_state.job) startPolling(_state.job.id, _state.job.packs, _state.job.proposalId);
       break;
     case 'dismiss-job':
       _state.job = null; renderStatus();
@@ -820,13 +821,6 @@ async function openReview(id) {
     const data = await AdminAPI.controlCenter.getTierProposal(id);
     if (!_host) return;
     _state.review = data;
-    // Drift baseline for the review impact: the live ladder, whole catalogue.
-    if (data && data.proposal && data.proposal.status === 'pending') {
-      try {
-        const base = await AdminAPI.controlCenter.simulatePricing(baselineSimulateBody({ scope: { include_overrides: false }, proposed_tiers: {}, preview_limit: 1 }, _state.live));
-        if (_host) _state.reviewBaseline = base;
-      } catch { _state.reviewBaseline = null; }
-    }
   } catch (err) {
     if (!_host) return;
     _state.reviewError = errorMessage(err);
@@ -864,7 +858,7 @@ function renderReview() {
     <h3 class="cc2-tiers__h3">What it changes</h3>
     ${diffTableHtml(diff)}
     <h3 class="cc2-tiers__h3">${pending ? 'Impact, measured now' : 'Impact, as stored on the proposal'}</h3>
-    ${impact ? metricsHtml(impact, pending ? _state.reviewBaseline : null, { scope: pending ? 'Re-measured on open because supplier costs move' : 'Snapshot' }) : '<p class="cc2-tiers__muted">No impact figures were returned for this proposal.</p>'}
+    ${impact ? metricsHtml(impact, { scope: pending ? 'Re-measured on open because supplier costs move' : 'Snapshot' }) : '<p class="cc2-tiers__muted">No impact figures were returned for this proposal.</p>'}
     ${pending ? `<div class="cc2-tiers__actions">
       <button class="admin-btn admin-btn--ghost" data-action="reject" ${owner ? '' : 'disabled'}>Reject</button>
       <button class="admin-btn admin-btn--primary" data-action="approve" ${approveDisabled ? 'disabled' : ''} ${d.stale ? 'title="Stale: the live ladder changed after this proposal was filed"' : ''}>${icon('check', 14, 14)} Approve and reprice…</button>
@@ -903,8 +897,9 @@ async function openApproveDialog() {
   }
   const impact = fresh.impact || {};
   const rat = ratchetSummary(impact);
-  const att = attribute(impact, _state.reviewBaseline);
+  const att = attribute(impact);
   const a = impact.aggregate || {};
+  const hasShelf = !!a.delivered;
   const m = Modal.open({
     title: 'Approve and reprice the catalogue?',
     body: `<p style="margin:0 0 8px">Approving makes this ladder <strong>live now</strong> and starts a <strong>full-catalogue reprice</strong>. Shoppers see new prices once the job completes, usually within a couple of minutes.</p>
@@ -913,8 +908,9 @@ async function openApproveDialog() {
         <li><strong>${int(impact.affected)}</strong> SKUs are priced by this table</li>
         <li><strong>${int(rat.willChange)}</strong> will change price${att.available && att.drift.will_change_skus ? `, including <strong>${int(att.drift.will_change_skus)}</strong> from cost drift that any reprice would apply` : ''}</li>
         <li><strong>${int(rat.blocked)}</strong> are priced lower by this table and will <strong>keep</strong> their current price</li>
-        <li>Net profit per unit Δ <strong>${signedMoney(a.net_profit_per_unit_delta)}</strong> (one unit of each SKU)</li>
-        <li>Below the 5% survival floor after: <strong>${int(a.below_survival_floor_after)}</strong></li>
+        ${att.available ? `<li>This edit alone: <strong>${int(att.edit.skus_priced_differently)}</strong> SKUs priced differently, <strong>${signedMoney(att.edit.net_profit_per_unit_delta_delivered)}</strong> net profit per unit at shelf prices</li>` : ''}
+        <li>Net profit per unit Δ <strong>${signedMoney(shelfFigure(a, 'net_profit_per_unit_delta').value)}</strong> ${hasShelf ? 'at shelf prices' : '<span class="cc2-tiers__warntext">at the table price (no shelf figure returned)</span>'} (one unit of each SKU)</li>
+        <li>Below the 5% survival floor after: <strong>${int(shelfFigure(a, 'below_survival_floor_after').value)}</strong></li>
         <li>Value packs and multipacks do <strong>not</strong> move. They need a manual re-anchor afterwards.</li>
       </ul>
       <div class="admin-form-group"><label for="cc2-approve-notes">Approval notes (optional)</label>
@@ -933,7 +929,7 @@ async function openApproveDialog() {
       const data = await AdminAPI.controlCenter.approveTierProposal(id, m.body.querySelector('#cc2-approve-notes').value.trim());
       if (!_host) return;
       m.close();
-      handleApproved(data);
+      handleApproved(data, id);
     } catch (err) {
       Toast.error(errorMessage(err));
       go.textContent = 'Approve and reprice';
@@ -943,20 +939,20 @@ async function openApproveDialog() {
   });
 }
 
-function handleApproved(data) {
+function handleApproved(data, proposalId) {
   const r = (data && data.reprice) || {};
   const packs = (data && data.packs) || null;
   if (r.status === 'queued' && r.job_id) {
     Toast.success('Approved. The ladder is live and the catalogue is repricing.');
-    startPolling(r.job_id, packs);
+    startPolling(r.job_id, packs, proposalId);
   } else if (r.status === 'enqueue_failed') {
     Toast.error('Approved, but the reprice did not start. Shelf prices have not moved.');
-    _state.job = { id: r.job_id || null, outcome: 'enqueue_failed', message: r.message, packs };
+    _state.job = { id: r.job_id || null, outcome: 'enqueue_failed', message: r.message, packs, proposalId };
   } else {
     // skipped (or a shape we do not know): say exactly what the server said.
     Toast.info(r.message || `Approved. Reprice status: ${r.status || 'not reported'}.`);
     _state.job = r.job_id ? { id: r.job_id, status: r.status, outcome: 'running', packs } : null;
-    if (r.job_id) startPolling(r.job_id, packs);
+    if (r.job_id) startPolling(r.job_id, packs, proposalId);
   }
   _state.view = 'edit';
   _state.review = null;
@@ -995,10 +991,13 @@ function openRejectDialog() {
 }
 
 // ── Reprice job polling ──────────────────────────────────────────────────────
-function startPolling(jobId, packs) {
+// `proposalId` rides along so a retry re-attaches the new job to the same
+// proposal (POST /reprice-jobs {proposal_id}).
+function startPolling(jobId, packs, proposalId) {
   clearTimeout(_pollTimer);
   const startedAt = Date.now();
-  _state.job = { id: jobId, status: 'queued', outcome: 'running', packs: packs || (_state.job && _state.job.packs) || null };
+  const prev = _state.job || {};
+  _state.job = { id: jobId, status: 'queued', outcome: 'running', packs: packs || prev.packs || null, proposalId: proposalId || prev.proposalId || null };
   renderStatus();
   const tick = async () => {
     if (!_host) return;
@@ -1025,9 +1024,10 @@ function startPolling(jobId, packs) {
 async function retryReprice(btn) {
   btn.disabled = true;
   try {
-    const d = await AdminAPI.controlCenter.retryReprice();
+    const job = _state.job || {};
+    const d = await AdminAPI.controlCenter.retryReprice(job.proposalId);
     if (!_host) return;
-    if (d.job_id) { Toast.success('Reprice started.'); startPolling(d.job_id, _state.job && _state.job.packs); }
+    if (d.job_id) { Toast.success('Reprice queued for the whole catalogue.'); startPolling(d.job_id, job.packs, job.proposalId); }
     else { Toast.info(d.message || 'Reprice requested. No job id came back, so progress cannot be tracked here.'); }
   } catch (err) {
     Toast.error(errorMessage(err));
@@ -1043,7 +1043,7 @@ async function resumeRunningJob() {
     if (!_host || !latest || !latest.reprice_job_id || _state.job) return;
     const job = await AdminAPI.controlCenter.getRepriceJob(latest.reprice_job_id);
     if (!_host || !job || job.missing) return;
-    if (job.status === 'pending' || job.status === 'running') startPolling(latest.reprice_job_id, null);
+    if (job.status === 'pending' || job.status === 'running') startPolling(latest.reprice_job_id, null, latest.id);
   } catch { /* history read failure is reported by the history panel itself */ }
 }
 
@@ -1099,7 +1099,6 @@ async function loadLive({ keepDraft = false } = {}) {
   _state.live = live;
   _state.loadError = null;
   if (!keepDraft || !_state.draft) _state.draft = draftFromLive(live);
-  _state.baselineKey = null;
   if (_state.history) loadHistory();
   // Contract §3.1: with a pending proposal the panel opens in review state.
   if (live.pending_proposal && _state.view === 'edit' && !_state.job && !_state.reviewedOnce) {

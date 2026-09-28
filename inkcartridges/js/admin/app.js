@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.25-codes-any-type';
+const APP_VERSION = '2026.09.28-backend-reply';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

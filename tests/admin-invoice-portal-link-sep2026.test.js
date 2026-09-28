@@ -11,8 +11,11 @@
  *     Portal column and an "unlinked" filter are buildable.
  *
  * Measured 2026-09-25: every list row carries both keys (null on all 21 today),
- * and the list IGNORES every portal param we tried — so the filter is ours, and
- * it must walk every page, not one.
+ * and the list IGNORED every portal param we tried — so the filter was ours,
+ * walking every page. The backend added `linked=true|false` on 2026-09-25
+ * (BF-070 g) and made the list `strictQuery`. Measured 2026-09-28: linked=true
+ * 0 + linked=false 21 = the whole list; `linked=maybe` and any unknown param
+ * are 400. So the filter is the SERVER's now, and paginates normally.
  *
  * What would be invisibly wrong without these:
  *   - `createInvoice` returned `data.invoice` alone, so a 201 with warnings
@@ -50,7 +53,7 @@ function extractFunction(src, name) {
 const load = (src, ...names) => new Function(`${names.map((n) => extractFunction(src, n)).join('\n')}; return { ${names.join(', ')} };`)();
 
 const { withInvoiceWarnings } = load(API, 'withInvoiceWarnings');
-const { portalLinkOf, matchesPortalFilter } = load(PAGE, 'portalLinkOf', 'matchesPortalFilter');
+const { portalLinkOf, linkedParam } = load(PAGE, 'portalLinkOf', 'linkedParam');
 
 test('a 201 with warnings[] carries them — as a NON-enumerable field', () => {
   const inv = withInvoiceWarnings({ ok: true, data: { invoice: { id: 'i1', invoice_number: 3290 },
@@ -96,25 +99,41 @@ test('portalLinkOf: absent, unlinked and linked are three different answers', ()
     { id: 'b1', name: 'BSW Architects' });
 });
 
-test('the Portal filter never claims an unknown row either way', () => {
-  const rows = [
-    { id: 1, business_account_id: null },
-    { id: 2, business_account_id: 'b1', business_account_name: 'A' },
-    { id: 3 },
-  ];
-  assert.deepEqual(rows.filter((r) => matchesPortalFilter(r, 'unlinked')).map((r) => r.id), [1]);
-  assert.deepEqual(rows.filter((r) => matchesPortalFilter(r, 'linked')).map((r) => r.id), [2]);
-  assert.deepEqual(rows.filter((r) => matchesPortalFilter(r, '')).map((r) => r.id), [1, 2, 3]);
+test('the Portal dropdown maps to linked=true|false, and "any" sends nothing', () => {
+  assert.equal(linkedParam('linked'), 'true');
+  assert.equal(linkedParam('unlinked'), 'false');
+  assert.equal(linkedParam(''), '');
+  assert.equal(linkedParam('bogus'), '', 'an unknown choice must never reach a strictQuery list');
 });
 
-test('the filter walks EVERY page and says when it could not', () => {
-  const scan = extractFunction(PAGE, 'loadPortalFiltered');
-  assert.match(scan, /for \(let page = 1; page <= PORTAL_SCAN_MAX_PAGES; page\+\+\)/);
-  assert.match(scan, /INCOMPLETE/, 'a capped or failed scan must say so');
-  assert.match(scan, /the server cannot filter by portal link/);
-  // It is never sent: the list ignores every portal param (measured), and an
-  // ignored param would look like a working filter.
+test('the SERVER filters by portal link; the client-side page walk is gone', () => {
+  const load = extractFunction(PAGE, 'loadData');
+  assert.match(load, /linked: linkedParam\(_portalFilter\)/);
+  assert.doesNotMatch(PAGE, /loadPortalFiltered|PORTAL_SCAN_|matchesPortalFilter|the server cannot filter by portal link/);
   const from = API.indexOf('async listInvoices(');
   const list = API.slice(from, API.indexOf('\n  },', from) + 4);
-  assert.doesNotMatch(list, /unlinked|business_account|portal/);
+  assert.match(list, /if \(filters\.linked === 'true' \|\| filters\.linked === 'false'\) params\.set\('linked', filters\.linked\);/);
+});
+
+test('strictQuery: a refused list is an ERROR on the page, never "no invoices"', () => {
+  const from = API.indexOf('async listInvoices(');
+  const list = API.slice(from, API.indexOf('\n  },', from) + 4);
+  assert.match(list, /if \(!resp \|\| resp\.ok === false\) throw invoiceError\(resp,/);
+  // Every param listInvoices can emit, against the allow-list measured 2026-09-28
+  // (page, limit, search, status, sort, order, linked all 200; `zz` is 400).
+  const sent = [...list.matchAll(/params\.set\('([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(sent)].sort(), ['limit', 'linked', 'order', 'page', 'search', 'sort', 'status']);
+  const load = extractFunction(PAGE, 'loadData');
+  assert.ok(load.indexOf('data === null') > -1 && load.indexOf('data === null') < load.indexOf('_table.setData(rows'),
+    'the failure branch runs before rows are painted');
+  assert.match(load, /NOT an empty list/);
+});
+
+test('every sortable invoice column is a sort the server accepts', () => {
+  // Measured 2026-09-28 under strictQuery: sort=invoice_number, issue_date and
+  // total all 200. A column added here needs a measurement first.
+  const cols = PAGE.slice(PAGE.indexOf('const COLUMNS = ['));
+  const keys = [...cols.slice(0, cols.indexOf('\n];')).matchAll(/\{ key: '([a-z_]+)'[^\n]*sortable: true/g)].map((m) => m[1]);
+  assert.ok(keys.length > 0);
+  for (const k of keys) assert.ok(['invoice_number', 'issue_date', 'total'].includes(k), `sort=${k} is unmeasured`);
 });

@@ -27,6 +27,8 @@ const STATUS_OPTIONS = [
   { key: 'pending',       label: 'Pending review' },
   { key: 'checked_clean', label: 'Checked clean'  },
   { key: 'replaced',      label: 'Replaced'       },
+  // In the list enum since 2026-09-25 (BF-070 d); 736 rows on 2026-09-28.
+  { key: 'watermark_hold', label: 'Watermark hold' },
 ];
 
 let _container = null;
@@ -45,6 +47,7 @@ let _state = {
   sort: 'name_asc',
 };
 let _brands = [];
+let _listFailed = false;
 let _products = [];
 let _stats = null;
 let _pagination = { total: 0, page: 1, limit: PAGE_SIZE };
@@ -179,7 +182,11 @@ function buildToolbar() {
   let brandOpts = '<option value="">All brands</option>';
   for (const b of _brands) {
     const name = typeof b === 'string' ? b : b.name || b.brand || String(b);
-    const val = (typeof b === 'object' && b.id) ? b.id : name;
+    // The SLUG. /image-audit/list and /stats resolve `brand` by slug only: a
+    // brand UUID (what this sent until 2026-09-28) and a brand NAME both answer
+    // 404 "Brand not found" (measured 2026-09-28) — so picking any brand
+    // emptied the grid, and the grid then said "All clean".
+    const val = (typeof b === 'object' && b.slug) ? b.slug : name;
     const sel = String(val) === String(_state.brand) ? ' selected' : '';
     brandOpts += `<option value="${esc(val)}"${sel}>${esc(name)}</option>`;
   }
@@ -386,6 +393,15 @@ function restoreButtonHtml(p, where) {
 function renderGrid() {
   const grid = document.getElementById('gia-grid');
   if (!grid) return;
+  if (_listFailed) {
+    grid.innerHTML = `
+      <div class="gia-empty" role="alert">
+        <div class="gia-empty__title">Could not load the image audit</div>
+        <div class="gia-empty__text">The list request failed or was refused, so nothing is known about these filters. This is not an empty result.</div>
+      </div>
+    `;
+    return;
+  }
   if (!_products.length) {
     grid.innerHTML = `
       <div class="gia-empty">
@@ -446,9 +462,9 @@ function buildFilters() {
     verdict: _state.verdict,
     // "Recoverable only" = archive present AND pending. `recoverable_only` alone
     // also returns the 730-row watermark hold (834 = 104 + 730, measured
-    // 2026-09-25), and `status=watermark_hold` is not a value the list accepts
-    // (400) — so pending is how the hold is excluded. An explicit status choice
-    // wins.
+    // 2026-09-25), so pending is how the hold is excluded. The hold itself is
+    // now a Status choice of its own (`status=watermark_hold`, accepted since
+    // 2026-09-25). An explicit status choice wins.
     recoverable_only: _state.recoverableOnly,
     status: _state.status || (_state.recoverableOnly ? 'pending' : ''),
     brand: _state.brand,
@@ -484,6 +500,8 @@ async function loadList() {
 
   _products = products;
   _pagination = pagination;
+  // null = the request failed or was refused. It is NOT "nothing to review".
+  _listFailed = data === null;
 
   // Drop selections that aren't on the visible page anymore (so the bulk bar count matches)
   const visibleIds = new Set(products.map(p => p.id));

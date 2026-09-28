@@ -1,7 +1,11 @@
 /**
  * Product Review Page — Review queue for newly imported products
  */
-import { AdminAPI, FilterState, icon, esc, updateReviewBadge } from '../app.js';
+// `updateReviewBadge` was removed from app.js on 2026-04-09 (0764fdb, with the
+// sidebar badge it fed) and this import kept it: the module failed to link, so
+// #product-review showed "Page Not Found" for 5½ months (found 2026-09-28,
+// ERR-291). The page's own count badge is the only badge left.
+import { AdminAPI, FilterState, icon, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -79,7 +83,11 @@ async function loadPage() {
   const brands = await AdminAPI.getBrands();
   if (!_container) return; // destroyed during await
   if (brands && Array.isArray(brands)) {
-    _brands = brands.map(b => typeof b === 'string' ? b : b.name || b.brand || String(b));
+    // The filter sends the SLUG: /api/admin/products takes one slug or id,
+    // and a brand NAME ("HP") is 400 UNKNOWN_BRAND since 2026-09-25 (BF-070 c).
+    _brands = brands
+      .filter(b => b && typeof b === 'object' && b.slug)
+      .map(b => ({ slug: b.slug, name: b.name || b.slug }));
   }
 
   let html = `<div class="admin-page-header">
@@ -90,7 +98,7 @@ async function loadPage() {
     <div style="display:flex;gap:8px;align-items:center">
       <select class="admin-select admin-select--sm" id="review-brand-filter" style="min-width:140px">
         <option value="">All brands</option>
-        ${_brands.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}
+        ${_brands.map(b => `<option value="${esc(b.slug)}">${esc(b.name)}</option>`).join('')}
       </select>
     </div>
   </div>`;
@@ -138,12 +146,19 @@ async function fetchAndRender() {
 
   const data = await AdminAPI.getUnreviewedProducts(filters, _page, 200);
   if (!_table) return; // destroyed during await
+  if (data === null) {
+    // A failed read is NOT an empty queue — never say "All products reviewed".
+    _table.config.emptyMessage = 'Could not load the review queue. The count is unknown, not zero.';
+    updateCountBadge('?');
+    _table.setData([], { total: 0, page: _page, limit: 200 });
+    return;
+  }
+  _table.config.emptyMessage = 'All products reviewed';
   const products = data?.products || (Array.isArray(data) ? data : []);
   const pagination = data?.pagination || { total: products.length, page: _page, limit: 200 };
 
   _totalCount = pagination.total || 0;
   updateCountBadge(_totalCount);
-  updateReviewBadge(_totalCount);
 
   _table.setData(products, pagination);
   _table.setSort(_sort, _sortDir);
@@ -176,7 +191,6 @@ async function acceptProduct(product, rowEl) {
   // Optimistic count update
   _totalCount = Math.max(0, _totalCount - 1);
   updateCountBadge(_totalCount);
-  updateReviewBadge(_totalCount);
 
   try {
     await AdminAPI.reviewProduct(product.id, true);
@@ -186,7 +200,6 @@ async function acceptProduct(product, rowEl) {
     if (rowEl) rowEl.classList.remove('admin-row-exit');
     _totalCount += 1;
     updateCountBadge(_totalCount);
-    updateReviewBadge(_totalCount);
     return;
   }
 

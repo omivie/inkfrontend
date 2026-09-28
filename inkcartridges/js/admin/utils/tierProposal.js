@@ -11,25 +11,33 @@
  * This module only shapes requests, validates them before they leave, and
  * reads the simulate response honestly.
  *
- * Two things measured on live 2026-09-23 that the contract does not say, and
- * that this module exists to handle:
+ * Measured on live 2026-09-23, reported as BF-068, and answered by the
+ * backend on 2026-09-25 (backend-docs/inbox/fe-replies-round-backend-response-sep2026.md §5).
+ * Re-measured 2026-09-28 before this module was rebuilt on the answer:
  *
- *  1. DRIFT. Simulating the live ladder with NO change (compatible) reported
- *     51 increases, 141 decreases and a net-profit-per-unit delta of −524.67.
- *     So `aggregate` is not "what my edit does"; it is "what a reprice would do
- *     with this table", and approving any edit applies the drift too.
- *     `attribute()` subtracts a no-change baseline so the panel can say which
- *     part is the edit and which part a reprice would apply anyway.
+ *  1. DRIFT. A reprice applies supplier-cost drift as well as the edit, so
+ *     `aggregate` is "what a reprice would do with this table", not "what my
+ *     edit does". Every impact now carries `baseline` (the same scan at the
+ *     live ladder + offset) and `edit_only` (the proposal net of the drift),
+ *     computed server-side. `attribute()` reads those; the second no-change
+ *     simulate the panel used to run is gone.
  *
- *  2. THE RATCHET IS NOT APPLIED TO THE AGGREGATE. A blocked row (C12XBK)
- *     shows new_retail 62.49 < current_retail 68.79 with
- *     blocked_by_no_decrease:true, and total_skus_with_decrease == blocked_skus.
- *     The *_after figures therefore include price cuts that will not happen.
- *     `rowOutcome()` renders those rows as "keeps its price", never as a drop.
+ *  2. THE RATCHET. The plain `*_after` fields still price ratchet-blocked
+ *     rows at the lower TABLE price. `aggregate.delivered` holds their twins
+ *     with the ratchet applied — the SHELF. The panel leads with delivered and
+ *     shows the table figure as secondary. `rowOutcome()` still renders a
+ *     blocked row as "keeps its price", never as a drop.
  *
- * And one gap: simulate answers 200 with "no change" for a band key that does
- * not exist ("<=100") and for a brand id it cannot resolve. PUT refuses both.
- * A typo would preview as "no effect", so everything is validated here first.
+ *  Snapshots stored before 2026-09-25 carry neither block. They are read as
+ *  "not split / table price only" and SAID so, never back-filled with zero.
+ *
+ *  3. Simulate now refuses what PUT refuses (UNKNOWN_TIER_BAND,
+ *     INVALID_BAND_LADDER, UNKNOWN_BRAND; brands keyed by id). The local
+ *     checks stay because they list EVERY problem at once and run before a
+ *     request is spent.
+ *
+ *  4. An omitted `global_offset` now means "the offset in force", not 0 —
+ *     so buildSimulateBody() always sends the draft's offset, 0 included.
  *
  * Dual export (ESM for the browser, loaded by `import()` in node tests), same
  * as pricingCalculator.js. No build step.
@@ -286,82 +294,46 @@ function buildSimulateBody(draft, live, opts = {}) {
   };
   if (opts.source) body.scope.source = opts.source;
   if (opts.brandSlug) body.scope.brand_slug = opts.brandSlug;
-  // Always pass the offset in force for the draft: an offset-only proposal
-  // simulated without it reports "no change" for a change that moves every
-  // price (§3.2).
-  const offset = draft.offset != null ? Number(draft.offset) : Number((live && live.global_offset) || 0);
-  if (offset) body.global_offset = offset;
-  return body;
-}
-
-// The no-change twin of a simulate body: same scope, same live offset, empty
-// table. Its figures are the drift a reprice would apply with no edit at all.
-function baselineSimulateBody(simBody, live) {
-  const body = { ...simBody, proposed_tiers: {} };
-  const liveOffset = Number((live && live.global_offset) || 0);
-  if (liveOffset) body.global_offset = liveOffset; else delete body.global_offset;
+  // ALWAYS send the draft's offset, 0 included. Since 2026-09-25 an omitted
+  // `global_offset` means "the offset in force", so the old `if (offset)`
+  // would have previewed a proposed 0 at the live offset — on a catalogue at
+  // +0.02, a store-wide cut would have previewed as "no change".
+  body.global_offset = draft.offset != null ? Number(draft.offset) : Number((live && live.global_offset) || 0);
   return body;
 }
 
 // ── Reading the simulate response honestly ──────────────────────────────────
 
-const AGG_DELTA_FIELDS = [
-  'total_skus_with_increase',
-  'total_skus_with_decrease',
-  'net_profit_per_unit_after',
-  'catalogue_value_after',
-  'avg_net_margin_after',
-  'below_survival_floor_after',
-];
-
-// Split the proposal's figures into "caused by this edit" and "a reprice would
-// do this anyway". Both simulations share the before-state, so the difference
-// of their after-states is exactly the edit's contribution.
-function attribute(sim, baseline) {
-  const a = (sim && sim.aggregate) || {};
-  const b = (baseline && baseline.aggregate) || null;
-  if (!b) return { available: false };
-  const edit = {};
-  for (const f of AGG_DELTA_FIELDS) {
-    if (a[f] == null || b[f] == null) { edit[f] = null; continue; }
-    const d = Number(a[f]) - Number(b[f]);
-    edit[f] = Number.isInteger(a[f]) && Number.isInteger(b[f]) ? d : round2(d);
-  }
-  const ratchetA = (sim && sim.no_decrease_ratchet) || {};
-  const ratchetB = (baseline && baseline.no_decrease_ratchet) || {};
+// Split the figures into "this edit" and "drift a reprice applies anyway",
+// from the server's own `edit_only` and `baseline` blocks. A snapshot stored
+// before those blocks existed returns { available:false } — never a zero.
+function attribute(sim) {
+  const e = sim && sim.edit_only;
+  const b = sim && sim.baseline;
+  if (!e || !b) return { available: false };
   return {
     available: true,
-    edit,
-    edit_will_change: numDiff(ratchetA.will_change_skus, ratchetB.will_change_skus),
-    edit_blocked: numDiff(ratchetA.blocked_skus, ratchetB.blocked_skus),
+    edit: {
+      skus_priced_differently: e.skus_priced_differently ?? null,
+      net_profit_per_unit_delta_delivered: e.net_profit_per_unit_delta_delivered ?? null,
+    },
     drift: {
-      will_change_skus: ratchetB.will_change_skus ?? null,
-      blocked_skus: ratchetB.blocked_skus ?? null,
-      net_profit_per_unit_delta: b.net_profit_per_unit_delta ?? null,
+      will_change_skus: b.will_change_skus ?? null,
+      blocked_skus: b.blocked_skus ?? null,
+      net_profit_per_unit_delta_delivered: b.net_profit_per_unit_delta_delivered ?? null,
+      global_offset: b.global_offset ?? null,
     },
   };
 }
 
-function numDiff(x, y) {
-  if (x == null || y == null) return null;
-  return Number(x) - Number(y);
-}
-
-// Per-band attribution: join proposal by_tier to baseline by_tier on
-// (source, tier). A moved boundary renames bands, so an unmatched row simply
-// has no baseline (null), never a zero.
-function attributeBands(sim, baseline) {
-  const idx = new Map();
-  for (const r of (baseline && baseline.by_tier) || []) idx.set(`${r.source}|${r.tier}`, r);
-  return ((sim && sim.by_tier) || []).map((r) => {
-    const b = idx.get(`${r.source}|${r.tier}`) || null;
-    return {
-      ...r,
-      baseline_products_increasing: b ? b.products_increasing : null,
-      edit_products_increasing: b ? r.products_increasing - b.products_increasing : null,
-      edit_net_profit_per_unit_delta: b ? round2(r.net_profit_per_unit_delta - b.net_profit_per_unit_delta) : null,
-    };
-  });
+// The shelf figure for an aggregate field: `aggregate.delivered[field]` (the
+// ratchet applied) when the server sent it, else the table figure FLAGGED as
+// such. `delivered:false` is what the panel prints as "table price".
+function shelfFigure(aggregate, field) {
+  const d = aggregate && aggregate.delivered;
+  if (d && d[field] != null) return { value: d[field], delivered: true };
+  const v = aggregate ? aggregate[field] : undefined;
+  return { value: v == null ? null : v, delivered: false };
 }
 
 // §4.2 warning. Null when nothing is blocked.
@@ -480,8 +452,8 @@ const TierProposal = {
   SIM_DEBOUNCE_MS, POLL_MS, POLL_MAX_MS, EDIT_PREVIEW_LIMIT, FULL_PREVIEW_LIMIT,
   sameMult, deriveBandKey, ladderKeys, bandsFromServer,
   validateBandLadder, validateOffset, validateEdits,
-  buildProposeBody, buildSimulateBody, baselineSimulateBody,
-  attribute, attributeBands, ratchetSummary, rowOutcome, diffLadders,
+  buildProposeBody, buildSimulateBody,
+  attribute, shelfFigure, ratchetSummary, rowOutcome, diffLadders,
   errorMessage, pollDecision, ERROR_COPY,
 };
 
@@ -490,8 +462,8 @@ export {
   SIM_DEBOUNCE_MS, POLL_MS, POLL_MAX_MS, EDIT_PREVIEW_LIMIT, FULL_PREVIEW_LIMIT,
   sameMult, deriveBandKey, ladderKeys, bandsFromServer,
   validateBandLadder, validateOffset, validateEdits,
-  buildProposeBody, buildSimulateBody, baselineSimulateBody,
-  attribute, attributeBands, ratchetSummary, rowOutcome, diffLadders,
+  buildProposeBody, buildSimulateBody,
+  attribute, shelfFigure, ratchetSummary, rowOutcome, diffLadders,
   errorMessage, pollDecision, ERROR_COPY, TierProposal,
 };
 export default TierProposal;

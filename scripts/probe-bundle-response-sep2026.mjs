@@ -17,16 +17,30 @@
  *       an EMPTY TABLE. Four column sorts did exactly that on 2026-09-25. The
  *       sort list is read out of the shipped products.js (backendCanSort), not
  *       retyped here, so the probe measures what the page actually sends.
- *       `brand` takes a SLUG and silently IGNORES a UUID — this checks both.
+ *       `brand` takes a SLUG or a brand ID since 2026-09-25 (BF-070 c); a
+ *       name or a comma list is 400 UNKNOWN_BRAND. Checked with the SAME brand
+ *       both ways (counts must match) plus both refusals. The server product
+ *       export is RETIRED (type=products → 400); the page builds CSV itself.
  *   §3  the image audit's split, and that "Recoverable only" + pending is the
  *       true recoverable set (recoverable_only alone includes the 730-row
- *       watermark hold).
+ *       watermark hold). `status=watermark_hold` is accepted (BF-070 d). The
+ *       image-audit `brand` resolves a SLUG only — a UUID is 404, which is why
+ *       the page's dropdown sends slugs.
  *   §4  the order detail carries the delete contract + invoice_sent the modal
- *       now reads FIRST; invoice rows carry the portal link.
- *   §5  public: past_the_end, the series shard, the homepage count <= the
- *       claimable count the backend publishes for exactly that assertion.
- *   §6  BF-027: how many products the FE yield detector still RAISES over the
- *       backend's tier. 3 on 2026-09-25; utils.js keeps max() until it is 0.
+ *       now reads FIRST; invoice rows carry the portal link. The invoice list
+ *       is strictQuery (negative control), `linked=true|false` partitions it,
+ *       and every sort invoices.js offers is accepted (BF-070 g). Import status
+ *       returns ≤5 runs per feed with `dry_run` (BF-070 h); failures PRINTED.
+ *   §5  public: past_the_end (with a real total on /api/ribbons, BF-070 a), the
+ *       series shard, the homepage count <= the claimable count the backend
+ *       publishes for exactly that assertion.
+ *   §6  BF-027 tripwire: where the FE yield DETECTOR (run with the backend
+ *       field stripped) reads a higher tier than the backend sends. 3 on
+ *       2026-09-25, 0 on 2026-09-28 net of G288BXLCMY — which the backend keeps
+ *       STD on purpose (a 288XL black + STANDARD C/M/Y, backend §2 e). utils.js
+ *       dropped its max() merge at that 0 and now trusts the backend, so a new
+ *       disagreement here is a row the storefront would MERGE into the wrong
+ *       yield row. It is a failure, not a note.
  *
  * ── READ-ONLY. EVERY REQUEST IS A GET (plus the admin sign-in). ─────────────
  * There is no --write, no --record and no fixture. Deliberately NOT exercised:
@@ -72,14 +86,33 @@ const skip = (n, why) => { notes.push(`SKIPPED: ${n} — ${why}`); console.log(`
 const check = (cond, n, d) => (cond ? ok(n) : bad(n, d));
 const section = (t) => console.log(`\n\x1b[1m${t}\x1b[0m`);
 
-/** GET only. Origin set like the browser; no Content-Type on a bodyless GET (ERR-282). */
+/**
+ * GET only. Origin set like the browser; no Content-Type on a bodyless GET (ERR-282).
+ *
+ * A 429 is WAITED OUT (retry-after, up to 3 times), never returned as data.
+ * The origin allows 100 requests / 60 s per IP across every endpoint, and this
+ * probe makes ~60 before §6 pages the whole catalogue. On 2026-09-28 a run hit
+ * the limit: §6 stopped paging at 1,799 of 4,114 and still passed, and
+ * /api/site/trust read as "catalog_claimable_count absent". Both were 429s.
+ * ***A probe that reads a 429 as missing data measures its own request rate***
+ * (ERR-243, ERR-291). A 429 that outlasts the retries is returned AS a 429, and
+ * every caller below checks the status before it reads a field.
+ */
 async function get(url, headers = {}) {
-  const res = await fetch(url, { headers: { Origin: SITE, ...headers } });
-  const text = await res.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch { /* non-JSON */ }
-  await sleep(DELAY_MS);
-  return { status: res.status, json, text, headers: res.headers };
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers: { Origin: SITE, ...headers } });
+    const text = await res.text();
+    if (res.status === 429 && attempt < 3) {
+      const wait = Math.min(65, Number(res.headers.get('retry-after')) || 20);
+      console.log(`  \x1b[90m… 429 on ${url.replace(API, '')} — waiting ${wait}s (rate limit, not data)\x1b[0m`);
+      await sleep(wait * 1000);
+      continue;
+    }
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* non-JSON */ }
+    await sleep(DELAY_MS);
+    return { status: res.status, json, text, headers: res.headers };
+  }
 }
 
 function readEnv() {
@@ -189,7 +222,26 @@ if (H) {
     } else bad('pagination totals', 'data.pagination.total missing — BF-045 regressed, the footer prints "of many" again');
   }
   {
-    // brand takes a SLUG. A UUID is IGNORED, not refused.
+    // brand takes ONE slug or ONE id (BF-070 c). The same brand both ways must
+    // answer the same total; a name and a comma list are refused, not ignored.
+    const brands = await get(`${API}/api/admin/brands`, H);
+    const list = brands.json?.data?.brands || brands.json?.data || [];
+    const hpRow = (Array.isArray(list) ? list : []).find((b) => b && b.slug === 'hp');
+    const unf = (await P('')).json?.data?.pagination?.total;
+    const bySlug = (await P('brand=hp')).json?.data?.pagination?.total;
+    const byId = hpRow ? (await P(`brand=${hpRow.id}`)).json?.data?.pagination?.total : undefined;
+    if (!hpRow) bad('brand id', '/api/admin/brands has no hp row — cannot test brand=<id>');
+    else check(Number.isFinite(bySlug) && bySlug === byId && bySlug < unf,
+      `brand=<hp id> filters exactly like brand=hp (${byId} = ${bySlug} of ${unf}) — products.js sends the id`,
+      `id ${byId} vs slug ${bySlug} vs unfiltered ${unf} — a UUID is being ignored again (the pre-2026-09-25 bug)`);
+    for (const v of ['HP', 'hp,canon']) {
+      const r = await P(`brand=${encodeURIComponent(v)}`);
+      const code = r.json?.error?.code || r.json?.code;
+      check(r.status === 400 && code === 'UNKNOWN_BRAND', `brand=${v} is 400 UNKNOWN_BRAND, not the whole catalogue`,
+        `HTTP ${r.status} ${code || ''} — a refused brand must never answer every row`);
+    }
+    const rv = await P('is_reviewed=false&brand=hp');
+    check(rv.status === 200, 'Product Review sends is_reviewed=false + a brand slug — accepted', `HTTP ${rv.status}`);
     const hp = await P('brand=hp&limit=50');
     const rows = hp.json?.data?.products || [];
     const off = rows.filter((r) => String(r.brand_name || r.brand || '').toLowerCase() !== 'hp');
@@ -201,15 +253,11 @@ if (H) {
     }
   }
   {
-    // The server export ignored every filter on 2026-09-25, which is why the
-    // page builds CSV itself now. Reported as a note so the day it is fixed we know.
-    const g = await get(`${API}/api/admin/export/products?format=csv&source=genuine`, H);
-    const lines = g.text.split('\n').slice(1).filter(Boolean);
-    const compat = lines.filter((l) => /^C[A-Z0-9]/.test(l)).length;
-    if (g.status === 200 && compat) soft('the server product export still ignores source=genuine',
-      `${compat} of ${lines.length} rows look compatible — the page's client-side CSV stays (BF-070)`);
-    else if (g.status === 200) soft('the server export may honour filters now', 're-measure before pointing the page back at it');
-    else soft(`server export → HTTP ${g.status}`, 'the page does not use it');
+    // RETIRED 2026-09-25 (BF-070 b): type=products is a 400. The page's
+    // client-side CSV is the only product export. A 200 here means it came back.
+    const g = await get(`${API}/api/admin/export/products?format=csv`, H);
+    check(g.status === 400, '/api/admin/export/products is retired (400)',
+      `HTTP ${g.status} — the route is back; re-measure its filters before anything points at it`);
   }
 
   section('§3 image audit — the split, and "Recoverable only"');
@@ -225,8 +273,14 @@ if (H) {
       check(t === b.recoverable, `recoverable_only + status=pending = the true recoverable set (${t})`,
         `list says ${t}, stats says ${b.recoverable} — "Recoverable only" would include or drop rows`);
       const hold = await get(`${API}/api/admin/image-audit/list?page=1&limit=1&status=watermark_hold`, H);
-      if (hold.status === 400) ok('status=watermark_hold is still refused', 'so the page excludes the hold via status=pending');
-      else soft(`status=watermark_hold → HTTP ${hold.status}`, 'the list may filter the hold directly now');
+      const ht = hold.json?.meta?.total ?? hold.json?.data?.pagination?.total;
+      check(hold.status === 200 && Number.isFinite(ht) && ht > 0, `status=watermark_hold is accepted (${ht} rows) — the Status dropdown offers it`,
+        `HTTP ${hold.status} — the page's "Watermark hold" choice would show an error`);
+      const bySlug = await get(`${API}/api/admin/image-audit/list?page=1&limit=1&brand=hp`, H);
+      const byId = await get(`${API}/api/admin/image-audit/list?page=1&limit=1&brand=ab434033-68c9-4c6a-94d7-3525a42074c5`, H);
+      check(bySlug.status === 200, 'image-audit brand=hp (a slug) filters', `HTTP ${bySlug.status} — the page's brand dropdown sends slugs`);
+      if (byId.status === 200) soft('image-audit brand=<uuid> is accepted now', 'the dropdown could send ids like /api/admin/products; slugs still work');
+      else ok(`image-audit brand=<uuid> → ${byId.status}`, 'so the dropdown sends the slug (it sent the UUID until 2026-09-28 and the grid read "All clean")');
     }
   }
 
@@ -247,6 +301,37 @@ if (H) {
     const rows = inv.json?.data?.invoices || [];
     check(rows.length && rows.every((r) => 'business_account_id' in r && 'business_account_name' in r),
       `invoice rows carry the portal link (${rows.length} checked)`, 'absent — the Portal column renders "—" (unknown)');
+    // strictQuery since 2026-09-25 — the negative control first, or every
+    // "accepted" below proves nothing.
+    const I = (qs) => get(`${API}/api/admin/invoices?page=1&limit=1${qs ? `&${qs}` : ''}`, H);
+    const itot = (r) => r.json?.data?.pagination?.total;
+    const neg = await I('zz_probe_unknown=1');
+    check(neg.status === 400, 'negative control: /api/admin/invoices refuses an unknown param (strictQuery)',
+      `HTTP ${neg.status} — the accept checks below would be vacuous`);
+    const [all, yes, no] = [await I(''), await I('linked=true'), await I('linked=false')];
+    check([all, yes, no].every((r) => Number.isFinite(itot(r))) && itot(yes) + itot(no) === itot(all),
+      `linked=true (${itot(yes)}) + linked=false (${itot(no)}) = all (${itot(all)}) — the Portal filter is the server's`,
+      `true ${itot(yes)} + false ${itot(no)} ≠ ${itot(all)} — a row is in neither or both`);
+    const invSrc = fs.readFileSync(path.join(ROOT, 'inkcartridges/js/admin/pages/invoices.js'), 'utf8');
+    const cols = invSrc.slice(invSrc.indexOf('const COLUMNS = ['));
+    const sortKeys = [...cols.slice(0, cols.indexOf('\n];')).matchAll(/\{ key: '([a-z_]+)'[^\n]*sortable: true/g)].map((x) => x[1]);
+    if (!sortKeys.length) bad('read invoices.js sortable columns', 'none parsed — the probe would test a replica');
+    for (const k of sortKeys) {
+      const r = await I(`sort=${k}&order=desc`);
+      check(r.status === 200, `invoice sort=${k} accepted`, `HTTP ${r.status} — clicking that column header would blank the list`);
+    }
+    const is = await get(`${API}/api/admin/supplier/import-status`, H);
+    for (const feed of ['genuine', 'compatible']) {
+      const f = is.json?.data?.[feed];
+      const runs = f?.recent_runs;
+      if (!f || !Array.isArray(runs)) { bad(`import-status ${feed}`, `HTTP ${is.status}, no recent_runs — Site Health → Infra shows "No import run on record"`); continue; }
+      const failed = runs.filter((r) => r.status === 'failed');
+      check(runs.length <= 5 && runs.every((r) => 'dry_run' in r) && f.latest,
+        `import-status ${feed}: ${runs.length} runs, latest ${f.latest?.status}${f.latest?.dry_run ? ' (DRY RUN)' : ''}`,
+        'shape changed — utils/importStatus.js reads latest + recent_runs[].dry_run');
+      if (failed.length) soft(`${feed} feed: ${failed.length} of the last ${runs.length} runs FAILED`,
+        failed.map((r) => (r.started_at || '').slice(0, 10)).join(', ') + ' — Site Health → Infra flags it; a supplier/backend question, not a FE bug');
+    }
     const m = await get(`${API}/api/admin/supplier-offers/mappings?page=1&limit=1`, H);
     check(m.status === 200 && Array.isArray(m.json?.data?.mappings), 'GET /supplier-offers/mappings answers a list',
       `HTTP ${m.status} — the Manual mappings panel shows a failed read`);
@@ -264,19 +349,20 @@ section('§5 public surfaces');
     `/api/products past the end says so, with the real total (${p.json?.meta?.total})`,
     `meta = ${JSON.stringify(p.json?.meta)}`);
   const r = await get(`${API}/api/ribbons?limit=200&page=2`);
-  check(r.json?.meta?.past_the_end === true, '/api/ribbons past the end says so', `meta = ${JSON.stringify(r.json?.meta)}`);
-  if (r.json?.meta && r.json.meta.total === null) {
-    soft('/api/ribbons past the end reports total: null', 'the total is known (109 on page 2) — asked in BF-070; ribbons-page.js does not read it');
-  }
+  check(r.json?.meta?.past_the_end === true && Number.isFinite(r.json?.meta?.total),
+    `/api/ribbons past the end says so, with the real total (${r.json?.meta?.total}) — BF-070 a`,
+    `meta = ${JSON.stringify(r.json?.meta)} — total: null came back`);
   const t = await get(`${API}/api/ribbons?type=bogus_zzz`);
   check(t.status === 400, '/api/ribbons refuses an unknown type (it used to return all 109)', `HTTP ${t.status}`);
   const slug = await get(`${API}/api/products/by-slug/zzz-no-such-slug-probe`);
   check(slug.status === 404, 'by-slug 404s an impossible slug (it 500\'d for every slug)', `HTTP ${slug.status}`);
   const trust = await get(`${API}/api/site/trust`);
-  const claimable = trust.json?.data?.stats?.catalog_claimable_count;
+  const claimable = trust.status === 200 ? trust.json?.data?.stats?.catalog_claimable_count : undefined;
+  if (trust.status !== 200) bad('/api/site/trust', `HTTP ${trust.status} — could not read the claimable count (not "absent")`);
   const home = await get(`${SITE}/`, { 'User-Agent': GOOGLEBOT });
   const claims = [...home.text.matchAll(/(\d[\d,]*)\+ ink cartridges/gi)].map((m) => Number(m[1].replace(/,/g, '')));
-  if (!Number.isFinite(claimable)) bad('catalog_claimable_count', 'absent from /api/site/trust');
+  if (trust.status !== 200) { /* reported above */ }
+  else if (!Number.isFinite(claimable)) bad('catalog_claimable_count', 'absent from /api/site/trust');
   else if (!claims.length) soft('homepage count claim', 'no "N+ ink cartridges" phrase found in the prerender — nothing to compare');
   else check(claims.every((c) => c <= claimable), `homepage claims ${Math.max(...claims)}+ ≤ ${claimable} claimable`,
     `the homepage claims ${Math.max(...claims)}+ but only ${claimable} are claimable — an over-claim`);
@@ -291,16 +377,43 @@ section('§6 BF-027 — where the FE yield detector still RAISES the backend tie
   const { ProductSort } = require(path.join(ROOT, 'inkcartridges/js/utils.js'));
   const tierOf = (yt) => ({ XXL: 2, XL: 1, STD: 0 })[String(yt || '').toUpperCase()] ?? -1;
   const all = [];
+  let expected = null;
+  let readError = null;
   for (let page = 1; page <= 30; page++) {
     const r = await get(`${API}/api/products?limit=200&page=${page}`);
+    if (r.status !== 200) { readError = `page ${page} → HTTP ${r.status}`; break; }
     all.push(...(r.json?.data?.products || []));
+    if (Number.isFinite(r.json?.meta?.total)) expected = r.json.meta.total;
     if (!r.json?.meta?.has_next) break;
   }
+  // A partial read proves nothing about the rows it did not read.
+  // BF-079 (measured 2026-09-28): with limit ≥ 100 two value packs, G252VPVP and
+  // G728300MLCMY, are dropped from their page AFTER the slice (pages 17 and 26 at
+  // limit=100 return 99 rows) while `meta.total` still counts them; at limit=10
+  // both are present. So a full read at limit=200 is 2 short of `total` until
+  // the backend fixes it. That is reported as its OWN failure, never absorbed.
+  if (readError || expected == null) {
+    bad('§6 read the whole catalogue', `${all.length} of ${expected ?? '?'} products${readError ? ` (${readError})` : ''} — the comparison below is over a partial set`);
+  } else if (all.length !== expected) {
+    bad('/api/products pages add up to meta.total (BF-079)', `${all.length} rows read, total says ${expected} — rows are dropped after the page slice (2026-09-28: G252VPVP, G728300MLCMY at limit ≥ 100)`);
+  }
+  // G288BXLCMY: a 288XL black + STANDARD C/M/Y mixed pack. The backend keeps
+  // it STD on purpose (2026-09-25 §2 e) — our detector reads "BXL" and raises
+  // it. That is a disagreement about the data, not a gap in their rules.
+  const EXEMPT = new Set(['G288BXLCMY']);
+  // The DETECTOR's reading, with the backend field stripped — yieldTier() itself
+  // returns the backend tier now, so asking it would compare a value to itself
+  // and could never fail (ERR-258).
+  const detectorTier = (p) => ProductSort.yieldTier({ ...p, yield_tier: undefined });
   const absent = all.filter((p) => tierOf(p.yield_tier) < 0).length;
-  const raised = all.filter((p) => tierOf(p.yield_tier) >= 0 && ProductSort.yieldTier(p) > tierOf(p.yield_tier));
+  const higher = all.filter((p) => tierOf(p.yield_tier) >= 0 && detectorTier(p) > tierOf(p.yield_tier));
+  const raised = higher.filter((p) => !EXEMPT.has(p.sku));
+  const exempt = higher.filter((p) => EXEMPT.has(p.sku));
+  if (!all.length) bad('catalogue read', '0 products — §6 measured nothing');
   if (absent) soft(`${absent} products carry no yield_tier`, 'the detector stands alone for those');
-  if (!raised.length) soft(`max() is INERT over ${all.length} products`, 'utils.js yieldTier can return the backend tier alone now');
-  else ok(`max() still raises ${raised.length} of ${all.length}`, raised.map((p) => `${p.sku} (backend ${p.yield_tier})`).join(', '));
+  if (exempt.length) ok(`exempt: ${exempt.map((p) => p.sku).join(', ')} — detector says higher, backend keeps STD on purpose (mixed-capacity pack)`);
+  check(all.length && !raised.length, `backend yield_tier ≥ the detector on all ${all.length} products (net of the exemption)`,
+    `${raised.length} rows where the name says a higher yield than the backend sends: ${raised.map((p) => `${p.sku} (backend ${p.yield_tier})`).join(', ')} — utils.js trusts the backend, so these merge into the wrong yield row. BF-027 regression? Report it; do not re-add max().`);
 }
 
 // ── Summary ────────────────────────────────────────────────────────────────

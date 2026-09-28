@@ -107,7 +107,6 @@ async function withState(overrides) {
   const src = [
     extractFunction(PRODUCTS, 'backendProductFilters'),
     extractFunction(PRODUCTS, 'backendCanSort'),
-    extractFunction(PRODUCTS, 'backendBrandSlug'),
     extractFunction(PRODUCTS, 'filtersLostToBackend'),
     extractFunction(PRODUCTS, 'paginationFrom'),
   ].join('\n\n');
@@ -232,13 +231,22 @@ test('"All statuses" asks for is_active=all — absence means ACTIVE ONLY', asyn
   assert.equal((await withState({ _activeFilter: 'false' })).backendProductFilters().active, 'false');
 });
 
-test('brand is sent as the SLUG — a UUID is silently IGNORED by the backend', async () => {
-  // brand=<hp uuid> answered 4,069 rows across every brand (measured
-  // 2026-09-25); brand=hp answered 857 HP rows.
+test('brand is sent as the dropdown UUID — the backend takes a slug OR an id since 2026-09-25', async () => {
+  // Measured 2026-09-28 (backend a1c9c67): brand=hp and brand=<hp uuid> both
+  // answered 870 of 4,115; brand=HP (a NAME) and brand=hp,canon are
+  // 400 UNKNOWN_BRAND. Until 2026-09-25 a UUID was silently IGNORED, which is
+  // what the deleted backendBrandSlug() mapping worked around.
   const f = (await withState({ _brandFilter: 'uuid-hp' })).backendProductFilters();
-  assert.equal(f.brand, 'hp');
-  // A value that is not a known id passes through — it may already be a slug.
-  assert.equal((await withState({ _brandFilter: 'canon' })).backendProductFilters().brand, 'canon');
+  assert.equal(f.brand, 'uuid-hp');
+  assert.doesNotMatch(PRODUCTS, /backendBrandSlug/, 'the UUID→slug mapping is gone');
+});
+
+test('the export fan-out sends one brand ID per pass, and refuses an unknown name BY NAME', () => {
+  const fn = extractFunction(PRODUCTS, 'fetchFilteredProductsForExport');
+  assert.match(fn, /brand: hit\.id/);
+  assert.match(fn, /is not in the brand list/);
+  assert.doesNotMatch(fn, /\|\| name \}/, 'a raw brand NAME is a 400 UNKNOWN_BRAND now — never send it');
+  assert.doesNotMatch(fn, /join\(','\)/, 'a comma list is a 400 UNKNOWN_BRAND');
 });
 
 test('a sort the backend has no key for is left OFF and NAMED, never sent', async () => {

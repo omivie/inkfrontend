@@ -5124,6 +5124,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .cc2-infra-card__meta dt { color: var(--text-muted); }
 .cc2-infra-card__meta dd { margin: 0; font-family: var(--font-mono, monospace); }
 .cc2-infra__warn { color: var(--yellow-text); }
+.cc2-infra__bad { color: var(--danger, #f87171); font-weight: 600; }
+.cc2-infra__runfail td { background: var(--danger-bg, rgba(248, 113, 113, 0.08)); }
 
 /* Light-theme tweaks (matches existing admin patterns) ----------------- */
 .admin[data-theme="light"] .cc2-tile { background: #fff; }

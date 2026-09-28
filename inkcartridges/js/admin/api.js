@@ -1658,7 +1658,11 @@ const AdminAPI = {
       if (filters.brand) params.set('brand', filters.brand);
       if (filters.search) params.set('search', filters.search);
       const resp = await window.API.get(`/api/admin/products?${params}`);
-      return resp?.data ?? null;
+      // /api/admin/products is strictQuery: a refusal RESOLVES as {ok:false}
+      // (e.g. 400 UNKNOWN_BRAND). null = "could not load", so the page never
+      // reads a refusal as "All products reviewed".
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'The review queue request was refused');
+      return resp.data ?? null;
     } catch (e) {
       adminApiWarn('Failed to load products', e);
       return null;
@@ -4053,8 +4057,13 @@ const AdminAPI = {
       if (filters.status) params.set('status', filters.status);
       if (filters.sort) params.set('sort', filters.sort);
       if (filters.order) params.set('order', filters.order);
+      // Portal link, server-side since 2026-09-25 (BF-070 g): 'true' | 'false'.
+      if (filters.linked === 'true' || filters.linked === 'false') params.set('linked', filters.linked);
+      // strictQuery since 2026-09-25: an unknown param or value is a 400 that
+      // RESOLVES as {ok:false}. null = "could not load", never an empty list.
       const resp = await window.API.get(`/api/admin/invoices?${params}`);
-      return resp?.data ?? null;
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'The invoice list request was refused');
+      return resp.data ?? null;
     } catch (e) {
       adminApiWarn('Failed to load invoices', e);
       return null;
@@ -5568,15 +5577,18 @@ const AdminAPI = {
       return resp.data ?? null;
     },
 
-    // Retry for `reprice.status === 'enqueue_failed'` (contract §3.7): the
-    // ladder IS live but no reprice started. The contract names the route but
-    // not its body; `{}` is sent and a refusal surfaces verbatim (BF-068 asks
-    // for the shape). Returns the job id wherever the response carries it.
-    async retryReprice() {
-      const resp = await window.API.post('/api/admin/pricing/reprice', {});
+    // Retry for `enqueue_failed` / a failed job: the ladder IS live but the
+    // reprice did not run. POST /reprice-jobs {proposal_id?} → 202
+    // {job_id, status} queues the SAME full-catalogue background job approval
+    // queues, attached to the proposal when its id is passed (BF-068 answer,
+    // 2026-09-25). NOT POST /pricing/reprice: that route is synchronous, stops
+    // at 2,000 rows (`capped: true`) and returns no job id — `{}` there would
+    // have repriced about the first 2,000 products with nothing to poll.
+    async retryReprice(proposalId) {
+      const resp = await window.API.post('/api/admin/pricing/reprice-jobs', proposalId ? { proposal_id: proposalId } : {});
       if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not start the reprice');
       const d = resp.data || {};
-      return { ...d, job_id: d.job_id || d.reprice?.job_id || d.id || null };
+      return { ...d, job_id: d.job_id || null };
     },
 
     // Poll read. Three states, never two:

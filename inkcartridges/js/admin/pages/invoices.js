@@ -356,9 +356,10 @@ const STATUS_META = {
 let _container = null;
 let _table = null;
 let _filters = { search: '', status: '' };
-// '' | 'linked' | 'unlinked'. CLIENT-side: /api/admin/invoices ignores every
-// portal param we tried (unlinked=, linked=, business_account_id=none, portal=
-// — 21 of 21 rows back each time, measured 2026-09-25), so this is never sent.
+// '' | 'linked' | 'unlinked'. Sent as `linked=true|false` — the server filters
+// since 2026-09-25 (BF-070 g). Until then it ignored every portal param, so this
+// page walked up to 20×100 rows and filtered here. Measured 2026-09-28:
+// linked=true 0 + linked=false 21 = 21, the whole list; `linked=maybe` is a 400.
 let _portalFilter = '';
 let _page = 1;
 let _limit = 20;
@@ -884,15 +885,9 @@ function portalLinkOf(r) {
   return { id: r.business_account_id, name: r.business_account_name || '' };
 }
 
-/**
- * Keep the rows that match the Portal filter. A row whose link is UNKNOWN
- * matches neither side — it cannot be proven linked or unlinked.
- */
-function matchesPortalFilter(r, want) {
-  if (!want) return true;
-  const link = portalLinkOf(r);
-  if (link === null) return false;
-  return want === 'unlinked' ? link === false : link !== false;
+/** The Portal dropdown as the list's `linked` param: '', 'true' or 'false'. */
+function linkedParam(want) {
+  return want === 'linked' ? 'true' : want === 'unlinked' ? 'false' : '';
 }
 
 const COLUMNS = [
@@ -1108,49 +1103,24 @@ function adjustOutstanding(row, wasOutstanding, nowOutstanding) {
   renderOutstanding();
 }
 
-const PORTAL_SCAN_LIMIT = 100;
-const PORTAL_SCAN_MAX_PAGES = 20;
-
 async function loadData() {
   if (!_table) return;
   _table.setLoading(true);
-  if (_portalFilter) { await loadPortalFiltered(); loadOutstanding(); return; }
-  paintPortalNote('');
-  const data = await AdminAPI.listInvoices(_filters, _page, _limit);
+  const data = await AdminAPI.listInvoices({ ..._filters, linked: linkedParam(_portalFilter) }, _page, _limit);
   if (!_table) return; // destroyed mid-fetch
+  if (data === null) {
+    // /api/admin/invoices is strictQuery since 2026-09-25: a refused param is
+    // a 400, and a failed read must never render as "no invoices".
+    _table.setData([], null);
+    paintPortalNote('Could not load invoices. The list request failed or was refused, so this is NOT an empty list.', true);
+    loadOutstanding();
+    return;
+  }
+  paintPortalNote('');
   const rows = data?.invoices || data?.items || (Array.isArray(data) ? data : []);
   const pagination = data?.pagination || (data?.total != null ? { total: data.total, page: _page, limit: _limit } : null);
   _table.setData(rows, pagination);
   loadOutstanding();
-}
-
-/**
- * The server cannot filter by portal link, so filtering one server page would
- * show "no unlinked invoices" whenever they sat on page 2. Walk EVERY page under
- * the other filters, filter here, and show the result on one page. Capped; a
- * cap that bites is said out loud, as is a row that does not carry the field.
- */
-async function loadPortalFiltered() {
-  const all = [];
-  let total = null;
-  let failed = false;
-  for (let page = 1; page <= PORTAL_SCAN_MAX_PAGES; page++) {
-    const data = await AdminAPI.listInvoices(_filters, page, PORTAL_SCAN_LIMIT);
-    if (!_table) return;
-    if (!data) { failed = true; break; }
-    const rows = data.invoices || data.items || (Array.isArray(data) ? data : []);
-    all.push(...rows);
-    total = data.pagination?.total ?? data.total ?? total;
-    if (rows.length < PORTAL_SCAN_LIMIT || (total != null && all.length >= total)) break;
-  }
-  const shown = all.filter((r) => matchesPortalFilter(r, _portalFilter));
-  const unknown = all.filter((r) => portalLinkOf(r) === null).length;
-  const partial = failed || (total != null && all.length < total);
-  _table.setData(shown, { total: shown.length, page: 1, limit: Math.max(shown.length, 1) });
-  const bits = [`Filtered here, over ${all.length}${total != null ? ` of ${total}` : ''} invoices — the server cannot filter by portal link.`];
-  if (partial) bits.push(failed ? 'A page failed to load, so this list is INCOMPLETE.' : `Only the first ${all.length} were scanned, so this list is INCOMPLETE.`);
-  if (unknown) bits.push(`${unknown} row${unknown === 1 ? ' does' : 's do'} not say whether ${unknown === 1 ? 'it is' : 'they are'} linked and ${unknown === 1 ? 'is' : 'are'} left out.`);
-  paintPortalNote(bits.join(' '), partial || unknown > 0);
 }
 
 function paintPortalNote(text, warn = false) {

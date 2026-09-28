@@ -784,11 +784,12 @@ function supabaseFailureCause(e) {
  *     is in the backend's enum and resolves through the storefront taxonomy.
  *   - NO `is_active` means ACTIVE ONLY (4,069 of 4,387). "All statuses" must say
  *     `is_active=all`, or 318 inactive products vanish from the admin list.
- *   - `brand` takes a SLUG. The dropdown's value is the brand's UUID, and a
- *     UUID is not refused — it is IGNORED: `brand=<hp uuid>` answered all
- *     4,069 rows across every brand. Since ERR-220 the fallback is every load,
- *     so the Brand filter did nothing. A comma list (`hp,canon`) is ignored the
- *     same way; two UUIDs 400 on length.
+ *   - `brand` takes ONE brand slug OR brand id (BF-070 c, shipped 2026-09-25;
+ *     measured 2026-09-28: `brand=hp` and `brand=<hp uuid>` both 870 of 4,115).
+ *     Anything else — a brand NAME ("HP"), a comma list, an unknown slug — is
+ *     `400 UNKNOWN_BRAND`, never the whole catalogue. Until 2026-09-25 a UUID
+ *     was silently IGNORED (all 4,069 rows), which is why a slug mapping used
+ *     to sit here; the dropdown's UUID is now sent as-is.
  *   - `sort` is an enum that has no brand / supplier / is_active /
  *     import_locked. Sending one 400s, and the table went blank. An unsupported
  *     sort is left OFF and named by filtersLostToBackend() instead.
@@ -796,7 +797,7 @@ function supabaseFailureCause(e) {
 function backendProductFilters() {
   const filters = { search: _search, sort: _sort, order: _sortDir };
   if (!backendCanSort(_sort)) { delete filters.sort; delete filters.order; }
-  if (_brandFilter) filters.brand = backendBrandSlug(_brandFilter);
+  if (_brandFilter) filters.brand = _brandFilter;
   filters.active = _activeFilter === '' ? 'all' : _activeFilter;
   if (_sourceFilter) filters.source = _sourceFilter;
   if (typeFilterGroup(_typeFilter)) filters.product_type_group = _typeFilter;
@@ -808,16 +809,6 @@ function backendProductFilters() {
   else if (_packFilter === 'singles') filters.pack_type = 'single';
   if (_supplierFilter) filters.supplier = _supplierFilter;
   return filters;
-}
-
-/**
- * The dropdown carries brand UUIDs (the Supabase leg filters `brand_id`); the
- * backend's `brand` param wants the slug and silently ignores anything else.
- * A value that is not a known id is passed through — it may already be a slug.
- */
-function backendBrandSlug(value) {
-  const hit = (_brands || []).find((b) => b && typeof b === 'object' && b.id === value);
-  return (hit && hit.slug) || value;
 }
 
 /**
@@ -4285,6 +4276,8 @@ async function handleExport(format = 'csv') {
     // and `brand` did nothing — stopping at 999 rows with no truncation header,
     // and 500ing on the `brands=` param the global filter bar adds. An export
     // that disagrees with the table it was exported from is worse than none.
+    // The backend RETIRED that route on 2026-09-25 (`type=products` is now a
+    // 400, BF-070 b): this client-side build is the only product export.
     // Excel opens a CSV, so "Excel" is the same file with the same name rule.
     await exportProductsCSV(format);
   } catch (e) {
@@ -4399,16 +4392,18 @@ async function fetchFilteredProductsForExport() {
   // catalogue). The only addition is the global brand selection, which the
   // list gets from its own brand dropdown.
   //
-  // The global selection holds brand NAMES, and `brand` takes ONE slug: the
-  // old `names.join(',')` was silently ignored by the backend, so a PDF
-  // exported under "HP + Canon" was every brand (measured 2026-09-25,
-  // ERR-286). One pass per brand instead.
+  // The global selection holds brand NAMES, and `brand` takes ONE slug or
+  // id: a comma list was silently ignored until 2026-09-25 (a PDF exported
+  // under "HP + Canon" was every brand, ERR-286) and is a 400 UNKNOWN_BRAND
+  // now, as is a bare name. One pass per brand, sent by id. A name we cannot
+  // resolve is refused HERE, by name — never sent for the server to refuse.
   const filters = backendProductFilters();
   const globalBrands = FilterState.get('brands') || [];
   const passes = (!_brandFilter && globalBrands.length)
     ? globalBrands.map((name) => {
       const hit = _brands.find((b) => b && (b.name === name || b.slug === name));
-      return { ...filters, brand: (hit && hit.slug) || name };
+      if (!hit || !hit.id) throw new Error(`the brand "${name}" is not in the brand list, so it cannot be filtered on`);
+      return { ...filters, brand: hit.id };
     })
     : [filters];
 
@@ -4486,7 +4481,7 @@ async function exportProductsPDF() {
     // Filter summary
     const filterParts = [];
     if (_search) filterParts.push(`Search: "${_search}"`);
-    if (_brandFilter) filterParts.push(`Brand: ${_brandFilter}`);
+    if (_brandFilter) filterParts.push(`Brand: ${(_brands.find((b) => b && b.id === _brandFilter) || {}).name || _brandFilter}`);
     if (_activeFilter !== '') filterParts.push(`Status: ${_activeFilter === 'true' ? 'Active' : 'Inactive'}`);
     if (_imageFilter) filterParts.push(`Images: ${_imageFilter === 'no-images' ? 'Missing' : 'Has images'}`);
     if (_packFilter) filterParts.push(`Packs: ${_packFilter === 'packs' ? 'Packs only' : 'Singles only'}`);
