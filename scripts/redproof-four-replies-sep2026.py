@@ -41,8 +41,9 @@ SHH = 'inkcartridges/html/shop.html'
 
 M = [
  # §A — the retired reads stay retired
- (API, "const manualChips = await this._fetchManualChipCounts(params.brand, types);",
-       "const manualChips = await this._fetchManualChipCounts(params.brand, types); await this._supabaseSelect('product_code_visitors?select=code');"),
+ # (ERR-299 deleted the manual layer; the mutant re-adds a read to the hook.)
+ (API, "const truncated = this._detectTruncatedChips(primary, params);\n        return this._repairTruncatedSeries",
+       "const truncated = this._detectTruncatedChips(primary, params); await fetch('https://x.supabase.co/rest/v1/product_code_visitors?select=code').catch(() => null);\n        return this._repairTruncatedSeries"),
  (PDP, "                    if (typeof DebugLog !== 'undefined' && DebugLog.warn) {\n                        DebugLog.warn('[PDP] product row lacks",
        "                    if (false) {\n                        DebugLog.warn('[PDP] product row lacks"),
  # §B
@@ -52,13 +53,16 @@ M = [
  (PDP, "if (out.failed && !out.final) out = await ask();", "if (out.failed) out = await ask();"),
  # §D
  (SHOP, "                    if (key) {\n                        const n = counts[key];", "                    if (false) {\n                        const n = counts[key];"),
- (SHOP, "                if (box) box.hidden = true;", ""),
- (SHOP, "                if (total === null) {\n                    DebugLog.warn(`[brand-counts]", "                if (false) {\n                    DebugLog.warn(`[brand-counts]"),
+ (SHOP, "                        if (box) box.hidden = true;\n                        continue;", "                        continue;"),
+ # ERR-299: the confirming read is retired — putting it back must go red.
+ (SHOP, "                        if (box) box.hidden = true;\n                        continue;",
+        "                        API.getCategoryTotal(brandId, cat.apiCategory);\n                        if (box) box.hidden = true;\n                        continue;"),
  # §E
  (SEO, "if (surface === 'printer' && head.h1) {", "if (false) {"),
  (SEO, "PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v2:',", "PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v1:',"),
  (SHOP, "this.elements.title.textContent = mirrored || shown || 'Compatible Ink & Toner';", "this.elements.title.textContent = shown || 'Compatible Ink & Toner';"),
- (SHOP, "? PrinterName.display(rawPrinterName) : rawPrinterName;", "? rawPrinterName : rawPrinterName;"),
+ (SHOP, "? ((printerData && PrinterName.of(printerData)) || PrinterName.display(rawPrinterName || '') || rawPrinterName)",
+        "? (rawPrinterName)"),
  # §F
  (SHOP, "if (alias) products = alias.rows;", ""),
  (SHOP, "&& !smartData?.did_you_mean\n                        && !alias;", "&& !smartData?.did_you_mean;"),

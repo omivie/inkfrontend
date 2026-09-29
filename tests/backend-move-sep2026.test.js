@@ -441,13 +441,13 @@ test('§4b getRibbonBrandsList reads site/nav first; the direct read is the null
     assert.match(fn, /DebugLog\.warn\(/, 'the fallback says so');
 });
 
-test('§2 _applyManualCodes reads NO product_codes / product_code_visitors row (ERR-294)', () => {
-    // BF-085 (ribbon codes) and BF-086 (chip_category in /api/shop) are built,
-    // so the ribbon override read, the visitor summary and the per-code
-    // visitor recovery are deleted. Only the manual chip-count view survives.
-    const fn = API_CODE.match(/async _applyManualCodes\(primary, params, truncated\) \{[\s\S]*?\n    \},/)[0];
-    assert.match(fn, /this\._fetchManualChipCounts\(params\.brand, types\)/);
+test('§2 the manual-code layer reads NO product_codes / visitor / chip-count row (ERR-294, ERR-299)', () => {
+    // BF-085/086 (ERR-294) deleted the product_codes and visitor reads; BF-088
+    // (ERR-299: the backend folds 950XL into 950) deleted the last one, the
+    // product_code_chip_counts view, and with it _applyManualCodes itself.
+    assert.doesNotMatch(API_CODE, /_applyManualCodes|_fetchManualChipCounts|_supabaseSelect/,
+        'the whole manual-code layer is gone');
     assert.doesNotMatch(API_CODE, /_fetchProductIdsForCode|_fetchManualCodesByProduct|_fetchVisitorRows|_fetchVisitorIdsForCode|getManualProductCodes/,
         'every product_codes / visitor reader is gone');
-    assert.doesNotMatch(API_CODE, /product_codes\?select|product_code_visitors\?/, 'no direct read of either table');
+    assert.doesNotMatch(API_CODE, /product_codes\?select|product_code_visitors\?|product_code_chip_counts/, 'no direct read of any of them');
 });

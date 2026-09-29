@@ -1750,7 +1750,7 @@
                 if (mine !== seq) return;
                 const items = printers.slice(0, 6).map(p => {
                     const href = (typeof buildPrinterUrl === 'function' && buildPrinterUrl(p)) || `/shop?q=${encodeURIComponent(p.full_name || q)}`;
-                    const name = (typeof PrinterName !== 'undefined') ? PrinterName.display(p.full_name || '') : (p.full_name || '');
+                    const name = (typeof PrinterName !== 'undefined') ? PrinterName.of(p) : (p.full_name || '');
                     return `<li><a class="landing-printer-search__hit" href="${Security.escapeAttr(href)}">${Security.escapeHtml(name)}</a></li>`;
                 });
                 if (!items.length) {
@@ -1880,16 +1880,18 @@
          * `data[brand][category]`: the sum printed "HP 870" on both landings and
          * listed Dymo (103 label tapes) on the toner page.
          *
-         * On a category picker a brand whose count is 0 or ABSENT is hidden —
-         * but only once `API.getCategoryTotal()` has confirmed it. The counts
-         * endpoint omits keys it has nothing for (`dymo: {label: 103}`), and it
-         * undercounts multi-type families exactly like the /api/shop facet did
-         * (2026-09-28: epson drums absent vs 5 served, canon 9 vs 12 — ERR-215,
-         * BF-056; asked again for this endpoint as BF-091), so an absent key is
-         * UNMEASURED, never zero. Tri-state:
-         *   confirmed > 0 → show that number and WARN (the drift detector)
-         *   confirmed 0   → hide the tile
-         *   null          → keep the tile, blank, and say so out loud
+         * On a category picker a brand whose count is 0 or ABSENT is hidden.
+         * The counts endpoint omits keys it has nothing for (`dymo: {label:
+         * 103}`). Until BF-091 an absent key could also be an UNDERCOUNT (epson
+         * drums absent vs 5 served), so each 0 got a confirming ?category= read.
+         * The backend now builds counts from the same taxonomy as ?category=
+         * (migration 193); re-measured 2026-09-29, drums epson 5/5, canon
+         * 12/12, brother 61/61, hp 33/33 — so absent means 0 and the confirming
+         * read is gone (ERR-299). probe:four-replies §B keeps comparing the two
+         * on every run: THAT is the drift detector now, not a per-visit request.
+         *
+         * A brand the endpoint returns NO entry for, or a failed request, keeps
+         * its tile: that is unmeasured, not empty.
          *
          * Still fail-quiet on the count itself — a missing count is a cosmetic
          * absence on a tile that already works (the span is aria-hidden), not a
@@ -1905,7 +1907,6 @@
                 const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
                 if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
             };
-            const suspects = [];
             const ids = [...new Set(brands.map(b => b.slug || b.id || '').filter(Boolean))].sort();
             for (let i = 0; i < ids.length; i += MAX_PER_REQUEST) {
                 const chunk = ids.slice(i, i + MAX_PER_REQUEST);
@@ -1914,14 +1915,16 @@
                     const res = await API.getProductCounts({ brands: chunk.join(',') });
                     byBrand = res && res.ok !== false ? res.data : null;
                 } catch { byBrand = null; }
+                if (this.navigationVersion !== navVersion) return;   // a newer page owns the grid
                 if (!byBrand || typeof byBrand !== 'object') continue;
                 for (const brandId of chunk) {
                     const counts = byBrand[brandId] ?? byBrand[brandId.toLowerCase()];
                     if (!counts || typeof counts !== 'object') continue;
                     if (key) {
                         const n = counts[key];
-                        if (Number.isFinite(n) && n > 0) setCount(brandId, n);
-                        else suspects.push(brandId);
+                        if (Number.isFinite(n) && n > 0) { setCount(brandId, n); continue; }
+                        const box = this.elements.brandsGrid?.querySelector(`[data-brand="${CSS.escape(brandId)}"]`);
+                        if (box) box.hidden = true;
                         continue;
                     }
                     // A `total` key, if the backend ever adds one, is the answer
@@ -1933,28 +1936,6 @@
                     setCount(brandId, values.reduce((a, b) => a + b, 0));
                 }
             }
-            if (!key || !suspects.length) return;
-
-            const confirmed = await Promise.all(suspects.map(brandId =>
-                API.getCategoryTotal(brandId, cat.apiCategory)
-                    .then(total => ({ brandId, total }))
-                    .catch(() => ({ brandId, total: null }))));
-            if (this.navigationVersion !== navVersion) return;
-            confirmed.forEach(({ brandId, total }) => {
-                if (total === null) {
-                    DebugLog.warn(`[brand-counts] ${brandId}/${cat.apiCategory}: the counts endpoint said 0/absent `
-                        + 'and the confirming query could not be read — tile KEPT, count unconfirmed.');
-                    return;
-                }
-                if (total > 0) {
-                    setCount(brandId, total);
-                    DebugLog.warn(`[brand-counts] ${brandId}/${cat.apiCategory}: /api/products/counts said 0/absent `
-                        + `but ?category=${cat.apiCategory} serves ${total} — showing the real total.`);
-                    return;
-                }
-                const box = this.elements.brandsGrid?.querySelector(`[data-brand="${CSS.escape(brandId)}"]`);
-                if (box) box.hidden = true;
-            });
         },
 
         async renderRibbonBrands() {
@@ -1994,72 +1975,6 @@
                 box.style.animationDelay = `${60 + i * 30}ms`;
                 box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 grid.appendChild(box);
-            });
-        },
-
-        /**
-         * A zero for a MULTI-TYPE family is UNPROVEN until measured.
-         *
-         * The brand-scoped `counts` facet on /api/shop is not trustworthy for a
-         * category that spans several `product_type`s: the backend omits
-         * `maintenance_box` from `counts.drums` while its `?category=drums`
-         * FILTER returns those rows (measured 2026-09-06 — epson ABSENT/5,
-         * canon 9/12, brother 61/62).
-         *
-         * Epson is the brand where that bit. Its entire drums family is 5
-         * maintenance boxes, so the key was absent, `counts.drums || 0` read the
-         * absence as zero, and the tile filter below dropped "Drums & Supplies"
-         * — 5 purchasable products with no path from the brand drilldown, while
-         * the mega menu linked straight to them. Absence is not zero
-         * (ERR-063/068/073/075/076/149/150; this one is ERR-215).
-         *
-         * So: any category whose family holds more than one product_type and
-         * whose facet count came back 0 gets ONE confirming request before we
-         * are allowed to hide it. Today that is `ink` (2 types) and `drums` (7).
-         * Single-type families stay on the cheap path — there is nothing for the
-         * facet to omit. Membership is read from API._CATEGORY_PRODUCT_TYPES, so
-         * a category that gains a type is covered without touching this code.
-         *
-         * Tri-state, deliberately:
-         *   > 0   → show the tile, and WARN. That warning is the drift detector.
-         *   === 0 → hide. Proven empty (this is Lexmark → ink, correctly hidden).
-         *   null  → UNMEASURED. Keep the facet's answer, but say out loud that
-         *           the tile was hidden unconfirmed. Never silently.
-         */
-        async _confirmMultiTypeZeros(categoryCounts, navVersion) {
-            const brand = this.state.brand;
-            if (!brand || !categoryCounts) return;
-            const families = (typeof API !== 'undefined' && API._CATEGORY_PRODUCT_TYPES) || null;
-            if (!families) return;
-
-            const suspects = this.categories.filter(cat => {
-                if (cat.id === 'ribbons') return false;       // never a tile here (nav only)
-                if ((categoryCounts[cat.id] || 0) > 0) return false;
-                const family = families[cat.apiCategory];
-                return Array.isArray(family) && family.length > 1;
-            });
-            if (!suspects.length) return;
-
-            const confirmed = await Promise.all(suspects.map(cat =>
-                API.getCategoryTotal(brand, cat.apiCategory)
-                    .then(total => ({ cat, total }))
-                    .catch(() => ({ cat, total: null }))));
-            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-            confirmed.forEach(({ cat, total }) => {
-                if (total === null) {
-                    DebugLog.warn(
-                        `[category-counts] ${brand}/${cat.apiCategory}: the counts facet said 0 and the ` +
-                        `confirming query could not be read — hiding the "${cat.name}" tile UNCONFIRMED.`);
-                    return;
-                }
-                if (total > 0) {
-                    categoryCounts[cat.id] = total;
-                    DebugLog.warn(
-                        `[category-counts] ${brand}/${cat.apiCategory}: the /api/shop counts facet reported ` +
-                        `0/absent, but ?category=${cat.apiCategory} serves ${total}. Showing "${cat.name}" ` +
-                        `on the real total. The facet undercounts multi-type families (ERR-215).`);
-                }
             });
         },
 
@@ -2113,10 +2028,9 @@
                                     paper: counts.paper || 0,
                                     ribbons: 0
                                 };
-                                // The facet undercounts multi-type families, so a zero
-                                // from it is a question, not an answer (ERR-215).
-                                await this._confirmMultiTypeZeros(categoryCounts, navVersion);
-                                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                                // A zero here is an answer since BF-091: the facet and
+                                // ?category= share one taxonomy (ERR-299; was ERR-215's
+                                // confirming read). probe:four-replies §B watches drift.
                             }
                         } else {
                             this._shopEndpointAvailable = false;
@@ -3497,12 +3411,14 @@
                     const products = response.data.products || response.data.compatible_products || [];
 
                     // Store printer name for display
-                    // Display-cased once, here, so the breadcrumb, the H1 fallback
-                    // and the section headings all print the name the backend's
-                    // page prints ("Brother HL-L2375DW", not "Brother HL L2375DW").
+                    // Named once, here, so the breadcrumb, the H1 fallback and the
+                    // section headings all print the name the backend's page prints
+                    // ("Brother HL-L2375DW", not "Brother HL L2375DW"): the printer
+                    // object's own display_name (BF-093, ERR-299), else the mirror.
                     const rawPrinterName = printerData?.full_name || this.state.printer;
-                    this.state.printerName = (typeof PrinterName !== 'undefined' && rawPrinterName)
-                        ? PrinterName.display(rawPrinterName) : rawPrinterName;
+                    this.state.printerName = (typeof PrinterName !== 'undefined')
+                        ? ((printerData && PrinterName.of(printerData)) || PrinterName.display(rawPrinterName || '') || rawPrinterName)
+                        : rawPrinterName;
                     this.updateBreadcrumb();
                     this.updateTitle();
 
@@ -4493,7 +4409,6 @@
                 banner.innerHTML = `<p class="search-alias-banner__note"><strong>These match your words, not your printer.</strong> Check the code on your old cartridge before you order.</p>${finderHelpHtml()}`;
                 wrap.appendChild(banner);
             }
-
 
             // Hero banner — printer match takes precedence (spec §3.1).
             if (matchedPrinter && matchedPrinter.name) {

@@ -73,6 +73,10 @@ const FilterState = {
     // can lose track of. `delivered` and `refunded` were both settable and both
     // missing here (ERR-213).
     statuses: ['pending', 'paid', 'processing', 'shipped', 'delivered', 'completed', 'cancelled', 'refunded'],
+    // products.category CODES ({ value, label }), filled at boot from
+    // utils/best-sellers.js CATEGORY_OPTIONS. OPT-IN only (see _render): a page must
+    // name 'categories' in setVisibleFilters, because only some endpoints honour
+    // category_filter — a filter shown where it is ignored is a silent lie (ERR-299).
     categories: [],
   },
 
@@ -357,7 +361,7 @@ const FilterState = {
     if (!visible || visible.includes('brands')) leftHtml += this._renderMultiSelect('brands', 'Brand');
     if (!visible || visible.includes('suppliers')) leftHtml += this._renderMultiSelect('suppliers', 'Supplier');
     if (!visible || visible.includes('statuses')) leftHtml += this._renderMultiSelect('statuses', 'Status');
-    if (!visible || visible.includes('categories')) leftHtml += this._renderMultiSelect('categories', 'Category');
+    if (visible && visible.includes('categories')) leftHtml += this._renderMultiSelect('categories', 'Category');
 
     // Period presets (center)
     let centerHtml = '<div class="admin-filter-group">';
@@ -420,11 +424,11 @@ const FilterState = {
     html += `<div class="admin-filter-select__dropdown" data-filter-dropdown="${key}">`;
     const items = key === 'statuses' ? this._options.statuses : options;
     for (const opt of items) {
-      const val = typeof opt === 'string' ? opt : opt.name || opt;
+      const val = typeof opt === 'string' ? opt : opt.value || opt.name || opt;
       const checked = selected.includes(val) ? ' checked' : '';
       html += `<label class="admin-filter-select__option">`;
       html += `<input type="checkbox" value="${esc(val)}"${checked}>`;
-      html += `${esc(val)}`;
+      html += `${esc(typeof opt === 'string' ? opt : opt.label || val)}`;
       html += '</label>';
     }
     html += '</div></div>';

@@ -1,29 +1,21 @@
 /**
- * Ribbon PDP related products — prefix-tolerant SKU resolution — July 2026
- * =======================================================================
+ * Ribbon PDP related products — prefix-tolerant SKU resolution
+ * ============================================================
  *
- * The bug (ERR-084)
- * -----------------
- * The "Products related to 307.11" section on the Canon AP800 ribbon PDP
- * rendered as a bare heading with no products. Its curated
- * `related_product_skus` were `["141LOT","143LOT"]`, but the real correction
- * tapes have SKUs `C141LOT` / `C143LOT` (leading "C"). renderRelatedProducts()
- * resolved the curated list with an EXACT `.in('sku', manualSkus)` and no
- * fallback, so the bare codes matched zero rows.
+ * The bug (ERR-084, Jul 2026): 307.11's curated `related_product_skus` were
+ * ["141LOT","143LOT"] but the real tapes are C141LOT / C143LOT, so an exact
+ * `.in('sku', …)` resolved nothing and the rail was a bare heading. The PDP then
+ * resolved exact-first over C-/G- candidates with a direct Supabase read.
  *
- * Root cause: typewriter ribbons use bare numeric SKUs ("307.11") with no
- * prefix, so the related picker saved the tapes by their bare codes, dropping
- * the compatible-product "C" prefix. (The "02" product code was a red herring —
- * it drives /shop chips, and only 307.11 carries it.)
+ * Since BF-092 (ERR-299, 2026-09-29) the SERVER does that resolution:
+ * GET /api/ribbons/:sku returns `related_products` in saved order, active +
+ * public only, a bare code trying its C- then G- form after the exact SKU,
+ * duplicates and the ribbon itself dropped. Measured: 307.11 → C141LOT, C143LOT;
+ * 153.11 → C143LOT; 72200.01 → 72200.02. probe:four-replies §V re-measures it.
  *
- * The fix
- * -------
- * `relatedSkuCandidates(sku)` returns the exact sku first, then the two
- * conventional prefixed forms ("C"=compatible, "G"=genuine). The ribbon branch
- * queries the candidate union and resolves each entry exact-first, so
- * "141LOT" → C141LOT while a correctly-entered "C141LOT" still resolves to
- * itself. Matching stays strict SKU equality (a tiny candidate set), never a
- * fuzzy substring/ILIKE.
+ * What the PDP still owns, and this file pins by RUNNING it
+ * (`ribbonRelatedCards`): keep the server's order, rename the card fields
+ * Products.renderCard reads, and tell a failed lookup from an empty one.
  *
  * Run: node --test tests/pdp-related-sku-prefix-jul2026.test.js
  */
@@ -82,103 +74,65 @@ function loadPdpHelpers() {
     return helpers;
 }
 
-// A tiny resolver that mirrors the ribbon-branch precedence logic, to prove the
-// candidate list drives real resolution (exact-first, order preserved, dedup).
-// The catalogue is keyed by UPPER(sku), exactly like the product code does.
-function resolve(manualSkus, catalogueSkus, relatedSkuCandidates) {
-    const byUpper = {};
-    for (const sku of catalogueSkus) byUpper[String(sku).toUpperCase()] = { sku };
-    const ordered = [];
-    const used = new Set();
-    for (const s of manualSkus) {
-        for (const c of relatedSkuCandidates(s)) {
-            const hit = byUpper[c];
-            if (hit && !used.has(hit.sku)) { used.add(hit.sku); ordered.push(hit); break; }
-        }
-    }
-    return ordered.map(p => p.sku);
-}
+// The /api/ribbons/:sku `related_products` for 307.11, measured 2026-09-29
+// (quantity_breaks and timestamps trimmed).
+const LIVE_307 = [
+    { id: '20e3c4a5', sku: 'C141LOT', name: 'IBM Compatible 141LOT Correction Ribbon Tape', brand: 'IBM',
+      product_type: 'correction_tape', color: null, sale_price: 11.95, stock_quantity: 100, is_active: true,
+      image_url: 'https://x/141lot.webp', in_stock: true, stock_status: 'in_stock' },
+    { id: '36224f3d', sku: 'C143LOT', name: 'Olympia Compatible 143LOT Correction Ribbon Tape', brand: 'Olympia',
+      product_type: 'correction_tape', color: null, sale_price: 11.95, stock_quantity: 95, is_active: true,
+      image_url: 'https://x/143lot.webp', in_stock: true, stock_status: 'in_stock' },
+];
+const plain = (v) => JSON.parse(JSON.stringify(v));
 
-// ═════════════════════════════════════════════════════════════════════════════
-// relatedSkuCandidates — the candidate generator
-// ═════════════════════════════════════════════════════════════════════════════
-test('relatedSkuCandidates — a bare code yields C- and G-prefixed candidates', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    assert.deepEqual([...relatedSkuCandidates('141LOT')], ['141LOT', 'C141LOT', 'G141LOT']);
+test('307.11: the server-resolved cards render in the server\'s (saved) order', () => {
+    const { ribbonRelatedCards } = loadPdpHelpers();
+    const out = ribbonRelatedCards({ sku: '307.11', related_product_skus: ['141LOT', '143LOT'], related_products: LIVE_307 });
+    assert.equal(out.failed, false);
+    assert.deepEqual(out.cards.map((c) => c.sku), ['C141LOT', 'C143LOT'], 'bare codes resolved server-side (ERR-084 rule)');
 });
 
-test('relatedSkuCandidates — exact sku is ALWAYS first (exact match wins)', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    assert.equal(relatedSkuCandidates('141LOT')[0], '141LOT');
-    assert.equal(relatedSkuCandidates('C141LOT')[0], 'C141LOT');
+test('card fields are RENAMED for Products.renderCard — never computed', () => {
+    const { ribbonRelatedCards } = loadPdpHelpers();
+    const [c] = plain(ribbonRelatedCards({ related_products: LIVE_307 }).cards);
+    assert.equal(c.retail_price, 11.95, 'retail_price is the server\'s sale_price, unchanged');
+    assert.deepEqual(c.brand, { name: 'IBM' }, 'renderCard reads brand.name');
+    assert.equal(c.stock_status, 'in_stock');
+    assert.equal(c.sale_price, 11.95, 'the original field is kept');
+    const [d] = plain(ribbonRelatedCards({ related_products: [{ sku: 'X', retail_price: 5, sale_price: 4, brand: { name: 'B' } }] }).cards);
+    assert.equal(d.retail_price, 5, 'a retail_price the server sends wins');
+    assert.deepEqual(d.brand, { name: 'B' });
+    const [e] = plain(ribbonRelatedCards({ related_products: [{ sku: 'Y' }] }).cards);
+    assert.equal(e.retail_price, null, 'no price is a missing price, never 0');
 });
 
-test('relatedSkuCandidates — case-insensitive (lowercase input normalises up)', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    assert.deepEqual([...relatedSkuCandidates('141lot')], ['141LOT', 'C141LOT', 'G141LOT']);
+test('[] is "nothing to show"; null is "the server\'s lookup FAILED"', () => {
+    const { ribbonRelatedCards } = loadPdpHelpers();
+    assert.deepEqual(plain(ribbonRelatedCards({ related_product_skus: ['ZZZ'], related_products: [] })), { failed: false, cards: [] });
+    assert.equal(ribbonRelatedCards({ related_product_skus: [], related_products: null }).failed, true);
 });
 
-test('relatedSkuCandidates — a bare numeric ribbon SKU is handled without breaking', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    assert.deepEqual([...relatedSkuCandidates('307.11')], ['307.11', 'C307.11', 'G307.11']);
+test('ABSENT related_products with a curated list is unmeasured — failed, not empty', () => {
+    const { ribbonRelatedCards } = loadPdpHelpers();
+    assert.equal(ribbonRelatedCards({ related_product_skus: ['141LOT'] }).failed, true,
+        'an older backend or the fallback product path: never claim the owner curated nothing');
+    assert.equal(ribbonRelatedCards({ related_product_skus: [] }).failed, false, 'nothing curated, nothing to fail');
+    assert.equal(ribbonRelatedCards({}).failed, false);
 });
 
-test('relatedSkuCandidates — empty / null / whitespace yields no candidates', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    assert.deepEqual([...relatedSkuCandidates('')], []);
-    assert.deepEqual([...relatedSkuCandidates(null)], []);
-    assert.deepEqual([...relatedSkuCandidates('   ')], []);
+test('a card without a sku is dropped (it could not be linked)', () => {
+    const { ribbonRelatedCards } = loadPdpHelpers();
+    assert.deepEqual(ribbonRelatedCards({ related_products: [null, { name: 'no sku' }, LIVE_307[0]] }).cards.map((c) => c.sku), ['C141LOT']);
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Resolution behaviour — the exact 307.11 case and its invariants
-// ═════════════════════════════════════════════════════════════════════════════
-test('resolution — 307.11 case: bare ["141LOT","143LOT"] now resolves to C141LOT/C143LOT', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    const out = resolve(['141LOT', '143LOT'], ['C141LOT', 'C143LOT', '307.11'], relatedSkuCandidates);
-    assert.deepEqual(out, ['C141LOT', 'C143LOT']);
-});
-
-test('resolution — an EXACT sku is preferred over a prefixed sibling (no over-match)', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    // Both "141LOT" (exact) and "C141LOT" exist — the exact one must win.
-    const out = resolve(['141LOT'], ['141LOT', 'C141LOT'], relatedSkuCandidates);
-    assert.deepEqual(out, ['141LOT']);
-});
-
-test('resolution — a correctly-entered C-prefixed sku still resolves (no regression)', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    const out = resolve(['C141LOT'], ['C141LOT'], relatedSkuCandidates);
-    assert.deepEqual(out, ['C141LOT']);
-});
-
-test('resolution — curated order is preserved and duplicates collapse', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    // 143 first, then 141; and a repeat of 141 must not double-add.
-    const out = resolve(['143LOT', '141LOT', '141LOT'], ['C141LOT', 'C143LOT'], relatedSkuCandidates);
-    assert.deepEqual(out, ['C143LOT', 'C141LOT']);
-});
-
-test('resolution — a genuinely unknown code resolves to nothing (no phantom match)', () => {
-    const { relatedSkuCandidates } = loadPdpHelpers();
-    const out = resolve(['999XYZ'], ['C141LOT', 'C143LOT'], relatedSkuCandidates);
-    assert.deepEqual(out, []);
-});
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Source wiring — the ribbon branch actually uses the candidate resolver
-// ═════════════════════════════════════════════════════════════════════════════
-test('renderRelatedProducts — ribbon branch builds a candidate union, not a bare .in(manualSkus)', () => {
+test('renderRelatedProducts — the ribbon branch uses ribbonRelatedCards and makes NO Supabase read', () => {
     const ribbonBranch = PDP_CODE.slice(
         PDP_CODE.indexOf("if (info.category === 'ribbon') {"),
         PDP_CODE.indexOf('} else {', PDP_CODE.indexOf("if (info.category === 'ribbon') {"))
     );
-    assert.match(ribbonBranch, /relatedSkuCandidates\(/,
-        'the ribbon branch must expand each curated sku via relatedSkuCandidates');
-    assert.match(ribbonBranch, /\.in\('sku',\s*candidates\)/,
-        'it must query the candidate union, not the raw manualSkus');
-    assert.doesNotMatch(ribbonBranch, /\.in\('sku',\s*manualSkus\)/,
-        'the old exact-only query must be gone');
-    assert.match(ribbonBranch, /String\(p\.sku\)\.toUpperCase\(\)/,
-        'results must be keyed case-insensitively to match candidates');
+    assert.match(ribbonBranch, /ribbonRelatedCards\(info\)/);
+    assert.match(ribbonBranch, /fetchFailed = true/);
+    assert.doesNotMatch(ribbonBranch, /sb\.from|Auth\.supabase|\.in\('sku'/, 'the server resolves the list now (BF-092)');
+    assert.doesNotMatch(PDP_CODE, /relatedSkuCandidates/, 'the client-side resolver is gone');
 });

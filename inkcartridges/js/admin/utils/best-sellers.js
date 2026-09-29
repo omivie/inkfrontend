@@ -2,18 +2,27 @@
  * Best sellers — one owner for the rankings shown by the dashboard "Most Bought"
  * card and the Performance hub's Best Sellers tab.
  *
- * Source: GET /api/admin/analytics/top-products-rpc, measured 2026-09-28 by
- * `npm run probe:best-sellers`:
- *   - rows carry product_name, product_sku, revenue, units_sold, order_count (no brand)
- *   - result_limit is capped at 500; all-time returned 209 rows, so the FULL set
- *     arrives and units/orders can be ranked here. A response that fills the cap is
- *     TRUNCATED and every ranking says so (`truncated`), never silently ranks a cut.
- *   - the server orders by revenue and ignores sort_by, status_filter, category_filter
- *   - ONE SKU CAN COME BACK AS SEVERAL ROWS, one per historical product name
- *     (7 of 202 SKUs, e.g. "… 4-Pack" and "… 4-Pack (500 pages)"). Merged by SKU,
- *     all 202 reconciled exactly with the non-cancelled orders list on order count,
- *     units and revenue. Unmerged, one product's sales were split across two rows.
- *   - cancelled orders are already excluded server-side (same reconciliation).
+ * Source: GET /api/admin/analytics/top-products-rpc, re-measured 2026-09-29 after
+ * the backend built BF-089/BF-090 (ERR-299, `npm run probe:best-sellers`):
+ *   - ONE ROW PER PRODUCT (grouped by order_items.product_id). All-time: 199 rows,
+ *     199 distinct product_sku. `product_sku`/`product_name` are the product's
+ *     CURRENT sku/name; `sale_skus` lists every SKU it was SOLD under (33 of 199
+ *     differ, e.g. C62XLBK <- C62BK). An order line in /api/admin/orders carries
+ *     the SALE-TIME sku, so reconcile through `sale_skus`, never `product_sku`.
+ *   - rows carry brand, product_type, pack_type, source from the product row. A
+ *     product that no longer exists keeps brand/type from the order line's
+ *     snapshot and has pack_type null (0 such rows measured) — that null is the
+ *     "not in the catalogue" marker. The direct Supabase catalogue read is gone.
+ *   - result_limit is capped at 500; a response that fills the cap is TRUNCATED and
+ *     every ranking says so (`truncated`), never silently ranks a cut.
+ *   - status_filter / category_filter / supplier_filter / brand_filter all BITE
+ *     (negative controls: an impossible category or supplier = 0 rows). An unknown
+ *     status or an unknown PARAMETER (e.g. sort_by) is a 400 VALIDATION_FAILED —
+ *     surfaced on screen with the server's message, never read as "no sales".
+ *   - category_filter takes products.category CODES (CON-INK, …), not storefront
+ *     slugs: `ink` returns 0 rows. CATEGORY_OPTIONS below is that list.
+ *   - default statuses = every status except cancelled (same rule as /kpi-summary);
+ *     admin test orders (orders.is_test_order) are excluded server-side.
  *
  * Pure functions, no imports: pages and api.js both use this.
  */
@@ -29,36 +38,50 @@ export const METRICS = [
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
 /**
- * Merge raw rows by SKU. Sums revenue/units/orders; a sum that meets an absent
- * value stays null (absent is not zero). The displayed name is the one carrying the
- * most revenue. Rows without a SKU are kept as their own entries.
+ * Normalise the server rows. No merging: the server groups by product now. A SKU
+ * that still arrives on several rows is a server regression — it is COUNTED
+ * (`dupSkus`) so the page says so, instead of being silently summed.
  */
-export function mergeBySku(rows) {
-  const bySku = new Map();
-  const out = [];
-  for (const r of Array.isArray(rows) ? rows : []) {
-    const sku = r.product_sku || r.sku || null;
-    const row = {
+export function normalizeRows(rows) {
+  const seen = new Map();
+  const items = (Array.isArray(rows) ? rows : []).map(r => {
+    const sku = r.product_sku || null;
+    if (sku) seen.set(sku, (seen.get(sku) || 0) + 1);
+    const sale = Array.isArray(r.sale_skus) ? r.sale_skus.filter(Boolean) : [];
+    return {
       sku,
-      name: r.product_name || r.name || sku || 'Unknown',
-      revenue: num(r.revenue ?? r.total),
-      units: num(r.units_sold ?? r.units ?? r.quantity ?? r.qty ?? r.quantity_sold),
-      orders: num(r.order_count ?? r.orders),
+      name: r.product_name || sku || 'Unknown',
+      revenue: num(r.revenue),
+      units: num(r.units_sold),
+      orders: num(r.order_count),
       brand: r.brand || null,
-      _nameRevenue: num(r.revenue ?? r.total) ?? 0,
-      _rows: 1,
+      productType: r.product_type || null,
+      packType: r.pack_type || null,
+      source: r.source || null,
+      saleSkus: sale,
+      soldAs: sale.filter(x => x !== sku),
+      inCatalog: r.pack_type != null,
     };
-    const prev = sku ? bySku.get(sku) : null;
-    if (!prev) { if (sku) bySku.set(sku, row); out.push(row); continue; }
-    for (const k of ['revenue', 'units', 'orders']) {
-      prev[k] = prev[k] == null || row[k] == null ? null : Math.round((prev[k] + row[k]) * 100) / 100;
-    }
-    if (row._nameRevenue > prev._nameRevenue) { prev.name = row.name; prev._nameRevenue = row._nameRevenue; }
-    prev.brand = prev.brand || row.brand;
-    prev._rows += 1;
-  }
-  return out;
+  });
+  return { items, dupSkus: [...seen.values()].filter(n => n > 1).length };
 }
+
+/**
+ * Filter-bar category codes for category_filter (products.category). The backend
+ * matches these codes only — a storefront slug silently returns 0 rows.
+ */
+export const CATEGORY_OPTIONS = [
+  { value: 'CON-INK', label: 'Ink' },
+  { value: 'CON-LASER', label: 'Toner / laser' },
+  { value: 'CON-RIBBON', label: 'Ribbons' },
+  { value: 'CON-LABELS', label: 'Labels' },
+  { value: 'CON-PAPER', label: 'Paper' },
+  { value: 'CON-COPIER', label: 'Copier' },
+  { value: 'CON-A3', label: 'A3' },
+  { value: 'CON-FAX', label: 'Fax' },
+  { value: 'CON-OTHER', label: 'Other consumables' },
+  { value: 'HW-ACCESS', label: 'Hardware accessories' },
+];
 
 /** Sorted copy, highest first. Ties break on revenue, then name, so the order is stable. */
 export function rankBy(items, metric) {
@@ -71,21 +94,6 @@ export function rankBy(items, metric) {
 /** True when some row lacks the metric — the ranking would put it last as if zero. */
 export function metricIncomplete(items, metric) {
   return items.some(i => i[metric] == null);
-}
-
-/**
- * Attach catalogue facts (brand, product_type, pack_type) by SKU. A SKU the
- * catalogue no longer holds (33 of 202 sold SKUs, measured) is marked
- * `inCatalog: false` — its type and pack are UNKNOWN, not "single".
- */
-export function attachCatalog(items, metaBySku) {
-  const meta = metaBySku instanceof Map ? metaBySku : new Map();
-  return items.map(i => {
-    const m = i.sku ? meta.get(i.sku) : null;
-    return m
-      ? { ...i, brand: i.brand || m.brand || null, productType: m.product_type || null, packType: m.pack_type || null, inCatalog: true }
-      : { ...i, productType: null, packType: null, inCatalog: !meta.size ? null : false };
-  });
 }
 
 export const TYPE_GROUPS = [

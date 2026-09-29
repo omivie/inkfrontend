@@ -22,10 +22,10 @@
  *      that array, the audit must fail LOUDLY — an audit that finds no brands
  *      reports no bad links, which is the absence-read-as-zero mistake it
  *      exists to catch. So the contract between the two is pinned here.
- *   3. A ZERO FOR A MULTI-TYPE FAMILY STAYS UNPROVEN. shop-page.js must not go
- *      back to hiding a category tile on a bare `counts.X || 0`. That is what
- *      buried Epson's 5 maintenance boxes: the backend omits `maintenance_box`
- *      from `counts.drums`, the key came back ABSENT, and absent read as zero.
+ *   3. A ZERO FOR A MULTI-TYPE FAMILY. It used to stay unproven until a
+ *      confirming read (Epson's 5 maintenance boxes were ABSENT from
+ *      `counts.drums`). BF-091 fixed the facet at source, so ERR-299 retired
+ *      the confirm; the live comparison moved to probe:four-replies §B.
  *   4. THE AUDIT STAYS READ-ONLY. No write verb, no --record, no baseline.
  *   5. ENROLMENT. Every brand in the mega is also in shop-page.js's brandInfo.
  *      Two hardcoded copies of the brand list exist; neither may gain a brand
@@ -145,58 +145,24 @@ test('§2 the audit is wired to an npm script', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// §3 A zero for a multi-type family stays unproven
+// §3 A zero for a multi-type family — PROVEN by the backend now (BF-091)
 // ───────────────────────────────────────────────────────────────────────────
+// ERR-215 added a confirming ?category= read before hiding a multi-type tile,
+// because the counts facet omitted maintenance_box from drums. BF-091 (migration
+// 193) builds the facet from the same taxonomy as ?category=; re-measured
+// 2026-09-29 epson 5/5, canon 12/12, brother 61/61, hp 33/33. ERR-299 retired
+// the per-visit read; probe:four-replies §B compares the two on every run.
 
-test('§3 shop-page confirms a multi-type zero before hiding a tile', () => {
-    assert.match(SHOP_JS, /_confirmMultiTypeZeros\s*\(/,
-        'loadCategories() must confirm a zero count for a multi-type family before hiding ' +
-        'its tile. Without it, an absent counts key reads as 0 and buries a stocked ' +
-        'category (ERR-215: Epson\'s 5 maintenance boxes).');
-    assert.match(SHOP_JS, /await this\._confirmMultiTypeZeros\(categoryCounts, navVersion\)/,
-        'the confirm must actually run inside loadCategories, not merely be defined');
+test('§3 the confirming read is retired (ERR-299) — the facet is the answer', () => {
+    assert.doesNotMatch(SHOP_JS, /_confirmMultiTypeZeros|getCategoryTotal/,
+        'the per-visit confirm is gone; drift is the probe\'s job now');
+    assert.doesNotMatch(API_JS, /async getCategoryTotal/);
 });
 
-test('§3 the confirm reads family size from the shipped map, not a hardcoded list', () => {
-    const fn = SHOP_JS.slice(SHOP_JS.indexOf('async _confirmMultiTypeZeros'));
-    const body = fn.slice(0, fn.indexOf('\n        },'));
-    assert.match(body, /API\._CATEGORY_PRODUCT_TYPES/,
-        'membership must come from api.js _CATEGORY_PRODUCT_TYPES so a category that gains ' +
-        'a product_type is covered without editing this function');
-    assert.ok(!/['"]drums['"]\s*[,:)\]]/.test(body),
-        'the confirm must not hardcode "drums" — it was the family that bit us, not the ' +
-        'only multi-type family. Derive the suspects from the map.');
-    assert.match(body, /length > 1/,
-        'the rule is "more than one product_type in the family", stated in code');
-});
-
-test('§3 the confirm is tri-state: null is unmeasured, never zero', () => {
-    const fn = SHOP_JS.slice(SHOP_JS.indexOf('async _confirmMultiTypeZeros'));
-    const body = fn.slice(0, fn.indexOf('\n        },'));
-    assert.match(body, /total === null/,
-        'a failed confirm must be handled as its own case — "the shelf is empty" and ' +
-        '"I could not see the shelf" are different sentences');
-    assert.match(body, /DebugLog\.warn/,
-        'both the drift case and the unmeasured case must say so out loud; a fail-soft ' +
-        'that says nothing is how this bug survived');
-    const warns = body.match(/DebugLog\.warn/g) || [];
-    assert.ok(warns.length >= 2,
-        `expected a warn for the drift case AND the unmeasured case, found ${warns.length}`);
-});
-
-test('§3 getCategoryTotal returns null on failure and bypasses the compat sidecar', () => {
-    const fn = API_JS.slice(API_JS.indexOf('async getCategoryTotal'));
-    const body = fn.slice(0, fn.indexOf('\n    },'));
-    assert.match(body, /catalogEndpoint\('\/api\/shop'/,
-        'must build its URL through catalogEndpoint so CATALOG_PARAM_ORDER holds and it ' +
-        'mints no parallel edge-cache key (ERR-124/159)');
-    assert.ok(!/getShopData/.test(body),
-        'must NOT route through getShopData — with brand+category and no source that fires ' +
-        'a 200-row compat-recovery sidecar just to read a count');
-    assert.match(body, /return null/,
-        'an unreadable count must be null (unmeasured), never 0');
-    assert.match(body, /typeof total === 'number' \? total : null/,
-        'a missing meta.total is unmeasured too');
+test('§3 the drift detector that replaced it exists and compares counts with ?category=', () => {
+    const probe = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'probe-four-replies-sep2026.mjs'), 'utf8');
+    assert.match(probe, /BF-091/);
+    assert.match(probe, /category=drums/);
 });
 
 test('§3 the category-counts cache key was retired with the fix', () => {

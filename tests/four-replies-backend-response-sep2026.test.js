@@ -7,7 +7,8 @@
  * §B  the printer page's "Colour Pack Bundles" is deleted, request and all
  * §C  for-use-in is keyed on the RESPONSE's SKU and never retries a 404
  * §D  /ink-cartridges + /toner-cartridges show per-category brand counts, and
- *     hide a brand only once a zero is CONFIRMED (ERR-215 tri-state)
+ *     hide a 0/absent brand directly (BF-091 made counts = ?category=; ERR-299
+ *     retired the confirming read)
  * §E  the printer hub's visible <h1> mirrors the prerender's
  * §F  a regional alias ("canon pg540" → PG-640) renders its note + rows
  * §G  search URLs are noindexed (header AND meta); old-site slugs keep the part number
@@ -81,10 +82,10 @@ test('§A a ribbon PDP awaits no product_codes read; the enrich is a LOUD fallba
     assert.match(win, /if \(needsEnrich\) \{\s*if \(typeof DebugLog !== 'undefined' && DebugLog\.warn\) \{\s*DebugLog\.warn\('\[PDP\] product row lacks/);
 });
 
-function loadApi() {
+function loadApi(fetchImpl) {
     const ctx = {
         window: {}, console, URLSearchParams, URL, TextEncoder, AbortController, setTimeout, clearTimeout,
-        fetch: async () => ({ ok: false, json: async () => null }),
+        fetch: fetchImpl || (async () => ({ ok: false, json: async () => null })),
         Config: { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k', API_URL: 'https://api.test', getSetting: (k, d) => d },
         DebugLog: { warn() {}, error() {}, log() {}, info() {} },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
@@ -96,30 +97,22 @@ function loadApi() {
     return ctx.window.API;
 }
 
-test('§A _applyManualCodes: rows untouched, a code grid reads nothing, a visitor is not double-counted', async () => {
-    const API = loadApi();
-    const asked = [];
-    API._supabaseSelect = async (q) => {
-        asked.push(q);
-        if (q.startsWith('product_code_visitors')) return [{ code: 'TN155', product_type: 'drum_unit', chip_category: 'toner', product_count: 1 }];
-        if (q.startsWith('product_code_chip_counts')) return [{ code: 'TN155', product_count: 6 }, { code: '950XL', product_count: 1 }];
-        return [{ product_id: 'x', code: 'LZ24' }];
-    };
+test('§A _finalizeShopData makes NO Supabase read and leaves the server series alone (ERR-299 removed the last one)', async () => {
+    // ERR-294 kept ONE read here (product_code_chip_counts, for the 950XL tile);
+    // the backend folds 950XL into 950 (BF-088) so ERR-299 deleted it.
+    let fetched = 0;
+    const API = loadApi(async () => { fetched++; throw new Error('no fetch'); });
     API.getWithSWR = async () => { throw new Error('no pool may be fetched'); };
-
+    const chips = { ok: true, data: { products: [], series: [{ code: '950', count: 2 }, { code: 'TN155', count: 7 }] } };
     const ribbons = { ok: true, data: { products: [{ id: 'r', product_type: 'printer_ribbon', series_codes: [] }] } };
-    await API._applyManualCodes(ribbons, {});
+    await API._finalizeShopData(chips, { brand: 'hp', category: 'ink' });
+    await API._finalizeShopData(ribbons, {});
+    assert.equal(fetched, 0);
+    assert.deepEqual(plain(chips.data.series), [{ code: '950', count: 2 }, { code: 'TN155', count: 7 }]);
     assert.deepEqual(plain(ribbons.data.products[0].series_codes), [], 'a ribbon keeps the backend\'s [] — never re-derived');
-
-    const grid = { ok: true, data: { products: [{ id: 't1' }] }, meta: { total: 1 } };
-    await API._applyManualCodes(grid, { brand: 'brother', category: 'toner', code: 'TN155' });
-    assert.equal(grid.meta.total, 1);
-
-    const chips = { ok: true, data: { products: [], series: [{ code: 'TN155', count: 7 }] } };
-    await API._applyManualCodes(chips, { brand: 'hp', category: 'toner' });
-    assert.deepEqual(plain(chips.data.series), [{ code: '950XL', count: 1 }, { code: 'TN155', count: 7 }],
-        'the server count stands (visitor already in it); a manual chip the server lacks is still added');
-    assert.deepEqual(asked.map((q) => q.split('?')[0]), ['product_code_chip_counts'], 'the chip-count view is the ONLY read');
+    for (const gone of ['_applyManualCodes', '_fetchManualChipCounts', '_supabaseSelect', '_manualCodeCache']) {
+        assert.equal(API[gone], undefined, `${gone} is gone`);
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,7 +179,8 @@ function brandCounts({ category, counts, totals }) {
     const confirmCalls = [];
     const api = {
         getProductCounts: async () => ({ ok: true, data: counts }),
-        getCategoryTotal: async (b, c) => { confirmCalls.push(`${b}/${c}`); const t = totals[b]; if (t instanceof Error) throw t; return t; },
+        // Retired by ERR-299; a call would be recorded and fail the tests below.
+        getCategoryTotal: async (b, c) => { confirmCalls.push(`${b}/${c}`); return totals[b]; },
     };
     const obj = vm.runInNewContext(`({ ${body} })`, { API: api, CSS: { escape: (s) => s }, Number, Object, Set, Promise, DebugLog: { warn: (m) => warned.push(m) } });
     obj.elements = { brandsGrid: grid };
@@ -199,40 +193,39 @@ function brandCounts({ category, counts, totals }) {
     return { run: (slugs) => obj._loadBrandCounts(slugs.map((slug) => ({ slug }))), tiles, boxes, warned, confirmCalls };
 }
 
-// Shape measured 2026-09-28: GET /api/products/counts?brands=hp,dymo,epson,…
+// Shape measured 2026-09-29 (after BF-091): GET /api/products/counts?brands=hp,dymo,epson,…
 const COUNTS = {
     hp: { ink: 400, toner: 430, drums: 33, paper: 7 },
     dymo: { label: 103 },
-    epson: { ink: 317, paper: 23, ribbon: 32 },
-    canon: { ink: 381, toner: 157, drums: 9, paper: 20, ribbon: 4 },
+    epson: { ink: 317, drums: 5, paper: 23, ribbon: 32 },
+    canon: { ink: 381, toner: 156, drums: 12, paper: 20, ribbon: 4 },
 };
 
-test('§D /toner-cartridges: HP shows 430 (not 870); Dymo is hidden only after a CONFIRMED zero', async () => {
-    const d = brandCounts({ category: 'toner', counts: COUNTS, totals: { dymo: 0, epson: 0 } });
+test('§D /toner-cartridges: HP shows 430 (not 870); a 0/absent brand is hidden with NO confirming read', async () => {
+    const d = brandCounts({ category: 'toner', counts: COUNTS, totals: {} });
     await d.run(['hp', 'dymo', 'epson', 'canon']);
     assert.equal(d.tiles.hp.textContent, '430 products');
-    assert.equal(d.tiles.canon.textContent, '157 products');
-    assert.deepEqual(d.confirmCalls.sort(), ['dymo/toner', 'epson/toner'], 'every 0/absent is confirmed, nothing else');
+    assert.equal(d.tiles.canon.textContent, '156 products');
+    assert.deepEqual(d.confirmCalls, [], 'BF-091: counts come from the same taxonomy as ?category= — absent means 0');
     assert.equal(d.boxes.dymo.hidden, true);
     assert.equal(d.boxes.epson.hidden, true);
     assert.equal(d.boxes.hp, undefined, 'a stocked brand is never touched');
 });
 
-test('§D an absent key the confirming read says is stocked SHOWS the real total and warns (the ERR-215 drift)', async () => {
-    const d = brandCounts({ category: 'consumable', counts: COUNTS, totals: { epson: 5, dymo: 0 } });
+test('§D drums: epson 5 is COUNTED now (was absent before BF-091) and shown', async () => {
+    const d = brandCounts({ category: 'consumable', counts: COUNTS, totals: {} });
     await d.run(['epson', 'hp', 'dymo']);
-    assert.equal(d.tiles.epson.textContent, '5 products', 'epson drums: absent from counts, 5 served — shown');
+    assert.equal(d.tiles.epson.textContent, '5 products');
     assert.equal(d.boxes.epson, undefined, 'not hidden');
     assert.equal(d.tiles.hp.textContent, '33 products');
-    assert.ok(d.warned.some((w) => /epson\/drums/.test(w) && /serves 5/.test(w)));
+    assert.equal(d.boxes.dymo.hidden, true);
 });
 
-test('§D an UNMEASURED zero keeps the tile (never absence-as-zero) and says so', async () => {
-    const d = brandCounts({ category: 'toner', counts: COUNTS, totals: { dymo: null, epson: new Error('429') } });
+test('§D a FAILED counts request keeps every tile (unmeasured, not empty)', async () => {
+    const d = brandCounts({ category: 'toner', counts: null, totals: {} });
     await d.run(['dymo', 'epson']);
     assert.equal(d.boxes.dymo?.hidden ?? false, false);
     assert.equal(d.boxes.epson?.hidden ?? false, false);
-    assert.equal(d.warned.filter((w) => /tile KEPT/.test(w)).length, 2);
 });
 
 test('§D a brand the counts endpoint does not know is left alone (blank, visible, unconfirmed)', async () => {
@@ -321,7 +314,8 @@ test('§E updateTitle prints the mirrored H1 on a printer hub, the printer name 
 
 test('§E the printer name is display-cased where it is stored, so breadcrumb, H1 and headings agree', () => {
     const code = stripComments(SHOP_SRC);
-    assert.match(code, /this\.state\.printerName = \(typeof PrinterName !== 'undefined' && rawPrinterName\)\s*\? PrinterName\.display\(rawPrinterName\) : rawPrinterName;/);
+    // The printer object's own display_name first (BF-093, ERR-299), else the mirror.
+    assert.match(code, /this\.state\.printerName = \(typeof PrinterName !== 'undefined'\)\s*\? \(\(printerData && PrinterName\.of\(printerData\)\) \|\| PrinterName\.display\(rawPrinterName \|\| ''\) \|\| rawPrinterName\)/);
     assert.equal(U.PrinterName.display(U.PrinterName.display('Brother HL L2375DW')), 'Brother HL-L2375DW', 'display() is idempotent');
 });
 

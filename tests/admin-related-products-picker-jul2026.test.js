@@ -142,5 +142,7 @@ test('PDP ribbon related is manual-only (no getShopData in the ribbon branch)', 
     PDP.indexOf('} else {', PDP.indexOf("if (info.category === 'ribbon') {"))
   );
   assert.doesNotMatch(ribbon, /getShopData/);
-  assert.match(ribbon, /info\.related_product_skus/);
+  // The curated list arrives server-resolved as related_products (BF-092, ERR-299).
+  assert.match(ribbon, /ribbonRelatedCards\(info\)/);
+  assert.match(PDP, /info\.related_products/);
 });

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.28-best-sellers';
+const APP_VERSION = '2026.09.29-best-sellers-bf089';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -27,6 +27,7 @@ import { AdminAPI } from './api.js';
 // The Analytics hub's tab list, shared with pages/analytics.js so the sidebar's
 // sub-links and the page's own tab bar can never disagree. See that file's header.
 import { ANALYTICS_TABS } from './utils/analytics-tabs.js';
+import { CATEGORY_OPTIONS } from './utils/best-sellers.js';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
@@ -822,6 +823,8 @@ async function boot() {
       FilterState.setOptions('suppliers', suppliers.map(s => typeof s === 'string' ? s : s.name || String(s)));
     }
     if (dataStart) FilterState.setDataStartDate(dataStart);
+    // Fixed codes, not data: category_filter matches products.category (BF-090).
+    FilterState.setOptions('categories', CATEGORY_OPTIONS);
 
     // Wire filter changes to current page
     FilterState.subscribe(() => {

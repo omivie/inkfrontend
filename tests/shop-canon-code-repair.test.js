@@ -372,47 +372,20 @@ test('deep-linking to an already-correct pair fires no recovery fetch', async ()
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. _applyManualCodes — the duplicate-tile bug
+// 5. the duplicate-tile bug cannot recur: there is no manual layer to push tiles
+//    (ERR-299 deleted it; the backend folds override codes into their chips)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('a manual code the pair chip already speaks for does not spawn a duplicate tile', async () => {
+test('_finalizeShopData adds no chip of its own to the Canon pair series', async () => {
     const API = loadAPI();
     const params = { brand: 'canon', category: 'ink' };
     const primary = { ok: true, data: { series: CANON_SERIES(), products: [] } };
-    const truncated = API._detectTruncatedChips(primary, params);
-
-    // The live product_codes rows: a hand-patch that used to render 3 extra tiles.
-    API._fetchManualCodesByProduct = async () => new Map();
-    API._fetchManualChipCounts = async () => ([
-        { code: 'PG510', count: 2 },       // a half of PG510/CL511
-        { code: 'CL511', count: 1 },       // the other half
-        { code: 'CL511CLR', count: 1 },    // a suffixed variant of a half
-        { code: 'CL51', count: 1 },        // the truncated code the repair absorbs
-    ]);
-
-    await API._applyManualCodes(primary, params, truncated);
-
+    await API._finalizeShopData(primary, params);
     const codes = primary.data.series.map(c => c.code);
     for (const dupe of ['PG510', 'CL511', 'CL511CLR']) {
         assert.ok(!codes.includes(dupe), `${dupe} is already covered by PG510/CL511`);
     }
-    assert.equal(codes.filter(c => c === 'CL51').length, 1, 'must not re-add the absorbed CL51');
-    assert.deepEqual(codes.sort(), CANON_SERIES().map(c => c.code).sort(),
-        'the manual layer must add no chips at all here');
-});
-
-test('a genuinely new manual code still gets its tile', async () => {
-    const API = loadAPI();
-    const params = { brand: 'canon', category: 'ink' };
-    const primary = { ok: true, data: { series: CANON_SERIES(), products: [] } };
-    const truncated = API._detectTruncatedChips(primary, params);
-
-    API._fetchManualCodesByProduct = async () => new Map();
-    API._fetchManualChipCounts = async () => ([{ code: 'LC57', count: 2 }]);
-
-    await API._applyManualCodes(primary, params, truncated);
-    assert.ok(primary.data.series.some(c => c.code === 'LC57'),
-        'the purely-manual-code case must keep working');
+    assert.equal(API._applyManualCodes, undefined);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -426,14 +399,10 @@ test('shop-page bumps the chip cache to v9', () => {
         'no v8 key may still be read, or a stale split CL51 tile survives the deploy');
 });
 
-test('getShopData runs detection before the manual layer and repair after it', () => {
+test('getShopData runs detection before repair, with no manual layer between them (ERR-299)', () => {
     const detect = API_CODE.indexOf('_detectTruncatedChips(primary, params)');
-    const manual = API_CODE.indexOf('this._applyManualCodes(primary, params, truncated)');
     const repair = API_CODE.indexOf('this._repairTruncatedSeries(primary, params, truncated)');
-
-    assert.ok(detect > 0 && manual > 0 && repair > 0, 'all three must be wired into getShopData');
-    assert.ok(detect < manual,
-        'the manual layer needs the suspect set to avoid pushing duplicate tiles');
-    assert.ok(manual < repair,
-        'repair must run last so its series_codes rewrite wins over a stale manual override');
+    assert.ok(detect > 0 && repair > 0, 'both must be wired into getShopData');
+    assert.ok(detect < repair, 'repair needs the suspect set detection computes');
+    assert.equal(API_CODE.indexOf('_applyManualCodes'), -1, 'the manual layer is gone');
 });

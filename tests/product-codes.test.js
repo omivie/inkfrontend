@@ -25,7 +25,8 @@
  *   2. the AdminAPI surface (getProductCodes / setProductCodes / getCodeCatalogue)
  *   3. the admin drawer shell + save wiring
  *   4. wireProductCodesSection behaviour (seed, edit, save-diff gate)
- *   5. api.js _applyManualCodes — override, chip injection, code recovery
+ *   5. api.js — the storefront manual-code layer is GONE (ERR-294, ERR-299):
+ *      the backend applies overrides, visitors and the 950XL→950 chip fold
  *   6. the getShopData integration is fail-open
  */
 
@@ -222,10 +223,11 @@ test('setCodeMembership adds/removes ONE code, preserving each product’s other
   assert.match(fn, /c\.length < 2 \|\| c\.length > 24/);
 });
 
-test('every write clears the storefront’s 60s manual-code cache', () => {
-  // js/api.js caches product_codes reads for 60s. Without a flush the admin
-  // saves, reloads /shop, and sees the old chips — and concludes it didn't work.
-  assert.match(ADMIN_API, /_clearStorefrontCodeCache\(\)\s*\{[\s\S]*?_manualCodeCache\.clear\(\)/);
+test('every write clears the admin code-universe snapshot (the storefront manual-code cache is gone, ERR-299)', () => {
+  // The storefront no longer reads product_codes at all (ERR-299), so there is
+  // no storefront cache to flush; the admin's own universe snapshot still is.
+  assert.match(ADMIN_API, /_clearStorefrontCodeCache\(\)\s*\{\s*this\._clearCodeUniverseCache\(\);\s*\}/);
+  assert.doesNotMatch(ADMIN_API, /_manualCodeCache/);
   for (const method of ['async setCodeMembership(', 'async applyBrandCodeChange(']) {
     const start = ADMIN_API.indexOf(method);
     const chunk = ADMIN_API.slice(start, start + 2600);
@@ -724,7 +726,7 @@ test('brand-wide rename rewrites the code across products and in the grid', asyn
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. api.js — _applyManualCodes (override / chip injection / recovery)
+// 5. api.js — the manual-code layer is gone (ERR-299); only the category map stays
 // ─────────────────────────────────────────────────────────────────────────────
 
 function loadAPI({ debugLog } = {}) {
@@ -747,13 +749,12 @@ function loadAPI({ debugLog } = {}) {
   return win.API;
 }
 
-test('api.js loads cleanly; only the chip-count reader of the manual-code layer is left (ERR-294)', () => {
+test('api.js loads cleanly; the whole storefront manual-code layer is gone (ERR-294, ERR-299)', () => {
   const API = loadAPI();
-  for (const m of ['_applyManualCodes', '_fetchManualChipCounts', '_supabaseSelect', '_CATEGORY_PRODUCT_TYPES']) {
-    assert.ok(API[m] !== undefined, `API.${m} must exist`);
-  }
-  for (const m of ['_fetchManualCodesByProduct', '_fetchVisitorIdsForCode', '_fetchVisitorRows', 'getManualProductCodes']) {
-    assert.equal(API[m], undefined, `API.${m} is deleted: the backend serves what it read (BF-085/086)`);
+  assert.ok(API._CATEGORY_PRODUCT_TYPES, 'the category map stays: shop-page and the admin read it');
+  for (const m of ['_applyManualCodes', '_fetchManualChipCounts', '_supabaseSelect', '_manualCodeCache',
+    '_fetchManualCodesByProduct', '_fetchVisitorIdsForCode', '_fetchVisitorRows', 'getManualProductCodes']) {
+    assert.equal(API[m], undefined, `API.${m} is deleted: the backend serves what it read (BF-085/086/088)`);
   }
 });
 
@@ -762,85 +763,6 @@ test('_CATEGORY_PRODUCT_TYPES maps each /shop category to its product_types', ()
   assert.deepEqual(plain(API._CATEGORY_PRODUCT_TYPES.ink), ['ink_cartridge', 'ink_bottle']);
   assert.deepEqual(plain(API._CATEGORY_PRODUCT_TYPES.toner), ['toner_cartridge']);
   assert.ok(API._CATEGORY_PRODUCT_TYPES.ribbons.includes('typewriter_ribbon'));
-});
-
-test('(1) override — every row\'s series_codes is the backend\'s, ribbons included: NO product_codes read', async () => {
-  // Since 2026-09-28 GET /api/shop and /api/products apply product_codes
-  // overrides server-side (74fb234) AND the owner-manual ribbon rule (BF-085:
-  // a ribbon with no override carries []). ERR-294 deleted the ribbon read.
-  const API = loadAPI();
-  const asked = [];
-  API._supabaseSelect = async (q) => { asked.push(q); return []; };
-  const primary = { ok: true, data: { products: [
-    { id: 'p1', product_type: 'ink_cartridge', series_codes: ['LC40', 'LC57'] },
-    { id: 'r1', product_type: 'typewriter_ribbon', series_codes: ['DIN2103', 'GR51'] },
-    { id: 'r2', product_type: 'printer_ribbon', series_codes: [] },
-  ] } };
-  await API._applyManualCodes(primary, { brand: 'brother', category: 'ink' });
-  assert.deepEqual(plain(primary.data.products.map((p) => p.series_codes)), [['LC40', 'LC57'], ['DIN2103', 'GR51'], []]);
-  assert.ok(!asked.some((q) => q.startsWith('product_codes')), `no product_codes read: ${JSON.stringify(asked)}`);
-});
-
-test('(1) override — a grid with no series makes NO Supabase read at all', async () => {
-  const API = loadAPI();
-  let calls = 0;
-  API._supabaseSelect = async () => { calls++; return []; };
-  const primary = { ok: true, data: { products: [{ id: 'p1', product_type: 'toner_cartridge', series_codes: ['TN253'] }] } };
-  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner' });
-  assert.equal(calls, 0);
-  assert.deepEqual(plain(primary.data.products[0].series_codes), ['TN253']);
-});
-
-test('(2) chip injection — a purely-manual code gains its own drilldown chip', async () => {
-  const API = loadAPI();
-  API._supabaseSelect = async (q) => {
-    if (q.startsWith('product_code_chip_counts')) {
-      return [{ code: 'LC57', product_count: 2 }, { code: 'LC40', product_count: 9 }];
-    }
-    return [];
-  };
-  const primary = { ok: true, data: {
-    products: [],
-    series: [{ code: 'LC40', count: 9 }, { code: 'TN253', count: 4 }],
-  } };
-  await API._applyManualCodes(primary, { brand: 'brother', category: 'ink' });
-  const codes = primary.data.series.map(s => s.code);
-  assert.ok(codes.includes('LC57'), 'manual-only code LC57 was injected as a chip');
-  const lc40 = primary.data.series.find(s => s.code === 'LC40');
-  assert.equal(lc40.count, 9, 'an already-present chip keeps its backend count');
-});
-
-test('(3) code grid — cross-type visitors are the backend\'s job now (BF-086): no read, no pool, nothing merged', async () => {
-  // /api/shop?brand&category&code lists products of another type tagged into
-  // the chip (chip_category) since 2026-09-28. The visitor summary, the
-  // per-code visitor-id read and the cross-category pool walk are deleted.
-  const API = loadAPI();
-  const asked = [];
-  API._supabaseSelect = async (q) => { asked.push(q); return [{ product_id: 'drum' }]; };
-  let pools = 0;
-  API.getWithSWR = async () => { pools++; return { ok: true, data: { products: [{ id: 'drum', series_codes: ['TN155'] }] } }; };
-  const primary = { ok: true, data: { products: [{ id: 't1', series_codes: ['TN155'] }] }, meta: { total: 1 } };
-  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner', code: 'TN155' });
-  assert.deepEqual(asked, [], 'no Supabase read on a code grid');
-  assert.equal(pools, 0, 'no pool fetched');
-  assert.deepEqual(plain(primary.data.products.map((p) => p.id)), ['t1']);
-  assert.equal(primary.meta.total, 1, 'the server total stands');
-});
-
-test('(2) chips — a visitor is NOT added on top of the server\'s series (it would be counted twice)', async () => {
-  // BF-086: the server's `series` already counts a tagged-in visitor. The old
-  // client arithmetic (+1 per product_code_visitors row) would now DOUBLE it.
-  const API = loadAPI();
-  const asked = [];
-  API._supabaseSelect = async (q) => {
-    asked.push(q);
-    if (q.startsWith('product_code_visitors')) return [{ code: 'TN155', product_type: 'drum_unit', chip_category: 'toner', product_count: 1 }];
-    return [];
-  };
-  const primary = { ok: true, data: { products: [], series: [{ code: 'TN155', count: 7 }] } };
-  await API._applyManualCodes(primary, { brand: 'brother', category: 'toner' });
-  assert.equal(primary.data.series.find((s) => s.code === 'TN155').count, 7, 'the server count stands');
-  assert.ok(!asked.some((q) => q.startsWith('product_code_visitors')), 'the visitor view is never read');
 });
 
 // setProductCodes is a delete-then-insert: whatever it doesn't carry forward is
@@ -901,26 +823,6 @@ test('setProductCodes REFUSES a visitor write before deleting when the column is
   assert.deepEqual(plain(b.log.find(l => l[0] === 'insert')[1]), [{ product_id: 'p1', code: 'LC40' }]);
 });
 
-test('_applyManualCodes is fail-open — a Supabase outage leaves the response intact', async () => {
-  const API = loadAPI();
-  API._supabaseSelect = async () => { throw new Error('supabase unreachable'); };
-  const primary = { ok: true, data: { products: [{ id: 'p1', series_codes: ['LC40'] }],
-    series: [{ code: 'LC40', count: 1 }] } };
-  const out = await API._applyManualCodes(primary, { brand: 'brother', category: 'ink' });
-  assert.equal(out, primary, 'the same response object is returned');
-  assert.deepEqual(primary.data.products[0].series_codes, ['LC40'], 'untouched on failure');
-});
-
-test('_fetchManualChipCounts sums product_count across product_types of a category', async () => {
-  const API = loadAPI();
-  API._supabaseSelect = async () => ([
-    { code: 'LC40', product_count: 3 },   // ink_cartridge rows
-    { code: 'LC40', product_count: 1 },   // ink_bottle rows — same chip
-  ]);
-  const chips = await API._fetchManualChipCounts('brother', ['ink_cartridge', 'ink_bottle']);
-  assert.deepEqual(plain(chips), [{ code: 'LC40', count: 4 }]);
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. getShopData integration
 // ─────────────────────────────────────────────────────────────────────────────
@@ -935,12 +837,11 @@ test('getShopData routes BOTH return paths through _finalizeShopData', () => {
   const fn = API_SRC.slice(start, end);
   // The compat-recovery skip and the merged return must BOTH post-process —
   // the skip is the common path, so a hook only on the merged return would
-  // leave manual codes and truncated-chip repair off for most requests.
+  // leave truncated-chip repair off for most requests.
   const hooks = fn.match(/_finalizeShopData\(primary, params\)/g) || [];
   assert.equal(hooks.length, 2, 'the early-skip and the final return both post-process');
   assert.doesNotMatch(fn, /\n\s*return primary;/, 'no raw `return primary` bypasses the hook');
 
-  // And the hook itself still applies manual codes.
-  assert.match(API_SRC, /async _finalizeShopData\([\s\S]{0,400}_applyManualCodes\(primary, params/,
-    '_finalizeShopData must run the manual-code layer');
+  // And the hook no longer runs a manual-code layer (ERR-299).
+  assert.doesNotMatch(API_SRC, /_applyManualCodes/, 'the manual-code layer is gone');
 });

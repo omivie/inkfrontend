@@ -85,7 +85,7 @@ let _storageHydrated = false;   // seed the Map from localStorage exactly once p
 // payload can carry up to 1000 expense rows + 18 chart series).
 // BUMP DASH_CACHE_SCHEMA whenever the `payload` object shape (in loadDashboard) changes, so
 // a stale-shape blob from a previous deploy is ignored rather than fed to render().
-const DASH_CACHE_SCHEMA = 3; // 2: added payload.sTraffic (Performance overview traffic overlay); 3: topProducts is getBestSellers()' object, not a row array
+const DASH_CACHE_SCHEMA = 4; // 2: added payload.sTraffic (Performance overview traffic overlay); 3: topProducts is getBestSellers()' object, not a row array; 4: its rows are server-grouped (BF-089) and a failure is { error }
 function _dashCacheKey() {
   const uid = (typeof Auth !== 'undefined' && Auth.user && Auth.user.id) ? Auth.user.id : 'anon';
   return `admin_dash_cache:${uid}`;
@@ -2666,6 +2666,7 @@ function renderTopProductsBody() {
   // Partial-ness is said on the card, never left to look like a full ranking.
   const notes = [];
   if (_topData?.truncated) notes.push('Server row cap reached — ranking covers a partial set.');
+  if (_topData?.dupSkus) notes.push(`${_topData.dupSkus} SKU(s) split across rows — totals are partial.`);
   if (metricIncomplete(items, _topMetric)) notes.push(`Some products have no ${_topMetric} figure and rank last.`);
   return `
       ${notes.map(n => `<div class="admin-dash-inline-empty">${esc(n)}</div>`).join('')}
@@ -2683,7 +2684,7 @@ function renderTopProductsCard(data) {
     return `
       <div class="admin-dash__cell--6 admin-card">
         <div class="admin-card__title">Most Bought <small>top sellers</small></div>
-        <div class="admin-dash-inline-empty">${_topData ? 'No sales in this range' : 'Top product data unavailable'}</div>
+        <div class="admin-dash-inline-empty">${_topData ? 'No sales in this range' : esc(data?.error || 'Top product data unavailable')}</div>
       </div>
     `;
   }

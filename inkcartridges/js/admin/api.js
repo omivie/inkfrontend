@@ -9,7 +9,7 @@ import { BusinessAccountRegistry } from './utils/business-accounts.js';
 // pages/orders.js — see the module header for why it is not defined twice.
 import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './utils/order-invoice-sent.js';
 import { pgrstLike } from './utils/pgrst.js';
-import { TOP_PRODUCTS_MAX_LIMIT, mergeBySku, attachCatalog } from './utils/best-sellers.js';
+import { TOP_PRODUCTS_MAX_LIMIT, normalizeRows } from './utils/best-sellers.js';
 
 // The carrier registry (GET /api/admin/shipping/carriers) is a constant per
 // deploy — names, number labels, whether a product code is required, whether the
@@ -701,7 +701,12 @@ async function analyticsHttpGetNamed(path, signal) {
         const secs = Number(resp.retry_after);
         return { ok: false, rateLimited: true, retryAfter: Number.isFinite(secs) && secs > 0 ? secs : 60 };
       }
-      return { ok: false, status: resp.status || STATUS_FOR[resp.code] || null, code: resp.code || null };
+      // A 400 VALIDATION_FAILED resolves with per-field details (API.request);
+      // keep the server's words so a strict route's refusal can be SHOWN.
+      const message = Array.isArray(resp.details) && resp.details.length
+        ? resp.details.map(d => d?.message || String(d)).join('; ')
+        : (resp.error || null);
+      return { ok: false, status: resp.status || STATUS_FOR[resp.code] || null, code: resp.code || null, message };
     }
     return { ok: true, data: resp?.data ?? null, meta: resp?.meta ?? null };
   } catch (e) {
@@ -1282,49 +1287,26 @@ const AdminAPI = {
   },
 
   /**
-   * Every product sold in the filter range, merged by SKU, with catalogue brand /
-   * type / pack attached — the input to every Best Sellers ranking (utils/best-sellers.js
-   * has the measured facts behind each step). Returns null when the sales fetch fails.
+   * Every product sold in the filter range, one row per product, with the brand /
+   * type / pack / sale_skus the server now attaches (BF-089, ERR-299 — facts in
+   * utils/best-sellers.js). The input to every Best Sellers ranking.
+   * On failure returns `{ error }` (no `items`): a 400 carries the server's own
+   * message (e.g. an unknown status), so the page never reads a refusal as "no sales".
    * `truncated`: the server filled its row cap, so rankings cover a cut, not the set.
-   * `catalogFailed`: the lookup failed, so brand/type/pack are unknown on every row.
+   * `dupSkus`: SKUs the server returned on several rows (a regression of BF-089).
    */
   async getBestSellers(filterParams, signal) {
     const qs = analyticsQuery(filterParams, { result_limit: TOP_PRODUCTS_MAX_LIMIT });
     const res = noteAnalyticsHealth('top-products-rpc',
       await analyticsHttpGetNamed(`/api/admin/analytics/top-products-rpc?${qs}`, signal));
-    const raw = !res.ok ? null : Array.isArray(res.data) ? res.data
-      : Array.isArray(res.data?.products) ? res.data.products : null;  // tolerate { products: [...] }
-    if (!raw) return null;
-    const merged = mergeBySku(raw);
-    let meta = null;
-    try { meta = await this.getProductMetaBySku(merged.map(i => i.sku).filter(Boolean)); } catch (_) { meta = null; }
-    return {
-      items: attachCatalog(merged, meta),
-      truncated: raw.length >= TOP_PRODUCTS_MAX_LIMIT,
-      catalogFailed: meta == null,
-    };
-  },
-
-  /**
-   * sku -> { brand, product_type, pack_type } straight from Supabase, INCLUDING
-   * inactive products (a best seller may since have been retired). Explicit
-   * columns only (ERR-170). Chunked so the `in.(…)` URL stays short.
-   * Throws on a failed read — the caller must tell "unknown" from "not in catalogue".
-   */
-  async getProductMetaBySku(skus) {
-    const sb = this._sb();
-    if (!sb) throw new Error('Supabase client unavailable');
-    const out = new Map();
-    for (let i = 0; i < skus.length; i += 150) {
-      const { data, error } = await sb.from('products')
-        .select('sku, product_type, pack_type, brands(name), ribbon_brands!products_ribbon_brand_id_fkey(name)')
-        .in('sku', skus.slice(i, i + 150));
-      if (error) throw error;
-      for (const p of data || []) {
-        out.set(p.sku, { brand: p.brands?.name || p.ribbon_brands?.name || null, product_type: p.product_type, pack_type: p.pack_type });
-      }
+    const raw = res.ok && Array.isArray(res.data) ? res.data : null;
+    if (!raw) {
+      return { error: res.code === 'VALIDATION_FAILED' && res.message
+        ? `The server refused this filter: ${res.message}`
+        : 'The sales ranking could not be loaded. Change the period or reload to retry.' };
     }
-    return out;
+    const { items, dupSkus } = normalizeRows(raw);
+    return { items, dupSkus, truncated: raw.length >= TOP_PRODUCTS_MAX_LIMIT };
   },
 
   // ---- Dashboard graph series (paired-row redesign, Jun 2026) ----
@@ -2943,17 +2925,11 @@ const AdminAPI = {
   },
 
   /**
-   * Both code caches are stale after any write: the storefront's manual-code
-   * cache AND our own universe snapshot (a rename adds one code and drops
-   * another). Called from every write path below.
+   * Our code-universe snapshot is stale after any write (a rename adds one code
+   * and drops another). Called from every write path below. The storefront's
+   * manual-code cache it also used to clear no longer exists (ERR-299).
    */
   _clearStorefrontCodeCache() {
-    try {
-      if (typeof window !== 'undefined' && window.API
-          && window.API._manualCodeCache && window.API._manualCodeCache.clear) {
-        window.API._manualCodeCache.clear();
-      }
-    } catch (_) { /* non-fatal */ }
     this._clearCodeUniverseCache();
   },
 

@@ -70,8 +70,8 @@ test('the PDP takes series_codes from the product response — no override read 
 // 3. Ribbon related products are OWNER-CURATED ONLY (ERR-085, Jul 16 2026)
 //    The ERR-082 shared-code family union was intentionally RETIRED for ribbons:
 //    the owner decided ribbons are manual, not backend-derived. The ribbon branch
-//    must now resolve ONLY the curated related_product_skus (still prefix-tolerant
-//    per ERR-084) and make NO backend code-family call.
+//    shows ONLY the curated related_product_skus — resolved by the server as
+//    related_products since BF-092 (ERR-299) — and makes NO code-family call.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RIBBON_BRANCH = PDP.slice(
@@ -79,11 +79,11 @@ const RIBBON_BRANCH = PDP.slice(
   PDP.indexOf('} else {', PDP.indexOf("if (info.category === 'ribbon') {"))
 );
 
-test('the ribbon branch still honours the curated related_product_skus', () => {
-  assert.match(PDP, /const manualSkus = info\.related_product_skus;/,
-    'curated related_product_skus must still feed the ribbon section');
-  assert.match(RIBBON_BRANCH, /relatedSkuCandidates\(/,
-    'and resolve them prefix-tolerantly (ERR-084)');
+test('the ribbon branch still shows ONLY the curated list — now resolved by the server (BF-092)', () => {
+  assert.match(RIBBON_BRANCH, /ribbonRelatedCards\(info\)/,
+    'curated related_products (the server-resolved related_product_skus) feed the ribbon section');
+  assert.match(PDP, /const list = info && info\.related_products;/,
+    'the source is the ribbon response\'s related_products, prefix-tolerant server-side (ERR-084 rule)');
 });
 
 test('the ribbon branch makes NO backend code-family fetch (manual-only, ERR-085)', () => {

@@ -318,39 +318,42 @@ test('getCustomerStats reads the ROUTE, never the RPC, even for returning_pct', 
 });
 
 // =====================================================================
-// 6. getBestSellers — merged by SKU, catalogue failure named
+// 6. getBestSellers — server-grouped rows (BF-089), a 400 names its cause
 // =====================================================================
-test('getBestSellers reads the bare array, asks for the full set, and merges by SKU', async () => {
+test('getBestSellers reads the bare array, asks for the full set, and maps server facts', async () => {
   let url = '';
   installGlobals({
     apiGet: async (u) => { url = u; return { ok: true, data: [
-      { product_name: 'X', product_sku: 'GX', revenue: 10, units_sold: 1, order_count: 1 },
-      { product_name: 'X (old name)', product_sku: 'GX', revenue: 5, units_sold: 2, order_count: 1 },
+      { product_name: 'X', product_sku: 'GX', revenue: 10, units_sold: 1, order_count: 1,
+        sale_skus: ['GX-OLD', 'GX'], brand: 'HP', product_type: 'ink_cartridge', pack_type: 'single' },
     ] }; },
+    fetchImpl: async () => { throw new Error('no Supabase catalogue read may be attempted'); },
   });
-  globalThis.Auth = { supabase: { from: () => ({ select: () => ({ in: async () => ({ data: [
-    { sku: 'GX', product_type: 'ink_cartridge', pack_type: 'single', brands: { name: 'HP' } },
-  ], error: null }) }) }) } };
-  try {
-    const out = await AdminAPI.getBestSellers(params({ from: '2026-05-05', to: '2026-06-04' }));
-    assert.match(url, /result_limit=500/);
-    assert.equal(out.items.length, 1);
-    assert.deepEqual([out.items[0].revenue, out.items[0].units, out.items[0].orders], [15, 3, 2]);
-    assert.equal(out.items[0].brand, 'HP');
-    assert.equal(out.truncated, false);
-    assert.equal(out.catalogFailed, false);
-  } finally { delete globalThis.Auth; }
+  const out = await AdminAPI.getBestSellers(params({ from: '2026-05-05', to: '2026-06-04' }));
+  assert.match(url, /result_limit=500/);
+  assert.equal(out.items.length, 1);
+  assert.deepEqual([out.items[0].revenue, out.items[0].units, out.items[0].orders], [10, 1, 1]);
+  assert.equal(out.items[0].brand, 'HP');
+  assert.deepEqual(out.items[0].soldAs, ['GX-OLD']);
+  assert.equal(out.truncated, false);
+  assert.equal(out.dupSkus, 0);
 });
 
-test('getBestSellers unwraps { products: [...] } and NAMES a failed catalogue lookup', async () => {
+test('getBestSellers: a 400 VALIDATION_FAILED is { error } naming the server message — never "no sales"', async () => {
   installGlobals({
-    apiGet: async () => ({ ok: true, data: { products: [{ product_name: 'Y', product_sku: 'GY', revenue: 1 }] } }),
+    apiGet: async () => ({ ok: false, code: 'VALIDATION_FAILED', error: 'Validation failed',
+      details: [{ field: 'status_filter', message: 'status_filter: unknown order status "zz"' }] }),
   });
-  // No Auth.supabase: the lookup cannot run, so brand/type/pack are unknown — not "absent".
   const out = await AdminAPI.getBestSellers(params({ from: '2026-05-05', to: '2026-06-04' }));
-  assert.equal(out.items[0].name, 'Y');
-  assert.equal(out.catalogFailed, true);
-  assert.equal(out.items[0].inCatalog, null);
+  assert.equal(out.items, undefined, 'no items array: the dashboard card and the tab both render the error');
+  assert.match(out.error, /unknown order status "zz"/);
+});
+
+test('getBestSellers: any other failure is { error } too, with a generic message', async () => {
+  installGlobals({ apiGet: async () => { throw Object.assign(new Error('boom'), { status: 503 }); } });
+  const out = await AdminAPI.getBestSellers(params({ from: '2026-05-05', to: '2026-06-04' }));
+  assert.equal(out.items, undefined);
+  assert.match(out.error, /could not be loaded/);
 });
 
 // =====================================================================

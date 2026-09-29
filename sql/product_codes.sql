@@ -129,6 +129,11 @@ comment on view public.product_code_catalogue is
 -- case). Keyed by brand SLUG + product_type — the two facts api.js holds when
 -- it builds the drilldown — so no uuid/category translation is needed client
 -- side.
+--
+-- 2026-09-29 (ERR-299): the STOREFRONT NO LONGER READS THIS VIEW. The backend's
+-- /api/shop `series` carries every override code under its chip (BF-088), so
+-- api.js's chip injection was deleted. Only scripts/probe-four-replies-sep2026.mjs
+-- still reads it, to verify that claim. Dropping it is an owner decision.
 create or replace view public.product_code_chip_counts as
   select b.slug        as brand_slug,
          p.product_type as product_type,

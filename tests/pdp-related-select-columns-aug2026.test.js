@@ -40,35 +40,6 @@ const ROOT = path.resolve(__dirname, '..');
 const PDP = path.join(ROOT, 'inkcartridges', 'js', 'product-detail-page.js');
 const src = fs.readFileSync(PDP, 'utf8');
 
-/**
- * Columns verified to EXIST on the live `products` table (2026-08-17). The
- * explicit list is only safer than `*` if every name in it is real — PostgREST
- * 400s the whole query on an unknown column, which would be a worse outage than
- * the one being fixed. Nine plausible-sounding fields were rejected during this
- * work precisely because they are API-computed and not table columns:
- * in_stock, average_rating, review_count, canonical_url, original_price,
- * discount_amount, discount_percent, cost_per_page_display,
- * image_thumbnail_url, image_srcset.
- */
-const REAL_COLUMNS = new Set([
-    'id', 'sku', 'name', 'slug', 'retail_price', 'compare_price', 'image_url',
-    'color', 'color_hex', 'pack_type', 'source', 'product_type',
-    'stock_quantity', 'stock_status', 'is_active',
-]);
-
-/** Fields that are NOT columns on `products` — including one in the query would 400 it. */
-const NOT_COLUMNS = [
-    'in_stock', 'average_rating', 'review_count', 'canonical_url', 'original_price',
-    'discount_percent', 'cost_per_page_display', 'image_thumbnail_url', 'image_srcset',
-];
-
-function relatedColsLiteral() {
-    const m = /const RELATED_COLS = ([\s\S]*?);/.exec(src);
-    assert.ok(m, 'RELATED_COLS must exist as a named constant, not an inline string');
-    // Collapse the concatenated string literal into the actual column list.
-    return m[1].replace(/['"`+\s]+/g, ' ').trim();
-}
-
 // ─── 1. No wildcard ────────────────────────────────────────────────────────
 
 test('the curated lookup no longer selects *', () => {
@@ -81,59 +52,22 @@ test('there is no select(*) anywhere in the PDP', () => {
     assert.deepEqual(matches, [], 'a wildcard select returns cost_price implicitly');
 });
 
-// ─── 2. The explicit list is correct, and only contains real columns ────────
+// ─── 2. The curated lookup moved to the server (BF-092, ERR-299) ─────────────
+// The RELATED_COLS read this file used to pin is GONE: GET /api/ribbons/:sku
+// resolves the curated list itself (`related_products`), so no anon read of
+// `products` is left for the cost_price revoke to break. What ERR-170 was
+// really about — a failed lookup must not read as an empty curation — still
+// holds, and is pinned below and RUN in pdp-related-sku-prefix-jul2026.test.js.
 
-test('RELATED_COLS lists only columns that actually exist on products', () => {
-    const cols = relatedColsLiteral()
-        .replace(/brand:brands\([^)]*\)/, '')          // the aliased join is not a column
-        .split(',').map((c) => c.trim()).filter(Boolean);
-    const bogus = cols.filter((c) => !REAL_COLUMNS.has(c));
-    assert.deepEqual(bogus, [],
-        'an unknown column is a hard 400 — strictly worse than the wildcard this replaced:\n  '
-        + bogus.join('\n  '));
+test('the ribbon rail makes no direct products read at all', () => {
+    assert.doesNotMatch(src, /RELATED_COLS|manualProducts|manualError/);
 });
 
-test('RELATED_COLS contains none of the API-computed fields that would 400 the query', () => {
-    const literal = relatedColsLiteral();
-    const bad = NOT_COLUMNS.filter((c) => new RegExp(`\\b${c}\\b`).test(literal));
-    assert.deepEqual(bad, [], 'these are computed by the API and are not table columns');
-});
-
-test('RELATED_COLS carries no cost-bearing column', () => {
-    const literal = relatedColsLiteral();
-    for (const c of ['cost_price', 'profit_ex_gst', 'margin_pct']) {
-        assert.ok(!new RegExp(`\\b${c}\\b`).test(literal), `${c} must never reach the storefront`);
-    }
-});
-
-test('RELATED_COLS covers what the card renderer actually reads', () => {
-    const literal = relatedColsLiteral();
-    // Products.renderCard + its helpers + the PDP's own inferSource/inferProductType.
-    for (const needed of ['sku', 'name', 'slug', 'retail_price', 'image_url',
-        'color', 'pack_type', 'source', 'product_type', 'stock_status']) {
-        assert.match(literal, new RegExp(`\\b${needed}\\b`),
-            `renderCard reads ${needed}; dropping it silently degrades the card`);
-    }
-});
-
-test('the brands join is ALIASED to `brand`, because the renderer reads product.brand?.name', () => {
-    assert.match(relatedColsLiteral(), /brand:brands\(\s*name\s*,\s*slug\s*\)/,
-        'an unaliased brands(...) join arrives as `brands` and the brand line renders empty');
-});
-
-// ─── 3. The error is captured, not discarded ───────────────────────────────
-
-test('the curated lookup destructures `error` and acts on it', () => {
-    assert.match(src, /const \{ data: manualProducts, error: manualError \} = await sb\.from\('products'\)/,
-        'dropping `error` is what made a permissions failure look like an empty curation');
-    assert.match(src, /if \(manualError\)/, 'and it must be checked');
-});
-
-test('a failed curated lookup sets fetchFailed — an outage is not an empty result', () => {
-    const i = src.indexOf('if (manualError)');
-    const block = src.slice(i, i + 300);
-    assert.match(block, /fetchFailed = true/,
-        'the rail must record that it could not ask, so the empty state is not claimed');
+test('a failed curated lookup (related_products null/absent) sets fetchFailed', () => {
+    const i = src.indexOf('const curated = ribbonRelatedCards(info);');
+    assert.ok(i > -1);
+    const block = src.slice(i, i + 400);
+    assert.match(block, /if \(curated\.failed\) \{\s*fetchFailed = true;/);
     assert.match(block, /DebugLog\.(error|warn)/, 'and leave something to debug from');
 });
 

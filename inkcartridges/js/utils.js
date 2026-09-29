@@ -2986,7 +2986,16 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
  *
  * Known gap: one HP row, "HP DESKJET 3520 E-ALL-IN-ONE-PRINTER", is rewritten
  * by the backend to "e-All-in-One Printer"; that compound is not mirrored.
- * The permanent fix is a display name on the printer rows (asked: BF-093, ERR-294).
+ *
+ * THE BACKEND'S OWN NAME WINS (BF-093, built; ERR-299). `display_name` now sits
+ * beside `full_name` on /api/products/:sku compatible_printers[] and grouped
+ * top_models[], /api/printers/by-brand rows, and the `printer` object of
+ * /api/printers/:slug/products and /api/products/printer/:slug (measured
+ * 2026-09-29: "Brother HL L2375DW" → "Brother HL-L2375DW"). `of(p)` reads it
+ * first, and every printer-row caller goes through `of`. This mirror is now
+ * ONLY the fallback for rows that still lack it: /api/shop listing rows'
+ * compatible_printers[] and /api/printers/search (measured absent — asked as
+ * BF-094). ponytail: delete WORDS/BROTHER_PREFIX/display() once BF-094 lands.
  */
 const PrinterName = {
     WORDS: {
@@ -3031,6 +3040,20 @@ const PrinterName = {
         WORKFORCE: 'WorkForce',
     },
     BROTHER_PREFIX: /^(Brother )(ADS|DCP|FAX|HL|MFC|PT|QL) (?=\S*\d)/,
+
+    /**
+     * The name to print for a printer ROW: the backend's `display_name` when the
+     * row carries one, else the mirror over `full_name` (or brand + model_name).
+     * @param {{display_name?:string, full_name?:string, brand?:string|{name?:string}, model_name?:string}} p
+     * @returns {string}
+     */
+    of(p) {
+        if (!p || typeof p !== 'object') return '';
+        if (typeof p.display_name === 'string' && p.display_name.trim()) return p.display_name.trim();
+        const brand = typeof p.brand === 'string' ? p.brand : (p.brand && p.brand.name) || '';
+        return this.display(p.full_name || [brand, p.model_name].filter(Boolean).join(' '));
+    },
+
     display(name) {
         if (typeof name !== 'string') return '';
         let out = name
@@ -3059,9 +3082,8 @@ const PrinterName = {
 
     fitsLine(printers, total) {
         const names = (Array.isArray(printers) ? printers : [])
-            .map((p) => (p && (p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '))) || '')
-            .filter(Boolean)
-            .map((n) => this.display(n));
+            .map((p) => this.of(p))
+            .filter(Boolean);
         if (!names.length) return '';
         const shown = names.slice(0, 2);
         const count = Number(total);

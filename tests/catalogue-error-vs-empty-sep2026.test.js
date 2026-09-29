@@ -908,73 +908,17 @@ test('§7 _errorPaneShowing reads the DOM, and a legacy pane-less DOM is not "sh
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §8 — the manual-code cache must not memoise "we could not ask"
+// §8 — the manual-code cache (ERR-266) is GONE with the layer it cached
 //
-// _supabaseSelect (api.js:1718) returns null for a non-2xx, for a throw AND for
-// missing config, never as a real answer — a select that matched nothing gives
-// []. _manualCodeCacheGet counts only `undefined` as a miss, so that null stuck
-// for the full 60s TTL and the retry read the failure back out of memory. Fixed
-// in the SETTER, because all three call sites (:1761, :1797, :1833) are the same
-// three lines and a grep for one spelling is how ERR-259 shipped.
+// ERR-266 fixed a null (failed read) being memoised for 60s. ERR-299 deleted the
+// last reader behind that cache (the product_code_chip_counts view; BF-088), so
+// the cache, its setter guard and _supabaseSelect went with it. What stays true
+// is pinned here: no storefront code can memoise a failed product-codes read,
+// because the storefront makes none.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function liftManualCodes(supabaseSelect, src = API_SRC) {
-    const API = liftInto(src, [
-        '_manualCodeCacheGet(key)',
-        '_manualCodeCacheSet(key, value)',
-        // ERR-294: the visitor-id reader is deleted with the rest of the
-        // product_codes reads; the chip-count view is the cache's last reader.
-        'async _fetchManualChipCounts(brandSlug, productTypes)',
-        'purgeCatalogCache()',
-    ], { DebugLog: QUIET, window: {} });
-    API._manualCodeCache = new Map();
-    API._MANUAL_CODE_TTL = 60000;
-    API._swrCache = new Map();
-    API._swrInflight = new Map();
-    API._supabaseSelect = supabaseSelect;
-    return API;
-}
-
-test('§8 a FAILED manual-code read is not memoised — the retry asks again', async () => {
-    let calls = 0;
-    const API = liftManualCodes(async () => (++calls === 1 ? null : [{ code: 'lc431', product_count: 2 }]));
-
-    // Spread it: arrays built INSIDE the vm realm have a different prototype, so
-    // a strict deepEqual fails on two arrays that print identically.
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    assert.deepEqual([...(await API._fetchManualChipCounts('brother', ['ink_cartridge']))].map((r) => ({ ...r })),
-        [{ code: 'LC431', count: 2 }], 'the immediate retry must reach Supabase, not the memoised failure');
-    assert.equal(calls, 2, 'the failure must not have been cached');
-});
-
-test('§8 POSITIVE CONTROL — an empty ARRAY is a real answer and IS cached', async () => {
-    // Distinguishes "do not cache failures" from "do not cache anything", which
-    // would delete the cache's whole reason to exist.
-    let calls = 0;
-    const API = liftManualCodes(async () => { calls++; return []; });
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    assert.equal(calls, 1, 'a genuine "no manual codes" answer must still be memoised');
-});
-
-test('§8 POSITIVE CONTROL — a successful read is cached', async () => {
-    let calls = 0;
-    const API = liftManualCodes(async () => { calls++; return [{ code: 'LC431', product_count: 1 }]; });
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    assert.equal((await API._fetchManualChipCounts('brother', ['ink_cartridge'])).length, 1);
-    assert.equal(calls, 1, 'a good read must be memoised');
-});
-
-test('§8 purgeCatalogCache clears the manual-code layer too', async () => {
-    let calls = 0;
-    const API = liftManualCodes(async () => { calls++; return [{ code: 'LC431', product_count: 1 }]; });
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    assert.equal(API._manualCodeCache.size, 1);
-    API.purgeCatalogCache();
-    assert.equal(API._manualCodeCache.size, 0,
-        'the manual-code layer is catalogue data and must not outlive a purge');
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    assert.equal(calls, 2, 'after a purge the next read must reach the network');
+test('§8 no manual-code cache survives to memoise a failure (ERR-299 removed the reader)', () => {
+    assert.doesNotMatch(API_SRC, /_manualCodeCache|_supabaseSelect|_fetchManualChipCounts/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1102,16 +1046,4 @@ test('§9 MUTANT — drop the NOT_FOUND carve-out and a real "none" becomes a de
         async () => ({ ok: false, code: 'NOT_FOUND' }), { src: broken });
     assert.ok(kindsOf(nav).includes('error'),
         'without the carve-out NOT_FOUND must become an outage — the carve-out is a decision, not noise');
-});
-
-test('§9 MUTANT — delete the manual-code null guard and the failure sticks for the TTL', async () => {
-    const broken = mutate(API_SRC,
-        'if (value === null || value === undefined) return value;',
-        '');
-    let calls = 0;
-    const API = liftManualCodes(async () => (++calls === 1 ? null : [{ code: 'LC431', product_count: 1 }]), broken);
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    await API._fetchManualChipCounts('brother', ['ink_cartridge']);
-    assert.equal(calls, 1,
-        'without the guard the failed read must be served back out of cache — that is the bug');
 });

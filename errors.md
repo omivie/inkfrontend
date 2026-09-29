@@ -41,6 +41,59 @@ describing the same incident.
 
 ---
 
+## ERR-299 — The backend's round-2 answer retired six frontend workarounds, and the Best Sellers tab was offering two filters its server had never honoured — **RESOLVED (frontend)** (2026-09-29)
+
+**Source.** `backend-docs/inbox/fe-best-sellers-and-four-replies-round2-backend-response-sep2026.md`. It answers our best-sellers brief (ERR-295) and our reply to the four-replies answer (ERR-294). It built BF-089, BF-090, BF-091, BF-092 and BF-093. It declined BF-088 as unneeded. §8 (`/business` Apply) was split to a peer session as ERR-297. The turnaround doc it mentions is ERR-296.
+
+The user first handed over `fe-four-replies-backend-response-sep2026 (1).md`. That file is byte-identical to the doc already shipped as ERR-294. The user chose to build this newer reply instead.
+
+**Measured first.** Everything below was measured on production (`/health` commit `75370e0`, not the `e89c470` the doc names) before any code was deleted. Every claim held.
+
+**Best Sellers (BF-089, BF-090).**
+- `top-products-rpc` now returns one row per product: 199 rows, 199 distinct SKUs.
+- Each row carries `sale_skus`, `product_id`, `brand`, `product_type`, `pack_type` and `source`. 33 products were sold under another SKU; for example `C62XLBK` was sold as `C62BK`.
+- So `mergeBySku` and the direct Supabase catalogue read (`getProductMetaBySku`) are **deleted**. A SKU that still arrives on two rows is now **counted** (`dupSkus`) and stated on screen, never summed silently. The "not in catalogue" marker is the server's `pack_type: null` (0 such rows today).
+- Every filter now bites. Negative controls, all measured:
+  - an impossible category or supplier returns 0 rows;
+  - an impossible status returns **400**;
+  - `category_filter=ink` returns **0 rows**, because the filter matches `products.category` codes;
+  - `CON-INK` returns 134 rows.
+- So the tab now offers brand, supplier, status and category. The category list is the fixed set of `CON-*` codes (`CATEGORY_OPTIONS`).
+- The global filter bar's category list had never been filled, and it rendered on every page with no `setVisibleFilters` call. It is now **opt-in**: a page must name `categories`, because a filter shown where its endpoint ignores it is a silent lie.
+- The route now **400s any unknown parameter**. `analyticsHttpGetNamed` used to drop the server's message. It now keeps it, and `getBestSellers` returns `{ error }` on any failure. The tab and the dashboard card print that message ("The server refused this filter: status_filter: unknown order status …") instead of an empty table. ***A stricter server turns an empty-array fallback into a lie*** (ERR-291's rule, applied before it bit).
+- Every parameter the loader sends (`date_from`, `date_to`, `result_limit`, `granularity`, all four filters) was measured as accepted.
+- The table gains a Type column and a "sold as …" line. The sale-time SKU is the key for reconciling with `/api/admin/orders`, because order lines carry the SKU at the time of sale.
+- `DASH_CACHE_SCHEMA` bumped to 4; `APP_VERSION` bumped.
+
+**Storefront.**
+- **BF-088, the chip-count view read, deleted.** `series` folds a yield tier into its base chip: `code=950XL` and `code=950` list the same two products. The probe checked all 21 override codes and each is in `series` under itself or its base chip. That was the last reader of the manual-code layer, so `_applyManualCodes`, `_fetchManualChipCounts`, `_supabaseSelect` and the ERR-266 cache are gone. **The storefront makes no product-codes read at all.**
+- **BF-091, the confirming read, deleted.** `/api/products/counts` and the `/api/shop` counts facet now come from the same taxonomy as `?category=`. Drums: epson 5/5, canon 12/12, brother 61/61, hp 33/33, lexmark 72/72. So `getCategoryTotal` and `_confirmMultiTypeZeros` (ERR-215) are deleted, and a 0/absent tile is hidden directly. A failed counts request, or a brand the endpoint does not return, still keeps its tile. ***Removing the per-visit check moved the drift detection, it did not drop it:*** `probe:four-replies` §C compares counts with `?category=` on every run, as a HARD check.
+- **BF-092, the ribbon PDP's last direct Supabase read, deleted.** `/api/ribbons/:sku` returns `related_products`: 307.11 → C141LOT, C143LOT; 153.11 → C143LOT; 72200.01 → 72200.02; 691.01 → `[]`. The prefix-tolerant resolution (ERR-084) is now the server's. The client helper `ribbonRelatedCards` renames `sale_price` → `retail_price` and the string `brand` → `{ name }` (a rename, never arithmetic), keeps the server's order, and treats `null` — or absent while SKUs are curated — as FAILED, which shows the error pane, never "nothing curated".
+- **BF-093, `display_name` read first.** New `PrinterName.of(row)` returns `display_name`, else the mirror. It is used by the fit line, the PDP fit checker, the grouped and flat compatibility lists, the printer hub name and the landing printer search. The ink finder's tiles now print "HL-L2375DW", derived from `display_name`, where they used to print "HL L2375DW". Across 47 sampled printers, `display_name` equals the prerender `<h1>`.
+- **The mirror stays, with a named ceiling.** `/api/shop` listing rows' `compatible_printers[]` (0/40) and `/api/printers/search` (0/2) carry no `display_name`. Asked as **BF-094**. The probe prints this SOFT while it is open and tells you to delete the mirror the day it closes.
+
+**Kept on purpose.** The PDP's `products?sku=eq.` enrich (the 5xx fallback path, loud), `_CATEGORY_PRODUCT_TYPES`, and the SQL view itself. The view is owner SQL; dropping it is not a frontend change.
+
+**Answers owed to the backend** are in `backend-docs/outbox/round2-backend-response-FE-reply-sep2026.md`:
+- our category control sends `CON-*` codes;
+- BF-094 is asked;
+- the `/health` commit differs from the doc's.
+
+**Checks.**
+- `tests/round2-backend-response-sep2026.test.js` (12 tests) runs `PrinterName.of`, `fitsLine` and the ink-finder helper, and guards the retired reads.
+- `tests/best-sellers-sep2026.test.js` and `admin-analytics-wiring` §6 were rewritten on the live row shape.
+- Twelve older suites were updated. Each old pin now asserts that the retired read is gone, and each was read against its docstring first.
+- `scripts/redproof-round2-sep2026.py`: **31/31** mutations caught. Two were missed on the first run:
+  - one was an equivalent mutant (a failed request becoming `{}` behaves the same), replaced with "every brand reads as zero";
+  - the other showed the `fitsLine` fixture could not tell `display_name` from the mirror. It now uses a name only the server produces ("e-All-in-One Printer").
+- `redproof-four-replies-sep2026.py`: anchors moved with this change; still **29/29**.
+- `probe:best-sellers`: all hard, 0 FAIL.
+- `probe:four-replies`: 34 pass / 0 fail / 1 soft (BF-094).
+- `--browser` against local: 43 pass / 0 fail, and the ribbon PDP 307.11 shows C141LOT and C143LOT with **no** Supabase read.
+- The same `--browser` against production, which still runs the old code, **failed the ribbon check**. That is the negative control: the check can go red.
+- Admin tab checked in a browser: Category CON-RIBBON returned 16 rows, all ribbon types.
+- Full suite: 2 failures, both from peer sessions' in-progress files (`validateCart` Turnstile, an unregistered business probe), neither touched here.
+
 ## ERR-296 — The backend's turnaround doc: a printer finder that told buyers of non-NZ printers nothing, bots served a /shop-canonical shell on every prerender failure, and fifteen smaller conversion gaps — **RESOLVED (frontend)** (2026-09-29)
 
 **Source.** `backend-docs/inbox/fe-turnaround-fixes-sep2026.md` (backend, 2026-09-28): a scripted first-visit walk of the live site (1440×900 + iPhone 13, cleared storage), an SEO check and order/search data. ERR-294 recorded it as "never received"; the owner sent it on 2026-09-29 with the round-2 reply. Reply: `outbox/turnaround-fixes-FE-reply-sep2026.md`.

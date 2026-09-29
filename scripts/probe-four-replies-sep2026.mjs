@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
  * probe:four-replies — the backend's answer to our four 2026-09-28 replies (ERR-294)
+ * and its round-2 answer of 2026-09-29 (ERR-299: BF-088, BF-091, BF-092, BF-093)
  * ================================================================================
- * backend-docs/inbox/fe-four-replies-backend-response-sep2026.md. The unit suite
- * (tests/four-replies-backend-response-sep2026.test.js) proves the shipped
- * functions; this proves the LIVE contract they rest on, and (with --browser)
- * the pages.
+ * backend-docs/inbox/fe-four-replies-backend-response-sep2026.md and
+ * backend-docs/inbox/fe-best-sellers-and-four-replies-round2-backend-response-sep2026.md.
+ * The unit suites (tests/four-replies-backend-response-sep2026.test.js,
+ * tests/round2-backend-response-sep2026.test.js) prove the shipped functions;
+ * this proves the LIVE contract they rest on, and (with --browser) the pages.
  *
  *   §R  every ribbon: /api/ribbons/:sku carries description_html +
  *       related_product_skus (BF-084), and series_codes = its product_codes
@@ -13,20 +15,29 @@
  *   §V  cross-type visitors (BF-086): every product_code_visitors row is listed
  *       by /api/shop?brand&category=<visited>&code. 0 rows today ⇒ printed as
  *       UNMEASURED, never as a pass (a skip is not a pass).
- *   §C  manual chips the /api/shop series lacks (the reason _applyManualCodes
- *       keeps its one read — BF-088), and counts-endpoint undercounts vs the
- *       category filter (BF-091). Both SOFT: the frontend already handles them.
+ *   §C  BF-088: every product_codes override code is in /api/shop `series`,
+ *       under itself or its base chip (yield tier stripped: 950XL → 950), and
+ *       code=950XL / code=950 list the same products. HARD since ERR-299: the
+ *       storefront's chip-count read is deleted, so a gap is a missing tile.
+ *       BF-091: /api/products/counts drums = ?category=drums meta.total per
+ *       brand. HARD since ERR-299: the landing hides a 0/absent tile with no
+ *       confirming read — THIS comparison is the drift detector now.
+ *   §D  BF-092: /api/ribbons/:sku related_products resolves related_product_skus
+ *       (prefix-tolerant, saved order) with in_stock/stock_status on each card.
+ *   §E  BF-093: display_name on every printer surface the storefront reads it
+ *       from; BF-094 (open ask): /api/shop listing compatible_printers[] and
+ *       /api/printers/search still LACK it — printed SOFT while open.
  *   §P  both color-packs routes 404 (the deleted block had nothing to call).
  *   §S  search URLs carry X-Robots-Tag noindex; a brand hub does NOT (control).
  *   §O  old-site slugs keep the part number; a ribbon slug still goes to /ribbons.
- *   §N  PrinterName.display vs the backend's prerender <h1> for a sample of
- *       printers per brand — the mirror that drifted within a day.
+ *   §N  display_name AND PrinterName.display (the BF-094 fallback) vs the
+ *       backend's prerender <h1> for a sample of printers per brand.
  *   §A  --admin: failed import runs carry error_message; image-audit brand =
  *       slug or id, garbage = 400 UNKNOWN_BRAND (needs ADMIN_EMAIL/PASSWORD).
  *   §B  --browser: /toner-cartridges tiles; printer hub H1 = prerender H1 and no
  *       color-packs request; a redirected PDP asks for-use-in ONCE with the
- *       response's SKU; a ribbon PDP makes no enrich / product_codes read (the
- *       curated related rail's own products?sku=in. read is reported, BF-092).
+ *       response's SKU; a ribbon PDP makes NO direct Supabase products read at
+ *       all (BF-092 — the curated rail comes from /api/ribbons/:sku).
  *   §Q  --search: the ONE pinned alias query ("canon pg540"). It WRITES one
  *       search_analytics row (endpoint=smart) — off by default, printed when on.
  *
@@ -138,8 +149,9 @@ head('§V cross-type visitors listed by /api/shop (BF-086)');
 }
 
 // ── §C chips + counts ───────────────────────────────────────────────────────
-head('§C manual chips vs series (BF-088) · counts vs category totals (BF-091)');
+head('§C override codes are in /api/shop series (BF-088) · counts = category totals (BF-091)');
 {
+    // The probe may read the view; the STOREFRONT no longer does (ERR-299).
     const rows = await sb('product_code_chip_counts?select=brand_slug,product_type,code,product_count');
     const CAT = { ink_cartridge: 'ink', ink_bottle: 'ink', toner_cartridge: 'toner', label_tape: 'label', photo_paper: 'paper' };
     for (const t of ['drum_unit', 'waste_toner', 'maintenance_box', 'belt_unit', 'fuser_kit', 'fax_film', 'fax_film_refill']) CAT[t] = 'drums';
@@ -150,25 +162,76 @@ head('§C manual chips vs series (BF-088) · counts vs category totals (BF-091)'
         const k = `${r.brand_slug}|${c}`;
         groups.set(k, new Set([...(groups.get(k) || []), String(r.code).toUpperCase()]));
     }
-    const gaps = [];
-    for (const [k, codes] of groups) {
-        const [brand, cat] = k.split('|');
-        const series = new Set(((await getJson(`${API}/api/shop?brand=${brand}&category=${cat}&limit=1`)).body?.data?.series || []).flatMap((s) => String(s.code).toUpperCase().split('/')));
-        for (const c of codes) if (!series.has(c)) gaps.push(`${brand}·${cat}·${c}`);
+    if (!Array.isArray(rows)) bad('product_code_chip_counts readable', 'UNREADABLE — BF-088 unmeasured');
+    else {
+        // The backend's rule: a yield tier is stripped from each code to name its chip.
+        const base = (c) => c.replace(/(XXL|XL|HY)$/, '');
+        const gaps = [];
+        let n = 0;
+        for (const [k, codes] of groups) {
+            const [brand, cat] = k.split('|');
+            const series = new Set(((await getJson(`${API}/api/shop?brand=${brand}&category=${cat}&limit=1`)).body?.data?.series || [])
+                .flatMap((x) => String(x.code).toUpperCase().split('/')));
+            for (const c of codes) { n++; if (!series.has(c) && !series.has(base(c))) gaps.push(`${brand}·${cat}·${c}`); }
+        }
+        check(`${n} override codes: each is in series, under itself or its base chip`, gaps.length === 0, gaps.join(', ') || `${groups.size} brand·category groups`);
     }
-    if (gaps.length) soft('manual codes /api/shop series omits (the frontend adds them from product_code_chip_counts)', gaps.join(', '));
-    else ok('every manual code is in /api/shop series — _applyManualCodes step could go (tell the backend BF-088 is closed)');
+    const a = (await getJson(`${API}/api/shop?brand=hp&category=ink&code=950XL&limit=50`)).body?.data?.products || [];
+    const b2 = (await getJson(`${API}/api/shop?brand=hp&category=ink&code=950&limit=50`)).body?.data?.products || [];
+    const sig = (xs) => xs.map((p) => p.sku).sort().join(',');
+    check('code=950XL and code=950 list the same products (one chip, not two)', a.length > 0 && sig(a) === sig(b2), `${sig(a)} | ${sig(b2)}`);
 
-    const brands = ['epson', 'canon', 'brother', 'hp'];
+    const brands = ['epson', 'canon', 'brother', 'hp', 'lexmark'];
     const counts = (await getJson(`${API}/api/products/counts?brands=${brands.join(',')}`)).body?.data || {};
-    const under = [];
-    for (const b of brands) {
-        const total = (await getJson(`${API}/api/shop?brand=${b}&category=drums&limit=1`)).body?.meta?.total;
-        const said = counts[b]?.drums ?? 0;
-        if (typeof total === 'number' && total !== said) under.push(`${b} drums: counts ${said} vs ?category=drums ${total}`);
+    const lines = [];
+    let drift = 0;
+    for (const br of brands) {
+        const total = (await getJson(`${API}/api/shop?brand=${br}&category=drums&limit=1`)).body?.meta?.total;
+        const said = counts[br]?.drums ?? 0;   // absent = 0 is the storefront's reading now
+        if (typeof total !== 'number' || total !== said) drift++;
+        lines.push(`${br} ${said}/${total}`);
     }
-    if (under.length) soft('/api/products/counts undercounts a multi-type family (the landing confirms 0/absent tiles)', under.join('; '));
-    else ok('/api/products/counts drums agrees with ?category=drums for every sampled brand');
+    check('BF-091: /api/products/counts drums = ?category=drums for every sampled brand (counts/total)', drift === 0, lines.join(', '));
+}
+
+// ── §D ribbon related cards ─────────────────────────────────────────────────
+head('§D /api/ribbons/:sku related_products (BF-092)');
+for (const [sku, want] of [['307.11', ['C141LOT', 'C143LOT']], ['153.11', ['C143LOT']], ['72200.01', ['72200.02']]]) {
+    const d = (await getJson(`${API}/api/ribbons/${encodeURIComponent(sku)}`)).body?.data;
+    const cards = Array.isArray(d?.related_products) ? d.related_products : null;
+    check(`${sku}: related_products = ${want.join(', ')} in saved order, each with stock_status`,
+        !!cards && cards.map((c) => c.sku).join(',') === want.join(',') && cards.every((c) => 'stock_status' in c && 'in_stock' in c),
+        cards ? cards.map((c) => `${c.sku} ${c.sale_price} ${c.stock_status}`).join('; ') : `related_products ${JSON.stringify(d?.related_products)}`);
+}
+{
+    const d = (await getJson(`${API}/api/ribbons/691.01`)).body?.data;
+    check('CONTROL 691.01 (nothing curated): related_products = []', Array.isArray(d?.related_products) && d.related_products.length === 0,
+        JSON.stringify(d?.related_products));
+}
+
+// ── §E printer display_name ─────────────────────────────────────────────────
+head('§E display_name on printer rows (BF-093) · still missing where BF-094 asks');
+{
+    const has = (p) => typeof p?.display_name === 'string' && p.display_name.trim().length > 0;
+    const pdp = (await getJson(`${API}/api/products/GTN2445BK`)).body?.data || {};
+    const cp = pdp.compatible_printers || [];
+    const top = (pdp.compatible_printers_grouped || []).flatMap((g) => g.top_models || []);
+    check('PDP compatible_printers[] carry display_name', cp.length > 0 && cp.every(has), `${cp.filter(has).length}/${cp.length}; e.g. "${cp.find((p) => /L2375DW/.test(p.full_name))?.display_name}"`);
+    check('PDP compatible_printers_grouped[].top_models[] carry display_name', top.length > 0 && top.every(has), `${top.filter(has).length}/${top.length}`);
+    const bb = (await getJson(`${API}/api/printers/by-brand/brother`)).body?.data;
+    const flat = Array.isArray(bb) ? bb : bb?.printers || [];
+    check('/api/printers/by-brand/brother rows carry display_name', flat.length > 0 && flat.every(has), `${flat.filter(has).length}/${flat.length}`);
+    for (const pth of ['/api/printers/brother-hl-l2375dw/products?limit=1', '/api/products/printer/brother-hl-l2375dw?limit=1']) {
+        const pr = (await getJson(`${API}${pth}`)).body?.data?.printer;
+        check(`${pth.split('?')[0]} printer.display_name = "Brother HL-L2375DW"`, pr?.display_name === 'Brother HL-L2375DW', `${pr?.full_name} → ${pr?.display_name}`);
+    }
+    const listing = ((await getJson(`${API}/api/shop?brand=brother&category=toner&limit=20`)).body?.data?.products || [])
+        .flatMap((p) => p.compatible_printers || []);
+    const search = (await getJson(`${API}/api/printers/search?q=L2375`)).body?.data || [];
+    const missing = [[`/api/shop listing compatible_printers[]`, listing], ['/api/printers/search', search]]
+        .filter(([, xs]) => xs.length && !xs.every(has)).map(([n, xs]) => `${n} ${xs.filter(has).length}/${xs.length}`);
+    if (missing.length) soft('BF-094 open: rows without display_name (the storefront falls back to the PrinterName mirror)', missing.join('; '));
+    else ok('BF-094 landed: listing + printer search carry display_name — delete the PrinterName mirror (utils.js)');
 }
 
 // ── §P color-packs ──────────────────────────────────────────────────────────
@@ -211,13 +274,14 @@ for (const [from, want] of [
 }
 
 // ── §N printer display names ────────────────────────────────────────────────
-head('§N PrinterName.display = the backend prerender <h1> (sample per brand)');
+head('§N display_name and PrinterName.display = the backend prerender <h1> (sample per brand)');
 {
     const SUFFIX = / (Ink|Toner|Ink &amp; Toner|Ink & Toner) NZ$/;
     const brandList = (await getJson(`${API}/api/brands`)).body?.data;
     const slugs = (Array.isArray(brandList) ? brandList : brandList?.brands || []).map((b) => b.slug);
     let n = 0;
     const off = [];
+    const offDisplay = [];
     for (const b of slugs) {
         const ps = (await getJson(`${API}/api/printers/by-brand/${b}?limit=2000`)).body?.data?.printers || [];
         const caps = ps.filter((p) => /\b[A-Z]{3,}\b|^Brother [A-Z]+ /.test(p.full_name));
@@ -228,9 +292,11 @@ head('§N PrinterName.display = the backend prerender <h1> (sample per brand)');
             n++;
             const theirs = h1.replace(SUFFIX, '').replace(/&amp;/g, '&');
             if (PrinterName.display(p.full_name) !== theirs) off.push(`"${p.full_name}" → ours "${PrinterName.display(p.full_name)}" / theirs "${theirs}"`);
+            if (p.display_name !== theirs) offDisplay.push(`"${p.full_name}" → display_name "${p.display_name}" / page "${theirs}"`);
         }
     }
-    check(`${n} printers: our fit-line name = the page's name`, off.length === 0, off.slice(0, 6).join('; '));
+    check(`${n} printers: display_name (BF-093) = the page's name`, offDisplay.length === 0, offDisplay.slice(0, 6).join('; '));
+    check(`${n} printers: the PrinterName mirror (listing fallback, BF-094) = the page's name`, off.length === 0, off.slice(0, 6).join('; '));
 }
 
 // ── §A admin ────────────────────────────────────────────────────────────────
@@ -319,14 +385,16 @@ if (argv.has('--browser')) {
     {
         const { ctx, reqs } = await open('/ribbon/72200.01', () => document.getElementById('product-title') && !document.querySelector('#product-title .skeleton'));
         const rest = reqs.filter((u) => /supabase\.co\/rest\/v1\//.test(u)).map((u) => decodeURIComponent(u));
-        // The retired reads: the field enrich (products?sku=eq.) and both code tables.
-        const retired = rest.filter((u) => /\/products\?sku=eq\.|\/product_codes\b|\/product_code_visitors\b/.test(u));
-        check('ribbon PDP: no enrich / product_codes / visitor read (BF-084/085)', retired.length === 0, retired.map((u) => u.slice(0, 90)).join(', '));
-        // Still here, and NOT one of the three: the curated related rail resolves
-        // related_product_skus to cards with one products?sku=in.(…) read. No public
-        // endpoint takes a SKU list, so it stays until one does (asked: BF-092).
-        const rail = rest.filter((u) => /\/products\?select=.*sku=in\./.test(u));
-        if (rail.length) soft('ribbon PDP: curated related rail still reads products?sku=in.(…) directly', 'BF-092 asks for related cards on /api/ribbons/:sku');
+        // Every retired read: the field enrich (products?sku=eq.), both code tables,
+        // and since BF-092 (ERR-299) the curated rail's products?sku=in.(…) too.
+        const retired = rest.filter((u) => /\/products\?|\/product_codes\b|\/product_code_visitors\b/.test(u));
+        check('ribbon PDP: NO direct products / product_codes / visitor read (BF-084/085/092)', retired.length === 0, retired.map((u) => u.slice(0, 90)).join(', '));
+        await ctx.close();
+    }
+    {
+        const { page, ctx } = await open('/ribbon/307.11', () => document.querySelector('#ribbon-col-right .product-card'));
+        const skus = await page.$$eval('#ribbon-col-right .product-card', (els) => els.map((e) => e.dataset.sku || e.querySelector('[data-sku]')?.dataset.sku || ''));
+        check('ribbon PDP 307.11: related rail shows C141LOT, C143LOT (server-resolved)', skus.join(',') === 'C141LOT,C143LOT', skus.join(',') || 'no cards');
         await ctx.close();
     }
     {

@@ -66,7 +66,8 @@ function loadApi() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. _applyManualCodes — the override-only rule is now the BACKEND's (ERR-294)
+// 1. the override-only rule is the BACKEND's (ERR-294); the whole storefront
+//    manual-code layer is gone since ERR-299 — _finalizeShopData is the hook
 //
 // Until 2026-09-28 the storefront read product_codes and cleared a ribbon's
 // backend-derived codes itself. The backend now applies the rule on every
@@ -78,10 +79,10 @@ function loadApi() {
 // ═══════════════════════════════════════════════════════════════════════════
 async function applyWith(products) {
   const API = loadApi();
-  let reads = 0;
-  API._supabaseSelect = async () => { reads++; return []; };
   const primary = { ok: true, data: { products, series: [] } };
-  const out = await API._applyManualCodes(primary, {}, null);
+  const out = await API._finalizeShopData(primary, {});
+  // No reader exists that COULD read product_codes (ERR-299).
+  const reads = ['_applyManualCodes', '_supabaseSelect', '_fetchManualChipCounts'].filter((m) => API[m] !== undefined).length;
   return { products: out.data.products, reads };
 }
 
@@ -92,7 +93,7 @@ test('ribbon series_codes pass through untouched — the backend already applied
     { id: 'c', product_type: 'correction_tape', series_codes: [] },
   ]);
   assert.deepEqual(products.map((p) => [...p.series_codes]), [[], ['720'], []]);
-  assert.equal(reads, 0, 'no product_codes read for ribbon rows any more');
+  assert.equal(reads, 0, 'no product_codes reader exists any more');
 });
 
 test('a NON-ribbon keeps its backend codes (unchanged)', async () => {

@@ -174,8 +174,8 @@
                 name: g.name,
                 models: (g.models || []).map(m => ({
                     id: m.slug,
-                    name: m.model_name,
-                    fullName: m.full_name,
+                    name: modelLabel(m),
+                    fullName: m.display_name || m.full_name,
                     slug: m.slug,
                     printerId: m.id
                 }))
@@ -199,8 +199,8 @@
                     name: 'All Models',
                     models: printers.map(p => ({
                         id: p.slug,
-                        name: p.model_name,
-                        fullName: p.full_name,
+                        name: modelLabel(p),
+                        fullName: p.display_name || p.full_name,
                         slug: p.slug,
                         printerId: p.id
                     }))
@@ -466,6 +466,20 @@
 
     // Model full names arrive brand-prefixed ("Brother PIXMA TS3360"); the
     // model crumb is tighter without the redundant brand, so trim it when present.
+    // The backend's display_name (BF-093, ERR-299) with the brand taken off, for a
+    // tile under a brand heading: full_name "Brother HL L2375DW" + model_name
+    // "HL L2375DW" say the brand prefix is "Brother ", so display_name "Brother
+    // HL-L2375DW" gives "HL-L2375DW". Falls back to model_name when any piece is
+    // missing or the prefix does not line up.
+    function modelLabel(m) {
+        const d = m && m.display_name, f = m && m.full_name, n = m && m.model_name;
+        if (d && f && n && f.endsWith(n)) {
+            const prefix = f.slice(0, f.length - n.length);
+            if (d.startsWith(prefix) && d.length > prefix.length) return d.slice(prefix.length);
+        }
+        return n;
+    }
+
     function stripBrand(fullName) {
         if (!fullName || !selectedBrandName) return fullName || '';
         const prefix = selectedBrandName + ' ';

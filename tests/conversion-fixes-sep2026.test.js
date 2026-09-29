@@ -413,7 +413,7 @@ test('§6 the printer box is FIRST on the landing, uses /api/printers/search (no
     // Both separator spellings (ERR-296: /api/printers/search is separator-intolerant).
     assert.match(fn, /finderSpellings\(q\)\.map\(\(s\) => API\.searchPrinters\(s\)/);
     assert.doesNotMatch(fn, /smartSearch|\/api\/search\//, 'ERR-254: a typeahead must not file searches');
-    assert.match(fn, /PrinterName\.display/);
+    assert.match(fn, /PrinterName\.of\(p\)/);   // display_name first, else the mirror (ERR-299)
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

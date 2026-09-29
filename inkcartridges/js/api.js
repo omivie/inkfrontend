@@ -1035,37 +1035,6 @@ const API = {
         }
     },
 
-    /**
-     * The REAL number of products behind a brand+category link.
-     *
-     * WHY THIS IS NOT `getShopData`. Two reasons, both measured (ERR-215):
-     *
-     *   1. `getShopData` with brand+category and no `source` fires a parallel
-     *      compat-recovery sidecar — a 200-row /api/products fetch we do not
-     *      want when all we need is a count.
-     *   2. The brand-scoped `counts` facet that /api/shop returns is WRONG. The
-     *      backend omits `maintenance_box` from `counts.drums` while its
-     *      `?category=drums` FILTER includes it (2026-09-06: epson absent/5,
-     *      canon 9/12, brother 61/62). So a caller that needs the truth has to
-     *      ask the category question directly, which is what this does.
-     *
-     * Goes through `catalogEndpoint` so CATALOG_PARAM_ORDER holds and this
-     * mints no parallel Cloudflare edge key (ERR-124/159).
-     *
-     * @returns {Promise<number|null>} the count, or NULL when it could not be
-     *   read. Null is "unmeasured" and callers MUST NOT collapse it to 0 —
-     *   "the shelf is empty" and "I could not see the shelf" are different
-     *   sentences, and merging them is the bug this function exists to fix.
-     */
-    async getCategoryTotal(brand, category) {
-        if (!brand || !category) return null;
-        const endpoint = this.catalogEndpoint('/api/shop', { brand, category, limit: 1 });
-        const res = await this.getWithSWR(endpoint, { anonymous: true }).catch(() => null);
-        if (!res || res.ok === false) return null;
-        const total = res.meta && res.meta.total;
-        return typeof total === 'number' ? total : null;
-    },
-
     // =========================================================================
     // SWR (stale-while-revalidate) in-memory cache for catalog GETs
     // =========================================================================
@@ -1085,10 +1054,6 @@ const API = {
     purgeCatalogCache() {
         this._swrCache.clear();
         this._swrInflight.clear();
-        // ERR-266 — the manual-code layer is catalogue data too, and it outlived
-        // every purge: an identity change or a deliberate flush left up to 60s of
-        // the previous identity's overrides in place.
-        this._manualCodeCache.clear();
         const preview = (typeof window !== 'undefined') ? window.AdminPreview : null;
         if (preview) {
             preview.state = 'unknown';
@@ -1474,14 +1439,12 @@ const API = {
      * The post-processing every /api/shop response goes through, on BOTH of
      * getShopData's return paths (the compat-recovery skip and the merged one).
      *
-     * Truncated-code repair runs LAST so its series_codes rewrite wins over the
-     * manual override layer, but its chip detection is computed FIRST —
-     * synchronously, off the untouched backend series list — so the manual layer
-     * knows which codes it must not turn into duplicate tiles.
+     * Truncated-code repair: chip detection runs off the untouched backend
+     * series list, then the repair rewrites series_codes. (The manual-code layer
+     * that ran between the two is gone — ERR-299.)
      */
     async _finalizeShopData(primary, params) {
         const truncated = this._detectTruncatedChips(primary, params);
-        await this._applyManualCodes(primary, params, truncated);
         return this._repairTruncatedSeries(primary, params, truncated);
     },
 
@@ -1740,20 +1703,16 @@ const API = {
         }
     },
 
-    // ─── Manual product codes (the product_codes override table) ──────────────
-    // Admins assign categorisation codes in the product drawer; they persist to
-    // the Supabase `product_codes` table (see sql/product_codes.sql).
-    // This block lets the storefront honour them:
-    //   (1) a product WITH manual codes has its series_codes fully overridden;
-    //   (2) the codes drilldown gains a chip for any purely-manual code;
-    //   (3) clicking such a chip recovers the manually-tagged products the
-    //       backend's series_codes filter never returned.
-    // Fail-open throughout — any error leaves the backend response untouched, so
-    // /shop can never break because the codes table is unreachable.
-
-    _manualCodeCache: new Map(),   // key → { at:ms, value }
-    _MANUAL_CODE_TTL: 60000,        // 60s — codes change rarely; admins see fresh on reload
-
+    // ─── Category → product_type map ─────────────────────────────────────────
+    // The manual-code layer that used to live here (product_codes override,
+    // visitor recovery, and last the product_code_chip_counts view read) is GONE
+    // (ERR-294, ERR-299): the backend now emits override-aware series_codes,
+    // counts tagged visitors in `series`, and folds an override code with a yield
+    // tier ("950XL") into its base chip ("950"). The backend measured all 15
+    // override codes already in `series` (BF-088, declined as unneeded); we
+    // measured 950XL/950 on 2026-09-29, and probe:four-replies §C re-checks it.
+    // The storefront makes NO Supabase read for product codes.
+    //
     // apiCategory (the value shop-page passes as params.category) → product_type[].
     // Mirrors the category→product_type mapping in shop-page.js.
     //
@@ -1771,144 +1730,6 @@ const API = {
         label:   ['label_tape'],
         paper:   ['photo_paper'],
         ribbons: ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'],
-    },
-
-    /** GET against the Supabase REST API with the public anon key. JSON or null. */
-    async _supabaseSelect(pathAndQuery) {
-        try {
-            const base = (typeof Config !== 'undefined' && Config.SUPABASE_URL) || '';
-            const key  = (typeof Config !== 'undefined' && Config.SUPABASE_ANON_KEY) || '';
-            if (!base || !key) return null;
-            const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/${pathAndQuery}`, {
-                headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
-            });
-            if (!res.ok) return null;
-            return await res.json();
-        } catch (_) {
-            return null;
-        }
-    },
-
-    _manualCodeCacheGet(key) {
-        const hit = this._manualCodeCache.get(key);
-        if (hit && (Date.now() - hit.at) < this._MANUAL_CODE_TTL) return hit.value;
-        return undefined;
-    },
-    _manualCodeCacheSet(key, value) {
-        // ERR-266 — NEVER MEMOISE A FAILED READ. `_supabaseSelect` returns null on
-        // missing config, on !res.ok and on a throw, and NEVER as a legitimate
-        // answer — a select that matched nothing returns []. `_manualCodeCacheGet`
-        // treats only `undefined` as a miss, so caching that null pinned a transient
-        // Supabase blip in place for the full 60s TTL, and the retry read the
-        // failure back out of memory instead of asking again. Same shape as the SWR
-        // cache ERR-264 fixed at :1107; this is the layer that was missed.
-        //
-        // Fixed HERE rather than at the three call sites (:1761, :1797, :1833)
-        // because there is no version of this that is right at two of them and
-        // wrong at the third — and a grep for one spelling is how ERR-259 shipped
-        // with four of five sites unfixed.
-        if (value === null || value === undefined) return value;
-        if (this._manualCodeCache.size > 240) this._manualCodeCache.clear();
-        this._manualCodeCache.set(key, { at: Date.now(), value });
-        return value;
-    },
-
-    /** Manual chip counts for a brand+category → [{ code, count }]. */
-    async _fetchManualChipCounts(brandSlug, productTypes) {
-        if (!brandSlug || !Array.isArray(productTypes) || !productTypes.length) return [];
-        const cacheKey = `chips:${brandSlug}:${productTypes.join(',')}`;
-        let rows = this._manualCodeCacheGet(cacheKey);
-        if (rows === undefined) {
-            const types = productTypes.map(encodeURIComponent).join(',');
-            rows = await this._supabaseSelect(
-                `product_code_chip_counts?select=code,product_count`
-                + `&brand_slug=eq.${encodeURIComponent(brandSlug)}&product_type=in.(${types})`);
-            this._manualCodeCacheSet(cacheKey, rows);
-        }
-        if (!Array.isArray(rows)) return [];
-        // View rows are per product_type — sum across types for one chip total.
-        const byCode = new Map();
-        for (const r of rows) {
-            if (!r || !r.code) continue;
-            const c = String(r.code).toUpperCase();
-            byCode.set(c, (byCode.get(c) || 0) + (Number(r.product_count) || 0));
-        }
-        return [...byCode.entries()].map(([code, count]) => ({ code, count }));
-    },
-
-    /**
-     * Apply the product_codes override layer to a /api/shop response, in place.
-     * Runs at the tail of getShopData on the SWR-cloned response we own.
-     * Fail-open: never throws — returns `primary` whatever happens.
-     *
-     * ONE step is left, and it reads no product_codes row (ERR-294). Since
-     * 2026-09-28 the backend does the rest itself:
-     *   - every row's `series_codes` is override-aware (`74fb234`), and a ribbon
-     *     with no override carries `[]` (BF-085, ERR-086) — so the ribbon-only
-     *     product_codes read that corrected it is deleted;
-     *   - /api/shop?brand&category&code lists products of another type tagged
-     *     into this chip (`chip_category`) and counts them in `series` (BF-086)
-     *     — so the product_code_visitors summary, the per-code visitor-id read
-     *     and the cross-category pool recovery are deleted. KEEPING the visitor
-     *     arithmetic would now DOUBLE-COUNT: the server's `series` already
-     *     includes them. 0 visitor rows exist today (measured 2026-09-28), so
-     *     this is pinned by the backend's own test, not by live data;
-     *     probe:four-replies re-checks it the day a row appears.
-     *
-     * @param {Object} primary - the /api/shop response
-     * @param {Object} params  - the original getShopData params
-     */
-    async _applyManualCodes(primary, params, truncated) {
-        try {
-            if (!primary || !primary.ok || !primary.data) return primary;
-            const data = primary.data;
-
-            // Codes drilldown — ensure a chip exists for every manual code, so a
-            // purely-manual code (the LC57 case) still shows a tile. Still needed,
-            // measured 2026-09-28: C950XLBK's override is ["950XL","951"] and
-            // /api/shop?code=950XL lists it, but `series` has no 950XL chip
-            // (only "950"), so without this the owner's 950XL tile vanishes. The
-            // product_code_chip_counts view is a per-code COUNT, not a product_codes
-            // read. (Asked of the backend as BF-088.)
-            if (!params.code && params.brand && params.category && Array.isArray(data.series)) {
-                const own = String(params.category).toLowerCase();
-                const types = this._CATEGORY_PRODUCT_TYPES[own];
-                if (types) {
-                    const manualChips = await this._fetchManualChipCounts(params.brand, types);
-                    const have = new Set(data.series
-                        .map(s => s && s.code && String(s.code).toUpperCase())
-                        .filter(Boolean));
-                    // A merged pair chip ("PG510/CL511") never equals either of
-                    // its halves, so an exact-match `have` check lets a manual
-                    // "PG510" push a duplicate tile covering the same products.
-                    // Suppress anything the pair already speaks for: a half
-                    // itself ("CL511"), a suffixed variant of one ("CL511CLR"),
-                    // and the truncated code the repair pass is about to absorb
-                    // ("CL51").
-                    const halves = (truncated && truncated.halves) || [];
-                    const suspects = (truncated && truncated.suspectCodes) || new Set();
-                    const coveredByPair = code =>
-                        suspects.has(code) || halves.some(h => code === h || code.startsWith(h));
-
-                    let added = false;
-                    for (const { code, count } of manualChips) {
-                        if (have.has(code) || coveredByPair(code) || !(count > 0)) continue;
-                        data.series.push({ code, count });
-                        have.add(code);
-                        added = true;
-                    }
-                    if (added) {
-                        data.series.sort((a, b) => String(a.code)
-                            .localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
-                    }
-                }
-            }
-        } catch (e) {
-            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
-                DebugLog.warn('[API._applyManualCodes] skipped — manual codes not applied', e);
-            }
-        }
-        return primary;
     },
 
     /**

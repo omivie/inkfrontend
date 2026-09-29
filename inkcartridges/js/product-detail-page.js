@@ -1,28 +1,4 @@
     // ============================================
-    // RELATED-PRODUCT SKU RESOLUTION
-    // ============================================
-    // Curated related_product_skus are hand-entered. For typewriter ribbons —
-    // which use bare numeric SKUs like "307.11" with no prefix — the related
-    // picker tends to save a compatible product by its BARE code ("141LOT")
-    // while the real product carries the compatible/genuine prefix ("C141LOT").
-    // An exact `.in('sku', [...])` then resolves nothing and the "Products
-    // related to …" section renders as a bare heading (ERR-084: SKU 307.11's
-    // ["141LOT","143LOT"] never resolved to the real C141LOT/C143LOT tapes).
-    //
-    // The convention is a single known letter over a bare code: "C" = compatible,
-    // "G" = genuine. Return the EXACT sku first, then the two prefixed
-    // candidates, so exact always wins and matching stays strict SKU equality
-    // over a tiny candidate set — never a fuzzy substring / ILIKE (which could
-    // pull an unrelated product). A spurious candidate that matches nothing is
-    // harmless; one that matches a real C-/G- sibling is genuinely related.
-    // Pure — exposed on window._pdpRelatedHelpers for tests.
-    function relatedSkuCandidates(sku) {
-        const raw = String(sku == null ? '' : sku).trim();
-        if (!raw) return [];
-        const up = raw.toUpperCase();
-        return [up, 'C' + up, 'G' + up];
-    }
-    // ============================================
     // RELATED-PRODUCT FAMILY CODE CANDIDATES
     // ============================================
     // Related Products fetches a product's family with
@@ -63,8 +39,36 @@
         return out;
     }
 
+    // ============================================
+    // RIBBON RELATED CARDS (BF-092, ERR-299)
+    // ============================================
+    // GET /api/ribbons/:sku resolves the curated related_product_skus itself as
+    // `related_products` (see renderRelatedProducts). Each card is a /api/ribbons
+    // list item — `sale_price` and a string `brand` — and Products.renderCard
+    // reads `retail_price` and `brand.name`: the same renaming the PDP applies to
+    // the ribbon itself on load. A rename, never arithmetic (the FE never prices).
+    //   related_products array  → those cards, in the server's (saved) order
+    //   null, or absent while SKUs are curated → failed: the error pane, LOUD
+    //   absent with nothing curated → nothing to show, no error
+    // Pure — exposed on window._pdpRelatedHelpers for tests.
+    function ribbonRelatedCards(info) {
+        const list = info && info.related_products;
+        if (Array.isArray(list)) {
+            return {
+                failed: false,
+                cards: list.filter(c => c && c.sku).map(c => ({
+                    ...c,
+                    retail_price: c.retail_price ?? c.sale_price ?? null,
+                    brand: typeof c.brand === 'string' ? { name: c.brand } : (c.brand || null),
+                })),
+            };
+        }
+        const curated = info && Array.isArray(info.related_product_skus) && info.related_product_skus.length > 0;
+        return { failed: list === null || curated, cards: [] };
+    }
+
     if (typeof window !== 'undefined') {
-        window._pdpRelatedHelpers = { relatedSkuCandidates, familyCodeCandidates };
+        window._pdpRelatedHelpers = { familyCodeCandidates, ribbonRelatedCards };
     }
 
     // ============================================
@@ -1547,7 +1551,9 @@
             const hasPromise = promise && typeof promise.label === 'string' && promise.label.trim();
             if (!printers.length && !hasPromise) { el.hidden = true; el.innerHTML = ''; this._setHeadline('product-headline-fit', ''); return; }
 
-            const labelOf = (p) => this._printerLabel(p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '));
+            // The backend's display_name first (BF-093, ERR-299), else the mirror.
+            const labelOf = (p) => p.display_name
+                || this._printerLabel(p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '));
             const items = printers.map((p) => {
                 const raw = p.full_name || [p.brand, p.model_name].filter(Boolean).join(' ');
                 const href = this._printerHubHref(p);
@@ -1931,15 +1937,17 @@
             if (!groups.length) return false;
 
             const rows = groups.map(group => {
-                const models = Array.isArray(group.top_models) ? group.top_models.filter(m => m && m.full_name) : [];
+                const models = Array.isArray(group.top_models) ? group.top_models.filter(m => m && (m.display_name || m.full_name)) : [];
                 const linked = models.map(m => {
                     const href = this._printerHubHref({ slug: m.slug, brand_slug: group.brand_slug, brand: group.brand, full_name: m.full_name });
                     // The row already says "Fits <brand>", so each model drops the
                     // brand: "Fits Brother HL-L2300D", never "Fits Brother Brother
                     // HL L2300D" (backend re-check 2026-09-28 §5 #9, ERR-294).
+                    // The backend's display_name first (BF-093, ERR-299).
+                    const shown = m.display_name || m.full_name;
                     const cleaned = (typeof ProductName !== 'undefined' && ProductName.compatModel)
-                        ? (ProductName.compatModel(m.full_name, group.brand) || m.full_name)
-                        : m.full_name;
+                        ? (ProductName.compatModel(shown, group.brand) || shown)
+                        : shown;
                     const label = (typeof PrinterName !== 'undefined')
                         ? PrinterName.withoutBrand(cleaned, group.brand)
                         : cleaned;
@@ -1994,7 +2002,7 @@
             if (!printers.length || !printers.some(p => p.slug)) return false;
 
             const links = printers.map(p => {
-                let label = p.full_name || p.name
+                let label = p.display_name || p.full_name || p.name
                     || (p.brand && p.model_name ? `${p.brand} ${p.model_name}` : p.model_name) || '';
                 if (typeof ProductName !== 'undefined' && ProductName.compatModel) {
                     label = ProductName.compatModel(label, p.brand) || label;
@@ -2336,64 +2344,25 @@
                 // tab, in the saved order. Ribbons are deliberately NOT auto-filled by
                 // the backend (no shared-code family fetch): the ERR-082 code-family
                 // union was retired 2026-07-16 per owner decision so a ribbon shows
-                // only what the owner picked (ERR-085). The curated list still resolves
-                // prefix-tolerantly (ERR-084) so a legacy bare-code entry still lands.
+                // only what the owner picked (ERR-085).
+                //
+                // GET /api/ribbons/:sku now resolves that list itself as
+                // `related_products` (BF-092, ERR-299): saved order, active + public
+                // rows only, a bare code tries its C-/G- forms after the exact SKU
+                // (the ERR-084 rule, now server-side), duplicates and the ribbon
+                // itself dropped. Measured 2026-09-29: 307.11 → C141LOT, C143LOT.
+                // So the PDP makes NO Supabase read for it any more.
+                //   null   → the server's lookup FAILED: say so (the error pane)
+                //   []     → nothing curated / nothing resolvable: bare heading
+                //   absent → an older backend, or the product-endpoint fallback
+                //            path: unmeasured, so also the error pane, and LOUD
                 if (info.category === 'ribbon') {
-                    const manualSkus = info.related_product_skus;
-                    if (Array.isArray(manualSkus) && manualSkus.length > 0) {
-                        const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
-                        if (sb) {
-                            // Resolve prefix-tolerantly (ERR-084): a curated entry
-                            // saved as a bare code ("141LOT") still finds the real
-                            // C-/G-prefixed product ("C141LOT"). One query over the
-                            // exact + prefixed candidate union; per entry the exact
-                            // sku wins, else the first prefixed candidate that hits.
-                            const candidates = [];
-                            const seenCand = new Set();
-                            for (const s of manualSkus) {
-                                for (const c of relatedSkuCandidates(s)) {
-                                    if (!seenCand.has(c)) { seenCand.add(c); candidates.push(c); }
-                                }
-                            }
-                            // EXPLICIT COLUMNS, NOT `*` (ERR-170). `products` holds
-                            // `cost_price`, and the backend is revoking that column from
-                            // the public `anon` role (migration 137). Under column-level
-                            // privileges PostgREST fails the WHOLE `select('*')` with
-                            // 42501, so a signed-OUT visitor would get nothing here while
-                            // a signed-in one still worked — the hardest kind of bug to
-                            // see. Every column below is verified to exist on the table;
-                            // a name that doesn't is a hard 400, which is strictly worse
-                            // than the over-broad `*` this replaces. This is exactly what
-                            // Products.renderCard and its helpers read, and no more.
-                            const RELATED_COLS = 'id, sku, name, slug, retail_price, compare_price, '
-                                + 'image_url, color, color_hex, pack_type, source, product_type, '
-                                + 'stock_quantity, stock_status, is_active, brand:brands(name, slug)';
-                            // The error was DISCARDED here. A permissions failure returned
-                            // { data: null }, optional chaining swallowed it, and the rail
-                            // rendered its empty state — indistinguishable from "the owner
-                            // curated nothing". A fetch that failed is not an empty result.
-                            const { data: manualProducts, error: manualError } = await sb.from('products')
-                                .select(RELATED_COLS)
-                                .in('sku', candidates)
-                                .eq('is_active', true);
-                            if (manualError) {
-                                fetchFailed = true;
-                                DebugLog.error('Curated related-products lookup failed:', manualError.message || manualError);
-                            }
-                            if (manualProducts?.length) {
-                                const byUpper = {};
-                                manualProducts.forEach(p => { byUpper[String(p.sku).toUpperCase()] = p; });
-                                const ordered = [];
-                                const usedSku = new Set();
-                                for (const s of manualSkus) {
-                                    for (const c of relatedSkuCandidates(s)) {
-                                        const hit = byUpper[c];
-                                        if (hit && !usedSku.has(hit.sku)) { usedSku.add(hit.sku); ordered.push(hit); break; }
-                                    }
-                                }
-                                addProducts(ordered);
-                            }
-                        }
+                    const curated = ribbonRelatedCards(info);
+                    addProducts(curated.cards);
+                    if (curated.failed) {
+                        fetchFailed = true;
+                        DebugLog.warn(`Curated related products for ${info.sku}: related_products is `
+                            + `${info.related_products === null ? 'null (server lookup failed)' : 'absent'} — rail shows the error pane.`);
                     }
                 } else {
                     // Non-ribbon: mirror the brand+code shop page exactly.
