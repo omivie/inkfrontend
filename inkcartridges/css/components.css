@@ -1442,7 +1442,7 @@ a.product-card__contact-btn {
     color: #fff;
     background: var(--color-success, #16a34a);
     font-weight: 700;
-    font-size: 0.62rem;
+    font-size: 0.75rem; /* 12px floor on cards (ERR-296) */
     letter-spacing: 0.02em;
     padding: 2px 7px;
     border-radius: 3px;
@@ -1458,7 +1458,7 @@ a.product-card__contact-btn {
 
 .product-card__gst {
     display: block;
-    font-size: 0.72rem;
+    font-size: 0.75rem; /* 12px floor on cards (ERR-296) */
     color: var(--color-text-muted, #6b7280);
     margin: 0;
     line-height: 1.2;
@@ -1657,8 +1657,15 @@ a.product-card__contact-btn {
 .crosssell-modal__card:hover {
     border-color: var(--color-primary, #2563eb);
 }
+/* Capped at 120px (ERR-296, turnaround doc #8). The grid is auto-fit, so ONE
+   suggestion stretched its card — and a width:100% square image — across the
+   760px panel: a 686px "COMPATIBLE" placeholder that pushed the name and price
+   out of view. */
 .crosssell-modal__img {
     width: 100%;
+    max-width: 120px;
+    margin: 0 auto;
+    display: block;
     aspect-ratio: 1;
     object-fit: contain;
     background: #f9fafb;
@@ -2217,6 +2224,19 @@ a.product-card__contact-btn {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-3);
+}
+
+/* Phones: the TOP of the screen (ERR-296, turnaround doc P2). At the bottom the
+   add-to-cart toast (measured y 554–657 of 664) sat over the PDP sticky buy
+   bar, the cart bar and Filter & Sort — the controls the shopper reaches for
+   next. The top band is the header, which a toast may cover for 3s. */
+@media (max-width: 767.98px) {
+    .toast-container {
+        top: calc(env(safe-area-inset-top, 0px) + 12px);
+        bottom: auto;
+        left: 12px;
+        right: 12px;
+    }
 }
 
 .toast {

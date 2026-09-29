@@ -10,6 +10,7 @@
     "probe:404-search": "node scripts/probe-404-search-dropdown.mjs",
     "probe:contract-pricing": "node scripts/probe-contract-pricing.mjs",
     "probe:tier-approval": "node scripts/probe-tier-approval.mjs",
+    "probe:turnaround-fixes": "node scripts/probe-turnaround-fixes-sep2026.mjs",
     "audit:fit": "node scripts/fit-audit.js",
     "audit:colours": "node scripts/audit-colour-vocabulary.mjs",
     "audit:types": "node scripts/audit-product-types.mjs",

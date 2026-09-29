@@ -3030,7 +3030,7 @@ const PrinterName = {
         WIRELESS: 'Wireless',
         WORKFORCE: 'WorkForce',
     },
-    BROTHER_PREFIX: /^(Brother )(DCP|FAX|HL|MFC|PT|QL) (?=\S*\d)/,
+    BROTHER_PREFIX: /^(Brother )(ADS|DCP|FAX|HL|MFC|PT|QL) (?=\S*\d)/,
     display(name) {
         if (typeof name !== 'string') return '';
         let out = name

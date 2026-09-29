@@ -94,6 +94,13 @@
             const heading = document.querySelector('.account-content__heading');
             if (heading) heading.textContent = `Order #${order.order_number}`;
 
+            // Buy again (ERR-296): account.js owns the click (delegated).
+            const buyAgain = document.getElementById('order-buy-again');
+            if (buyAgain && order.order_number) {
+                buyAgain.setAttribute('data-buy-again', order.order_number);
+                buyAgain.hidden = false;
+            }
+
             // Update status
             const statusEl = document.querySelector('.order-status');
             if (statusEl && order.status) {

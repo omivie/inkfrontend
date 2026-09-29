@@ -2165,8 +2165,11 @@ const Cart = {
             return { valid: false, errors: ['Unable to validate cart. Please try again.'], priceChanges: [] };
         }
 
-        // Get Turnstile token for bot verification (non-blocking — returns null if unavailable)
-        const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;
+        // Get Turnstile token for bot verification (non-blocking — returns null if unavailable).
+        // ERR-296: from the prefetch when there is one, and never more than
+        // TURNSTILE_CLICK_WAIT_MS at the click — this used to hold "Checkout"
+        // for the script download + challenge, up to 8s (turnaround doc P2).
+        const turnstileToken = await this._takeTurnstileToken();
 
         try {
             const response = await API.validateCart(turnstileToken, acknowledgePriceChanges);
@@ -2256,8 +2259,52 @@ const Cart = {
      * Intercepts the checkout anchor click to validate cart first
      * SECURITY: Blocks checkout if server pricing is unavailable
      */
+    /** Turnstile tokens live 300s and are single-use; refetch past this age. */
+    TURNSTILE_MAX_AGE_MS: 240000,
+    /** The longest a Checkout click waits for a token before validating without one. */
+    TURNSTILE_CLICK_WAIT_MS: 1500,
+    _turnstilePrefetch: null,
+
+    /** Start fetching a token BEFORE the click (idle on /cart, hover/focus/touch on Checkout). */
+    prefetchTurnstile: function() {
+        if (typeof Auth === 'undefined' || typeof Auth.getTurnstileToken !== 'function') return;
+        const pre = this._turnstilePrefetch;
+        if (pre && Date.now() - pre.at < this.TURNSTILE_MAX_AGE_MS) return;
+        this._turnstilePrefetch = { at: Date.now(), promise: Auth.getTurnstileToken().catch(() => null) };
+    },
+
+    /** Take (and consume — tokens are single-use) the prefetched token, capped at the click. */
+    _takeTurnstileToken: async function() {
+        if (typeof Auth === 'undefined' || typeof Auth.getTurnstileToken !== 'function') return null;
+        let pre = this._turnstilePrefetch;
+        this._turnstilePrefetch = null;
+        if (!pre || Date.now() - pre.at >= this.TURNSTILE_MAX_AGE_MS) {
+            pre = { at: Date.now(), promise: Auth.getTurnstileToken().catch(() => null) };
+        }
+        let timer;
+        const cap = new Promise((resolve) => { timer = setTimeout(() => resolve(null), this.TURNSTILE_CLICK_WAIT_MS); });
+        try {
+            return await Promise.race([pre.promise, cap]);
+        } finally {
+            clearTimeout(timer);
+        }
+    },
+
     bindCheckoutButton: function() {
         const self = this;
+        // Warm the Turnstile token before the shopper reaches for Checkout.
+        const warm = (e) => {
+            if (e.target && e.target.closest && e.target.closest('#checkout-btn, .cart-summary__checkout-btn')) self.prefetchTurnstile();
+        };
+        document.addEventListener('pointerover', warm, { passive: true });
+        document.addEventListener('focusin', warm);
+        document.addEventListener('touchstart', warm, { passive: true });
+        if (typeof window !== 'undefined' && window.location && window.location.pathname === '/cart') {
+            const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 2000));
+            // After the cart has had time to load (init awaits Auth + the server
+            // cart), and only for a cart that can check out.
+            setTimeout(() => idle(() => { if (self.items.length > 0 || self.hasServerPricing()) self.prefetchTurnstile(); }), 3000);
+        }
         document.addEventListener('click', async (e) => {
             const checkoutLink = e.target.closest('#checkout-btn, .cart-summary__checkout-btn');
             if (!checkoutLink) return;
@@ -4258,11 +4305,12 @@ const Cart = {
                             ' + (escapedBrand ? '<p class="cart-item__brand">' + escapedBrand + '</p>' : '') + '\
                             ' + (escapedSku ? '<p class="cart-item__sku">SKU: ' + escapedSku + '</p>' : '') + '\
                             \
-                            <p class="cart-item__price-mobile">' + formatPrice(item.price) + '</p>\
+                            <p class="cart-item__price-mobile">' + formatPrice(item.price) + ' <span class="cart-item__exgst" data-exgst="' + Security.escapeAttr(item.price != null ? String(item.price) : '') + '" hidden></span></p>\
                             ' + self.renderLinePackSuggestion(item) + '\
                         </div>\
                         <div class="cart-item__price">\
                             ' + formatPrice(item.price) + '\
+                            <span class="cart-item__exgst" data-exgst="' + Security.escapeAttr(item.price != null ? String(item.price) : '') + '" hidden></span>\
                         </div>\
                         <div class="cart-item__quantity">\
                             <div class="quantity-selector" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
@@ -4294,6 +4342,8 @@ const Cart = {
                 // Bind image error fallbacks (replaces inline onerror)
                 this.bindImageFallbacks(cartItems);
                 this.decorateVolumeNudges(cartItems);
+                // Ex-GST under each unit price, business accounts only (ERR-296).
+                if (typeof decorateExGst === 'function') decorateExGst(cartItems);
             }
 
             const subtotal = this.getSubtotal();

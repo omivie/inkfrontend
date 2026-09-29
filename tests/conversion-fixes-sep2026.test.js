@@ -410,7 +410,8 @@ test('§6 the printer box is FIRST on the landing, uses /api/printers/search (no
     assert.doesNotMatch(html.slice(level, brands).replace(/<!--[\s\S]*?-->/g, ''), /<section(?![^>]*landing-printer-search)/,
         'no section may sit between the printer box and the brand picker');
     const fn = extractMethod(stripComments(read('js/shop-page.js')), 'renderLandingPrinterSearch').body;
-    assert.match(fn, /API\.searchPrinters\(q\)/);
+    // Both separator spellings (ERR-296: /api/printers/search is separator-intolerant).
+    assert.match(fn, /finderSpellings\(q\)\.map\(\(s\) => API\.searchPrinters\(s\)/);
     assert.doesNotMatch(fn, /smartSearch|\/api\/search\//, 'ERR-254: a typeahead must not file searches');
     assert.match(fn, /PrinterName\.display/);
 });

@@ -729,6 +729,13 @@
             if (Number.isFinite(price) && price > 0) {
                 priceEl.setAttribute('content', price.toFixed(2));
             }
+            // Ex-GST for business accounts (ERR-296) — BESIDE #product-price,
+            // never inside it: the microdata price stays GST-inclusive retail.
+            const exGstEl = document.getElementById('product-exgst');
+            if (exGstEl && typeof decorateExGst === 'function') {
+                exGstEl.setAttribute('data-exgst', Number.isFinite(price) ? String(price) : '');
+                decorateExGst(exGstEl.parentElement);
+            }
 
             // Four-row buy-box (Price · Availability · Delivery · Returns).
             // Price + Availability rows are filled by the existing renderers
@@ -1350,7 +1357,10 @@
                 `<p class="volume-pricing__eyebrow">Buy more, save more</p>` +
                 `<div class="volume-pricing__chips" role="group" aria-label="Quantity price breaks">${chips}</div>` +
                 `<p class="volume-pricing__status" id="volume-pricing-status" data-testid="volume-status" role="status" aria-live="polite"></p>` +
-                flooredNote;
+                flooredNote +
+                // ERR-296 (turnaround doc #13): the ladder is where a bulk buyer
+                // looks; /quote takes a photo, a pasted list, NZBN and PO.
+                `<p class="volume-pricing__quote"><a href="/quote">Buying for several printers? Get a quote</a></p>`;
             section.hidden = false;
 
             section.querySelectorAll('.volume-pricing__chip[data-qty]').forEach(chip => {

@@ -168,11 +168,33 @@ function initStickyCheckoutBar() {
  * wires the customer-facing input. Idle/blur previews the code (read-only,
  * surfaces the specific failure reason); submit applies it for real.
  */
+/**
+ * Guests cannot use coupons — the backend requires sign-in plus a verified
+ * email, on purpose (coupon abuse, prefix lock). Until ERR-296 a guest could
+ * type a code and press Apply here, spending an attempt to be told no, and
+ * checkout showed a disabled-looking button beside "Sign in to use coupon
+ * codes". Now: hide the form, offer the free account. Returns true when gated.
+ */
+function applyGuestCouponGate() {
+    const form = document.getElementById('cart-coupon-form');
+    const guest = document.getElementById('cart-coupon-guest');
+    if (!form || typeof Auth === 'undefined' || typeof Auth.isAuthenticated !== 'function') return false;
+    const isGuest = !Auth.isAuthenticated();
+    form.hidden = isGuest;
+    if (guest) guest.hidden = !isGuest;
+    return isGuest;
+}
+
 function initCouponForm() {
     const form = document.getElementById('cart-coupon-form');
     const input = document.getElementById('cart-coupon-input');
     const feedback = document.getElementById('cart-coupon-feedback');
     if (!form || !input || typeof API === 'undefined') return;
+    if (typeof Auth !== 'undefined' && Auth.readyPromise && typeof Auth.readyPromise.then === 'function') {
+        Auth.readyPromise.then(applyGuestCouponGate);
+    } else {
+        applyGuestCouponGate();
+    }
 
     const setFeedback = (msg, kind) => {
         if (!feedback) return;

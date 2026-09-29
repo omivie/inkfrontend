@@ -21,12 +21,13 @@
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+    <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=2c68b493">
-    <link rel="stylesheet" href="/css/components.css?v=d3a04dd8">
+    <link rel="stylesheet" href="/css/components.css?v=b1eaf525">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=536e13fe">
-    <link rel="stylesheet" href="/css/search.css?v=f0724f80">
+    <link rel="stylesheet" href="/css/pages.css?v=d731bfbd">
+    <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Order Confirmed | InkCartridges.co.nz">
@@ -249,15 +250,43 @@
                              claim html/account/loyalty.html:276 states — pinned by
                              tests/conversion-fixes-sep2026.test.js so a rate change
                              cannot land on one of them only. -->
+                        <!-- ONE FIELD (ERR-296, turnaround doc #14): the guest already gave
+                             us an email and an address at checkout, so a password is all
+                             that is missing. Auth.signUp with THIS order's email; the backend
+                             attaches the guest's past orders and points on first sign-in
+                             (POST /api/account/sync). The terms box mirrors the register
+                             form's own required consent — one account, one agreement.
+                             No email on the order ⇒ the form stays hidden and the full
+                             register link below is the way in (renderAccountForm). -->
                         <div class="confirmation-card confirmation-card--accent" id="create-account-prompt" hidden>
-                            <h3>Save Your Details for Next Time</h3>
-                            <p>Create an account to track orders, reorder in one click, and get new-product updates.</p>
+                            <h3>Save your printer and keep your points</h3>
                             <p class="confirmation-card__points" id="create-account-points" hidden></p>
                             <p>You'll also earn 1 point for every $1 you spend (excluding shipping). 100 points = $1 off a future order.</p>
-                            <a href="/account/login?tab=register" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
+                            <form class="confirmation-account-form" id="confirmation-account-form" hidden novalidate>
+                                <p class="confirmation-account-form__lead">Create a password to save your printer and keep your points. Your account email: <strong id="confirmation-account-email"></strong></p>
+                                <label class="form-label" for="confirmation-account-password">Choose a password</label>
+                                <input type="password" id="confirmation-account-password" class="form-input" autocomplete="new-password" minlength="8" required aria-describedby="confirmation-account-status">
+                                <label class="confirmation-account-form__terms">
+                                    <input type="checkbox" id="confirmation-account-terms" required>
+                                    I agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.
+                                </label>
+                                <button type="submit" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account Inline" data-track-location="post_purchase">Create my account</button>
+                                <p class="confirmation-account-form__status" id="confirmation-account-status" role="status" aria-live="polite"></p>
+                            </form>
+                            <a href="/account/login?tab=register" class="confirmation-account-form__alt" id="confirmation-account-alt" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Prefer the full sign-up form?</a>
                         </div>
 
-                        <div class="confirmation-card confirmation-card--subtle">
+                        <!-- Company-domain buyer without a business account (ERR-296, #11):
+                             shown only when the order says business_account_offer === true. -->
+                        <div class="confirmation-card confirmation-card--subtle" id="business-account-offer" hidden>
+                            <h3>Buying for a business?</h3>
+                            <p>Open an account: monthly invoice, saved printers, one place to reorder.</p>
+                            <a href="/business" class="btn btn--secondary" data-track="cta_click" data-track-cta="Business Account" data-track-location="post_purchase">See business accounts</a>
+                        </div>
+
+                        <!-- Signed-in only (ERR-296): for a guest this sent them to a sign-in
+                             wall. The guest's way to a saved printer is the card above. -->
+                        <div class="confirmation-card confirmation-card--subtle" id="save-printer-prompt" hidden>
                             <h3>Running Low? Set a Reminder</h3>
                             <p>Save your printer to your account and we'll remind you when it's time to reorder.</p>
                             <a href="/account/printers" class="btn btn--secondary" data-track="cta_click" data-track-cta="Save Printer" data-track-location="post_purchase">Save My Printer</a>
@@ -318,26 +347,26 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=068d4cd4"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/utils.js?v=3a202e72"></script>
-    <script defer src="/js/api.js?v=4bf7a775"></script>
+    <script defer src="/js/utils.js?v=83500127"></script>
+    <script defer src="/js/api.js?v=41244595"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=8aa5730e"></script>
+    <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/products.js?v=d3b78e7f"></script>
-    <script defer src="/js/search.js?v=c2997f45"></script>
+    <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=edd483a2"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=e07d7cca"></script>
+    <script defer src="/js/cart.js?v=089f2ca2"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
 
     <!-- defer = DOCUMENT ORDER: order-totals.js must precede both the page
          controller and order-receipt.js, which read window.OrderTotals. -->
     <script defer src="/js/order-totals.js?v=4d4a743f"></script>
     <script defer src="/js/order-receipt.js?v=8d7f6a13"></script>
-    <script defer src="/js/order-confirmation-page.js?v=9510ce5b"></script>
+    <script defer src="/js/order-confirmation-page.js?v=b550fa01"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

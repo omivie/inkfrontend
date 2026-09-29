@@ -440,17 +440,14 @@ const Auth = {
      * Sign up with email and password
      * @param {string} email
      * @param {string} password
+     * @param {object} [metadata] user_metadata (e.g. { full_name }), optional
      */
-    async signUp(email, password) {
+    async signUp(email, password, metadata) {
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
-        const { data, error } = await this.supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                emailRedirectTo: `${window.location.origin}/account/verify-email`
-            }
-        });
+        const options = { emailRedirectTo: `${window.location.origin}/account/verify-email` };
+        if (metadata && typeof metadata === 'object') options.data = metadata;
+        const { data, error } = await this.supabase.auth.signUp({ email, password, options });
 
         return { data, error };
     },

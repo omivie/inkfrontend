@@ -41,6 +41,43 @@ describing the same incident.
 
 ---
 
+## ERR-296 — The backend's turnaround doc: a printer finder that told buyers of non-NZ printers nothing, bots served a /shop-canonical shell on every prerender failure, and fifteen smaller conversion gaps — **RESOLVED (frontend)** (2026-09-29)
+
+**Source.** `backend-docs/inbox/fe-turnaround-fixes-sep2026.md` (backend, 2026-09-28): a scripted first-visit walk of the live site (1440×900 + iPhone 13, cleared storage), an SEO check and order/search data. ERR-294 recorded it as "never received"; the owner sent it on 2026-09-29 with the round-2 reply. Reply: `outbox/turnaround-fixes-FE-reply-sep2026.md`.
+
+**Verified before building.** Every item was checked against the code and the live API first. Already shipped by ERR-290/293/294, so not rebuilt: `/review`, desktop Add to Cart, the popular rows, search noindex (header + meta, `search` and `q`), slug redirects keeping the part number, the alias banner, "Fits Brother Brother", "Model:" on compatible rows, the printer H1, `/html/*` 308, bought-together hiding on `[]`, `/bulk-pricing` rendering the server's `detail`. `/business` Apply (#10) was built in parallel by a peer session as **ERR-297**.
+
+**Built (by the doc's numbering).**
+- **#4 middleware.** The bot prerender fetch had no timeout, and any failure (`catch`, non-OK) returned the SPA shell — the page with the generic title and a `/shop` canonical that Search Console reads as Soft 404. It now carries `AbortSignal.timeout(8000)` (cold prerender measured 3.6s). A timeout, network error or backend **5xx** answers **503 + `Retry-After: 120` + `no-store`**. A **4xx still falls through**: a printer that does not exist is an answer, not an outage.
+- **#6** alias link reads "Search PG-640". The **header typeahead** now shows the alias note + link too (ERR-294's "not built" row).
+- **#7 printer finder.** An empty `/api/printers/search` now says "We couldn't match that printer. Check the code printed on your old cartridge…", with `/quote` (photo) and the phone from `LegalConfig`. The Find button submits `&from=finder`; when that search comes back with rows but no `matched_printer`, a banner says "These match your words, not your printer." A typed search carries no printer claim and gets no banner.
+- **#8** cross-sell image capped at 120px. Cause: the grid is `auto-fit`, so ONE suggestion stretched its card and a `width:100%` square image across the 760px panel (686px).
+- **#9** `PrinterName` hyphenates Brother **ADS** (backend rule). No ADS printer is in the catalogue today (measured).
+- **#11** `business_account_offer` is carried through `transformAPIOrder` as a **tri-state** (absent ⇒ `null`, never "no"); only `true` shows the "Buying for a business?" card.
+- **#12 ex-GST.** `exGstPrice` (= price / 1.15, to the cent) + `decorateExGst`, shown under the PDP price (beside `#product-price`, never inside it — the microdata price stays GST-inclusive) and every cart line, **only** when `Business.isActive()` resolves true. A failed status read shows retail only.
+- **#13** `/quote` linked from the PDP ladder and `/bulk-pricing`.
+- **#14** the confirmation page's guest card is a **one-field** form: password + the register form's own terms box, `Auth.signUp(order email, pw, {full_name})`. Supabase's fake success for an existing email (`identities: []`) is read as "already exists", not "check your inbox". "Save My Printer" (a sign-in wall for a guest) is now signed-in only.
+- **#15** sign-in and register show `loyalty.headline` + `loyalty.detail` from value-props (welcome points, guest-orders claim), hidden until the fetch lands.
+- **#17** `/value-packs` brand chips from `/api/brands` (`show_on_shop`, `sort_order`), filtering `pack=value_pack&brand=`; a stale response cannot paint over a newer chip; an empty brand is said in words.
+- **#18 Buy again** on every account order row, the order detail and the account sidebar. It hands the order's lines to `/cart?add=` — the SAME path the guest reorder emails use (CartDeepLink), so unknown SKUs, the 12-line cap and the qty clamp are reported by one owner.
+- **P2.** Cart "Total" → "Total before shipping" (the FE never adds prices). Guest coupons: the form is hidden and "Have a code? Create a free account to use it" shown (cart AND checkout; the cart used to let a guest POST a code and spend an attempt). Checkout click: the Turnstile token is prefetched (idle on /cart, hover/focus/touch on Checkout) and the click waits at most **1.5s** for it (was up to 8s, script + challenge). Phone toasts moved to the TOP. Filter & Sort leaves on a downward scroll, following the header's own `.site-header--hidden` signal. Card text floor **12px** (was 9.92px "3+ PRICE"/"Save"/"Free shipping", 10px ribbon, 11px stock/colour). Google Fonts load from a `<link>` in all 46 page heads instead of an `@import` in base.css.
+
+**Found while building, not in the doc.**
+1. ***`/api/printers/search` is separator-intolerant, and the finder's own placeholder could not find itself.*** Measured: "Brother MFC-J5930DW" (the placeholder) → `[]`; "Brother MFC J5930DW" → the printer. Also "Epson XP-2100" → `[]`, "XP 2100" → hit; stored "HLL-3210CDW" is the reverse. The printer-model resolver in `loadProducts` already knew this; the finder did not. Before this change it said "No printer found"; with #7's new copy it would have told a buyer of a printer we sell that we could not match it. The finder now asks both spellings concurrently, raw first. Server-side normalisation asked as **BF-096**.
+2. `probe:mobile-cta` §7 has swept `/ink-cartridges` for card buttons since ERR-290 removed the only cards on it — it reports "0 card controls" as not exercised on every run. This build's probe sweeps a results page instead (§B4).
+
+**Measured, reported as measured.**
+- Fonts: on `/cart` (iPhone 13, throttled, 3 runs) the font CSS now starts at ~160ms instead of ~870ms, but first paint moved only ~80ms (1.86–1.96s → 1.79–1.84s): the `@import` chain was real and was not the bottleneck. Desktop LCP is the logo repainting when Inter arrives (~0.7–0.9s, both builds). Not claimed as an LCP fix.
+- Apex `http://inkcartridges.co.nz` 307 is a Vercel **domain** setting; the repo cannot remove the http→https hop. Owner action.
+
+**Our own mistake.** Before reading ERR-297's note, this session sent ONE unauthenticated `POST /api/business/apply` and one to `/credit-reference` to learn whether the routes existed (401 both). The `/apply` limiter counts 5/IP/24h BEFORE auth, so that request spent part of the office's quota. The probe for this entry never POSTs; a preflight 204s any path (ERR-223), so it is not used as evidence either.
+
+**Checks.**
+- `tests/turnaround-fixes-sep2026.test.js` — 36 tests; the middleware is imported and run against stubbed backends (timeout, 5xx, network error, 404, 200, human); every pure function runs in a vm.
+- `python3 scripts/redproof-turnaround-fixes-sep2026.py` — **42/42** mutations caught (temp copy). A hung suite is counted red, not green — one mutation hangs the Turnstile test without its timeout.
+- `npm run probe:turnaround-fixes [-- --browser]` — READ-ONLY, GETs only; the one search the banner needs is answered by a page.route mock of the measured `/smart` shape (no analytics row). Negative controls: a 9px override must be reported; a typed search must show no banner; the hyphenated placeholder must match.
+- `tests/admin-only-test-product-sep2026.test.js` §10 lifts `validateCart` into a vm; it now lifts `_takeTurnstileToken` with it.
+
 ## ERR-297 — /business told every prospective business customer the door was locked, because a GET read a POST-only endpoint's 404 as "no endpoint" — **RESOLVED (frontend)** (2026-09-29)
 
 **Source.** `backend-docs/inbox/fe-best-sellers-and-four-replies-round2-backend-response-sep2026.md` §8 (backend reply to ERR-294/295) and turnaround doc #10. The round-2 reply was split between sessions: this entry is ONLY the /business Apply flow. Best sellers (BF-089/090) and the storefront deletions (BF-088/091/092/093) are ERR-299.

@@ -341,6 +341,12 @@
                 invoiceNumber: apiOrder.invoice?.invoice_number || null,
                 invoiceDate: apiOrder.invoice?.invoice_date || null,
                 googleCustomerReviews: apiOrder.google_customer_reviews || null,
+                // ERR-296 (turnaround doc #11). Tri-state: true / false as sent,
+                // null when the key is ABSENT (an older payload, or the offline
+                // sessionStorage copy) — absence is "not reported", never "no".
+                businessAccountOffer: Object.prototype.hasOwnProperty.call(apiOrder, 'business_account_offer')
+                    ? apiOrder.business_account_offer === true
+                    : null,
                 // Money is normalised by the ONE shared helper (js/order-totals.js)
                 // rather than by hand-rolled `?? 0` chains here — see DEC-006.
                 // Those chains collapsed UNKNOWN into 0, which is how the points
@@ -492,6 +498,16 @@
 
             // Google Customer Reviews opt-in
             this.renderGoogleReviewsOptIn(order);
+
+            // Only an explicit `true` shows the card (see transformAPIOrder).
+            const bizOffer = document.getElementById('business-account-offer');
+            if (bizOffer) bizOffer.hidden = order.businessAccountOffer !== true;
+
+            // The order (and its email) can land after Auth has already said
+            // "guest" — renderAccountForm is idempotent, so ask again here.
+            if (typeof Auth !== 'undefined' && Auth.readyPromise) {
+                Auth.readyPromise.then(() => { if (!Auth.isAuthenticated()) this.renderAccountForm(); });
+            }
         },
 
         renderGoogleReviewsOptIn(order) {
@@ -690,6 +706,86 @@
             el.hidden = false;
         },
 
+        /**
+         * The one-field account form on the guest card (ERR-296, turnaround doc
+         * #14). The order already holds the email; a password is all that is
+         * missing. Supabase sends the verify link; on first sign-in
+         * POST /api/account/sync attaches this and every earlier guest order and
+         * its points (auth.js SIGNED_IN).
+         *
+         * No email on the order ⇒ the form stays hidden and the full register
+         * link is the only way in — we never ask for an email we would have to
+         * trust the guest to retype identically.
+         */
+        renderAccountForm() {
+            const form = document.getElementById('confirmation-account-form');
+            const email = this._orderEmail;
+            if (!form || !email || typeof Auth === 'undefined' || typeof Auth.signUp !== 'function') return;
+            const emailEl = document.getElementById('confirmation-account-email');
+            if (emailEl) emailEl.textContent = email;
+            form.hidden = false;
+            if (form.dataset.bound === '1') return;
+            form.dataset.bound = '1';
+            const status = document.getElementById('confirmation-account-status');
+            const pw = document.getElementById('confirmation-account-password');
+            const terms = document.getElementById('confirmation-account-terms');
+            const btn = form.querySelector('button[type="submit"]');
+            const say = (text, isError) => {
+                status.textContent = text;
+                status.classList.toggle('is-error', !!isError);
+            };
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const result = ConfirmationPage.accountFormError(pw.value, terms.checked);
+                if (result) { say(result, true); (result.includes('agree') ? terms : pw).focus(); return; }
+                btn.disabled = true;
+                say('Creating your account…', false);
+                const name = (this.orderData && this.orderData.shippingAddress && this.orderData.shippingAddress.recipient_name) || '';
+                let outcome;
+                try {
+                    const { data, error } = await Auth.signUp(email, pw.value, name ? { full_name: name } : undefined);
+                    outcome = ConfirmationPage.signUpOutcome(data, error);
+                } catch (err) {
+                    outcome = { ok: false, message: 'We could not create your account just now. Please try the full sign-up form.' };
+                }
+                if (outcome.ok) {
+                    form.innerHTML = `<p class="confirmation-account-form__done" role="status">Check your inbox at <strong>${Security.escapeHtml(email)}</strong> and click the link to finish. This order, any earlier guest orders and their points are added when you first sign in.</p>`;
+                    return;
+                }
+                btn.disabled = false;
+                say(outcome.message, true);
+                if (outcome.exists) {
+                    status.insertAdjacentHTML('beforeend', ' <a href="/account/login">Sign in</a>');
+                }
+            });
+        },
+
+        /** Client-side checks, the same two the register form makes. '' = fine. */
+        accountFormError(password, termsChecked) {
+            if (!password || password.length < 8) return 'Password must be at least 8 characters.';
+            if (!termsChecked) return 'Please agree to the Terms & Conditions and Privacy Policy.';
+            return '';
+        },
+
+        /**
+         * Supabase's signUp answer, read the way login-page.js reads it. An EXISTING
+         * email comes back as a fake success with `identities: []` — treating that
+         * as success would tell a customer to check an inbox that gets nothing.
+         */
+        signUpOutcome(data, error) {
+            const exists = 'An account with this email already exists.';
+            if (error) {
+                const msg = String(error.message || '');
+                if (/already (been )?registered/i.test(msg)) return { ok: false, exists: true, message: exists };
+                return { ok: false, message: msg || 'Registration failed. Please try again.' };
+            }
+            if (data && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+                return { ok: false, exists: true, message: exists };
+            }
+            if (!data || !data.user) return { ok: false, message: 'Registration failed. Please try again.' };
+            return { ok: true };
+        },
+
         renderTotals(order) {
             if (typeof OrderTotals === 'undefined') {
                 DebugLog.error('order-totals.js missing — cannot render order totals');
@@ -879,6 +975,10 @@
                     const prompt = document.getElementById('create-account-prompt');
                     if (prompt) prompt.hidden = false;
                     ConfirmationPage.renderGuestPointsLine();
+                    ConfirmationPage.renderAccountForm();
+                } else {
+                    const savePrinter = document.getElementById('save-printer-prompt');
+                    if (savePrinter) savePrinter.hidden = false;
                 }
             });
         }

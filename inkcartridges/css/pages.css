@@ -2055,6 +2055,17 @@
 }
 
 
+/* Ex-GST beside the incl-GST price, business accounts only (ERR-296). */
+.product-info__exgst,
+.cart-item__exgst {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+.cart-item__price-mobile .cart-item__exgst { display: inline; margin-left: 4px; }
+.product-info__exgst[hidden], .cart-item__exgst[hidden] { display: none; }
+
 .product-info__gst {
     font-size: var(--font-size-sm);
     color: var(--color-text-light);
@@ -2739,7 +2750,7 @@
 .product-card__free-shipping {
     display: inline-flex;
     align-items: center;
-    font-size: 0.62rem;
+    font-size: 0.75rem; /* 12px floor on cards (ERR-296) */
     font-weight: 700;
     color: #047857;
     background: #ecfdf5;
@@ -2968,6 +2979,21 @@
 /* Never over an open search suggestion list (conversion handoff 2026-09-23
    §2): search.js sets body.smart-ac-open while any list is open. */
 body.smart-ac-open .filter-sort-bar { display: none !important; }
+
+/* Out of the way while the shopper scrolls DOWN (ERR-296, turnaround doc P2):
+   on search results the fixed layers took 252 of 664px — header 128, this bar
+   67, consent 57 — and the first card's Add sat partly under this bar. The
+   header already hides on a downward scroll (main.js initStickyHeader adds
+   .site-header--hidden); this bar follows that ONE signal, so the two can never
+   disagree about direction. Scrolling up brings both back. Keyboard focus
+   inside the bar always shows it. */
+@media (max-width: 768px) {
+    .filter-sort-bar { transition: transform 0.2s ease; }
+    body:has(.site-header--hidden) .filter-sort-bar:not(:focus-within) {
+        transform: translateY(calc(100% + var(--consent-banner-height, 0px) + 8px));
+        pointer-events: none;
+    }
+}
 
 .filter-sort-bar {
     display: none; /* revealed only inside the mobile breakpoint below */
@@ -5194,6 +5220,11 @@ body.filter-sort-open { overflow: hidden; }
     border-bottom: none;
 }
 
+.orders-table__actions { white-space: nowrap; }
+.account-content__lead { margin: 0 0 var(--spacing-md); color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.orders-table__actions .btn + .btn { margin-left: 8px; }
+.account-content__header #order-buy-again { margin-left: auto; }
+
 .orders-table td a {
     color: var(--color-primary);
     font-weight: var(--font-weight-medium);
@@ -6241,6 +6272,17 @@ a.account-review-card__product:focus-visible {
     margin-bottom: var(--spacing-xl);
 }
 
+/* Live rewards facts under the auth heading (ERR-296, turnaround doc #15). */
+.auth-form__points {
+    margin: -0.5rem 0 1.25rem;
+    padding: 0.625rem 0.75rem;
+    border-radius: 6px;
+    background: var(--cyan-light, #D4E8F5);
+    font-size: var(--font-size-sm);
+    line-height: 1.45;
+    color: var(--steel-600, #475569);
+}
+
 .auth-form__forgot {
     display: block;
     text-align: right;
@@ -7108,6 +7150,28 @@ a.account-review-card__product:focus-visible {
     color: var(--steel-600, #475569);
     font-size: var(--font-size-sm);
 }
+
+/* One-field account form on the guest card (ERR-296, turnaround doc #14). */
+.confirmation-account-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 360px;
+    margin: 0 auto 0.75rem;
+    text-align: left;
+}
+.confirmation-account-form .form-input { width: 100%; }
+.confirmation-account-form__terms {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    font-size: var(--font-size-sm);
+    color: var(--steel-600, #475569);
+}
+.confirmation-account-form__terms input { margin-top: 0.2rem; flex: none; }
+.confirmation-card--accent .confirmation-account-form__status { margin: 0; min-height: 1.2em; }
+.confirmation-account-form__status.is-error { color: var(--color-error, #b91c1c); }
+.confirmation-account-form__alt { font-size: var(--font-size-sm); }
 
 .confirmation-card--subtle {
     background: var(--steel-50, #F8FAFC);
@@ -8939,7 +9003,7 @@ body.page-shop {
 
 .product-card__color {
     display: inline-block;
-    font-size: 11px;
+    font-size: 12px; /* 12px floor on cards (ERR-296) */
     color: var(--color-text-muted);
     margin: 0;
 }
@@ -8959,7 +9023,7 @@ body.page-shop {
 
 
 .product-card__stock {
-    font-size: 11px;
+    font-size: 12px; /* 12px floor on cards (ERR-296): was 11px */
     font-weight: var(--font-weight-medium);
     margin: 0;
     margin-right: var(--spacing-sm);
@@ -11359,6 +11423,9 @@ body.page-shop {
     min-height: 44px;
 }
 
+.cart-coupon__guest { margin: 0.25rem 0 0; font-size: var(--font-size-sm); }
+.cart-coupon__guest a { font-weight: 600; }
+
 .cart-coupon__feedback {
     margin: var(--spacing-2) 0 0;
     font-size: var(--font-size-sm);
@@ -12749,7 +12816,7 @@ body.page-shop {
 
 .product-card__biz-label {
     font-family: var(--font-family-mono);
-    font-size: 0.62rem;
+    font-size: 0.75rem; /* 12px floor on cards (ERR-296): was 0.62rem, 9.9px */
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -12764,13 +12831,13 @@ body.page-shop {
 
 /* "ea" — the unit qualifier is part of the claim, never optional decoration. */
 .product-card__biz-unit {
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--color-text-muted);
 }
 
 .product-card__biz-save {
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--color-success-green, #16a34a);
 }
@@ -13995,6 +14062,25 @@ body.page-shop {
 .value-page__table th[scope="row"] { text-align: left; white-space: nowrap; }
 .value-page__table thead th { background: var(--color-background-alt); }
 .value-page__grid { margin-top: var(--spacing-md); }
+
+/* /value-packs brand chips (ERR-296). Wrap on phones; 44px tap targets. */
+.value-page__brands { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--spacing-md); }
+.value-page__brand-chip {
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid var(--color-border, #d1d5db);
+    border-radius: 999px;
+    background: #fff;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-heading, #111827);
+    cursor: pointer;
+}
+.value-page__brand-chip[aria-pressed="true"] { background: var(--cyan-primary, #267FB5); border-color: var(--cyan-primary, #267FB5); color: #fff; }
+.value-page__brand-chip:focus-visible { outline: 2px solid var(--cyan-primary, #267FB5); outline-offset: 2px; }
+.value-page__empty { grid-column: 1 / -1; padding: var(--spacing-md) 0; }
+.value-page__quote { margin-top: var(--spacing-md); font-size: var(--font-size-sm); }
 
 /* Guest cart-copy consent (dark until the backend endpoint is live). */
 .checkout-optin {

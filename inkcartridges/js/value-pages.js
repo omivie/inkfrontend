@@ -107,6 +107,27 @@ const ValuePages = {
         if (wrap && table) { wrap.innerHTML = table; wrap.hidden = false; }
     },
 
+    /**
+     * Brand chips for /value-packs (ERR-296, turnaround doc #17). WHICH brands is
+     * data: `/api/brands` rows with show_on_shop, in sort_order — the same rule
+     * as the /shop grid. Pure; returns '' when there is nothing to choose.
+     */
+    brandChipsHtml(brands, active) {
+        const esc = Security.escapeHtml;
+        const rows = (Array.isArray(brands) ? brands : [])
+            .filter(b => b && b.show_on_shop === true && typeof b.slug === 'string' && b.slug)
+            .sort((a, b) => (Number.isFinite(a.sort_order) ? a.sort_order : 1e9) - (Number.isFinite(b.sort_order) ? b.sort_order : 1e9));
+        if (!rows.length) return '';
+        const chip = (slug, label) => `<button type="button" class="value-page__brand-chip" data-brand="${Security.escapeAttr(slug)}" aria-pressed="${(active || '') === slug ? 'true' : 'false'}">${esc(label)}</button>`;
+        return chip('', 'All brands') + rows.map(b => chip(b.slug, b.name || b.slug)).join('');
+    },
+
+    /** The ?brand= the page opened on, or '' — a slug shape only, never free text. */
+    brandFromUrl(search) {
+        const b = new URLSearchParams(search || '').get('brand') || '';
+        return /^[a-z0-9][a-z0-9-]{0,40}$/.test(b) ? b : '';
+    },
+
     async renderPacks(facts, data) {
         const packs = ValueProps.packs(data);
         const esc = Security.escapeHtml;
@@ -115,11 +136,18 @@ const ValuePages = {
         const more = document.getElementById('value-page-more');
         if (!grid || typeof API === 'undefined' || typeof Products === 'undefined') return;
         let page = 1;
+        let brand = this.brandFromUrl(window.location.search);
+        let brandLabel = '';
+        let seq = 0;
         const load = async () => {
+            const mine = ++seq;
             let rows = [];
             let total = null;
             try {
-                const resp = await API.getProducts({ pack: 'value_pack', page, limit: 24, sort: 'recommended' });
+                const params = { pack: 'value_pack', page, limit: 24, sort: 'recommended' };
+                if (brand) params.brand = brand;
+                const resp = await API.getProducts(params);
+                if (mine !== seq) return; // a newer chip click owns the grid
                 rows = resp && resp.ok && resp.data && Array.isArray(resp.data.products) ? resp.data.products : [];
                 total = resp && resp.data && resp.data.pagination ? resp.data.pagination.total : null;
                 if (!resp || !resp.ok) throw new Error('unreadable');
@@ -129,6 +157,12 @@ const ValuePages = {
                 return;
             }
             if (page === 1) grid.innerHTML = '';
+            if (page === 1 && !rows.length) {
+                // Said in words: an empty grid under a pressed chip reads as broken.
+                grid.innerHTML = `<p class="value-page__empty">No value packs for ${esc(brandLabel || brand || 'this brand')} right now. <a href="/value-packs">See every brand</a> or <a href="/quote">ask us for a set</a>.</p>`;
+                if (more) more.hidden = true;
+                return;
+            }
             grid.insertAdjacentHTML('beforeend', Products.renderCards(rows));
             Products.bindImageFallbacks(grid);
             Products.attachCardListeners(grid);
@@ -138,6 +172,33 @@ const ValuePages = {
             page += 1;
         };
         if (more) more.addEventListener('click', load);
+
+        const chips = document.getElementById('value-page-brands');
+        if (chips && typeof API.getBrands === 'function') {
+            // Chips are an extra, the grid is the page: a failed brand read hides
+            // the row (and says so in the log) but never blocks the packs.
+            API.getBrands().then((resp) => {
+                const html = resp && resp.ok ? this.brandChipsHtml(resp.data, brand) : '';
+                if (!html) { DebugLog.warn('[value-packs] /api/brands unreadable — brand chips not shown'); return; }
+                chips.innerHTML = html;
+                chips.hidden = false;
+                const pressed = chips.querySelector('[aria-pressed="true"]');
+                brandLabel = pressed && brand ? pressed.textContent : '';
+                chips.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.value-page__brand-chip');
+                    if (!btn) return;
+                    brand = btn.getAttribute('data-brand') || '';
+                    brandLabel = brand ? btn.textContent : '';
+                    chips.querySelectorAll('.value-page__brand-chip').forEach(c => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'));
+                    const url = new URL(window.location.href);
+                    if (brand) url.searchParams.set('brand', brand); else url.searchParams.delete('brand');
+                    history.replaceState(history.state, '', url.pathname + url.search);
+                    page = 1;
+                    grid.innerHTML = '<p class="value-page__loading">Loading value packs&hellip;</p>';
+                    load();
+                });
+            }).catch(() => DebugLog.warn('[value-packs] /api/brands failed — brand chips not shown'));
+        }
         await load();
     },
 

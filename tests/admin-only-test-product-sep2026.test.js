@@ -603,6 +603,9 @@ test('§10 validateCart returns a terminal `blocked` instead of throwing', () =>
   // proceed-anyway arm, which walks the shopper to a checkout that cannot
   // complete and fails them after they have typed a card in.
   const body = liftMethod(CART_SRC, 'async validateCart(acknowledgePriceChanges)');
+  // ERR-296: validateCart takes its Turnstile token through this capped helper
+  // (the click no longer waits up to 8s), so the vm Cart carries the real one.
+  const takeToken = liftMethod(CART_SRC, '_takeTurnstileToken: async function()');
   const { AdminOnlyRefusal } = require(path.join(ROOT, 'inkcartridges/js/utils.js'));
 
   const run = async (response) => {
@@ -616,7 +619,8 @@ test('§10 validateCart returns a terminal `blocked` instead of throwing', () =>
       },
     };
     vm.createContext(sandbox);
-    vm.runInContext(`globalThis.Cart = { validationState: 'unknown', validationErrors: [], ${body} };`, sandbox);
+    Object.assign(sandbox, { setTimeout, clearTimeout, Date, Promise });
+    vm.runInContext(`globalThis.Cart = { validationState: 'unknown', validationErrors: [], TURNSTILE_MAX_AGE_MS: 240000, TURNSTILE_CLICK_WAIT_MS: 1500, _turnstilePrefetch: null, ${takeToken}, ${body} };`, sandbox);
     return sandbox.Cart;
   };
 

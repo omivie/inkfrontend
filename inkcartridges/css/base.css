@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Web fonts load from a <link rel="stylesheet"> in each page's <head>, next to
+   the fonts.googleapis.com preconnect — NOT an import rule here (ERR-296). An
+   import rule is discovered only after this file downloads and parses, and it
+   blocks render: measured on /cart (iPhone 13, throttled) the font CSS started
+   at ~870ms and first paint waited until ~1.9s. Every page that links base.css
+   links the fonts first; tests/turnaround-fixes-sep2026.test.js holds that. */
 
 /**
  * BASE.CSS

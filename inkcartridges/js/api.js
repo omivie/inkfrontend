@@ -4314,6 +4314,42 @@ function calculateGST(inclusiveAmount) {
 }
 
 /**
+ * Ex-GST beside incl-GST for ACTIVE business accounts (ERR-296, turnaround doc
+ * #12). Display arithmetic on a server price — `price / (1 + rate)` rounded to
+ * the cent, the handoff's own formula — never a price the FE decides. Returns
+ * null for anything that is not a positive number, so a missing price shows
+ * nothing rather than "$0.00 ex GST".
+ */
+function exGstPrice(inclusiveAmount) {
+    const v = Number(inclusiveAmount);
+    if (inclusiveAmount == null || inclusiveAmount === '' || !Number.isFinite(v) || v <= 0) return null;
+    return Math.round((v - calculateGST(v)) * 100) / 100;
+}
+
+/**
+ * Fill every `[data-exgst]` under `root` with "$X ex GST" — only once
+ * Business says this shopper is an ACTIVE business account. Everyone else
+ * (guests never even ask) keeps the elements hidden. PDP + cart lines share it.
+ */
+async function decorateExGst(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return 0;
+    const els = root.querySelectorAll('[data-exgst]');
+    if (!els.length || typeof Business === 'undefined' || typeof Business.isActive !== 'function') return 0;
+    let active = false;
+    try { active = await Business.isActive(); } catch (_) { active = false; }
+    if (!active) return 0;
+    let shown = 0;
+    els.forEach((el) => {
+        const v = exGstPrice(el.getAttribute('data-exgst'));
+        if (v == null) { el.hidden = true; return; }
+        el.textContent = `${formatPrice(v)} ex GST`;
+        el.hidden = false;
+        shown++;
+    });
+    return shown;
+}
+
+/**
  * Get stock status display
  * @param {object} product - Product object
  * @returns {object} Status with class and text
@@ -4403,6 +4439,8 @@ window.formatPrice = formatPrice;
 window.getStockStatus = getStockStatus;
 window.qualifiesForFreeShipping = qualifiesForFreeShipping;
 window.calculateGST = calculateGST;
+window.exGstPrice = exGstPrice;
+window.decorateExGst = decorateExGst;
 // Test hook — used by __tests__/search-enrichment.test.js. Not part of the
 // public API surface; do not call from product code.
 window._normalizeRpcSearchResponse = _normalizeRpcSearchResponse;

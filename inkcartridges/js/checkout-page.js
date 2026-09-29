@@ -1733,14 +1733,19 @@
             if (this.noteTestCartDiscounts(couponInput, couponBtn)) return;
 
             // Guests cannot use coupons
+            // ERR-296: hide the field and the button (a pink disabled button
+            // read as broken) and offer the free account instead.
             if (typeof Auth !== 'undefined' && !Auth.isAuthenticated()) {
                 couponInput.disabled = true;
                 couponBtn.disabled = true;
-                const hint = couponInput.closest('.coupon-form') || couponInput.parentElement;
+                const formRow = couponInput.closest('.coupon-form') || couponInput.parentElement;
+                formRow.hidden = true;
+                const label = document.querySelector('label[for="coupon-code"]');
+                if (label) label.hidden = true;
                 const msg = document.createElement('p');
-                msg.className = 'form-hint';
-                msg.textContent = 'Sign in to use coupon codes.';
-                hint.appendChild(msg);
+                msg.className = 'form-hint checkout-coupon-guest';
+                msg.innerHTML = 'Have a code? <a href="/account/login?tab=register&amp;redirect=%2Fcheckout">Create a free account to use it</a>.';
+                formRow.insertAdjacentElement('afterend', msg);
                 return;
             }
 

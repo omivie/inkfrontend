@@ -355,6 +355,9 @@
             suggestions: items,
             matched_printer: data.matched_printer || null,
             did_you_mean: data.did_you_mean || null,
+            // Regional alias (ERR-294 §F, ERR-296): "canon pg540" has no rows of
+            // its own; the note says why and where the NZ code is.
+            alias_suggestion: data.alias_suggestion || null,
         };
         // Only a real answer gets remembered. Every failure above threw before
         // reaching this line, so a 429 or a dropped connection is retried on the
@@ -754,6 +757,22 @@
                             — <a href="${escAttr(matchedHref)}">view all compatible cartridges →</a>
                         </div>`;
                     setLive(`Matched printer ${matchedPrinter.name}. View compatible cartridges.`);
+                    return;
+                }
+                // Regional alias: the ERR-294 results page shows this note above the
+                // alias rows; the dropdown had shown "No results" for the same query
+                // (ERR-296). Note + a link to the NZ code, never the alias rows as a
+                // match — Canon ink is region-locked.
+                const alias = data && data.alias_suggestion;
+                if (alias && typeof alias.note === 'string' && alias.note.trim()
+                    && typeof alias.search_query === 'string' && alias.search_query.trim()) {
+                    const to = Array.isArray(alias.to) && alias.to.length ? alias.to.join(' / ') : alias.search_query;
+                    state.list.innerHTML = `
+                        <div class="smart-ac__no-results smart-ac__alias" role="note">
+                            ${esc(alias.note.trim())}
+                            <a href="/search?q=${encodeURIComponent(alias.search_query.trim())}">Search ${esc(to)} →</a>
+                        </div>`;
+                    setLive(alias.note.trim());
                     return;
                 }
                 const dymHTML = didYouMean

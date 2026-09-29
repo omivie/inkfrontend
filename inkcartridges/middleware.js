@@ -2,6 +2,13 @@
 // ink-backend-zaeq is switched off once nothing calls it. tests/backend-move-sep2026.test.js §0.
 const BACKEND = 'https://ink-backend-sg.onrender.com';
 
+// Bot prerender budget (ERR-296). The backend's first response on a cold printer
+// page measured 3.6s (turnaround doc #4); 8s leaves headroom for that and still
+// answers well inside the edge's 25s limit to begin a response. Past it the
+// crawler gets 503 + Retry-After instead of the SPA shell.
+const PRERENDER_TIMEOUT_MS = 8000;
+const PRERENDER_RETRY_AFTER_S = 120;
+
 // `adsbot-google` and `storebot-google` are intentionally listed even though
 // `googlebot` is already present — the AdsBot ("AdsBot-Google", "AdsBot-Google-
 // Mobile") and StoreBot ("Storebot-Google") user-agents do NOT contain the
@@ -289,6 +296,9 @@ export default async function middleware(request) {
         'Accept': 'text/html',
       },
       redirect: 'manual',
+      // A slow prerender used to hold the crawler until the edge gave up, and
+      // then it got the SPA shell (ERR-296). See prerenderUnavailable().
+      signal: AbortSignal.timeout(PRERENDER_TIMEOUT_MS),
     });
 
     // Pass a backend redirect through as OUR 301 so the crawler moves to the
@@ -310,6 +320,10 @@ export default async function middleware(request) {
       });
     }
 
+    // A backend 5xx is an outage, not an answer: tell the crawler to come back
+    // (ERR-296). A 4xx is an answer — a printer or product that does not exist —
+    // and still falls through to the SPA, which renders its own not-found state.
+    if (response.status >= 500) return prerenderUnavailable();
     if (!response.ok) return;
 
     // Headers are BUILT, never copied from upstream. The backend's prerender
@@ -336,8 +350,36 @@ export default async function middleware(request) {
 
     return new Response(response.body, { status: 200, headers });
   } catch {
-    return;
+    // Timeout (AbortSignal.timeout → TimeoutError) or a network failure.
+    return prerenderUnavailable();
   }
+}
+
+/**
+ * A bot whose prerender failed gets 503 + Retry-After, never the SPA shell
+ * (ERR-296, backend turnaround doc 2026-09-28 #4).
+ *
+ * The shell is the worst thing to hand a crawler: it carries the generic shop
+ * title and, until the SPA runs, a `/shop` canonical. Search Console flagged
+ * ~68% of printer URLs "Soft 404" — thousands of identical shells, each
+ * canonicalised to /shop. A 503 is the documented "temporarily unavailable,
+ * keep the old copy" signal: Google retries and does not drop or merge the URL.
+ *
+ * `no-store` so the edge never caches an outage, and `noindex` in case any
+ * consumer indexes an error body. Humans never reach here — the bot gate
+ * returns before any prerender fetch.
+ */
+function prerenderUnavailable() {
+  return new Response('Temporarily unavailable. Please retry shortly.', {
+    status: 503,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Retry-After': String(PRERENDER_RETRY_AFTER_S),
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex',
+      'X-Prerender-Unavailable': 'true',
+    },
+  });
 }
 
 export const config = {

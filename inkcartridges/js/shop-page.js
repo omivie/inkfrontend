@@ -196,6 +196,52 @@
         };
     }
 
+    // PRINTER FINDER, NO MATCH (ERR-296, turnaround doc #7). The finder on
+    // /ink-cartridges and /toner-cartridges submits /shop?q=<model>&from=finder.
+    // True when THAT search came back with rows but no printer: the rows match
+    // the words typed, not a machine we know. Pure, so a test can run it.
+    function finderSearchWithoutPrinter(smartData, search) {
+        if (!smartData || (smartData.matched_printer && smartData.matched_printer.name)) return false;
+        if (!Array.isArray(smartData.products) || !smartData.products.length) return false;
+        return new URLSearchParams(search || '').get('from') === 'finder';
+    }
+
+    // The spellings the finder asks for (see renderLandingPrinterSearch): the
+    // query as typed, then with hyphens as spaces when that differs.
+    function finderSpellings(q) {
+        const raw = String(q || '').trim();
+        const spaced = raw.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+        return spaced && spaced !== raw ? [raw, spaced] : [raw];
+    }
+
+    // Printer rows from several /api/printers/search answers, first answer first,
+    // one row per slug (or full_name when a row has no slug). Failed answers add nothing.
+    function mergePrinterAnswers(answers) {
+        const seen = new Set();
+        const out = [];
+        for (const resp of answers || []) {
+            const rows = resp && resp.ok && Array.isArray(resp.data) ? resp.data : [];
+            for (const p of rows) {
+                const key = p && (p.slug || p.full_name);
+                if (!key || seen.has(key)) continue;
+                seen.add(key);
+                out.push(p);
+            }
+        }
+        return out;
+    }
+
+    // The way out when we cannot name the printer: a person, a photo, or the
+    // code on the old cartridge. Phone from LegalConfig (the one owner of it),
+    // with the same literal the static header ships as the fallback.
+    function finderHelpHtml() {
+        const L = (typeof window !== 'undefined' && window.LegalConfig) || {};
+        const display = L.phoneDisplay || '027 474 0115';
+        const e164 = L.phoneE164 || '+64274740115';
+        return `<span class="finder-help"><a href="/quote">Send us a photo or your list</a> · `
+            + `<a href="tel:${Security.escapeAttr(e164)}">Call ${Security.escapeHtml(display)}</a></span>`;
+    }
+
     // A section heading's text, after its badge: whitespace collapsed, and a
     // leading source word dropped because the badge already says it — the
     // shopper reads "Compatible Brother Cartridges", never "Compatible
@@ -459,6 +505,7 @@
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
             partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn, identityIndex,
             reattachCompatProvenance, searchAlias, sectionTitleText,
+            finderSearchWithoutPrinter, finderHelpHtml, finderSpellings, mergePrinterAnswers,
         };
     }
 
@@ -1691,11 +1738,15 @@
                 const q = input.value.trim();
                 const mine = ++seq;
                 if (q.length < 2) { clear(); return; }
-                let printers = [];
-                try {
-                    const resp = await API.searchPrinters(q);
-                    printers = resp && resp.ok && Array.isArray(resp.data) ? resp.data : [];
-                } catch (_) { printers = []; }
+                // `/api/printers/search` is separator-INTOLERANT (measured
+                // 2026-09-29: "Brother MFC-J5930DW" — this box's own placeholder —
+                // returns [], "Brother MFC J5930DW" returns the printer; and the
+                // reverse for stored "HLL-3210CDW"). ERR-296 made the empty answer
+                // say "We couldn't match that printer", so both spellings are asked,
+                // concurrently, raw first — the same rule as the printer-model
+                // resolver in loadProducts.
+                const answers = await Promise.all(finderSpellings(q).map((s) => API.searchPrinters(s).catch(() => null)));
+                const printers = mergePrinterAnswers(answers);
                 if (mine !== seq) return;
                 const items = printers.slice(0, 6).map(p => {
                     const href = (typeof buildPrinterUrl === 'function' && buildPrinterUrl(p)) || `/shop?q=${encodeURIComponent(p.full_name || q)}`;
@@ -1703,7 +1754,9 @@
                     return `<li><a class="landing-printer-search__hit" href="${Security.escapeAttr(href)}">${Security.escapeHtml(name)}</a></li>`;
                 });
                 if (!items.length) {
-                    list.innerHTML = `<li class="landing-printer-search__none">No printer found for “${Security.escapeHtml(q)}”. Press Find to search every product.</li>`;
+                    // ERR-296 (turnaround doc #7): never imply a text search will
+                    // find cartridges that FIT an unmatched printer.
+                    list.innerHTML = `<li class="landing-printer-search__none"><strong>We couldn't match that printer.</strong> Check the code printed on your old cartridge and search for that instead, or send us a photo.${finderHelpHtml()}</li>`;
                 } else {
                     list.innerHTML = items.join('');
                 }
@@ -4422,10 +4475,25 @@
                 const toLabel = alias.to.length ? alias.to.join(' / ') : alias.searchQuery;
                 banner.innerHTML = `
                     <p class="search-alias-banner__note">${Security.escapeHtml(alias.note)}</p>
-                    ${alias.searchQuery ? `<a class="search-alias-banner__link" href="/search?q=${encodeURIComponent(alias.searchQuery)}">See every ${Security.escapeHtml(toLabel)} result</a>` : ''}
+                    ${alias.searchQuery ? `<a class="search-alias-banner__link" href="/search?q=${encodeURIComponent(alias.searchQuery)}">Search ${Security.escapeHtml(toLabel)}</a>` : ''}
                 `;
                 wrap.appendChild(banner);
             }
+
+            // ERR-296 (turnaround doc #7): the printer finder's Find button lands
+            // here as /shop?q=<model>&from=finder. When the backend matched no
+            // printer, the rows are TEXT matches — "Brother HL-L2350DW" (a model
+            // Brother NZ never sold) listed TN2345/DR2315 as if they fit. Say so
+            // above the first card. Only for the finder's own submissions: a
+            // typed search box query carries no claim to be a printer.
+            if (!alias && !(matchedPrinter && matchedPrinter.name) && finderSearchWithoutPrinter(smartData, window.location.search)) {
+                const banner = document.createElement('div');
+                banner.className = 'search-alias-banner search-finder-nomatch';
+                banner.setAttribute('role', 'note');
+                banner.innerHTML = `<p class="search-alias-banner__note"><strong>These match your words, not your printer.</strong> Check the code on your old cartridge before you order.</p>${finderHelpHtml()}`;
+                wrap.appendChild(banner);
+            }
+
 
             // Hero banner — printer match takes precedence (spec §3.1).
             if (matchedPrinter && matchedPrinter.name) {

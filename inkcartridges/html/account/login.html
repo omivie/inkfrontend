@@ -21,12 +21,13 @@
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+    <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=2c68b493">
-    <link rel="stylesheet" href="/css/components.css?v=d3a04dd8">
+    <link rel="stylesheet" href="/css/components.css?v=b1eaf525">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=536e13fe">
-    <link rel="stylesheet" href="/css/search.css?v=f0724f80">
+    <link rel="stylesheet" href="/css/pages.css?v=d731bfbd">
+    <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Login | InkCartridges.co.nz">
     <meta name="twitter:description" content="Login or create an account at InkCartridges.co.nz">
@@ -69,6 +70,12 @@
                     <div class="auth-form-wrapper">
                         <h1 class="auth-form__heading">Welcome Back</h1>
                         <p class="auth-form__subheading">Sign in to access your account, track orders, and checkout faster.</p>
+                        <!-- Rewards facts from GET /api/site/value-props (ERR-296, turnaround
+                             doc #15), never hard-coded: loyalty.detail carries the welcome
+                             points and "checked out as a guest? … same email". Ships hidden;
+                             ValueProps.bindAll (utils.js) reveals it only when the fetch lands
+                             and the programme is active. -->
+                        <p class="auth-form__points" data-value-prop-scope hidden><strong data-value-prop="loyalty.headline"></strong>. <span data-value-prop="loyalty.detail"></span></p>
 
                         <form class="auth-form" id="login-form" novalidate>
                             <div class="form-group">
@@ -146,6 +153,12 @@
                     <div class="auth-form-wrapper">
                         <h1 class="auth-form__heading">Create Account</h1>
                         <p class="auth-form__subheading">Join us to track orders, save addresses, and get new-product updates.</p>
+                        <!-- Rewards facts from GET /api/site/value-props (ERR-296, turnaround
+                             doc #15), never hard-coded: loyalty.detail carries the welcome
+                             points and "checked out as a guest? … same email". Ships hidden;
+                             ValueProps.bindAll (utils.js) reveals it only when the fetch lands
+                             and the programme is active. -->
+                        <p class="auth-form__points" data-value-prop-scope hidden><strong data-value-prop="loyalty.headline"></strong>. <span data-value-prop="loyalty.detail"></span></p>
 
                         <form class="auth-form" id="register-form" novalidate>
                             <div class="form-row form-row--two-col">
@@ -273,13 +286,13 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=068d4cd4"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/utils.js?v=3a202e72"></script>
-    <script defer src="/js/api.js?v=4bf7a775"></script>
+    <script defer src="/js/utils.js?v=83500127"></script>
+    <script defer src="/js/api.js?v=41244595"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=8aa5730e"></script>
+    <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/products.js?v=d3b78e7f"></script>
-    <script defer src="/js/search.js?v=c2997f45"></script>
+    <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
     <script defer src="/js/footer.js?v=edd483a2"></script>

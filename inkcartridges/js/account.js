@@ -1220,8 +1220,9 @@ const AccountPage = {
                     <span class="order-status order-status--${Security.escapeAttr(statusClass)}">${Security.escapeHtml(statusText)}</span>
                 </td>
                 <td data-label="Total">${total}</td>
-                <td>
+                <td class="orders-table__actions">
                     <a href="/account/order-detail?id=${Security.escapeAttr(order.order_number)}" class="btn btn--small btn--text">View</a>
+                    <button type="button" class="btn btn--small btn--secondary" data-buy-again="${Security.escapeAttr(order.order_number)}">Buy again</button>
                 </td>
             </tr>
         `;
@@ -2333,6 +2334,66 @@ const AccountPage = {
     }
 };
 
+/**
+ * BUY AGAIN (ERR-296, turnaround doc #18). There is no authed one-call reorder
+ * endpoint (/api/reorder/load/:orderId needs the signed `t` only emails carry),
+ * so the order's lines go through the SAME path the guest reorder emails use:
+ * /cart?add=SKU:QTY,… (CartDeepLink). That is where unknown/inactive SKUs,
+ * the 12-line cap and the 1–20 qty clamp are handled and REPORTED on /cart —
+ * one reorder path, not two that drift.
+ */
+const BuyAgain = {
+    /** Pure. Order lines → { href, lines, missingSku }. href null = nothing to add. */
+    hrefFor(items) {
+        const tokens = [];
+        let missingSku = 0;
+        (Array.isArray(items) ? items : []).forEach((item) => {
+            if (!item) return;
+            const sku = (item.product && item.product.sku) || item.product_sku || item.sku || '';
+            const qty = Math.max(1, Math.floor(Number(item.quantity)) || 1);
+            if (typeof sku !== 'string' || !sku.trim()) { missingSku++; return; }
+            tokens.push(`${sku.trim()}:${qty}`);
+        });
+        return {
+            href: tokens.length ? `/cart?add=${encodeURIComponent(tokens.join(','))}` : null,
+            lines: tokens.length,
+            missingSku,
+        };
+    },
+
+    /** Fetch the order, then hand its lines to /cart. Loud on every failure. */
+    async go(orderNumber, btn) {
+        const toast = (msg, type) => (typeof showToast === 'function' ? showToast(msg, type) : DebugLog.warn(msg));
+        if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = 'Loading…'; }
+        try {
+            const resp = await API.getOrder(orderNumber);
+            const order = resp && resp.ok ? resp.data : null;
+            const items = order ? (order.items || order.order_items) : null;
+            if (!Array.isArray(items)) throw new Error('order unreadable');
+            const plan = this.hrefFor(items);
+            if (!plan.href) {
+                toast('We could not find the products from that order. Please search for them instead.', 'error');
+                return;
+            }
+            if (plan.missingSku) DebugLog.warn(`[BuyAgain] order ${orderNumber}: ${plan.missingSku} line(s) had no SKU and were not added`);
+            window.location.href = plan.href;
+        } catch (_) {
+            toast('We could not load that order just now. Please try again.', 'error');
+        } finally {
+            if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = btn.dataset.label || 'Buy again'; }
+        }
+    },
+};
+
+// One delegated handler for every Buy again button (orders table, dashboard
+// recent orders, order detail) — rows are re-rendered, listeners would not be.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('[data-buy-again]');
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    BuyAgain.go(btn.getAttribute('data-buy-again'), btn);
+});
+
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     // Small delay to ensure Auth is initialized first
@@ -2341,3 +2402,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Make available globally
 window.AccountPage = AccountPage;
+window.BuyAgain = BuyAgain;

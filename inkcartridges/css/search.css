@@ -484,6 +484,10 @@ mark.smart-ac__mark {
 .search-alias-banner__note { margin: 0; line-height: 1.45; }
 .search-alias-banner__link { color: #92400e; font-size: 13px; font-weight: 600; text-decoration: underline; }
 .search-alias-banner__link:hover { text-decoration: none; }
+/* Printer finder with no printer match (ERR-296): same caution colours as the
+   alias note — the rows below are text matches, not a fit for the machine. */
+.finder-help { display: block; margin-top: 4px; font-size: 13px; }
+.finder-help a { color: inherit; font-weight: 600; text-decoration: underline; }
 
 /* search-ux-frontend-jul2026 §1 — "Showing results similar to 'X'" banner for a
    fuzzy (SKU/model typo) result set. Amber, like did-you-mean, since both signal
@@ -634,7 +638,7 @@ mark.smart-ac__mark {
     z-index: 2;
     padding: 3px 8px;
     border-radius: 4px;
-    font-size: 10px;
+    font-size: 12px; /* 12px floor on cards (ERR-296) */
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -954,7 +958,7 @@ mark.smart-ac__mark {
     margin: 0;
 }
 .smart-ac__grid .product-card__stock {
-    font-size: 10px;
+    font-size: 12px; /* 12px floor on cards (ERR-296): was 10px */
 }
 .smart-ac__grid .product-card__add-btn {
     font-size: 12px;
