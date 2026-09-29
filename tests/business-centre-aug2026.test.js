@@ -301,11 +301,17 @@ test('§3 a GUEST gets the explainer, never a login wall', () => {
         'an unauthenticated visitor must be shown #business-denied');
     assert.match(code, /markGuest\(\)/, 'the guest path must add the sign-in route');
 
-    // The gate's own copy must carry the real intake, and must not promise an
-    // application flow that has no endpoint behind it (ERR-138).
+    // The gate's own copy must carry the real intake. It now also carries the
+    // Apply form (ERR-297): the endpoint was there all along, POST-only, and
+    // "no endpoint" was a GET reading its 404 (measured 2026-09-29: GET 404,
+    // POST without a token 401). Exactly ONE form, posted by JS with the
+    // session token — never a bare HTML action.
     const gate = PAGE.slice(PAGE.indexOf('id="business-denied"'), PAGE.indexOf('id="business-unavailable"'));
     assert.match(gate, /href="\/quote"/, 'the gate must route intent to /quote, the real intake');
-    assert.ok(!/<form/i.test(gate), 'the gate must not grow an application form');
+    const forms = gate.match(/<form\b[^>]*>/gi) || [];
+    assert.equal(forms.length, 1, 'the gate carries exactly one form: the Apply form');
+    assert.match(forms[0], /id="business-apply-form"/);
+    assert.doesNotMatch(forms[0], /\baction=/, 'the Apply form posts from JS (auth header), never via an HTML action');
 
     // And the sign-in route is injected, not shipped — a signed-in-but-
     // unapproved user must never be offered a sign-in link they already used.
@@ -845,7 +851,8 @@ test('§7 overdue is derived the way the backend derives it, and never from a Da
 
     // The filter must offer exactly the values the server accepts. Drafts are
     // never returned to a customer, so there must be no Draft option.
-    const select = PAGE.slice(PAGE.indexOf('id="invoice-filter-status"'), PAGE.indexOf('</select>'));
+    const at = PAGE.indexOf('id="invoice-filter-status"');
+    const select = PAGE.slice(at, PAGE.indexOf('</select>', at));
     for (const v of ['unpaid', 'overdue', 'paid', 'void']) {
         assert.match(select, new RegExp(`value="${v}"`), `the status filter must offer ${v}`);
     }

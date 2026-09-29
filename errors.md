@@ -41,6 +41,37 @@ describing the same incident.
 
 ---
 
+## ERR-297 — /business told every prospective business customer the door was locked, because a GET read a POST-only endpoint's 404 as "no endpoint" — **RESOLVED (frontend)** (2026-09-29)
+
+**Source.** `backend-docs/inbox/fe-best-sellers-and-four-replies-round2-backend-response-sep2026.md` §8 (backend reply to ERR-294/295) and turnaround doc #10. The round-2 reply was split between sessions: this entry is ONLY the /business Apply flow. Best sellers (BF-089/090) and the storefront deletions (BF-088/091/092/093) are ERR-299.
+
+**The wrong premise.** `/business` showed everyone who was not an approved account one paragraph and a /quote button. Two tests defended that on the grounds that "there is STILL no application endpoint" (`legal-pages` §7, `business-centre` §1/§3). Business buyers are 29% of customers and 54% of revenue; only 2 business accounts exist. The endpoint was there all along. It is POST-only, and our check was a GET. **Measured 2026-09-29:** `GET /api/business/apply` 404; `POST` without a token 401 on `/apply` and `/reapply`. Negative control: POST to a made-up `/api/business/zz-no-such-route` returns **404**, so the 401 proves the route exists; it is not a blanket auth wall. ***A 404 on the wrong METHOD is not absence.***
+
+**Built.**
+- `/business` is an open page. It has terms (Net 30 once approved, GST tax invoices, PO number), the volume ladder from `/api/site/value-props` (the same `ValuePages.tiersTableHtml` as /bulk-pricing), and a contact line from `LegalConfig`. It links to /quote and /bulk-pricing, and it makes no ranking claim.
+- An Apply panel whose content follows `/api/business/status`:
+  - guest: sign in / create an account, returning to `/business#apply`
+  - `personal`: the form, posting to `/apply`
+  - `rejected`: "Apply again", posting to `/reapply`
+  - `pending`: "we have your application", no form
+  - `suspended` / `closed` / `can_apply:false`: talk to us
+  - degraded (5xx): the open page still shows, and the panel says it couldn't check. It never guesses.
+- `Business.applyState()` keeps the raw `status` + `can_apply`. `readStatus()` (pricing) is unchanged.
+- ***`can_apply` is ABSENT on production*** (the approved owner account's reply has status, application, credit fields, net30 — no `can_apply`), even though the backend documents it. Unknown is read as `null`, not `false`: the form shows, a warning is logged, and a 409 corrects it. Reading it as false would have hidden the form from every prospect with no symptom (the ERR-063 family). BF-095.
+- A refused POST RE-READS the status instead of guessing from an undocumented 409 code.
+- ***`POST /api/business/apply` is rate-limited to 5 per IP per 24h (`ratelimit-policy: 5;w=86400`), counted BEFORE sign-in.*** Two curls plus one probe run used up this office's quota (429, `retry-after` 84657 s). A shared office connection can therefore lock out real applicants. The page says so and gives a phone number, never "try again in a minute", and it handles both RATE_LIMITED shapes (resolved and thrown, ERR-266). The probe's POST controls are opt-in (`--post-controls`), and the probe prints what they cost. BF-095.
+- **The redirect now survives sign-up.** Registering sends the user to verify-email, and the verification link returns to `/account/login?verified=true` with no query string, so "Create an account" dropped the applicant at /account. `login-page.js` stores the target in localStorage for 24h and reads it through one memoised `postLoginRedirect()`. It is memoised because one sign-in fires both `onAuthStateChange` and the form's redirect.
+- ***`Security.safeRedirect` was an open redirect.*** `/\evil.com` and `/<TAB>/evil.com` passed the "one leading slash" check. The WHATWG parser (what the browser follows) resolves both to `https://evil.com/`, measured with `new URL()`. It now judges the URL after the browser's normalisation (backslash to slash; tab/CR/LF dropped).
+
+**Tests.**
+- New `tests/business-apply-sep2026.test.js` (24).
+- `legal-pages` §7 and `business-centre` §3 were rewritten around the corrected premise: exactly one Apply form, no HTML `action`, and still no `/business/apply` PAGE.
+- `business-centre` §7 sliced the page at the FIRST `</select>`, which is now the Apply form's. It now slices from its own select.
+- `scripts/redproof-business-apply-sep2026.py`: 21/21. The first run caught 19. One gap was a mutation my own fallback masked; the other was that nothing pinned sign-up calling `rememberRedirect`. Both are fixed.
+- Full suite green.
+
+**Probe.** `npm run probe:business-apply` is READ-ONLY by default. `--admin` reads the owner's status. `--browser` checked 1440 and 390 on local: 18/18. `--post-controls` spends daily slots.
+
 ## ERR-298 — The product page breadcrumb read as a staircase, and changed font from the /shop trail the shopper had just clicked — **RESOLVED (frontend)** (2026-09-29)
 
 **Report.** Owner screenshot of `/products/oki-genuine-mc860m-drum-unit-mc860-magenta-20000-pages/GMC860M-2`: the crumbs under the blue nav were not on one line, and the font differed from the `/shop` drilldown trail.

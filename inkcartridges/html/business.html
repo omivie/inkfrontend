@@ -19,11 +19,12 @@
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
     <link rel="stylesheet" href="/css/layout.css?v=2c68b493">
     <link rel="stylesheet" href="/css/components.css?v=d3a04dd8">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=73b0f793">
+    <link rel="stylesheet" href="/css/pages.css?v=536e13fe">
     <link rel="stylesheet" href="/css/search.css?v=f0724f80">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Business Centre | InkCartridges.co.nz">
@@ -176,10 +177,108 @@
                 <p class="business-gate__msg">Loading your business account&hellip;</p>
             </div>
 
-            <div class="business-gate account-empty" id="business-denied" hidden>
-                <h1 class="business-gate__heading">Business Centre</h1>
-                <p class="business-gate__msg">This area is for approved business accounts. Consolidated invoices, Net&nbsp;30 terms and your order history are all handled here once your account is approved. Volume pricing is not gated &mdash; the price breaks on every product page apply to your order today.</p>
-                <p><a class="btn btn--primary" href="/quote">Request a business quote</a></p>
+            <!-- ERR-297: an OPEN page with a way in, not a locked door. Everyone who
+                 is not an approved account sees this block; the Apply panel inside it
+                 changes with /api/business/status (business-page.js renderApply). -->
+            <div class="business-gate business-open" id="business-denied" hidden>
+                <h1 class="business-gate__heading">Business accounts</h1>
+                <p class="business-gate__msg">Every printer in your office on one account. The right cartridge for each machine on file, invoiced monthly, and dispatched the same day when you order by 2pm on a weekday.</p>
+
+                <section class="business-open__section" aria-labelledby="business-terms-heading">
+                    <h2 id="business-terms-heading" class="business-open__title">What an approved account gets</h2>
+                    <ul class="business-open__list">
+                        <li><strong>Monthly invoice:</strong> Net&nbsp;30 terms once your account is approved.</li>
+                        <li><strong>GST tax invoices</strong> for every order, kept here with your order history.</li>
+                        <li><strong>Your PO number</strong> on every order.</li>
+                    </ul>
+                </section>
+
+                <section class="business-open__section" aria-labelledby="business-ladder-heading">
+                    <h2 id="business-ladder-heading" class="business-open__title">Volume pricing, for everyone</h2>
+                    <p class="business-gate__msg">You don&rsquo;t need an account for price breaks. They apply to every order today.</p>
+                    <div id="business-ladder" class="value-page__table-wrap" aria-live="polite"><p class="business-gate__msg">Loading the current price breaks&hellip;</p></div>
+                    <p><a href="/bulk-pricing">How volume pricing works</a></p>
+                </section>
+
+                <section class="business-open__section business-apply" id="apply" aria-labelledby="business-apply-heading">
+                    <h2 id="business-apply-heading" class="business-open__title">Apply for a business account</h2>
+                    <div id="business-apply-state" class="business-apply__state" role="status" aria-live="polite"></div>
+
+                    <form id="business-apply-form" class="contact-form business-apply__form" novalidate hidden>
+                        <div id="business-apply-errors" class="quote-error-summary" role="alert" hidden></div>
+                        <div class="contact-form__row">
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Company name <span aria-hidden="true">*</span></span>
+                                <input type="text" name="company_name" required maxlength="200" autocomplete="organization" class="form-input">
+                            </label>
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">NZBN (13 digits)</span>
+                                <input type="text" name="nzbn" maxlength="13" inputmode="numeric" pattern="\d{13}" class="form-input">
+                            </label>
+                        </div>
+                        <div class="contact-form__row">
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Your name <span aria-hidden="true">*</span></span>
+                                <input type="text" name="contact_name" required maxlength="200" autocomplete="name" class="form-input">
+                            </label>
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Phone</span>
+                                <input type="tel" name="contact_phone" maxlength="40" autocomplete="tel" class="form-input">
+                            </label>
+                        </div>
+                        <div class="contact-form__row">
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Email <span aria-hidden="true">*</span></span>
+                                <input type="email" name="contact_email" required maxlength="254" autocomplete="email" class="form-input">
+                            </label>
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Accounts payable email</span>
+                                <input type="email" name="ap_email" maxlength="254" class="form-input">
+                            </label>
+                        </div>
+                        <div class="contact-form__row">
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Estimated monthly spend</span>
+                                <select name="estimated_monthly_spend" class="form-input">
+                                    <option value="">Choose one (optional)</option>
+                                    <option value="under_500">Under $500</option>
+                                    <option value="500_1000">$500 &ndash; $1,000</option>
+                                    <option value="1000_2500">$1,000 &ndash; $2,500</option>
+                                    <option value="2500_5000">$2,500 &ndash; $5,000</option>
+                                    <option value="over_5000">Over $5,000</option>
+                                </select>
+                            </label>
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Industry</span>
+                                <input type="text" name="industry" maxlength="120" class="form-input">
+                            </label>
+                        </div>
+                        <div class="contact-form__row">
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Business type</span>
+                                <input type="text" name="business_type" maxlength="120" placeholder="e.g. company, sole trader, school" class="form-input">
+                            </label>
+                        </div>
+                        <div class="contact-form__row">
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Billing address</span>
+                                <textarea name="billing_address" rows="3" maxlength="500" autocomplete="street-address" class="form-input"></textarea>
+                            </label>
+                            <label class="contact-form__field">
+                                <span class="contact-form__label">Delivery address (if different)</span>
+                                <textarea name="shipping_address" rows="3" maxlength="500" class="form-input"></textarea>
+                            </label>
+                        </div>
+                        <p class="business-gate__msg business-apply__fine">Fields marked * are required. We reply within one business day.</p>
+                        <p><button type="submit" class="btn btn--primary" id="business-apply-submit">Send application</button></p>
+                    </form>
+                </section>
+
+                <section class="business-open__section" aria-labelledby="business-contact-heading">
+                    <h2 id="business-contact-heading" class="business-open__title">Talk to us</h2>
+                    <p class="business-gate__msg" id="business-contact">Call or email us about a business account.</p>
+                    <p><a class="btn btn--outline" href="/quote">Request a business quote</a></p>
+                </section>
             </div>
 
             <div class="business-gate account-empty" id="business-unavailable" hidden>
@@ -395,16 +494,17 @@
 <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=068d4cd4"></script>
-    <script defer src="/js/security.js?v=790f00f3"></script>
+    <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/utils.js?v=3a202e72"></script>
     <script defer src="/js/api.js?v=4bf7a775"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=8aa5730e"></script>
-    <script defer src="/js/business.js?v=73a85697"></script>
+    <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/products.js?v=d3b78e7f"></script>
     <script defer src="/js/search.js?v=c2997f45"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
+    <script defer src="/js/value-pages.js?v=d081e96d"></script>
     <script defer src="/js/footer.js?v=edd483a2"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
@@ -414,7 +514,7 @@
     <script defer src="/js/order-totals.js?v=4d4a743f"></script>
     <script defer src="/js/business-chart.js?v=997236cc"></script>
     <script defer src="/js/business-invoice-pdf.js?v=973007a8"></script>
-    <script defer src="/js/business-page.js?v=e3dd47ba"></script>
+    <script defer src="/js/business-page.js?v=140f11ed"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

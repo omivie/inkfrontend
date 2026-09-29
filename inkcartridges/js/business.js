@@ -176,6 +176,8 @@ const Business = {
     // sign out, account switch) throws the whole cache away before it can be read.
     _cacheOwner: undefined,
     _statusPromise: null,
+    /** readApply() of the last status reply; see applyState(). */
+    _apply: null,
     _priceCache: new Map(),   // sku -> item from the AUTHED route; owner-scoped
     // The company name the AUTHED pricing envelope last reported. Owner-scoped
     // like _priceCache and cleared with it — it names one account, so it must
@@ -303,6 +305,30 @@ const Business = {
      * @returns {{active:boolean, companyName:(string|null), net30Approved:boolean,
      *            creditLimit:(number|null), creditRemaining:(number|null)}}
      */
+    /**
+     * The application side of /api/business/status (ERR-297): the raw
+     * `status` (personal | pending | approved | rejected | suspended | closed)
+     * and `can_apply`. readStatus() folds all of that into active/inactive for
+     * PRICING and must keep doing so; the /business Apply panel needs the
+     * difference between "pending" and "rejected, may reapply".
+     *
+     * `can_apply` ABSENT is `null` (unknown), never `false`: a missing field
+     * must not quietly hide the Apply form from everyone (absence-as-zero,
+     * ERR-063 family). The panel shows the form and the server's 409 decides.
+     */
+    readApply(data) {
+        const d = data && typeof data === 'object' ? data : {};
+        const status = typeof d.status === 'string' && d.status.trim()
+            ? d.status.trim().toLowerCase() : null;
+        const canApply = typeof d.can_apply === 'boolean' ? d.can_apply : null;
+        return { status, canApply };
+    },
+
+    /** Last applyState read by getStatus(); null until one has resolved (or after reset()). */
+    applyState() {
+        return this._apply || null;
+    },
+
     readStatus(data) {
         const inactive = () => Object.assign({}, this.INACTIVE_STATUS);
         const d = data && typeof data === 'object' ? data : {};
@@ -637,6 +663,7 @@ const Business = {
      */
     reset() {
         this._statusPromise = null;
+        this._apply = null;
         this._priceCache.clear();
         this._lastCompanyName = null;
         this._cacheOwner = undefined;
@@ -832,8 +859,10 @@ const Business = {
                         // flag instead of treating silence as a denial (ERR-139).
                         this._statusDegraded = true;
                     }
+                    if (!this._statusDegraded) this._apply = { status: 'personal', canApply: null };
                     return Object.assign({}, this.INACTIVE_STATUS);
                 }
+                this._apply = this.readApply(res.data);
                 return this.readStatus(res.data);
             } catch (e) {
                 this._warn('[Business] status error:', e && e.message);

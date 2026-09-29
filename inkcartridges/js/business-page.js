@@ -234,6 +234,8 @@
                     show('business-loading', false);
                     show('business-denied', true);
                     this.markGuest();
+                    this.renderOpen();
+                    this.renderApply('guest');
                     return;
                 }
             }
@@ -269,6 +271,275 @@
             window.addEventListener('hashchange', () => this.setTab(this.readTab(), false));
 
             await this.gate();
+        },
+
+        // ── Open page + Apply (ERR-297) ─────────────────────────────────────
+        //
+        // /business used to be a locked door: one paragraph and a /quote button
+        // for everyone who was not already approved, because "no application
+        // endpoint exists" (tests/legal-pages §7). That premise was wrong: the
+        // endpoint is POST-only, so our GET read its 404 as absence. Measured
+        // 2026-09-29: GET /api/business/apply 404, POST without a token 401.
+
+        /** Terms are static HTML; the ladder and the contact line are rendered here. */
+        renderOpen() {
+            if (this._openRendered) return;
+            this._openRendered = true;
+            this.renderContact();
+            this.renderLadder();
+        },
+
+        renderContact() {
+            const el = $('business-contact');
+            const L = typeof LegalConfig !== 'undefined' ? LegalConfig : null;
+            if (!el || !L) return;   // the static sentence stays — it is still true
+            const who = L.invoice && L.invoice.contactName ? `${esc(L.invoice.contactName)} on ` : '';
+            el.innerHTML = `Call ${who}<a href="tel:${esc(L.phoneE164)}">${esc(L.phoneDisplay)}</a>`
+                + ` or email <a href="mailto:${esc(L.email)}">${esc(L.email)}</a>.`
+                + (L.hoursDisplay ? ` ${esc(L.hoursDisplay)}.` : '');
+        },
+
+        /**
+         * The volume ladder from /api/site/value-props — the same source and the
+         * same table as /bulk-pricing, so the two pages cannot disagree. A failed
+         * read SAYS so; it never leaves the loading line up or an empty box.
+         */
+        async renderLadder() {
+            const box = $('business-ladder');
+            if (!box) return;
+            const ready = typeof ValueProps !== 'undefined' && typeof ValuePages !== 'undefined';
+            const res = ready ? await ValueProps.load().catch(() => ({ ok: false })) : { ok: false };
+            const vol = res && res.ok ? ValueProps.volume(res.data) : null;
+            const table = vol ? ValuePages.tiersTableHtml(vol.tiers) : '';
+            if (!res || !res.ok || !ready) {
+                warn('[BusinessPage] value-props unavailable — ladder not shown');
+                if (ready) ValuePages.unavailable(box);
+                else box.innerHTML = '<p class="value-page__error">We couldn\'t load the current price breaks just now. Please refresh the page.</p>';
+                return;
+            }
+            if (!vol || !table) {
+                // An honest answer, not a failure: the programme is off, or it
+                // has no tiers. Say which rather than print an empty table.
+                box.innerHTML = '<p class="business-gate__msg">Volume price breaks aren\'t running just now. <a href="/quote">Ask us for a quote</a> on larger orders.</p>';
+                return;
+            }
+            box.innerHTML = (vol.headline ? `<p class="business-gate__msg">${esc(vol.headline)}</p>` : '')
+                + table
+                + (vol.detail ? `<p class="business-gate__msg">${esc(vol.detail)}</p>` : '');
+        },
+
+        /**
+         * The Apply panel. `state` is 'guest', 'degraded', or Business.applyState()
+         * ({status, canApply} with canApply null when the server did not say).
+         *
+         *   guest                 sign in / create account, back to #apply
+         *   degraded              "couldn't check" — never a guess either way
+         *   pending               received, no form (a second POST would 409)
+         *   approved              handled by gate() — never reaches here
+         *   suspended / closed    talk to us, no form
+         *   rejected + canApply   form, "Apply again" → /reapply
+         *   canApply true         form → /apply
+         *   canApply false        talk to us, no form
+         *   canApply null         form (loud warn): the server's 409 decides.
+         *                         Hiding the form on a MISSING field would lock
+         *                         every prospect out silently.
+         */
+        renderApply(state) {
+            const box = $('business-apply-state');
+            const form = $('business-apply-form');
+            if (!box || !form) return;
+            const L = typeof LegalConfig !== 'undefined' ? LegalConfig : {};
+            const talk = `Please call <a href="tel:${esc(L.phoneE164 || '+64274740115')}">${esc(L.phoneDisplay || '027 474 0115')}</a> or email <a href="mailto:${esc(L.email || 'support@inkcartridges.co.nz')}">${esc(L.email || 'support@inkcartridges.co.nz')}</a>.`;
+            const sla = esc(L.responseSLA || 'within one business day');
+            const heading = $('business-apply-heading');
+            form.hidden = true;
+            this._applyEndpoint = null;
+            if (heading) heading.textContent = 'Apply for a business account';
+
+            if (state === 'guest') {
+                const back = encodeURIComponent('/business#apply');
+                box.innerHTML = '<p class="business-gate__msg">Sign in or create a free account first, so your application, orders and invoices sit on one account.</p>'
+                    + `<p class="business-apply__actions"><a class="btn btn--primary" data-apply-signin href="/account/login?redirect=${back}">Sign in to apply</a> `
+                    + `<a class="btn btn--outline" data-apply-signup href="/account/login?tab=register&amp;redirect=${back}">Create an account</a></p>`;
+                return;
+            }
+            if (state === 'degraded' || !state) {
+                if (!state) warn('[BusinessPage] no application status to render — treated as unknown');
+                box.innerHTML = '<p class="business-gate__msg">We couldn\'t check whether you already have an application with us. Use <strong>Try again</strong> above, or ' + talk.charAt(0).toLowerCase() + talk.slice(1) + '</p>';
+                return;
+            }
+
+            const status = state.status;
+            const canApply = state.canApply;
+            if (status === 'pending') {
+                box.innerHTML = `<p class="business-gate__msg"><strong>We have your application.</strong> We reply ${sla}. Questions in the meantime? ${talk}</p>`;
+                return;
+            }
+            if (status === 'suspended' || status === 'closed' || canApply === false) {
+                box.innerHTML = `<p class="business-gate__msg">Your business account needs a word with us before anything changes online. ${talk}</p>`;
+                return;
+            }
+            if (canApply === null) {
+                warn('[BusinessPage] /api/business/status has no can_apply — showing the form; the server decides', status);
+            }
+            const reapply = status === 'rejected';
+            this._applyEndpoint = reapply ? '/api/business/reapply' : '/api/business/apply';
+            if (heading) heading.textContent = reapply ? 'Apply again' : 'Apply for a business account';
+            box.innerHTML = reapply
+                ? '<p class="business-gate__msg">Your last application wasn\'t approved. If something has changed, you can apply again below.</p>'
+                : '<p class="business-gate__msg">Tell us about your business. We reply ' + sla + '.</p>';
+            form.hidden = false;
+            this.prefillApply(form);
+            this.wireApply(form);
+            if (location.hash === '#apply') {
+                const sec = $('apply');
+                if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: 'start' });
+            }
+        },
+
+        prefillApply(form) {
+            const user = typeof Auth !== 'undefined' && Auth.getUser ? Auth.getUser() : null;
+            if (!user) return;
+            const email = form.elements.namedItem('contact_email');
+            if (email && !email.value && user.email) email.value = user.email;
+            const name = form.elements.namedItem('contact_name');
+            const full = user.user_metadata && user.user_metadata.full_name;
+            if (name && !name.value && full) name.value = full;
+        },
+
+        wireApply(form) {
+            if (form._wired) return;
+            form._wired = true;
+            form.addEventListener('submit', (e) => { e.preventDefault(); this.submitApply(form); });
+        },
+
+        /**
+         * Read + check the form. Returns {body, errors}. Pure over the form's
+         * values: optional fields that are blank are LEFT OUT (the server
+         * validates what it is sent; an empty string is not "no answer").
+         */
+        readApplyForm(form) {
+            const REQUIRED = { company_name: 'Enter your company name.', contact_name: 'Enter your name.', contact_email: 'Enter your email address.' };
+            const OPTIONAL = ['nzbn', 'contact_phone', 'estimated_monthly_spend', 'industry', 'business_type', 'ap_email', 'billing_address', 'shipping_address'];
+            const SPEND = ['under_500', '500_1000', '1000_2500', '2500_5000', 'over_5000'];
+            const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const val = (n) => { const el = form.elements.namedItem(n); return el ? String(el.value || '').trim() : ''; };
+            const body = {};
+            const errors = [];
+            for (const [name, msg] of Object.entries(REQUIRED)) {
+                const v = val(name);
+                if (!v) errors.push({ name, text: msg });
+                else body[name] = v;
+            }
+            for (const name of OPTIONAL) {
+                let v = val(name);
+                if (!v) continue;
+                if (name === 'nzbn') v = v.replace(/\s+/g, '');
+                body[name] = v;
+            }
+            if (body.contact_email && !EMAIL.test(body.contact_email)) errors.push({ name: 'contact_email', text: 'Enter a valid email address.' });
+            if (body.ap_email && !EMAIL.test(body.ap_email)) errors.push({ name: 'ap_email', text: 'Enter a valid accounts payable email, or leave it blank.' });
+            if (body.nzbn && !/^\d{13}$/.test(body.nzbn)) errors.push({ name: 'nzbn', text: 'An NZBN is 13 digits. Leave it blank if you don\'t have it to hand.' });
+            if (body.estimated_monthly_spend && !SPEND.includes(body.estimated_monthly_spend)) errors.push({ name: 'estimated_monthly_spend', text: 'Choose a monthly spend from the list.' });
+            return { body, errors };
+        },
+
+        showApplyErrors(form, errors) {
+            const summary = $('business-apply-errors');
+            form.querySelectorAll('[aria-invalid="true"]').forEach((el) => {
+                el.removeAttribute('aria-invalid');
+                el.removeAttribute('aria-describedby');
+            });
+            form.querySelectorAll('.quote-field-error').forEach((el) => el.remove());
+            if (!summary) return;
+            if (!errors.length) { summary.hidden = true; summary.textContent = ''; return; }
+            summary.innerHTML = `<p>${errors.length === 1 ? 'One thing needs fixing:' : 'A few things need fixing:'}</p><ul>`
+                + errors.map((e) => `<li><a href="#" data-field="${esc(e.name)}">${esc(e.text)}</a></li>`).join('') + '</ul>';
+            for (const e of errors) {
+                const input = form.elements.namedItem(e.name);
+                if (!input || !input.insertAdjacentElement) continue;
+                const id = `business-apply-err-${e.name}`;
+                const span = document.createElement('span');
+                span.id = id;
+                span.className = 'quote-field-error';
+                span.textContent = e.text;
+                input.insertAdjacentElement('afterend', span);
+                input.setAttribute('aria-invalid', 'true');
+                input.setAttribute('aria-describedby', id);
+            }
+            summary.querySelectorAll('a[data-field]').forEach((a) => a.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                const el = form.elements.namedItem(a.getAttribute('data-field'));
+                if (el && el.focus) el.focus();
+            }));
+            summary.hidden = false;
+            summary.setAttribute('tabindex', '-1');
+            if (summary.focus) summary.focus();
+        },
+
+        async submitApply(form) {
+            if (this._applying || !this._applyEndpoint) return;
+            const { body, errors } = this.readApplyForm(form);
+            this.showApplyErrors(form, errors);
+            if (errors.length) return;
+            const stateBox = $('business-apply-state');
+            if (stateBox) stateBox.querySelectorAll('.business-apply__error').forEach((el) => el.remove());
+
+            const btn = $('business-apply-submit');
+            const box = $('business-apply-state');
+            this._applying = true;
+            if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+            let res;
+            try {
+                res = await API.post(this._applyEndpoint, body);
+            } catch (e) {
+                // RATE_LIMITED has TWO shapes (ERR-266): resolved, or THROWN with
+                // .code. Keep the code either way.
+                res = { ok: false, error: e && e.message, code: e && e.code };
+            }
+            this._applying = false;
+            if (btn) { btn.disabled = false; btn.textContent = 'Send application'; }
+
+            if (res && res.ok) {
+                form.hidden = true;
+                if (box) box.innerHTML = '<p class="business-gate__msg"><strong>Thanks, we have your application.</strong> We reply '
+                    + esc((typeof LegalConfig !== 'undefined' && LegalConfig.responseSLA) || 'within one business day') + '.</p>';
+                Business.reset();
+                return;
+            }
+            if (res && res.code === 'RATE_LIMITED') {
+                // Measured 2026-09-29: /api/business/apply allows 5 attempts per
+                // IP per 24h (ratelimit-policy: 5;w=86400), counted BEFORE sign-in.
+                // "Try again in a minute" would be a lie; a shared office
+                // connection can hit it, so give them a person instead.
+                const L = typeof LegalConfig !== 'undefined' ? LegalConfig : {};
+                if (box) box.querySelectorAll('.business-apply__error').forEach((el) => el.remove());
+                if (box) box.insertAdjacentHTML('beforeend', '<p class="business-apply__error" role="alert">We can\'t take another online application from this connection today. Your answers are still in the form. '
+                    + `Please call <a href="tel:${esc(L.phoneE164 || '+64274740115')}">${esc(L.phoneDisplay || '027 474 0115')}</a> or email <a href="mailto:${esc(L.email || 'support@inkcartridges.co.nz')}">${esc(L.email || 'support@inkcartridges.co.nz')}</a> and we\'ll set the account up with you.</p>`);
+                warn('[BusinessPage] application rate-limited', res.retry_after);
+                return;
+            }
+            if (res && res.code === 'VALIDATION_FAILED') {
+                const details = Array.isArray(res.details) ? res.details : [];
+                const known = details.filter((d) => d && d.field && form.elements.namedItem(d.field))
+                    .map((d) => ({ name: d.field, text: String(d.message || 'Check this field.') }));
+                this.showApplyErrors(form, known.length ? known : [{ name: 'company_name', text: res.error || 'Please check the form and try again.' }]);
+                return;
+            }
+            // 409 (already pending / already approved) arrives with a code we were
+            // never told; a 5xx arrives with none. Either way the truth is the
+            // server's CURRENT status, so re-read it rather than guess from the
+            // error: a pending/approved answer re-renders the right panel, and
+            // anything else keeps the form (values intact) with a plain error.
+            warn('[BusinessPage] application not accepted:', res && res.code, res && res.error);
+            Business.reset();
+            let status = null;
+            try { status = await Business.getStatus(); } catch (_) { status = null; }
+            const apply = Business.applyState ? Business.applyState() : null;
+            if (status && status.active) { await this.gate(); return; }
+            if (apply && (apply.status === 'pending' || apply.canApply === false)) { this.renderApply(apply); return; }
+            if (box) box.querySelectorAll('.business-apply__error').forEach((el) => el.remove());
+            if (box) box.insertAdjacentHTML('beforeend', '<p class="business-apply__error" role="alert">We couldn\'t send your application just now. Your answers are still in the form. Please try again in a minute.</p>');
         },
 
         /**
@@ -386,12 +657,20 @@
 
             if (Business._statusDegraded) {
                 // A non-answer. Saying "you're not a business account" here would
-                // be a confident lie told by an outage.
+                // be a confident lie told by an outage. The open page (terms,
+                // ladder, contact) is still true for everyone, so it stays; only
+                // the Apply panel, which depends on the answer, says it couldn't
+                // check (ERR-297).
                 show('business-unavailable', true);
+                show('business-denied', true);
+                this.renderOpen();
+                this.renderApply('degraded');
                 return;
             }
             if (!status.active) {
                 show('business-denied', true);
+                this.renderOpen();
+                this.renderApply(Business.applyState ? Business.applyState() : null);
                 return;
             }
 

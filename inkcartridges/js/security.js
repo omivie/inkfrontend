@@ -96,8 +96,12 @@ const Security = {
     safeRedirect(url, fallback = '/account') {
         if (!url || typeof url !== 'string') return fallback;
         const trimmed = url.trim();
-        // Must start with exactly one / (not // which is protocol-relative)
-        if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+        // Must start with exactly one / (not // which is protocol-relative).
+        // Browsers read "\" as "/" and DROP tab/CR/LF inside a URL, so "/\evil.com"
+        // and "/<TAB>/evil.com" both navigate to //evil.com. Judge the URL the
+        // browser will actually follow, not the string we were handed (ERR-297).
+        const followed = trimmed.replace(/[\t\n\r]/g, '').replace(/\\/g, '/');
+        if (followed.startsWith('/') && !followed.startsWith('//')) {
             return trimmed;
         }
         // Reject absolute URLs, protocol-relative URLs, javascript:, data:, etc.

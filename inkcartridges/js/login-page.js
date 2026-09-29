@@ -1,4 +1,35 @@
         document.addEventListener('DOMContentLoaded', function() {
+            // ERR-297: a ?redirect= must survive SIGN-UP. Registering sends the
+            // user to /account/verify-email, and the verification link comes back
+            // to /account/login?verified=true (often in a NEW tab), so the query
+            // string is gone by the time they sign in. /business "Create an
+            // account" → apply lost its way back. The target is kept in
+            // localStorage for 24h and read only when the URL carries none.
+            const REDIRECT_KEY = 'post_verify_redirect';
+            const REDIRECT_TTL_MS = 24 * 60 * 60 * 1000;
+            function rememberRedirect(params) {
+                const target = params.get('redirect');
+                if (!target || Security.safeRedirect(target, '') !== target.trim()) return;
+                try { localStorage.setItem(REDIRECT_KEY, JSON.stringify({ path: target.trim(), at: Date.now() })); } catch (_) { /* storage blocked: the link still lands on /account */ }
+            }
+            // Memoised: one sign-in fires BOTH onAuthStateChange(SIGNED_IN) and the
+            // form's own redirect. Reading-and-removing twice would send the first
+            // to /business and the second (which wins) to /account.
+            let savedRedirect;
+            function postLoginRedirect(params) {
+                if (params.get('redirect')) return Security.safeRedirect(params.get('redirect'));
+                if (savedRedirect !== undefined) return savedRedirect;
+                let saved = null;
+                try {
+                    saved = JSON.parse(localStorage.getItem(REDIRECT_KEY) || 'null');
+                    localStorage.removeItem(REDIRECT_KEY);
+                } catch (_) { saved = null; }
+                const fresh = saved && typeof saved.path === 'string' && Number.isFinite(saved.at)
+                    && Date.now() - saved.at >= 0 && Date.now() - saved.at < REDIRECT_TTL_MS;
+                savedRedirect = Security.safeRedirect(fresh ? saved.path : null);
+                return savedRedirect;
+            }
+
             // Tab switching
             const tabs = document.querySelectorAll('.auth-tabs__tab');
             const panels = document.querySelectorAll('.auth-panel');
@@ -81,7 +112,7 @@
                     if (event === 'SIGNED_IN' && session) {
                         // User just signed in (possibly via email verification)
                         const params = new URLSearchParams(window.location.search);
-                        const redirect = Security.safeRedirect(params.get('redirect'));
+                        const redirect = postLoginRedirect(params);
                         window.location.href = redirect;
                     }
                 });
@@ -224,7 +255,7 @@
 
                         // Redirect to account or original page
                         const params = new URLSearchParams(window.location.search);
-                        const redirect = Security.safeRedirect(params.get('redirect'));
+                        const redirect = postLoginRedirect(params);
                         window.location.href = redirect;
                     }
                 });
@@ -408,7 +439,9 @@
                             }
                         }
 
-                        // Redirect to verify email page
+                        // Redirect to verify email page, keeping any ?redirect= for
+                        // the sign-in that follows verification (ERR-297).
+                        rememberRedirect(new URLSearchParams(window.location.search));
                         window.location.href = '/account/verify-email';
                         return; // Skip re-enable since we're navigating away
                     }
@@ -533,7 +566,7 @@
             setTimeout(() => {
                 if (Auth.isAuthenticated()) {
                     const params = new URLSearchParams(window.location.search);
-                    const redirect = Security.safeRedirect(params.get('redirect'));
+                    const redirect = postLoginRedirect(params);
                     window.location.href = redirect;
                 }
             }, 500);

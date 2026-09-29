@@ -12963,6 +12963,43 @@ body.page-shop {
     color: var(--steel-600, #475569);
 }
 
+/* ── Open page + Apply (ERR-297) ─────────────────────────────────────── */
+
+.business-open__section {
+    margin-top: var(--spacing-6, 1.5rem);
+    max-width: 760px;
+}
+
+.business-open__title {
+    font-size: var(--font-size-lg, 1.125rem);
+    margin-bottom: var(--spacing-2, 0.5rem);
+}
+
+.business-open__list {
+    margin: 0 0 var(--spacing-3, 0.75rem) 1.25rem;
+    color: var(--steel-600, #475569);
+}
+
+.business-open__list li { margin-bottom: 4px; }
+
+.business-apply__form { margin-top: var(--spacing-3, 0.75rem); }
+.business-apply__form[hidden] { display: none; }
+.business-apply__form textarea.form-input { resize: vertical; min-height: 4.5rem; }
+
+.business-apply__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2, 0.5rem);
+}
+
+.business-apply__fine { font-size: var(--font-size-sm, 0.875rem); }
+
+.business-apply__error {
+    color: var(--color-error, #b91c1c);
+    font-weight: 600;
+    margin-top: var(--spacing-2, 0.5rem);
+}
+
 /* ── Header ───────────────────────────────────────────────────────────── */
 
 .business-header {
