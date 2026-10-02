@@ -515,8 +515,6 @@
                   nightly sweep first runs.
                 -->
                 <p class="footer-stats" id="footer-trust-stats" data-testid="footer-trust-stats" hidden></p>
-            </div>
-        </div>
                 <!--
                   "See our reviews on Google" (ERR-302, ad-clicks-to-orders §6).
                   A plain link, new tab — no stars, no review count (copy rules).
@@ -528,6 +526,8 @@
                 <p class="footer-reviews" id="footer-google-reviews" data-testid="footer-google-reviews" hidden>
                   <a class="footer-reviews__link" target="_blank" rel="noopener noreferrer">See our reviews on Google</a>
                 </p>
+            </div>
+        </div>
 
         <div id="google-reviews-badge"></div>
 
@@ -650,9 +650,9 @@
     // network call, and TrustStats fails open to {} so a dead endpoint leaves
     // the line hidden rather than blanking anything.
     renderTrustStats();
+    renderGoogleReviewsLink();
 
     // Google Customer Reviews - badge + opt-in survey loader
-    renderGoogleReviewsLink();
     (function () {
       window.___gcfg = { lang: 'en_NZ' };
       var originalOptIn = window.renderOptIn;
@@ -954,8 +954,6 @@
     el.hidden = false;
   }
 
-  function syncFooterAccordions() {
-    const items = document.querySelectorAll('.site-footer [data-footer-accordion]');
   /**
    * Fill the footer's "See our reviews on Google" link (ERR-302). Same shared,
    * session-cached /api/site/trust read as the stats line — no new request.
@@ -977,6 +975,8 @@
     el.hidden = false;
   }
 
+  function syncFooterAccordions() {
+    const items = document.querySelectorAll('.site-footer [data-footer-accordion]');
     if (!items.length || !window.matchMedia) return;
     const mq = window.matchMedia('(max-width: 768px)');
     // Which column stays open on mobile? The one the template shipped `open`

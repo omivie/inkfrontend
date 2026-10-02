@@ -247,6 +247,32 @@ test('§6 footer renderer takes the href ONLY through googleReviewsUrl, and mark
     assert.match(code, /renderTrustStats\(\);\s*renderGoogleReviewsLink\(\);/);
 });
 
+/** Brace depth (comments/strings stripped) at the first occurrence of `marker`. */
+function depthAt(code, marker) {
+    const at = code.indexOf(marker);
+    assert.ok(at >= 0, `missing ${marker}`);
+    const src = code.slice(0, at).replace(/`(?:\\[\s\S]|[^`\\])*`|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g, '""');
+    let d = 0;
+    for (const ch of src) { if (ch === '{') d++; else if (ch === '}') d--; }
+    return d;
+}
+
+test('§6 renderGoogleReviewsLink is declared in the SAME scope as renderTrustStats (prod ReferenceError, 2026-10-02)', () => {
+    // caea73d shipped it nested inside syncFooterAccordions(): every text-level
+    // assertion above passed while initFooter() threw "renderGoogleReviewsLink is
+    // not defined" on production. Scope is what the caller can see; test it.
+    const code = stripComments(read('js/footer.js'));
+    assert.equal(depthAt(code, 'async function renderGoogleReviewsLink()'), depthAt(code, 'async function renderTrustStats()'));
+    assert.equal(depthAt(code, 'function syncFooterAccordions()'), depthAt(code, 'async function renderTrustStats()'));
+});
+
+test('§4 checkout status line sits AFTER the label, not inside it', () => {
+    const html = read('html/checkout.html');
+    const label = html.indexOf('id="guest-cart-email-optin"');
+    const close = html.indexOf('</label>', label);
+    assert.ok(close > label && close < html.indexOf('id="guest-cart-email-status"'));
+});
+
 /** Run renderGoogleReviewsLink against a fake DOM. */
 async function runFooterLink(trust) {
     const code = read('js/footer.js');
