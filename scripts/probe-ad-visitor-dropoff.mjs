@@ -111,6 +111,20 @@ async function openPage(viewport, path, { spacer = null } = {}) {
     }
     // The consent card animates in; give it and Google's badge time to settle.
     await page.waitForFunction(() => document.querySelector('.consent-banner.is-open'), null, { timeout: 15000 }).catch(() => {});
+    // Google's badge passes through a transient box (our 100px clip, then a
+    // 614px measuring frame) for ~3 s before settling at 86x64. Measured on
+    // production 2026-10-02: a probe that caught the transient reported a 3px
+    // edge overlap on the last /shop card that the settled badge does not have.
+    // Wait for its box to hold still for 12 animation frames (or 15 s; on
+    // localhost the badge is a 2px stub and settles at once).
+    await page.waitForFunction(() => {
+        const b = document.getElementById('google-reviews-badge');
+        const r = b ? b.getBoundingClientRect() : null;
+        const key = r ? `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}` : 'none';
+        window.__badgeSettle = (window.__badgeSettle && window.__badgeSettle.key === key)
+            ? { key, n: window.__badgeSettle.n + 1 } : { key, n: 0 };
+        return window.__badgeSettle.n >= 12;
+    }, null, { timeout: 15000, polling: 'raf' }).catch(() => {});
     return { ctx, page, shopRequests, limited };
 }
 

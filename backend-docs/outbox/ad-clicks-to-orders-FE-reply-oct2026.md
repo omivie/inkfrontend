@@ -208,6 +208,44 @@ page does now.
 - **Please confirm** a `guest_sessions.contact_consent_at` row for that address at about 04:10 UTC.
 - The cart lines `CLC73BK` × 1 on the probe's guest sessions are test carts. If one of them sends a reminder, it goes to the owner.
 
+**ERR-301 on production, measured 04:14–04:40 UTC, after the hotfix.** These are the same checks as your §"How we will verify", from a first-time visitor with the consent banner open. They ran READ-ONLY: analytics requests were aborted and nothing was added to a cart.
+
+`PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:ad-visitor-dropoff`
+
+**1. Product page: Add to Cart above the banner and clickable, fit line directly under it.** All three products (GGI690KCMY, GLC3329XLBK, CDR1070BK) passed at every size.
+
+| Size | Add to Cart (y) | Nothing overlaps; `elementFromPoint` hits it at centre + 4 corners | Fit line under it, on screen |
+|---|---|---|---|
+| 1280×551 | 464–519 | yes | yes |
+| 1366×599 | 464–519 | yes | yes |
+| 1536×695 | 513–586 | yes | yes |
+| 1366×768 | 513–586 | yes | yes |
+| 1280×720 | 513–586 | yes | yes |
+| 1440×900 | 513–586 | yes | yes |
+
+- **Layout shift (CLS):** at most 0.054 on genuine products and 0.094 on the compatible drum at 1280×551. Both are under 0.1.
+- **Your literal vertical figure** (`Add.bottom ≤ min(banner.top, badge.top)`) is printed beside every row. With the banner bottom-left and the badge bottom-right, it is false at the short sizes while nothing actually covers the button. That is what the §1 note above is about.
+
+**2. Series page `code=288`: first-row price and Add above the banner, H1 names the code.**
+- **Visible label:** "Epson 288 / 288XL Ink Cartridges", the same words as the H1.
+- **Price / Add positions:**
+  - 1366×599 and 1280×551: first price at y 441, first Add at y 495–531, 218px from the card top.
+  - 1536×695 and 1366×768: 247px from the card top.
+- **Covered cards:** at 599 and 551 tall, the cards in columns 1–2 sit under the consent card until it is answered. All other first-row cards are clear.
+
+**3. `code=288XL` and `pack=value_pack` reach `/api/shop` unchanged.**
+- The 288XL page sends `code=288XL` and `code=288`, and the first card is 288XL Black.
+- The `code=564&pack=value_pack` page sends `pack=value_pack`, the first card is a value pack, and the "See all 564 cartridges" link is shown.
+
+**Negative controls.** A 200px spacer above Add, and another above the grid, each turned the check red. Those two are measured against localhost. Production runs them too.
+
+**A measurement trap we fixed in the probe.** In the first production run, 2 cards failed: G288CMYK at 1280 wide. The probe had measured Google's reviews badge during its first ~3 seconds, while it still sits in a transient 100px box (x 1180). In that state it overlapped the last card's button by 3px at the edge. Settled, the badge is 86px wide at x 1194, the button ends at x 1183, and `elementFromPoint` hits the button. The probe now waits for the badge to hold still before measuring, and the re-run passed 31 / 0.
+
+**Consent banner with the real Google badge.** `PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:consent-banner`: 24 pass, 0 fail, 0 not exercised.
+- **At 1512×806 the banner is a corner card.** It sits at x 16–376 and the badge at x 1426–1512, so they don't touch. The badge sits at `bottom: 0` and is not lifted over the banner.
+- **Below 1100px it is still a bar, and the ERR-233 lift still works.** At 1024×768 the badge sits *on* the bar, and both buttons answer their own hit-test.
+- **Accept stores consent.** Clicking it stores `cookie_consent=accepted`.
+
 ## Not done, on purpose
 
 - No price claims, no star ratings, no "guaranteed fit" wording.
