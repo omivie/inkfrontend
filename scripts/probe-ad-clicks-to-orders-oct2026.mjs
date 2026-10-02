@@ -72,19 +72,16 @@ async function fresh() {
     const writes = [];
     page.on('request', (r) => { if (r.method() !== 'GET' && r.method() !== 'OPTIONS' && /\/api\/cart/.test(r.url())) writes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
     // Record every gtag() call the page makes, before any page script runs.
-    await ctx.addInitScript(() => {
-        window.__gtagCalls = [];
-        const dl = (window.dataLayer = window.dataLayer || []);
-        const push = dl.push.bind(dl);
-        dl.push = (...args) => {
-            for (const a of args) { try { window.__gtagCalls.push(JSON.parse(JSON.stringify(Array.from(a)))); } catch (_) { /* non-arguments push */ } }
-            return push(...args);
-        };
-    });
     return { ctx, page, aborted, writes };
 }
-const adsEvents = (page, name) => page.evaluate(([n, tag]) => (window.__gtagCalls || [])
-    .filter((c) => c[0] === 'event' && c[1] === n && c[2] && c[2].send_to === tag), [name, ADS_TAG]);
+// Read gtag's own queue AFTER the fact. gtag/js replaces dataLayer.push when it
+// loads, so wrapping push only sees what was queued before (and a re-wrapping
+// accessor looped). The array keeps every gtag() call either way.
+const gtagCalls = (page) => page.evaluate(() => (window.dataLayer || [])
+    .filter((c) => c && typeof c === 'object' && typeof c.length === 'number' && c[0] === 'event')
+    .map((c) => JSON.parse(JSON.stringify(Array.from(c)))));
+const adsEvents = async (page, name) => (await gtagCalls(page))
+    .filter((c) => c[1] === name && c[2] && c[2].send_to === ADS_TAG);
 
 try {
     /* ══ §6 footer link ══════════════════════════════════════════════════ */
@@ -144,10 +141,10 @@ try {
         const { ctx, page } = await fresh();
         await page.goto(`${BASE}/shop?brand=epson&category=ink&code=288`, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(6000);
-        const total = await page.evaluate(() => (window.__gtagCalls || []).length);
+        const total = (await gtagCalls(page)).length;
         const events = await adsEvents(page, 'view_item');
-        if (!total) nm('control', 'recorder saw no gtag calls at all — the control would pass vacuously');
-        else check('no Ads view_item on /shop', events.length === 0, `${events.length} of ${total} gtag calls`);
+        if (!total) nm('control', 'no gtag events at all — the control would pass vacuously');
+        else check('no Ads view_item on /shop', events.length === 0, `${events.length} of ${total} gtag events`);
         await ctx.close();
     }
 
@@ -190,6 +187,12 @@ try {
             await r.page.goto(`${BASE}/cart?add=${OPT_IN_SKU}:1`, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await r.page.waitForFunction(() => !document.getElementById('cart-layout')?.hidden
                 && document.getElementById('cart-guest-email')?.hidden === false, null, { timeout: 45000 });
+            // A shopper types an address over several seconds; the deep link's
+            // server add (which mints the guest session) and its cross-sell modal
+            // both land in that window. Wait for the session, close the modal.
+            await r.page.waitForFunction(() => typeof API !== 'undefined' && !!API.getGuestSessionId(), null, { timeout: 20000 });
+            await r.page.waitForTimeout(3000);
+            await r.page.keyboard.press('Escape');
             const pos = await r.page.evaluate(() => {
                 const b = (id) => document.getElementById(id).getBoundingClientRect();
                 return { checkoutBottom: Math.round(b('checkout-btn').bottom), boxTop: Math.round(b('cart-guest-email').top) };

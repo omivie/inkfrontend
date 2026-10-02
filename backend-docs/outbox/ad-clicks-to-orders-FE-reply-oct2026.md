@@ -15,7 +15,7 @@ work by file.
 Your reading was right, and the cause was ours. Local `main` was **5 commits ahead of `origin/main`**: ERR-295 to ERR-299
 were committed but never pushed. Vercel was serving the last push correctly.
 
-This round ships everything in one push. **Deploy time:** _filled in after the push (see §9)._
+**Deployed:** pushed `e0a76a13` at **2026-10-02 04:01:41 UTC** (live by 04:02 UTC), then hotfix `abfca574` at **04:05:46 UTC** (live 04:06 UTC). See §9.
 
 ## §4 Guest cart reminder — switched on, and now on /cart too
 
@@ -32,7 +32,7 @@ This round ships everything in one push. **Deploy time:** _filled in after the p
 - **Outcome is shown.** On success the shopper sees "We'll email a copy of this cart to {email} if you don't finish. Every email
   has an unsubscribe link." On any failure (thrown 400, `RATE_LIMITED`) they see "We couldn't save that just now. Your cart is
   unaffected." and can try again. The cart and checkout are never blocked.
-- **Done-when.** _One real opt-in, made after the deploy with an address the owner controls; result in §9._ Please confirm the row
+- **Done-when.** One real opt-in was made on production at **2026-10-02 ~04:10 UTC**, for `junjackson0915@gmail.com` (the owner's address), on a guest cart holding `CLC73BK`. The page reported `sent`. Please confirm the row
   in `guest_sessions.contact_consent_at`.
 
 ### BF-099 — withdrawing consent before the first email
@@ -189,7 +189,24 @@ page does now.
 
 ## §9 After the deploy
 
-_Filled in after the push: deploy time, `probe:ad-clicks` against production, the real opt-in result._
+**Deploys.** We pushed `e0a76a13` (ERR-299 to ERR-302) at 04:01:41 UTC. The new `/cart` markup was served by 04:02 UTC.
+
+**A defect in our first deploy, live for about 4 minutes.** The production probe failed on the footer link. In that build `initFooter()` threw `renderGoogleReviewsLink is not defined`, because the function had been committed in the wrong scope. The throw stopped the rest of the footer setup on every page, including the Google Customer Reviews badge loader. Hotfix `abfca574` was pushed at 04:05:46 UTC and was live by 04:06 UTC. After it, we found no uncaught page errors on `/`, `/shop?…code=288`, `/p/GGI690KCMY`, `/cart`, `/checkout` or `/order-confirmation`. The cause is in ERR-302.
+
+**`PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:ad-clicks`, after the hotfix: 18 pass, 0 fail, 1 not measured.**
+- Footer: the link is shown, the href is byte-identical to `organization.google_reviews_url`, it opens a new tab with `noopener`, and there are no stars or counts.
+- PDP `GGI690KCMY`: exactly one Ads-scoped `view_item` with `id: "GGI690KCMY"`. Google's tag transmitted it to Ads in 4 requests. The probe aborts those requests, so it never joins an audience.
+- Negative control: `/shop?brand=epson&category=ink&code=288` sent no Ads `view_item`.
+- `/cart` as a first-visit guest: the box is shown, unticked, with the exact label and its own email field. Nothing was POSTed.
+- Not measured in read-only mode: the box's position, because an empty cart hides the cart layout. The recording run measured it: the box top is at y 867, below "Proceed to Checkout" (bottom y 820).
+
+**Add to cart, production, deep link `/cart?add=CLC73BK:1`:** the existing conversion (`…/e3c8CI2D3dwcEMqwyJZD`) and the new label-less `add_to_cart` to `AW-18032498762` with `id: "CLC73BK"` were both pushed. The tag transmitted `add_to_cart` with the SKU in 4 requests.
+
+**The real opt-in (§4 done-when).** It took two attempts.
+- **First run (04:08 UTC): no request was sent.** Our probe ticked the box within a second of the deep-link add. At that point the server had not yet minted the guest session, and a cross-sell modal opened over the page. The page told the shopper "We couldn't save that just now…", as designed, and sent nothing.
+- **Second run (~04:10 UTC): `sent`.** We waited for the session and closed the modal. The shopper saw "We'll email a copy of this cart to junjackson0915@gmail.com if you don't finish. Every email has an unsubscribe link."
+- **Please confirm** a `guest_sessions.contact_consent_at` row for that address at about 04:10 UTC.
+- The cart lines `CLC73BK` × 1 on the probe's guest sessions are test carts. If one of them sends a reminder, it goes to the owner.
 
 ## Not done, on purpose
 
