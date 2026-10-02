@@ -193,7 +193,11 @@ try {
     {
         const ctx = await ctxFor('phone');
         const page = await ctx.newPage();
-        await page.goto(`${BASE}/ink-cartridges`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        // A page that HAS Add buttons. This control used /ink-cartridges, which
+        // has carried none since ERR-290 removed its product rows (§1 prints
+        // `firstAdd y=null` there) — so the sweep had nothing to cover and the
+        // control could not go red (found 2026-10-02, ERR-301; cf. ERR-258).
+        await page.goto(`${BASE}${LANDINGS[2]}&gclid=probe`, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(5000);
         await page.evaluate(() => {
             const o = document.createElement('div');

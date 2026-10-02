@@ -238,8 +238,15 @@ try {
                         m.banner.right - m.banner.left <= 400 && m.banner.left <= 24,
                         `x${Math.round(m.banner.left)}–${Math.round(m.banner.right)}`);
                     check(`${tag}: Google badge NOT raised over the banner (computed bottom 0px)`, m.badgeBottom === null || m.badgeBottom === '0px', String(m.badgeBottom));
-                    info(`${tag}: handoff's literal Add.bottom ≤ banner.top`,
-                        `${Math.round(a.bottom)} ≤ ${Math.round(m.banner.top)} is ${a.bottom <= m.banner.top} — the card is on the opposite side (x ≤ ${Math.round(m.banner.right)}), so overlap is measured above instead`);
+                    // The handoffs' VERTICAL acceptance, printed as-is so a re-run
+                    // of their check is never a surprise: 2 Oct §1 "Add.bottom ≤
+                    // banner.top"; 1 Oct §1 "above the top edge of EVERY fixed
+                    // element" (the badge too). With the card bottom-LEFT and the
+                    // badge bottom-RIGHT neither shares Add's columns, so the
+                    // owner-accepted bar is the intersection + hit-test above.
+                    const fixedTop = Math.min(m.banner.top, m.badge ? m.badge.top : Infinity);
+                    info(`${tag}: handoffs' vertical metric Add.bottom ≤ min(banner.top, badge.top)`,
+                        `${Math.round(a.bottom)} ≤ ${Math.round(fixedTop)} is ${a.bottom <= fixedTop} — card x ${Math.round(m.banner.left)}–${Math.round(m.banner.right)}, badge x ≥ ${m.badge ? Math.round(m.badge.left) : '—'}, Add x ${Math.round(a.left)}–${Math.round(a.right)}: no shared column, so overlap is measured above instead`);
                 }
                 if (m.cls >= 0.1) soft(`${tag}: CLS ${m.cls}`, 'target < 0.1');
             }
