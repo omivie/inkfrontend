@@ -245,7 +245,7 @@ test('§2 renderVolumePricing clears the line first and fills it only after the 
     assert.ok(clear >= 0 && guard > clear && fill > guard, `clear ${clear} < guard ${guard} < fill ${fill}`);
 });
 
-test('§2 markup: the strip sits under the title, the ladder line before the actions, both ship hidden', () => {
+test('§2 markup: the strip sits under the title, the ladder line AFTER the actions (ERR-301), both ship hidden', () => {
     const html = read('html/product/index.html');
     const title = html.indexOf('id="product-title"');
     const strip = html.indexOf('id="product-headline"');
@@ -255,7 +255,12 @@ test('§2 markup: the strip sits under the title, the ladder line before the act
     const ladder = html.indexOf('id="volume-pricing"');
     const summary = html.indexOf('id="volume-pricing-summary"');
     const actions = html.indexOf('class="product-info__actions"');
-    assert.ok(ladder < summary && summary < actions, 'the one-line ladder is the last thing before Add');
+    // ERR-301 (ad-clicks-to-orders §1, owner's call 2026-10-02): the "3+ from
+    // $X each" line moved BELOW Add — under the fit promise — so the button
+    // sits directly under the price and stock line on a laptop.
+    const promise = html.indexOf('id="product-promise"');
+    assert.ok(ladder < actions && actions < promise && promise < summary,
+        'chips, then Add, then the fit promise, then the one-line ladder');
     assert.match(html, /id="volume-pricing-summary"[^>]*hidden/);
 });
 

@@ -63,12 +63,23 @@ test('§A PDP HTML ships a <dl class="buy-box"> with id="product-buybox"', () =>
 });
 
 test('§A buy-box rows appear in the locked order: Price → Availability → Delivery → Returns', () => {
+    // ERR-301 split the four rows across TWO <dl>s so Add to Cart can sit
+    // directly under Price + Availability: #product-buybox (the Offer
+    // microdata) holds those two, #product-buybox-terms below Add holds
+    // Delivery + Returns. The prerender-mirrored copy and the document order
+    // of the four rows are unchanged — which is what this pin protects.
     const buyBoxMatch = pdpHtml.match(/<dl[^>]*id="product-buybox"[\s\S]*?<\/dl>/);
+    const termsMatch = pdpHtml.match(/<dl[^>]*id="product-buybox-terms"[\s\S]*?<\/dl>/);
     assert.ok(buyBoxMatch, 'buy-box <dl> not found in PDP HTML');
-    const block = buyBoxMatch[0];
-    const labels = [...block.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map(m => m[1].trim());
-    assert.deepEqual(labels, ['Price', 'Availability', 'Delivery', 'Returns'],
-        'buy-box <dt> labels must be exactly Price · Availability · Delivery · Returns in this order');
+    assert.ok(termsMatch, 'buy-box terms <dl> not found in PDP HTML');
+    const labelsOf = (block) => [...block.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map(m => m[1].trim());
+    assert.deepEqual(labelsOf(buyBoxMatch[0]), ['Price', 'Availability'],
+        'the Offer <dl> above Add holds exactly Price · Availability');
+    assert.deepEqual(labelsOf(termsMatch[0]), ['Delivery', 'Returns'],
+        'the terms <dl> below Add holds exactly Delivery · Returns');
+    assert.ok(pdpHtml.indexOf('id="product-buybox"') < pdpHtml.indexOf('id="add-to-cart-btn"')
+        && pdpHtml.indexOf('id="add-to-cart-btn"') < pdpHtml.indexOf('id="product-buybox-terms"'),
+        'document order: Price · Availability, then Add, then Delivery · Returns');
 });
 
 test('§A buy-box has the four expected value <dd> classes', () => {

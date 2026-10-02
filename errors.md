@@ -41,6 +41,76 @@ describing the same incident.
 
 ---
 
+## ERR-301 — Paid laptop visitors could not see a price or an Add button: the PDP put Add at y 703 under our own consent bar and Google badge, the series page put its first price at y 635, `code=288XL` led with standard 288, and a genuine product with no photo showed "No Image" — **RESOLVED (frontend)** (2026-10-02)
+
+**Source.** `backend-docs/inbox/ad-visitor-dropoff-FE-handoff-oct2026.md`, superseded mid-session by `ad-clicks-to-orders-FE-handoff-oct2026.md` (both 2 Oct). It re-raised the never-built `paid-traffic-conversion-FE-handoff-oct2026.md` (1 Oct). Google Ads, 29 Sep–2 Oct: 54 tracked visits and 0 orders. The same series page converts 13% of paid visitors on a phone and under 4% on a laptop. Split by FILE with a peer: §0/§4/§6 footer/§7 = **ERR-302**. This entry covers §1, §2, §3, §5, §6 on the PDP, and §8. Reply: `backend-docs/outbox/ad-clicks-to-orders-FE-reply-oct2026.md` (ERR-301 section).
+
+**Measured before anything changed** (live, 2026-10-02, READ-ONLY, analytics aborted):
+
+| | Handoff | Measured |
+|---|---|---|
+| PDP GGI690KCMY at 1366×599 | Add 704 | Add **703**, price 438. At 1366×768 the badge sits at 643–707 and the bar at 707–768, both over Add. Same at 1280×720. Compatible CDR1070BK is the same. |
+| "an empty fixed 64px div" (1 Oct) | ? | **`#google-reviews-badge`**: Google's iframe, which **our own** ERR-233 rule lifts onto the bar |
+| `code=288` h1 | wrong | `Shop Ink Cartridges & Toner NZ`, visually hidden; never replaced at the products level |
+| `code=288XL` | 288 first | `parseURLState` collapses 288XL→288, and the sort puts STD first. **`/api/shop?code=288XL` returns ONLY the 7 XL rows** (13 for `code=288`) |
+| "genuine packs already show a GENUINE tile" | true | **FALSE.** G288CMYK (genuine value pack, `image_url` null) shows the grey "No Image" SVG. No such tile existed (cf. ERR-143) |
+| `ink-backend-zaeq` / onrender refs | remove | **Already clean**: only comments, the deliberate OLD constant in `probe-backend-move.mjs`, and the `backend-move-sep2026` §0 guard. `.vercel/` holds no hosts |
+| printer pages switched on | spot check | 9 render: correct h1, products listed, no console errors |
+| beacon blocked by uBO/Brave? | question | **No.** Checked with the @ghostery/adblocker engine against uBO's default lists and Brave's standard lists. `/api/analytics/traffic-event` is allowed as xhr, ping and fetch on both hosts. Positive controls (GA collect, gtag.js, bat.bing) were BLOCKED |
+| §6 b1934f3 search fix | FYI | `/api/printers/search` still returns `[]` for the backend's own example and for "DCP-J1050DW". The FE both-spellings fallback stays (ERR-158). Asked which endpoint the fix covers |
+
+**What changed.**
+
+- **PDP — the decision first** (`html/product/index.html`, `product-detail-page.js`, `pages.css`).
+  - The four-row buy box is split across two `<dl>`s. Price + Availability sit directly above qty + Add and keep the Offer microdata. Delivery + Returns sit below Add in `#product-terms`, with the dispatch countdown, pack savings, printer proof and cost-per-page. Copy and document order are unchanged.
+  - Directly under Add: `#product-promise` (`renderPromise`). It shows `compatibility_promise.label` verbatim (moved out of `#product-fit`, not copied), then `how_to_check` as a link to the printer finder, then "See our reviews on Google" via `TrustStats.googleReviewsUrl` (ERR-302's validator).
+  - Then the "3+ from $X each" line. It is **below** Add at the owner's call (2026-10-02), superseding ERR-293's placement above.
+  - The 208px price-block CLS reserve became the measured 88px (the `<dl>` is 80px on all three probe SKUs).
+  - A `max-height: 620px` rung reclaims ~40px on 1280×551.
+- **Consent banner** (`components.css`, CSS only). From 1100px it is a 360px card, bottom-LEFT. The badge keeps bottom-right, so the two never share a corner. The ERR-233 lift is scoped to `max-width: 1099.98px`, unchanged inside. The handoff: "do not raise any element above the banner".
+- **Series page** (`shop-page.js`, `seo-meta.js`, `pages.css`).
+  - The h1 names the code. `updateTitle` writes brand + code. `SeoMeta.reconcile` mirrors the prerender's own h1 ("Epson 288 / 288XL Ink Cartridges") on a brand **code** page. The h1 stays visually hidden and the visible label beside the breadcrumb prints the same words (ERR-270).
+  - A compact card on short laptops only, `(min-width:1100px) and (max-height:800px)`, tighter at ≤620: letterbox image, 3- then 2-line title, price and GST on one line, ladder on one line, "Fits" below Add. At ≤620 the pills are dropped, because both are restated: the struck-through Was price, and the free-shipping bar above the grid.
+  - `tests/product-card-title-clamp` gets ONE pinned, media-gated exception.
+- **The ad's intent** (`shop-page.js`, `utils.js`, `api.js`).
+  - `state.intent = {code, requested, yieldPref, pack}`. It is stale as soon as `state.code` moves.
+  - `loadProducts` sends `code=288XL` **unchanged and first**, beside `code=288`, so the family stays.
+  - `ProductSort.byCodeThenColor(rows, {preferYield})` puts the asked-for tier first within each family. Colour order and row breaks are kept.
+  - `pack=value_pack` passes through, with its own cache key. The chip-cache shortcut and the compat sidecar are skipped for it, because the sidecar would merge the singles back.
+  - The URL keeps both. The canonical keeps neither.
+  - New "See all 564 cartridges" link.
+- **GENUINE tile** (`BrandSource.tile` / `revealTile`, utils.js).
+  - Gated on `isGenuine`, so unknown keeps the placeholder and nothing is inferred from a name.
+  - Neutral text only, never a swatch (ERR-143). All values are backend fields, escaped. Without Security loaded it returns `''`.
+  - Used on 10 surfaces: cards, /shop, PDP hero, cart, favourites, checkout, confirmation, order detail, payment, ribbons. Each also covers the failed-image path.
+  - `payment-page.js` pointed at `/assets/images/placeholder.png`, a file that never existed.
+
+**Measured after** (local, `npm run probe:ad-visitor-dropoff`, paced for the 100/60 s limiter):
+- **PDP, all three SKUs, at 1280×551, 1366×599, 1536×695, 1366×768, 1280×720 and 1440×900:**
+  - Add lands at **464–538** (was 703). It is inside the viewport, overlapped by nothing, and `elementFromPoint` returns it at the centre and all four corners.
+  - The fit promise sits directly under it, and CLS is ≤ 0.015.
+- **`code=288`:**
+  - First price **441** (was 635) and first Add **495–531** (was 763) at 599 and 551. That is 218px from the card top; the target was ≤ 250.
+  - The consent card covers the bottom of columns 1–2 until it is answered, at 551/599/720 tall and the soft-reported columns. Every other column is clear.
+  - `code=288XL` sends `code=288XL` and `code=288`, and the first card is 288XL Black. `pack=value_pack` reaches the API, the first card is a pack, and "See all" shows.
+- **Negative controls:** a 200px spacer above Add, and one above the grid, turn both checks RED.
+
+**The handoff's literal PDP metric is meaningless for a corner card.** With the card at x 16–376 and Add at x ~800–1000, `Add.bottom ≤ banner.top` measures a vertical coincidence, not an overlap. The probe prints it as INFO. We measure the handoff's own second condition (`elementFromPoint`) plus a rect intersection.
+
+***A fixed element we placed ourselves was half of what covered the button: the "empty div" the backend could not name was our ERR-233 lift doing exactly what it was written to do.*** ***When a handoff says something "already" exists, measure it: the genuine-pack tile never did.***
+
+**Tests.**
+- New `tests/ad-visitor-dropoff-oct2026.test.js` (28). Mutations red-proofed: preferYield ignored, pack sidecar re-enabled, tile ungated.
+- Pins updated deliberately:
+  - product-buybox §A (two `<dl>`s)
+  - post-deploy-fixes §2 (ladder after Add)
+  - marketing-audit §1.1 (`#product-terms`)
+  - genuine-no-color-tile (the tile, plus a no-BrandSource control and an unknown-source control)
+  - code-yield-grouping and ribbon-compat-search (an optional 2nd arg)
+  - product-card-title-clamp (one gated exception)
+  - catalogue-error-vs-empty (lifts `_freshIntent`)
+- Probes updated: `probe:consent-banner` (bar geometry measured at 1024 wide, card geometry at 1512), `probe:post-deploy-fixes` (ladder below Add), `probe:conversion-fixes` (banner MEASURED, not the hard-coded 61px).
+
 ## ERR-302 — Ads remarketing audiences were empty because the Ads tag never received a single ecommerce event NAME, and the guest cart reminder had never been shown to anyone — **RESOLVED (frontend)** (2026-10-02)
 
 **Source.** `backend-docs/inbox/ad-clicks-to-orders-FE-handoff-oct2026.md` (2 Oct 2026; supersedes the 1 Oct paid-traffic and 2 Oct ad-visitor-dropoff handoffs). Google Ads: 54 tracked visits, 0 orders, 29 Sep–2 Oct. Split by FILE with a peer session: PDP buy box, consent card, series page, `code=288XL`/`pack`, GENUINE tile = **ERR-301**. This entry covers §0, §4, §6, §7. Reply: `backend-docs/outbox/ad-clicks-to-orders-FE-reply-oct2026.md`.

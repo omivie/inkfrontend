@@ -1030,6 +1030,16 @@
             this.state.code = (typeof window !== 'undefined' && window.SeriesCodes && _rawCode)
                 ? window.SeriesCodes.collapseYieldSuffix(_rawCode)
                 : _rawCode;
+            // ERR-301 (ad-clicks-to-orders §5) — KEEP THE AD'S INTENT. The code
+            // above collapses 288XL → 288 so the page shows the whole family
+            // (chips, canonical, breadcrumb all key on it). What the visitor
+            // actually searched — "epson 288xl" — used to be thrown away right
+            // here, so the page led with standard 288. `intent` remembers it:
+            // the requested code is SENT to /api/shop unchanged (alongside the
+            // family code: 288XL alone returns only the 7 XL rows), its yield
+            // tier sorts first, and `pack=value_pack` passes through. It is
+            // stale — ignored — as soon as state.code moves to another family.
+            this.state.intent = this._parseIntent(_rawCode, this.state.code, params.get('pack'));
             // Canonical printer query param is `printer_slug` per
             // docs: search-dropdown-routing.md (May 2026). The legacy
             // `printer` form is still accepted to keep bookmarks, cached
@@ -1092,6 +1102,26 @@
 
         },
 
+        /**
+         * ERR-301 — the ad's intent, from the raw URL. Returns null when the
+         * URL asks for nothing beyond the family. Only `pack=value_pack` is
+         * honoured: it is the one pack filter the API documents.
+         */
+        _parseIntent(rawCode, code, rawPack) {
+            const raw = rawCode ? String(rawCode).trim().toUpperCase().replace(/[\s-]/g, '') : '';
+            const suffix = (code && raw.startsWith(String(code).toUpperCase())) ? raw.slice(String(code).length) : '';
+            const yieldPref = suffix === 'XL' ? 1 : (suffix === 'XXL' || suffix === 'XXXL') ? 2 : null;
+            const pack = rawPack === 'value_pack' ? 'value_pack' : null;
+            if (!code || (!yieldPref && !pack)) return null;
+            return { code, requested: yieldPref ? raw : null, yieldPref, pack };
+        },
+
+        /** The intent, only while the page is still on the family it was for. */
+        _freshIntent() {
+            const i = this.state.intent;
+            return i && this.state.code && i.code === this.state.code ? i : null;
+        },
+
         updateURL() {
             // Category-landing path: /ink-cartridges and /toner-cartridges
             // are the canonical URLs for the category-only state (no brand /
@@ -1130,7 +1160,11 @@
             // Emit the backend's canonical slug, never the internal tab id
             // (consumable→drums etc. — IA reorg Jul 2026).
             if (this.state.category && !categoryImpliedByPath) params.set('category', this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
-            if (this.state.code) params.set('code', this.state.code);
+            // ERR-301: while the visitor is on the family they came in on, the
+            // address bar keeps what the ad asked for (288XL, pack=value_pack).
+            const _intent = this._freshIntent();
+            if (this.state.code) params.set('code', (_intent && _intent.requested) || this.state.code);
+            if (_intent && _intent.pack) params.set('pack', _intent.pack);
             if (this.state.type) params.set('type', this.state.type);
             // Filter & Sort refinements — omit the defaults to keep URLs clean.
             if (this.state.sort && this.state.sort !== 'recommended') params.set('sort', this.state.sort);
@@ -3097,8 +3131,15 @@
                 const categoryId = this.state.category;
                 const typeKey = this.state.type || 'all';
 
+                // ERR-301 — the ad's intent: the requested yield code is fetched
+                // alongside the family, and a pack filter changes the ANSWER, so
+                // it is part of the cache key and bypasses the chip cache (which
+                // holds the whole family).
+                const intent = this._freshIntent();
+                const packFilter = intent && intent.pack ? intent.pack : null;
+
                 // Per-code product cache key
-                const productCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-products-${code}`;
+                const productCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-products-${code}${packFilter ? `-pack-${packFilter}` : ''}`;
 
                 let mergedProducts = this.cache.products[productCacheKey] || [];
 
@@ -3115,7 +3156,7 @@
                 let productsUnavailable = false;
                 let unavailableCode = null;
 
-                if (mergedProducts.length === 0) {
+                if (mergedProducts.length === 0 && !packFilter) {
                     // Try the codes cache, newest first
                     // (v9 Jul 2026 truncated-code repair, v8 series_codes-only extractor,
                     //  v7 yield-collapse, v6 specialty collapse, v5 /api/shop legacy).
@@ -3151,13 +3192,19 @@
                         const loadCategoryConfig = this.categories.find(c => c.id === this.state.category);
                         const loadApiCategory = loadCategoryConfig?.apiCategory || this.state.category;
 
-                        const aliases = this._codeAliasesFor(code) || [code];
+                        const aliases = (this._codeAliasesFor(code) || [code]).slice();
+                        // ERR-301: the code the ad asked for goes FIRST and goes
+                        // UNCHANGED (code=288XL), next to the family code — on a
+                        // cold deep link the chip cache is empty and only the
+                        // collapsed code used to be sent.
+                        if (intent && intent.requested && !aliases.includes(intent.requested)) aliases.unshift(intent.requested);
                         const responses = await Promise.all(aliases.map(alias =>
                             API.getShopData({
                                 brand: this.state.brand,
                                 category: loadApiCategory,
                                 code: alias,
-                                limit: 200
+                                limit: 200,
+                                ...(packFilter ? { pack: packFilter } : {})
                             // ERR-266 — a throw is a FAILED ASK, not an empty shelf.
                             // This used to be `.catch(() => null)`, which erased the
                             // difference. api.js throws for a non-JSON 5xx (:326-343),
@@ -3279,13 +3326,14 @@
                             brand: this.state.brand,
                             category: stemApiCategory,
                             code: stem,
-                            limit: 200
+                            limit: 200,
+                            ...(packFilter ? { pack: packFilter } : {})
                         }).catch(() => null);
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                         if (stemRes && stemRes.ok && Array.isArray(stemRes.data?.products) && stemRes.data.products.length) {
                             mergedProducts = stemRes.data.products;
-                            this.cache.products[`${this.state.brand}-${categoryId}-${typeKey}-products-${stem}`] = mergedProducts;
+                            this.cache.products[`${this.state.brand}-${categoryId}-${typeKey}-products-${stem}${packFilter ? `-pack-${packFilter}` : ''}`] = mergedProducts;
                         } else {
                             // Fail-soft, but not silent: we keep the narrower set
                             // we already have rather than blanking the page, and
@@ -4907,8 +4955,10 @@
                 sortedProducts = compatLast(this._sortProductsBy(products, sortMode));
                 breaks = new Set(); // flat sorted run — no yield-group row breaks
             } else {
+                // ERR-301: the yield the ad asked for (288XL) leads each family.
+                const _intent = this._freshIntent();
                 sortedProducts = compatLast((typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
-                    ? ProductSort.byCodeThenColor(products)
+                    ? ProductSort.byCodeThenColor(products, { preferYield: _intent ? _intent.yieldPref : null })
                     : products);
                 breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
                     ? new Set(ProductSort.rowBreakIndices(sortedProducts))
@@ -5043,12 +5093,21 @@
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="placeholder"${rawAttr}>`;
+                    // ERR-301: a genuine image that fails to load falls back to
+                    // the GENUINE tile (hidden sibling) before the placeholder.
+                    const fallbackTile = (!isCompatible && typeof BrandSource !== 'undefined') ? BrandSource.tile(product, { hidden: true }) : '';
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="placeholder"${rawAttr}>${fallbackTile}`;
                 }
             } else if (isCompatible) {
                 imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
             } else {
-                imageContent = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
+                // ERR-301: a GENUINE row with no photo gets the brand tile, not
+                // the grey "No Image" box. Gated on the row's own source
+                // (BrandSource), not on the section it landed in — an
+                // unknown-source row sits in this section too, and keeps the
+                // placeholder.
+                imageContent = (typeof BrandSource !== 'undefined' && BrandSource.tile(product))
+                    || `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
             }
 
             // Check if product is already a favourite
@@ -5751,9 +5810,28 @@
             }
         },
 
+        /**
+         * ERR-301 — on a pack-only landing (?pack=value_pack, from an ad), a
+         * link back to the whole family: same URL minus `pack`, family code.
+         */
+        _renderFamilyAllLink() {
+            const link = typeof document !== 'undefined' ? document.getElementById('family-all-link') : null;
+            if (!link) return;
+            const intent = this._freshIntent();
+            if (this.state.level !== 'products' || !intent || !intent.pack) { link.hidden = true; return; }
+            const params = new URLSearchParams(window.location.search);
+            params.delete('pack');
+            params.set('code', this.state.code);
+            link.href = `${window.location.pathname}?${params.toString()}`;
+            link.textContent = `See all ${this.state.code} cartridges`;
+            link.hidden = false;
+        },
+
         updateTitle() {
             // Hide product type label by default
             this.elements.productTypeLabel.hidden = true;
+            const _allLink = typeof document !== 'undefined' ? document.getElementById('family-all-link') : null;
+            if (_allLink) _allLink.hidden = true;
 
             if (this.state.level === 'printer-products') {
                 // A printer hub prints the SAME visible <h1> the crawler gets
@@ -5782,8 +5860,27 @@
                 } else if (this.state.level === 'search-results') {
                     productType = `Search Results for "${this.state.search}"`;
                 }
+                // ERR-301 (ad-clicks-to-orders §3): a CODE page's h1 names the
+                // code. It read "Shop Ink Cartridges & Toner NZ" on every one —
+                // the static shop.html text, never replaced at this level —
+                // while the <title> already said "Epson 288 / 288XL Ink
+                // Cartridges NZ". The h1 stays visually hidden (it costs the
+                // grid no height on a short laptop); the visible label beside
+                // the breadcrumb prints the SAME words, so what a shopper reads
+                // is what the crawler indexes (ERR-270). SeoMeta mirrors the
+                // prerender's own h1 into both when it lands; until then — or
+                // if the prerender is down — brand + code + type stands in.
+                if (this.state.level === 'products' && this.state.code) {
+                    const mirrored = (typeof SeoMeta !== 'undefined' && SeoMeta.h1For && typeof window !== 'undefined')
+                        ? SeoMeta.h1For(SeoMeta.prerenderPathForLocation(window.location))
+                        : null;
+                    const brand = this.brandName(this.state.brand) || '';
+                    productType = mirrored || [brand, this.state.code, productType].filter(Boolean).join(' ');
+                    this.elements.title.textContent = productType;
+                }
                 this.elements.productTypeLabel.textContent = productType;
                 this.elements.productTypeLabel.hidden = false;
+                this._renderFamilyAllLink();
                 // Note: yieldBanner is shown/hidden by displayProductInfo based on data
             } else {
                 // Hide yield banner on non-product levels

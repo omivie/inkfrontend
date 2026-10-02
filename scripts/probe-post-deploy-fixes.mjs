@@ -156,10 +156,12 @@ try {
         } else soft(`${sku}: no compatible_printers in the API row`, 'fit line not checked');
         const rung = Array.isArray(api?.quantity_breaks) && api.quantity_breaks[0];
         if (rung) {
-            check(`${sku}: one ladder line above Add, from the API's first rung`,
-                !!m.summary && m.summary.y < m.addTop && m.summary.text.startsWith(`${rung.min_quantity}+ from $${Number(rung.business_price).toFixed(2)} each`),
+            // ERR-301 (ad-clicks-to-orders §1, owner 2026-10-02): the line moved
+            // BELOW Add so the button sits directly under price + stock.
+            check(`${sku}: one ladder line BELOW Add (ERR-301), from the API's first rung`,
+                !!m.summary && m.summary.y > m.addTop && m.summary.text.startsWith(`${rung.min_quantity}+ from $${Number(rung.business_price).toFixed(2)} each`),
                 m.summary?.text);
-            check(`${sku}: never a maximum saving above Add`, !!m.summary && !/up to|save/i.test(m.summary.text));
+            check(`${sku}: never a maximum saving in the ladder line`, !!m.summary && !/up to|save/i.test(m.summary.text));
         } else soft(`${sku}: no quantity_breaks`, 'ladder line not checked');
         if (m.countdown) {
             const scoped = /auckland metro/i.test(api?.delivery_estimate?.promise || '');

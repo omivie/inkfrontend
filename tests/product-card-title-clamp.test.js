@@ -139,6 +139,20 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
             const selector = m[1].trim();
             const body = m[2];
             if (!/-webkit-line-clamp\s*:\s*[23]\b/.test(body)) continue;
+            // ERR-301 — the ONE deliberate exception: the /shop grid on a
+            // short laptop window (>= 1100px wide AND <= 800px tall), where a
+            // 4-line title put a paid visitor's first price at y 635 and first
+            // Add at y 763 on a 599px screen. There the colour and yield are
+            // restated on the card (footer row; the code page groups by
+            // yield) and the h3's title attribute carries the full name. The
+            // exception is pinned to that selector inside its height-gated
+            // media block, so a clamp anywhere else still fails here.
+            if (/^(?:\/\*[\s\S]*?\*\/\s*)*\.shop-page \.products-row \.product-card \.product-card__title$/.test(selector)) {
+                const at = css.lastIndexOf('@media', m.index);
+                assert.match(css.slice(at, m.index), /^@media \(min-width: 1100px\) and \(max-height: (800|620)px\)/,
+                    `${file}: the short-laptop title clamp must stay inside its height-gated media block`);
+                continue;
+            }
             const productFacing = /\b(product-card|product-box|smart-ac__name|smart-ac__grid|favourite-item|dash-fav-card|crosssell-modal__name)\b/.test(
                 selector,
             );

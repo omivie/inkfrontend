@@ -638,14 +638,18 @@ const Favourites = {
                 return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="color-block">
                         <div class="favourite-item__color-block" style="${colorStyle} display: none;"></div>`;
             }
-            return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="placeholder">`;
+            // ERR-301: a genuine image that fails falls back to the GENUINE tile.
+            const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(item, { cls: 'genuine-tile--sm', hidden: true }) : '';
+            return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="placeholder">${fallbackTile}`;
         }
 
         if (colorStyle) {
             return `<div class="favourite-item__color-block" style="${colorStyle}"></div>`;
         }
 
-        return `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(item.name)}">`;
+        // ERR-301: a genuine favourite with no photo shows the GENUINE brand tile.
+        const tile = typeof BrandSource !== 'undefined' ? BrandSource.tile(item, { cls: 'genuine-tile--sm' }) : '';
+        return tile || `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(item.name)}">`;
     },
 
     /**

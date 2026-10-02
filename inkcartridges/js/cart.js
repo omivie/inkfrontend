@@ -784,7 +784,9 @@ const Cart = {
                 return `<img src="${Security.escapeAttr(imageUrl)}" alt="${escapedName}" data-fallback="color-block">
                         <div class="cart-item__color-block" style="${colorStyle}; width: 100%; height: 100%; border-radius: 4px; display: none;"></div>`;
             } else {
-                return `<img src="${Security.escapeAttr(imageUrl)}" alt="${escapedName}" data-fallback="placeholder">`;
+                // ERR-301: a genuine image that fails falls back to the GENUINE tile.
+                const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(item, { cls: 'genuine-tile--sm', hidden: true }) : '';
+                return `<img src="${Security.escapeAttr(imageUrl)}" alt="${escapedName}" data-fallback="placeholder">${fallbackTile}`;
             }
         }
 
@@ -792,7 +794,9 @@ const Cart = {
             return `<div class="cart-item__color-block" style="${colorStyle}; width: 100%; height: 100%; border-radius: 4px;"></div>`;
         }
 
-        return `<img src="/assets/images/placeholder-product.svg" alt="${escapedName}">`;
+        // ERR-301: a genuine line with no photo shows the GENUINE brand tile.
+        const tile = typeof BrandSource !== 'undefined' ? BrandSource.tile(item, { cls: 'genuine-tile--sm' }) : '';
+        return tile || `<img src="/assets/images/placeholder-product.svg" alt="${escapedName}">`;
     },
 
     /**
@@ -812,6 +816,7 @@ const Cart = {
                     if (sibling) sibling.style.display = 'flex';
                 } else if (this.dataset.fallback === 'placeholder') {
                     this.removeAttribute('data-fallback');
+                    if (typeof BrandSource !== 'undefined' && BrandSource.revealTile(this)) return;
                     this.src = '/assets/images/placeholder-product.svg';
                 }
             }, { once: true });

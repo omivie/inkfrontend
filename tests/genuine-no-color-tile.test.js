@@ -236,7 +236,27 @@ test('order-detail-page.js — getColorPlaceholder takes source and short-circui
 // the placeholder, compatible must show the color block.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function loadProducts() {
+/**
+ * The REAL BrandSource from utils.js, run in its own context with the same
+ * Security escaper (ERR-301: a genuine row with no image now renders
+ * BrandSource.tile — the GENUINE brand tile). Loaded separately so utils.js's
+ * real ProductColors does not replace the stub below.
+ */
+function loadBrandSource(Security) {
+    const sb = {
+        console, URL, URLSearchParams, setTimeout, clearTimeout, Security,
+        document: { addEventListener() {}, querySelector() { return null; }, getElementById() { return null; }, readyState: 'complete' },
+        localStorage: { getItem() { return null; }, setItem() {} },
+        sessionStorage: { getItem() { return null; }, setItem() {} },
+        navigator: {}, location: { search: '', pathname: '/' },
+    };
+    sb.window = sb; sb.globalThis = sb;
+    vm.createContext(sb);
+    vm.runInContext(fs.readFileSync(JS('utils.js'), 'utf8'), sb, { filename: 'utils.js' });
+    return sb.BrandSource;
+}
+
+function loadProducts({ withBrandSource = true } = {}) {
     // Stub the bare minimum that products.js touches at module load time and
     // during renderCard. We don't need a real DOM — renderCard returns an
     // HTML string.
@@ -299,6 +319,7 @@ function loadProducts() {
     };
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
+    if (withBrandSource) sandbox.BrandSource = loadBrandSource(sandbox.Security);
     const ctx = vm.createContext(sandbox);
     vm.runInContext(fs.readFileSync(JS('products.js'), 'utf8'), ctx, { filename: 'products.js' });
     return sandbox.Products;
@@ -336,12 +357,15 @@ const COMPATIBLE_PACK = {
     canonical_url: 'https://www.inkcartridges.co.nz/products/compatible-toner-cartridge-replacement-for-hp-410x-kcmy-4-pack/C-HP-CF410X-TNR-KCMY-4PK',
 };
 
-test('runtime: genuine pack with image_url=NULL renders placeholder, NOT a color block', () => {
+test('runtime: genuine pack with image_url=NULL renders the GENUINE tile (ERR-301), NOT a color block', () => {
     const Products = loadProducts();
     const html = Products.renderCard(GENUINE_PACK, 0);
-    // Genuine should show the placeholder image …
-    assert.match(html, /\/assets\/images\/placeholder-product\.svg/,
-        'genuine pack with image_url=null must render the placeholder SVG');
+    // ERR-301: genuine shows the neutral GENUINE brand tile — text, never a
+    // swatch — instead of the grey "No Image" placeholder …
+    assert.match(html, /class="genuine-tile"[^>]*role="img"[^>]*aria-label="HP Genuine [^"]+"/,
+        'genuine pack with image_url=null must render the GENUINE brand tile');
+    assert.doesNotMatch(html, /placeholder-product\.svg/,
+        'one tile per card: the tile replaces the placeholder');
     // … and must NOT render a colored tile div.
     assert.doesNotMatch(html, /class="product-card__color-block"/,
         'genuine pack with image_url=null must NOT render a product-card__color-block');
@@ -373,10 +397,27 @@ test('runtime: genuine single (color="Black", image_url=null) also gets placehol
         pack_type: 'single',
     };
     const html = Products.renderCard(genuineSingle, 0);
-    assert.match(html, /placeholder-product\.svg/,
-        'genuine single with no image must render the placeholder, not a Black-color tile');
+    assert.match(html, /class="genuine-tile"/,
+        'genuine single with no image must render the GENUINE tile (ERR-301), not a Black-color tile');
     assert.doesNotMatch(html, /class="product-card__color-block"/,
         'genuine single must NOT render a Black-color tile when image_url is null');
+});
+
+test('runtime: without BrandSource loaded, a genuine no-image card falls back to the placeholder (never a swatch)', () => {
+    // The tile is optional chrome; the invariant is not. If utils.js ever fails
+    // to load, the card must degrade to the neutral placeholder, not a tile.
+    const Products = loadProducts({ withBrandSource: false });
+    const html = Products.renderCard(GENUINE_PACK, 0);
+    assert.match(html, /placeholder-product\.svg/);
+    assert.doesNotMatch(html, /class="product-card__color-block"/);
+});
+
+test('runtime: an UNKNOWN-source no-image card keeps the placeholder — the tile is never inferred from a name (ERR-157)', () => {
+    const Products = loadProducts();
+    const { source, ...unknown } = GENUINE_PACK;
+    const html = Products.renderCard(unknown, 0);
+    assert.doesNotMatch(html, /genuine-tile/, 'a name saying "Genuine" is not a source');
+    assert.match(html, /placeholder-product\.svg/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -412,8 +453,8 @@ test('runtime: genuine Tri-Colour single with image_url=NULL (G804CLR) gets the 
     assert.match(compatibleTwin, /class="product-card__color-block"/,
         'a COMPATIBLE tri-colour single with no image must still get the tile — the gate must not over-correct');
 
-    assert.match(html, /placeholder-product\.svg/,
-        'genuine Tri-Colour single with no image must render the neutral placeholder');
+    assert.match(html, /class="genuine-tile"/,
+        'genuine Tri-Colour single with no image must render the neutral GENUINE tile (ERR-301)');
     assert.doesNotMatch(html, /class="product-card__color-block"/,
         'genuine Tri-Colour single must NOT render a CMY 3-stripe tile');
 });

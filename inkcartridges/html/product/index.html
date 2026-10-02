@@ -62,9 +62,9 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=b1eaf525">
+    <link rel="stylesheet" href="/css/components.css?v=e1803d91">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=b01a5111">
+    <link rel="stylesheet" href="/css/pages.css?v=3c79d4fe">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
 </head>
 <body>
@@ -270,6 +270,12 @@
                           rows or change row order without updating the spec
                           and the prerender alongside.
 
+                          ERR-301: the four rows are split across TWO <dl>s.
+                          Price + Availability stay here, directly above the
+                          quantity box and Add; Delivery + Returns moved to
+                          #product-buybox-terms below Add. Document order is
+                          still Price, Availability, Delivery, Returns.
+
                           Wrapper retains .product-info__pricing because the
                           cost_per_page_display anchor (renderProduct → §1.1)
                           and inc-gst-amount-removed.test.js both pin it.
@@ -291,53 +297,7 @@
                                         In Stock
                                     </span>
                                 </dd>
-
-                                <dt class="buy-box__label">Delivery</dt>
-                                <dd class="buy-box__value buy-box__value--delivery" id="product-delivery" data-testid="buy-box-delivery">
-                                    <span class="skeleton" style="display:inline-block;width:240px;height:1em;"></span>
-                                </dd>
-
-                                <dt class="buy-box__label">Returns</dt>
-                                <dd class="buy-box__value buy-box__value--returns" id="product-returns" data-testid="buy-box-returns">
-                                    <span class="skeleton" style="display:inline-block;width:160px;height:1em;"></span>
-                                </dd>
                             </dl>
-
-                            <!--
-                              Same-day dispatch countdown (traffic-conversion-jul2026 §4).
-                              Deliberately OUTSIDE the buy-box <dl> — that element's copy is
-                              locked to mirror the backend prerender, and a client-only
-                              ticking timer inside it would put the SPA and the prerender
-                              out of sync. Rendered by renderBuyBoxDeliveryAndReturns() from
-                              delivery_estimate.{same_day_eligible,cutoff_remaining_seconds};
-                              stays hidden when not eligible (incl. weekends), where the
-                              locked "Order before 2pm NZT" row is the fallback framing.
-
-                              role="timer" + aria-live="off": the text changes every second
-                              and a polite live region would read it aloud each time.
-                            -->
-                            <p class="buy-box__dispatch" id="product-dispatch-countdown"
-                               data-testid="dispatch-countdown" role="timer" aria-live="off" hidden></p>
-
-                            <!--
-                              Pack-vs-singles savings (traffic-conversion-jul2026 §3), from
-                              the optional pack_savings_vs_singles object. Dollars only —
-                              value_pack/multipack surfaces never append "(N%)"
-                              (value-pack-savings-no-percent.test.js). Distinct from
-                              #pack-upsell below, which is the inverse: shown on a SINGLE to
-                              upsell the pack. The two never fire on the same product.
-                            -->
-                            <p class="product-info__pack-savings" id="product-pack-savings"
-                               data-testid="pack-savings" hidden></p>
-
-                            <!--
-                              Recent-purchase proof scoped to the printer the shopper came
-                              from (traffic-conversion-jul2026 §3). Only populated when the
-                              PDP was reached with ?printer_slug= AND the backend returned
-                              bought_for_this_printer (≥10 in the last 90 days).
-                            -->
-                            <p class="product-info__printer-proof" id="product-printer-proof"
-                               data-testid="printer-proof" hidden></p>
                         </div>
 
                         <!--
@@ -380,9 +340,6 @@
                         <section class="volume-pricing" id="volume-pricing"
                                  data-testid="volume-pricing" hidden
                                  aria-label="Quantity price breaks"></section>
-                        <!-- Desktop (>=1100px) only: the ladder's first rung as one
-                             line above Add; the chips sit below Add (ERR-293). -->
-                        <p class="volume-pricing-summary" id="volume-pricing-summary" data-testid="volume-summary" hidden></p>
 
                         <div class="product-info__actions">
                             <div class="quantity-selector">
@@ -418,6 +375,79 @@
                             <span class="atc-confirmation__text" id="atc-confirmation-text">Added to cart</span>
                             <a href="/cart" class="atc-confirmation__cta">View Cart →</a>
                             <a href="/checkout" class="btn btn--primary atc-confirmation__checkout" data-track="cta_click" data-track-cta="atc_checkout" data-track-location="product_page">Checkout</a>
+                        </div>
+
+                        <!--
+                          ERR-301 (ad-clicks-to-orders handoff, 2026-10-02 §1-§2): on a
+                          laptop the buyer has to SEE the price, the stock and the Add
+                          button on the first screen, so everything that is reassurance
+                          rather than the decision sits BELOW Add, in this order:
+                            1. #product-promise — the fit reassurance, one line, directly
+                               under the button (trust_signals.compatibility_promise), plus
+                               "See our reviews on Google";
+                            2. #volume-pricing-summary — the "3+ from $X each" line
+                               (moved from above Add; supersedes ERR-293 at the owner's
+                               call, 2026-10-02);
+                            3. #product-terms — Delivery + Returns (the second half of
+                               the prerender-mirrored buy box; copy still locked, row
+                               order still Price, Availability, Delivery, Returns across
+                               the two <dl>s), the dispatch countdown, pack savings and
+                               printer proof.
+                        -->
+                        <div class="product-promise" id="product-promise" data-testid="product-promise" hidden></div>
+
+                        <!-- The ladder's first rung as one line (desktop >=1100px only),
+                             BELOW Add since ERR-301; the chips sit below it (ERR-293). -->
+                        <p class="volume-pricing-summary" id="volume-pricing-summary" data-testid="volume-summary" hidden></p>
+
+                        <div class="product-info__terms" id="product-terms" data-testid="product-terms">
+                            <dl class="buy-box buy-box--terms" id="product-buybox-terms" data-testid="buy-box-terms">
+                                    <dt class="buy-box__label">Delivery</dt>
+                                    <dd class="buy-box__value buy-box__value--delivery" id="product-delivery" data-testid="buy-box-delivery">
+                                        <span class="skeleton" style="display:inline-block;width:240px;height:1em;"></span>
+                                    </dd>
+
+                                    <dt class="buy-box__label">Returns</dt>
+                                    <dd class="buy-box__value buy-box__value--returns" id="product-returns" data-testid="buy-box-returns">
+                                        <span class="skeleton" style="display:inline-block;width:160px;height:1em;"></span>
+                                    </dd>
+                            </dl>
+
+                            <!--
+                              Same-day dispatch countdown (traffic-conversion-jul2026 §4).
+                              Deliberately OUTSIDE the buy-box <dl> — that element's copy is
+                              locked to mirror the backend prerender, and a client-only
+                              ticking timer inside it would put the SPA and the prerender
+                              out of sync. Rendered by renderBuyBoxDeliveryAndReturns() from
+                              delivery_estimate.{same_day_eligible,cutoff_remaining_seconds};
+                              stays hidden when not eligible (incl. weekends), where the
+                              locked "Order before 2pm NZT" row is the fallback framing.
+
+                              role="timer" + aria-live="off": the text changes every second
+                              and a polite live region would read it aloud each time.
+                            -->
+                            <p class="buy-box__dispatch" id="product-dispatch-countdown"
+                               data-testid="dispatch-countdown" role="timer" aria-live="off" hidden></p>
+
+                            <!--
+                              Pack-vs-singles savings (traffic-conversion-jul2026 §3), from
+                              the optional pack_savings_vs_singles object. Dollars only —
+                              value_pack/multipack surfaces never append "(N%)"
+                              (value-pack-savings-no-percent.test.js). Distinct from
+                              #pack-upsell below, which is the inverse: shown on a SINGLE to
+                              upsell the pack. The two never fire on the same product.
+                            -->
+                            <p class="product-info__pack-savings" id="product-pack-savings"
+                               data-testid="pack-savings" hidden></p>
+
+                            <!--
+                              Recent-purchase proof scoped to the printer the shopper came
+                              from (traffic-conversion-jul2026 §3). Only populated when the
+                              PDP was reached with ?printer_slug= AND the backend returned
+                              bought_for_this_printer (≥10 in the last 90 days).
+                            -->
+                            <p class="product-info__printer-proof" id="product-printer-proof"
+                               data-testid="printer-proof" hidden></p>
                         </div>
 
                         <!-- Value-pack upsell — rendered from the backend's
@@ -516,16 +546,16 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=1c50051c"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/api.js?v=a64e5efe"></script>
+    <script defer src="/js/api.js?v=ece02c2f"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=e739e07c"></script>
+    <script defer src="/js/utils.js?v=327fd22e"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=7e7a56b1"></script>
+    <script defer src="/js/cart.js?v=40a8e7a7"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
-    <script defer src="/js/favourites.js?v=4482d91c"></script>
-    <script defer src="/js/products.js?v=d3b78e7f"></script>
+    <script defer src="/js/favourites.js?v=68c60f09"></script>
+    <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=77275047"></script>
@@ -533,7 +563,7 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=d3f60271"></script>
+    <script defer src="/js/product-detail-page.js?v=ae71f1c1"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

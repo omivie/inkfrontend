@@ -147,6 +147,10 @@ try {
                 const y = (id) => { const e = document.getElementById(id); return e && !e.hidden ? Math.round(e.getBoundingClientRect().top + scrollY) : null; };
                 return {
                     fitY: y('product-fit'), valueY: y('product-value-lines'), addY: y('add-to-cart-btn'),
+                    // ERR-301: the consent banner is MEASURED (a bottom-left card
+                    // on desktop since 2026-10-02), never assumed to be 61px.
+                    addRect: (() => { const r = document.getElementById('add-to-cart-btn')?.getBoundingClientRect(); return r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null; })(),
+                    bannerRect: (() => { const r = document.querySelector('.consent-banner.is-open')?.getBoundingClientRect(); return r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null; })(),
                     fitItems: document.querySelectorAll('#product-fit .product-fit__item').length,
                     points: document.getElementById('product-points-line')?.textContent || '',
                     call: document.querySelector('.product-value-lines__call')?.textContent || '',
@@ -165,10 +169,12 @@ try {
                 check(`${sku}: printer fit ABOVE Add`, m.fitY !== null && m.addY !== null && m.fitY < m.addY);
                 check(`${sku}: value lines ABOVE Add`, m.valueY !== null && m.valueY < m.addY);
             } else {
-                // Desktop: Add keeps its first screen, clear of the 61px consent bar
-                // (D-P0-2); fit + value lines render one screen down, below it.
-                check(`${sku}: Add to Cart fully above the consent bar at scroll 0`, m.addY !== null && m.addY + 48 <= DESKTOP.height - 61,
-                    `Add y ${m.addY}-${m.addY + 48}, bar from y ${DESKTOP.height - 61}`);
+                // Desktop: Add keeps its first screen, clear of the consent banner
+                // (D-P0-2; measured rects, ERR-301); fit + value lines render below it.
+                const a = m.addRect, b = m.bannerRect;
+                const overlaps = !!(a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom);
+                check(`${sku}: Add to Cart on the first screen and clear of the consent banner`, !!a && a.bottom <= DESKTOP.height && !overlaps,
+                    a ? `Add y ${Math.round(a.top)}-${Math.round(a.bottom)} x${Math.round(a.left)}-${Math.round(a.right)}; banner ${b ? `x${Math.round(b.left)}-${Math.round(b.right)} y${Math.round(b.top)}-${Math.round(b.bottom)}` : 'not open'}` : 'no Add');
                 check(`${sku}: printer fit + value lines rendered (below Add on desktop)`, m.fitY !== null && m.valueY !== null && m.fitY > m.addY);
             }
             check(`${sku}: points line rendered`, /^Earn \d[\d,]* points \(\$\d+\.\d\d\) on this order$/.test(m.points), m.points);

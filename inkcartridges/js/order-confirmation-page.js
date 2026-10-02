@@ -598,12 +598,16 @@
                                 data-fallback="color-block">
                             <div class="confirmation-item__color-block" style="display: none; ${colorStyle} width: 100%; height: 100%; border-radius: 6px;"></div>`;
                 } else {
-                    return `<img src="${escAttr(item.image_url)}" alt="${escAttr(item.name)}" loading="lazy" data-fallback="placeholder-svg">`;
+                    // ERR-301: a genuine image that fails falls back to the GENUINE tile.
+                    const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(item, { cls: 'genuine-tile--sm', hidden: true }) : '';
+                    return `<img src="${escAttr(item.image_url)}" alt="${escAttr(item.name)}" loading="lazy" data-fallback="placeholder-svg">${fallbackTile}`;
                 }
             } else if (colorStyle) {
                 return `<div class="confirmation-item__color-block" style="${colorStyle} width: 100%; height: 100%; border-radius: 6px;"></div>`;
             } else {
-                return this.getPlaceholderSvg();
+                // ERR-301: a genuine line with no photo shows the GENUINE brand tile.
+                return (typeof BrandSource !== 'undefined' && BrandSource.tile(item, { cls: 'genuine-tile--sm' }))
+                    || this.getPlaceholderSvg();
             }
         },
 
@@ -649,6 +653,7 @@
                         if (sibling) sibling.style.display = 'flex';
                     } else if (this.dataset.fallback === 'placeholder-svg') {
                         this.removeAttribute('data-fallback');
+                        if (typeof BrandSource !== 'undefined' && BrandSource.revealTile(this)) return;
                         this.parentElement.innerHTML = ConfirmationPage.getPlaceholderSvg();
                     }
                 }, { once: true });

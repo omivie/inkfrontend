@@ -77,12 +77,15 @@ const Products = {
                              data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
             } else {
+                // ERR-301: a genuine image that fails to load falls back to the
+                // GENUINE tile (hidden sibling), then the placeholder.
+                const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(product, { hidden: true }) : '';
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
                              ${loadAttrs}${srcsetHtml}
-                             data-fallback="placeholder"${rawAttr}>`;
+                             data-fallback="placeholder"${rawAttr}>${fallbackTile}`;
             }
         } else if (colorStyle && product.source === 'compatible') {
             // Compatible with no image but has color - show color block
@@ -91,7 +94,10 @@ const Products = {
             // Compatible with no known color - default to black
             return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         } else {
-            // Genuine with no image, no color - show placeholder
+            // Genuine with no image: the GENUINE brand tile (ERR-301). The
+            // placeholder stays for a row whose source is unknown.
+            const tile = typeof BrandSource !== 'undefined' ? BrandSource.tile(product) : '';
+            if (tile) return tile;
             return `<img src="/assets/images/placeholder-product.svg"
                          alt="${Security.escapeAttr(product.name)}"
                          class="product-card__image"
@@ -603,6 +609,7 @@ const Products = {
                     if (sibling) sibling.style.display = 'flex';
                 } else if (this.dataset.fallback === 'placeholder') {
                     this.removeAttribute('data-fallback');
+                    if (typeof BrandSource !== 'undefined' && BrandSource.revealTile(this)) return;
                     this.src = '/assets/images/placeholder-product.svg';
                 }
             });

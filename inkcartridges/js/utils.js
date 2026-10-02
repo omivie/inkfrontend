@@ -1488,7 +1488,18 @@ const ProductSort = (function() {
     //
     // Spec: readfirst/sort-hierarchy-may2026.md, readfirst/code-yield-grouping-may2026.md
     // Pinned by: tests/sort-hierarchy-may2026.test.js, tests/code-yield-grouping-may2026.test.js
-    function byCodeThenColor(products) {
+    //
+    // `opts.preferYield` (ERR-301, ad-clicks-to-orders §5): the yield tier the
+    // visitor ASKED for — 1 for /shop?code=288XL, 2 for …XXL. Inside each
+    // family that tier ranks first and the others keep their usual order, so
+    // the family stays one block and the row breaks still fall on (family,
+    // tier). Absent/null ⇒ the unchanged STD → XL → XXL order.
+    function byCodeThenColor(products, opts) {
+        const preferYield = opts && Number.isInteger(opts.preferYield) ? opts.preferYield : null;
+        const yieldRank = (p) => {
+            const t = yieldTier(p);
+            return preferYield !== null && t === preferYield ? -1 : t;
+        };
         if (!Array.isArray(products) || products.length < 2) {
             return Array.isArray(products) ? products.slice() : [];
         }
@@ -1521,7 +1532,7 @@ const ProductSort = (function() {
             // interleaving by colour (OKI MC853 black-drum, black-toner, …).
             const aa = accessoryTier(a), ab = accessoryTier(b);
             if (aa !== ab) return aa - ab;
-            const ya = yieldTier(a), yb = yieldTier(b);
+            const ya = yieldRank(a), yb = yieldRank(b);
             if (ya !== yb) return ya - yb;
             const ca = colorOrder(a), cb = colorOrder(b);
             if (ca !== cb) return ca - cb;
@@ -2326,6 +2337,71 @@ const BrandSource = (function () {
         return `<span class="${cls} ${cls}--${s}">${s.toUpperCase()}</span>`;
     }
 
+    /**
+     * The GENUINE brand tile — what a genuine product shows when it has no
+     * photo (ERR-301, ad-visitor-dropoff handoff §2 / ad-clicks-to-orders §8).
+     *
+     * 552 genuine images were pulled for manual review after September's
+     * watermark problem (412 of them in stock, Epson 288 Black and the 288
+     * KCMY pack among them), and they come back slowly. Until then a genuine
+     * row with `image_url = null` showed the grey "No Image" box, which reads
+     * as broken. The handoff said genuine PACKS already had this tile; they
+     * did not (G288CMYK measured with the placeholder on 2026-10-02) — so
+     * this is new, and it covers singles and packs alike.
+     *
+     * Rules, each one load-bearing:
+     *   - GENUINE ONLY, by `of(row)` — an unknown source returns '' and the
+     *     caller keeps its placeholder; NEVER inferred from a name (ERR-157).
+     *   - NEUTRAL — text on a plain surface, never a colour swatch: a colour
+     *     tile is the visual language of a COMPATIBLE cartridge, and painting
+     *     one on a genuine row misrepresents the brand (ERR-143). The colour
+     *     appears only as a word.
+     *   - Every value is backend data (brand.name, series_codes[0],
+     *     yield_tier, color; the SKU as the last resort), escaped through
+     *     Security. Without Security loaded it returns '' rather than emit
+     *     unescaped text — the caller's placeholder is the safe failure.
+     *
+     * @param {object|null} row  product / cart / order row
+     * @param {{cls?: string, hidden?: boolean}} [opts]  extra class, e.g.
+     *        'genuine-tile--sm'; `hidden` ships it behind a real <img> as that
+     *        image's load-error fallback (see revealTile)
+     * @returns {string} HTML, or '' when the row is not known-genuine
+     */
+    function tile(row, opts) {
+        if (!isGenuine(row)) return '';
+        if (typeof Security === 'undefined' || typeof Security.escapeHtml !== 'function') return '';
+        const e = (v) => Security.escapeHtml(String(v));
+        const p = (row && row.product && typeof row.product === 'object') ? row.product : row;
+        const brandRaw = (p.brand && typeof p.brand === 'object') ? p.brand.name
+            : (p.brand_name || p.brandName || (typeof p.brand === 'string' ? p.brand : ''));
+        const brand = String(brandRaw || '').trim();
+        const series = Array.isArray(p.series_codes) && p.series_codes[0] ? String(p.series_codes[0]).trim() : '';
+        const tier = String(p.yield_tier || '').toUpperCase();
+        const suffix = (tier === 'XL' || tier === 'XXL') && series && !series.toUpperCase().endsWith(tier) ? tier : '';
+        const colour = String(p.color || '').trim();
+        const code = series ? [series + suffix, colour].filter(Boolean).join(' ') : String(p.sku || '').trim();
+        const label = [brand, 'Genuine', code].filter(Boolean).join(' ');
+        const cls = opts && opts.cls ? ` ${String(opts.cls).replace(/[^a-z0-9_ -]/gi, '')}` : '';
+        return `<div class="genuine-tile${cls}" role="img" aria-label="${Security.escapeAttr(label)}"${opts && opts.hidden ? ' hidden' : ''}>`
+            + (brand ? `<span class="genuine-tile__brand">${e(brand)}</span>` : '')
+            + `<span class="genuine-tile__label">Genuine</span>`
+            + (code ? `<span class="genuine-tile__code">${e(code)}</span>` : '')
+            + `</div>`;
+    }
+
+    /**
+     * Load-error path: a genuine <img> that failed shows the hidden tile
+     * rendered right after it (tile(row, {hidden:true})). Returns true when it
+     * did, so every image error handler can try this before its placeholder.
+     */
+    function revealTile(img) {
+        const next = img && img.nextElementSibling;
+        if (!next || !next.classList || !next.classList.contains('genuine-tile')) return false;
+        img.style.display = 'none';
+        next.hidden = false;
+        return true;
+    }
+
     return {
         GENUINE,
         COMPATIBLE,
@@ -2335,7 +2411,9 @@ const BrandSource = (function () {
         isGenuine,
         isKnown,
         label,
-        badgeHTML
+        badgeHTML,
+        tile,
+        revealTile
     };
 })();
 

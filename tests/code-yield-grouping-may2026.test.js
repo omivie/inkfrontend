@@ -660,7 +660,8 @@ test('Shop.renderProducts uses ProductSort.byCodeThenColor + inserts row breaks'
     const m = SHOP_CODE.match(/renderProducts\s*\([^)]*\)\s*\{([\s\S]*?)\n\s{8}\},/);
     assert.ok(m, 'expected renderProducts method body in shop-page.js');
     const body = m[1];
-    assert.match(body, /ProductSort\.byCodeThenColor\s*\(\s*products\s*\)/,
+    // ERR-301: an optional 2nd arg carries the ad's preferred yield tier.
+    assert.match(body, /ProductSort\.byCodeThenColor\s*\(\s*products\s*[,)]/,
         'renderProducts must apply ProductSort.byCodeThenColor — code-yield-grouping-may2026.md');
     assert.match(body, /ProductSort\.rowBreakIndices\s*\(/,
         'renderProducts must request rowBreakIndices to know where to splice breaks');

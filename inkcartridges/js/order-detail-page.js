@@ -154,8 +154,10 @@
                             <div class="order-item">
                                 <div class="order-item__image">
                                     ${(imageUrl && !_swatchStale)
-                                        ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">`
-                                        : this.getColorPlaceholder(item.product_name, BrandSource.of(item), item.product?.color || item.color)
+                                        ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">${BrandSource.tile(item, { cls: 'genuine-tile--sm', hidden: true })}`
+                                        // ERR-301: a genuine line with no photo shows the GENUINE brand tile.
+                                        : (BrandSource.tile(item, { cls: 'genuine-tile--sm' })
+                                            || this.getColorPlaceholder(item.product_name, BrandSource.of(item), item.product?.color || item.color))
                                     }
                                 </div>
                                 <div class="order-item__details">

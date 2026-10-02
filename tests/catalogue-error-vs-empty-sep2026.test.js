@@ -698,6 +698,8 @@ function liftLoadProducts(getShopData, src = SHOP_SRC) {
         'async loadProducts(navVersion)',
         '_errorPaneShowing()',
         '_isCatalogueFailure(resp)',
+        // ERR-301: loadProducts reads the ad's intent (288XL / pack) through it.
+        '_freshIntent()',
     ], {
         API: { getShopData },
         DebugLog: QUIET,
@@ -712,6 +714,7 @@ async function runLoadProducts(getShopData, opts = {}) {
     const lifted = liftLoadProducts(getShopData, opts.src);
     nav._errorPaneShowing = lifted._errorPaneShowing;
     nav._isCatalogueFailure = lifted._isCatalogueFailure;
+    nav._freshIntent = lifted._freshIntent;
     await lifted.loadProducts.call(nav, 1);
     return nav;
 }
@@ -819,6 +822,7 @@ test('§6 Try again re-runs THIS loader, and succeeds once the backend recovers'
     const lifted = liftLoadProducts(getShopData);
     nav._errorPaneShowing = lifted._errorPaneShowing;
     nav._isCatalogueFailure = lifted._isCatalogueFailure;
+    nav._freshIntent = lifted._freshIntent;
     nav.loadProducts = lifted.loadProducts;
 
     await lifted.loadProducts.call(nav, 1);

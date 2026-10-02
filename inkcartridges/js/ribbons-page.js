@@ -897,6 +897,7 @@ const RibbonsPage = {
             img.addEventListener('error', function() {
                 if (this.dataset.fallback === 'placeholder') {
                     this.removeAttribute('data-fallback');
+                    if (typeof BrandSource !== 'undefined' && BrandSource.revealTile(this)) return;
                     if (this.closest('.product-card')?.dataset.source === 'compatible') {
                         const placeholder = document.createElement('div');
                         placeholder.className = 'product-card__compatible-placeholder';
@@ -936,11 +937,17 @@ const RibbonsPage = {
         const imageUrl = ribbon.image_url || '';
         const ribbonId = ribbon.id;
 
+        // ERR-301: a GENUINE ribbon with no photo (or whose photo fails) shows
+        // the GENUINE brand tile — a black block is the compatible tile's
+        // language (ERR-143). Every other ribbon keeps the existing fallbacks.
+        const tileRow = ribbon.brand ? ribbon : { ...ribbon, brand_name: brandName };
         let imageContent;
         if (imageUrl) {
-            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`;
+            const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(tileRow, { hidden: true }) : '';
+            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">${fallbackTile}`;
         } else {
-            imageContent = `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
+            imageContent = (typeof BrandSource !== 'undefined' && BrandSource.tile(tileRow))
+                || `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         }
 
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);

@@ -235,10 +235,22 @@
 
             // esc() provided by utils.js
             const escAttr = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
+            // ERR-301: a genuine line with no photo shows the GENUINE brand
+            // tile. The old fallback named /assets/images/placeholder.png, a
+            // file that has never existed (a 404 on every image-less line).
+            const PLACEHOLDER = '/assets/images/placeholder-product.svg';
+            const imageHtml = (item) => {
+                const hasPhoto = item.image && item.image !== PLACEHOLDER;
+                const tile = typeof BrandSource !== 'undefined'
+                    ? BrandSource.tile(item, { cls: 'genuine-tile--sm', hidden: hasPhoto })
+                    : '';
+                if (!hasPhoto && tile) return tile;
+                return `<img src="${escAttr(hasPhoto ? item.image : PLACEHOLDER)}" alt="${escAttr(item.name)}" loading="lazy" data-fallback="placeholder">${hasPhoto ? tile : ''}`;
+            };
             container.innerHTML = this.cartItems.map(item => `
                 <li class="checkout-summary__item">
                     <div class="checkout-summary__item-image">
-                        <img src="${escAttr(item.image || '/assets/images/placeholder.png')}" alt="${escAttr(item.name)}" loading="lazy" data-fallback="placeholder">
+                        ${imageHtml(item)}
                         <span class="checkout-summary__item-qty">${parseInt(item.quantity) || 0}</span>
                     </div>
                     <div class="checkout-summary__item-details">
@@ -297,7 +309,10 @@
                             || null,
                         price: item.product?.retail_price || item.price_snapshot || 0,
                         quantity: item.quantity,
-                        image: typeof storageUrl === 'function' ? storageUrl(item.product?.image_url) : (item.product?.image_url || '/assets/images/placeholder.png')
+                        image: typeof storageUrl === 'function' ? storageUrl(item.product?.image_url) : (item.product?.image_url || '/assets/images/placeholder-product.svg'),
+                        // The product row, so BrandSource.tile can read its
+                        // source, brand and code (ERR-301).
+                        product: item.product || null
                     }));
                     this.renderOrderSummary();
                 }

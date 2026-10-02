@@ -2039,7 +2039,12 @@
    skeleton (95-168px) to ~208px when the product landed, and the title from
    one skeleton line to two — together a 0.10 shift on desktop PDPs and most
    of the 0.04 left on a phone. Reserve the settled sizes up front. */
-.product-info__pricing { min-height: 208px; align-content: flex-start; }
+/* ERR-301: the block now holds Price + Availability only (Delivery, Returns,
+   countdown and savings moved below Add, into #product-terms), so the reserve
+   is the settled height of those two rows: the <dl> measured 80px on
+   GGI690KCMY (with Was/Save), GLC3329XLBK and CDR1070BK at 1280-1440px wide,
+   + the block's 8px padding (2026-10-02, probe:ad-visitor-dropoff). */
+.product-info__pricing { min-height: 88px; align-content: flex-start; }
 .product-info__title { min-height: 2.5em; }
 /* The Genuine/Compatible pill ships [hidden] and appears when the product
    lands — 34px pushing title, SKU, price and Add down (0.096 CLS on a desktop
@@ -9673,9 +9678,7 @@ body.page-shop {
     overflow-y: auto;
 }
 .product-fit__item { break-inside: avoid; }
-.product-fit__promise-label { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text); }
-.product-fit__promise-desc,
-.product-fit__how { margin: 6px 0 0; font-size: var(--font-size-sm); color: var(--color-text-light); }
+.product-fit__promise-desc { margin: 6px 0 0; font-size: var(--font-size-sm); color: var(--color-text-light); }
 
 .product-value-lines {
     margin: 10px 0 0;
@@ -14163,4 +14166,133 @@ body.page-shop {
     .volume-pricing__status { margin-top: 6px; }
     .product-info__pricing { margin-bottom: 0; }
     .product-detail { padding-top: 12px; }
+}
+
+/* ── ERR-301: the PDP decision on the first screen of a laptop ─────────────
+   ad-clicks-to-orders handoff (2026-10-02): 54 paid visits, 0 orders; on a
+   laptop the price and Add sat below the first screen (Add at y 703 at
+   1366x599, under the consent bar and the Google badge). The markup now reads
+   Price + Availability, quantity + Add, then the fit promise (#product-promise)
+   directly under the button, then the "3+ from $X" line, then Delivery /
+   Returns / countdown / savings (#product-terms). The ladder line moved BELOW
+   Add at the owner's call (2026-10-02), superseding ERR-293's placement above.
+   Acceptance (probe:ad-visitor-dropoff): at 1280x551, 1366x599, 1536x695 and
+   1366x768 with the consent card open, Add is inside the viewport, nothing
+   covers it, and the promise line is visible directly below it. */
+#product-buybox { padding: var(--spacing-sm, 8px) 0; }
+.buy-box--terms { margin-top: 4px; border-top: 0; }
+.product-info__terms[hidden],
+.product-promise[hidden] { display: none; }
+
+.product-promise {
+    margin: 6px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+.product-promise__label {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+/* --color-text-light (steel-600): --color-text-muted is below 4.5:1 on white
+   (conversion handoff §8.2, WCAG AA). */
+.product-promise__how,
+.product-promise__reviews {
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--color-text-light);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.product-promise__reviews { color: var(--cyan-dark); }
+
+@media (min-width: 1100px) {
+    /* The ladder line now sits under the promise, not over the button. */
+    .volume-pricing-summary:not([hidden]) { margin-top: 6px; }
+}
+
+/* Short laptop windows (1280x551 is a 720-tall screen under browser chrome):
+   claw back the air above the buy box, one rung at a time, only as far as
+   the probe needed. */
+@media (min-width: 1100px) and (max-height: 620px) {
+    .product-detail { padding-top: 0; }
+    .breadcrumb--pdp { padding: 0; }
+    /* The 2-line title reserve (CLS, ERR-289) is ~30px of air under a
+       one-line title; on a 551px window that air is the fit line's room. */
+    .product-info__title { min-height: 0; }
+    .product-info__badge { margin-bottom: 4px; }
+    .product-info__sku { margin-bottom: 4px; }
+    .product-info__pricing { margin-top: 2px; }
+    .product-info__actions { margin-top: 4px; }
+    .product-info__actions .btn { min-height: 44px; }
+    .product-promise { margin-top: 2px; }
+}
+
+
+/* ── ERR-301: /shop code page — price and Add on a short laptop's first screen
+   ad-clicks-to-orders handoff §3 (2026-10-02): the same series page converts
+   13% of paid visitors on a phone and under 4% on a laptop, with identical
+   products and copy. At 1366x599 the first price sat at y 635 and the first
+   Add at y 763 — a card was a 137px image, a 4-line title, a "Fits" line, a
+   66px row-stretch gap and a 3-line volume ladder before its button. Only on
+   a wide AND short window (a laptop), only on the /shop grid: the image goes
+   letterbox, the title takes 2 lines, the ladder one line, and the "Fits"
+   line moves below the button. Tall windows and phones are unchanged.
+   Target (handoff): price + Add within ~250px of the card top; measured by
+   `npm run probe:ad-visitor-dropoff` §2. */
+.drilldown-header__all {
+    margin-left: var(--spacing-sm);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--cyan-dark);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.drilldown-header__all[hidden] { display: none; }
+
+@media (min-width: 1100px) and (max-height: 800px) {
+    .shop-page .products-row .product-card .product-card__image-wrapper { aspect-ratio: 5 / 2; }
+    /* 3 lines, not 4: the colour is restated in the footer row below, and
+       the h3's title attribute still carries the full name. */
+    .shop-page .products-row .product-card .product-card__title {
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+        min-height: calc(var(--font-size-xs) * 1.3 * 3);
+    }
+    /* Price and "Incl. GST" share a line; the volume rung keeps its own. */
+    .shop-page .products-row .product-card .product-card__pricing {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        column-gap: 6px;
+        row-gap: 0;
+    }
+    .shop-page .products-row .product-card .product-card__fits { order: 9; margin: 4px 0 0; }
+    .shop-page .products-row .product-card .product-card__footer { margin-top: 0; }
+    .shop-page .products-row .product-card .product-card__biz-price {
+        flex-direction: row;
+        align-items: baseline;
+        gap: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        margin-top: 2px;
+        padding-top: 2px;
+    }
+    .shop-page .products-row .product-card .product-card__biz-save { display: none; }
+}
+/* Shorter still (1280x551 = a 720px screen under browser chrome): a flatter
+   image, and the "Free Shipping" / "Save $X" pills go — both are restated
+   right there (the struck-through Was price beside the price, and "Free
+   shipping on orders over $100" in the bar above the grid). */
+@media (min-width: 1100px) and (max-height: 620px) {
+    .shop-page .products-row .product-card .product-card__image-wrapper { aspect-ratio: 3 / 1; }
+    .shop-page .products-row .product-card .product-card__info-row { display: none; }
+    .shop-page .products-row .product-card .product-card__title {
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        min-height: calc(var(--font-size-xs) * 1.3 * 2);
+    }
 }

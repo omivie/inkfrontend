@@ -619,6 +619,68 @@
     text-transform: uppercase;
 }
 
+/* ERR-301 — the GENUINE brand tile: a genuine product with no photo
+   (BrandSource.tile in utils.js). Neutral by rule — text on the product-image
+   surface, never a colour block, which is the compatible tile's language
+   (ERR-143). Type scales with the tile's own width (a card, a cart thumbnail
+   and the PDP hero all use the same markup), so one rule fits every surface. */
+.genuine-tile {
+    container-type: inline-size;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15em;
+    padding: 6%;
+    box-sizing: border-box;
+    background: var(--product-image-bg, #fff);
+    color: var(--color-text, #111827);
+    text-align: center;
+    line-height: 1.15;
+    overflow: hidden;
+}
+.genuine-tile__brand {
+    font-family: var(--font-family-heading, inherit);
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: clamp(10px, 13cqi, 40px);
+}
+.genuine-tile__label {
+    font-family: var(--font-family-mono, ui-monospace, monospace);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-size: clamp(8px, 7cqi, 16px);
+    color: var(--cyan-dark, #1d6a99);
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0.15em 0.7em;
+}
+.genuine-tile__code {
+    font-weight: 600;
+    font-size: clamp(9px, 8.5cqi, 24px);
+    color: var(--color-text-light, #475569);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* A tile kept behind a real <img> for its load-error path. */
+.genuine-tile[hidden] { display: none; }
+/* PDP hero: a square, like the photo it stands in for. */
+.genuine-tile--hero {
+    aspect-ratio: 1;
+    width: min(100%, 420px);
+    height: auto;
+    margin: 0 auto;
+}
+/* Cart / checkout / order thumbnails: a fixed small square. */
+.genuine-tile--sm { padding: 4%; gap: 1px; }
+
 .product-card__color-block {
     width: 100%;
     height: 100%;
@@ -3929,8 +3991,16 @@ body.has-consent-banner {
     overflow: hidden;
 }
 
+/* ERR-301: below 1100px only. From 1100px the banner is a bottom-LEFT card
+   (see the end of the consent rules), so it no longer shares the badge's
+   corner and there is nothing to lift clear of — and the ad-clicks-to-orders
+   handoff (2026-10-02 §1) asks that nothing be raised over the banner's
+   legal text. Below 1100px the full-width bar still spans the corner, and
+   this lift is still what keeps Accept clickable (ERR-233). */
+@media (max-width: 1099.98px) {
 body.has-consent-banner #google-reviews-badge {
     bottom: var(--consent-banner-height, 0px) !important;
+}
 }
 
 /* ERR-238 — THE SAME DEFECT, THREE MORE TIMES, AND THESE THREE ARE OURS.
@@ -4405,4 +4475,38 @@ a.drilldown-box.drilldown-box--ribbon,
     .consent-banner__btn {
         padding: 0 12px;
     }
+}
+
+/* ERR-301 — DESKTOP: a corner card, bottom-LEFT, never a full-width bar.
+   ad-clicks-to-orders handoff (2026-10-02 §1): the 61px bar plus Google's
+   badge lifted onto it covered the PDP Add to Cart at 1366x768 and pushed it
+   off the first screen at 1366x599 (measured: badge 643-707, bar 707-768, Add
+   703). At >= 1100px wide the PDP buy box sits right of x 380 and the
+   gallery owns the bottom-left corner. On /shop the card does sit over the
+   lower part of grid column 1 until the visitor answers it — the trade the
+   owner accepted (2026-10-02); the probe reports those columns separately. The badge keeps bottom-right, so
+   the two never share a corner (the ERR-233 collision cannot recur) and
+   nothing is raised over the banner's text, which stays in full: heading,
+   long wording, privacy link. body padding-bottom still reserves the card's
+   MEASURED height (consent-banner.js ResizeObserver), so the end of every
+   page can scroll clear of it. Measured by `npm run probe:ad-visitor-dropoff`
+   and `npm run probe:consent-banner`. */
+@media (min-width: 1100px) {
+    .consent-banner {
+        left: 16px;
+        right: auto;
+        bottom: calc(16px + var(--safe-bottom, 0px));
+        width: 360px;
+        max-width: calc(100vw - 32px);
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 14px 16px;
+        border: 1px solid var(--color-border, #e5e7eb);
+        border-radius: var(--radius-lg, 12px);
+        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+        transform: translateY(calc(100% + 24px));
+    }
+    .consent-banner.is-open { transform: translateY(0); }
+    .consent-banner__actions { justify-content: flex-end; }
 }

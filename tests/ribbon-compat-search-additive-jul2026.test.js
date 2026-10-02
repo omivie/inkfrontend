@@ -610,7 +610,8 @@ test('§5 compat-last is applied under BOTH sort modes, before row breaks', () =
     const body = blockBodyAt(SHOP_CODE, 'renderProducts(products, container, section, isCompatible = false, _options = {})');
     assert.match(body, /compatLast\(this\._sortProductsBy\(products,\s*sortMode\)\)/,
         'explicit price/name sorts must also trail the compat rows');
-    assert.match(body, /compatLast\(\(typeof ProductSort[\s\S]*?byCodeThenColor\(products\)[\s\S]*?\)\)/,
+    // ERR-301: byCodeThenColor may carry the ad's preferred yield as a 2nd arg.
+    assert.match(body, /compatLast\(\(typeof ProductSort[\s\S]*?byCodeThenColor\(products\b[\s\S]*?\)\)/,
         'the recommended (byCodeThenColor) path must trail them too');
     // rowBreakIndices must be computed from the REORDERED array, or the
     // yield-group break lines land between the wrong cards.

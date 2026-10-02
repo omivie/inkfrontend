@@ -778,6 +778,7 @@
             // cartridge fits does not add it; 51% of orders are one unit.
             this._unitPrice = price;
             this.renderFitCheck(info);
+            this.renderPromise(info);
             this.renderValueLines(info);
 
             this.renderWaitlistProof(info);
@@ -814,12 +815,13 @@
             // It is deliberately absent on value packs and ml-rated bottles.
             // When absent we render nothing — never compute it client-side
             // (page yield / pack semantics live with the backend). Painted in
-            // the price accent colour and placed directly under the price,
-            // never buried in the spec table.
+            // the price accent colour, never buried in the spec table.
+            // ERR-301: it sits in #product-terms, BELOW Add — the first screen
+            // on a laptop is price, stock and the button; this is reassurance.
             if (info.cost_per_page_display) {
-                const pricingEl = document.querySelector('.product-info__pricing');
-                if (pricingEl) {
-                    pricingEl.insertAdjacentHTML('beforeend',
+                const termsEl = document.getElementById('product-terms');
+                if (termsEl) {
+                    termsEl.insertAdjacentHTML('afterbegin',
                         `<span class="product-cost-per-page" data-testid="cost-per-page">${Security.escapeHtml(String(info.cost_per_page_display))}</span>`);
                 }
             }
@@ -955,9 +957,11 @@
                              data-fallback="color-block">
                         <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
-                    // Image with placeholder fallback
+                    // Image with placeholder fallback — the GENUINE tile first
+                    // when the row is known-genuine (ERR-301).
+                    const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(info, { cls: 'genuine-tile--hero', hidden: true }) : '';
                     productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
-                        data-fallback="placeholder">`;
+                        data-fallback="placeholder">${fallbackTile}`;
                 }
 
                 // Bind image fallback handlers
@@ -969,7 +973,9 @@
                             if (sibling) sibling.style.display = 'flex';
                         } else if (this.dataset.fallback === 'placeholder') {
                             this.removeAttribute('data-fallback');
-                            this.src = '/assets/images/placeholder-product.svg';
+                            if (!(typeof BrandSource !== 'undefined' && BrandSource.revealTile(this))) {
+                                this.src = '/assets/images/placeholder-product.svg';
+                            }
                         }
                         // A failed image must not stay hover-zoomable — the
                         // fallback tile/placeholder is not a photo to magnify.
@@ -998,7 +1004,12 @@
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
                     productImageEl.innerHTML = `<div class="product-gallery__color-block" style="background-color: #1a1a1a;"></div>`;
                 } else {
-                    productImageEl.innerHTML = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;">`;
+                    // Genuine with no photo: the GENUINE brand tile (ERR-301) —
+                    // neutral, never a colour block. Unknown source keeps the
+                    // placeholder.
+                    const tile = typeof BrandSource !== 'undefined' ? BrandSource.tile(info, { cls: 'genuine-tile--hero' }) : '';
+                    productImageEl.innerHTML = tile
+                        || `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;">`;
                 }
             }
 
@@ -1589,17 +1600,16 @@
                     + `<p class="product-fit__result" id="product-fit-result" role="status" aria-live="polite" hidden></p>`
                     + `<ul class="product-fit__list" id="product-fit-list">${items}</ul>`;
             }
-            if (hasPromise) {
-                const desc = typeof promise.description === 'string' ? promise.description.trim() : '';
-                const how = typeof promise.how_to_check === 'string' ? promise.how_to_check.trim() : '';
-                const extra = (desc ? `<p class="product-fit__promise-desc">${Security.escapeHtml(desc)}</p>` : '')
-                    + (how ? `<p class="product-fit__how"><strong>How do I know it fits?</strong> ${Security.escapeHtml(how)}</p>` : '');
-                if (printers.length) html += extra + `</details>`;
-                html += `<p class="product-fit__promise-label">${Security.escapeHtml(promise.label.trim())}</p>`;
-                if (!printers.length && extra) html += `<details class="product-fit__details"><summary>How do I know it fits?</summary>${extra}</details>`;
-            } else if (printers.length) {
-                html += `</details>`;
+            // ERR-301: the promise LABEL and `how_to_check` moved to
+            // #product-promise, directly under Add (renderPromise). Only the
+            // longer `description` stays here, inside the checker, on demand.
+            const desc = hasPromise && typeof promise.description === 'string' ? promise.description.trim() : '';
+            if (printers.length) {
+                html += (desc ? `<p class="product-fit__promise-desc">${Security.escapeHtml(desc)}</p>` : '') + `</details>`;
+            } else if (desc) {
+                html += `<details class="product-fit__details"><summary>Our returns promise</summary><p class="product-fit__promise-desc">${Security.escapeHtml(desc)}</p></details>`;
             }
+            if (!html) { el.hidden = true; el.innerHTML = ''; return; }
             el.innerHTML = html;
             el.hidden = false;
 
@@ -1625,6 +1635,42 @@
                     result.innerHTML = `Not listed for this cartridge. <a href="/shop?q=${encodeURIComponent(input.value.trim())}">Search your printer model</a> to see the cartridges listed for it.`;
                 }
             });
+        },
+
+        /**
+         * ERR-301 (ad-clicks-to-orders handoff, 2026-10-02 §2 + §6): the fit
+         * reassurance, ONE line directly under Add to Cart, then the backend's
+         * "how to check" as small link text to the printer finder, then a plain
+         * "See our reviews on Google" link.
+         *
+         * Every word comes from the product response: `label` and
+         * `how_to_check` from trust_signals.compatibility_promise (the return
+         * days are the backend's setting — never hard-code them), the reviews
+         * URL from trust_signals.organization via TrustStats.googleReviewsUrl,
+         * which refuses anything that is not an https Google URL. No stars, no
+         * count, and never "guaranteed fit" / "fits your printer" (inv 13 — the
+         * compatibility data has known errors).
+         *
+         * Hidden when the response carries none of the three.
+         */
+        renderPromise(info) {
+            const el = document.getElementById('product-promise');
+            if (!el) return;
+            const ts = (info && info.trust_signals) || {};
+            const promise = ts.compatibility_promise || {};
+            const label = typeof promise.label === 'string' ? promise.label.trim() : '';
+            const how = typeof promise.how_to_check === 'string' ? promise.how_to_check.trim() : '';
+            const reviewsUrl = (typeof TrustStats !== 'undefined' && typeof TrustStats.googleReviewsUrl === 'function')
+                ? TrustStats.googleReviewsUrl(ts.organization)
+                : null;
+            let html = '';
+            if (label) html += `<p class="product-promise__label">${Security.escapeHtml(label)}</p>`;
+            if (how) html += `<a class="product-promise__how" href="/?scroll=ink-finder">${Security.escapeHtml(how)}</a>`;
+            if (reviewsUrl) {
+                html += `<a class="product-promise__reviews" href="${Security.escapeAttr(reviewsUrl)}" target="_blank" rel="noopener">See our reviews on Google</a>`;
+            }
+            el.innerHTML = html;
+            el.hidden = !html;
         },
 
         /**
@@ -3326,12 +3372,13 @@
             document.querySelector('.product-info__gst').hidden = true;
             document.getElementById('product-stock').hidden = true;
             document.querySelector('.product-info__actions').hidden = true;
-            // Hide the Delivery + Returns rows of the buy-box on error — their
-            // labels would otherwise float beside an empty price.
-            const deliveryRow = document.getElementById('product-delivery');
-            if (deliveryRow) deliveryRow.hidden = true;
-            const returnsRow = document.getElementById('product-returns');
-            if (returnsRow) returnsRow.hidden = true;
+            // Hide the Delivery + Returns half of the buy-box on error — its
+            // labels would otherwise float under an empty price. ERR-301 moved
+            // those rows into #product-terms; hide it (and the fit promise) whole.
+            const termsBlock = document.getElementById('product-terms');
+            if (termsBlock) termsBlock.hidden = true;
+            const promiseBlock = document.getElementById('product-promise');
+            if (promiseBlock) promiseBlock.hidden = true;
             // Show error state in image area with retry button
             const imageEl = document.getElementById('product-image');
             imageEl.innerHTML = `

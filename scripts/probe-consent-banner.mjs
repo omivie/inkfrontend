@@ -58,6 +58,11 @@ import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobi
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const DESKTOP = { width: 1512, height: 806 };   // the viewport the bug was measured at
 const NARROW = { width: 1100, height: 800 };    // still desktop, badge still rendered
+/* ERR-301: from 1100px wide the banner is a bottom-LEFT card and no longer
+   shares the badge's corner, so the ERR-233 geometry (a full-width bar with the
+   badge lifted onto it) now exists only BELOW 1100px. §1 measures it there;
+   §1b measures the card at the width the bug was found at. */
+const BAR_DESKTOP = { width: 1024, height: 768 };
 /* ERR-280: the phone box comes from playwright's own device registry now.
    Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
    SCREEN; its usable viewport after Safari's chrome is 390x664. The 180px
@@ -216,8 +221,8 @@ let fatal = null;
 try {
     /* ── §1 DESKTOP — the exact viewport the bug was measured at ──────────── */
     {
-        console.log('\x1b[1m§1 Desktop 1512x806 — the geometry that was broken\x1b[0m');
-        const ctx = await browser.newContext({ viewport: DESKTOP });
+        console.log('\x1b[1m§1 Desktop 1024x768 — the full-width bar, the geometry that was broken (ERR-233)\x1b[0m');
+        const ctx = await browser.newContext({ viewport: BAR_DESKTOP });
         const page = await load(ctx);
         const m = await page.evaluate(MEASURE);
 
@@ -313,6 +318,35 @@ try {
         await ctx.close();
     }
 
+    /* ── §1b DESKTOP >= 1100px — the corner card (ERR-301) ─────────────────── */
+    {
+        console.log('\n\x1b[1m§1b Desktop 1512x806 — the bottom-left card; the badge keeps its own corner (ERR-301)\x1b[0m');
+        const ctx = await browser.newContext({ viewport: DESKTOP });
+        const page = await load(ctx);
+        const m = await page.evaluate(MEASURE);
+        const accept = m.buttons.find((b) => b.text === 'Accept');
+        const decline = m.buttons.find((b) => b.text === 'Decline');
+        check('the consent card is showing for an undecided visitor', m.bannerPresent,
+            m.bannerPresent ? `${m.banner.w}x${m.banner.h} at x=${m.banner.x} y=${m.banner.y}` : 'no #consent-banner');
+        if (m.bannerPresent) {
+            check('it is a bottom-LEFT card, not a full-width bar',
+                m.banner.x <= 24 && m.banner.w <= 400 && m.viewport.h - m.banner.bottom <= 40,
+                `x${m.banner.x}-${m.banner.right} (w ${m.banner.w}), ${m.viewport.h - m.banner.bottom}px off the bottom`);
+            check('Accept and Decline answer their own hit-tests',
+                !!accept && accept.hit === 'self' && !!decline && decline.hit === 'self',
+                `Accept "${accept && accept.hit}", Decline "${decline && decline.hit}"`);
+        }
+        if (!m.badgePresent || !m.badge || m.badge.w === 0) {
+            soft('the Google badge did not render', 'the two-corner separation was not exercised');
+        } else {
+            check('nothing is raised over the banner: the badge is NOT lifted (handoff 2026-10-02 §1)',
+                m.badgeBottom === '0px', `computed bottom ${m.badgeBottom}`);
+            check('the badge and the card do not touch', !intersects(m.badge, m.banner),
+                `badge x${m.badge.x}-${m.badge.right}, card x${m.banner && m.banner.x}-${m.banner && m.banner.right}`);
+        }
+        await ctx.close();
+    }
+
     /* ── §2 Accept must actually WORK, not merely be reachable ────────────── */
     {
         console.log('\n\x1b[1m§2 Pressing Accept — through the real UI, never by writing storage\x1b[0m');
@@ -359,7 +393,7 @@ try {
 
     /* ── §3 A narrower desktop — the badge is still there ─────────────────── */
     {
-        console.log('\n\x1b[1m§3 Desktop 1100x800 — narrower, badge still rendered\x1b[0m');
+        console.log('\n\x1b[1m§3 Desktop 1100x800 — the first card-mode width, badge still rendered\x1b[0m');
         const ctx = await browser.newContext({ viewport: NARROW });
         const page = await load(ctx);
         const m = await page.evaluate(MEASURE);

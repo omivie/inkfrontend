@@ -73,9 +73,11 @@ test('§1.1 PDP renders cost_per_page_display near the price', () => {
         'PDP must render the .product-cost-per-page element');
     assert.match(pdpCode, /data-testid="cost-per-page"/,
         'PDP cost-per-page element needs a stable data-testid');
-    // It must be appended into the pricing block, i.e. near the price.
-    assert.match(pdpCode, /product-info__pricing[\s\S]{0,400}product-cost-per-page/,
-        'cost-per-page must be placed in/near .product-info__pricing, not the spec table');
+    // ERR-301 moved it from the price block to #product-terms, directly below
+    // Add (Delivery/Returns live there now) — still in the buy box, never in
+    // the spec table. A laptop's first screen is price, stock and the button.
+    assert.match(pdpCode, /getElementById\('product-terms'\)[\s\S]{0,400}product-cost-per-page/,
+        'cost-per-page must be placed in #product-terms (the buy box, below Add), not the spec table');
 });
 
 test('§1.1 cost_per_page is escaped, never computed client-side', () => {

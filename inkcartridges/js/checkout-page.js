@@ -34,13 +34,17 @@
                                 data-fallback="color-block">
                             <div style="${colorStyle} width: 50px; height: 50px; border-radius: 4px; display: none;"></div>`;
                 } else {
+                    // ERR-301: a genuine image that fails falls back to the GENUINE tile.
+                    const fallbackTile = BrandSource.tile(item, { cls: 'genuine-tile--sm genuine-tile--50', hidden: true });
                     return `<img src="${escAttr(item.image)}" alt="${escAttr(item.name)}" width="50" height="50" style="object-fit: contain;"
-                                data-fallback="placeholder">`;
+                                data-fallback="placeholder">${fallbackTile}`;
                 }
             } else if (colorStyle) {
                 return `<div style="${colorStyle} width: 50px; height: 50px; border-radius: 4px;"></div>`;
             }
-            return `<svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>`;
+            // ERR-301: a genuine line with no photo shows the GENUINE brand tile.
+            return BrandSource.tile(item, { cls: 'genuine-tile--sm genuine-tile--50' })
+                || `<svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>`;
         },
 
         // Initialize checkout page

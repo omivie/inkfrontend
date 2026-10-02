@@ -39,9 +39,9 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=b1eaf525">
+    <link rel="stylesheet" href="/css/components.css?v=e1803d91">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=b01a5111">
+    <link rel="stylesheet" href="/css/pages.css?v=3c79d4fe">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
 
     <script type="application/ld+json" id="shop-schema">
@@ -202,6 +202,9 @@
                             </ol>
                         </nav>
                         <span class="drilldown-header__product-type" id="product-type-label" hidden></span>
+                        <!-- ERR-301: an ad can land on ?pack=value_pack, which lists the
+                             family's packs only; this is the way back to every cartridge. -->
+                        <a class="drilldown-header__all" id="family-all-link" href="/shop" hidden></a>
                     </div>
                     <div class="drilldown-header__right-group">
                         <div class="drilldown-header__right" id="yield-banner" hidden>
@@ -482,25 +485,25 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=4e256132"></script>
+    <script defer src="/js/shop-page.js?v=1fb33f28"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=1c50051c"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/api.js?v=a64e5efe"></script>
-    <script defer src="/js/seo-meta.js?v=e97ba8d6"></script>
+    <script defer src="/js/api.js?v=ece02c2f"></script>
+    <script defer src="/js/seo-meta.js?v=29eb1bc0"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=e739e07c"></script>
+    <script defer src="/js/utils.js?v=327fd22e"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=7e7a56b1"></script>
+    <script defer src="/js/cart.js?v=40a8e7a7"></script>
     <script defer src="/js/cart-deep-link.js?v=018aa678"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
-    <script defer src="/js/favourites.js?v=4482d91c"></script>
-    <script defer src="/js/products.js?v=d3b78e7f"></script>
+    <script defer src="/js/favourites.js?v=68c60f09"></script>
+    <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
     <!-- search-click-tracking-aug2026 — POST /api/search/click for results-page
          card clicks. THIS PAGE ONLY: /search is a rewrite to this HTML, so the

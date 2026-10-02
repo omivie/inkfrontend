@@ -1223,10 +1223,14 @@ const API = {
         //  - no brand+category → can't dedupe the sidecar narrowly
         //  - source=genuine → caller asked for genuine only; no compats wanted
         //  - search= → server-side search match isn't a code drilldown
+        //  - pack= → the caller asked for packs only (ERR-301: an ad landing on
+        //    ?pack=value_pack); the sidecar reads every compatible row and
+        //    would merge the singles straight back in
         const eligibleForRecovery = !!(params.brand
             && params.category
             && params.source !== 'genuine'
-            && !params.search);
+            && !params.search
+            && !params.pack);
 
         // Admin mirror (ERR-234) — same rule as getProducts. The sidecar below
         // deliberately stays on the public route: it is a compat-recovery fetch

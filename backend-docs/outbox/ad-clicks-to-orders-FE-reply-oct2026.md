@@ -96,7 +96,96 @@ page does now.
 
 ## ERR-301 items (§1, §2, §3, §5, §6 product page, §8)
 
-_Placeholder: the peer session that built these replaces this line with its measured results._
+**Measured before anything changed** on production, 2 Oct 2026, as a first-time visitor in a READ-ONLY browser (analytics requests aborted). **Measured after** locally with `npm run probe:ad-visitor-dropoff`. That probe checks four sizes, three products, two negative controls, and is paced to stay under the 100 requests / 60 s limiter. We re-run it against production after the push (§9).
+
+### §1 P0 — Add to Cart on the first screen: done
+
+- **Before:** Add sat at **y 703**, price at y 438, on GGI690KCMY at 1366×599. At 1366×768 two fixed elements covered it:
+  - **`#google-reviews-badge` at 643–707.** This is the "empty fixed 64px element" from 1 Oct. It is Google's reviews badge. Its contents are a cross-origin iframe, which is why it looks empty. Our own CSS was lifting it so that it sat on top of the consent bar.
+  - **The consent bar at 707–768.**
+- **The buy box now reads in this order:**
+  1. Price, Availability
+  2. quantity + **Add to Cart**
+  3. the fit line (§2)
+  4. "3+ from $X each"
+  5. Delivery, Returns, the dispatch countdown, pack savings, cost per page
+- **The rows' copy is unchanged.** The four prerender-mirrored rows keep their copy and their document order. They are split across two `<dl>`s so the button can sit between them, and the Offer microdata stays on Price + Availability.
+- **The consent banner** is now a 360px card in the bottom-**left** corner, from 1100px wide. The product page's buy box sits right of x 380 at those widths, so the card cannot cover it. The badge keeps the bottom-right corner, and nothing is raised over the banner's text, as you asked. Below 1100px it is still the full-width bar.
+- **After:** Add is at **y 464–538** at every size we checked: 1280×551, 1366×599, 1536×695, 1366×768, plus 1280×720 and 1440×900. That holds for a genuine pack (GGI690KCMY), a genuine single (GLC3329XLBK) and a compatible drum (CDR1070BK). It is fully inside the viewport, and no fixed element overlaps it. `elementFromPoint` returns the button at its centre and at all four corners. CLS is ≤ 0.015.
+- **Your literal check doesn't fit a corner card.** `#add-to-cart-btn.bottom ≤ .consent-banner.top` assumes a full-width bar. With a corner card at x 16–376 and the button at x 822–1119, the check compares two boxes that never share a column, so it can come out false with nothing covering the button. Please verify with your second condition instead (`elementFromPoint` at the button's centre returns the button). Our probe prints your literal number too, labelled as information.
+
+### §2 P1 — Fit reassurance directly under Add to Cart: done
+
+- **Directly under the button:** `trust_signals.compatibility_promise.label`, one line, verbatim from the product response. It was **moved** out of the fit section, not copied.
+- **Under it:** `how_to_check`, as small link text to the printer finder (`/?scroll=ink-finder`, the same target as the "Printer Models" menu item).
+- **Copy:** none of it is hard-coded, and there is no "guaranteed fit" or "fits your printer" wording. A test checks both.
+- **At 1366×599 and 1280×551:** the line sits at y 520–551, right under the button and still on the first screen. At 551 tall that is the last row of pixels, so there is no margin left at that size.
+- **Also there (§6, product-page half):** a plain "See our reviews on Google" link to `trust_signals.organization.google_reviews_url`, which opens in a new tab. No stars and no count. The URL goes through the same https + Google-host check as the footer link.
+
+### §3 P1 — Series page: price and Add on the first screen
+
+- **The H1 now names the code.** It mirrors your prerender's own h1, "Epson 288 / 288XL Ink Cartridges". Until that loads, it reads "Epson 288 Ink Cartridges". The visible label beside the breadcrumb prints the same words, so what a shopper reads is what Google indexes.
+- **Compact card.** It applies only on laptop-shaped windows: at least 1100px wide and at most 800px tall. Phones and tall windows are unchanged.
+  - shorter image
+  - a 3-line title (2 lines at 620px tall or less)
+  - price and "Incl. GST" on one line
+  - the volume rung on one line
+  - the "Fits" line moved below the button
+- **Before → after**, `code=288` at 1366×599:
+
+  | | Before | After |
+  |---|---|---|
+  | first price | y 635 | **y 441** |
+  | first Add | y 763 | **y 495–531** |
+  | Add, measured from the card top | — | **218px** (your target is about 250) |
+
+  At 1366×768 and 1536×695 it is 247px.
+- **One honest limit.** The consent card in the bottom-left corner covers the lower part of grid columns 1–2 until the visitor answers it:
+  - 1366×599: columns 1–2 under the card
+  - 1280×551: columns 1–2 under the card
+  - 1536×695: column 1 under the card
+  - 1366×768: no column under the card
+  
+  Every other first-row card has its price and Add fully on screen and clear. The owner chose the corner card because it keeps the product page's buy box completely clear. A full-width bar would cover every column on this page instead.
+
+### §5 P2 — Keep the ad's intent in the URL: done (see BF-098 above)
+
+- **`code=288XL`:** the page sends **`code=288XL` unchanged, first**, plus `code=288` alongside it. That keeps both of your done-when lines: the request carries 288XL, and the whole family is still listed.
+  - The XL tier sorts first within the family, and colour order is kept.
+  - The address bar keeps `288XL`. The canonical stays `code=288`.
+  - Measured: first card "Epson Genuine 288XL Ink Cartridge Black (500 pages)".
+  - XXL works the same way. "HY" is not a suffix the code collapses today, so there is nothing to keep for it.
+- **`pack=value_pack`:** passed through to `/api/shop`.
+  - Measured on `code=564&pack=value_pack`: the request carries it and the first card is a value pack.
+  - The page gets a "See all 564 cartridges" link back to the whole family.
+  - We skip our compatible-recovery side request for a pack page, because it would have merged the singles back in.
+
+### §8 Small items
+
+- **GENUINE tile — the premise did not hold.** Genuine packs did **not** already have a GENUINE tile. We measured G288CMYK (genuine value pack, `image_url` null) on the 288 page today, and it showed the grey "No Image" box like the singles. So we built the tile new. It applies to every genuine row with no image, single or pack, and also when a genuine photo fails to load.
+  - **Content:** brand + "GENUINE" + code, for example "EPSON · GENUINE · 288XL Black". It is text only, never a colour block (that is the compatible tile's language).
+  - **Only on proven genuine rows.** It shows only when the row's `source` is genuine. An unknown source keeps the placeholder, and we never infer genuine from a product name.
+  - **Every surface:** cards, /shop, search, PDP hero, cart, favourites, checkout, payment, confirmation, order history, ribbons.
+  - **Payment bug, also fixed:** the payment summary was pointing image-less lines at `/assets/images/placeholder.png`, a file that never existed.
+- **`ink-backend-zaeq` / `onrender.com`: already clean.** No storefront code calls the old host. The only mentions are code comments, the deliberate "old host" constant in the backend-move probe, and the test that **fails** if a live reference ever appears. Every `onrender.com` reference left is `ink-backend-sg`, in Vercel's server-side rewrites and middleware, which is the bypass-Cloudflare case you allowed. The Vercel project config in the repo holds no host. Please check the dashboard's environment variables on your side; we can't read them from here.
+- **Printer pages switched on (§4 of ad-visitor-dropoff): render normally.** We checked 9:
+  - HP Envy 6130e, 6120e, 6520e and Smart Tank 7005
+  - Epson WF-7845
+  - Brother HL-3170CDW and DCP-L1630W
+  - HP LaserJet P2015n
+  - Dymo LabelWriter 450 Duo
+
+  Each had the correct h1, listed its cartridges, and logged no console errors. Example: Envy 6130e lists HP 68 Black and Colour.
+- **Is the traffic beacon blocked by uBlock Origin or Brave (§5 of ad-visitor-dropoff)? No.**
+  - **How we checked:** we ran `POST /api/analytics/traffic-event` through the same filter engine (`@ghostery/adblocker`) against:
+    - uBlock Origin's default lists (uBO filters, privacy, badware, quick-fixes, unbreak, EasyList, EasyPrivacy)
+    - Brave's standard lists (EasyList, EasyPrivacy, uBO, brave-specific, brave-unbreak)
+  - **Result:** the beacon is **allowed** as xhr, ping and fetch, on both `api.inkcartridges.co.nz` and `ink-backend-sg`.
+  - **Positive controls:** Google Analytics collect, gtag.js and `bat.bing.com` were all **blocked**, so the engine was doing its job.
+  - **What that means:** a visitor with a default blocker still sends our pageview. The ~5 missing pageviews on 1 Oct are not explained by default filter lists. A blocker with a custom list, or a click that never loaded the page (for example a bot or a closed tab), would fit. No route change needed.
+- **Search fix b1934f3 (§6 of ad-visitor-dropoff).** `GET /api/printers/search` still returns `[]` for your own example, "Fuji Xerox Docuprint CM305 df". The stored spelling "Fuji Xerox DOCUPRINT CM 305DF" matches. It also still returns `[]` for "DCP-J1050DW", while "DCP J1050DW" matches.
+  - **Our side:** the storefront never strips spaces. It only turns hyphens into spaces, and it asks both spellings (BF-096). We keep that.
+  - **Question:** which endpoint did b1934f3 change? If it was `/api/search/smart` only, could `/api/printers/search` get the same matching?
 
 ## §9 After the deploy
 

@@ -575,9 +575,14 @@ const SeoMeta = {
         if (seq !== undefined && seq !== this._seq) return false; // navigated away
         if (head.title) this._setTitle(head.title);
         if (head.description) this._setDescription(head.description);
-        if (surface === 'printer' && head.h1) {
+        // The prerender's <h1> is mirrored on a printer hub (shown) and, since
+        // ERR-301, on a brand CODE page (/shop?brand=epson&code=288 — kept
+        // visually hidden there, with the same words in the visible label).
+        // A brand page WITHOUT a code keeps its own h1.
+        const codePage = surface === 'brand' && /[?&]code=/.test(prerenderPath || '');
+        if ((surface === 'printer' || codePage) && head.h1) {
             this._h1 = { path: prerenderPath, h1: head.h1 };
-            this._setH1(head.h1);
+            this._setH1(head.h1, surface === 'printer');
         }
         return true;
     },
@@ -590,13 +595,20 @@ const SeoMeta = {
         return (head && head.h1) || null;
     },
 
-    _setH1(text) {
+    _setH1(text, reveal = true) {
         if (typeof document === 'undefined' || !text) return;
         const el = document.getElementById('drilldown-title');
         if (!el) return;
         el.textContent = text;
         el.hidden = false;
-        el.classList.remove('visually-hidden');
+        if (reveal) {
+            el.classList.remove('visually-hidden');
+            return;
+        }
+        // Code page (ERR-301): the h1 stays visually hidden and the visible
+        // label beside the breadcrumb carries the same words.
+        const label = document.getElementById('product-type-label');
+        if (label && !label.hidden) label.textContent = text;
     },
 
     // ── public entry point ────────────────────────────────────────────────────
