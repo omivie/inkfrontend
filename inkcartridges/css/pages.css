@@ -14098,6 +14098,13 @@ body.page-shop {
 
 /* /review — guest review-by-link (live 2026-09-28). */
 .review-page__form { margin: 0 0 var(--spacing-lg); padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); max-width: 640px; }
+.checkout-optin__status { margin: 6px 0 0; font-size: 0.875rem; color: var(--color-text-muted); }
+.checkout-optin__status[hidden] { display: none; }
+/* /cart guest reminder (ERR-302): box + its own email field under Checkout. */
+.cart-optin { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); }
+.cart-optin[hidden] { display: none; }
+.cart-optin .checkout-optin { margin-top: 0; font-size: 0.9375rem; }
+.cart-optin__email { width: 100%; min-height: 44px; margin-top: 4px; padding: 8px 12px; font-size: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .review-page__product { margin: 0 0 8px; font-size: 1.125rem; display: flex; align-items: center; gap: 12px; }
 .review-page__image { width: 64px; height: 64px; object-fit: contain; flex: 0 0 auto; }
 .review-page__stars { border: 0; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 1rem; }

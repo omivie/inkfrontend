@@ -29,7 +29,7 @@ M = [
  ("inkcartridges/js/pdp-prefetch.js", "if (params.get('printer_slug')) return null;", ""),
  ("inkcartridges/js/pdp-prefetch.js", "? 'https://api.inkcartridges.co.nz'", "? 'https://www.inkcartridges.co.nz'"),
  ("inkcartridges/js/value-pages.js", ".map(t => `${Number(t.min_quantity)}+ ${pct(Number(t.discount_percent))} off`)", ".map(t => `${Number(t.min_quantity)}+ —`)"),
- ("inkcartridges/js/config.js", "        guestCartEmail: false,", "        guestCartEmail: true,"),
+ ("inkcartridges/js/config.js", "        guestCartEmail: true,", "        guestCartEmail: false,"),
  ("inkcartridges/js/review-page.js", "if (!Number.isInteger(r) || r < 1 || r > 5)", "if (!Number.isInteger(r) || r < 1)"),
  ("inkcartridges/html/checkout.html", "Human support Mon–Fri, 9am–5pm", "Human support 8am–8pm, 7 days"),
  ("inkcartridges/css/layout.css", "    min-height: 32px;\n    background: var(--cyan-light);", "    position: fixed;\n    min-height: 32px;\n    background: var(--cyan-light);"),

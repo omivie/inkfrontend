@@ -480,17 +480,21 @@ test('§8 the three pages + /review are routed in BOTH rewrite tables and carry 
     assert.match(read('html/review.html'), /<meta name="robots" content="noindex, nofollow">/);
 });
 
-test('§8 cart email ships DARK, reviews LIVE (2026-09-28), and the consent box is unticked', () => {
+test('§8 cart email LIVE (ERR-302) and reviews LIVE, and the consent box is unticked', () => {
     const cfg = read('js/config.js');
     // guestReviews went live with the backend's confirmation (ERR-290,
-    // backend-docs/inbox/fe-post-deploy-fixes-sep2026.md §1).
-    assert.match(cfg, /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*false,\s*guestReviews:\s*true,?\s*\}/);
+    // backend-docs/inbox/fe-post-deploy-fixes-sep2026.md §1); guestCartEmail
+    // with the owner's approval of the ad-clicks-to-orders handoff §4 (ERR-302).
+    assert.match(cfg, /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*true,\s*guestReviews:\s*true,?\s*\}/);
     const box = read('html/checkout.html').match(/<input type="checkbox" id="guest-cart-email-consent"[^>]*>/)[0];
     assert.doesNotMatch(box, /checked/, 'NZ UEMA: consent is given by the shopper, never pre-ticked');
     assert.match(read('html/checkout.html'), /id="guest-cart-email-optin" hidden/);
+    // The behaviour has ONE owner now (cart.js GuestCartEmail); checkout delegates.
     const fn = extractMethod(stripComments(read('js/checkout-page.js')), 'setupGuestCartEmail').body;
-    assert.match(fn, /DARK_FEATURES\.guestCartEmail === true/);
-    assert.match(fn, /if \(!box\.checked/);
+    assert.match(fn, /GuestCartEmail\.bind\(/);
+    const cart = stripComments(read('js/cart.js'));
+    assert.match(cart, /Config\.DARK_FEATURES\.guestCartEmail === true/);
+    assert.match(cart, /if \(!box\.checked\)/);
 });
 
 test('§8 review form validation', () => {

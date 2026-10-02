@@ -2716,6 +2716,25 @@ const TrustStats = {
             { key: 'cartridges', value: this.band(s.cartridgesSold), label: 'cartridges sold' },
         ].filter(row => row.value !== null);
     },
+
+    /**
+     * The "See our reviews on Google" href (ERR-302), from an `organization`
+     * object (/api/site/trust, or a product's trust_signals). An href from an
+     * API is a trust boundary: only an https URL on a Google host passes, so a
+     * bad row can never turn the link into javascript: or an off-site redirect.
+     * Anything else ⇒ null ⇒ the caller renders NO link (never a dead one).
+     * @param {Object} org
+     * @returns {string|null}
+     */
+    googleReviewsUrl(org) {
+        const raw = org && typeof org === 'object' ? org.google_reviews_url : null;
+        if (typeof raw !== 'string' || !raw.trim()) return null;
+        try {
+            const u = new URL(raw.trim());
+            const okHost = /^(www\.|maps\.|search\.)?google\.(com|co\.nz)$/.test(u.hostname);
+            return u.protocol === 'https:' && okHost && !u.username && !u.password ? u.href : null;
+        } catch { return null; }
+    },
 };
 if (typeof window !== 'undefined') window.TrustStats = TrustStats;
 

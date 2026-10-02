@@ -284,6 +284,9 @@ const AdsConversions = {
             if (hasValue) params.value = snap * quantity;
 
             gtag('event', 'conversion', params);
+            // The conversion counts the add; the audience needs the event NAME
+            // (ERR-302). Same confirmed-2xx guard, same SKU.
+            AdsRemarketing.event('add_to_cart', [sku]);
 
             return hasValue
                 ? { sent: true, value: params.value }
@@ -291,6 +294,64 @@ const AdsConversions = {
         } catch (err) {
             // A thrown tag must never take an add-to-cart with it.
             if (typeof DebugLog !== 'undefined') DebugLog.warn('Ads add_to_cart failed (non-fatal):', err);
+            return { sent: false, reason: 'threw' };
+        }
+    },
+};
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * GOOGLE ADS DYNAMIC REMARKETING (ERR-302, ad-clicks-to-orders handoff §7)
+ *
+ * The Ads account's "Product viewers", "Shopping cart abandoners" and "Past
+ * buyers" audiences were all at 0 while "All visitors" held ~2,300. The tag
+ * loaded; what was missing was the EVENT NAMES those audiences key on. Every
+ * ecommerce event we sent was either a GA4 event scoped to the GA4 property
+ * (never reaches the Ads tag) or an Ads `conversion` (a conversion action, not
+ * a remarketing event). Ads received no `view_item`, `add_to_cart` or
+ * `purchase` at all.
+ *
+ * - send_to is the Ads TAG ONLY (no label). That keeps these events out of
+ *   GA4, where `purchase` is server-side only (Measurement Protocol), and makes
+ *   them remarketing signals rather than new conversion actions. The labelled
+ *   conversions in AdsConversions / order-confirmation-page.js are unchanged.
+ * - `id` is the SKU VERBATIM (trimmed only). Merchant Center's `<g:id>` is
+ *   `product.sku`; any other form (lower-cased, slug, uuid) matches nothing in
+ *   the feed and the audience stays empty while every hit looks fine.
+ * - Consent: the same treatment as every other Ads call here (no ad_storage
+ *   declared; see the Consent Mode block and ERR-227). No new gate.
+ * - Partial-ness is in the RETURN VALUE: no SKU ⇒ nothing sent, and it says
+ *   why. Never throws into a page.
+ * ========================================================================== */
+const AdsRemarketing = {
+    EVENTS: ['view_item', 'add_to_cart', 'purchase'],
+
+    /** `[{ id, google_business_vertical }]` from SKUs or `{sku}` objects; blanks dropped. */
+    items(list) {
+        if (!Array.isArray(list)) return [];
+        const out = [];
+        for (const entry of list) {
+            const raw = entry && typeof entry === 'object' ? entry.sku : entry;
+            const id = typeof raw === 'string' ? raw.trim() : '';
+            if (id) out.push({ id, google_business_vertical: 'retail' });
+        }
+        return out;
+    },
+
+    /**
+     * @param {'view_item'|'add_to_cart'|'purchase'} name
+     * @param {Array<string|{sku:string}>} list
+     * @returns {{sent: boolean, reason?: string, count?: number}}
+     */
+    event(name, list) {
+        try {
+            if (this.EVENTS.indexOf(name) === -1) return { sent: false, reason: 'unknown-event' };
+            if (typeof gtag !== 'function') return { sent: false, reason: 'no-gtag' };
+            const items = this.items(list);
+            if (!items.length) return { sent: false, reason: 'no-sku' };
+            gtag('event', name, { send_to: ADS.TAG_ID, items });
+            return { sent: true, count: items.length };
+        } catch (err) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn(`Ads ${name} remarketing failed (non-fatal):`, err);
             return { sent: false, reason: 'threw' };
         }
     },
@@ -1219,5 +1280,6 @@ const Ga4Ecommerce = {
 };
 
 if (typeof window !== 'undefined') window.AdsConversions = AdsConversions;
+if (typeof window !== 'undefined') window.AdsRemarketing = AdsRemarketing;
 if (typeof window !== 'undefined') window.Ga4Ecommerce = Ga4Ecommerce;
 if (typeof window !== 'undefined') window.UetTag = UetTag;

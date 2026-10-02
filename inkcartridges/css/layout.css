@@ -1896,6 +1896,21 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* "See our reviews on Google" (ERR-302): one plain link, no stars or counts. */
+.footer-reviews {
+    margin: var(--spacing-3, 12px) 0 0;
+    text-align: center;
+    font-size: var(--font-size-sm);
+}
+.footer-reviews[hidden] { display: none; }
+.footer-reviews__link {
+    color: var(--steel-300, #cbd5e1);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.footer-reviews__link:hover,
+.footer-reviews__link:focus-visible { color: #fff; }
+
 .footer-trust__item {
     display: flex;
     align-items: center;

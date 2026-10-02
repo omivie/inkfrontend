@@ -41,6 +41,31 @@ describing the same incident.
 
 ---
 
+## ERR-302 — Ads remarketing audiences were empty because the Ads tag never received a single ecommerce event NAME, and the guest cart reminder had never been shown to anyone — **RESOLVED (frontend)** (2026-10-02)
+
+**Source.** `backend-docs/inbox/ad-clicks-to-orders-FE-handoff-oct2026.md` (2 Oct 2026; supersedes the 1 Oct paid-traffic and 2 Oct ad-visitor-dropoff handoffs). Google Ads: 54 tracked visits, 0 orders, 29 Sep–2 Oct. Split by FILE with a peer session: PDP buy box, consent card, series page, `code=288XL`/`pack`, GENUINE tile = **ERR-301**. This entry covers §0, §4, §6, §7. Reply: `backend-docs/outbox/ad-clicks-to-orders-FE-reply-oct2026.md`.
+
+**§0 "None of the fixes is live."** True, and the cause was simple: local `main` was **5 commits ahead of `origin/main`** (ERR-295…299 committed, never pushed). Nothing was wrong with Vercel.
+
+**§7 Remarketing audiences at 0 while "All visitors" held ~2,300.**
+- **The cause.** Product viewers / Cart abandoners / Past buyers key on the event NAMES `view_item` / `add_to_cart` / `purchase` with `items`. Ads received none of them. GA4's `view_item`/`add_to_cart` are `send_to` the GA4 property only (correctly, ERR-256). The Ads add-to-cart and purchase are labelled `conversion` events. A conversion is not a remarketing event. The tag loaded fine, which is why "All visitors" worked.
+- **The fix.** `AdsRemarketing` (gtag.js), `send_to: 'AW-18032498762'` with no label. View_item rides GA4's one-shot guard and the test-product gate on the PDP. Add_to_cart follows the confirmed-2xx conversion. Purchase sits inside `markConversion()`'s three guards, and the purchase conversion now also carries `items`.
+- **`id` is the SKU verbatim** (trimmed, never case-changed). Merchant Center `<g:id>` is `product.sku`; anything else matches nothing and the audience stays empty while every hit looks fine.
+- **Measured locally (`probe:ad-clicks`).** The tag transmitted `view_item` with `GGI690KCMY` to Ads (4 requests, captured and aborted). The negative control, `/shop`, pushed none of 8 gtag calls.
+- ***A tag that loads is not a tag that feeds an audience. "All visitors > 0" proved the tag, not the events.***
+
+**§4 Guest cart reminder.** Built 2026-09-27 for checkout only, behind `guestCartEmail:false`, and never rendered (0 consents ever). Owner approved it on 2026-10-02.
+- One owner now, `GuestCartEmail` (cart.js, the script both pages load). It is on `/cart` (own email field, under Proceed to Checkout) and on checkout.
+- The box is UNTICKED, and a browser-restored tick is cleared at bind (a restored tick is not consent). Guests only, decided after `Auth.readyPromise`.
+- **Loud fail-soft.** The shopper is told the outcome (aria-live) and the root carries `data-guest-contact`. A thrown 400 (`GUEST_SESSION_MISMATCH`) and `RATE_LIMITED` both read "failed" and allow a retry.
+- **Unticking after a send is honest.** There is no withdraw call, so the copy says the address is saved and every email has an unsubscribe link. Asked as BF-099.
+
+**§6 "See our reviews on Google"** in the footer, from `/api/site/trust` via the shared `TrustStats.raw()` (no new request). The href passes `TrustStats.googleReviewsUrl()` (https + Google host only). An API href is a trust boundary. Absent ⇒ hidden + `data-reviews-link="absent"`. No stars, no count. The PDP trust-block link (ERR-301) uses the same validator.
+
+**The handoff contradicted the live API once.** `/api/shop?code=288XL` returns ONLY the 7 XL rows, so "send `code=288XL` unchanged" and "keep the whole family" cannot both hold. ERR-301 fetches both; asked as **BF-098**.
+
+**Tests.** `tests/ad-clicks-to-orders-oct2026.test.js` (29). `python3 scripts/redproof-ad-clicks-to-orders.py`: 20/20 mutations red. Pins updated deliberately: the `guestCartEmail:false` pins (conversion-fixes §8, post-deploy §1), and the Ads add-to-cart suite now counts `conversion` events (still exactly one) rather than all gtag calls. Probe: `npm run probe:ad-clicks` (READ-ONLY; `--record-opt-in=<email>` is the one explicit write mode).
+
 ## ERR-299 — The backend's round-2 answer retired six frontend workarounds, and the Best Sellers tab was offering two filters its server had never honoured — **RESOLVED (frontend)** (2026-09-29)
 
 **Source.** `backend-docs/inbox/fe-best-sellers-and-four-replies-round2-backend-response-sep2026.md`. It answers our best-sellers brief (ERR-295) and our reply to the four-replies answer (ERR-294). It built BF-089, BF-090, BF-091, BF-092 and BF-093. It declined BF-088 as unneeded. §8 (`/business` Apply) was split to a peer session as ERR-297. The turnaround doc it mentions is ERR-296.

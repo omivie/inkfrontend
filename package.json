@@ -86,7 +86,8 @@
     "probe:four-replies": "node scripts/probe-four-replies-sep2026.mjs",
     "probe:bundle-response": "node scripts/probe-bundle-response-sep2026.mjs",
     "probe:best-sellers": "node scripts/probe-best-sellers.mjs",
-    "probe:business-apply": "node scripts/probe-business-apply-sep2026.mjs"
+    "probe:business-apply": "node scripts/probe-business-apply-sep2026.mjs",
+    "probe:ad-clicks": "node scripts/probe-ad-clicks-to-orders-oct2026.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

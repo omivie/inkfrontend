@@ -379,6 +379,10 @@
                     if (typeof UetTag !== 'undefined') {
                         UetTag.viewItem(this.product, ga4);
                     }
+                    // Ads remarketing twin (ERR-302): the "Product viewers" audience keys on the event NAME.
+                    if (ga4 && ga4.sent && typeof AdsRemarketing !== 'undefined') {
+                        AdsRemarketing.event('view_item', [this.product]);
+                    }
                 }
 
                 this.loadReviews();

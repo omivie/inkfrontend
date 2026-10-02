@@ -103,10 +103,10 @@ const printers = (n) => Array.from({ length: n }, (_, i) => ({ full_name: `Broth
 // §1 /review
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§1 guestReviews is ON; guestCartEmail is unchanged', () => {
+test('§1 guestReviews is ON; guestCartEmail is ON since ERR-302 (owner-approved 2026-10-02)', () => {
     const cfg = stripComments(read('js/config.js'));
     assert.match(cfg, /guestReviews:\s*true/);
-    assert.match(cfg, /guestCartEmail:\s*false/);
+    assert.match(cfg, /guestCartEmail:\s*true/);
 });
 
 /** Run review-page.js in a vm with a fake page, API and flag. */

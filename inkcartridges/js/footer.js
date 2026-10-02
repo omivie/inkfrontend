@@ -517,6 +517,17 @@
                 <p class="footer-stats" id="footer-trust-stats" data-testid="footer-trust-stats" hidden></p>
             </div>
         </div>
+                <!--
+                  "See our reviews on Google" (ERR-302, ad-clicks-to-orders §6).
+                  A plain link, new tab — no stars, no review count (copy rules).
+                  The href comes ONLY from /api/site/trust → organization.
+                  google_reviews_url via TrustStats.googleReviewsUrl(); until
+                  then it ships hidden, and with no valid URL it stays hidden
+                  with data-reviews-link="absent" so the gap is measurable.
+                -->
+                <p class="footer-reviews" id="footer-google-reviews" data-testid="footer-google-reviews" hidden>
+                  <a class="footer-reviews__link" target="_blank" rel="noopener noreferrer">See our reviews on Google</a>
+                </p>
 
         <div id="google-reviews-badge"></div>
 
@@ -641,6 +652,7 @@
     renderTrustStats();
 
     // Google Customer Reviews - badge + opt-in survey loader
+    renderGoogleReviewsLink();
     (function () {
       window.___gcfg = { lang: 'en_NZ' };
       var originalOptIn = window.renderOptIn;
@@ -944,6 +956,27 @@
 
   function syncFooterAccordions() {
     const items = document.querySelectorAll('.site-footer [data-footer-accordion]');
+  /**
+   * Fill the footer's "See our reviews on Google" link (ERR-302). Same shared,
+   * session-cached /api/site/trust read as the stats line — no new request.
+   * Not awaited by the caller; never throws.
+   */
+  async function renderGoogleReviewsLink() {
+    const el = document.getElementById('footer-google-reviews');
+    if (!el || typeof TrustStats === 'undefined') return;
+    const data = await TrustStats.raw();
+    const href = TrustStats.googleReviewsUrl(data && data.organization);
+    const a = el.querySelector('a');
+    if (!href || !a) {
+      el.hidden = true;
+      el.dataset.reviewsLink = 'absent';
+      return;
+    }
+    a.href = href;
+    el.dataset.reviewsLink = 'present';
+    el.hidden = false;
+  }
+
     if (!items.length || !window.matchMedia) return;
     const mq = window.matchMedia('(max-width: 768px)');
     // Which column stays open on mobile? The one the template shipped `open`

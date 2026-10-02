@@ -175,7 +175,10 @@ test('§1 AdsConversions is on window, not a bare const', () => {
 test('§1 it sends the real Shopping Cart label, and NZD', () => {
     const { ads, calls } = loadGtag();
     const r = ads.addToCart(confirmed());
-    assert.equal(calls.length, 1, 'exactly one conversion per confirmed add');
+    // ERR-302: a label-less `add_to_cart` remarketing event now follows the
+    // conversion (tests/ad-clicks-to-orders-oct2026.test.js). Still exactly ONE conversion.
+    assert.equal(calls.filter((c) => c[1] === 'conversion').length, 1, 'exactly one conversion per confirmed add');
+    assert.deepEqual(calls.map((c) => c[1]), ['conversion', 'add_to_cart']);
 
     const [eventKeyword, eventName, params] = calls[0];
     assert.equal(eventKeyword, 'event');
@@ -332,7 +335,7 @@ test('§1b a missing price_snapshot fires the conversion WITHOUT a value', () =>
     delete c.price_snapshot;
     const r = ads.addToCart(c);
 
-    assert.equal(calls.length, 1, 'still fires — the add is real');
+    assert.equal(calls.filter((c) => c[1] === 'conversion').length, 1, 'still fires — the add is real');
     assert.ok(!('value' in calls[0][2]), 'but carries NO value key');
     assert.equal(calls[0][2].currency, 'NZD');
     assert.equal(r.sent, true);
@@ -362,7 +365,7 @@ test('§1b a zero price is a price; null/undefined are not', () => {
     for (const absent of [null, undefined, '', '   ', 'abc', {}, [], NaN]) {
         const g = loadGtag();
         g.ads.addToCart(confirmed({ price_snapshot: absent }));
-        assert.equal(g.calls.length, 1, `${String(absent)}: still fires`);
+        assert.equal(g.calls.filter((c) => c[1] === 'conversion').length, 1, `${String(absent)}: still fires`);
         assert.ok(!('value' in g.calls[0][2]),
             `price_snapshot ${JSON.stringify(absent)} must NOT become $0.00`);
     }

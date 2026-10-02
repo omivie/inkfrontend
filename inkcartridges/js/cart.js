@@ -4751,6 +4751,83 @@ const Cart = {
     }
 };
 
+/**
+ * "Email me a copy of my cart if I don't finish" — the guest cart reminder
+ * opt-in (conversion handoff 2026-09-23 §6a.1; switched on and added to /cart
+ * by ERR-302, ad-clicks-to-orders handoff §4).
+ *
+ * ONE owner for both surfaces: /cart (its own email field) and /checkout (the
+ * order email field). It lives here because cart.js is the one script both
+ * pages load.
+ *
+ * - NZ UEMA: express consent. The box ships UNTICKED and the call carries
+ *   `consent: true` only after the shopper ticks it. Nothing is sent unticked.
+ * - Guests only, decided AFTER Auth has restored its session — a signed-in
+ *   shopper must never see a guest consent box flash and vanish.
+ * - Sends on box change and on email blur, once per address, only when ticked
+ *   and the address is valid. `API.guestContact` takes the body id and the
+ *   X-Guest-Session header from the same store, so the backend's
+ *   GUEST_SESSION_MISMATCH cannot happen by construction; a thrown 400 or a
+ *   RATE_LIMITED envelope still lands in "failed".
+ * - LOUD fail-soft: the outcome is told to the shopper (aria-live status) and
+ *   written to `data-guest-contact="sent|failed"` on the root for probes. A
+ *   failure never blocks the cart or checkout.
+ */
+const GuestCartEmail = {
+    SENT_COPY: (email) => `We'll email a copy of this cart to ${email} if you don't finish. Every email has an unsubscribe link.`,
+    FAILED_COPY: "We couldn't save that just now. Your cart is unaffected. Try again, or carry on to checkout.",
+    NEED_EMAIL_COPY: 'Enter your email address to get the copy.',
+    KEPT_COPY: 'Your address is already saved for this cart. Every reminder email has an unsubscribe link.',
+
+    enabled() {
+        return typeof Config !== 'undefined' && !!Config.DARK_FEATURES && Config.DARK_FEATURES.guestCartEmail === true;
+    },
+
+    /**
+     * @param {{root: Element, box: HTMLInputElement, email: HTMLInputElement, status?: Element}} els
+     * @returns {Promise<{bound: boolean, reason?: string}>}
+     */
+    bind(els) {
+        const { root, box, email, status } = els || {};
+        if (!this.enabled()) return Promise.resolve({ bound: false, reason: 'flag-off' });
+        if (!root || !box || !email) return Promise.resolve({ bound: false, reason: 'no-markup' });
+        const ready = (typeof Auth !== 'undefined' && Auth.readyPromise && typeof Auth.readyPromise.then === 'function')
+            ? Auth.readyPromise.then(() => {}, () => {}) : Promise.resolve();
+        return ready.then(() => {
+            if (typeof Auth !== 'undefined' && typeof Auth.isAuthenticated === 'function' && Auth.isAuthenticated()) {
+                return { bound: false, reason: 'signed-in' };
+            }
+            this._wire(root, box, email, status || null);
+            return { bound: true };
+        });
+    },
+
+    _wire(root, box, email, status) {
+        const say = (text) => { if (status) { status.textContent = text; status.hidden = !text; } };
+        let sentFor = null;
+        const send = async () => {
+            const value = (email.value || '').trim();
+            if (!box.checked) { say(sentFor ? this.KEPT_COPY : ''); return; }
+            if (!value || !email.checkValidity()) { say(this.NEED_EMAIL_COPY); return; }
+            if (value === sentFor) { say(this.SENT_COPY(value)); return; }
+            sentFor = value;
+            let ok = false;
+            try {
+                const resp = await API.guestContact(value);
+                ok = !!(resp && resp.ok);
+            } catch (_) { ok = false; }
+            root.dataset.guestContact = ok ? 'sent' : 'failed';
+            if (!ok) sentFor = null;
+            say(ok ? this.SENT_COPY(value) : this.FAILED_COPY);
+        };
+        box.checked = false;
+        root.hidden = false;
+        email.addEventListener('blur', send);
+        box.addEventListener('change', send);
+    },
+};
+if (typeof window !== 'undefined') window.GuestCartEmail = GuestCartEmail;
+
 // Initialize cart when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     Cart.init();

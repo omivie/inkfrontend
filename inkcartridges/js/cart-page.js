@@ -19,6 +19,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Async and additive: a business account gets the promo field disabled with
     // its reason. Guests and retail shoppers fire no request and see no change.
     initBusinessCouponLock();
+    // Guest cart reminder opt-in (ERR-302). Guests only; unticked by default.
+    if (typeof GuestCartEmail !== 'undefined') {
+        GuestCartEmail.bind({
+            root: document.getElementById('cart-guest-email'),
+            box: document.getElementById('cart-guest-email-consent'),
+            email: document.getElementById('cart-guest-email-input'),
+            status: document.getElementById('cart-guest-email-status')
+        });
+    }
 });
 
 /**

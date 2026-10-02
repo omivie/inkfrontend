@@ -653,39 +653,18 @@
 
         // Update totals display
         /**
-         * Guest cart-copy consent (conversion handoff 2026-09-23 §6a.1), DARK
-         * until Config.DARK_FEATURES.guestCartEmail is true. Guests only; the
-         * box starts unticked and the call carries consent only when ticked.
-         * It fires on email blur and on ticking, once per (email) — never on
-         * every keystroke. The outcome is written to
-         * data-guest-contact="sent|failed" on the label: DebugLog is silent in
-         * production, so the attribute is the signal a probe can read. A failed
-         * call never blocks or interrupts checkout.
+         * Guest cart-copy consent (conversion handoff 2026-09-23 §6a.1; live
+         * since ERR-302). The behaviour has ONE owner, GuestCartEmail in
+         * cart.js, shared with /cart; this page supplies its order-email field.
          */
         setupGuestCartEmail() {
-            const flag = typeof Config !== 'undefined' && Config.DARK_FEATURES && Config.DARK_FEATURES.guestCartEmail === true;
-            const label = document.getElementById('guest-cart-email-optin');
-            const box = document.getElementById('guest-cart-email-consent');
-            const email = document.getElementById('email');
-            if (!flag || !label || !box || !email) return;
-            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return;
-            label.hidden = false;
-            let sentFor = null;
-            const send = async () => {
-                const value = (email.value || '').trim();
-                if (!box.checked || !email.checkValidity() || !value || value === sentFor) return;
-                sentFor = value;
-                try {
-                    const resp = await API.guestContact(value);
-                    label.dataset.guestContact = resp && resp.ok ? 'sent' : 'failed';
-                    if (!(resp && resp.ok)) sentFor = null;
-                } catch (_) {
-                    label.dataset.guestContact = 'failed';
-                    sentFor = null;
-                }
-            };
-            email.addEventListener('blur', send);
-            box.addEventListener('change', send);
+            if (typeof GuestCartEmail === 'undefined') return;
+            GuestCartEmail.bind({
+                root: document.getElementById('guest-cart-email-optin'),
+                box: document.getElementById('guest-cart-email-consent'),
+                email: document.getElementById('email'),
+                status: document.getElementById('guest-cart-email-status')
+            });
         },
 
         /**

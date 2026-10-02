@@ -131,15 +131,21 @@
             }
             this._conversionFired = true;
 
-            // Google Ads purchase conversion.
+            // Google Ads purchase conversion, now with the SKUs bought (ERR-302):
+            // the conversion carries them for reporting, and the label-less
+            // `purchase` below is what fills the "Past buyers" audience.
+            const adsItems = typeof AdsRemarketing !== 'undefined' ? AdsRemarketing.items(order.items) : [];
             if (typeof gtag === 'function') {
-                gtag('event', 'conversion', {
+                const conversion = {
                     send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
                     value: order.total,
                     currency: 'NZD',
                     transaction_id: order.orderNumber
-                });
+                };
+                if (adsItems.length) conversion.items = adsItems;
+                gtag('event', 'conversion', conversion);
             }
+            if (typeof AdsRemarketing !== 'undefined') AdsRemarketing.event('purchase', order.items);
 
             // Microsoft Advertising purchase conversion (UET).
             //

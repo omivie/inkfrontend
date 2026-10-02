@@ -57,7 +57,10 @@ const Config = {
      * nothing stores, or a review form that posts to a missing route, would be
      * a promise we cannot keep. Flip to true in the same commit that the
      * backend's "endpoint is live" note is recorded in backend-docs/.
-     *   guestCartEmail → POST /api/cart/guest-contact   (checkout opt-in)
+     *   guestCartEmail → POST /api/cart/guest-contact   (/cart + checkout opt-in)
+     *                    LIVE 2026-10-02 (ERR-302): backend-docs/inbox/
+     *                    ad-clicks-to-orders-FE-handoff-oct2026.md §4 asks for it on;
+     *                    the route has been live since 2026-09-27; owner approved.
      *   guestReviews   → GET/POST /api/reviews/by-token (html/review.html)
      *                    LIVE 2026-09-28: backend-docs/inbox/fe-post-deploy-fixes-sep2026.md
      *                    §1 (the review-request email links every product here;
@@ -65,7 +68,7 @@ const Config = {
      *                    same day: an unknown token → 404 NOT_FOUND, no-store.
      */
     DARK_FEATURES: {
-        guestCartEmail: false,
+        guestCartEmail: true,
         guestReviews: true,
     },
 
