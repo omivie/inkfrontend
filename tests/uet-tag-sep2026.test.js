@@ -255,11 +255,12 @@ test('§4 no auto SPA tracking — it would duplicate pageviews, not add them', 
 /* ── §5 BEHAVIOUR, EXECUTED — the value is the bug ───────────────────────── */
 
 /** Runs gtag.js against a fake DOM and returns what it did. */
-function runGtag() {
+function runGtag(pathname = '/products/x/SKU1') {
     const scripts = [];
     const store = new Map();
     const ctx = {
         console,
+        location: { pathname },
         localStorage: {
             getItem: (k) => (store.has(k) ? store.get(k) : null),
             setItem: (k, v) => { store.set(k, String(v)); },
@@ -288,6 +289,29 @@ test('§5 init() requests bat.js over explicit https', () => {
     if (bat.length) {
         assert.equal(bat[0].src, 'https://bat.bing.com/bat.js',
             'protocol-relative // urls are not what the CSP entry spells');
+    }
+});
+
+/* §5b THE ADMIN DASHBOARD IS NOT AN AD AUDIENCE (2026-10-02).
+ * html/admin/index.html loads gtag.js, and init() runs at file load. Without
+ * the /admin skip every dashboard visit was a Microsoft Ads pageview: staff in
+ * the remarketing audience and in the conversion-rate denominator. Executed,
+ * not grepped, and with a POSITIVE CONTROL on a storefront path so a harness
+ * that never injects anything cannot pass this vacuously. */
+test('§5b an /admin page never requests bat.js, and says why', () => {
+    for (const p of ['/admin', '/admin/', '/admin/index.html', '/admin/orders']) {
+        const { ctx, scripts } = runGtag(p);
+        assert.equal(scripts.filter((s) => /bat\.bing\.com/.test(s.src || '')).length, 0,
+            `${p}: bat.js requested on an admin page`);
+        assert.deepEqual({ ...ctx.UetTag.init() }, { loaded: false, reason: 'admin' }, p);
+    }
+});
+
+test('§5b POSITIVE CONTROL — a storefront page does request bat.js', () => {
+    for (const p of ['/', '/products/x/SKU1', '/order-confirmation']) {
+        const { scripts } = runGtag(p);
+        assert.equal(scripts.filter((s) => /bat\.bing\.com/.test(s.src || '')).length, 1,
+            `${p}: the storefront lost its UET tag`);
     }
 });
 

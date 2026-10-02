@@ -9,6 +9,41 @@ const AccountPage = {
     initialized: false,
 
     /**
+     * The order-confirmation email's "Set up scheduled reorder" link ends, after
+     * a backend confirm page and the shopper's POST, at
+     * `/account?subscription=<outcome>` (handoff Oct 2026 §2.2). Nothing read the
+     * param before ERR-300, so a shopper who set one up landed on a page that
+     * said nothing about it. ONLY these four values are ever acted on or carried
+     * through the login redirect; anything else is ignored, never reflected.
+     */
+    SUBSCRIPTION_OUTCOMES: {
+        created:     { type: 'success', text: 'Your scheduled reorder is set up.' },
+        exists:      { type: 'success', text: 'You already have a scheduled reorder for this order — nothing has changed.' },
+        unavailable: { type: 'warning', text: 'A scheduled reorder isn\'t available for this order. Contact us and we\'ll help.' },
+        error:       { type: 'error',   text: 'We couldn\'t set up your scheduled reorder. Please try again from your email, or contact us.' },
+    },
+
+    /** The `subscription` param if it is one of the four outcomes, else null. */
+    subscriptionOutcome() {
+        const v = new URLSearchParams(window.location.search).get('subscription');
+        return Object.prototype.hasOwnProperty.call(this.SUBSCRIPTION_OUTCOMES, v) ? v : null;
+    },
+
+    /** Tell the shopper what happened, then drop the param so a refresh doesn't repeat it. */
+    handleSubscriptionParam() {
+        const outcome = this.subscriptionOutcome();
+        if (!outcome) return;
+        const { type, text } = this.SUBSCRIPTION_OUTCOMES[outcome];
+        if (typeof showToast === 'function') showToast(text, type, 10000);
+        else this.showToast(text, type === 'error' ? 'error' : 'info');
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('subscription');
+            window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+        } catch (_) { /* replaceState is best-effort */ }
+    },
+
+    /**
      * Initialize account page
      */
     async init() {
@@ -32,8 +67,13 @@ const AccountPage = {
             // this must not become an open redirect or a reflection sink.
             const intent = new URLSearchParams(window.location.search).get('intent');
             const tab = intent === 'signup' ? '&tab=register' : '';
+            // A scheduled-reorder outcome must survive the sign-in round trip,
+            // or a signed-out shopper never learns what their click did (ERR-300).
+            // Only an allowlisted value is carried — never the raw query.
+            const outcome = this.subscriptionOutcome();
+            const back = window.location.pathname + (outcome ? `?subscription=${outcome}` : '');
             window.location.href = '/account/login?redirect='
-                + encodeURIComponent(window.location.pathname) + tab;
+                + encodeURIComponent(back) + tab;
             return;
         }
 
@@ -47,6 +87,8 @@ const AccountPage = {
 
         // Load user info into sidebar (for all account pages)
         this.loadUserInfo();
+
+        this.handleSubscriptionParam();
 
         // Mobile pill-bar nav (<=1024px, ERR-099): the account nav is one
         // horizontally scrollable row — bring the current page's pill into

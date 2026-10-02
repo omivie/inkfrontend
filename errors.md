@@ -41,6 +41,24 @@ describing the same incident.
 
 ---
 
+## ERR-303 — The Microsoft Ads tag counted every admin dashboard visit as a storefront visitor — **RESOLVED (frontend)** (2026-10-02)
+
+**Source.** Verifying `backend-docs/inbox/paid-traffic-conversion-FE-handoff-oct2026.md` §3 (1 Oct; superseded by the 2 Oct ad-clicks handoff, which folds §1 into ERR-301 and §2 into ERR-302). §3 asked for the UET tag on every page and a purchase event carrying the order total. Both have been live since ERR-278/279: tag `97269770`, `bat.bing.com` in `script-src` and `connect-src`, and `UetTag.purchase()` inside `markConversion()`.
+
+**The defect.** `html/admin/index.html` loads `gtag.js`, and `UetTag.init()` runs at file load with no path check. `WebVitalsReporter.start()` in the same file already skips `/admin`; the UET loader did not. Every dashboard visit loaded `bat.js` and sent a `pageLoad` to the Microsoft Ads account. That puts staff in remarketing audiences and in the conversion-rate denominator Microsoft bids on.
+
+**The fix.** `UetTag.init()` returns `{ loaded: false, reason: 'admin' }` on `/admin*`, before the script is requested. Same shape as the existing skip, and the reason is in the return value. `gtag.js?v=` restamped (md5) in all 42 pages.
+
+**Proof.**
+- `tests/uet-tag-sep2026.test.js` §5b executes `gtag.js` in a VM at four admin paths: no `bat.js`, reason `admin`. A positive control at three storefront paths requires exactly one `bat.js`, so a harness that injects nothing cannot pass. The harness now supplies `location`.
+- `scripts/redproof-uet.sh` gained a mutation that deletes the guard. It is caught: 27/27.
+- Browser, `localhost:3000`: `/admin` had 0 `bat.bing.com` scripts and resources and `window.uetq` undefined. The PDP had `bat.js` plus the `97269770` action beacons and `window.uetq` was a `UET` object. That PDP visit sent one real pageview from localhost to the Microsoft account.
+- `npm test`: 6878 pass. The 1 fail was this session's own `.playwright-mcp/` directory, since deleted.
+
+**Not changed, owner's call.** The `gtag('config', 'G-SDQELG0FGD')` and `gtag('config', 'AW-18032498762')` lines at the top of `gtag.js` also run on `/admin`. Google Analytics and the Google Ads "All visitors" audience therefore still include dashboard visits. Skipping them would remove admin pageviews from GA4 history, so it is a reporting decision and not a cleanup.
+
+**§1 cross-check, handed to ERR-301's owner.** This handoff's acceptance is "Add sits fully above the top edge of every fixed element" at 1366×768 and 1280×720. ERR-301's probe tests rectangle intersection, which a bottom-left consent card can pass while starting above Add's bottom. The ERR-301 session now prints `Add.bottom ≤ min(banner.top, badge.top)` as a separate INFO line at all six viewports, and its backend reply says intersection plus `elementFromPoint` is the owner-accepted bar. Live baseline before the deploy (1366×768, CDR1070BK): Add 688–736, badge x1270–1356 y643–707 (lifted), banner 707–768, and `elementFromPoint` at Add's centre returned `consent-banner`.
+
 ## ERR-301 — Paid laptop visitors could not see a price or an Add button: the PDP put Add at y 703 under our own consent bar and Google badge, the series page put its first price at y 635, `code=288XL` led with standard 288, and a genuine product with no photo showed "No Image" — **RESOLVED (frontend)** (2026-10-02)
 
 **Source.** `backend-docs/inbox/ad-visitor-dropoff-FE-handoff-oct2026.md`, superseded mid-session by `ad-clicks-to-orders-FE-handoff-oct2026.md` (both 2 Oct). It re-raised the never-built `paid-traffic-conversion-FE-handoff-oct2026.md` (1 Oct). Google Ads, 29 Sep–2 Oct: 54 tracked visits and 0 orders. The same series page converts 13% of paid visitors on a phone and under 4% on a laptop. Split by FILE with a peer: §0/§4/§6 footer/§7 = **ERR-302**. This entry covers §1, §2, §3, §5, §6 on the PDP, and §8. Reply: `backend-docs/outbox/ad-clicks-to-orders-FE-reply-oct2026.md` (ERR-301 section).
@@ -137,6 +155,55 @@ describing the same incident.
 **Shipped broken, fixed within the hour (2026-10-02, deploy 04:01Z).** The live probe went red on the footer link: `initFooter()` threw `renderGoogleReviewsLink is not defined`. The commit was built from HEAD by applying zero-context (`-U0`) hunks to a shared-index file, and three insertions landed a few lines low. The function ended up nested inside `syncFooterAccordions()`, the markup sat outside its container, and checkout's status line went inside its `<label>`. Every text-level test passed, because they extract a function by name and cannot see its scope. Fixed by rebuilding each blob from the working file minus the peers' hunks. A new test pins the function's brace depth to `renderTrustStats`'s; it fails on the broken blob (depth 2 vs 1). ***Never apply `-U0` hunks to build a commit. A text test cannot see scope. Diff the committed blob against the working file before pushing.***
 
 **Tests.** `tests/ad-clicks-to-orders-oct2026.test.js` (29). `python3 scripts/redproof-ad-clicks-to-orders.py`: 20/20 mutations red. Pins updated deliberately: the `guestCartEmail:false` pins (conversion-fixes §8, post-deploy §1), and the Ads add-to-cart suite now counts `conversion` events (still exactly one) rather than all gtag calls. Probe: `npm run probe:ad-clicks` (READ-ONLY; `--record-opt-in=<email>` is the one explicit write mode).
+
+## ERR-300 — The backend's audit handoff: a home-address lookup anyone could call, a product FAQ hidden on every PDP, a reorder landing that said nothing, and share images that were 404s — **RESOLVED (frontend)** (2026-10-02)
+
+**Source.** `backend-docs/inbox/backend-audit-fe-handoff-oct2026.md` (backend `390ae16`, live 2026-09-30). Reply: `backend-docs/outbox/backend-audit-FE-reply-oct2026.md`. Every claim was measured on production before any code changed. Nine held. One did not. Two "no change expected" checks were FE defects.
+
+**§1.1 Guest prefill.**
+- **The security hole was on the backend, and it is closed.** `POST /api/checkout/guest-prefill` returned name, phone and street address for any email to an unauthenticated caller. It now returns `{has_previous_order:false}` (measured).
+- **Our checkout never broke.** It read FLAT fields (`first_name`, `address_line1`), not `shipping_address`, so it had silently been filling nothing.
+- **The autofill is deleted rather than guarded.** `tryGuestPrefill` now reads only `has_previous_order` + `welcome_message` and never writes a field. A test feeds it the OLD PII shape and asserts zero fills.
+- **The banner also stopped hiding.** It used to be gated behind "address field empty"; that gate is gone.
+- **The prod 400s.** The blur now sends only `input.validity.valid` emails, once per address, which addresses the known 400 `VALIDATION_FAILED` (ERR-225 note). The backend's validator is stricter than the browser's (`x@example.invalid` → 400), so a few may remain.
+
+**§1.3 The visible FAQ was hidden on every product page.**
+- **The cause.** The PDP read `seo.jsonLd.faq_schema`. Production's `seo` is `{title, description, canonical, og, keywords}`, with no `jsonLd`.
+- **Measured in a browser on prod:** `#product-faq` hidden, 0 items.
+- **The fix.** It now reads `info.faqJsonLd` first, with the old key second (ERR-158). Locally: 6 questions, and the delivery answer is the trust-signal text word for word.
+- ***A renderer with no fallback copy fails SILENT when its key moves. "Nothing rendered" looked exactly like "this product has no FAQ."***
+
+**§1.2 The premise was false.**
+- The handoff said bots get the backend prerender for `/genuine-vs-compatible`. They don't. `middleware.js` has no arm for it, Googlebot and a browser get byte-identical HTML, and `/api/prerender/genuine-vs-compatible` returns 404.
+- Neither the old sentence nor the new one exists in our repo, on the live page, or in five sampled prerenders.
+- No copy changed. "Guaranteed to work" is now test-banned, and the question is asked back as **BF-097**.
+
+**§2.2 `/account?subscription=…` had no handler at all.**
+- The backend redirects the "Set up scheduled reorder" email flow there with `created|exists|unavailable|error`. Nothing read it.
+- The login bounce also dropped it, because `redirect=` carried the pathname only.
+- Now an allowlist of 4 outcomes gives a toast, then strips the param. The outcome is carried through sign-in (measured `redirect=%2Faccount%3Fsubscription%3Dcreated`). A hostile value is ignored (measured `redirect=%2Faccount`). `__proto__`/`constructor` are tested.
+
+**§2.3 `?rated=N`.** `handleRatedParam` ran inside the reviews `try`, so a failed reviews fetch swallowed the thank-you for a rating that was already saved. It now runs after the catch. Measured with `/reviews` aborted: the toast shows and the param is stripped.
+
+**§2.4 Same-day wording.**
+- **Fallback titles.** `seo-meta.js` titles said "— Same-Day Dispatch". They now say "— Fast NZ Delivery", the backend's measured wording; the toner title is byte-identical.
+- **Fallback descriptions** use "Auckland metro: same-day dispatch by 2pm NZT." The backend's full sentence pushed home and shop over 155 chars and truncation cut "Free shipping over $100" to a stub.
+- **Pages.** The `business.html` line and the `about.html` heading are qualified.
+- **Countdown.** The countdown qualifier comes from `delivery_estimate.promise`, and the live promise still names Auckland metro.
+
+**§3 Share image + logo were 404s, and worse than the note said.**
+- **Share image.** The FE's og/twitter image was `www…/assets/images/logo.png` on 41 pages, not `og-default.png`. That file never existed (404).
+- **Organization logo.** `www…/logo.png` (static homepage JSON-LD + `footer.js`) was also a 404.
+- **Now:** `https://api.inkcartridges.co.nz/og-default.png` (+1200×630 on the three static og pages), and the exact logo URL `/api/schema/site` emits.
+
+**Tests and probe.**
+- `tests/backend-audit-handoff-oct2026.test.js`: 19 tests. They run the real method source for §1 and §3.
+- **Red-proof against HEAD:** 14 red for the right reason, 5 positive controls green on both.
+- **Changed tests.** `seo-meta-rewrite-may2026` and `review-flywheel-fe-jul2026` were updated: they pinned the old titles and the old call site.
+- **Full suite:** 6817 pass, 1 fail. The fail is a stale `.playwright-mcp/` directory from 2026-09-29 that predates this work and was not created by it.
+- `npm run probe:backend-audit` is READ-ONLY and prints its mode. Its negative control is that the two old www image URLs still 404. `--site` is red on prod until this deploys.
+
+---
 
 ## ERR-299 — The backend's round-2 answer retired six frontend workarounds, and the Best Sellers tab was offering two filters its server had never honoured — **RESOLVED (frontend)** (2026-09-29)
 

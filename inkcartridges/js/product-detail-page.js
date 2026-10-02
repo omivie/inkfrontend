@@ -600,7 +600,9 @@
             document.getElementById('og-title').content = og.title || `${info.displayName} | InkCartridges.co.nz`;
             document.getElementById('og-description').content = og.description || metaDescription;
             document.getElementById('og-url').content = canonicalUrl;
-            document.getElementById('og-image').content = og.image || info.image_url || '/assets/images/logo.png';
+            // No product image ⇒ the backend's default share card. `/assets/images/logo.png`
+            // never existed (404 — ERR-300).
+            document.getElementById('og-image').content = og.image || info.image_url || 'https://api.inkcartridges.co.nz/og-default.png';
             document.getElementById('og-type').content = og.type || 'product';
             document.getElementById('og-price').content = price.toFixed(2);
 
@@ -628,11 +630,20 @@
             // two Product nodes with different @ids on the same URL — a Google
             // Merchant Center "Unacceptable Business Practices" trigger.
             //
-            // `seo.jsonLd.faq_schema` is still read — but only to populate the
-            // *visible* FAQ accordion (renderFaqAccordion below). That is on-page
-            // UI, not JSON-LD markup, so it carries no duplication risk.
-            if (seo.jsonLd && typeof seo.jsonLd === 'object' && seo.jsonLd.faq_schema) {
-                this._faqSchema = seo.jsonLd.faq_schema;
+            // The backend's FAQPage object is still read — but only to populate
+            // the *visible* FAQ accordion (renderFaqAccordion below). That is
+            // on-page UI, not JSON-LD markup, so it carries no duplication risk.
+            // The visible answers MUST be the prerender's FAQPage answers word for
+            // word (invariant 11), so they come from the backend and never from
+            // copy of ours. `/api/products/:sku` carries it as `faqJsonLd`; the
+            // older `seo.jsonLd.faq_schema` key is ABSENT on prod (measured
+            // 2026-10-02: `seo` has no `jsonLd`), which hid the accordion on every
+            // PDP (ERR-300). The old key stays as the second read.
+            const faq = (info.faqJsonLd && typeof info.faqJsonLd === 'object')
+                ? info.faqJsonLd
+                : (seo.jsonLd && typeof seo.jsonLd === 'object' ? seo.jsonLd.faq_schema : null);
+            if (faq && Array.isArray(faq.mainEntity)) {
+                this._faqSchema = faq;
             }
 
             // Breadcrumb
@@ -3095,16 +3106,20 @@
                     });
                 }
 
-                // §1.1 — welcome a customer back from a one-click email rating.
-                // The backend records the rating then 302-redirects here with
-                // ?rated=N (N = 1–5). Thank them, reveal the reviews, and scroll
-                // to them. setupReviewForm() has already swapped the write-a-review
-                // form for the "You rated this N★" acknowledgement (§1.3), so we
-                // don't dangle a comment prompt the backend can't accept.
-                this.handleRatedParam(params, section);
             } catch (e) {
                 // Reviews are non-critical
             }
+
+            // §1.1 — welcome a customer back from a one-click email rating.
+            // The backend records the rating then 302-redirects here with
+            // ?rated=N (N = 1–5). Thank them, reveal the reviews, and scroll
+            // to them. setupReviewForm() has already swapped the write-a-review
+            // form for the "You rated this N★" acknowledgement (§1.3), so we
+            // don't dangle a comment prompt the backend can't accept.
+            // OUTSIDE the try above: the rating is already saved by the time the
+            // shopper lands here, so a failed reviews fetch must not swallow the
+            // thank-you (ERR-300; Chrome now completes this redirect, handoff §2.3).
+            this.handleRatedParam(new URLSearchParams(window.location.search), section);
         },
 
         // Reads ?rated=N (1–5) and welcomes the customer back after a one-click

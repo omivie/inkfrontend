@@ -268,7 +268,9 @@
         legalName: TRUST.legalEntity,
         alternateName: TRUST.tradingName,
         url: SITE,
-        logo: SITE + '/logo.png',
+        // www/logo.png never existed (404); the backend serves the site logo
+        // and its own /api/schema/site emits this exact URL (ERR-300).
+        logo: 'https://api.inkcartridges.co.nz/api/images/optimize?url=site/IC_2.png&format=png&w=512',
         email: TRUST.email,
         telephone: TRUST.phoneSchema,
         taxID: TRUST.gstNumber,

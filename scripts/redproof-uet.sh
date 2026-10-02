@@ -202,6 +202,15 @@ run_case "a trailing // comment smuggles gtag( into the UET module" \
   "$H"'
 edit("js/gtag.js","    CURRENCY: \x27NZD\x27,\n\n    /* THE ONLY ACTIONS lead","    CURRENCY: \x27NZD\x27, // unlike gtag( above\n\n    /* THE ONLY ACTIONS lead")'
 
+run_case "the /admin skip is removed from UetTag.init()" \
+  "$H"'
+import re,io,os
+p=os.path.join(root,"js/gtag.js")
+s=io.open(p,encoding="utf-8").read()
+s2=s.replace("            if (location.pathname.startsWith(\x27/admin\x27)) return { loaded: false, reason: \x27admin\x27 };\n","",1)
+assert s2!=s, "UET admin guard not found"
+io.open(p,"w",encoding="utf-8").write(s2)'
+
 run_case "a page keeps its controller but loses gtag.js" \
   "$H"'
 import re,io,os

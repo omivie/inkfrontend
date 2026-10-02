@@ -388,10 +388,17 @@ const SeoMeta = {
     // numbers and reconcile() fills the exact version). Trust clauses drop out
     // when their value is null. All output is compliance-clean.
 
+    // Same-day dispatch is an AUCKLAND METRO promise only (BF-078); the
+    // backend dropped every unqualified "same-day dispatch" from its titles and
+    // descriptions on 2026-09-30. Titles copy its "— Fast NZ Delivery" exactly
+    // (measured on the prerender 2026-10-02, ERR-300). The description clause
+    // is a shorter, equally qualified form of its "Auckland metro orders by 2pm
+    // NZT dispatch same day." — the full sentence pushed home/shop past 155
+    // chars and truncation cut "Free shipping over $100" down to a stub.
     _trustClauses(trust) {
         return {
             founded: trust.foundedYear ? `NZ-owned since ${trust.foundedYear}.` : null,
-            dispatch: trust.cutoff ? `${trust.cutoff} Auckland same-day dispatch.` : null,
+            dispatch: trust.cutoff ? `Auckland metro: same-day dispatch by ${trust.cutoff} NZT.` : null,
             guarantee: trust.guaranteeDays ? `${trust.guaranteeDays}-day guarantee.` : null,
         };
     },
@@ -399,13 +406,13 @@ const SeoMeta = {
     _buildHome(ctx) {
         const t = this._trustClauses(ctx.trust);
         const title = this.titleLadder([
-            'Ink Cartridges NZ — Same-Day Dispatch | InkCartridges.co.nz',
-            'Ink Cartridges NZ — Same-Day Dispatch',
+            'Ink Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz',
+            'Ink Cartridges NZ — Fast NZ Delivery',
             'Ink Cartridges NZ',
         ]);
         const description = this.truncateDescription(this._joinClauses([
             t.founded,
-            `Ink cartridges & toner — ${this.BRANDS_LINE}`,
+            `Ink & toner — ${this.BRANDS_LINE}`,
             t.dispatch,
             t.guarantee,
             `Free shipping over $${ctx.free}.`,
@@ -416,12 +423,12 @@ const SeoMeta = {
     _buildShop(ctx) {
         const t = this._trustClauses(ctx.trust);
         const title = this.titleLadder([
-            'Ink & Toner NZ — Same-Day Dispatch | InkCartridges.co.nz',
-            'Ink & Toner NZ — Same-Day Dispatch',
+            'Ink & Toner NZ — Fast NZ Delivery | InkCartridges.co.nz',
+            'Ink & Toner NZ — Fast NZ Delivery',
             'Ink & Toner NZ',
         ]);
         const description = this.truncateDescription(this._joinClauses([
-            `Ink cartridges, toner & supplies. ${this.BRANDS_LINE}`,
+            `Ink, toner & supplies. ${this.BRANDS_LINE}`,
             t.founded,
             t.dispatch,
             `Free shipping over $${ctx.free}.`,
@@ -433,8 +440,8 @@ const SeoMeta = {
         const t = this._trustClauses(ctx.trust);
         const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
         const title = this.titleLadder([
-            `${label} — Same-Day Dispatch | InkCartridges.co.nz`,
-            `${label} — Same-Day Dispatch`,
+            `${label} — Fast NZ Delivery | InkCartridges.co.nz`,
+            `${label} — Fast NZ Delivery`,
             label,
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -453,8 +460,8 @@ const SeoMeta = {
         // Brand prerender is category-agnostic (middleware drops ?category), so
         // the fallback omits the category too — matching what the bot receives.
         const title = this.titleLadder([
-            `${brand} NZ — Same-Day Dispatch | InkCartridges.co.nz`,
-            `${brand} NZ — Same-Day Dispatch`,
+            `${brand} NZ — Fast NZ Delivery | InkCartridges.co.nz`,
+            `${brand} NZ — Fast NZ Delivery`,
             `${brand} NZ`,
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -471,8 +478,8 @@ const SeoMeta = {
         const printer = ctx.printerDisplay || this._titleCaseSlug(ctx.printerSlug);
         if (!printer) return null;
         const title = this.titleLadder([
-            `${printer} Cartridges — Same-Day Dispatch | InkCartridges.co.nz`,
-            `${printer} Cartridges — Same-Day Dispatch`,
+            `${printer} Cartridges — Fast NZ Delivery | InkCartridges.co.nz`,
+            `${printer} Cartridges — Fast NZ Delivery`,
             `${printer} Cartridges`,
         ]);
         const description = this.truncateDescription(this._joinClauses([

@@ -3038,10 +3038,12 @@ const API = {
     // =========================================================================
 
     /**
-     * Prefill returning guest's name/address from shadow_accounts.
-     * Non-blocking — returns null on failure so checkout continues normally.
+     * Returning-guest flag for checkout's "Welcome back" banner. Despite the
+     * endpoint name it carries NO personal data since backend 390ae16
+     * (2026-09-30): `{ has_previous_order, customer_status?, welcome_message? }`
+     * (ERR-300). Non-blocking — returns null on failure.
      * @param {string} email - Guest email
-     * @returns {Promise<object|null>} { first_name, last_name, address_line1, city, ... } or null
+     * @returns {Promise<object|null>} { ok, data: { has_previous_order, ... } } or null
      */
     async guestPrefill(email) {
         try {

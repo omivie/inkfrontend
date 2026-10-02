@@ -98,7 +98,9 @@ test('§1.1 the PDP welcomes a one-click rater via ?rated=N and strips the param
     assert.match(fn, /searchParams\.delete\('rated'\)/, 'must delete the rated param');
     assert.match(fn, /replaceState/, 'must strip the param from the address bar');
     // …and loadReviews must actually invoke it.
-    assert.match(PDP_JS, /this\.handleRatedParam\(params, section\)/,
+    // ERR-300: called AFTER the reviews try/catch with a fresh read of the
+    // query, so a failed reviews fetch can't swallow the thank-you.
+    assert.match(PDP_JS, /this\.handleRatedParam\(new URLSearchParams\(window\.location\.search\), section\)/,
         'loadReviews() must call handleRatedParam');
 });
 

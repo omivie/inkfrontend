@@ -537,6 +537,11 @@ const UetTag = {
             if (typeof window === 'undefined' || typeof document === 'undefined') {
                 return { loaded: false, reason: 'no-dom' };
             }
+            // Same skip as WebVitalsReporter.start(). admin/index.html loads this file,
+            // and without it every dashboard visit was a Microsoft Ads pageview:
+            // staff in the remarketing audience and in the conversion-rate
+            // denominator (paid-traffic handoff follow-up, 2026-10-02).
+            if (location.pathname.startsWith('/admin')) return { loaded: false, reason: 'admin' };
             if (!UET_TAG_ID) return { loaded: false, reason: 'no-tag-id' };
             if (window.uetq && !Array.isArray(window.uetq)) {
                 return { loaded: false, reason: 'already-loaded' };

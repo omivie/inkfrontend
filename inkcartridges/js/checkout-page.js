@@ -1205,11 +1205,17 @@
                 }
             });
 
-            // Guest prefill: when an unauthenticated user enters their email,
-            // try to autofill their shipping address from previous guest orders.
+            // Returning-guest greeting: when an unauthenticated user enters their
+            // email, ask whether it has ordered before. Only a VALID address is
+            // sent (the backend 400s anything else — two VALIDATION_FAILED per
+            // guest checkout were logged in prod, ERR-225 note) and each address
+            // is asked once, however often the field blurs.
             const emailField = document.getElementById('email');
             if (emailField) {
-                emailField.addEventListener('blur', () => this.tryGuestPrefill(emailField.value));
+                emailField.addEventListener('blur', () => {
+                    if (!emailField.validity.valid) return;
+                    this.tryGuestPrefill(emailField.value.trim());
+                });
             }
 
             // Coupon code handler
@@ -1219,47 +1225,39 @@
         },
 
         /**
-         * For returning guests — fetch saved name/address from shadow_accounts
-         * and fill the shipping form. Non-blocking; fails silently.
+         * Returning-guest greeting (ERR-300). `POST /api/checkout/guest-prefill`
+         * used to answer an UNAUTHENTICATED request with the guest's name, phone
+         * and street address given only an email — anyone who knew a customer's
+         * email could read their home address. Since backend 390ae16
+         * (2026-09-30) it returns only `{ has_previous_order, customer_status?,
+         * welcome_message? }`, so this reads nothing else and never fills a
+         * form field. Address autofill may return only behind proof of email
+         * ownership (magic link / one-time code) — a backend build, not a
+         * frontend re-read of fields that are gone. Non-blocking; fails silently.
          */
         async tryGuestPrefill(email) {
             if (!email || !email.includes('@')) return;
             // Only for guests — authenticated users already get profile prefill
             if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return;
-            // Don't overwrite if user already filled address fields
-            const addr1 = document.getElementById('address1');
-            if (addr1 && addr1.value.trim()) return;
+            const key = email.toLowerCase();
+            if (this._guestPrefillAsked === key) return;
+            this._guestPrefillAsked = key;
 
             try {
                 const res = await API.guestPrefill(email);
                 if (!res?.ok || !res?.data) return;
                 const d = res.data;
-                this.fillAddressFields({
-                    first_name: d.first_name,
-                    last_name: d.last_name,
-                    recipient_name: d.recipient_name,
-                    address_line1: d.address_line1,
-                    address_line2: d.address_line2,
-                    city: d.city,
-                    region: d.region,
-                    postal_code: d.postal_code,
-                });
-
-                // Returning-customer hint — backend sets has_previous_order + welcome_message
-                // when this email has ordered before. Show a friendly banner above the form.
-                if (d.has_previous_order && d.welcome_message) {
+                if (d.has_previous_order === true && typeof d.welcome_message === 'string') {
                     this._renderReturningGuestBanner(d.welcome_message);
                 }
-
-                DebugLog.log('Guest prefill: address autofilled from previous order');
             } catch {
-                // Non-blocking — guest fills in manually
+                // Non-blocking — the greeting is a nicety
             }
         },
 
         /**
          * Render the "Welcome back!" banner above the checkout form.
-         * Idempotent — replaces an existing banner so address re-prefills don't stack.
+         * Idempotent — replaces an existing banner so repeat lookups don't stack.
          */
         _renderReturningGuestBanner(message) {
             const form = document.getElementById('checkout-form');

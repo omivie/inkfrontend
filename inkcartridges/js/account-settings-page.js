@@ -76,7 +76,11 @@
             // Always setup form handlers first
             this.setupFormSubmit();
 
-            // Handle ?unsubscribed=<type> redirect from email links
+            // Handle ?unsubscribed=<type> redirect from email links. Since backend
+            // 390ae16 (2026-09-30) lifecycle-email unsubscribes end on a backend
+            // confirm + result page and no longer come here; CAMPAIGN unsubscribes
+            // (/api/campaigns/unsubscribe/:id) still redirect here, so this stays
+            // (handoff Oct 2026 §2.1, ERR-300).
             const params = new URLSearchParams(window.location.search);
             const unsubType = params.get('unsubscribed');
             if (unsubType) {

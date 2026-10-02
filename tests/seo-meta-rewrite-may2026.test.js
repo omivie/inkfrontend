@@ -190,13 +190,13 @@ test('§4 decodeEntities handles &amp; &mdash; numeric', () => {
 });
 test('§4 extractHead pulls decoded title + description from prerender HTML', () => {
     const html = `<!doctype html><html><head>
-        <title>Canon NZ &amp; More — Same-Day Dispatch | InkCartridges.co.nz</title>
+        <title>Canon NZ &amp; More — Fast NZ Delivery | InkCartridges.co.nz</title>
         <meta charset="utf-8">
         <meta property="og:title" content="ignore me">
         <meta name="description" content="200 Canon cartridges &amp; toner. Free shipping over $100.">
       </head><body>...</body></html>`;
     const head = SeoMeta.extractHead(html);
-    assert.equal(head.title, 'Canon NZ & More — Same-Day Dispatch | InkCartridges.co.nz');
+    assert.equal(head.title, 'Canon NZ & More — Fast NZ Delivery | InkCartridges.co.nz');
     assert.equal(head.description, '200 Canon cartridges & toner. Free shipping over $100.');
 });
 test('§4 extractHead is attribute-order independent and tolerant of single quotes', () => {
@@ -400,16 +400,21 @@ test('§8 every listing surface builds a title <=60 and description <=155 (full 
 
 test('§8 toner title uses the ladder (full form would exceed 60)', () => {
     const b = SeoMeta.buildForSurface('category-toner', ctx(FULL_TRUST));
-    // "Toner Cartridges NZ — Same-Day Dispatch | InkCartridges.co.nz" is 61 chars
+    // "Toner Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz" is exactly
+    // 60 chars, so since ERR-300 the full rung fits — and it is byte-identical to
+    // the backend's toner prerender title (measured 2026-10-02).
     assert.ok(b.title.length <= 60);
-    assert.ok(b.title.startsWith('Toner Cartridges NZ'));
-    assert.ok(!b.title.includes('| InkCartridges.co.nz'), 'ladder should have dropped the brand suffix');
+    assert.equal(b.title, 'Toner Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz');
+    // The ladder itself still drops the suffix when the full rung is too long.
+    const long = SeoMeta.titleLadder(['x'.repeat(61), 'short', 'shorter']);
+    assert.equal(long, 'short');
 });
 
 test('§8 trust clauses OMITTED (not guessed) when trust is empty', () => {
     const home = SeoMeta.buildForSurface('home', ctx(EMPTY_TRUST));
     assert.ok(!/NZ-owned since/.test(home.description), 'no founded clause without trust');
     assert.ok(!/same-day dispatch/i.test(home.description), 'no dispatch clause without cutoff');
+    assert.ok(!/Auckland metro/.test(home.description), 'no dispatch clause without cutoff');
     assert.ok(!/-day guarantee/.test(home.description), 'no guarantee clause without days');
     // still produces a valid, useful description
     assert.ok(home.description.includes('Free shipping over $100.'));
@@ -418,7 +423,8 @@ test('§8 trust clauses OMITTED (not guessed) when trust is empty', () => {
 test('§8 trust clauses PRESENT when trust resolved', () => {
     const home = SeoMeta.buildForSurface('home', ctx(FULL_TRUST));
     assert.ok(home.description.includes('NZ-owned since 2008.'));
-    assert.ok(home.description.includes('2pm Auckland same-day dispatch.'));
+    // Same-day is an Auckland-metro promise only (BF-078, ERR-300).
+    assert.ok(home.description.includes('Auckland metro: same-day dispatch by 2pm NZT.'));
     assert.ok(home.description.includes('30-day guarantee.'));
 });
 
@@ -502,12 +508,12 @@ test('§10 render() applies the trust-built fallback when the prerender fetch fa
         },
     });
     await S2.render({ surface: 'home' });
-    assert.ok(doc.title.startsWith('Ink Cartridges NZ — Same-Day Dispatch'), `title was "${doc.title}"`);
+    assert.ok(doc.title.startsWith('Ink Cartridges NZ — Fast NZ Delivery'), `title was "${doc.title}"`);
     assert.ok(doc._metas['meta[name="description"]']._content.includes('NZ-owned since 2008.'));
 });
 
 test('§10 render() reconciles to the byte-exact prerender head when available', async () => {
-    const prerenderHtml = `<head><title>Canon NZ — Same-Day Dispatch | InkCartridges.co.nz</title>
+    const prerenderHtml = `<head><title>Canon NZ — Fast NZ Delivery | InkCartridges.co.nz</title>
         <meta name="description" content="200 Canon ink cartridges &amp; toner — 200 genuine, 0 compatible. NZ-owned since 2008. Free shipping over $100."></head>`;
     const { S2, doc } = rigForRender({
         location: { pathname: '/shop', search: '?brand=canon' },
@@ -518,11 +524,11 @@ test('§10 render() reconciles to the byte-exact prerender head when available',
         },
     });
     await S2.render({ hints: { brand: 'Canon' } });
-    assert.equal(doc.title, 'Canon NZ — Same-Day Dispatch | InkCartridges.co.nz');
+    assert.equal(doc.title, 'Canon NZ — Fast NZ Delivery | InkCartridges.co.nz');
     assert.equal(doc._metas['meta[name="description"]']._content,
         '200 Canon ink cartridges & toner — 200 genuine, 0 compatible. NZ-owned since 2008. Free shipping over $100.');
     // og mirrors are kept in sync
-    assert.equal(doc._metas['meta[property="og:title"]']._content, 'Canon NZ — Same-Day Dispatch | InkCartridges.co.nz');
+    assert.equal(doc._metas['meta[property="og:title"]']._content, 'Canon NZ — Fast NZ Delivery | InkCartridges.co.nz');
 });
 
 test('§10 render() is a no-op on non-prerendered surfaces (search) — leaves page copy', async () => {
@@ -651,6 +657,6 @@ test('§13 home/shop fixed titles are <=60 chars', () => {
     const home = SeoMeta.buildForSurface('home', ctx(FULL_TRUST));
     const shop = SeoMeta.buildForSurface('shop-landing', ctx(FULL_TRUST));
     assert.ok(home.title.length <= 60 && shop.title.length <= 60);
-    assert.equal(home.title, 'Ink Cartridges NZ — Same-Day Dispatch | InkCartridges.co.nz');
-    assert.equal(shop.title, 'Ink & Toner NZ — Same-Day Dispatch | InkCartridges.co.nz');
+    assert.equal(home.title, 'Ink Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz');
+    assert.equal(shop.title, 'Ink & Toner NZ — Fast NZ Delivery | InkCartridges.co.nz');
 });
