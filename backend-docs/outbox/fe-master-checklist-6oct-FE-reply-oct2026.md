@@ -51,6 +51,27 @@ All "local" measurements are a browser on `localhost:3000` against the productio
 
 **Production run of the new probe:** `PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:fe-master-6oct -- --record` → 21 passed, 0 failed, 0 skipped, rollback verified (the probe's cart re-read at ×0 after holding ×1).
 
+## What changes on your side (logs, limiters, contracts)
+
+**New request patterns since `b2d07c0f`:**
+- **`POST /api/cart/validate` (read-only, no `acknowledge`)** is sent ONCE per settled cart on `/cart`. It is sent again only after the cart changes or after 60 s. The click on Proceed to Checkout reuses that answer, so most clicks no longer send their own validate. Expect roughly one validate per `/cart` view plus one per quantity change. It counts toward `cartLimiter` and the shared per-IP budget.
+- **`POST /api/checkout/guest-prefill`** is still sent once per address, on blur. It can now also be sent when "Continue to Payment" is pressed, for an address that was never blurred (browser autofill). It stays one request per address, and only for guests.
+- **`GET /api/cart` after a quantity change is gone** when the PUT carries `data.cart`. A rare extra GET can still happen when a cart has waited 4 s with no re-price on the way (a safety net so "Updating…" always ends).
+
+**Contracts the storefront now depends on.** Please tell us before changing any of these:
+- `PUT /api/cart/items/:productId` → `data.cart`, same shape as `GET /api/cart` `data`. If it is absent, we fall back to the GET, so dropping it costs speed, not correctness.
+- Per cart line: `quantity_breaks[]` with `min_quantity` and `business_price` (contract price folded in, as your 6 Oct note says) and `volume_unit_price`. The unit price column is read from these.
+- `400 VALIDATION_FAILED` with `details[].field === 'email'` on guest-prefill, and `'guest_email'` on `POST /api/orders`. These are matched by field name. If the name changes, the gate fails open (it never blocks wrongly), but it would stop catching bad emails.
+
+**Not part of the email gate:** `POST /api/cart/guest-contact` (the "Email me a copy of my cart" box). Its 400 still only marks that box as failed. Only guest-prefill blocks "Continue to Payment".
+
+**Our test traffic in your logs on 6 Oct, roughly 12:00–12:45 NZT (23:00–23:45 UTC 5 Oct):**
+- `POST /api/checkout/guest-prefill` 400s for `test@gmail.con`, each followed by a 200 for `test@gmail.com` (probe runs).
+- GLC3313BK added to, re-quantified in and removed from guest carts (probe runs; each restored to ×0 and verified).
+- **Two guest carts still hold GLC3313BK ×1.** They came from two measurements taken before the fix (item 3 and item 9), which did not roll back. They are abandoned guest sessions with no email or opt-in attached, so no reminder can go out. Ignore them or purge them.
+
+None of this reached `POST /api/orders`. For your one-week item 15 check, guest-prefill 400s are now expected (that is the gate working). The signal to watch is `validation_failed` on `/orders` for `guest_email`.
+
 ## Asks still open
 
 - **BF-100**: can `POST /api/orders` take `shipping_postal_code` alone (no `shipping_region`)? Needed before the cart wallet (item 2) can go on.
