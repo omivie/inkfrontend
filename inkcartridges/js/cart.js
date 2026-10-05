@@ -2177,6 +2177,9 @@ const Cart = {
         // held "Proceed to Checkout" for 8.0s on a laptop and 9.4s on an iPhone
         // (ERR-296 capped it at 1.5s; the backend still measured 3.0s to load
         // /checkout). The cart's job at the click is the stock/price check only.
+        // Acknowledging changes the server's snapshot: a cached verdict that
+        // listed those price changes no longer describes it (item 9).
+        if (acknowledgePriceChanges) this._prevalidated = null;
         try {
             const response = await API.validateCart(null, acknowledgePriceChanges);
             if (response.ok) {
@@ -2280,11 +2283,52 @@ const Cart = {
      * "infrastructure failure ⇒ proceed" meaning.
      */
     _validateWithinCap: function() {
+        // A verdict the cart already fetched for exactly this cart (item 9,
+        // ERR-307) answers at once; one still on its way is awaited instead
+        // of asking twice. Neither ⇒ ask now.
+        const ready = typeof this._freshPrevalidation === 'function' ? this._freshPrevalidation() : null;
+        if (ready) return Promise.resolve(ready);
+        const pv = this._prevalidated;
+        const inflight = pv && pv.inflight && pv.epoch === this._mutationEpoch ? pv.promise : null;
         let timer;
         const cap = new Promise((resolve) => {
             timer = setTimeout(() => resolve({ timedOut: true }), this.CHECKOUT_VALIDATE_CAP_MS);
         });
-        return Promise.race([this.validateCart(), cap]).finally(() => clearTimeout(timer));
+        return Promise.race([inflight || this.validateCart(), cap]).finally(() => clearTimeout(timer));
+    },
+
+    /**
+     * Pre-validate the settled cart while the shopper reads it (FE master
+     * checklist item 9, ERR-307: "Proceed to Checkout reaches /checkout in
+     * under 1 s"; the backend measured 1.29 s, and the click still spent
+     * ~0.6 s waiting for POST /api/cart/validate on 6 Oct). Read-only for the
+     * server — no `acknowledge` — and at most ONE per settled cart: the
+     * verdict is keyed by `_mutationEpoch`, so any change makes it unusable
+     * and the next settle asks again. The click uses a verdict up to
+     * PREVALIDATE_MAX_AGE_MS old; POST /api/orders re-checks everything.
+     */
+    PREVALIDATE_MAX_AGE_MS: 60000,
+    _maybePrevalidate: function() {
+        if (this.pricingState !== PRICING.OK || !Array.isArray(this.items) || this.items.length === 0) return;
+        if (typeof document === 'undefined' || !document.getElementById('checkout-btn')) return;
+        const epoch = this._mutationEpoch;
+        const pv = this._prevalidated;
+        if (pv && pv.epoch === epoch && (pv.inflight || Date.now() - pv.at < this.PREVALIDATE_MAX_AGE_MS)) return;
+        const entry = { epoch: epoch, inflight: true, at: 0, result: null, promise: null };
+        entry.promise = this.validateCart().then(
+            (r) => { entry.result = r; return r; },
+            (e) => { entry.result = null; throw e; }
+        ).finally(() => { entry.inflight = false; entry.at = Date.now(); });
+        entry.promise.catch(() => { /* the click asks again */ });
+        this._prevalidated = entry;
+    },
+
+    /** The pre-validation verdict, if it describes THIS cart and is fresh; else null. */
+    _freshPrevalidation: function() {
+        const pv = this._prevalidated;
+        if (!pv || pv.inflight || !pv.result || pv.epoch !== this._mutationEpoch) return null;
+        if (Date.now() - pv.at > this.PREVALIDATE_MAX_AGE_MS) return null;
+        return pv.result;
     },
 
     /** Immediate feedback on the clicked checkout control (a dead-looking button was §8.1's complaint). */
@@ -2605,15 +2649,15 @@ const Cart = {
         this._mutationEpoch++;
         this.saveToLocalStorage();
 
-        // Apply price delta to server summary for responsive display
-        // (server will replace with correct values after API responds)
-        if (this.serverSummary && this.serverSummary.subtotal !== undefined) {
-            const priceDelta = item.price * (clampedQty - oldQty);
-            this.serverSummary.subtotal += priceDelta;
-            if (this.serverSummary.total !== undefined) {
-                this.serverSummary.total += priceDelta;
-            }
-        }
+        // The server's summary described the OLD quantity. It used to be
+        // patched with a retail delta (subtotal and total only) while its
+        // volume discount, shipping, GST, points and free-shipping figures
+        // stayed at the old quantity — the owner's two screenshots on 6 Oct
+        // ("qty 1 … Volume discount −$4.05 … Total $63.44 … 198 points") were
+        // taken inside that window (FE master checklist item 14, ERR-307).
+        // Drop it instead: PENDING paints "Updating…" in every server-only row
+        // (_paintSummaryPending) until the PUT's own re-priced cart lands.
+        if (oldQty !== clampedQty) this._losePricing(PRICING.PENDING);
 
         // Surgical DOM update — only touch the changed item + summary numbers
         this._updateCartItemDOM(itemId);
@@ -2687,12 +2731,22 @@ const Cart = {
         try {
             if (isCore && typeof API !== 'undefined') {
                 try {
+                    // The mutation epoch this PUT answers for. Read directly, not
+                    // through _beginSnapshot(): that pair is reserved for (and
+                    // counted against) API.getCart() reads.
+                    const putEpoch = this._mutationEpoch;
                     const response = await API.updateCartItem(actualId, quantity);
                     const hasPendingUpdate = this._quantityQueued[itemId] !== undefined
                                           || this._quantityDebounceTimers[itemId];
 
                     if (response.ok) {
-                        if (response.data?.items) {
+                        const putCart = this._putResponseCart(response);
+                        if (putCart && this._mutationEpoch !== putEpoch) {
+                            // The shopper changed the cart again while this PUT was
+                            // in flight: its cart describes the past. The later
+                            // mutation's own response re-prices; adopting this one
+                            // would flash the older quantity back (item 14).
+                        } else if (putCart) {
                             /* DELIBERATELY NOT GUARDED by _serverEmptyButWeHoldLines
                              * (ERR-259). Setting a quantity to zero removes the line,
                              * so an empty cart here is the CORRECT answer and the whole
@@ -2702,12 +2756,10 @@ const Cart = {
                              * reintroduced at a site where the emptiness is intended.
                              * Pinned by a test, so this stays a decision rather than
                              * an omission someone "completes" later. */
-                            const parsed = this._parseServerCart(response.data);
-                            this.items = parsed.items;
-                            this._adoptServerSummary(parsed.summary);
-                            this.appliedCoupon = parsed.couponCode;
-                            this.discountAmount = parsed.discountAmount;
+                            this._adoptMutationCart(putCart);
                         } else {
+                            // Older backend, or its re-read failed (it then omits
+                            // `cart`): read the cart the long way.
                             await this.loadFromServer();
                         }
                         // Only update DOM if no pending update (queue or debounce timer)
@@ -2788,11 +2840,13 @@ const Cart = {
             totalEl.innerHTML = this.lineTotalHtml(item);
         }
 
-        // Update mobile price line
-        const priceMobile = cartItemEl.querySelector('.cart-item__price-mobile');
-        if (priceMobile) {
-            priceMobile.textContent = formatPrice(item.price);
-        }
+        // Both unit price cells follow the quantity's rung (item 14). The
+        // desktop cell used to be left at whatever the full render printed.
+        const priceHtml = this.unitPriceHtml(item);
+        cartItemEl.querySelectorAll('.cart-item__price-mobile, .cart-item__price').forEach(function(el) {
+            el.innerHTML = priceHtml;
+        });
+        if (typeof decorateExGst === 'function') decorateExGst(cartItemEl);
 
         // The volume nudge is a function of the quantity that just changed, so
         // the surgical path has to repaint it too. Skipping this here is exactly
@@ -2830,6 +2884,156 @@ const Cart = {
     },
 
     /**
+     * The unit price this line is charged at its CURRENT quantity (FE master
+     * checklist item 14, ERR-307). A lookup of server figures, never maths:
+     *
+     *   1. the server's own `volume_unit_price`, while its figures still
+     *      describe this quantity (lineTotalFigures);
+     *   2. the server priced this quantity with no unit figure ⇒ retail;
+     *   3. otherwise (a change in flight) the highest rung of the line's own
+     *      `quantity_breaks` with min_quantity ≤ quantity — the server builds
+     *      that ladder per line, contract price included;
+     *   4. else retail (`item.price`).
+     *
+     * GLC3313BK, live 6 Oct: rung 3 = 66.14 against retail 67.49, so qty 3
+     * shows $66.14 at once instead of $67.49 until a reload.
+     * @returns {number}
+     */
+    unitPriceFor: function(item) {
+        const retail = Number(item && item.price);
+        const f = this.lineTotalFigures(item);
+        if (f) return Number.isFinite(f.unit_price) && f.unit_price > 0 ? f.unit_price : retail;
+        const qty = Number(item && item.quantity);
+        let best = null;
+        (Array.isArray(item && item.quantity_breaks) ? item.quantity_breaks : []).forEach(function(b) {
+            const min = Number(b && b.min_quantity);
+            const price = Number(b && b.business_price);
+            if (!Number.isFinite(min) || !(price > 0) || min > qty) return;
+            if (!best || min > best.min) best = { min: min, price: price };
+        });
+        return best && Number.isFinite(retail) && best.price < retail ? best.price : retail;
+    },
+
+    /**
+     * The unit price cell — desktop `.cart-item__price` AND mobile
+     * `.cart-item__price-mobile` (item 14: both used to print `item.price`,
+     * retail, in every render, and the surgical path repainted only one).
+     * Below retail: retail struck through beside it. The ex-GST span (business
+     * accounts, decorateExGst) carries the SAME figure.
+     */
+    unitPriceHtml: function(item) {
+        const unit = this.unitPriceFor(item);
+        const retail = Number(item.price);
+        const exgst = '<span class="cart-item__exgst" data-exgst="' + Security.escapeAttr(Number.isFinite(unit) ? String(unit) : '') + '" hidden></span>';
+        if (Number.isFinite(unit) && Number.isFinite(retail) && unit < retail) {
+            return '<s class="cart-item__price-was">' + formatPrice(retail) + '</s> ' +
+                '<span class="cart-item__price-now">' + formatPrice(unit) + '</span> ' + exgst;
+        }
+        return formatPrice(item.price) + ' ' + exgst;
+    },
+
+    /**
+     * The re-priced cart a PUT /api/cart/items/:id answered with, or null.
+     * Since the backend's 6 Oct deploy it is `data.cart` (same shape as GET
+     * /api/cart `data`) beside the old keys; an older shape put `items` on
+     * `data` itself. Absent (the backend omits it when its re-read fails) ⇒
+     * null ⇒ the caller reads the cart with a GET.
+     */
+    _putResponseCart: function(response) {
+        const d = response && response.data;
+        if (!d || typeof d !== 'object') return null;
+        if (d.cart && typeof d.cart === 'object' && Array.isArray(d.cart.items)) return d.cart;
+        if (Array.isArray(d.items)) return d;
+        return null;
+    },
+
+    /**
+     * Adopt the cart a quantity mutation answered with — the same steps
+     * loadFromServer takes (parse, pending-removal filter, summary, coupon,
+     * discount, loyalty, the inactive-drop notice), so one ~0.7 s request
+     * replaces the PUT + GET pair (item 14).
+     *
+     * DELIBERATELY NOT GUARDED by _serverEmptyButWeHoldLines (ERR-259): a
+     * quantity set to zero removes the line, so an empty cart here can be the
+     * CORRECT answer; guarding it would resurrect what the shopper removed.
+     */
+    _adoptMutationCart: function(data) {
+        const parsed = this._parseServerCart(data);
+        parsed.items = this._filterPendingRemovals(parsed.items);
+        this._announceDroppedInactive(parsed.summary);
+        this.items = parsed.items;
+        this._adoptServerSummary(parsed.summary);
+        this.appliedCoupon = parsed.couponCode;
+        this.discountAmount = parsed.discountAmount;
+        this.loyalty = parsed.loyalty;
+    },
+
+    /**
+     * "Updating…" must END. Every mutation path that sets PENDING is meant to
+     * finish in a re-read, but some failure arms (a server-rejected add, for
+     * one) roll back without one — harmless while PENDING painted fallback
+     * figures, a frozen summary once it paints "Updating…". So if PENDING
+     * outlives every in-flight mutation by PENDING_WATCHDOG_MS, re-read the
+     * cart: it lands in OK or in a named, LOUD failure state.
+     */
+    PENDING_WATCHDOG_MS: 4000,
+    _armPendingWatchdog: function() {
+        if (this._pendingWatchdog) return;
+        this._pendingWatchdog = setTimeout(() => {
+            this._pendingWatchdog = null;
+            if (!this._summaryPending()) return;
+            if (this.loading || this._mutationRepriceComing()) { this._armPendingWatchdog(); return; }
+            Promise.resolve(this.loadFromServer()).then(() => this.updateUI(), () => this.updateUI());
+        }, this.PENDING_WATCHDOG_MS);
+    },
+
+    /** A quantity change is waiting for the server's re-price (item 14). */
+    _summaryPending: function() {
+        return this.pricingState === PRICING.PENDING && Array.isArray(this.items) && this.items.length > 0;
+    },
+
+    /**
+     * While PENDING, every server-only row says "Updating…" or is hidden, so
+     * the summary never shows the previous quantity's discount, shipping,
+     * GST, total or points beside the new subtotal (item 14). The subtotal
+     * itself is pre-discount retail — the server's own subtotal meaning —
+     * so it may update at once. Called LAST by both summary renderers.
+     */
+    _paintSummaryPending: function() {
+        const pending = this._summaryPending();
+        const summary = document.querySelector('.cart-summary');
+        if (summary) {
+            if (pending) {
+                summary.setAttribute('aria-busy', 'true');
+                summary.dataset.pricing = 'pending';
+            } else {
+                summary.removeAttribute('aria-busy');
+                delete summary.dataset.pricing;
+            }
+        }
+        if (!pending) return;
+        this._armPendingWatchdog();
+        const UPDATING = 'Updating\u2026';
+        const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+        const hide = (id) => { const el = document.getElementById(id); if (el) el.hidden = true; };
+        set('cart-gst', UPDATING);
+        set('cart-total', UPDATING);
+        set('cart-total-label', 'Total');
+        set('cart-sticky-label', 'Total');
+        const row = document.getElementById('cart-total-row');
+        if (row) row.dataset.totalSource = 'pending';
+        set('cart-shipping', UPDATING);
+        set('cart-shipping-label', 'Shipping');
+        const points = document.getElementById('cart-points-earn');
+        if (points && !points.hidden) {
+            set('cart-points-earn-value', UPDATING);
+            points.dataset.points = 'pending';
+        }
+        ['cart-savings-row', 'cart-loyalty-row', 'cart-b2b-row', 'cart-b2b-note',
+            'cart-shipping-message', 'cart-shipping-bar'].forEach(hide);
+    },
+
+    /**
      * The line total cell. With a volume saving the server's after-discount
      * total is shown, and the pre-discount one struck through beside it — the
      * summary's subtotal is pre-discount with its own "You Save" row, so both
@@ -2838,8 +3042,18 @@ const Cart = {
      */
     lineTotalHtml: function(item) {
         const f = this.lineTotalFigures(item);
-        if (!f || !(f.line_savings > 0)) {
-            return formatPrice(f ? f.line_total_after_discount : item.price * item.quantity);
+        if (!f) {
+            // A change in flight: the rung price × quantity from the line's own
+            // ladder (item 14), retail × quantity when no rung applies.
+            const unit = this.unitPriceFor(item);
+            const retailTotal = item.price * item.quantity;
+            if (!(unit < item.price)) return formatPrice(retailTotal);
+            return '<s class="cart-item__total-was">' + formatPrice(retailTotal) + '</s> ' +
+                '<span class="cart-item__total-now">' + formatPrice(Math.round(unit * item.quantity * 100) / 100) + '</span>' +
+                '<span class="cart-item__total-unit">' + formatPrice(unit) + ' each · volume price</span>';
+        }
+        if (!(f.line_savings > 0)) {
+            return formatPrice(f.line_total_after_discount);
         }
         const before = Number.isFinite(f.line_total) ? f.line_total : item.price * item.quantity;
         return '<s class="cart-item__total-was">' + formatPrice(before) + '</s> ' +
@@ -3011,6 +3225,8 @@ const Cart = {
 
         // Savings / loyalty / business-account rows — one shared renderer.
         this._renderDiscountRows(discount);
+        this._paintSummaryPending();
+        this._maybePrevalidate();
 
         // Cart summary class-based elements
         const cartSummary = document.querySelector('.cart-summary');
@@ -3621,16 +3837,25 @@ const Cart = {
         // Sync to server only for core items
         if (isCore && typeof API !== 'undefined') {
             try {
+                const putEpoch = this._mutationEpoch;
                 const response = await API.updateCartItem(actualId, quantity);
-                if (response.ok) {
+                const putCart = response.ok ? this._putResponseCart(response) : null;
+                if (putCart && this._mutationEpoch === putEpoch) {
+                    // The PUT's own re-priced cart (item 14): no second request.
+                    this._adoptMutationCart(putCart);
+                    this.updateUI();
+                } else if (response.ok) {
                     // Refresh from server for accurate totals
                     await this.loadFromServer();
                     this.updateUI();
                 } else {
-                    // Generic failure - rollback
+                    // Generic failure - rollback, then re-price: PENDING must
+                    // end in a server answer or a named failure, never linger
+                    // as "Updating…" (item 14).
                     if (item) {
                         item.quantity = oldQuantity;
                         this.saveToLocalStorage();
+                        await this.loadFromServer();
                         this.updateUI();
                     }
                     if (typeof showToast === 'function') {
@@ -3639,10 +3864,11 @@ const Cart = {
                 }
             } catch (error) {
                 DebugLog.error('Failed to sync quantity to server:', error);
-                // Rollback on error
+                // Rollback on error, then re-price (see above)
                 if (item) {
                     item.quantity = oldQuantity;
                     this.saveToLocalStorage();
+                    await this.loadFromServer();
                     this.updateUI();
                 }
                 if (typeof showToast === 'function') {
@@ -4422,12 +4648,11 @@ const Cart = {
                             ' + (escapedBrand ? '<p class="cart-item__brand">' + escapedBrand + '</p>' : '') + '\
                             ' + (escapedSku ? '<p class="cart-item__sku">SKU: ' + escapedSku + '</p>' : '') + '\
                             \
-                            <p class="cart-item__price-mobile">' + formatPrice(item.price) + ' <span class="cart-item__exgst" data-exgst="' + Security.escapeAttr(item.price != null ? String(item.price) : '') + '" hidden></span></p>\
+                            <p class="cart-item__price-mobile">' + self.unitPriceHtml(item) + '</p>\
                             ' + self.renderLinePackSuggestion(item) + '\
                         </div>\
                         <div class="cart-item__price">\
-                            ' + formatPrice(item.price) + '\
-                            <span class="cart-item__exgst" data-exgst="' + Security.escapeAttr(item.price != null ? String(item.price) : '') + '" hidden></span>\
+                            ' + self.unitPriceHtml(item) + '\
                         </div>\
                         <div class="cart-item__quantity">\
                             <div class="quantity-selector" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
@@ -4598,6 +4823,9 @@ const Cart = {
             if (typeof renderCartLoyaltyControl === 'function') {
                 renderCartLoyaltyControl();
             }
+            // Last: a pending re-price overrides every server-only row (item 14).
+            this._paintSummaryPending();
+            this._maybePrevalidate();
 
             // Disable checkout if cart has out-of-stock items
             const checkoutBtn = document.getElementById('checkout-btn');

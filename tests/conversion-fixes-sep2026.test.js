@@ -330,13 +330,13 @@ test('§4 points line: server reward_points, the rung price at the quantity in t
     const sync = method('js/product-detail-page.js', 'syncPointsLine', self,
         { document: doc, Business: { offerAtQuantity: () => ({ businessPrice: 32.49 }) } });
     sync();
-    assert.equal(line.textContent, 'Earn 100 points ($1.00) on this order', 'floor(33.49 × 3) = 100 points');
+    assert.equal(line.textContent, 'Earn 100 reward points ($1.00) on this order', 'floor(33.49 × 3) = 100 points');
     self._volumeLadder = { breaks: [] };
     sync();
-    assert.equal(line.textContent, 'Earn 97 points ($0.97) on this order', 'at 3+ the rung price 32.49 × 3 = 97.47 applies');
+    assert.equal(line.textContent, 'Earn 97 reward points ($0.97) on this order', 'at 3+ the rung price 32.49 × 3 = 97.47 applies');
     self._rewardPoints = null; line.hidden = false;
     sync();
-    assert.equal(line.textContent, 'Earn 97 points ($0.97) on this order', 'no reward_points ⇒ the function leaves the line alone (renderValueLines never created it)');
+    assert.equal(line.textContent, 'Earn 97 reward points ($0.97) on this order', 'no reward_points ⇒ the function leaves the line alone (renderValueLines never created it)');
     assert.doesNotMatch(stripComments(read('js/product-detail-page.js')), /ValueProps\.pointsFor/, 'the PDP no longer computes points from value-props');
 });
 

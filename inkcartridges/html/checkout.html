@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=6c1bdb59">
+    <link rel="stylesheet" href="/css/components.css?v=7430c563">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
     <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
@@ -115,6 +115,9 @@
                                     <div class="form-group">
                                         <label for="email" class="form-label">Email Address <span class="required">*</span></label>
                                         <input type="email" id="email" name="email" class="form-input" required autocomplete="email">
+                                        <!-- Typo hint ("Did you mean name@gmail.com?"), filled by
+                                             CheckoutPage._renderEmailSuggestion (item 15, ERR-307). -->
+                                        <p class="email-suggest" id="email-suggest" aria-live="polite" hidden></p>
                                         <span class="form-hint">We'll send your order confirmation here</span>
                                         <!-- Guest cart-copy consent (conversion handoff §6a.1; live ERR-302).
                                              UNTICKED by default — NZ UEMA needs the shopper's own consent.
@@ -513,7 +516,7 @@
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=88086be1"></script>
+    <script defer src="/js/cart.js?v=89beaa2f"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
@@ -522,7 +525,7 @@
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/checkout-page.js?v=9eafa4f8"></script>
+    <script defer src="/js/checkout-page.js?v=2aef0f4b"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
     <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
 

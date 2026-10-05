@@ -88,12 +88,16 @@ function customerHtml() {
 
 const CHECKOUT = stripComments(read('js/checkout-page.js'));
 const PREFILL_SRC = extractMethod(CHECKOUT, 'async tryGuestPrefill(email) {');
+// ERR-307 (item 15): the same answer is the backend's verdict on the address.
+const VERDICT_SRC = extractMethod(CHECKOUT, 'emailVerdictFrom(res) {');
 
 function runPrefill(response, { authed = false } = {}) {
     const calls = { api: 0, banner: [], filled: 0 };
+    calls.verdicts = [];
     const self = {
         _renderReturningGuestBanner(msg) { calls.banner.push(msg); },
         fillAddressFields() { calls.filled++; },
+        _recordEmailVerdict(key, v) { calls.verdicts.push([key, v.state]); },
     };
     const sandbox = {
         API: { guestPrefill: async () => { calls.api++; return response; } },
@@ -107,6 +111,7 @@ function runPrefill(response, { authed = false } = {}) {
     };
     vm.createContext(sandbox);
     vm.runInContext(`self.tryGuestPrefill = ${PREFILL_SRC.replace(/^async tryGuestPrefill/, 'async function')}`, sandbox);
+    vm.runInContext(`self.emailVerdictFrom = ${VERDICT_SRC.replace(/^emailVerdictFrom/, 'function')}`, sandbox);
     return { self, calls };
 }
 

@@ -1189,6 +1189,16 @@
 
                 // Loyalty points balance changed between cart and pay — the points
                 // discount can no longer be honoured. Send them back to re-apply.
+                // The backend refused the guest email (FE master checklist
+                // item 15, ERR-307). Order 2026100602: this fell to the generic
+                // throw below and Pay looked dead twice. Say what is wrong, beside
+                // Pay, with the way back to the one field that fixes it.
+                const emailDetail = this.rejectedEmailDetail(orderResponse);
+                if (emailDetail) {
+                    this.showEmailRejected(emailDetail);
+                    return { status: 'handled' };
+                }
+
                 if (errorCode === 'INSUFFICIENT_POINTS') {
                     throw new Error('Your loyalty points balance changed, so the points discount is no longer valid. Please return to your cart to re-apply your points, then try again.');
                 }
@@ -1430,6 +1440,7 @@
         showError(message) {
             const errorEl = document.getElementById('card-errors');
             if (errorEl) {
+                delete errorEl.dataset.error;
                 // esc() provided by utils.js
                 errorEl.innerHTML = `
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -1437,6 +1448,45 @@
                 `;
                 errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
+        },
+
+        /**
+         * The message of a VALIDATION_FAILED detail on `guest_email` (or
+         * `email`), else null. PURE.
+         */
+        rejectedEmailDetail(resp) {
+            if (!resp || resp.ok !== false || resp.code !== 'VALIDATION_FAILED') return null;
+            const details = Array.isArray(resp.details) ? resp.details : [];
+            const hit = details.find(d => d && (d.field === 'guest_email' || d.field === 'email'));
+            if (!hit) return null;
+            return typeof hit.message === 'string' && hit.message.trim()
+                ? hit.message.trim() : 'Please enter a valid email address';
+        },
+
+        /**
+         * Show a refused email beside Pay with a "Change email" link back to
+         * /checkout#email. `loadCheckoutData` removed `checkoutData` from
+         * sessionStorage when this page loaded, so it is written back first
+         * (fresh `savedAt`): without that the shopper returns to an EMPTY form
+         * and re-types the address too — what the 2026100602 shopper did.
+         */
+        showEmailRejected(message) {
+            try {
+                if (this.checkoutData) {
+                    sessionStorage.setItem('checkoutData', JSON.stringify(Object.assign({}, this.checkoutData, { savedAt: Date.now() })));
+                }
+            } catch (e) {
+                DebugLog.warn('Could not keep checkout details for the email fix:', e && e.message);
+            }
+            const errorEl = document.getElementById('card-errors');
+            if (!errorEl) return;
+            errorEl.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>${esc(message)}</span>
+                <a href="/checkout#email" class="card-errors__change-email" id="change-email-link">Change email</a>
+            `;
+            errorEl.dataset.error = 'email-rejected';
+            errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         },
 
         showEmailVerificationRequired() {

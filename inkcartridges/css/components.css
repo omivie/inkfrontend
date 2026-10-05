@@ -4591,3 +4591,31 @@ a.drilldown-box.drilldown-box--ribbon,
     color: var(--color-text-light);
     cursor: default;
 }
+
+/* Checkout email typo hint (FE master checklist item 15, ERR-307).
+   "Did you mean name@gmail.com?" — one tap fills the field. A hint, never a
+   block: only the backend's VALIDATION_FAILED holds Continue to payment. */
+.email-suggest {
+    margin: var(--spacing-1) 0 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+.email-suggest__btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--color-primary, #0b5cad);
+    text-decoration: underline;
+    cursor: pointer;
+    min-height: 24px;
+}
+/* Payment backstop: the refused-email message beside Pay, with its way back. */
+.card-errors__change-email {
+    display: inline-block;
+    margin-left: var(--spacing-2);
+    font-weight: 600;
+    color: inherit;
+    text-decoration: underline;
+}

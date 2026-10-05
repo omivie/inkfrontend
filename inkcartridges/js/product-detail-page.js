@@ -1806,7 +1806,8 @@
             const unit = rung ? rung.businessPrice : this._unitPrice;
             const earn = this.rewardPointsFor(this._rewardPoints, unit, qty, this._unitPrice);
             if (!earn) { line.hidden = true; line.textContent = ''; return; }
-            line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} points (${formatPrice(earn.value)}) on this order`;
+            // "reward points": the FE master checklist's own words (item 6, ERR-307).
+            line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} reward points (${formatPrice(earn.value)}) on this order`;
             line.hidden = false;
         },
 

@@ -21,6 +21,26 @@ Everything needed is copied in below, so you should not need to open them.
 
 ---
 
+## Status after the live check on 6 October 2026
+
+Checked in a fresh browser session (first-time visitor, consent banner open) at 1366×768, 1366×599 and 390×664, plus the live JS.
+
+**Done:** 1 (no authorize tick), 4 (cart "Estimated total" includes shipping; checkout shows a single estimate), 11 (address search asks for 8; region label), 12 (`/cart?add=` filled CLI681XXLC ×2 + CLI681XXLBK ×1, cleaned the URL, no double on reload), the cart half of 6 ("Points to be earned: 89 points"), and the desktop half of 3 (Proceed to Checkout on the first screen, Continue Shopping is a text link).
+
+**Code shipped, needs a real-device test:** 2 (`cart-wallet.js` mounts the Express Checkout Element on the cart; Apple Pay cannot render in a test browser) and 13 (the sign-up box is in `order-confirmation-page.js`, but nothing reads `next_order_offer` yet).
+
+**Still open:**
+- **3, phones:** at 390×664 "Proceed to Checkout" sits at 718 px, below the screen, with no sticky bar after the banner is answered.
+- **5:** no service row next to Add to Cart on the PDP, and none under the H1 on series pages.
+- **6, PDP:** no "Earn N reward points" near the price.
+- **7:** the consent card is still bottom-LEFT (left 16 px) and covers the first series card's Add at 1366×599 (`elementFromPoint` misses it).
+- **8:** `/shipping` still shows South Island "2–4 working days" (`js/legal-config.js` line 149). `/faq` changed the visible answer but NOT its FAQPage JSON-LD, which still says 2–4: the two must match word for word (Google treats a mismatch as cloaking), so this is now worse than before. `SPEC_DELIVERY_LABEL = '1–4 business days NZ-wide'` is still in `js/product-detail-page.js`.
+- **9:** the click reaches `/checkout` in 1.29 s (was 3.0 s; target under 1 s).
+- **10:** no "Download PDF quote" in the cart or on checkout.
+- **13:** show `next_order_offer` from `GET /api/orders/:orderNumber` when present.
+- **14 (new, owner report 6 Oct):** the cart's unit price stays at retail when a volume rung is reached, and the summary mixes two quantities for about 1.5 s after each + or −.
+- **15 (new, P0, 6 Oct):** checkout lets an email the backend has already rejected through to Pay, where the order is refused and Pay appears to do nothing. It nearly lost a $486.81 order.
+
 ## Part 1: open work, in order
 
 ### 1. P0: remove the "I authorize this payment" tick
@@ -201,6 +221,56 @@ if (res.ok) {
 
 **Done when:** a guest order's confirmation page shows the box; signing up, confirming and signing in shows the order and its points in the account.
 
+### 14. P1: cart unit price follows the quantity (volume price)
+
+**Owner report (6 Oct):** GLC3313BK in the cart. At quantity 3 the price should read $66.14, and it stays at $67.49.
+
+**What is wrong (two separate problems, `js/cart.js`):**
+
+1. **The unit price cell never shows the volume price.** `.cart-item__price` and `.cart-item__price-mobile` always render `item.price`, which is retail. The surgical update (~line 2783) repaints `.cart-item__price-mobile` but never `.cart-item__price`. Even after the server re-prices the line, the shopper sees $67.49 in the price column. The $66.14 appears only as small text ("$66.14 each · volume price") under the line total.
+2. **For about 1.5 s after each + or −, the cart shows a mix of old and new figures.** `updateQuantity` sends `PUT /api/cart/items/:id`, then `GET /api/cart`. Each takes about 0.7 s (Render log of the owner's session, 5 Oct 19:57 UTC). Until the GET lands, `lineTotalFigures()` correctly drops the stale server figures, so the line shows retail × qty. But the summary keeps the previous quantity's server rows next to the new local subtotal. The owner's two screenshots were both taken inside this window:
+   - qty 1 shown with "Volume discount −$4.05", "Shipping Free", "Total $63.44", "198 points" (all from qty 3);
+   - qty 3 shown with "Shipping (est.) $7.00 · free over $100" on a $202.47 subtotal, "Incl. GST $9.72", "Add $32.51 more…" and "67 points" (all from qty 1).
+
+**The backend is correct.** After the GET, a guest replay of the same cart showed ~~$202.47~~ $198.42, "$66.14 each", volume discount −$4.05, free shipping, total $198.42.
+
+**Backend change (live after the 6 Oct deploy):** `PUT /api/cart/items/:productId` now returns the whole re-priced cart as `data.cart`, the same shape as `GET /api/cart` `data`, beside its old keys (`message`, `id`, `product_id`, `quantity`). In `updateQuantity`, adopt `response.data.cart` through the same path `loadFromServer` uses (`_parseServerCart`, the pending-removal filter, the empty-cart guard) and skip the follow-up `GET /api/cart`. Epoch guard: take `_beginSnapshot()` right after the local `_mutationEpoch++`, and adopt the PUT's cart only if the epoch is unchanged when it returns. If the shopper clicked again meanwhile, drop it: the later PUT's own `cart` describes the newer quantity. Only when `data.cart` is missing (the backend omits it if its re-read fails) fall back to `loadFromServer()`. This halves the wait (one ~0.7 s request instead of two).
+
+**Fix:**
+- **Unit price = the line's rung price.** Each cart line already carries `quantity_breaks` (built by the server for this line, contract price included). Find the highest rung with `min_quantity <= quantity`; its `business_price` is the unit price, otherwise use `item.price`. When `volume_figures.quantity === item.quantity`, use `volume_figures.unit_price` instead. This is a lookup of server figures, not FE price maths. Show it in BOTH `.cart-item__price` and `.cart-item__price-mobile`, with retail struck through beside it when lower (for example ~~$67.49~~ $66.14, and the ex-GST figure from the same number). Repaint both cells in the surgical path as well as the full render.
+- **Line total while the change is in flight:** rung price × quantity, from the same lookup, instead of retail × quantity.
+- **Summary while `pricingState === PRICING.PENDING`:** do not show the previous quantity's server-only rows (volume discount, shipping, total, GST, points, the free-shipping message) beside the new subtotal. Either show "Updating…" in those rows until the GET lands, or hide them. Never show a mix of two quantities.
+
+**Done when:** on `/cart` with GLC3313BK, pressing + from 1 to 3 shows ~~$67.49~~ $66.14 in the price column at once. The line total reads $198.42. The summary goes straight from the qty-1 figures to: volume discount −$4.05, shipping Free, total $198.42, never through a mixed state. Pressing − back to 1 shows $67.49 and no volume discount row.
+
+### 15. P0: catch a bad email on the checkout page, not at Pay
+
+**Owner report (6 Oct):** order 2026100602 ($486.81). The shopper pressed Pay twice and nothing happened. They had to work out for themselves that the email was the problem, go back to checkout and retype it. We nearly lost the order.
+
+**What happened** (Render log, 5 Oct, UTC):
+- **20:20:03** The shopper typed their email on `/checkout`. `POST /api/checkout/guest-prefill` and `POST /api/cart/guest-contact` both answered `400 VALIDATION_FAILED` on the `email` field. The page ignored both answers and let "Continue to payment" through.
+- **20:21:40 and 20:22:13** Pay now → `POST /api/orders` → `400 VALIDATION_FAILED`, field `guest_email`, "Please enter a valid email address so we can send your receipt". No order was created and Stripe was never called.
+- **20:22:29** The shopper went back to `/checkout`, retyped the email (accepted at 20:22:59), re-entered the address, and paid at 20:24:58.
+
+**Why the browser accepted it:** the backend checks the email with Joi `.email()`, which also requires a real top-level domain. So `name@gmail.con` and `name@gmail` are refused, while `<input type="email">` and a simple `x@y.z` pattern accept them. We do not log email addresses, so the exact typo is unknown. Keep the backend as the judge; do not copy its rules into the FE.
+
+**The backend's answer** (same shape on all three endpoints):
+
+```json
+{ "ok": false, "error": { "code": "VALIDATION_FAILED", "message": "Validation failed",
+  "details": [{ "field": "email", "message": "Please enter a valid email address" }] } }
+```
+
+On `POST /api/orders` the field is `guest_email`.
+
+**Fix:**
+- **Check on blur and on "Continue to payment".** The page already sends `POST /api/checkout/guest-prefill { email }` when the field is filled. Treat its `400` with `error.code === 'VALIDATION_FAILED'` as "this email is invalid": show `error.details[0].message` under the email field, mark the field invalid (`aria-invalid="true"`, message linked with `aria-describedby`), focus it, and keep "Continue to payment" disabled until a later check passes.
+- **Fail open on anything else.** A `429` (the endpoint allows 5 a minute per IP), a `5xx` or a network error must NOT block checkout. `POST /api/orders` still checks the email.
+- **Typo hint (recommended):** when the domain is one letter off a common one, offer a one-tap fix under the field, for example "Did you mean name@gmail.com?". Domains: `gmail.com`, `hotmail.com`, `outlook.com`, `yahoo.com`, `icloud.com`, `xtra.co.nz`. Typical misses: `.con`, `.cmo`, `.comm`, `gmial`, `gmai`, `hotmial`, `xtra.co`.
+- **Backstop on `/payment`.** If `POST /api/orders` still returns `400` with a `guest_email` detail, show that message next to the Pay button with a "Change email" link back to the checkout email field. Never a generic error, and never a Pay button that silently does nothing.
+
+**Done when:** on `/checkout` as a guest, typing `test@gmail.con` and leaving the field shows "Please enter a valid email address" under it and "Continue to payment" stays disabled. Correcting it to `test@gmail.com` clears the message and enables the button. Over the next week, Render logs show no `validation_failed` on `/orders` for `guest_email`.
+
 ### Not to do
 
 - **PayPal: on hold by the owner.** Leave the PayPal button as it is. Do not apply the old hide rule.
@@ -259,4 +329,5 @@ After you tell us a deploy is live, we re-run, as a first-time visitor (consent 
 9. The PDF quote downloads and matches the cart (10).
 10. `/cart?add=SKU:QTY,…` fills the cart once, adding to what is there (12).
 11. A guest order's confirmation page offers the one-step account, and `next_order_offer` shows only when present (13).
-12. Everything in Part 2 still holds.
+12. A mistyped email (`test@gmail.con`) is caught under the email field on `/checkout`, and "Continue to payment" stays disabled until it is fixed (15).
+13. Everything in Part 2 still holds.

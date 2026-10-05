@@ -391,7 +391,12 @@ test('§6 wired beside (never inside) #product-price, and under every cart line 
     assert.ok(!priceSpan.includes('exgst'), 'the microdata price stays GST-inclusive retail');
     assert.match(stripComments(read('js/product-detail-page.js')), /exGstEl\.setAttribute\('data-exgst'[\s\S]{0,120}decorateExGst\(exGstEl\.parentElement\)/);
     const cart = stripComments(read('js/cart.js'));
-    assert.equal((cart.match(/class="cart-item__exgst" data-exgst=/g) || []).length, 2, 'desktop price cell + mobile price line');
+    // Both cells are built by ONE function since ERR-307 (item 14: the unit
+    // price follows the quantity's rung), so the span is spelled once and
+    // each cell must call it.
+    assert.equal((cart.match(/class="cart-item__exgst" data-exgst=/g) || []).length, 1, 'one builder: unitPriceHtml');
+    assert.match(cart, /<p class="cart-item__price-mobile">' \+ self\.unitPriceHtml\(item\)/, 'mobile price line');
+    assert.match(cart, /<div class="cart-item__price">\\\s*' \+ self\.unitPriceHtml\(item\)/, 'desktop price cell');
     assert.match(cart, /this\.decorateVolumeNudges\(cartItems\);\s*if \(typeof decorateExGst === 'function'\) decorateExGst\(cartItems\);/);
 });
 

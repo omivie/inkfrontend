@@ -68,6 +68,9 @@
             // Restore any saved checkout state (after auth prefill, so auth data takes priority)
             this.restoreCheckoutState();
 
+            // Sent back from /payment by "Change email" (item 15 backstop).
+            this.focusEmailFromHash();
+
             // Mobile order-summary disclosure (ERR-224). Before the accordion so
             // the summary is already collapsed when the form sections settle.
             this.setupSummaryDisclosure();
@@ -1174,6 +1177,22 @@
             return { valid: true };
         },
 
+        /**
+         * /checkout#email — the payment page's "Change email" link after
+         * POST /api/orders refused `guest_email` (item 15 backstop). Open the
+         * contact step and put the cursor in the field the shopper must fix.
+         */
+        focusEmailFromHash() {
+            if (window.location.hash !== '#email') return;
+            const field = document.getElementById('email');
+            if (!field) return;
+            const contact = this._accordionSections && this._accordionSections[0];
+            if (contact && contact.collapsed) this._expandAccordionSection(contact);
+            field.scrollIntoView({ block: 'center' });
+            field.focus({ preventScroll: true });
+            if (typeof field.select === 'function') field.select();
+        },
+
         // Restore checkout state from session storage
         restoreCheckoutState() {
             try {
@@ -1299,6 +1318,7 @@
                     if (!emailField.validity.valid) return;
                     this.tryGuestPrefill(emailField.value.trim());
                 });
+                this.setupEmailCheck(emailField);
             }
 
             // Coupon code handler
@@ -1319,24 +1339,237 @@
          * frontend re-read of fields that are gone. Non-blocking; fails silently.
          */
         async tryGuestPrefill(email) {
-            if (!email || !email.includes('@')) return;
+            if (!email || !email.includes('@')) return null;
             // Only for guests — authenticated users already get profile prefill
-            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return;
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return null;
             const key = email.toLowerCase();
-            if (this._guestPrefillAsked === key) return;
-            this._guestPrefillAsked = key;
+            // One request per address, however often the field blurs. The
+            // promise is kept so "Continue to payment" can await an answer
+            // that is already on its way instead of asking again.
+            this._emailChecks = this._emailChecks || {};
+            if (this._emailChecks[key]) return this._emailChecks[key];
 
-            try {
-                const res = await API.guestPrefill(email);
-                if (!res?.ok || !res?.data) return;
-                const d = res.data;
-                if (d.has_previous_order === true && typeof d.welcome_message === 'string') {
+            this._emailChecks[key] = (async () => {
+                let res = null;
+                try {
+                    res = await API.guestPrefill(email);
+                } catch {
+                    res = null;
+                }
+                // The same answer is also the backend's verdict on the address
+                // (FE master checklist item 15, ERR-307).
+                const verdict = this.emailVerdictFrom(res);
+                this._recordEmailVerdict(key, verdict);
+                const d = res && res.ok ? res.data : null;
+                if (d && d.has_previous_order === true && typeof d.welcome_message === 'string') {
                     this._renderReturningGuestBanner(d.welcome_message);
                 }
-            } catch {
-                // Non-blocking — the greeting is a nicety
+                return verdict;
+            })();
+            return this._emailChecks[key];
+        },
+
+        /**
+         * The backend's verdict on a guest email, read from the guest-prefill
+         * answer (FE master checklist item 15, ERR-307).
+         *
+         * Order 2026100602 ($486.81, 5 Oct): guest-prefill and guest-contact
+         * both answered 400 VALIDATION_FAILED on `email`, the page ignored
+         * both, and POST /api/orders then refused `guest_email` twice while
+         * Pay appeared to do nothing. The backend (Joi `.email()` with a TLD
+         * check) is the judge; nothing here copies its rules.
+         *
+         * ONLY a VALIDATION_FAILED that names the email field blocks. A 429
+         * (5 a minute per IP), a 5xx, a network error or a null all come back
+         * 'unknown', and 'unknown' FAILS OPEN: POST /api/orders still checks.
+         *
+         * PURE. @returns {{state:'ok'|'invalid'|'unknown', message?:string}}
+         */
+        emailVerdictFrom(res) {
+            if (!res || typeof res !== 'object') return { state: 'unknown' };
+            if (res.ok === true) return { state: 'ok' };
+            if (res.code !== 'VALIDATION_FAILED') return { state: 'unknown' };
+            const details = Array.isArray(res.details) ? res.details : [];
+            const hit = details.find(d => d && (d.field === 'email' || d.field === 'guest_email'));
+            if (!hit) return { state: 'unknown' };
+            const msg = typeof hit.message === 'string' && hit.message.trim()
+                ? hit.message.trim() : 'Please enter a valid email address';
+            return { state: 'invalid', message: msg };
+        },
+
+        /** Remember a verdict and paint it if the field still holds that address. */
+        _recordEmailVerdict(key, verdict) {
+            this._emailVerdicts = this._emailVerdicts || {};
+            this._emailVerdicts[key] = verdict;
+            const field = document.getElementById('email');
+            if (!field || field.value.trim().toLowerCase() !== key) return;
+            if (verdict.state === 'invalid') this._showEmailError(verdict.message);
+            else this._clearEmailError();
+        },
+
+        /** The verdict for what the email field holds now, or undefined if never asked. */
+        _currentEmailVerdict() {
+            const field = document.getElementById('email');
+            const key = field ? field.value.trim().toLowerCase() : '';
+            return key && this._emailVerdicts ? this._emailVerdicts[key] : undefined;
+        },
+
+        /**
+         * Show the backend's message under the email field, mark it invalid
+         * for assistive tech, focus it, and hold "Continue to payment" while
+         * the field still holds the rejected address (any edit releases it;
+         * the next blur re-checks).
+         */
+        _showEmailError(message) {
+            const field = document.getElementById('email');
+            if (!field) return;
+            const group = field.closest('.form-group');
+            document.querySelectorAll('#email-error').forEach(el => el.remove());
+            const err = document.createElement('div');
+            err.className = 'form-error';
+            err.id = 'email-error';
+            err.setAttribute('role', 'alert');
+            err.textContent = message;
+            if (group) group.insertBefore(err, field.nextSibling);
+            field.classList.add('is-error');
+            field.setAttribute('aria-invalid', 'true');
+            field.setAttribute('aria-describedby', 'email-error');
+            const btn = document.getElementById('continue-to-payment-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.dataset.emailBlocked = 'true';
+            }
+            field.focus({ preventScroll: true });
+        },
+
+        _clearEmailError() {
+            const field = document.getElementById('email');
+            document.querySelectorAll('#email-error').forEach(el => el.remove());
+            if (field) {
+                if (field.getAttribute('aria-invalid') === 'true') field.classList.remove('is-error');
+                field.removeAttribute('aria-invalid');
+                if (field.getAttribute('aria-describedby') === 'email-error') field.removeAttribute('aria-describedby');
+            }
+            const btn = document.getElementById('continue-to-payment-btn');
+            if (btn && btn.dataset.emailBlocked === 'true') {
+                delete btn.dataset.emailBlocked;
+                if (!this.isSubmitting) btn.disabled = false;
             }
         },
+
+        /**
+         * "Did you mean name@gmail.com?" for a domain one slip away from a
+         * common one (item 15's recommended typo hint). A HINT only: it never
+         * blocks, because only the backend decides an address is invalid.
+         *
+         * A domain matches when it is one edit away (substitution, insertion,
+         * deletion or a swap of two neighbours: gmail.con, gmail.cmo,
+         * gmail.comm, gmial.com, gmai.com, hotmial.com) or is a dot-boundary
+         * prefix of a known one (xtra.co, gmail). An exact match gets nothing.
+         *
+         * PURE. @returns {string|null} the suggested full address
+         */
+        suggestEmailDomain(email) {
+            const DOMAINS = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'icloud.com', 'xtra.co.nz'];
+            if (typeof email !== 'string') return null;
+            const at = email.lastIndexOf('@');
+            if (at < 1) return null;
+            const local = email.slice(0, at).trim();
+            const domain = email.slice(at + 1).trim().toLowerCase();
+            if (!local || !domain || DOMAINS.includes(domain)) return null;
+            // Optimal string alignment distance, capped: we only care about ≤ 1.
+            const within1 = (a, b) => {
+                if (Math.abs(a.length - b.length) > 1) return false;
+                const d = [];
+                for (let i = 0; i <= a.length; i++) {
+                    d[i] = [i];
+                    for (let j = 1; j <= b.length; j++) {
+                        if (i === 0) { d[i][j] = j; continue; }
+                        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+                        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                            d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+                        }
+                    }
+                }
+                return d[a.length][b.length] <= 1;
+            };
+            const hit = DOMAINS.find(k => within1(domain, k))
+                || DOMAINS.find(k => k.startsWith(domain + '.'));
+            return hit ? local + '@' + hit : null;
+        },
+
+        /** Paint or hide the typo hint under the email field. */
+        _renderEmailSuggestion(field) {
+            const box = document.getElementById('email-suggest');
+            if (!box || !field) return;
+            const suggestion = this.suggestEmailDomain(field.value);
+            // Unchanged ⇒ leave it alone. Rebuilding on every blur replaced the
+            // button between a tap's mousedown (which blurs the field) and its
+            // mouseup, so the click never fired (measured, ERR-307).
+            if (suggestion && !box.hidden && box.dataset.suggestion === suggestion) return;
+            box.textContent = '';
+            box.hidden = !suggestion;
+            box.dataset.suggestion = suggestion || '';
+            if (!suggestion) return;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'email-suggest__btn';
+            btn.textContent = suggestion;
+            // Keep focus where it is: the tap must not blur the field first.
+            btn.addEventListener('mousedown', (e) => e.preventDefault());
+            btn.addEventListener('click', () => {
+                field.value = suggestion;
+                box.hidden = true;
+                box.textContent = '';
+                box.dataset.suggestion = '';
+                this._clearEmailError();
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                if (field.validity.valid) this.tryGuestPrefill(suggestion);
+            });
+            box.append('Did you mean ', btn, '?');
+        },
+
+        /** Wire the email field's verdict UI (item 15). */
+        setupEmailCheck(field) {
+            field.addEventListener('blur', () => this._renderEmailSuggestion(field));
+            field.addEventListener('input', () => {
+                const box = document.getElementById('email-suggest');
+                if (box && !box.hidden) { box.hidden = true; box.textContent = ''; box.dataset.suggestion = ''; }
+                // Any edit releases the hold; a known verdict for the new
+                // value is re-painted at once, an unknown one on the next blur.
+                this._clearEmailError();
+                const v = this._currentEmailVerdict();
+                if (v && v.state === 'invalid') this._showEmailError(v.message);
+            });
+        },
+
+        /**
+         * The email gate before /payment (item 15). Guests only. A known
+         * 'invalid' verdict blocks; an address never checked (autofill with
+         * no blur) is checked now, capped at EMAIL_CHECK_CAP_MS. Everything
+         * else, including the cap winning, proceeds.
+         * @returns {Promise<boolean>} true = may continue
+         */
+        async _emailPassesGate() {
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return true;
+            const field = document.getElementById('email');
+            if (!field || !field.value.trim() || !field.validity.valid) return true;
+            let v = this._currentEmailVerdict();
+            if (!v) {
+                let timer;
+                const cap = new Promise(resolve => { timer = setTimeout(() => resolve(undefined), this.EMAIL_CHECK_CAP_MS); });
+                v = await Promise.race([this.tryGuestPrefill(field.value.trim()), cap]).finally(() => clearTimeout(timer));
+            }
+            if (v && v.state === 'invalid') {
+                this._showEmailError(v.message);
+                field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return false;
+            }
+            return true;
+        },
+
+        EMAIL_CHECK_CAP_MS: 1500,
 
         /**
          * Render the "Welcome back!" banner above the checkout form.
@@ -1561,6 +1794,15 @@
                     }
                     if (!firstInvalid) firstInvalid = field;
                 }
+            }
+
+            // The clear above also wiped a backend-refused email's message;
+            // the address is still refused, so the step may not complete (item 15).
+            const emailHere = body.querySelector('#email');
+            const verdict = emailHere && emailHere.value.trim() ? this._currentEmailVerdict() : undefined;
+            if (verdict && verdict.state === 'invalid') {
+                this._showEmailError(verdict.message);
+                if (!firstInvalid) firstInvalid = emailHere;
             }
 
             if (firstInvalid) {
@@ -2530,6 +2772,11 @@
 
             // Validate form with custom error display
             if (!this.validateFormFields(form)) {
+                return;
+            }
+
+            // The backend's verdict on a guest email, BEFORE /payment (item 15).
+            if (!(await this._emailPassesGate())) {
                 return;
             }
 
