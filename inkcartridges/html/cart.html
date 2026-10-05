@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
     <link rel="stylesheet" href="/css/components.css?v=e1803d91">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=3c79d4fe">
+    <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
@@ -248,7 +248,9 @@
                         </div>
 
                         <div class="cart-actions">
-                            <a href="/shop" class="btn btn--secondary">
+                            <!-- A plain text link (ERR-305, §8.2): as a magenta button it was the
+                                 loudest thing on the first screen, and it leads AWAY from the cart. -->
+                            <a href="/shop" class="cart-actions__continue">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
                                 Continue Shopping
                             </a>
@@ -282,14 +284,19 @@
                             </div>
                             <p class="cart-summary__note" id="cart-b2b-note" hidden></p>
                             <div class="cart-summary__row">
-                                <span>Shipping <span id="cart-shipping-tier" style="font-size:0.75rem;color:#6b7280;font-weight:400;" hidden></span></span>
+                                <span><span id="cart-shipping-label">Shipping</span> <span id="cart-shipping-tier" style="font-size:0.75rem;color:#6b7280;font-weight:400;" hidden></span></span>
                                 <span id="cart-shipping">Calculated at checkout</span>
                             </div>
-                            <!-- "before shipping" (ERR-296): this figure is subtotal − discount;
-                                 shipping is added at checkout, where the cart's "Total
-                                 $29.49" became $36.49. The FE never adds prices. -->
-                            <div class="cart-summary__row cart-summary__row--total">
-                                <span>Total before shipping</span>
+                            <!-- ONE shipping figure, inside the total (ERR-305, §8.3). When the
+                                 server's cart summary carries its own `total` (subtotal + the
+                                 urban shipping estimate − discount) the row reads "Estimated
+                                 total" and shows THAT figure — read, never added up here. Only
+                                 when the server total is missing does it fall back to the
+                                 ERR-296 "Total before shipping" (subtotal − discount), with
+                                 data-total-source="fallback" so the partial state is visible.
+                                 Label + figure are set together by Cart.renderTotalRow. -->
+                            <div class="cart-summary__row cart-summary__row--total" id="cart-total-row" data-total-source="pending">
+                                <span id="cart-total-label">Total before shipping</span>
                                 <span id="cart-total">$0.00 NZD</span>
                             </div>
                             <!-- GST demoted from a full row to a caption (Jul 2026 CTA lift).
@@ -297,6 +304,63 @@
                                  calculateGST on the incl-GST total). An empty value degrades to
                                  a bare "Incl. GST" rather than a misleading $0.00. -->
                             <p class="cart-summary__gst">Incl. GST <span id="cart-gst"></span></p>
+                        </div>
+
+                        <!-- CTA lift (Jul 2026): the checkout button used to sit at the
+                             very bottom of this aside, ~900px down and below the fold on
+                             a 1440x900 desktop — which also meant the sticky sidebar
+                             below never actually pinned, because it was taller than the
+                             viewport. Everything promotional now lives BELOW the button.
+                             ERR-305 (§8.2): the free-shipping message and bar moved below
+                             it too — at 1366x768 they pushed the button to y 829, under the
+                             fold. Only the money rows sit above it now. -->
+                        <div class="cart-summary__actions">
+                            <a href="/checkout" id="checkout-btn" class="btn btn--primary btn--lg btn--full-width" data-track="cta_click" data-track-cta="Proceed to Checkout" data-track-location="cart_summary" data-testid="cart-checkout-btn">
+                                Proceed to Checkout
+                            </a>
+                            <!-- Apple Pay / Google Pay from the cart (FE master checklist item 2,
+                                 ERR-305). Behind Config.DARK_FEATURES.cartWallet (OFF) — or
+                                 /cart?wallet=1 for the owner's device test. js/cart-wallet.js
+                                 mounts Stripe's Express Checkout Element here; it stays hidden
+                                 unless a wallet is actually available. -->
+                            <div class="cart-wallet" id="cart-wallet" data-testid="cart-wallet" hidden>
+                                <p class="cart-wallet__or"><span>or pay instantly</span></p>
+                                <div id="cart-wallet-element"></div>
+                                <p class="cart-wallet__status" id="cart-wallet-status" role="status" aria-live="polite" hidden></p>
+                                <div id="cart-wallet-turnstile" class="cart-wallet__turnstile" hidden></div>
+                            </div>
+                        </div>
+
+                        <!-- Sibling of __actions, not a child: __actions is a column flex
+                             with gap, so nesting would stack gap on top of this margin. -->
+                        <div class="cart-summary__secure">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            <span>Secure 256-bit SSL checkout</span>
+                        </div>
+
+                        <!-- Points to be earned (FE master checklist item 6, cart half; ERR-305).
+                             Read from the cart response's `loyalty.earn_on_this_order`, which the
+                             backend sends for members AND guests. Absent ⇒ stays hidden with
+                             data-points="absent" — never printed as 0. The guest's "how to collect
+                             them" text stays in #cart-loyalty-chip. Filled by Cart.renderPointsEarn. -->
+                        <div class="cart-points-earn" id="cart-points-earn" data-testid="cart-points-earn" data-points="absent" hidden>
+                            <p class="cart-points-earn__line">Points to be earned: <strong id="cart-points-earn-value"></strong></p>
+                        </div>
+
+
+                        <!-- Guest cart reminder (ERR-302, ad-clicks-to-orders handoff §4). UNTICKED
+                             by default: NZ UEMA needs the shopper's express consent, so nothing is
+                             sent until they tick it. Ships hidden; GuestCartEmail (cart.js) shows
+                             it to guests only, after Auth has restored any session. -->
+                        <div class="cart-optin" id="cart-guest-email" data-testid="cart-guest-email" hidden>
+                            <label class="checkout-optin">
+                                <input type="checkbox" id="cart-guest-email-consent" name="cart-guest-email-consent">
+                                <span>Email me a copy of my cart if I don't finish</span>
+                            </label>
+                            <label class="visually-hidden" for="cart-guest-email-input">Email address</label>
+                            <input type="email" id="cart-guest-email-input" class="cart-optin__email" name="email"
+                                   autocomplete="email" inputmode="email" placeholder="you@example.co.nz" maxlength="254">
+                            <p class="checkout-optin__status" id="cart-guest-email-status" role="status" aria-live="polite" hidden></p>
                         </div>
 
                         <div class="cart-summary__shipping-message" id="cart-shipping-message" hidden>
@@ -313,40 +377,6 @@
                              All fail-soft: cart.js#renderCartSignals reveals each
                              only when the backend supplies the data. -->
                         <div class="cart-free-ship-unlock" id="cart-free-ship-unlock" hidden></div>
-
-                        <!-- CTA lift (Jul 2026): the checkout button used to sit at the
-                             very bottom of this aside, ~900px down and below the fold on
-                             a 1440x900 desktop — which also meant the sticky sidebar
-                             below never actually pinned, because it was taller than the
-                             viewport. Everything promotional now lives BELOW the button.
-                             Only the money rows and the free-shipping state sit above it. -->
-                        <div class="cart-summary__actions">
-                            <a href="/checkout" id="checkout-btn" class="btn btn--primary btn--lg btn--full-width" data-track="cta_click" data-track-cta="Proceed to Checkout" data-track-location="cart_summary" data-testid="cart-checkout-btn">
-                                Proceed to Checkout
-                            </a>
-                        </div>
-
-                        <!-- Sibling of __actions, not a child: __actions is a column flex
-                             with gap, so nesting would stack gap on top of this margin. -->
-                        <div class="cart-summary__secure">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                            <span>Secure 256-bit SSL checkout</span>
-                        </div>
-
-                        <!-- Guest cart reminder (ERR-302, ad-clicks-to-orders handoff §4). UNTICKED
-                             by default: NZ UEMA needs the shopper's express consent, so nothing is
-                             sent until they tick it. Ships hidden; GuestCartEmail (cart.js) shows
-                             it to guests only, after Auth has restored any session. -->
-                        <div class="cart-optin" id="cart-guest-email" data-testid="cart-guest-email" hidden>
-                            <label class="checkout-optin">
-                                <input type="checkbox" id="cart-guest-email-consent" name="cart-guest-email-consent">
-                                <span>Email me a copy of my cart if I don't finish</span>
-                            </label>
-                            <label class="visually-hidden" for="cart-guest-email-input">Email address</label>
-                            <input type="email" id="cart-guest-email-input" class="cart-optin__email" name="email"
-                                   autocomplete="email" inputmode="email" placeholder="you@example.co.nz" maxlength="254">
-                            <p class="checkout-optin__status" id="cart-guest-email-status" role="status" aria-live="polite" hidden></p>
-                        </div>
 
                         <!-- Coupon (mobile-parity-may2026 S3.2) + loyalty redemption
                              (loyalty-points-jun2026) merged into ONE disclosure. The two
@@ -495,7 +525,7 @@
             <div class="cart-sticky-bar" id="cart-sticky-bar" aria-hidden="true">
                 <div class="cart-sticky-bar__inner">
                     <span class="cart-sticky-bar__total">
-                        <span class="cart-sticky-bar__label">Before shipping</span>
+                        <span class="cart-sticky-bar__label" id="cart-sticky-label">Before shipping</span>
                         <span id="cart-sticky-total">$0.00</span>
                     </span>
                     <a href="/checkout" id="cart-sticky-checkout"
@@ -518,11 +548,11 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=1c50051c"></script>
+    <script defer src="/js/config.js?v=e96b328a"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/shipping.js?v=570c7bc4"></script>
     <script defer src="/js/utils.js?v=327fd22e"></script>
-    <script defer src="/js/api.js?v=0f7bc988"></script>
+    <script defer src="/js/api.js?v=3752a5e2"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
@@ -534,10 +564,11 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=40a8e7a7"></script>
+    <script defer src="/js/cart.js?v=88086be1"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/cart-page.js?v=35b9e028"></script>
     <script defer src="/js/cart-deep-link.js?v=018aa678"></script>
+    <script defer src="/js/cart-wallet.js?v=7a6c3b52"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

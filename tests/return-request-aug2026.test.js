@@ -279,7 +279,7 @@ test('§5 every class the form emits is styled, with defined variables only', ()
     ].forEach((c) => assert.ok(CSS.includes('.' + c), `${c} is emitted but never styled`));
 
     const block = CSS.slice(CSS.indexOf('.order-return {'));
-    const vars = [...new Set((block.match(/var\(--[a-z-]+/g) || []).map((v) => v.slice(4)))];
+    const vars = [...new Set((block.match(/var\(--[a-z0-9-]+/g) || []).map((v) => v.slice(4)))];
     const ALL = ['base.css', 'pages.css'].map((f) =>
         fs.readFileSync(path.join(INK, 'css', f), 'utf8')).join('\n');
     vars.forEach((v) => assert.ok(new RegExp(`${v}\\s*:`).test(ALL), `${v} is used but never defined`));

@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
     <link rel="stylesheet" href="/css/components.css?v=e1803d91">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=3c79d4fe">
+    <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
@@ -335,13 +335,9 @@
                             </div>
 
                             <div class="checkout-submit">
-                                <div class="form-group form-group--checkbox">
-                                    <input type="checkbox" id="terms" name="terms" class="form-checkbox" required>
-                                    <label for="terms" class="form-label form-label--checkbox">
-                                        I agree to the Terms & Conditions and Privacy Policy <span class="required">*</span>
-                                    </label>
-                                </div>
-
+                                <!-- No Terms tick box (ERR-305, ad-clicks handoff §8.4; owner, 2026-10-05).
+                                     Agreement is a line next to the Pay button on /payment instead:
+                                     "By placing this order you agree to our Terms and Privacy Policy". -->
                                 <div class="form-group form-group--checkbox">
                                     <input type="checkbox" id="newsletter" name="newsletter" class="form-checkbox">
                                     <label for="newsletter" class="form-label form-label--checkbox">
@@ -432,7 +428,9 @@
                                 </div>
                                 <div class="checkout-summary__row">
                                     <span id="checkout-shipping-label">Shipping (est.)</span>
-                                    <span id="checkout-shipping"><span class="skeleton" style="display:inline-block;width:50px;height:1em;"></span></span>
+                                    <!-- "Calculating…" until the SERVER's figure arrives (ERR-305, §8.3):
+                                         checkout used to paint a local $12.00 and swap it for $7.00 ~4s later. -->
+                                    <span id="checkout-shipping" data-shipping-source="pending">Calculating…</span>
                                 </div>
                                 <div class="checkout-summary__row checkout-summary__row--discount" id="checkout-discount-row" hidden>
                                     <span>Discount</span>
@@ -452,7 +450,7 @@
                                 </div>
                                 <div class="checkout-summary__row checkout-summary__row--total">
                                     <span>Estimated Total</span>
-                                    <span id="checkout-total"><span class="skeleton" style="display:inline-block;width:80px;height:1em;"></span></span>
+                                    <span id="checkout-total">Calculating…</span>
                                 </div>
                             </div>
                             <!-- Points this order earns, from the cart's own `loyalty`
@@ -474,6 +472,7 @@
                                     <span>Your order may ship in multiple packages</span>
                                 </p>
                             </div>
+
 
                             <div class="checkout-summary__trust">
                                 <div class="checkout-summary__trust-item" data-value-prop-scope>
@@ -501,17 +500,17 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=1c50051c"></script>
+    <script defer src="/js/config.js?v=e96b328a"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/shipping.js?v=570c7bc4"></script>
-    <script defer src="/js/api.js?v=0f7bc988"></script>
+    <script defer src="/js/api.js?v=3752a5e2"></script>
     <script defer src="/js/address-autocomplete.js?v=80cdcf13"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=327fd22e"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=40a8e7a7"></script>
+    <script defer src="/js/cart.js?v=88086be1"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
@@ -520,7 +519,7 @@
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/checkout-page.js?v=b8efc087"></script>
+    <script defer src="/js/checkout-page.js?v=9eafa4f8"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
 
     <style>

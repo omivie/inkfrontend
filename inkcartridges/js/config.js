@@ -70,6 +70,11 @@ const Config = {
     DARK_FEATURES: {
         guestCartEmail: true,
         guestReviews: true,
+        // Apple Pay / Google Pay under "Proceed to Checkout" (js/cart-wallet.js,
+        // ERR-305). OFF until the owner has paid one real order with it on a
+        // real iPhone via /cart?wallet=1, and BF-100 (region from postcode) is
+        // answered. Flip to true to ship it.
+        cartWallet: false,
     },
 
     // Business settings (loaded from server, these are fallback defaults)

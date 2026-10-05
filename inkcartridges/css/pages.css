@@ -14105,6 +14105,45 @@ body.page-shop {
 .cart-optin[hidden] { display: none; }
 .cart-optin .checkout-optin { margin-top: 0; font-size: 0.9375rem; }
 .cart-optin__email { width: 100%; min-height: 44px; margin-top: 4px; padding: 8px 12px; font-size: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+/* /cart checkout funnel (ERR-305, ad-clicks handoff §8.2–8.3). */
+/* "Continue Shopping" is a plain text link, not the loudest button on the page. */
+.cart-actions__continue { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--color-text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+.cart-actions__continue:hover { color: var(--color-primary, var(--color-text)); }
+/* The checkout button answers the click at once (§8.1: a dead-looking button). */
+#checkout-btn.is-busy, .cart-summary__checkout-btn.is-busy { cursor: progress; opacity: 0.85; }
+/* "Points to be earned: N points" under the checkout button. */
+.cart-points-earn { margin-top: 10px; }
+.cart-points-earn[hidden] { display: none; }
+.cart-points-earn__line { margin: 0; font-size: 0.9375rem; color: var(--color-text); }
+/* Desktop /cart: toasts at the TOP right. The checkout button now sits in the
+   bottom-right of a 1366x768 screen (y 665–710), exactly where the bottom-right
+   toast stack lands — measured covering it for ~6s after an add. Phones already
+   put toasts at the top (ERR-296). */
+@media (min-width: 768px) {
+    body:has(#cart-layout) .toast-container { top: var(--spacing-6); bottom: auto; }
+}
+/* Laptops (ERR-305, §8.2): the backend checks /cart at 1280x551, 1366x599 and
+   1536x695 too, where the summary's money rows alone end below the fold (the
+   button sits at y 696). The phone sticky bar (S3.1) also serves desktop now:
+   cart-page.js shows it only while the real button is off-screen. Its content
+   is right-aligned, so the bottom-LEFT consent card (≥1100px) never covers it.
+   The full-width lift above the banner is cancelled there, because a card is
+   not a full-width bar. */
+@media (min-width: 769px) {
+    .cart-sticky-bar { display: block; }
+    .cart-sticky-bar__inner { justify-content: flex-end; }
+    .cart-sticky-bar__btn { flex: 0 0 auto; min-width: 260px; }
+}
+@media (min-width: 1100px) {
+    body.has-consent-banner .cart-sticky-bar { bottom: 0; }
+}
+/* Wallet row under Checkout (OFF by default: Config.DARK_FEATURES.cartWallet). */
+.cart-wallet { margin-top: 12px; }
+.cart-wallet[hidden] { display: none; }
+.cart-wallet__or { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 0.8125rem; color: var(--color-text-muted); }
+.cart-wallet__or::before, .cart-wallet__or::after { content: ""; flex: 1; border-top: 1px solid var(--color-border); }
+.cart-wallet__status { margin: 8px 0 0; font-size: 0.875rem; color: var(--color-text-muted); }
+.cart-wallet__status[hidden], .cart-wallet__turnstile[hidden] { display: none; }
 
 /* /review — guest review-by-link (live 2026-09-28). */
 .review-page__form { margin: 0 0 var(--spacing-lg); padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); max-width: 640px; }

@@ -446,7 +446,11 @@
             // Fetch shipping from backend API with full item weights
             await this.fetchShippingFromAPI();
 
-            this.totals.total = this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) - (this.totals.b2bDiscount || 0) + this.totals.shipping;
+            // Shipping not known yet ⇒ neither is the total (ERR-305): "Calculating…",
+            // never a placeholder figure that changes a moment later.
+            this.totals.total = Number.isFinite(this.totals.shipping)
+                ? this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) - (this.totals.b2bDiscount || 0) + this.totals.shipping
+                : null;
             this.updateTotalsDisplay();
             this.updateShippingInfo();
             // Labels for BOTH areas, memoised on (region, cart). Not awaited: the
@@ -518,8 +522,35 @@
             // shipping — and the displayed total equals the charged total, which is
             // the property worth keeping.
 
-            // Try backend API for accurate weight-based rates (skip if no region selected)
-            if (region && typeof API !== 'undefined' && this.cartItems.length > 0) {
+            // ONE SHIPPING FIGURE (ERR-305, ad-clicks handoff §8.3). Checkout used to
+            // paint "North Island Shipping (est.) $12.00" from the local table the
+            // moment the page opened (no region yet ⇒ DEFAULT_ZONE ⇒ standard_urban
+            // $12), then swap it for the server's $7.00 about 4s later. Now:
+            //   region or postcode known → the server (/api/shipping/options)
+            //   neither known yet        → the cart's OWN server estimate
+            //                              (summary.shipping, the same figure the
+            //                              cart printed inside "Estimated total")
+            //   no server figure at all  → null ⇒ "Calculating…"
+            //   server call FAILED       → the local table, marked
+            //                              data-shipping-source="local-fallback"
+            // The local table never paints first any more.
+            this._shippingSource = 'pending';
+            if (!region && !postalCode) {
+                const est = this._cartShippingEstimate();
+                if (est) {
+                    this.totals.shipping = est.fee;
+                    this._shippingResult = est;
+                    this._shippingSource = 'cart-estimate';
+                } else {
+                    this.totals.shipping = null;
+                    this._shippingResult = null;
+                }
+                return;
+            }
+
+            // Backend API for accurate weight-based rates. postal_code alone is
+            // accepted (backend validates "at least one of region, postal_code").
+            if (typeof API !== 'undefined' && this.cartItems.length > 0) {
                 try {
                     const payload = {
                         cart_total: this.totals.subtotal,
@@ -527,7 +558,8 @@
                             product_id: item.id,
                             quantity: item.quantity
                         })),
-                        region: region,
+                        ...(region ? { region } : {}),
+                        ...(postalCode ? { postal_code: postalCode } : {}),
                         delivery_type: deliveryType
                     };
                     const response = await API.getShippingOptions(payload);
@@ -544,6 +576,7 @@
                                 deliveryType: deliveryType,
                                 reason: option.reason || ''
                             };
+                            this._shippingSource = 'server';
                             return;
                         } else {
                             DebugLog.warn('Shipping API returned no usable option:', response.data);
@@ -554,7 +587,9 @@
                 }
             }
 
-            // Fallback: client-side estimate (uses light weight tier)
+            // Fallback: client-side estimate (uses light weight tier). Reached
+            // only after the server was ASKED and did not answer.
+            this._shippingSource = 'local-fallback';
             if (typeof Shipping !== 'undefined') {
                 const result = Shipping.calculate(this.cartItems, this.totals.subtotal, region, deliveryType);
                 this.totals.shipping = result.fee;
@@ -586,13 +621,61 @@
         },
 
         /**
+         * The cart's own server shipping estimate, before any address is typed
+         * (ERR-305). `summary.shipping` + `is_shipping_estimate` from GET
+         * /api/cart — the figure /cart showed inside "Estimated total". Free
+         * shipping is the server's `qualifies_for_free_shipping`, never a 0
+         * read as free. Returns null when the server gave no usable figure.
+         */
+        _cartShippingEstimate() {
+            const s = (typeof Cart !== 'undefined' && Cart.serverSummary) || null;
+            if (!s) return null;
+            if (s.qualifies_for_free_shipping === true) {
+                return { fee: 0, tier: 'free', zone: '', zoneLabel: '', freeShipping: true, reason: 'cart-estimate' };
+            }
+            if (typeof s.shipping === 'number' && Number.isFinite(s.shipping) && s.shipping > 0) {
+                return { fee: s.shipping, tier: 'estimate', zone: '', zoneLabel: '', freeShipping: false, reason: 'cart-estimate' };
+            }
+            return null;
+        },
+
+        /**
+         * A coupon / points change re-reads GET /api/cart. Its `summary.shipping`
+         * is the GENERIC urban estimate, so it must not replace a fee the server
+         * already priced for the shopper's address (ERR-305): a rural $14 used
+         * to fall back to $7 the moment a coupon was applied, a second figure
+         * that changed. The cart estimate only fills the gap before an address.
+         */
+        _adoptCartShipping(summary) {
+            if (!summary) return;
+            if (summary.subtotal != null) this.totals.subtotal = summary.subtotal;
+            if (this._shippingSource === 'server' || this._shippingSource === 'local-fallback') return;
+            const est = this._cartShippingEstimate();
+            if (est) {
+                this.totals.shipping = est.fee;
+                this._shippingResult = est;
+                this._shippingSource = 'cart-estimate';
+            }
+        },
+
+        /** Recompute the display total from the parts and repaint through ONE renderer. */
+        _repaintShippingAndTotal() {
+            this.totals.total = Number.isFinite(this.totals.shipping)
+                ? this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) - (this.totals.b2bDiscount || 0) + this.totals.shipping
+                : null;
+            this.updateTotalsDisplay();
+        },
+
+        /**
          * Update shipping info display (ETA, spend-more, tier label, split shipment)
          */
         updateShippingInfo() {
             if (typeof Shipping === 'undefined') return;
 
             const region = document.getElementById('region')?.value || '';
-            const result = this._shippingResult || Shipping.calculate(this.cartItems, this.totals.subtotal, region);
+            // No silent local recompute here (ERR-305): with no result yet the
+            // label is the plain "Shipping (est.)" beside "Calculating…".
+            const result = this._shippingResult || { fee: null, tier: 'pending', zone: '', zoneLabel: '', freeShipping: false };
 
             // Update shipping label with zone and tier
             const labelEl = document.getElementById('checkout-shipping-label');
@@ -643,7 +726,7 @@
             }
 
             // Track analytics event (once per region change)
-            if (typeof Analytics !== 'undefined' && region) {
+            if (typeof Analytics !== 'undefined' && region && result.fee != null) {
                 Analytics.track('shipping_calculated', {
                     tier: result.tier,
                     fee: result.fee,
@@ -707,9 +790,12 @@
             const totalEl = document.getElementById('checkout-total');
 
             if (subtotalEl) subtotalEl.textContent = `$${this.totals.subtotal.toFixed(2)}`;
+            const shippingKnown = Number.isFinite(this.totals.shipping);
             if (shippingEl) {
-                shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
+                shippingEl.textContent = !shippingKnown ? 'Calculating\u2026'
+                    : this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
                 shippingEl.classList.toggle('text-success', this.totals.shipping === 0);
+                shippingEl.dataset.shippingSource = shippingKnown ? (this._shippingSource || 'server') : 'pending';
             }
 
             // Show discount if applied
@@ -752,7 +838,10 @@
                 }
             }
 
-            if (totalEl) totalEl.textContent = `$${this.totals.total.toFixed(2)} NZD`;
+            if (totalEl) {
+                totalEl.textContent = Number.isFinite(this.totals.total)
+                    ? `$${this.totals.total.toFixed(2)} NZD` : 'Calculating\u2026';
+            }
         },
 
         // Render cart items
@@ -1148,12 +1237,6 @@
                 const saveAddressCheckbox = document.getElementById('save-address');
                 if (saveAddressCheckbox && state.saveAddress) {
                     saveAddressCheckbox.checked = true;
-                }
-
-                // Restore terms checkbox if it was checked
-                const termsCheckbox = document.getElementById('terms');
-                if (termsCheckbox && state.termsAccepted) {
-                    termsCheckbox.checked = true;
                 }
 
                 DebugLog.log('Restored checkout state from session');
@@ -1931,8 +2014,7 @@
                                 if (summary.subtotal != null) this.totals.subtotal = summary.subtotal;
                                 if (summary.discount != null) this.totals.discount = summary.discount;
                                 else this.totals.discount = serverDiscount;
-                                if (summary.shipping != null) this.totals.shipping = summary.shipping;
-                                if (summary.total != null) this.totals.total = summary.total;
+                                this._adoptCartShipping(summary);
                             } else {
                                 this.totals.discount = serverDiscount;
                             }
@@ -1950,11 +2032,7 @@
                         }
                         const subtotalEl = document.getElementById('checkout-subtotal');
                         if (subtotalEl) subtotalEl.textContent = formatPrice(this.totals.subtotal);
-                        const shippingEl = document.getElementById('checkout-shipping');
-                        if (shippingEl) {
-                            shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : formatPrice(this.totals.shipping);
-                        }
-                        document.getElementById('checkout-total').textContent = `${formatPrice(this.totals.total)} NZD`;
+                        this._repaintShippingAndTotal();
 
                         // Show success
                         couponInput.value = '';
@@ -2005,8 +2083,7 @@
                         this.appliedCoupon = activeCoupon;
                         this.totals.discount = activeCoupon && summary?.discount ? summary.discount : 0;
                         if (summary?.subtotal != null) this.totals.subtotal = summary.subtotal;
-                        if (summary?.shipping != null) this.totals.shipping = summary.shipping;
-                        this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+                        this._adoptCartShipping(summary);
 
                         const discountRow = document.getElementById('checkout-discount-row');
                         const discountEl = document.getElementById('checkout-discount');
@@ -2021,10 +2098,7 @@
                         }
                         const subtotalEl = document.getElementById('checkout-subtotal');
                         if (subtotalEl) subtotalEl.textContent = formatPrice(this.totals.subtotal);
-                        const shippingEl = document.getElementById('checkout-shipping');
-                        if (shippingEl) shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : formatPrice(this.totals.shipping);
-                        const totalEl = document.getElementById('checkout-total');
-                        if (totalEl) totalEl.textContent = `${formatPrice(this.totals.total)} NZD`;
+                        this._repaintShippingAndTotal();
                     } catch (syncErr) {
                         DebugLog.warn('Cart resync after coupon failure failed:', syncErr);
                     }
@@ -2161,10 +2235,9 @@
                         if (summary.subtotal != null) self.totals.subtotal = summary.subtotal;
                         self.totals.discount = self.appliedCoupon ? (summary.coupon_discount != null ? summary.coupon_discount : (summary.discount || 0)) : 0;
                         self.totals.loyaltyDiscount = summary.loyalty_discount_amount || 0;
-                        if (summary.shipping != null) self.totals.shipping = summary.shipping;
-                        self.totals.total = self.totals.subtotal - self.totals.discount - self.totals.loyaltyDiscount + self.totals.shipping;
+                        self._adoptCartShipping(summary);
                     }
-                    self.updateTotalsDisplay();
+                    self._repaintShippingAndTotal();
                     render(data.loyalty || null);
                 } catch (e) {
                     if (typeof DebugLog !== 'undefined') DebugLog.warn('Cart refresh after loyalty change failed:', e && e.message);
@@ -2288,8 +2361,7 @@
                             const s = fresh?.data?.summary;
                             if (s) {
                                 if (s.subtotal != null) this.totals.subtotal = s.subtotal;
-                                if (s.shipping != null) this.totals.shipping = s.shipping;
-                                this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+                                this._adoptCartShipping(s);
                             }
                         } catch (e) { /* ignore */ }
 
@@ -2299,10 +2371,7 @@
                         }
                         const subtotalEl = document.getElementById('checkout-subtotal');
                         if (subtotalEl) subtotalEl.textContent = formatPrice(this.totals.subtotal);
-                        const shippingEl = document.getElementById('checkout-shipping');
-                        if (shippingEl) shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : formatPrice(this.totals.shipping);
-                        const totalEl = document.getElementById('checkout-total');
-                        if (totalEl) totalEl.textContent = `${formatPrice(this.totals.total)} NZD`;
+                        this._repaintShippingAndTotal();
                     } catch (err) {
                         DebugLog.error('Remove coupon failed:', err);
                         btn.disabled = false;
@@ -2486,19 +2555,8 @@
                 }
             }
 
-            // Check terms acceptance
-            const termsCheckbox = document.getElementById('terms');
-            if (!termsCheckbox.checked) {
-                const group = termsCheckbox.closest('.form-group') || termsCheckbox.parentElement;
-                if (group && !group.querySelector('.form-error')) {
-                    const errorMsg = document.createElement('div');
-                    errorMsg.className = 'form-error';
-                    errorMsg.textContent = 'Please accept the Terms & Conditions to continue.';
-                    group.appendChild(errorMsg);
-                }
-                termsCheckbox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                return;
-            }
+            // No Terms tick (ERR-305, §8.4, owner 2026-10-05): agreement is the
+            // "By placing this order you agree…" line beside Pay on /payment.
 
             this.isSubmitting = true;
             continueBtn.disabled = true;
@@ -2578,6 +2636,14 @@
                     address2: formData.get('address2'),
                     city: formData.get('city'),
                     region: formData.get('region'),
+                    // The option's LABEL, for display only (ERR-305, §8.5): /payment
+                    // printed the slug — "Auckland, auckland 0627". `region` stays the
+                    // slug the API and Stripe receive.
+                    regionLabel: (() => {
+                        const sel = document.getElementById('region');
+                        const opt = sel && sel.selectedIndex > 0 ? sel.options[sel.selectedIndex] : null;
+                        return opt ? opt.text.trim() : '';
+                    })(),
                     postcode: formData.get('postcode'),
                     // Billing
                     sameAsShipping: !differentBilling,
@@ -2602,7 +2668,6 @@
                     deliveryType: deliveryType,
                     estimatedShipping: this.totals.shipping,
                     // Terms accepted
-                    termsAccepted: document.getElementById('terms')?.checked || false,
                     // Timestamp
                     savedAt: Date.now()
                 };

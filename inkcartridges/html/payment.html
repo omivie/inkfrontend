@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
     <link rel="stylesheet" href="/css/components.css?v=e1803d91">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=3c79d4fe">
+    <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
 
     <script defer src="https://js.stripe.com/v3/"></script>
@@ -269,146 +269,21 @@
             display: none;
         }
 
-        /* Authorization box */
-        .payment-authorization {
-            margin-top: 1.5rem;
-            overflow: hidden;
-            max-height: 0;
-            opacity: 0;
-            transform: translateY(10px);
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+        /* The "I authorize this payment" tick box was removed (ERR-305, §8.4):
+           pressing Pay is the authorisation, and Stripe does not need it. */
 
-        .payment-authorization.visible {
-            max-height: 120px;
-            opacity: 1;
-            transform: translateY(0);
+        /* Agreement line beside Pay — replaces the checkout Terms tick (owner, 2026-10-05). */
+        .pay-terms {
+            margin: 0.5rem 0 0;
+            font-size: 0.8125rem;
+            line-height: 1.4;
+            color: var(--gray-600, #4b5563);
+            text-align: center;
         }
+        .pay-terms a { color: inherit; text-decoration: underline; }
 
-        .payment-authorization.authorized {
-            opacity: 0;
-            max-height: 0;
-            margin-top: 0;
-            transform: translateY(-20px) scale(0.95);
-        }
-
-        .authorize-box {
-            background: linear-gradient(135deg, var(--dark) 0%, var(--dark-light) 100%);
-            border: 2px solid var(--cyan);
-            border-radius: var(--radius-sm);
-            padding: 1rem 1.25rem;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .authorize-box::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(38, 127, 181, 0.1), transparent);
-            transition: left 0.5s ease;
-        }
-
-        .authorize-box:hover {
-            border-color: var(--cyan-light);
-            box-shadow: 0 8px 25px rgba(38, 127, 181, 0.25);
-            transform: translateY(-2px);
-        }
-
-        .authorize-box:hover::before {
-            left: 100%;
-        }
-
-        .authorize-checkbox {
-            width: 24px;
-            height: 24px;
-            min-width: 24px;
-            border: 2px solid var(--cyan);
-            border-radius: 6px;
-            background: transparent;
-            cursor: pointer;
-            appearance: none;
-            -webkit-appearance: none;
-            position: relative;
-            transition: all 0.2s ease;
-        }
-
-        .authorize-checkbox:checked {
-            background: var(--cyan);
-            border-color: var(--cyan);
-        }
-
-        .authorize-checkbox:checked::after {
-            content: '';
-            position: absolute;
-            left: 7px;
-            top: 3px;
-            width: 6px;
-            height: 12px;
-            border: solid white;
-            border-width: 0 2.5px 2.5px 0;
-            transform: rotate(45deg);
-            animation: checkmark 0.2s ease-out;
-        }
-
-        @keyframes checkmark {
-            from {
-                transform: rotate(45deg) scale(0);
-                opacity: 0;
-            }
-            to {
-                transform: rotate(45deg) scale(1);
-                opacity: 1;
-            }
-        }
-
-        .authorize-checkbox:focus {
-            outline: none;
-            box-shadow: 0 0 0 4px rgba(38, 127, 181, 0.3);
-        }
-
-        .authorize-content {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            flex: 1;
-        }
-
-        .authorize-icon {
-            width: 36px;
-            height: 36px;
-            background: rgba(38, 127, 181, 0.2);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--cyan-light);
-            flex-shrink: 0;
-        }
-
-        .authorize-text {
-            color: white;
-        }
-
-        .authorize-text__title {
-            font-size: 0.9375rem;
-            font-weight: 600;
-            margin: 0 0 0.125rem;
-        }
-
-        .authorize-text__subtitle {
-            font-size: 0.75rem;
-            color: var(--gray-400);
-            margin: 0;
-        }
+        /* Pay pressed while the guest bot check is still finishing (ERR-305, §8.1). */
+        .pay-button.is-verifying { cursor: progress; }
 
         /* Pay button */
         .pay-button {
@@ -695,22 +570,10 @@
                                             <div id="card-errors" role="alert"></div>
                                         </div>
 
-                                        <div id="payment-authorization" class="payment-authorization">
-                                            <label class="authorize-box" for="authorize-payment">
-                                                <input type="checkbox" id="authorize-payment" name="authorizePayment" class="authorize-checkbox" autocomplete="off">
-                                                <div class="authorize-content">
-                                                    <div class="authorize-icon">
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                                    </div>
-                                                    <div class="authorize-text">
-                                                        <p class="authorize-text__title">I authorize this payment</p>
-                                                        <p class="authorize-text__subtitle">Confirm to proceed with secure payment</p>
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        </div>
-
-                                        <!-- Turnstile widget (rendered for guest checkouts only) -->
+                                        <!-- Turnstile widget (guest checkouts only). Invisible unless Cloudflare
+                                             needs an interaction (appearance: interaction-only). Pay is NOT disabled
+                                             while it runs: a Pay press waits for the token behind a spinner
+                                             (ERR-305, §8.1). -->
                                         <div id="turnstile-container" style="display:none; margin-bottom: 0.75rem;">
                                             <div id="turnstile-widget"></div>
                                         </div>
@@ -719,6 +582,10 @@
                                             <svg class="pay-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                                             <span id="pay-button-text">Pay Now</span>
                                         </button>
+
+                                        <!-- Replaces the "I agree to the Terms" tick box on /checkout (ERR-305,
+                                             §8.4; owner decision 2026-10-05). -->
+                                        <p class="pay-terms" id="pay-terms" data-testid="pay-terms">By placing this order you agree to our <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
 
                                         <!-- Next to the Pay button (conversion handoff 2026-09-27
                                              §8.3/§8.2): the surcharge note from
@@ -816,16 +683,16 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=1c50051c"></script>
+    <script defer src="/js/config.js?v=e96b328a"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/shipping.js?v=570c7bc4"></script>
-    <script defer src="/js/api.js?v=0f7bc988"></script>
+    <script defer src="/js/api.js?v=3752a5e2"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=327fd22e"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=40a8e7a7"></script>
+    <script defer src="/js/cart.js?v=88086be1"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
@@ -834,7 +701,7 @@
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/payment-page.js?v=9cae7bad"></script>
+    <script defer src="/js/payment-page.js?v=3724f1f4"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

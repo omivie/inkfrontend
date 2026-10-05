@@ -2170,14 +2170,15 @@ const Cart = {
             return { valid: false, errors: ['Unable to validate cart. Please try again.'], priceChanges: [] };
         }
 
-        // Get Turnstile token for bot verification (non-blocking — returns null if unavailable).
-        // ERR-296: from the prefetch when there is one, and never more than
-        // TURNSTILE_CLICK_WAIT_MS at the click — this used to hold "Checkout"
-        // for the script download + challenge, up to 8s (turnaround doc P2).
-        const turnstileToken = await this._takeTurnstileToken();
-
+        // NO Turnstile here (ERR-305, ad-clicks handoff §8.1). /api/cart/validate
+        // does not check a token (cartLimiter + fastOptionalAuth only — backend,
+        // 2026-10-05); POST /api/orders is the one call that does, and the
+        // payment page mints that token itself. Waiting for a challenge here
+        // held "Proceed to Checkout" for 8.0s on a laptop and 9.4s on an iPhone
+        // (ERR-296 capped it at 1.5s; the backend still measured 3.0s to load
+        // /checkout). The cart's job at the click is the stock/price check only.
         try {
-            const response = await API.validateCart(turnstileToken, acknowledgePriceChanges);
+            const response = await API.validateCart(null, acknowledgePriceChanges);
             if (response.ok) {
                 const data = response.data || {};
                 const errors = [];
@@ -2264,52 +2265,51 @@ const Cart = {
      * Intercepts the checkout anchor click to validate cart first
      * SECURITY: Blocks checkout if server pricing is unavailable
      */
-    /** Turnstile tokens live 300s and are single-use; refetch past this age. */
-    TURNSTILE_MAX_AGE_MS: 240000,
-    /** The longest a Checkout click waits for a token before validating without one. */
-    TURNSTILE_CLICK_WAIT_MS: 1500,
-    _turnstilePrefetch: null,
+    /**
+     * The longest a "Proceed to Checkout" click waits for /api/cart/validate
+     * before navigating anyway (ERR-305, §8.1: "reaches /checkout in under 1
+     * second"). validate answers in ~0.35s; past the cap the shopper goes on
+     * and the server re-checks every price and stock level at POST /api/orders.
+     */
+    CHECKOUT_VALIDATE_CAP_MS: 700,
 
-    /** Start fetching a token BEFORE the click (idle on /cart, hover/focus/touch on Checkout). */
-    prefetchTurnstile: function() {
-        if (typeof Auth === 'undefined' || typeof Auth.getTurnstileToken !== 'function') return;
-        const pre = this._turnstilePrefetch;
-        if (pre && Date.now() - pre.at < this.TURNSTILE_MAX_AGE_MS) return;
-        this._turnstilePrefetch = { at: Date.now(), promise: Auth.getTurnstileToken().catch(() => null) };
+    /**
+     * Race validateCart() against CHECKOUT_VALIDATE_CAP_MS. Resolves to the
+     * validation result, or to { timedOut: true } when the cap wins. A
+     * validation that THROWS still rejects, so the caller's catch keeps its
+     * "infrastructure failure ⇒ proceed" meaning.
+     */
+    _validateWithinCap: function() {
+        let timer;
+        const cap = new Promise((resolve) => {
+            timer = setTimeout(() => resolve({ timedOut: true }), this.CHECKOUT_VALIDATE_CAP_MS);
+        });
+        return Promise.race([this.validateCart(), cap]).finally(() => clearTimeout(timer));
     },
 
-    /** Take (and consume — tokens are single-use) the prefetched token, capped at the click. */
-    _takeTurnstileToken: async function() {
-        if (typeof Auth === 'undefined' || typeof Auth.getTurnstileToken !== 'function') return null;
-        let pre = this._turnstilePrefetch;
-        this._turnstilePrefetch = null;
-        if (!pre || Date.now() - pre.at >= this.TURNSTILE_MAX_AGE_MS) {
-            pre = { at: Date.now(), promise: Auth.getTurnstileToken().catch(() => null) };
-        }
-        let timer;
-        const cap = new Promise((resolve) => { timer = setTimeout(() => resolve(null), this.TURNSTILE_CLICK_WAIT_MS); });
-        try {
-            return await Promise.race([pre.promise, cap]);
-        } finally {
-            clearTimeout(timer);
+    /** Immediate feedback on the clicked checkout control (a dead-looking button was §8.1's complaint). */
+    _setCheckoutBusy: function(link, busy) {
+        if (!link) return;
+        if (busy) {
+            if (!link.dataset.idleLabel) link.dataset.idleLabel = link.textContent.trim();
+            link.setAttribute('aria-busy', 'true');
+            link.classList.add('is-busy');
+            link.textContent = 'Opening checkout\u2026';
+        } else {
+            link.removeAttribute('aria-busy');
+            link.classList.remove('is-busy');
+            if (link.dataset.idleLabel) link.textContent = link.dataset.idleLabel;
         }
     },
 
     bindCheckoutButton: function() {
         const self = this;
-        // Warm the Turnstile token before the shopper reaches for Checkout.
-        const warm = (e) => {
-            if (e.target && e.target.closest && e.target.closest('#checkout-btn, .cart-summary__checkout-btn')) self.prefetchTurnstile();
-        };
-        document.addEventListener('pointerover', warm, { passive: true });
-        document.addEventListener('focusin', warm);
-        document.addEventListener('touchstart', warm, { passive: true });
-        if (typeof window !== 'undefined' && window.location && window.location.pathname === '/cart') {
-            const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 2000));
-            // After the cart has had time to load (init awaits Auth + the server
-            // cart), and only for a cart that can check out.
-            setTimeout(() => idle(() => { if (self.items.length > 0 || self.hasServerPricing()) self.prefetchTurnstile(); }), 3000);
-        }
+        // Back from /checkout into a bfcached /cart: the page is restored as we
+        // left it, mid-"Opening checkout…". Put the buttons back.
+        window.addEventListener('pageshow', () => {
+            document.querySelectorAll('#checkout-btn[aria-busy], .cart-summary__checkout-btn[aria-busy]')
+                .forEach((el) => self._setCheckoutBusy(el, false));
+        });
         document.addEventListener('click', async (e) => {
             const checkoutLink = e.target.closest('#checkout-btn, .cart-summary__checkout-btn');
             if (!checkoutLink) return;
@@ -2326,17 +2326,25 @@ const Cart = {
                 return;
             }
 
+            // A second click while the first is in flight does nothing.
+            if (checkoutLink.getAttribute('aria-busy') === 'true') return;
+            self._setCheckoutBusy(checkoutLink, true);
+
             // Validate cart for stock issues and price changes.
             // Stock warnings are advisory (never block navigation — checkout re-validates).
             // Price changes require explicit acknowledgment before proceeding.
             try {
-                const result = await self.validateCart();
+                // `timedOut` (validate slower than the cap) carries no verdict:
+                // nothing below fires and the shopper goes on, because POST
+                // /api/orders re-checks every price, stock level and refusal.
+                const result = await self._validateWithinCap();
 
                 // The server refused this cart outright (ERR-246). Not advisory,
                 // not retryable, and the only outcome of this handler that must
                 // NOT navigate: POST /api/orders enforces the same rule, so
                 // /checkout is a dead end with a card form on it.
                 if (result.blocked) {
+                    self._setCheckoutBusy(checkoutLink, false);
                     if (typeof showToast === 'function') {
                         showToast(result.errors[0] || 'This cart can\u2019t be checked out.', 'error', 7000);
                     }
@@ -2354,8 +2362,10 @@ const Cart = {
 
                 // Price changes require user acknowledgment before checkout
                 if (result.priceChanges && result.priceChanges.length > 0) {
+                    self._setCheckoutBusy(checkoutLink, false);
                     const accepted = await self.showPriceChangeModal(result.priceChanges);
                     if (!accepted) return; // User declined — stay on cart
+                    self._setCheckoutBusy(checkoutLink, true);
                     // Acknowledge price changes so backend updates snapshots
                     try {
                         await self.validateCart(true);
@@ -2364,7 +2374,7 @@ const Cart = {
                     }
                 }
             } catch (_) {
-                // Validation failed (network/Turnstile/auth) — proceed anyway.
+                // Validation failed (network/auth/5xx) — proceed anyway.
             }
 
             window.location.href = '/checkout';
@@ -2985,17 +2995,19 @@ const Cart = {
 
         const subtotal = this.getSubtotal();
         const discount = this.getDiscount();
-        // Cart page total excludes shipping — shipping is calculated at checkout
+        // The pre-shipping figure. Shown only when the server's own total is
+        // missing — see _totalRowModel (ERR-305).
         const cartTotal = subtotal - discount;
 
         const itemCountEl = document.getElementById('cart-item-count');
         const subtotalEl = document.getElementById('cart-subtotal');
         const gstEl = document.getElementById('cart-gst');
-        const totalEl = document.getElementById('cart-total');
         if (itemCountEl) itemCountEl.textContent = itemCount;
         if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
         if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
-        if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
+        this.renderTotalRow(cartTotal);
+        this.renderShippingRow();
+        this.renderPointsEarn();
 
         // Savings / loyalty / business-account rows — one shared renderer.
         this._renderDiscountRows(discount);
@@ -4210,7 +4222,11 @@ const Cart = {
      * the first time a shopper saw shipping was one step from paying. The cart
      * response already carries the figure. Rules, SERVER NUMBERS ONLY:
      *   qualifies                          → "Free"
-     *   shipping > 0, is_shipping_estimate → "From $7.00 · free over $100"
+     *   shipping > 0, is_shipping_estimate → "$7.00 · free over $100" (row label
+     *                                        reads "Shipping (est.)"; ERR-305
+     *                                        dropped "From" — the figure is now
+     *                                        INSIDE the estimated total, and a
+     *                                        total cannot contain a "from")
      *   shipping > 0, not an estimate      → "$7.00"
      *   anything else (absent, null, 0)    → "Calculated at checkout"
      * The threshold is the cart's own `free_shipping_threshold`; no local
@@ -4232,7 +4248,103 @@ const Cart = {
             ? s.free_shipping_threshold : null;
         // "$100", not "$100.00", for a whole-dollar threshold — it is a headline.
         const tStr = t === null ? '' : (Number.isInteger(t) ? '$' + t : money(t));
-        return 'From ' + money(ship) + (tStr ? ' · free over ' + tStr : '');
+        return money(ship) + (tStr ? ' · free over ' + tStr : '');
+    },
+
+    /**
+     * Paint the Shipping row: its label ("Shipping (est.)" only while the
+     * server calls the figure an estimate) and its value (_shippingRowText).
+     */
+    renderShippingRow: function() {
+        const s = this.serverSummary || {};
+        const qualifies = s.qualifies_for_free_shipping === true;
+        const shipEl = document.getElementById('cart-shipping');
+        if (shipEl) shipEl.textContent = this._shippingRowText(this.serverSummary, qualifies);
+        const labelEl = document.getElementById('cart-shipping-label');
+        if (labelEl) {
+            labelEl.textContent = (!qualifies && s.shipping > 0 && s.is_shipping_estimate !== false)
+                ? 'Shipping (est.)' : 'Shipping';
+        }
+    },
+
+    /**
+     * The cart's total row — ONE shipping figure, inside the total (ERR-305,
+     * ad-clicks handoff §8.3 / FE master checklist item 4).
+     *
+     * The cart used to show "Total before shipping $48.99" and checkout then
+     * showed a bigger number: a total that grows at checkout is a classic
+     * reason to abandon. The server's cart summary already carries `total`
+     * (subtotal + the urban shipping estimate − discount: 30.79 + 7 = 37.79,
+     * measured 2026-10-05), so the row SHOWS that figure. Nothing is added up
+     * here — the FE never computes a price.
+     *
+     *   server total + qualifies for free shipping → "Total"            (server)
+     *   server total + shipping > 0, not estimate  → "Total"            (server)
+     *   server total + shipping > 0, estimate      → "Estimated total"  (server)
+     *   anything else (no server total, or the
+     *   shipping figure is unknown / 0-not-free)   → "Total before shipping"
+     *                                                = subtotal − discount (fallback)
+     *
+     * The last arm is the ERR-296 label, kept for a cart the server has not
+     * priced (offline, first paint, a 5xx). `source` is written onto the row
+     * as data-total-source so the partial state is LOUD, not silent.
+     *
+     * PURE. @param {object|null} summary  server cart summary
+     * @param {number} beforeShipping  subtotal − discount (fallback figure)
+     * @returns {{label:string, value:number, source:'server'|'fallback'}}
+     */
+    _totalRowModel: function(summary, beforeShipping) {
+        const s = summary || {};
+        const total = typeof s.total === 'number' && Number.isFinite(s.total) ? s.total : null;
+        const ship = typeof s.shipping === 'number' && Number.isFinite(s.shipping) ? s.shipping : null;
+        const fallback = { label: 'Total before shipping', value: beforeShipping, source: 'fallback' };
+        if (total === null) return fallback;
+        if (s.qualifies_for_free_shipping === true) return { label: 'Total', value: total, source: 'server' };
+        if (!(ship > 0)) return fallback;
+        return {
+            label: s.is_shipping_estimate === false ? 'Total' : 'Estimated total',
+            value: total,
+            source: 'server',
+        };
+    },
+
+    /** Paint the total row (and the mobile sticky bar's label) from _totalRowModel. */
+    renderTotalRow: function(beforeShipping) {
+        const model = this._totalRowModel(this.serverSummary, beforeShipping);
+        const totalEl = document.getElementById('cart-total');
+        if (totalEl) totalEl.textContent = formatPrice(model.value) + ' NZD';
+        const labelEl = document.getElementById('cart-total-label');
+        if (labelEl) labelEl.textContent = model.label;
+        const rowEl = document.getElementById('cart-total-row');
+        if (rowEl) rowEl.dataset.totalSource = model.source;
+        const stickyLabel = document.getElementById('cart-sticky-label');
+        if (stickyLabel) stickyLabel.textContent = model.label === 'Total before shipping' ? 'Before shipping' : model.label;
+        return model;
+    },
+
+    /**
+     * "Points to be earned: N points" (FE master checklist item 6, cart half;
+     * ERR-305). The cart response's `loyalty.earn_on_this_order` arrives for
+     * members AND guests (measured 2026-10-05: guest, $30.79 cart → 30). The
+     * guest's "how to collect them" wording is NOT repeated here: the loyalty
+     * chip (_renderLoyaltyChip) already prints `loyalty.message` verbatim. Absent / non-numeric ⇒ the block stays hidden with
+     * data-points="absent" — never printed as 0 (absence-as-zero, ERR-063).
+     */
+    renderPointsEarn: function() {
+        const box = document.getElementById('cart-points-earn');
+        if (!box) return;
+        const lo = this.loyalty || null;
+        const n = lo && typeof lo.earn_on_this_order === 'number' && Number.isFinite(lo.earn_on_this_order)
+            ? Math.floor(lo.earn_on_this_order) : null;
+        if (n === null || n <= 0 || this.getItemCount() === 0) {
+            box.hidden = true;
+            box.dataset.points = n === null ? 'absent' : 'zero';
+            return;
+        }
+        const valueEl = document.getElementById('cart-points-earn-value');
+        if (valueEl) valueEl.textContent = n.toLocaleString('en-NZ') + (n === 1 ? ' point' : ' points');
+        box.dataset.points = String(n);
+        box.hidden = false;
     },
 
     /**
@@ -4353,19 +4465,20 @@ const Cart = {
 
             const subtotal = this.getSubtotal();
             const discount = this.getDiscount();
-            // Cart page total excludes shipping — shipping is calculated at checkout
+            // The pre-shipping figure. Shown only when the server's own total is
+            // missing — see _totalRowModel (ERR-305).
             const cartTotal = subtotal - discount;
             const itemCount = this.getItemCount();
 
             const itemCountEl = document.getElementById('cart-item-count');
             const subtotalEl = document.getElementById('cart-subtotal');
             const gstEl = document.getElementById('cart-gst');
-            const totalEl = document.getElementById('cart-total');
 
             if (itemCountEl) itemCountEl.textContent = itemCount;
             if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
             if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
-            if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
+            this.renderTotalRow(cartTotal);
+            this.renderPointsEarn();
 
             // Savings / loyalty / business-account rows — one shared renderer.
             this._renderDiscountRows(discount);
@@ -4392,12 +4505,9 @@ const Cart = {
             // local Shipping.getSpendMore fallback below is a frontend threshold
             // calc, fine for nudge copy but never good enough to print. Unknown
             // shipping stays "Calculated at checkout" and is never shown as free.
-            const shipEl = document.getElementById('cart-shipping');
             const serverQualifies = !!(this.serverSummary
                 && this.serverSummary.qualifies_for_free_shipping === true);
-            if (shipEl) {
-                shipEl.textContent = this._shippingRowText(this.serverSummary, serverQualifies);
-            }
+            this.renderShippingRow();
 
             if (shippingMsgEl) {
                 const summary = this.serverSummary || {};

@@ -499,39 +499,22 @@ test('§9 guests: the coupon form is HIDDEN and the free-account line shown; mem
 });
 
 test('§9 the cart figure without shipping is labelled so, desktop and sticky bar', () => {
+    // ERR-305 keeps the ERR-296 label as the FALLBACK (no server total yet) and
+    // swaps it for "Estimated total" once the server's own total arrives —
+    // tests/checkout-funnel-oct2026.test.js drives that model.
     const html = read('html/cart.html');
-    assert.match(html, /<div class="cart-summary__row cart-summary__row--total">\s*<span>Total before shipping<\/span>/);
-    assert.match(html, /<span class="cart-sticky-bar__label">Before shipping<\/span>/);
+    assert.match(html, /<div class="cart-summary__row cart-summary__row--total"[^>]*>\s*<span id="cart-total-label">Total before shipping<\/span>/);
+    assert.match(html, /<span class="cart-sticky-bar__label" id="cart-sticky-label">Before shipping<\/span>/);
 });
 
-function turnstileCart(getToken, waitMs) {
-    const src = read('js/cart.js');
-    const sandbox = { setTimeout, clearTimeout, Date, Promise, Auth: { getTurnstileToken: getToken } };
-    vm.createContext(sandbox);
-    vm.runInContext(`globalThis.C = { TURNSTILE_MAX_AGE_MS: 240000, TURNSTILE_CLICK_WAIT_MS: ${waitMs}, _turnstilePrefetch: null,
-        ${lift(src, 'prefetchTurnstile: function()')}, ${lift(src, '_takeTurnstileToken: async function()')} };`, sandbox);
-    return sandbox.C;
-}
-
-test('§9 Turnstile: a hung challenge costs the click at most TURNSTILE_CLICK_WAIT_MS (was up to 8s)', { timeout: 5000 }, async () => {
-    const C = turnstileCart(() => new Promise(() => {}), 50);
-    const t0 = Date.now();
-    assert.equal(await C._takeTurnstileToken(), null);
-    assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0}ms`);
-    const shipped = Number((read('js/cart.js').match(/TURNSTILE_CLICK_WAIT_MS:\s*(\d+)/) || [])[1]);
-    assert.ok(shipped > 0 && shipped <= 2000, `shipped cap ${shipped}ms`);
-});
-
-test('§9 Turnstile: a prefetched token is used once (single-use), then a new one is asked for', async () => {
-    let n = 0;
-    const C = turnstileCart(async () => `tok${++n}`, 1000);
-    C.prefetchTurnstile();
-    C.prefetchTurnstile();
-    assert.equal(n, 1, 'a fresh prefetch is not repeated');
-    assert.equal(await C._takeTurnstileToken(), 'tok1');
-    assert.equal(await C._takeTurnstileToken(), 'tok2', 'consumed — never replayed');
+test('§9 Checkout never waits for Turnstile at the click (ERR-305 superseded the ERR-296 1.5s cap)', () => {
+    // /api/cart/validate does not check a token; POST /api/orders does, and the
+    // payment page mints it. The click waits for validate only, capped.
     const code = stripComments(read('js/cart.js'));
-    assert.match(lift(code, 'async validateCart(acknowledgePriceChanges)'), /const turnstileToken = await this\._takeTurnstileToken\(\);/);
+    assert.doesNotMatch(code, /_takeTurnstileToken|prefetchTurnstile|TURNSTILE_CLICK_WAIT_MS/);
+    assert.match(lift(code, 'async validateCart(acknowledgePriceChanges)'), /API\.validateCart\(null, acknowledgePriceChanges\)/);
+    const cap = Number((code.match(/CHECKOUT_VALIDATE_CAP_MS:\s*(\d+)/) || [])[1]);
+    assert.ok(cap > 0 && cap < 1000, `click cap ${cap}ms must leave room under the 1s target`);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

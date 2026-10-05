@@ -342,11 +342,13 @@ test('§4 points line: goods only, the rung price at the quantity in the box, in
 test('§5 cart shipping row: server numbers only, never "free" from absence', () => {
     const row = method('js/cart.js', '_shippingRowText');
     assert.equal(row({}, true), 'Free');
-    assert.equal(row({ shipping: 7, is_shipping_estimate: true, free_shipping_threshold: 100 }, false), 'From $7.00 · free over $100');
+    // ERR-305 dropped "From": the estimate is now INSIDE the cart's "Estimated
+    // total", and the row label carries "(est.)" instead.
+    assert.equal(row({ shipping: 7, is_shipping_estimate: true, free_shipping_threshold: 100 }, false), '$7.00 · free over $100');
     assert.equal(row({ shipping: 7, is_shipping_estimate: false }, false), '$7.00');
     assert.equal(row({ shipping: 0 }, false), 'Calculated at checkout', 'a 0 that is not "qualifies" is not free');
     assert.equal(row(null, false), 'Calculated at checkout');
-    assert.equal(row({ shipping: 7, is_shipping_estimate: true }, false), 'From $7.00', 'no threshold ⇒ no threshold clause');
+    assert.equal(row({ shipping: 7, is_shipping_estimate: true }, false), '$7.00', 'no threshold ⇒ no threshold clause');
 });
 
 test('§5 the cross-sell modal never opens on a phone, and leads with Checkout on desktop', () => {
@@ -485,7 +487,7 @@ test('§8 cart email LIVE (ERR-302) and reviews LIVE, and the consent box is unt
     // guestReviews went live with the backend's confirmation (ERR-290,
     // backend-docs/inbox/fe-post-deploy-fixes-sep2026.md §1); guestCartEmail
     // with the owner's approval of the ad-clicks-to-orders handoff §4 (ERR-302).
-    assert.match(cfg, /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*true,\s*guestReviews:\s*true,?\s*\}/);
+    assert.match(stripComments(cfg), /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*true,\s*guestReviews:\s*true,\s*cartWallet:\s*false,?\s*\}/);
     const box = read('html/checkout.html').match(/<input type="checkbox" id="guest-cart-email-consent"[^>]*>/)[0];
     assert.doesNotMatch(box, /checked/, 'NZ UEMA: consent is given by the shopper, never pre-ticked');
     assert.match(read('html/checkout.html'), /id="guest-cart-email-optin" hidden/);

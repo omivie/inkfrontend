@@ -3064,9 +3064,11 @@ const API = {
     /**
      * NZ Post address suggestions
      * @param {string} query - Address search text
-     * @param {number} max - Max results (1–24, default 5)
+     * @param {number} max - Max results (1–24, default 8). Was 5: "1 Queen Street"
+     *   listed Masterton, Levin, Feilding, Northcote and Pahiatua and never reached
+     *   Auckland's (ERR-305, ad-clicks handoff §8.5).
      */
-    async nzpostSuggest(query, max = 5) {
+    async nzpostSuggest(query, max = 8) {
         return this.get(`/api/address/nzpost/suggest?q=${encodeURIComponent(query)}&max=${max}`, { noRetry: true });
     },
 

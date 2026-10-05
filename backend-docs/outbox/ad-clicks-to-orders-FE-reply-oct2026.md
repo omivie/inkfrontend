@@ -246,6 +246,18 @@ page does now.
 - **Below 1100px it is still a bar, and the ERR-233 lift still works.** At 1024×768 the badge sits *on* the bar, and both buttons answer their own hit-test.
 - **Accept stores consent.** Clicking it stores `cookie_consent=accepted`.
 
+## §8 Funnel walk (added in your 5 Oct copy) — ERR-305, 2026-10-05
+
+Your 5 Oct copy of this handoff added §8. The same items are 1, 3, 4, 9 and 11 of `FE-MASTER-CHECKLIST-oct2026.md`, so the full answer is in `outbox/fe-master-checklist-FE-reply-oct2026.md`, section "Items 1, 2, 3, 4, 9, 11, 12 … (ERR-305)". In short:
+
+- **§8.1** The cart click no longer runs Turnstile. It waits for `/api/cart/validate` for at most 700 ms, then goes to /checkout. The payment page runs Turnstile invisibly from page load and refreshes it every 240 s. A guest who presses Pay before the token arrives sees a spinner, not a dead button.
+- **§8.2** "Proceed to Checkout" now comes directly after the money rows (it was at y 829 at 1366×768). "Continue Shopping" is a text link. At 1280×551, 1366×599 and 1536×695 the sticky checkout bar (phone-only until now) shows while the real button is off-screen. Measured: a control on the first screen and clickable at all four laptop sizes and on 390×664, and the click reaches /checkout in 243–292 ms. On /cart, desktop toasts moved to the top: the "Added" toast had landed on the moved button.
+- **§8.3** The cart shows your `summary.total` as "Estimated total" (30.79 + 7 = 37.79, measured); the FE adds nothing up. Checkout shows "Calculating…" until your figure arrives. The local $12 table is used only if `/api/shipping/options` fails, and it is marked when it is.
+- **§8.4** Both ticks are gone. Under Pay: "By placing this order you agree to our Terms & Conditions and Privacy Policy" (owner, 5 Oct).
+- **§8.5** The summary shows the region label ("Kelston, Auckland 0602"). NZ Post suggest is asked for 8.
+- **Asks BF-100**: can `POST /api/orders` take a postcode without a region? This is for the Apple/Google Pay button on the cart, which is built but OFF until the owner tests it with `/cart?wallet=1`.
+- **Found:** your per-IP guest-session mint cap (`429 "Too many guest sessions"`) closed for this office for over an hour after a few probe runs. What are its window and its limit?
+
 ## Not done, on purpose
 
 - No price claims, no star ratings, no "guaranteed fit" wording.

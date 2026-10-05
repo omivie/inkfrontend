@@ -118,7 +118,62 @@ items: [{ id: product.sku, google_business_vertical: 'retail' }]
 
 **Done when:** within a few days, the "Product viewers (Retail)" audience in Google Ads is above 0.
 
-## 8. Small items (from `ad-visitor-dropoff-FE-handoff-oct2026.md`)
+## 8. Found walking the whole funnel as an ad customer (2 Oct, new)
+
+On 2 October we walked the full path a paid visitor takes: Epson 502 ad → series page → Add → cart → checkout → address → payment. We did it twice, on a 1366×768 laptop and on an iPhone 13 (390×664), as a first-time guest. Order creation and payment were blocked on our side, so no order was placed. Every step works: no errors, the NZ Post address lookup fills city, region and postcode, and Stripe offers card, Klarna and PayPal. The items below are friction, not breakage.
+
+### 8.1 P0 — "Proceed to Checkout" freezes for 8–9 seconds
+
+Clicking the button runs a Cloudflare Turnstile challenge before anything happens. We measured 8.0 s on the laptop and 9.4 s on the iPhone between the click and `/api/cart/validate` (which itself answers in 0.35 s). The button gives no feedback in that time, so a shopper sees a dead button. A real browser may solve the challenge faster than our test browser, but it still takes seconds.
+
+The backend does not need the token at this step. Turnstile is checked only when a guest **places the order** (`POST /api/orders`).
+
+- Navigate to `/checkout` immediately on click.
+- Run Turnstile invisibly in the background, either from when the payment page loads or earlier, and attach the token to `POST /api/orders`.
+- Tokens expire after 300 seconds. Refresh the token if the shopper takes longer than that.
+- If the token is still pending when they press Pay, show a spinner on the Pay button.
+
+**Done when:** the click on "Proceed to Checkout" reaches `/checkout` in under 1 second.
+
+### 8.2 P1 — Cart: the button that leads away is the one you see
+
+At 1366×768, "Proceed to Checkout" starts at 798 px, below the fold. The most prominent thing on the first screen is the magenta "Continue Shopping" button, which takes the shopper away from the cart. On the iPhone, the checkout button is at 851 px on a 664 px screen.
+
+- Put "Proceed to Checkout" at the top of the order summary. On mobile, make it sticky at the bottom of the screen.
+- Make "Continue Shopping" a plain text link.
+
+**Done when:** "Proceed to Checkout" is on the first screen at 1366×768 and 390×664.
+
+### 8.3 P1 — One shipping number, included in the total
+
+The same order shows shipping three ways. The cart says "From $7.00 · free over $100" and a Total that leaves shipping out ($48.99). Checkout first renders "North Island Shipping (est.) $12.00", then changes it to $7.00 once the estimate loads.
+
+- On the cart, show the urban estimate ($7.00) and an "Estimated total" that includes it. A total that grows at checkout is a common reason to abandon a cart. Today's Epson 502 shopper opened the cart twice and left.
+- On checkout, don't render a placeholder price before the estimate arrives. Show "Calculating…" instead.
+
+### 8.4 P2 — Two required ticks before paying
+
+The details step requires "I agree to the Terms & Conditions and Privacy Policy". The payment step then keeps "Pay $55.99 NZD" disabled until "I authorize this payment" is also ticked, and that button is below the fold at 1366×768.
+
+- Remove "I authorize this payment". Pressing Pay already authorises the payment, and Stripe does not need the extra tick.
+- For the terms, ask the owner whether a line next to the Pay button ("By placing this order you agree to our Terms and Privacy Policy") can replace the tick box.
+
+### 8.5 P3 — Polish
+
+- The payment summary shows the region's internal value: "Auckland, auckland 0627". Show its label instead.
+- Typing "1 Queen Street" lists Masterton, Levin, Feilding, Northcote and Pahiatua before Auckland's main Queen Street. Consider asking `/api/address/nzpost/suggest` for 8 suggestions instead of 5.
+
+### Fixed on the backend the same day (no storefront work)
+
+Listing cards read "Fits Epson EC OTANK ET 2850, Epson ECO TANK ET 2700 +9". The card's "Fits …" line took the first two printer rows alphabetically, and the feeds' all-caps typo rows sort first. Migration 195 now:
+
+- shows the manufacturer's spelling when a printer has several spellings;
+- never shows the same machine twice;
+- counts each printer once in "+N".
+
+The Epson 502 cards now read "Fits Epson EcoTank ET-2850, …". The field shape (`compatible_printers`, `compatible_printers_count`) is unchanged.
+
+## 9. Small items (from `ad-visitor-dropoff-FE-handoff-oct2026.md`)
 
 - Use the "GENUINE" brand tile for genuine singles with no `image_url`, as genuine packs already do. None showed on the 288 page today, but 552 genuine images are still waiting for review.
 - Search the storefront code and the Vercel environment variables for `ink-backend-zaeq` and `onrender.com`, and remove any leftover reference.
@@ -130,8 +185,9 @@ After you tell us a deploy is live, the backend re-runs the live check at 1280×
 1. Product page: Add to Cart above the banner and clickable; fit line directly under it.
 2. Series page `code=288`: first-row price and Add above the banner; H1 names the code.
 3. `code=288XL` and `pack=value_pack` reach `/api/shop` unchanged.
-4. Cart page shows the unticked reminder box.
-5. A Google reviews link exists on the product page and in the footer.
+4. Cart page shows the unticked reminder box, and "Proceed to Checkout" is on the first screen.
+5. "Proceed to Checkout" reaches `/checkout` in under 1 second.
+6. A Google reviews link exists on the product page and in the footer.
 
 We then compare paid visitors who add to cart before and after the deploy, and report back after a week.
 

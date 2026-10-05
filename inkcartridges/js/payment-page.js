@@ -37,7 +37,6 @@
         totals: { subtotal: 0, shipping: 0, discount: 0, total: 0 },
         checkoutData: null,
         isSubmitting: false,
-        paymentAuthorized: false,
         isGuestCheckout: false,
         turnstileToken: null,
         turnstileWidgetId: undefined,
@@ -158,6 +157,26 @@
         },
 
         /**
+         * "City, Region Postcode" for the shipping summary (ERR-305, §8.5). Shows
+         * the region's LABEL ("Auckland"), never its slug ("auckland"): the line
+         * used to read "Auckland, auckland 0627". checkoutData from before this
+         * change has no regionLabel, so the slug is title-cased as a fallback —
+         * display only; `region` (the slug) is still what the API receives.
+         * The city is not repeated when it IS the region ("Auckland, Auckland").
+         * PURE.
+         */
+        regionLine(d) {
+            const slug = String(d.region || '');
+            const label = String(d.regionLabel || '').trim()
+                || slug.split('-').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+            const city = String(d.city || '').trim();
+            const parts = [];
+            if (city) parts.push(city);
+            if (label && label.toLowerCase() !== city.toLowerCase()) parts.push(label);
+            return [parts.join(', '), String(d.postcode || '').trim()].filter(Boolean).join(' ');
+        },
+
+        /**
          * Display shipping summary
          */
         displayShippingSummary() {
@@ -172,7 +191,7 @@
                 leftCol.innerHTML = `
                     <p><strong>${esc(d.firstName)} ${esc(d.lastName)}</strong></p>
                     <p>${esc(d.address1)}${d.address2 ? ', ' + esc(d.address2) : ''}</p>
-                    <p>${esc(d.city)}, ${esc(d.region)} ${esc(d.postcode)}</p>
+                    <p>${esc(PaymentPage.regionLine(d))}</p>
                 `;
             }
             if (rightCol) {
@@ -530,10 +549,8 @@
                 if (event.complete) {
                     this.paymentElementReady = true;
                     errorEl.textContent = '';
-                    this.showAuthorizationBox();
                 } else {
                     this.paymentElementReady = false;
-                    this.hideAuthorizationBox();
                 }
 
                 if (event.value?.type) {
@@ -827,28 +844,6 @@
          * Setup event handlers
          */
         setupEventHandlers() {
-            // Authorization checkbox
-            const authorizeCheckbox = document.getElementById('authorize-payment');
-            const authContainer = document.getElementById('payment-authorization');
-
-            if (authorizeCheckbox) {
-                // Reset state on page load
-                authorizeCheckbox.checked = false;
-                this.paymentAuthorized = false;
-
-                authorizeCheckbox.addEventListener('change', () => {
-                    this.paymentAuthorized = authorizeCheckbox.checked;
-
-                    if (authorizeCheckbox.checked && authContainer) {
-                        authContainer.classList.add('authorized');
-                    } else if (authContainer) {
-                        authContainer.classList.remove('authorized');
-                    }
-
-                    this.updatePayButton();
-                });
-            }
-
             // Form submission
             const form = document.getElementById('payment-form');
             if (form) {
@@ -860,15 +855,58 @@
         },
 
         /**
-         * Update pay button state
+         * Update pay button state.
+         *
+         * Pay enables as soon as the card details are complete (ERR-305, ad-clicks
+         * handoff §8.4 / FE master checklist item 1). Two gates came off:
+         *  - the "I authorize this payment" tick — pressing Pay IS the
+         *    authorisation and Stripe does not need it;
+         *  - the guest Turnstile token — a dead Pay button while a bot check
+         *    finishes looked broken. A press before the token arrives now waits
+         *    for it behind a spinner (handlePayment → _awaitTurnstileToken).
          */
         updatePayButton() {
             const payBtn = document.getElementById('pay-now-btn');
             if (!payBtn) return;
+            if (this.isSubmitting) return;
+            payBtn.disabled = !this.paymentElementReady;
+        },
 
-            const turnstileOk = !this.isGuestCheckout || !!this.turnstileToken;
-            const canPay = this.paymentElementReady && this.paymentAuthorized && turnstileOk;
-            payBtn.disabled = !canPay;
+        /** The longest a Pay press waits for the guest bot-check token before giving up. */
+        TURNSTILE_PAY_WAIT_MS: 15000,
+        /** Turnstile tokens live 300s: re-run the invisible check at this age so a slow shopper always holds a fresh one. */
+        TURNSTILE_REFRESH_MS: 240000,
+        _turnstileWaiters: [],
+        _turnstileRefreshTimer: null,
+
+        /** Hand the token to anyone waiting (a Pay press) and schedule the 240s refresh. */
+        _onTurnstileToken(token) {
+            this.turnstileToken = token || null;
+            if (this.turnstileToken) {
+                const waiters = this._turnstileWaiters.splice(0);
+                waiters.forEach((resolve) => resolve(this.turnstileToken));
+                clearTimeout(this._turnstileRefreshTimer);
+                this._turnstileRefreshTimer = setTimeout(() => {
+                    if (!this.isSubmitting) this.resetTurnstile();
+                }, this.TURNSTILE_REFRESH_MS);
+            }
+        },
+
+        /**
+         * Resolve with the guest's Turnstile token — at once if we hold one,
+         * else when the invisible check finishes, else null after `ms`.
+         */
+        _awaitTurnstileToken(ms) {
+            if (this.turnstileToken) return Promise.resolve(this.turnstileToken);
+            return new Promise((resolve) => {
+                let done = false;
+                const finish = (tok) => { if (!done) { done = true; clearTimeout(timer); resolve(tok); } };
+                const timer = setTimeout(() => {
+                    this._turnstileWaiters = this._turnstileWaiters.filter((w) => w !== finish);
+                    finish(null);
+                }, ms);
+                this._turnstileWaiters.push(finish);
+            });
         },
 
         /**
@@ -880,24 +918,14 @@
          *
          * The order-creation + duplicate/idempotency handling is shared with the
          * Express Checkout (wallet) flow via createStripeOrder(); this method owns
-         * only the card-specific pieces: the authorize gate, elements.submit() on
+         * only the card-specific pieces: the guest token wait, elements.submit() on
          * THIS (card) Elements instance, and confirmPayment() with billing details.
          */
         async handlePayment() {
             if (this.isSubmitting) return;
 
-            if (!this.paymentAuthorized) {
-                showToast('Please authorize the payment before proceeding.', 'error');
-                return;
-            }
-
             if (!this.paymentElementReady) {
                 showToast('Please complete your payment details.', 'error');
-                return;
-            }
-
-            if (this.isGuestCheckout && !this.turnstileToken) {
-                showToast('Please complete the human verification check.', 'error');
                 return;
             }
 
@@ -907,6 +935,24 @@
 
             this.isSubmitting = true;
             payBtn.disabled = true;
+
+            // Guest bot check still finishing (ERR-305, §8.1): wait for it behind
+            // a spinner instead of refusing the press.
+            if (this.isGuestCheckout && !this.turnstileToken) {
+                payBtn.classList.add('is-verifying');
+                btnText.innerHTML = this.getLoadingHTML('Verifying...');
+                const token = await this._awaitTurnstileToken(this.TURNSTILE_PAY_WAIT_MS);
+                payBtn.classList.remove('is-verifying');
+                if (!token) {
+                    btnText.textContent = originalText;
+                    this.isSubmitting = false;
+                    payBtn.disabled = false;
+                    const container = document.getElementById('turnstile-container');
+                    if (container) container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    showToast('We couldn\u2019t finish the security check. Please complete it above, or refresh the page, then press Pay again.', 'error', 8000);
+                    return;
+                }
+            }
 
             try {
                 // STEP 0: Validate PaymentElement form
@@ -1443,35 +1489,6 @@
         },
 
         /**
-         * Show authorization box when card is complete
-         */
-        showAuthorizationBox() {
-            const authContainer = document.getElementById('payment-authorization');
-            if (authContainer && !authContainer.classList.contains('authorized')) {
-                authContainer.classList.add('visible');
-            }
-        },
-
-        /**
-         * Hide authorization box when card is incomplete
-         */
-        hideAuthorizationBox() {
-            const authContainer = document.getElementById('payment-authorization');
-            const authorizeCheckbox = document.getElementById('authorize-payment');
-
-            if (authContainer) {
-                authContainer.classList.remove('visible');
-                authContainer.classList.remove('authorized');
-            }
-
-            // Reset authorization state
-            if (authorizeCheckbox) {
-                authorizeCheckbox.checked = false;
-            }
-            this.paymentAuthorized = false;
-        },
-
-        /**
          * Initialize Cloudflare Turnstile widget for guest checkouts.
          * Widget is shown only when the user is not authenticated.
          */
@@ -1489,7 +1506,11 @@
             const doRender = () => {
                 self.turnstileWidgetId = turnstile.render('#turnstile-widget', {
                     sitekey: siteKey,
-                    callback: (token) => { self.turnstileToken = token; self.updatePayButton(); },
+                    // Invisible unless Cloudflare needs the shopper (ERR-305, §8.1);
+                    // runs from page load, long before Pay is pressed.
+                    appearance: 'interaction-only',
+                    'refresh-expired': 'auto',
+                    callback: (token) => { self._onTurnstileToken(token); self.updatePayButton(); },
                     'expired-callback': () => { self.turnstileToken = null; self.updatePayButton(); },
                     'error-callback': () => { self.turnstileToken = null; self.updatePayButton(); }
                 });
@@ -1732,8 +1753,11 @@
         }
     };
 
-    // Initialize when ready
+    // Initialize when ready — on /payment only. /cart loads this file too when
+    // its wallet button is enabled (js/cart-wallet.js, ERR-305), to reuse
+    // createStripeOrder; init() there would bounce the shopper to /checkout.
     document.addEventListener('DOMContentLoaded', () => {
+        if (!document.getElementById('payment-form')) return;
         if (typeof Auth !== 'undefined') {
             let initialized = false;
             const checkAuth = setInterval(() => {
