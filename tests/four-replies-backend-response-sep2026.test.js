@@ -293,7 +293,9 @@ test('§E reconcile on the PRINTER surface writes the visible H1; any other surf
 });
 
 test('§E updateTitle prints the mirrored H1 on a printer hub, the printer name until it lands', () => {
-    const body = extractMethod(SHOP_SRC, 'updateTitle');
+    // updateTitle also toggles the service row (FE master checklist item 5);
+    // lift the real method beside it — with no document it returns at once.
+    const body = extractMethod(SHOP_SRC, '_syncServiceRow') + ',\n' + extractMethod(SHOP_SRC, 'updateTitle');
     const run = (mirrored) => {
         const title = { textContent: '', hidden: true, classList: { add() {}, remove() { this.gone = true; } } };
         const obj = vm.runInNewContext(`({ ${body} })`, {

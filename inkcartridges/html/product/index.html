@@ -62,7 +62,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=e1803d91">
+    <link rel="stylesheet" href="/css/components.css?v=6c1bdb59">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
     <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
@@ -368,6 +368,13 @@
                             </button>
                         </div>
 
+                        <!-- Service row (FE master checklist item 5, feink-dc; js/service-row.js
+                             fills it from /api/site/trust + /api/site/value-props). DIRECTLY
+                             UNDER Add on purpose: measured 2026-10-05 at 1280x551, a row
+                             above Add pushes it 22px down; here Add stays at 512px and the
+                             row still ends on screen (534px). -->
+                        <div class="service-row" id="product-service-row" aria-label="Why buy from us" hidden></div>
+
                         <div class="atc-confirmation" id="atc-confirmation">
                             <span class="atc-confirmation__check">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -549,6 +556,7 @@
     <script defer src="/js/api.js?v=3752a5e2"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=327fd22e"></script>
+    <script defer src="/js/service-row.js?v=77e0df0a"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
@@ -558,12 +566,12 @@
     <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
-    <script defer src="/js/legal-config.js?v=77275047"></script>
+    <script defer src="/js/legal-config.js?v=ac859292"></script>
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=2a6edd7a"></script>
+    <script defer src="/js/product-detail-page.js?v=39d7c077"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

@@ -353,6 +353,13 @@
                 businessAccountOffer: Object.prototype.hasOwnProperty.call(apiOrder, 'business_account_offer')
                     ? apiOrder.business_account_offer === true
                     : null,
+                // FE master checklist 2026-10-05 item 13. Tri-state as sent:
+                // undefined = key ABSENT (older payload / offline copy), null =
+                // the backend says there is no offer, else the offer object.
+                // Only nextOrderLine() decides whether it is printable.
+                nextOrderOffer: Object.prototype.hasOwnProperty.call(apiOrder, 'next_order_offer')
+                    ? apiOrder.next_order_offer
+                    : undefined,
                 // Money is normalised by the ONE shared helper (js/order-totals.js)
                 // rather than by hand-rolled `?? 0` chains here — see DEC-006.
                 // Those chains collapsed UNKNOWN into 0, which is how the points
@@ -512,7 +519,14 @@
             // The order (and its email) can land after Auth has already said
             // "guest" — renderAccountForm is idempotent, so ask again here.
             if (typeof Auth !== 'undefined' && Auth.readyPromise) {
-                Auth.readyPromise.then(() => { if (!Auth.isAuthenticated()) this.renderAccountForm(); });
+                // The points line and next_order_offer need the ORDER (its earned
+                // row, its offer); the DOMContentLoaded call usually runs before
+                // the order lands and printed the no-number sentence.
+                Auth.readyPromise.then(() => {
+                    if (Auth.isAuthenticated()) return;
+                    this.renderAccountForm();
+                    this.renderGuestPointsLine();
+                });
             }
         },
 
@@ -681,9 +695,10 @@
          */
         /**
          * The guest's points, told to the guest (conversion handoff 2026-09-23
-         * §4.2): "You earned N points — create an account with {email} to
-         * collect them". True since 2026-09-23: the backend credits past guest
-         * orders on first sign-in (POST /api/account/sync → `retro`).
+         * §4.2; worded per FE master checklist 2026-10-05 item 13 — see
+         * guestPointsText). True since 2026-09-23: the backend credits past guest
+         * orders on first sign-in (POST /api/account/sync → `retro`). Also prints
+         * next_order_offer under it when the order carries a usable one.
          *
          * N is the SAME figure the totals block shows — the backend's exact earn
          * when reported, else OrderTotals' marked estimate ("about N") — never a
@@ -694,27 +709,61 @@
         async renderGuestPointsLine() {
             const el = document.getElementById('create-account-points');
             if (!el) return;
-            const row = this._earnedRow;
-            const email = this._orderEmail;
-            const who = email ? `create a free account with ${email}` : 'create a free account with the email you used';
-            let text;
-            if (row && row.amount > 0) {
-                const n = OrderTotals.formatPoints(row.amount);
-                text = row.kind === 'points' && row.note
-                    ? `This order earns about ${n} points — ${who} to collect them.`
-                    : `You earned ${n} points on this order — ${who} to collect them.`;
-            } else {
-                text = `Points from this order are waiting — ${who} to collect them.`;
-            }
+            let welcome = null;
             if (typeof ValueProps !== 'undefined') {
                 const vp = await ValueProps.load();
                 const loyalty = vp.ok ? ValueProps.loyalty(vp.data) : null;
-                if (loyalty && loyalty.welcomeBonus) {
-                    text += ` New accounts also get ${loyalty.welcomeBonus.toLocaleString('en-NZ')} welcome points.`;
-                }
+                if (loyalty && loyalty.welcomeBonus) welcome = loyalty.welcomeBonus;
             }
-            el.textContent = text;
+            // Read AFTER the await: the order may have landed meanwhile.
+            const row = this._earnedRow;
+            el.textContent = this.guestPointsText(row, welcome);
             el.hidden = false;
+
+            const offerEl = document.getElementById('create-account-offer');
+            if (offerEl) {
+                const line = this.nextOrderLine(this.orderData && this.orderData.nextOrderOffer);
+                offerEl.textContent = line;
+                offerEl.hidden = !line;
+            }
+        },
+
+        /**
+         * The benefits sentence (FE master checklist item 13): "You get {N} points
+         * for this order plus {W} welcome points." N is the backend's earned row
+         * (OrderTotals: exact, else its marked estimate on goods excluding
+         * shipping — never a third computation here). W is the live welcome
+         * bonus. Either missing ⇒ its clause is dropped, never defaulted.
+         * @param {{amount:number, note?:string}|null} row  OrderTotals 'earned' row
+         * @param {number|null} welcome
+         */
+        guestPointsText(row, welcome) {
+            const fmt = (n) => (typeof OrderTotals !== 'undefined' && OrderTotals.formatPoints)
+                ? OrderTotals.formatPoints(n) : Number(n).toLocaleString('en-NZ');
+            const n = row && row.amount > 0 ? `${row.note ? 'about ' : ''}${fmt(row.amount)}` : null;
+            const w = Number.isInteger(welcome) && welcome > 0 ? fmt(welcome) : null;
+            if (n && w) return `You get ${n} points for this order plus ${w} welcome points.`;
+            if (n) return `You get ${n} points for this order.`;
+            if (w) return `You get ${w} welcome points, and this order's points are added when you first sign in.`;
+            return "This order's points are added to your account when you first sign in.";
+        },
+
+        /**
+         * "Your next order by 19 October earns 150 bonus points ($1.50)." from
+         * GET /api/orders/:orderNumber `next_order_offer` ({points, dollars, by,
+         * guest}). '' — print nothing — when the offer is null, ABSENT, or any
+         * part of it is unusable: a half-formed promise is worse than none.
+         */
+        nextOrderLine(offer) {
+            if (!offer || typeof offer !== 'object') return '';
+            const points = Number(offer.points);
+            const dollars = Number(offer.dollars);
+            if (!Number.isInteger(points) || points <= 0 || !Number.isFinite(dollars) || dollars < 0) return '';
+            const by = new Date(typeof offer.by === 'string' ? offer.by : NaN);
+            if (Number.isNaN(by.getTime())) return '';
+            const date = by.toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', timeZone: 'Pacific/Auckland' });
+            const money = dollars.toLocaleString('en-NZ', { style: 'currency', currency: 'NZD', minimumFractionDigits: 2 });
+            return `Your next order by ${date} earns ${points.toLocaleString('en-NZ')} bonus points (${money}).`;
         },
 
         /**
@@ -733,7 +782,7 @@
             const email = this._orderEmail;
             if (!form || !email || typeof Auth === 'undefined' || typeof Auth.signUp !== 'function') return;
             const emailEl = document.getElementById('confirmation-account-email');
-            if (emailEl) emailEl.textContent = email;
+            if (emailEl) emailEl.value = email;
             form.hidden = false;
             if (form.dataset.bound === '1') return;
             form.dataset.bound = '1';

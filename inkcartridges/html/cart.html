@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=e1803d91">
+    <link rel="stylesheet" href="/css/components.css?v=6c1bdb59">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
     <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
@@ -347,6 +347,9 @@
                             <p class="cart-points-earn__line">Points to be earned: <strong id="cart-points-earn-value"></strong></p>
                         </div>
 
+                        <!-- PDF quote for a buyer's internal approval (CRO handoff 2026-10-04 §2).
+                             js/cart-quote-pdf.js fills it; GET /api/cart/quote.pdf. -->
+                        <div class="quote-pdf" data-quote-pdf="cart" data-testid="quote-pdf"></div>
 
                         <!-- Guest cart reminder (ERR-302, ad-clicks-to-orders handoff §4). UNTICKED
                              by default: NZ UEMA needs the shopper's express consent, so nothing is
@@ -550,7 +553,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=e96b328a"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/shipping.js?v=570c7bc4"></script>
+    <script defer src="/js/shipping.js?v=d9f0ced7"></script>
     <script defer src="/js/utils.js?v=327fd22e"></script>
     <script defer src="/js/api.js?v=3752a5e2"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
@@ -559,7 +562,7 @@
     <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
-    <script defer src="/js/legal-config.js?v=77275047"></script>
+    <script defer src="/js/legal-config.js?v=ac859292"></script>
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
@@ -568,6 +571,7 @@
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/cart-page.js?v=35b9e028"></script>
     <script defer src="/js/cart-deep-link.js?v=018aa678"></script>
+    <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
     <script defer src="/js/cart-wallet.js?v=7a6c3b52"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>

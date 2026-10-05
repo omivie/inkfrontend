@@ -163,9 +163,13 @@ test('§C Returns row emits "${days}-day returns" and links to Policy', () => {
 // §D — Spec-locked fallbacks for pre-May-2026 payloads
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§D PDP falls back to the spec-locked delivery copy when the API omits it', () => {
-    assert.match(pdpCode, /SPEC_DELIVERY_LABEL\s*=\s*'1–4 business days NZ-wide'/,
-        'PDP must hard-code the spec-locked delivery label as a fallback');
+test('§D delivery label: NO hard-coded fallback window (CRO handoff 2026-10-04); cutoff fallback stays', () => {
+    // The '1–4 business days' fallback was retired when the backend's promise
+    // became "1–3": a fallback would print a slower promise than the one we
+    // make everywhere else. Absent label ⇒ the row is hidden (pinned in
+    // tests/cro-search-quote-points-oct2026.test.js).
+    assert.doesNotMatch(pdpCode, /SPEC_DELIVERY_LABEL/, 'no hard-coded delivery window');
+    assert.doesNotMatch(pdpCode, /[1-4]\s*[–-]\s*[2-5] business days/, 'no literal delivery window in PDP code');
     assert.match(pdpCode, /SPEC_DELIVERY_CUTOFF\s*=\s*'2pm'/,
         'PDP must hard-code the spec-locked dispatch cutoff ("2pm") as a fallback');
 });

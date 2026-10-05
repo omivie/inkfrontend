@@ -791,6 +791,7 @@
             this.renderFitCheck(info);
             this.renderPromise(info);
             this.renderValueLines(info);
+            this.renderServiceRow(info);
 
             this.renderWaitlistProof(info);
             this.renderPrinterPurchaseProof(info);
@@ -1107,24 +1108,43 @@
         },
 
         renderBuyBoxDeliveryAndReturns(info) {
-            const SPEC_DELIVERY_LABEL = '1–4 business days NZ-wide';
             const SPEC_DELIVERY_CUTOFF = '2pm';
             const SPEC_RETURNS_DAYS = 30;
             const SPEC_RETURNS_URL = '/returns';
 
             // Delivery row — `${label} · Order before ${cutoff} NZT for same-day dispatch`.
+            //
+            // The label comes ONLY from `delivery_estimate.label` (CRO handoff
+            // 2026-10-04). There used to be a hard-coded '1–4 business days'
+            // fallback here; the backend's promise moved to "1–3", so the
+            // fallback would have printed a slower promise than the one we
+            // make everywhere else. A delivery window is a promise, not a
+            // default: when the label is absent the WHOLE row (dt + dd) is
+            // hidden and the row is marked `data-delivery="absent"`, so the
+            // gap is visible in the DOM instead of papered over.
             const delivery = (info && info.delivery_estimate) || {};
             const dLabel = typeof delivery.label === 'string' && delivery.label.trim()
                 ? delivery.label.trim()
-                : SPEC_DELIVERY_LABEL;
+                : null;
             const dCutoff = typeof delivery.dispatch_cutoff_human === 'string' && delivery.dispatch_cutoff_human.trim()
                 ? delivery.dispatch_cutoff_human.trim()
                 : SPEC_DELIVERY_CUTOFF;
             const deliveryEl = document.getElementById('product-delivery');
             if (deliveryEl) {
-                deliveryEl.innerHTML =
-                    `<span class="buy-box__delivery-label">${Security.escapeHtml(dLabel)}</span>`
-                    + this._dispatchClause(delivery, dCutoff);
+                const deliveryDt = deliveryEl.previousElementSibling;
+                if (dLabel) {
+                    deliveryEl.innerHTML =
+                        `<span class="buy-box__delivery-label">${Security.escapeHtml(dLabel)}</span>`
+                        + this._dispatchClause(delivery, dCutoff);
+                    deliveryEl.hidden = false;
+                    deliveryEl.dataset.delivery = 'ok';
+                } else {
+                    deliveryEl.innerHTML = '';
+                    deliveryEl.hidden = true;
+                    deliveryEl.dataset.delivery = 'absent';
+                    DebugLog.warn('[PDP] delivery_estimate.label absent — delivery row hidden, no fallback promise printed');
+                }
+                if (deliveryDt && deliveryDt.tagName === 'DT') deliveryDt.hidden = !dLabel;
             }
 
             // Returns row — `${days}-day returns · Policy ›` linking to ${url_path}.
@@ -1689,7 +1709,8 @@
          * points this order earns, free-shipping threshold, and the phone number
          * with the founding year (older buyers call before they buy — §8.2).
          *
-         * Loyalty + free-shipping numbers come ONLY from /api/site/value-props;
+         * Points come ONLY from this product's `reward_points` (CRO handoff
+         * 2026-10-04); the free-shipping line ONLY from /api/site/value-props;
          * phone + founded year ONLY from this product's trust_signals. Each line
          * is omitted when its source is missing — never a default number.
          */
@@ -1699,7 +1720,6 @@
             const contact = info && info.trust_signals && info.trust_signals.contact;
             const org = info && info.trust_signals && info.trust_signals.organization;
             const vp = (typeof ValueProps !== 'undefined') ? await ValueProps.load() : { ok: false, error: 'ValueProps missing' };
-            this._loyalty = vp.ok ? ValueProps.loyalty(vp.data) : null;
             const ship = vp.ok ? ValueProps.freeShipping(vp.data) : null;
             el.dataset.valueProps = vp.ok ? 'ok' : 'unavailable';
 
@@ -1708,7 +1728,12 @@
             // · Free shipping on orders over $100") so the block stays two lines
             // tall above the Add button.
             const facts = [];
-            if (this._loyalty) facts.push(`<span class="product-value-lines__points" id="product-points-line" hidden></span>`);
+            // The points slot exists only when the PRODUCT carries
+            // `reward_points` (CRO handoff 2026-10-04: absent = programme off
+            // for this product). value-props no longer decides it — its
+            // site-wide rate cannot see a per-product multiplier.
+            this._rewardPoints = this.validRewardPoints(info && info.reward_points);
+            if (this._rewardPoints) facts.push(`<span class="product-value-lines__points" id="product-points-line" hidden></span>`);
             if (ship && ship.headline) facts.push(`<span class="product-value-lines__ship">${Security.escapeHtml(ship.headline)}</span>`);
             if (facts.length) lines.push(`<p class="product-value-lines__facts">${facts.join('')}</p>`);
             const phone = contact && typeof contact.phone_display === 'string' ? contact.phone_display.trim() : '';
@@ -1724,23 +1749,79 @@
         },
 
         /**
-         * "Earn N points ($X) on this order" for the quantity in the box.
-         * Goods only (earn_basis goods_excluding_shipping), at the unit price
-         * this add-to-cart will charge: the ladder rung when one applies,
-         * else retail. Integer-cent maths lives in ValueProps.pointsFor.
+         * `reward_points` from GET /api/products/:sku (CRO handoff
+         * 2026-10-04): `{ points, points_per_dollar, multiplier,
+         * redemption_rate }` for ONE unit. Returns the object only when every
+         * field is a usable number — a half-formed block would print a wrong
+         * figure, so it is treated as absent (no line), never patched.
+         */
+        validRewardPoints(rp) {
+            if (!rp || typeof rp !== 'object') return null;
+            const points = Number(rp.points);
+            const ppd = Number(rp.points_per_dollar);
+            const mult = Number(rp.multiplier);
+            const rate = Number(rp.redemption_rate);
+            if (!Number.isInteger(points) || points < 0 || !(ppd > 0) || !(mult > 0) || !(rate > 0)) return null;
+            return { points, pointsPerDollar: ppd, multiplier: mult, redemptionRate: rate };
+        },
+
+        /**
+         * Points for `qty` units at `unitPrice`, by the BACKEND's formula
+         * (handoff §3): floor(unit_price × qty) × points_per_dollar ×
+         * multiplier. The floor is on DOLLARS, then multiplied — not
+         * floor(cents × rate / 100), which disagrees with the server whenever
+         * points_per_dollar > 1. Money is summed in integer cents so float
+         * noise cannot drop a dollar. At qty 1 and the retail price the
+         * server's own `points` is returned verbatim — we never second-guess
+         * the figure we were given.
+         * @returns {{points:number, value:number}|null}  value = $ off
+         */
+        rewardPointsFor(rp, unitPrice, qty, retailPrice) {
+            if (!rp) return null;
+            const n = Math.max(1, Math.floor(Number(qty)) || 1);
+            const unitCents = Math.round(Number(unitPrice) * 100);
+            if (!(unitCents > 0)) return null;
+            const isServerFigure = n === 1 && unitCents === Math.round(Number(retailPrice) * 100);
+            const points = isServerFigure
+                ? rp.points
+                : Math.floor((unitCents * n) / 100) * rp.pointsPerDollar * rp.multiplier;
+            if (!(points >= 1)) return null;
+            // redemption_rate = points per $1 off; value rounded DOWN to the cent.
+            const value = Math.floor((points * 100) / rp.redemptionRate) / 100;
+            return { points, value };
+        },
+
+        /**
+         * "Earn N points ($X) on this order" for the quantity in the box, at
+         * the unit price this add-to-cart will charge: the ladder rung when
+         * one applies, else retail. Figures from `reward_points` only.
          */
         syncPointsLine() {
             const line = document.getElementById('product-points-line');
-            if (!line || !this._loyalty || typeof ValueProps === 'undefined') return;
+            if (!line || !this._rewardPoints) return;
             const qtyInput = document.getElementById('qty-input');
             const qty = Math.max(1, parseInt(qtyInput && qtyInput.value, 10) || 1);
             const ladder = this._volumeLadder;
             const rung = ladder && typeof Business !== 'undefined' ? Business.offerAtQuantity(ladder, qty) : null;
             const unit = rung ? rung.businessPrice : this._unitPrice;
-            const earn = ValueProps.pointsFor(Math.round(Number(unit) * 100) * qty / 100, this._loyalty);
+            const earn = this.rewardPointsFor(this._rewardPoints, unit, qty, this._unitPrice);
             if (!earn) { line.hidden = true; line.textContent = ''; return; }
             line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} points (${formatPrice(earn.value)}) on this order`;
             line.hidden = false;
+        },
+
+        /**
+         * Service row under the Add button (FE master checklist item 5; module
+         * owned by js/service-row.js). The outcome is stamped on the element
+         * (`data-service-row` = ok | no-facts | no-trust-module | missing) so a
+         * hidden row says WHY it is hidden instead of just being absent.
+         */
+        async renderServiceRow(info) {
+            const el = document.getElementById('product-service-row');
+            if (!el) return;
+            if (typeof ServiceRow === 'undefined') { el.hidden = true; el.dataset.serviceRow = 'missing'; return; }
+            const res = await ServiceRow.mount(el, { deliveryEstimate: info && info.delivery_estimate });
+            el.dataset.serviceRow = (res && res.reason) || 'unknown';
         },
 
         /**

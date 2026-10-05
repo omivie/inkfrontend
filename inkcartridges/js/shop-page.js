@@ -5827,7 +5827,36 @@
             link.hidden = false;
         },
 
+        /**
+         * FE master checklist 2026-10-05 item 5: the service row (js/service-row.js)
+         * under the heading on a CODE page and a PRINTER hub — the two pages the ads
+         * land on. Hidden at every other level. Mounted once per page: the facts are
+         * site-wide (/api/site/trust), so a level change only toggles visibility.
+         */
+        _syncServiceRow() {
+            const el = typeof document !== 'undefined' ? document.getElementById('service-row') : null;
+            if (!el) return;
+            const s = this.state;
+            const wanted = (s.level === 'products' && !!s.code) || s.level === 'printer-products';
+            if (!wanted || typeof ServiceRow === 'undefined') {
+                el.hidden = true;
+                return;
+            }
+            if (el.dataset.mounted === '1') {
+                el.hidden = !el.firstChild;
+                return;
+            }
+            el.dataset.mounted = '1';
+            ServiceRow.mount(el).then((r) => {
+                // A level change while the read was in flight wins.
+                const st = this.state;
+                if (!((st.level === 'products' && !!st.code) || st.level === 'printer-products')) el.hidden = true;
+                return r;
+            });
+        },
+
         updateTitle() {
+            this._syncServiceRow();
             // Hide product type label by default
             this.elements.productTypeLabel.hidden = true;
             const _allLink = typeof document !== 'undefined' ? document.getElementById('family-all-link') : null;

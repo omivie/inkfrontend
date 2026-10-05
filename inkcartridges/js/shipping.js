@@ -66,7 +66,7 @@ const Shipping = {
     ETA: {
         'auckland': '1\u20132 business days',
         'north-island': '1\u20133 business days',
-        'south-island': '2\u20134 business days'
+        'south-island': '1\u20133 business days'
     },
 
     /**

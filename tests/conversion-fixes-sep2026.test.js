@@ -319,20 +319,25 @@ test('§4 PDP fit + value slots sit ABOVE the Add button, and ship hidden', () =
     assert.match(html, /class="btn btn--primary atc-confirmation__checkout"/, 'after Add, Checkout is right there');
 });
 
-test('§4 points line: goods only, the rung price at the quantity in the box, integer cents', () => {
+test('§4 points line: server reward_points, the rung price at the quantity in the box (CRO handoff 2026-10-04)', () => {
+    // Since the CRO handoff the figure comes from the product's own
+    // `reward_points`, not from value-props (which cannot see a multiplier).
+    // The formula itself is pinned in tests/cro-search-quote-points-oct2026.test.js.
     const line = { hidden: true, textContent: '' };
-    const self = { _loyalty: { pointsPerDollar: 1, pointsPerDollarOff: 100 }, _unitPrice: 33.49, _volumeLadder: null };
+    const self = { _rewardPoints: { points: 33, pointsPerDollar: 1, multiplier: 1, redemptionRate: 100 }, _unitPrice: 33.49, _volumeLadder: null };
+    self.rewardPointsFor = method('js/product-detail-page.js', 'rewardPointsFor', self);
     const doc = { getElementById: (id) => (id === 'product-points-line' ? line : id === 'qty-input' ? { value: '3' } : null) };
     const sync = method('js/product-detail-page.js', 'syncPointsLine', self,
-        { document: doc, ValueProps: U.ValueProps, Business: { offerAtQuantity: () => ({ businessPrice: 32.49 }) } });
+        { document: doc, Business: { offerAtQuantity: () => ({ businessPrice: 32.49 }) } });
     sync();
-    assert.equal(line.textContent, 'Earn 100 points ($1.00) on this order', '33.49 × 3 = 100.47 → 100 points');
+    assert.equal(line.textContent, 'Earn 100 points ($1.00) on this order', 'floor(33.49 × 3) = 100 points');
     self._volumeLadder = { breaks: [] };
     sync();
     assert.equal(line.textContent, 'Earn 97 points ($0.97) on this order', 'at 3+ the rung price 32.49 × 3 = 97.47 applies');
-    self._loyalty = null; line.hidden = false;
+    self._rewardPoints = null; line.hidden = false;
     sync();
-    assert.equal(line.textContent, 'Earn 97 points ($0.97) on this order', 'no loyalty ⇒ the function leaves the line alone (renderValueLines never created it)');
+    assert.equal(line.textContent, 'Earn 97 points ($0.97) on this order', 'no reward_points ⇒ the function leaves the line alone (renderValueLines never created it)');
+    assert.doesNotMatch(stripComments(read('js/product-detail-page.js')), /ValueProps\.pointsFor/, 'the PDP no longer computes points from value-props');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

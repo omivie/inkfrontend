@@ -41,7 +41,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=e1803d91">
+    <link rel="stylesheet" href="/css/components.css?v=6c1bdb59">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
     <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
@@ -219,6 +219,11 @@
                         </div>
                     </div>
                 </div>
+                <!-- Service row (FE master checklist 2026-10-05 item 5): speed, phone/email,
+                     GST invoice, returns — every fact from GET /api/site/trust via
+                     js/service-row.js. Shown by shop-page.js on code pages and printer hubs
+                     only; stays hidden when the API gives nothing (never defaulted). -->
+                <div class="service-row" id="service-row" aria-label="Why buy from us" hidden></div>
 
 
                 <h1 class="drilldown-title" id="drilldown-title">Shop Ink Cartridges &amp; Toner NZ</h1>
@@ -487,7 +492,7 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=1fb33f28"></script>
+    <script defer src="/js/shop-page.js?v=1c7551eb"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
@@ -498,6 +503,7 @@
     <script defer src="/js/seo-meta.js?v=69f45351"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=327fd22e"></script>
+    <script defer src="/js/service-row.js?v=77e0df0a"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=90a53675"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
@@ -513,7 +519,7 @@
          renders the typeahead dropdown's cards as its main grid. -->
     <script defer src="/js/search-click-beacon.js?v=5016c5df"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
-    <script defer src="/js/legal-config.js?v=77275047"></script>
+    <script defer src="/js/legal-config.js?v=ac859292"></script>
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>

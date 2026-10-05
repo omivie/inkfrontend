@@ -89,8 +89,10 @@
     "probe:best-sellers": "node scripts/probe-best-sellers.mjs",
     "probe:business-apply": "node scripts/probe-business-apply-sep2026.mjs",
     "probe:backend-audit": "node scripts/probe-backend-audit-oct2026.mjs",
+    "probe:cro-quote-points": "node scripts/probe-cro-search-quote-points-oct2026.mjs",
     "probe:ad-clicks": "node scripts/probe-ad-clicks-to-orders-oct2026.mjs",
-    "probe:checkout-funnel": "node scripts/probe-checkout-funnel-oct2026.mjs"
+    "probe:checkout-funnel": "node scripts/probe-checkout-funnel-oct2026.mjs",
+    "probe:fe-master": "node scripts/probe-fe-master-checklist-oct2026.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

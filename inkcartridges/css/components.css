@@ -3978,6 +3978,11 @@ body.has-consent-banner {
    document. Declaring the fixed corner box ourselves means Google's inline
    styles only restate where it already is. Same corner Google uses; the
    consent-banner lift below still wins (!important). */
+:root {
+    /* The badge's largest possible box: OUR clip below, not Google's size.
+       The /shop corner card (end of this file) lifts by it. */
+    --google-badge-max: 100px;
+}
 #google-reviews-badge {
     position: fixed;
     right: 0;
@@ -3986,8 +3991,8 @@ body.has-consent-banner {
     /* The measuring iframe is 450x150 and starts in view before platform.js
        parks it at top:-10000px; clipping to the badge's real footprint (it
        renders at 86px wide or less) keeps that hop from being a visible shift. */
-    max-width: 100px;
-    max-height: 100px;
+    max-width: var(--google-badge-max);
+    max-height: var(--google-badge-max);
     overflow: hidden;
 }
 
@@ -4509,4 +4514,80 @@ a.drilldown-box.drilldown-box--ribbon,
     }
     .consent-banner.is-open { transform: translateY(0); }
     .consent-banner__actions { justify-content: flex-end; }
+}
+
+/* FE master checklist 2026-10-05 item 7 — on /shop (series pages and printer
+   hubs: body.page-shop) the corner card moves bottom-RIGHT. Ads land there and
+   the first cards sit in grid column 1, where the bottom-left card covered the
+   first card's price and Add at 1280x551, 1366x599, 1536x695 and 1920x911.
+   Google's reviews badge owns the bottom-right corner at z-index 2^31-1, so
+   the card sits ABOVE it, never under it: the ERR-233 collision cannot recur
+   and Accept (bottom-right of the card) is never covered. The lift is the
+   badge's CLIP BOX (--google-badge-max, our own max-width/height), NOT
+   footer.js's measured --google-badge-height: that is published only once
+   the badge settles (~6.5s), and probe:fe-master caught the card sitting
+   under the 100x100 transient box at 1280x551 before it did.
+   SCOPED TO /shop ON PURPOSE: on a PDP the buy box (Add to Cart) is the right
+   column, so a right card would cover Add — the PDP keeps the left corner
+   (ERR-301). Measured by `npm run probe:fe-master`. */
+@media (min-width: 1100px) {
+    body.page-shop .consent-banner {
+        left: auto;
+        right: 16px;
+        bottom: calc(16px + var(--google-badge-max, 100px) + 8px + var(--safe-bottom, 0px));
+    }
+}
+
+/* FE master checklist 2026-10-05 item 5 — the service row (js/service-row.js).
+   ONE LINE, ALWAYS, and it costs exactly that line (18px, no margin):
+   measured 2026-10-05, the series compact card's Add ends at y 531 of 551 at
+   1280x551 without the row, so the budget is 20px. A wrapping row was 38px +
+   8px margin and pushed Add to 577 (below the fold) — probe:fe-master caught it.
+   On a laptop the list is clipped to one line with flex-wrap, so a fact that
+   does not fit drops WHOLE onto the hidden second line (still in the DOM for
+   screen readers) — never cut mid-word. At 1280 the returns fact drops; from
+   ~1366 all four show. On a phone it scrolls sideways instead. */
+.service-row {
+    margin: 0;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--color-text-light);
+}
+.service-row[hidden] { display: none; }
+.service-row__list {
+    display: flex;
+    flex-wrap: wrap;
+    max-height: 18px;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.service-row__item { white-space: nowrap; }
+.service-row__item + .service-row__item::before {
+    content: "·";
+    padding: 0 8px;
+    color: var(--color-text-muted);
+}
+.service-row__link {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+@media (max-width: 768px) {
+    .service-row__list {
+        max-height: none;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* FE master checklist 2026-10-05 item 13 — the guest account card shows the
+   order's email READ-ONLY. It must not look like a box to type in. */
+.confirmation-account-form .form-input[readonly] {
+    background: var(--color-background-alt);
+    color: var(--color-text-light);
+    cursor: default;
 }

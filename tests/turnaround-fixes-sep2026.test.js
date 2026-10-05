@@ -311,7 +311,8 @@ test('§5 the form uses the ORDER\'s email, is guest-only, and Save My Printer i
     assert.match(code, /if \(!Auth\.isAuthenticated\(\)\) \{[\s\S]{0,300}ConfirmationPage\.renderAccountForm\(\);[\s\S]{0,80}\} else \{[\s\S]{0,120}save-printer-prompt/);
     const html = read('html/order-confirmation.html');
     assert.match(html, /id="save-printer-prompt" hidden/);
-    assert.match(html, /Create a password to save your printer and keep your points\./);
+    // Wording per FE master checklist 2026-10-05 item 13 ("Save your order and collect your points").
+    assert.match(html, /Create a password to save your order and collect your points\./);
     assert.match(html, /id="confirmation-account-password"[^>]*minlength="8"/);
     // The loyalty claim stays verbatim (tests/mobile-cta-occlusion-sep2026.test.js §5).
     assert.ok(html.includes('1 point for every $1') && html.includes('100 points = $1'));

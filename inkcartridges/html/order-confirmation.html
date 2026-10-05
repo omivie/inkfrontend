@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
-    <link rel="stylesheet" href="/css/components.css?v=e1803d91">
+    <link rel="stylesheet" href="/css/components.css?v=6c1bdb59">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
     <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
@@ -259,16 +259,32 @@
                              No email on the order ⇒ the form stays hidden and the full
                              register link below is the way in (renderAccountForm). -->
                         <div class="confirmation-card confirmation-card--accent" id="create-account-prompt" hidden>
-                            <h3>Save your printer and keep your points</h3>
+                            <!-- FE master checklist 2026-10-05 item 13 (Baymard: delayed account
+                                 creation). Benefits come from live data only: the order's points
+                                 (OrderTotals earned row) + the welcome bonus (/api/site/value-props),
+                                 and next_order_offer when the order carries one. The earn-rule
+                                 sentence below stays VERBATIM: it must match /account/loyalty word
+                                 for word (ads misrepresentation suspension, May 2026 — pinned by
+                                 tests/mobile-cta-occlusion-sep2026.test.js §5). -->
+                            <h3>Save your order and collect your points</h3>
                             <p class="confirmation-card__points" id="create-account-points" hidden></p>
+                            <p class="confirmation-card__offer" id="create-account-offer" hidden></p>
                             <p>You'll also earn 1 point for every $1 you spend (excluding shipping). 100 points = $1 off a future order.</p>
                             <form class="confirmation-account-form" id="confirmation-account-form" hidden novalidate>
-                                <p class="confirmation-account-form__lead">Create a password to save your printer and keep your points. Your account email: <strong id="confirmation-account-email"></strong></p>
+                                <!-- The order's own email, READ-ONLY: the account is for the address
+                                     the order went to. autocomplete=username lets a password manager
+                                     file the new password against it. -->
+                                <p class="confirmation-account-form__lead">Create a password to save your order and collect your points.</p>
+                                <label class="form-label" for="confirmation-account-email">Email</label>
+                                <input type="email" id="confirmation-account-email" class="form-input" readonly autocomplete="username">
                                 <label class="form-label" for="confirmation-account-password">Choose a password</label>
                                 <input type="password" id="confirmation-account-password" class="form-input" autocomplete="new-password" minlength="8" required aria-describedby="confirmation-account-status">
                                 <label class="confirmation-account-form__terms">
                                     <input type="checkbox" id="confirmation-account-terms" required>
-                                    I agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.
+                                    <!-- ONE flex item: the label is display:flex, so bare text and each
+                                         link were laid out as separate columns ("I agree to the |
+                                         Terms & | and | Privacy Policy | ."). -->
+                                    <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
                                 </label>
                                 <button type="submit" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account Inline" data-track-location="post_purchase">Create my account</button>
                                 <p class="confirmation-account-form__status" id="confirmation-account-status" role="status" aria-live="polite"></p>
@@ -355,7 +371,7 @@
     <script defer src="/js/products.js?v=effc0864"></script>
     <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
-    <script defer src="/js/legal-config.js?v=77275047"></script>
+    <script defer src="/js/legal-config.js?v=ac859292"></script>
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
@@ -366,7 +382,7 @@
          controller and order-receipt.js, which read window.OrderTotals. -->
     <script defer src="/js/order-totals.js?v=4d4a743f"></script>
     <script defer src="/js/order-receipt.js?v=8d7f6a13"></script>
-    <script defer src="/js/order-confirmation-page.js?v=a9a80daa"></script>
+    <script defer src="/js/order-confirmation-page.js?v=2c6229e6"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

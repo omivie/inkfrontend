@@ -41,6 +41,56 @@ describing the same incident.
 
 ---
 
+## ERR-306 — Ad landing pages showed no reason to buy beside the price, the consent card covered the first series card, and four pages still promised South Island 2–4 days — **RESOLVED (frontend)** (2026-10-05)
+
+**Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md` (backend, 5 Oct), items 5, 7, 8 and 13. The other items were done by peer sessions, split by file: ERR-304 did items 6 (PDP) and 10, and ERR-305 did items 1, 2, 3, 4, 9, 11 and 12. Answered by `backend-docs/outbox/fe-master-checklist-FE-reply-oct2026.md`.
+
+**The defects.**
+- **Item 5.** Ads now lead with service (speed, a person to call, tax invoices, returns), but the series, printer and product pages they land on said none of it.
+- **Item 7.** On `/shop` the bottom-left consent card sat over grid column 1, which held the first card's price and Add.
+- **Item 8.** The owner moved the South Island to 1–3 business days. These places still said 2–4: `/faq` (visible AND in its FAQPage JSON-LD), `/about` (not in the checklist; found by searching), `legal-config.js` and `shipping.js`. The PDP's 1–4 fallback went in ERR-304.
+- **Item 13.** The guest account card had the wrong wording and showed the email as text. It ignored `next_order_offer`, and its points line rendered BEFORE the order arrived, so it usually printed the sentence without a number.
+
+**The fix.**
+- **New `js/service-row.js` (one owner).** It reads every fact from `/api/site/trust` (through `TrustStats.raw()`) plus a product's `delivery_estimate`:
+  - speed, always scoped "Auckland metro"
+  - phone/email, with `tel:` and `mailto:` links
+  - the GST tax invoice, shown only while `organization.gst_number` is set (owner's choice)
+  - 30-day returns
+  - **No Afterpay**: no field says it is offered (owner). A missing field drops its fact. An empty trust read hides the row and logs why.
+  - Where it is mounted: `/shop` code pages and printer hubs (`_syncServiceRow`, called from `updateTitle`). The PDP mount, under the Add row, was done by the ERR-304 session.
+- **Consent card:** `body.page-shop` only, at ≥ 1100px, bottom-RIGHT. It is lifted by `--google-badge-max` (100px, OUR clip of Google's badge), not by footer.js's measured `--google-badge-height`. Every other page keeps bottom-LEFT, because there the right column holds the PDP's Add and the cart's Proceed to Checkout.
+- **Item 8:** each site edited once; the faq visible list and the JSON-LD changed in the same edit.
+- **Confirmation card:**
+  - heading "Save your order and collect your points"
+  - read-only email field (`autocomplete=username`)
+  - points line "You get {N} points for this order plus {W} welcome points."; a missing clause is dropped
+  - `nextOrderLine()` for `next_order_offer`, tri-state through `transformAPIOrder`; null, absent or malformed prints nothing
+  - the line re-renders once the order lands
+  - the terms label's links were each a separate flex column; they are now one span
+- **Not removed:** the earn-rule sentence. It must match `/account/loyalty` word for word (ads suspension, May 2026; mobile-cta-occlusion §5).
+
+**Caught on the way.**
+- **The first service row was a two-line wrap plus an 8px margin (46px).** It pushed the series Add to y 577 at 1280×551, below the fold. That viewport's budget was 20px: Add ended at 531 without the row. The row is now one clipped 18px line. A fact that does not fit drops WHOLE onto a hidden second line; at 1280 that is the returns fact.
+- **The first right-hand card lifted by Google's MEASURED badge height.** That height is published only after the badge settles (about 6.5 s), so the probe caught the card under the 100×100 loading box. The lift now uses our own clip, which the badge can never exceed.
+- **The checklist's own CSS (`right: 16px` site-wide) would have covered the PDP's Add and the cart's Proceed to Checkout.** It is scoped to /shop.
+- **The probe's /faq check first read "null".** The answers sit in CLOSED `<details>`, which `innerText` skips. The check now uses `textContent`.
+
+**Proof.**
+- `tests/fe-master-checklist-oct2026.test.js`: 20 tests that run the shipped code (require + vm lift). Red-proof: 10 of 10 mutations caught.
+- `npm run probe:fe-master` (READ-ONLY, paced): 45 passed, 0 failed, 0 skipped on localhost against the production API. Both negative controls go red: the card forced left, and the row hidden.
+- Measured with the banner open:
+  - series 1280×551: row 263–281, Add 513–549, clickable
+  - printer 1366×599: Add 562–598
+  - PDP 1280×551: row 516–534
+  - phone: row 18px, one line
+- Browser, guest confirmation with a sample order: the points line read "about 45 points … plus 200 welcome points" for $52.99 with $7 shipping; the offer line rendered; with a null offer it stayed hidden.
+- `four-replies` §E now lifts `_syncServiceRow` beside `updateTitle`. `turnaround-fixes` §5 asserts the new lead wording. `post-deploy-fixes` §4 uses the live promise text.
+
+**Open.** BF-101: a payment-methods field (Afterpay), a tax-invoice field, and structured delivery days on `/api/site/trust`, so series pages can show "most of NZ in 1–3 business days". Sign-up → confirm → sign-in was not run end to end, because it would create a real account; that path is unchanged from ERR-296.
+
+---
+
 ## ERR-305 — A paid shopper's path from cart to payment: a Checkout button that froze for 8 s, a total that grew at checkout, two ticks before Pay, and the way out louder than the way on — **RESOLVED (frontend)** (2026-10-05)
 
 **Source.** `ad-clicks-to-orders-FE-handoff-oct2026 (1).md` §8 (the backend walked the full paid-visitor path on 2 Oct: Epson 502 ad → series → Add → cart → checkout → payment, laptop 1366×768 and iPhone 13 390×664). The same items are 1, 2, 3, 4, 9, 11 and 12, plus the cart half of 6, in `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md` (5 Oct). The work was split by FILE with peer sessions: ERR-304 = PDP points + PDF quote, ERR-306 = service row, consent card, delivery days, confirmation account. Reply: `backend-docs/outbox/fe-master-checklist-FE-reply-oct2026.md`, section "Items 1, 2, 3, 4, 9, 11, 12 (ERR-305)".
@@ -68,6 +118,34 @@ describing the same incident.
 **Tests / probes.** `tests/checkout-funnel-oct2026.test.js` (17, executed in a vm against the shipping source); `scripts/redproof-checkout-funnel-oct2026.py` turns it red for all 22 mutations. `npm run probe:checkout-funnel` is READ-ONLY by default; `--seed` adds one throwaway guest line, verifies it was on the server, and proves cleanup both ways. Pins updated: turnaround-fixes §9 (the 1.5 s Turnstile cap is superseded), conversion-fixes §5 (no "From") and §8 (`cartWallet: false`), admin-only-test-product §10.
 
 **Lesson.** *The fastest Turnstile is the one you don't wait for.* Ask which call actually checks a token before putting a challenge in front of a click. *A total that changes between pages reads as a hidden fee.* When the server already sends the full figure, show it; never assemble it.
+
+## ERR-304 — The PDP printed reward points from a formula that could not see the multiplier, and a delivery window slower than the real one — **RESOLVED (frontend)** (2026-10-05)
+
+**Source.** `backend-docs/inbox/cro-search-quote-points-FE-handoff-oct2026.md` (CRO brief 2026-10-04: no coupons; lead with quantity pricing and reward points). Answered by `outbox/cro-search-quote-points-FE-reply-oct2026.md`.
+
+**The defects found while verifying it.**
+- **Points.** The PDP's "Earn N points" line was computed client-side from `/api/site/value-props` as `floor(cents × points_per_dollar / 100)`. That rate is site-wide, so it **could not see a per-product `multiplier`**, and it floors in a different place than the backend's `floor(price × qty) × points_per_dollar × multiplier`. The two agree today only because `points_per_dollar` is 1 and every multiplier is 1. A double-points promotion would have shown half the real figure. With `points_per_dollar` 2, $10.60 × 3 gives 63 on the old formula against the backend's 62.
+- **Delivery.** `renderBuyBoxDeliveryAndReturns` fell back to a hard-coded `'1–4 business days NZ-wide'` whenever `delivery_estimate.label` was absent. The backend's promise is now `1–3`, so the fallback would have promised a slower window than every other surface.
+
+**The fix.**
+- `ProductPage.validRewardPoints` / `rewardPointsFor` (`js/product-detail-page.js`). At qty 1 and the retail price, the line prints the server's `reward_points.points` verbatim. On a ladder rung it uses the backend's formula, summed in integer cents. If `reward_points` is absent or half-formed, there is no line (absent = programme off), never a patched figure.
+- Delivery: no fallback label. If the label is absent, the `<dt>` and `<dd>` are both hidden, the row is marked `data-delivery="absent"`, and a `DebugLog.warn` is logged.
+- Same handoff, built alongside: `js/cart-quote-pdf.js` (`QuotePdf`) adds "Download PDF quote" on /cart and /checkout. It uses `GET /api/cart/quote.pdf` with the cart's identity headers. The optional company / attention / reference fields are clamped to 80 characters. The checkout zone is sent only when the region is set and the postcode is 4 digits. The file name comes from `Content-Disposition`. Every failure shows in a `role="status"` line. The cart and checkout markup were inserted by the session that owns those files.
+- Search-dropdown Add to Cart was **already live** (shared card, `Cart.addItem`), so nothing was built for it. The query is sent as typed, and a test now pins that, because the backend normalises `604 xl` / `604-xl` / `epson604` itself.
+
+**Proof.**
+- `tests/cro-search-quote-points-oct2026.test.js` (18 tests). Red-proofed with five mutations: floor order, delivery fallback restored, no clamp, postcode gate removed, token ignored. Each one turns a test red.
+- `tests/conversion-fixes-sep2026.test.js` §4 points line and `tests/product-buybox-may2026.test.js` §D were rewritten. The old §D *required* the `1–4` literal.
+- `npm run probe:cro-quote-points`: every check passes on production, read-only. It includes a negative control: an 81-character `company` must be refused, and it is (400). `--record-opt-in=quote` made a real PDF (`%PDF-`, 2,761 bytes), then deleted the line, and the cart re-read empty after having been non-empty.
+- Browser, localhost:3000, C02CMY: "Earn 36 points ($0.36)" at qty 1, "Earn 106 points ($1.06)" at qty 3 (rung $35.40), delivery "1–3 business days NZ-wide". On /cart with one guest line, the button downloaded `inkcartridges-quote-Q-261005-E3B717.pdf` (`%PDF-`). The cart was cleared to 0 afterwards. Analytics hosts were blocked for the run.
+
+**Writes to production, stated.** Three guest carts were created and emptied: two probe runs and one browser run. Each add logged a server-side `add_to_cart` row. **The second probe run was accidental**: its output was piped to `head -1` and discarded. Node survives a closed pipe, so that run most likely completed its own rollback, but its PASS lines were never seen. The probe's search lines wrote `search_analytics` rows for real terms (`604xl` and its variants, `epson604`), as the banner says.
+
+**Also in `product-detail-page.js`, done for another session (ERR-306).** feink-dc's `ServiceRow` is mounted directly UNDER the Add row. Measured at 1280×551: a row above Add pushes it down 22px. In this position Add stays at a bottom of 512 and the row sits at 516–534, unobstructed (checked with `elementFromPoint`). `probe:fe-master --only=pdp` passes 6/6. Test §5.
+
+**Left as is.** `ValueProps.pointsFor` in `utils.js` is no longer called by any page; only its own test in `conversion-fixes-sep2026.test.js` §2 uses it. Deleting it means restamping `utils.js?v=` on every page while other sessions are editing those pages, so it stays for a quiet window.
+
+---
 
 ## ERR-303 — The Microsoft Ads tag counted every admin dashboard visit as a storefront visitor — **RESOLVED (frontend)** (2026-10-02)
 

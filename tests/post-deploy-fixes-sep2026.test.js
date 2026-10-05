@@ -308,7 +308,7 @@ test('§3 BOTH card renderers pass the count (products.js + the shop-page.js dup
 // §4 countdown scope
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PROMISE = 'Auckland metro orders placed before 14:00 NZT on a business day are dispatched the same day. North Island 1-3 business days; South Island 2-4 business days.';
+const PROMISE = 'Auckland metro orders placed before 14:00 NZT on a business day are dispatched the same day. North Island 1-3 business days; South Island 1-3 business days.';
 
 test('§4 DispatchCountdown.scope follows the promise text', () => {
     const D = U.DispatchCountdown;

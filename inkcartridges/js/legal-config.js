@@ -146,7 +146,7 @@
         shippingZones: [
             { zone: 'Auckland metro',        urban: '$7.00', rural: '$14.00', eta: '1–2 working days' },
             { zone: 'North Island',          urban: '$7.00 – $12.00', rural: '$14.00 – $20.00', eta: '1–3 working days' },
-            { zone: 'South Island',          urban: '$7.00 – $22.00', rural: '$14.00 – $30.00', eta: '2–4 working days' },
+            { zone: 'South Island',          urban: '$7.00 – $22.00', rural: '$14.00 – $30.00', eta: '1–3 working days' },
         ],
         // ─── Returns ──────────────────────────────────────────────────────
         // Two windows mirror the backend trustSignals.js contract:
