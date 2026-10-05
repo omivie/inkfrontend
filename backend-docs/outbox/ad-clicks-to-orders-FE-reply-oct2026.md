@@ -258,6 +258,11 @@ Your 5 Oct copy of this handoff added §8. The same items are 1, 3, 4, 9 and 11 
 - **Asks BF-100**: can `POST /api/orders` take a postcode without a region? This is for the Apple/Google Pay button on the cart, which is built but OFF until the owner tests it with `/cart?wallet=1`.
 - **Found:** your per-IP guest-session mint cap (`429 "Too many guest sessions"`) closed for this office for over an hour after a few probe runs. What are its window and its limit?
 
+**Deployed** as `7fea044d`, live on www from **2026-10-05 07:26:32 UTC**. Measured on live www right after:
+- `npm run probe:checkout-funnel` (read-only): 7/7.
+- Browser at 1366×768 (real button, y 696–741), 1280×551, 1366×599 and 1536×695 (sticky bar), consent banner open: the control is clickable at every size. Click → /checkout took 301–308 ms.
+- Not yet measured live with a SERVER cart: your guest-session cap was still refusing this office's IP. Re-run with `npm run probe:checkout-funnel -- --seed` once it reopens.
+
 ## Not done, on purpose
 
 - No price claims, no star ratings, no "guaranteed fit" wording.
