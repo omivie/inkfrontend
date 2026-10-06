@@ -33,7 +33,30 @@ Every claim below was measured: against the production API (`ink-backend-sg`, GE
 
 The service row is one 18 px line; a fact that doesn't fit is hidden whole (ERR-306). The longer speed fact pushes the GST-invoice fact off on series and printer pages at 1280, 1440 and 1920 px wide. It still fits at 1366 on a series page. The returns fact was already off at those widths. Before this change, the GST fact showed at 1280. If the owner prefers the GST fact to the days, it is a one-line change on our side.
 
-## Nothing new to ask
+## One question
+
+**BF-095, the limiter order.** You say a token-less `POST /api/business/apply` (or `/reapply`) is refused with 401 and spends nothing. We have not measured this. We never POST `/apply` to test it: before your change, two curls and one probe run locked the owner's office out for a day. Can you confirm it from your side, either in the code or in the logs? With `--post-controls`, our probe now reports any `ratelimit-policy` with `w=86400` on that 401 as a failure, so we can measure it ourselves if you would rather we did.
+
+## What changes on your side (logs, limiters, contracts)
+
+**New or changed request patterns since `38eb74f3` (6 Oct, 23:17 NZT):**
+- **`GET /api/printers/search`:** at most half as many requests. The printer finder used to send two concurrent requests for a query containing a hyphen; it now sends one per (debounced) keystroke. The `/shop?printer_model=` resolver used to send up to five concurrent spellings; it now sends one, with `brand` when known.
+- **`POST /api/cart/guest-contact` with `{ guest_session_id, consent: false }`** (no email) is new. It is sent only when a shopper unticks the box after an opt-in was accepted; unticking when nothing was sent makes no call. Opt-in and withdrawal are sent one at a time, in the order the shopper clicked.
+- **`POST /api/orders` from the cart wallet may omit `shipping_address.region`.** That happens when the Apple/Google Pay `state` matches none of the 16 regions. The wallet is ON for every shopper since `aeac442b` (ERR-309, 6 Oct). Expect `shipping_region` empty and `delivery_type` NULL on those orders, as you described. `postal_code` is always 4 digits.
+- **Admin no longer reaches GA4 or Google Ads** (your request). Expect admin pageviews to stop in GA4 and the Ads "All visitors" list to lose the staff visits from 6 Oct 23:17 NZT. Microsoft UET was already off there (ERR-303).
+
+**Contracts the storefront now depends on, with no FE fallback.** Please tell us before changing any of these:
+- **`display_name` on every printer row:** listing `compatible_printers[]`, `/api/printers/search`, PDP `compatible_printers[]` and `top_models[]`, `by-brand`, and the printer-hub `printer` object. Our name mirror is deleted, so a row without it prints the raw `full_name` (for example "Brother MFC J5930DW").
+- **`/api/printers/search` matching any separator spelling (BF-096).** We ask once. If matching went back to typed text only, "MFC-J5930DW" would show "We couldn't match that printer" again.
+- **`can_apply` boolean on every `/api/business/status` branch, and the exact 409 codes `APPLICATION_PENDING` and `ALREADY_APPROVED`.** The panel is chosen from the code. Any other 409 falls back to re-reading status.
+- **`tax_invoice.emailed_with_every_order === true` plus `tax_invoice.label`** decides the GST-invoice fact; the label is printed verbatim. **`shipping_promise.delivery_label`** supplies the days on series and printer pages; " NZ-wide" is cut from its end.
+- **`/api/cart/guest-contact` accepting `consent: false` without an email**, and still answering `ok: true`.
+
+**Our test traffic in your logs, 6 Oct about 22:45–23:40 NZT (09:45–10:40 UTC), all reads:**
+- Paced GETs from `probe:four-replies`: brands, `by-brand` per brand, about 47 printer prerenders, `/api/shop`, `/api/products`, `/api/printers/search?q=L2375`.
+- `/api/printers/search` for `Brother MFC-J5930DW`, `MFC J5930DW`, `MFCJ5930DW` and `Brother HL-L2350DW`, from browsers on `localhost:3000` and on www. These write no `search_analytics` row.
+- One owner sign-in (Supabase password grant) plus `GET /api/business/status` from `probe:business-apply -- --admin`, and one browser sign-in as the owner to open `/admin` at about 23:18 NZT.
+- **No POST to `/api/business/apply`, `/reapply`, `/api/cart/guest-contact` or `/api/orders`.** The consent withdrawal and the wallet order shape are tested against stubs, not your API.
 
 ## Deploy
 
