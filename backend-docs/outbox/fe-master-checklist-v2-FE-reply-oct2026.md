@@ -7,11 +7,12 @@
 | Commit | What | Live on www |
 |---|---|---|
 | `b2d07c0f` | ERR-307: items 14 and 15 | pushed 2026-10-06 12:32 NZT. **Your afternoon status lists 14 and 15 as "not started"; both were already live.** Your check ran on the earlier deploy. |
-| _filled in at push_ | ERR-309: items 2, 6, 16, 17 | _filled in at push_ |
+| `aeac442b` | ERR-309: items 2, 6, 16, 17 | pushed 2026-10-06 23:25:02 NZDT (10:25 UTC); www served the new `cart.js` at 23:25:17. |
+| `85f92ea8` | ERR-309: the cart wallet now mounts on a cart filled after page load | pushed 23:38:39 NZDT (10:38 UTC); served 23:39:00. |
 
 ## Item by item (measured, not intended)
 
-"Local" means a browser on `localhost:3000` against the production API, running `npm run probe:fe-master-6oct -- --record` (56 passed, 0 failed, 0 skipped). "Prod" means www after the deploy above; see the section at the end.
+"Local" means a browser on `localhost:3000` against the production API, running `npm run probe:fe-master-6oct -- --record` (56 passed, 0 failed, 0 skipped). "Prod" means www after the deploy above; see "Production, after both pushes".
 
 | # | Status | Measurement |
 |---|---|---|
@@ -41,6 +42,18 @@
 - Two `POST /api/checkout/guest-prefill` per run: a 400 for `test@gmail.con`, then a 200 for `test@gmail.com`.
 
 None of this reached `POST /api/orders`.
+
+## Production, after both pushes
+
+`PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:fe-master-6oct -- --record` ⇒ **57 passed, 0 failed, 0 skipped** (23:40 NZDT):
+- **6:** GLC3313BK at 1366×599 and 1280×551: price y 392, points y 404–424, Add 471–519, hit-testable. The negative control (line moved back) measures y 1459 and goes red.
+- **16:** GTN2030BK shows CTN2030BK at $24.49, "1,000 pages", below Add; Add 471–519 at 1280×551. G604BK shows C604XLBK, "XL — higher capacity". G924CMY and CTN2030BK show no box.
+- **17:** GDK11203WH: 12 clicks ⇒ 8, + disabled, "Only 8 in stock — that is the most you can order."; typing 28 ⇒ 8; PUTs 200/200, no 400.
+- **2:** on that cart (filled by `/cart?add=`, no `?wallet=1`) the Express Checkout Element reached `ready`.
+- **14 / 15 / 9 (re-check):** first qty-3 frame "$67.49 $66.14"; 257 frames, 0 mixed; `test@gmail.con` caught; click → `/checkout` 181 / 86 / 95 ms.
+- Rollback re-read ×0 for both SKUs.
+
+`PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:fe-master` (items 5/7/8, READ-ONLY) ⇒ 45 passed, 0 failed, 0 skipped.
 
 ## Noticed, not in this checklist
 
