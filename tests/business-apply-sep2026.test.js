@@ -298,6 +298,36 @@ test('§4 a refused POST RE-READS status: "already pending" renders pending, not
     assert.match(t.ids['business-apply-state'].innerHTML, /We have your application/);
 });
 
+test('§4 409 APPLICATION_PENDING renders pending from the CODE — even when the status re-read would fail (BF-095)', async () => {
+    const t = load({
+        user: USER,
+        postReply: { ok: false, code: 'APPLICATION_PENDING', error: 'An application is already pending' },
+        statusReply: new Error('network down'),
+    });
+    t.Page.renderApply({ status: 'personal', canApply: true });
+    fillValid(t);
+    await t.Page.submitApply(t.form);
+    assert.equal(t.form.hidden, true);
+    assert.match(t.ids['business-apply-state'].innerHTML, /We have your application/);
+    assert.doesNotMatch(t.ids['business-apply-state'].innerHTML, /couldn't send/);
+});
+
+test('§4 409 ALREADY_APPROVED hands over to gate() — the account view, not an error (BF-095)', async () => {
+    const t = load({
+        user: USER,
+        postReply: { ok: false, code: 'ALREADY_APPROVED', error: 'Already approved' },
+        statusReply: { ok: true, data: { status: 'personal', can_apply: true } },
+    });
+    let gated = 0;
+    t.Page.gate = async () => { gated++; };
+    t.Page.renderApply({ status: 'rejected', canApply: true });
+    fillValid(t);
+    await t.Page.submitApply(t.form);
+    assert.equal(gated, 1);
+    assert.equal(t.form.hidden, true);
+    assert.doesNotMatch(t.ids['business-apply-state'].innerHTML, /couldn't send/);
+});
+
 test('§4 a failure with no new status keeps the form and its values, with one error line', async () => {
     const t = load({
         user: USER,
@@ -325,8 +355,9 @@ test('§4 VALIDATION_FAILED maps the server\'s field errors onto the form', asyn
     assert.match(t.ids['business-apply-errors'].innerHTML, /NZBN must be 13 digits/);
 });
 
-test('§4 RATE_LIMITED (5 per IP per 24h, counted before sign-in) says so plainly — in BOTH shapes', async () => {
+test('§4 RATE_LIMITED (5 per signed-in user per 24h, BF-095) says so plainly — in BOTH shapes', async () => {
     // Measured 2026-09-29: ratelimit-policy 5;w=86400 on POST /api/business/apply.
+    // Since BF-095 (backend 2026-10-06) it counts per signed-in USER, after auth.
     // API.request RESOLVES a 429 as {code:'RATE_LIMITED'} but can also THROW an
     // error carrying .code (ERR-266); both must land on the same message.
     for (const shape of ['resolved', 'thrown']) {
@@ -337,7 +368,8 @@ test('§4 RATE_LIMITED (5 per IP per 24h, counted before sign-in) says so plainl
         fillValid(t);
         await t.Page.submitApply(t.form);
         const html = t.ids['business-apply-state'].innerHTML;
-        assert.match(html, /can't take another online application from this connection today/, shape);
+        assert.match(html, /can't take another online application from your account today/, shape);
+        assert.doesNotMatch(html, /connection/, `${shape}: the limit is per account now, not per connection`);
         assert.match(html, /027 474 0115/, `${shape}: a person to call instead`);
         assert.doesNotMatch(html, /try again in a minute/, `${shape}: a 24h limit is not "a minute"`);
         assert.equal(t.form.hidden, false, `${shape}: answers kept`);

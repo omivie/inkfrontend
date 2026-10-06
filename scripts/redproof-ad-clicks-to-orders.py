@@ -26,10 +26,16 @@ MUTATIONS = [
  # §4 cart reminder
  ("inkcartridges/html/cart.html", 'id="cart-guest-email-consent" name="cart-guest-email-consent">', 'id="cart-guest-email-consent" name="cart-guest-email-consent" checked>'),
  ("inkcartridges/js/cart.js", "        box.checked = false;\n        root.hidden = false;", "        root.hidden = false;"),
- ("inkcartridges/js/cart.js", "if (!box.checked) { say(sentFor ? this.KEPT_COPY : ''); return; }", ""),
+ ("inkcartridges/js/cart.js", "                if (!sentFor) { say(''); return; }\n", ""),
+ # BF-099: untick withdraws; failure stays loud; events serialize
+ ("inkcartridges/js/cart.js", "const resp = await API.withdrawGuestContact();", "const resp = { ok: true };"),
+ ("inkcartridges/js/cart.js", "                if (ok) sentFor = null;\n", "                sentFor = null;\n"),
+ ("inkcartridges/js/cart.js", "say(ok ? this.WITHDRAWN_COPY : this.WITHDRAW_FAILED_COPY);", "say(this.WITHDRAWN_COPY);"),
+ ("inkcartridges/js/cart.js", "            const run = () => sync(ticked, value, valid);", "            const run = () => sync(box.checked, (email.value || '').trim(), email.checkValidity());"),
+ ("inkcartridges/js/api.js", "{ guest_session_id: guestSessionId, consent: false }", "{ guest_session_id: guestSessionId, consent: false, email: '' }"),
  ("inkcartridges/js/cart.js", "            if (!ok) sentFor = null;\n", ""),
  ("inkcartridges/js/cart.js", "                return { bound: false, reason: 'signed-in' };", "                this._wire(root, box, email, status || null); return { bound: false, reason: 'signed-in' };"),
- ("inkcartridges/js/cart.js", "} catch (_) { ok = false; }", "} catch (_) { ok = true; }"),
+ ("inkcartridges/js/cart.js", "                ok = !!(resp && resp.ok);\n            } catch (_) { ok = false; }", "                ok = !!(resp && resp.ok);\n            } catch (_) { ok = true; }"),
  ("inkcartridges/js/cart-page.js", "        GuestCartEmail.bind({", "        void ({"),
  ("inkcartridges/js/checkout-page.js", "            GuestCartEmail.bind({", "            void ({"),
 ]

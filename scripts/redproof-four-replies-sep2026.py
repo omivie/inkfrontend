@@ -58,11 +58,11 @@ M = [
  (SHOP, "                        if (box) box.hidden = true;\n                        continue;",
         "                        API.getCategoryTotal(brandId, cat.apiCategory);\n                        if (box) box.hidden = true;\n                        continue;"),
  # §E
- (SEO, "if (surface === 'printer' && head.h1) {", "if (false) {"),
+ (SEO, "if ((surface === 'printer' || codePage) && head.h1) {", "if (false) {"),   # anchor widened by ERR-300 (code pages), re-pointed 2026-10-06
  (SEO, "PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v2:',", "PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v1:',"),
- (SHOP, "this.elements.title.textContent = mirrored || shown || 'Compatible Ink & Toner';", "this.elements.title.textContent = shown || 'Compatible Ink & Toner';"),
- (SHOP, "? ((printerData && PrinterName.of(printerData)) || PrinterName.display(rawPrinterName || '') || rawPrinterName)",
-        "? (rawPrinterName)"),
+ (SHOP, "this.elements.title.textContent = mirrored || name || 'Compatible Ink & Toner';", "this.elements.title.textContent = name || 'Compatible Ink & Toner';"),
+ (SHOP, "this.state.printerName = (typeof PrinterName !== 'undefined' && printerData && PrinterName.of(printerData))",
+        "this.state.printerName = (false)"),
  # §F
  (SHOP, "if (alias) products = alias.rows;", ""),
  (SHOP, "&& !smartData?.did_you_mean\n                        && !alias;", "&& !smartData?.did_you_mean;"),
@@ -73,10 +73,8 @@ M = [
       '{ "source": "/([^/]+)-toner-cartridge-([^/]+)", "destination": "/shop?search=$2", "permanent": true }'),
  (SHOP, "if ((brand && category && code) || this.state.level === 'search-results') {", "if (brand && category && code) {"),
  # §H
- (UTL, "            .replace(this.BROTHER_PREFIX, '$1$2-');", "            ;"),
- (UTL, "        DOCUPRINT: 'DocuPrint',\n", ""),
- (UTL, "        if (/^HP /.test(out)) out = out.replace(/\\bLASER\\b/g, 'Laser');\n", ""),
- (PDP, "PrinterName.withoutBrand(cleaned, group.brand)", "PrinterName.display(cleaned)"),
+ # (the casing-mirror mutations went with the mirror, 2026-10-06 BF-094)
+ (PDP, "PrinterName.withoutBrand(cleaned, group.brand)", "cleaned"),
  (PDP, "const showModel = info.manufacturer_part_number && info.source !== 'compatible';", "const showModel = info.manufacturer_part_number;"),
  # §I
  (SHOP, "            .replace(/^(compatible|genuine|original)\\s+/i, '');", "            ;"),

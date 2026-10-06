@@ -352,7 +352,7 @@ test('§3 the resolver is separator-insensitive via CompatSource.printerKey', ()
         + '"Brother DCP J1050DW" while the URL carries "Brother DCP-J1050DW"');
     assert.match(resolver, /getPrintersByBrand/, 'stage 1 matches locally against the brand pool');
     assert.match(resolver, /searchPrinters/,
-        'stage 2 must exist: /api/printers/search is separator-INTOLERANT and the brand pool is '
+        'stage 2 must exist: the brand pool is '
         + 'server-capped (HP returns exactly 1000 rows), so stage 1 alone can miss a real printer');
 });
 

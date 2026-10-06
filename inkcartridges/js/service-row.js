@@ -11,18 +11,22 @@
  *   - speed      "Auckland metro orders by 2pm ship same day · most of NZ in
  *                1–3 business days". Scoped to Auckland metro always (Part 2
  *                invariant: never an unscoped "same-day dispatch"). The days
- *                half needs `delivery_estimate.label`, which only a product
- *                carries; /api/site/trust has no structured days (BF-100), so
- *                on a series page the speed fact is the cutoff half alone.
+ *                half is the product's `delivery_estimate.label` on a PDP, else
+ *                `shipping_promise.delivery_label` from /api/site/trust (BF-101,
+ *                built 2026-10-06: "1–3 business days NZ-wide", from the same
+ *                source as a product's label) — so series and printer pages
+ *                carry it too.
  *   - people     phone + email from `contact` (tel: and mailto: links).
- *   - paperwork  "GST tax invoice emailed with every order" ONLY while the
- *                API says we are GST-registered (`organization.gst_number`).
- *                The tax-invoice claim has no field of its own (BF-100); the
- *                owner chose to gate it on the GST number (2026-10-05).
+ *   - paperwork  `tax_invoice.label` ("GST tax invoice emailed with every
+ *                order") ONLY while `tax_invoice.emailed_with_every_order` is
+ *                true (BF-101: false / null when no GST number is configured).
+ *                Replaces the owner's interim gate on `organization.gst_number`.
  *   - returns    "30-day returns on unopened items" from `returns`.
  *
- * Afterpay is deliberately ABSENT: the checklist lists it, but no API field
- * says it is offered and nothing on the site offers it (owner, 2026-10-05).
+ * Afterpay is deliberately ABSENT: the owner chose to leave it off the row
+ * (2026-10-05). For the record (backend, 2026-10-06): Stripe DOES offer
+ * afterpay_clearpay, klarna and link on the payment step; there is no
+ * /api/site/trust field for it, and the backend will add one if asked.
  *
  * Fail-soft is LOUD: when the trust read comes back empty the row stays
  * hidden and DebugLog says why — an empty row is never shown as "no service".
@@ -59,7 +63,7 @@ const ServiceRow = {
         const cutoff = s(d.dispatch_cutoff_human)
             || this.formatCutoff(d.dispatch_cutoff_nzt)
             || this.formatCutoff(t.shipping_promise && t.shipping_promise.dispatch_cutoff_nzt);
-        const label = s(d.label);
+        const label = s(d.label) || s(t.shipping_promise && t.shipping_promise.delivery_label);
         const days = label ? label.replace(/\s*NZ-wide\s*$/i, '') : null;
         if (cutoff) {
             out.push({
@@ -83,8 +87,10 @@ const ServiceRow = {
             out.push({ key: 'people', text, links });
         }
 
-        if (s(t.organization && t.organization.gst_number)) {
-            out.push({ key: 'paperwork', text: 'GST tax invoice emailed with every order' });
+        const ti = (t.tax_invoice && typeof t.tax_invoice === 'object') ? t.tax_invoice : {};
+        const tiLabel = s(ti.label);
+        if (ti.emailed_with_every_order === true && tiLabel) {
+            out.push({ key: 'paperwork', text: tiLabel });
         }
 
         const r = (t.returns && typeof t.returns === 'object') ? t.returns : {};

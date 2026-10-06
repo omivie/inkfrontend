@@ -303,22 +303,24 @@ test('§E updateTitle prints the mirrored H1 on a printer hub, the printer name 
             PrinterName: U.PrinterName, window: { location: {} },
         });
         obj.elements = { title, productTypeLabel: { hidden: false }, yieldBanner: { hidden: false } };
-        obj.state = { level: 'printer-products', printerName: 'Brother HL L2375DW' };
+        // state.printerName is stored from the printer object's display_name (BF-094).
+        obj.state = { level: 'printer-products', printerName: 'Brother HL-L2375DW' };
         obj.updateTitle();
         return title;
     };
     assert.equal(run('Brother HL-L2375DW Toner NZ').textContent, 'Brother HL-L2375DW Toner NZ');
     const fallback = run(null);
-    assert.equal(fallback.textContent, 'Brother HL-L2375DW', 'fallback is the display name (hyphen mirrored)');
+    assert.equal(fallback.textContent, 'Brother HL-L2375DW', 'fallback is the stored display name, printed as-is');
     assert.equal(fallback.hidden, false);
     assert.equal(fallback.classList.gone, true, 'visible, not visually-hidden');
 });
 
 test('§E the printer name is display-cased where it is stored, so breadcrumb, H1 and headings agree', () => {
     const code = stripComments(SHOP_SRC);
-    // The printer object's own display_name first (BF-093, ERR-299), else the mirror.
-    assert.match(code, /this\.state\.printerName = \(typeof PrinterName !== 'undefined'\)\s*\? \(\(printerData && PrinterName\.of\(printerData\)\) \|\| PrinterName\.display\(rawPrinterName \|\| ''\) \|\| rawPrinterName\)/);
-    assert.equal(U.PrinterName.display(U.PrinterName.display('Brother HL L2375DW')), 'Brother HL-L2375DW', 'display() is idempotent');
+    // The printer object's own display_name (BF-093/094), else the raw name —
+    // the FE casing mirror was deleted on 2026-10-06 (backend response BF-094).
+    assert.match(code, /this\.state\.printerName = \(typeof PrinterName !== 'undefined' && printerData && PrinterName\.of\(printerData\)\)\s*\|\| rawPrinterName;/);
+    assert.equal(U.PrinterName.display, undefined, 'the casing mirror is gone');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -476,15 +478,21 @@ const MEASURED_0928 = [
     ['Lexmark MS 823', 'Lexmark MS 823'], ['OKI MC 780', 'OKI MC 780'], ['Panasonic KX-P1595', 'Panasonic KX-P1595'],
 ];
 
-test('§H PrinterName.display matches the backend prerender for every printer measured on 2026-09-28', () => {
-    for (const [raw, backend] of MEASURED_0928) assert.equal(U.PrinterName.display(raw), backend, raw);
+// §H's casing mirror (calibrated on MEASURED_0928 above) was DELETED on
+// 2026-10-06: the backend ships display_name on every printer row (BF-094).
+// The table stays as the record of what the backend's rule produces; the FE
+// no longer reproduces it, so nothing asserts it here.
+test('§H the casing mirror is gone — the backend owns the name (BF-094)', () => {
+    assert.equal(U.PrinterName.display, undefined);
+    assert.equal(U.PrinterName.WORDS, undefined);
+    assert.ok(MEASURED_0928.length > 50, 'record kept');
 });
 
 test('§H withoutBrand: one brand word, taken off only when it leads', () => {
     const P = U.PrinterName;
-    assert.equal(P.withoutBrand('Brother HL L2300D', 'Brother'), 'HL-L2300D', 'hyphen found BEFORE the brand is cut');
-    assert.equal(P.withoutBrand('HP COLOR LASERJET 5500', 'HP'), 'Color LaserJet 5500');
-    assert.equal(P.withoutBrand('Fuji Xerox DOCUPRINT 202', 'Fuji Xerox'), 'DocuPrint 202');
+    assert.equal(P.withoutBrand('Brother HL-L2300D', 'Brother'), 'HL-L2300D');
+    assert.equal(P.withoutBrand('Brother HL L2300D', 'Brother'), 'HL L2300D', 'no casing/hyphen rewrite any more (BF-094)');
+    assert.equal(P.withoutBrand('Fuji Xerox DocuPrint 202', 'Fuji Xerox'), 'DocuPrint 202');
     assert.equal(P.withoutBrand('Brotherhood 5', 'Brother'), 'Brotherhood 5', 'a word that merely starts with the brand stays');
     assert.equal(P.withoutBrand('Brother', 'Brother'), 'Brother');
     assert.equal(P.withoutBrand('Canon PIXMA MG3660', ''), 'Canon PIXMA MG3660');
@@ -499,10 +507,9 @@ test('§H the grouped "Fits <brand>" row lists models without the brand again', 
         document: { querySelector: () => ({ insertAdjacentHTML: (_, h) => { html = h; } }) },
     });
     obj._printerHubHref = (p) => `/shop?printer_slug=${p.slug}`;
-    obj._printerLabel = (n) => U.PrinterName.display(n);
-    // Measured 2026-09-28: CTN2345BK compatible_printers_grouped
+    // Shape measured 2026-10-06 (GLC3317BK): top_models carry display_name (BF-093/094).
     obj._renderGroupedPrinterCompat({ category: 'toner', compatible_printers_grouped: [{ brand: 'Brother', brand_slug: 'brother', total: 6,
-        top_models: [{ full_name: 'Brother HL L2300D', slug: 'brother-hl-l2300d' }, { full_name: 'Brother MFC L2700DW', slug: 'brother-mfc-l2700dw' }] }] });
+        top_models: [{ full_name: 'Brother HL L2300D', display_name: 'Brother HL-L2300D', slug: 'brother-hl-l2300d' }, { full_name: 'Brother MFC L2700DW', display_name: 'Brother MFC-L2700DW', slug: 'brother-mfc-l2700dw' }] }] });
     assert.match(html, /Fits Brother<\/span>/);
     assert.match(html, />HL-L2300D<\/a>, <a[^>]*>MFC-L2700DW<\/a>/);
     assert.doesNotMatch(html, /Brother Brother|Brother HL/);

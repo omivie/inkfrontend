@@ -1088,7 +1088,10 @@
                     address_line_1: this.checkoutData.address1,
                     address_line_2: this.checkoutData.address2 || '',
                     city: this.checkoutData.city,
-                    region: this.checkoutData.region,
+                    // OPTIONAL (BF-100, backend 2026-10-06): the zone comes from
+                    // postal_code. A cart-wallet address whose `state` matches no
+                    // region sends none — omitted, never '' and never guessed.
+                    ...(this.checkoutData.region ? { region: this.checkoutData.region } : {}),
                     postal_code: this.checkoutData.postcode,
                     country: 'NZ'
                 },

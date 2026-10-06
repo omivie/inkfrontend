@@ -30,7 +30,7 @@
  *   §P  both color-packs routes 404 (the deleted block had nothing to call).
  *   §S  search URLs carry X-Robots-Tag noindex; a brand hub does NOT (control).
  *   §O  old-site slugs keep the part number; a ribbon slug still goes to /ribbons.
- *   §N  display_name AND PrinterName.display (the BF-094 fallback) vs the
+ *   §N  display_name (the casing mirror was deleted 2026-10-06, BF-094) vs the
  *       backend's prerender <h1> for a sample of printers per brand.
  *   §A  --admin: failed import runs carry error_message; image-audit brand =
  *       slug or id, garbage = 400 UNKNOWN_BRAND (needs ADMIN_EMAIL/PASSWORD).
@@ -55,7 +55,6 @@ import { createRequire } from 'node:module';
 import { printSearchAnalyticsNotice } from './lib/probe-search-notice.mjs';
 
 const require = createRequire(import.meta.url);
-const { PrinterName } = require('../inkcartridges/js/utils.js');
 
 const argv = new Set(process.argv.slice(2));
 const API = process.env.PROBE_API || 'https://ink-backend-sg.onrender.com';
@@ -210,7 +209,7 @@ for (const [sku, want] of [['307.11', ['C141LOT', 'C143LOT']], ['153.11', ['C143
 }
 
 // ── §E printer display_name ─────────────────────────────────────────────────
-head('§E display_name on printer rows (BF-093) · still missing where BF-094 asks');
+head('§E display_name on printer rows (BF-093) and on listing + search rows (BF-094)');
 {
     const has = (p) => typeof p?.display_name === 'string' && p.display_name.trim().length > 0;
     const pdp = (await getJson(`${API}/api/products/GTN2445BK`)).body?.data || {};
@@ -228,10 +227,12 @@ head('§E display_name on printer rows (BF-093) · still missing where BF-094 as
     const listing = ((await getJson(`${API}/api/shop?brand=brother&category=toner&limit=20`)).body?.data?.products || [])
         .flatMap((p) => p.compatible_printers || []);
     const search = (await getJson(`${API}/api/printers/search?q=L2375`)).body?.data || [];
-    const missing = [[`/api/shop listing compatible_printers[]`, listing], ['/api/printers/search', search]]
-        .filter(([, xs]) => xs.length && !xs.every(has)).map(([n, xs]) => `${n} ${xs.filter(has).length}/${xs.length}`);
-    if (missing.length) soft('BF-094 open: rows without display_name (the storefront falls back to the PrinterName mirror)', missing.join('; '));
-    else ok('BF-094 landed: listing + printer search carry display_name — delete the PrinterName mirror (utils.js)');
+    // BF-094 built (backend 2026-10-06) and the FE mirror DELETED the same day:
+    // a row without display_name now prints its raw full_name, so this is a
+    // hard check. An EMPTY answer fails too — it would pass `every` vacuously.
+    for (const [name, xs] of [['/api/shop listing compatible_printers[]', listing], ['/api/printers/search?q=L2375', search]]) {
+        check(`${name} rows carry display_name (BF-094)`, xs.length > 0 && xs.every(has), `${xs.filter(has).length}/${xs.length}`);
+    }
 }
 
 // ── §P color-packs ──────────────────────────────────────────────────────────
@@ -274,13 +275,12 @@ for (const [from, want] of [
 }
 
 // ── §N printer display names ────────────────────────────────────────────────
-head('§N display_name and PrinterName.display = the backend prerender <h1> (sample per brand)');
+head('§N display_name = the backend prerender <h1> (sample per brand)');
 {
     const SUFFIX = / (Ink|Toner|Ink &amp; Toner|Ink & Toner) NZ$/;
     const brandList = (await getJson(`${API}/api/brands`)).body?.data;
     const slugs = (Array.isArray(brandList) ? brandList : brandList?.brands || []).map((b) => b.slug);
     let n = 0;
-    const off = [];
     const offDisplay = [];
     for (const b of slugs) {
         const ps = (await getJson(`${API}/api/printers/by-brand/${b}?limit=2000`)).body?.data?.printers || [];
@@ -291,12 +291,10 @@ head('§N display_name and PrinterName.display = the backend prerender <h1> (sam
             if (!h1) continue;
             n++;
             const theirs = h1.replace(SUFFIX, '').replace(/&amp;/g, '&');
-            if (PrinterName.display(p.full_name) !== theirs) off.push(`"${p.full_name}" → ours "${PrinterName.display(p.full_name)}" / theirs "${theirs}"`);
             if (p.display_name !== theirs) offDisplay.push(`"${p.full_name}" → display_name "${p.display_name}" / page "${theirs}"`);
         }
     }
     check(`${n} printers: display_name (BF-093) = the page's name`, offDisplay.length === 0, offDisplay.slice(0, 6).join('; '));
-    check(`${n} printers: the PrinterName mirror (listing fallback, BF-094) = the page's name`, off.length === 0, off.slice(0, 6).join('; '));
 }
 
 // ── §A admin ────────────────────────────────────────────────────────────────

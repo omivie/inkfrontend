@@ -197,21 +197,18 @@ test('§2 the shipped copy: "couldn\'t match that printer", the banner, and the 
     assert.match(form, /<input type="hidden" name="from" value="finder">/);
 });
 
-test('§2 the finder asks BOTH separator spellings (/api/printers/search is separator-intolerant)', () => {
+test('§2 the finder asks ONCE — /api/printers/search is separator-tolerant since BF-096', () => {
+    // Was: two spellings per query (finderSpellings + mergePrinterAnswers).
+    // Backend 2026-10-06 (BF-096, measured): "Brother MFC-J5930DW", "MFC J5930DW"
+    // and "MFCJ5930DW" all return the same single printer.
     const H = shopHelpers();
-    assert.deepEqual(plain(H.finderSpellings('Brother MFC-J5930DW')), ['Brother MFC-J5930DW', 'Brother MFC J5930DW']);
-    assert.deepEqual(plain(H.finderSpellings('  Epson XP 2100 ')), ['Epson XP 2100'], 'no hyphen ⇒ one request');
-    const merged = H.mergePrinterAnswers([
-        { ok: true, data: [] },
-        { ok: true, data: [{ slug: 'brother-mfc-j5930dw', full_name: 'Brother MFC J5930DW' }] },
-    ]);
-    assert.equal(merged.length, 1, 'the measured case: the hyphenated spelling returns [], the spaced one finds it');
-    const order = H.mergePrinterAnswers([
-        { ok: true, data: [{ slug: 'a' }, { slug: 'b' }] }, null, { ok: false }, { ok: true, data: [{ slug: 'b' }, { slug: 'c' }] },
-    ]).map((p) => p.slug);
-    assert.deepEqual(plain(order), ['a', 'b', 'c'], 'raw spelling first, deduped, failures add nothing');
-    const code = stripComments(SHOP_SRC);
-    assert.match(lift(code, 'renderLandingPrinterSearch(show)'), /finderSpellings\(q\)\.map\(\(s\) => API\.searchPrinters\(s\)/);
+    assert.equal(H.finderSpellings, undefined);
+    assert.equal(H.mergePrinterAnswers, undefined);
+    const fn = lift(stripComments(SHOP_SRC), 'renderLandingPrinterSearch(show)');
+    assert.equal((fn.match(/API\.searchPrinters\(/g) || []).length, 1);
+    assert.match(fn, /await API\.searchPrinters\(q\)\.catch\(\(\) => null\)/);
+    // A failed lookup is not "no such printer".
+    assert.match(fn, /if \(!answered\) \{[\s\S]*?data-finder-state="unavailable"[\s\S]*?\} else if \(!items\.length\)/);
 });
 
 test('§2 the alias link reads "Search PG-640" (turnaround doc #6), built from search_query', () => {
@@ -237,14 +234,10 @@ test('§3 the typeahead keeps alias_suggestion and renders its note + a link to 
 // §4 PrinterName — executed
 // ═════════════════════════════════════════════════════════════════════════════
 
-test('§4 Brother ADS hyphenates like HL/MFC/DCP/FAX/PT/QL; hyphenated and non-listed prefixes are left alone', () => {
+test('§4 the Brother hyphen comes from the backend\'s display_name now (BF-094), never re-derived', () => {
     const { PrinterName } = require('../inkcartridges/js/utils.js');
-    assert.equal(PrinterName.display('Brother ADS 2200'), 'Brother ADS-2200');
-    assert.equal(PrinterName.display('Brother ADS 1700W'), 'Brother ADS-1700W');
-    assert.equal(PrinterName.display('Brother HL L2375DW'), 'Brother HL-L2375DW');
-    assert.equal(PrinterName.display('Brother HL-L2375DW'), 'Brother HL-L2375DW', 'already hyphenated');
-    assert.equal(PrinterName.display('Brother TD 4000'), 'Brother TD 4000', 'TD is not in the backend rule');
-    assert.equal(PrinterName.display('Brother ADS SCANNER'), 'Brother ADS Scanner'.replace('Scanner', 'SCANNER'), 'no model code ⇒ no hyphen');
+    assert.equal(PrinterName.of({ display_name: 'Brother ADS-2200', full_name: 'Brother ADS 2200' }), 'Brother ADS-2200');
+    assert.equal(PrinterName.display, undefined, 'mirror deleted');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

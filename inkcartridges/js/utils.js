@@ -3047,100 +3047,28 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 }
 
 /**
- * PRINTER DISPLAY NAME  (conversion handoff 2026-09-23 §5, last row)
- * ==================================================================
- * The catalogue stores many printer names in capitals ("HP COLOR LASERJET
- * 5500"). The backend's crawler pages now display-case them
- * (`printerDisplayName` in its src/utils/seoHelpers.js), so the SPA must print
- * the SAME name or users and Google see two spellings of one printer.
+ * PRINTER DISPLAY NAME  (BF-093 + BF-094, backend response 2026-10-06)
+ * ====================================================================
+ * The catalogue stores many printer names in capitals ("Brother MFC J5930DW");
+ * the backend's `printerDisplayName()` cases and hyphenates them ("Brother
+ * MFC-J5930DW") and now ships the result as `display_name` on EVERY printer
+ * row: /api/products/:sku compatible_printers[] + grouped top_models[],
+ * /api/shop and /api/products listing rows' compatible_printers[],
+ * /api/printers/search rows, /api/printers/by-brand, and the `printer` object
+ * of the printer-hub endpoints (measured 2026-10-06).
  *
- * We cannot read the backend's source, so this is calibrated against its
- * OUTPUT: every entry below was measured from /api/prerender/printer/<brand>/
- * <slug> <h1>s. First cut 2026-09-27 (8 words). RE-MEASURED 2026-09-28
- * (ERR-294) after the backend's re-check showed "Brother MFC L2740DW" on our
- * fit line against "Brother MFC-L2740DW" on its page: the backend had widened
- * its rule in the meantime, so a mirror calibrated once had silently drifted
- * (the ERR-270 shape — the other half of a mirror moved). The 2026-09-28 pass
- * measured EVERY all-caps word (3+ letters) in every brand's printer list —
- * 119 words — against one prerender each. Fixtures: tests/four-replies-
- * backend-response-sep2026.test.js §H. Words the backend leaves alone (ENVY,
- * ECOSYS, PIXMA, IMAGECLASS, APEOSPORT, MAXIFY, WORKCENTRE, LABELWRITER, MFP…)
- * are left alone here too — prettier is not the goal, SAME is.
- *
- * Whole-word, exact-uppercase matches only: a mixed-case token ("M428fdw",
- * "LaserJet") is already how the data wants it and is never touched.
- *
- * Brother: the backend hyphenates the series prefix that DIRECTLY follows the
- * brand — "Brother HL 1110" → "Brother HL-1110" — for DCP, FAX, HL, MFC, PT and
- * QL only (measured: BF, DPC, GL, TD and VC are left spaced, and so is the PT
- * in "Brother P-TOUCH PT 90", which does not follow the brand).
- *
- * One word is BRAND-SCOPED: HP's LASER becomes "Laser" ("HP LASER JET
- * ENTERPRISE M651" → "HP Laser Jet Enterprise M651", "HP NEVERSTOP LASER
- * 1001NW" → "… Laser 1001NW") while Canon's stays ("Canon LASER SHOT LBP 2900").
- * Every other word was measured on one brand and is applied to all — the
- * backend may scope more of them than we can see; the display-name ask covers it.
- *
- * Known gap: one HP row, "HP DESKJET 3520 E-ALL-IN-ONE-PRINTER", is rewritten
- * by the backend to "e-All-in-One Printer"; that compound is not mirrored.
- *
- * THE BACKEND'S OWN NAME WINS (BF-093, built; ERR-299). `display_name` now sits
- * beside `full_name` on /api/products/:sku compatible_printers[] and grouped
- * top_models[], /api/printers/by-brand rows, and the `printer` object of
- * /api/printers/:slug/products and /api/products/printer/:slug (measured
- * 2026-09-29: "Brother HL L2375DW" → "Brother HL-L2375DW"). `of(p)` reads it
- * first, and every printer-row caller goes through `of`. This mirror is now
- * ONLY the fallback for rows that still lack it: /api/shop listing rows'
- * compatible_printers[] and /api/printers/search (measured absent — asked as
- * BF-094). ponytail: delete WORDS/BROTHER_PREFIX/display() once BF-094 lands.
+ * The FE mirror of that rule (119 calibrated words + the Brother hyphen,
+ * ERR-294/299) is DELETED: a mirror drifts the moment the other half moves
+ * (ERR-270). A row WITHOUT `display_name` is now a contract break, not a
+ * case to paper over — it prints the raw `full_name` and warns once, so the
+ * gap shows up in DebugLog instead of hiding behind a near-miss spelling.
  */
 const PrinterName = {
-    WORDS: {
-        BUSINESS: 'Business',
-        COLOR: 'Color',
-        COLOUR: 'Colour',
-        COPIER: 'Copier',
-        DESIGNJET: 'DesignJet',
-        DESK: 'Desk',
-        DESKJ: 'Deskj',
-        DESKJET: 'DeskJet',
-        DOCUCENTRE: 'DocuCentre',
-        DOCUPRINT: 'DocuPrint',
-        ECOTANK: 'EcoTank',
-        ENTERPRISE: 'Enterprise',
-        EXPRESSION: 'Expression',
-        FLOW: 'Flow',
-        FUJI: 'Fuji',
-        HOME: 'Home',
-        INKJET: 'Inkjet',
-        INSPIRE: 'Inspire',
-        JET: 'Jet',
-        LASERJET: 'LaserJet',
-        MOBILE: 'Mobile',
-        NEVERSTOP: 'Neverstop',
-        OFFICEJET: 'OfficeJet',
-        PAGEWIDE: 'PageWide',
-        PHASER: 'Phaser',
-        PHOTO: 'Photo',
-        PLUS: 'Plus',
-        POSTSCRIPT: 'PostScript',
-        PRINETR: 'Prinetr',
-        PRINT: 'Print',
-        PRINTER: 'Printer',
-        PRO: 'Pro',
-        RANGE: 'Range',
-        SERIES: 'Series',
-        STYLUS: 'Stylus',
-        TASKALFA: 'TASKalfa',
-        TONER: 'Toner',
-        WIRELESS: 'Wireless',
-        WORKFORCE: 'WorkForce',
-    },
-    BROTHER_PREFIX: /^(Brother )(ADS|DCP|FAX|HL|MFC|PT|QL) (?=\S*\d)/,
+    _warned: false,
 
     /**
-     * The name to print for a printer ROW: the backend's `display_name` when the
-     * row carries one, else the mirror over `full_name` (or brand + model_name).
+     * The name to print for a printer ROW: the backend's `display_name`, else
+     * the raw `full_name` (or brand + model_name) with a one-time warning.
      * @param {{display_name?:string, full_name?:string, brand?:string|{name?:string}, model_name?:string}} p
      * @returns {string}
      */
@@ -3148,30 +3076,25 @@ const PrinterName = {
         if (!p || typeof p !== 'object') return '';
         if (typeof p.display_name === 'string' && p.display_name.trim()) return p.display_name.trim();
         const brand = typeof p.brand === 'string' ? p.brand : (p.brand && p.brand.name) || '';
-        return this.display(p.full_name || [brand, p.model_name].filter(Boolean).join(' '));
-    },
-
-    display(name) {
-        if (typeof name !== 'string') return '';
-        let out = name
-            .replace(/\b[A-Z]+\b/g, (w) => (Object.prototype.hasOwnProperty.call(this.WORDS, w) ? this.WORDS[w] : w))
-            .replace(this.BROTHER_PREFIX, '$1$2-');
-        if (/^HP /.test(out)) out = out.replace(/\bLASER\b/g, 'Laser');
-        return out;
+        const raw = (p.full_name || [brand, p.model_name].filter(Boolean).join(' ') || '').trim();
+        if (raw && !this._warned && typeof DebugLog !== 'undefined') {
+            this._warned = true;
+            DebugLog.warn('[PrinterName] printer row without display_name (BF-094 contract) — printing raw full_name:', raw);
+        }
+        return raw;
     },
 
     /**
-     * The same name with its brand taken off the front, for a row that
-     * already prints the brand ("Fits Brother" + "HL-L2300D, MFC-L2740DW").
-     * Display-cased FIRST: the Brother hyphen needs the brand to find the
-     * prefix. A name that does not start with the brand is returned whole.
+     * The name with its brand taken off the front, for a row that already
+     * prints the brand ("Fits Brother" + "HL-L2300D, MFC-L2740DW"). A name
+     * that does not start with the brand is returned whole.
      * Backend re-check 2026-09-28 §5 #9: "Fits Brother Brother HL L2300D".
      * @param {string} name
      * @param {string} brand
      * @returns {string}
      */
     withoutBrand(name, brand) {
-        const shown = this.display(name);
+        const shown = typeof name === 'string' ? name.trim() : '';
         const b = typeof brand === 'string' ? brand.trim() : '';
         if (!b || shown.length <= b.length) return shown;
         return shown.slice(0, b.length + 1).toLowerCase() === `${b.toLowerCase()} ` ? shown.slice(b.length + 1) : shown;

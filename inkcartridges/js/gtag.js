@@ -37,8 +37,16 @@ const GTAG_COOKIE_FLAGS = { cookie_flags: 'SameSite=None;Secure' };
  *
  * Pinned by tests/ga4-ecommerce-events-sep2026.test.js as an EXACT SET, not a
  * count — a count passes when one id is swapped for another (ERR-214). */
-gtag('config', 'G-SDQELG0FGD', GTAG_COOKIE_FLAGS);
-gtag('config', 'AW-18032498762', GTAG_COOKIE_FLAGS);
+/* NOT ON /admin (owner via backend, 2026-10-06). Admin pageviews have no
+ * analytic value, and staff visits were joining the Ads "All visitors" list —
+ * the Display remarketing audience AND the 3-day "recent visitors" exclusion.
+ * html/admin/index.html no longer loads gtag.js at all; this guard is the
+ * second half, so a future admin page that copies a storefront <head> still
+ * configures nothing. UetTag and WebVitalsReporter skip /admin the same way. */
+if (!(typeof location !== 'undefined' && String(location.pathname || '').startsWith('/admin'))) {
+    gtag('config', 'G-SDQELG0FGD', GTAG_COOKIE_FLAGS);
+    gtag('config', 'AW-18032498762', GTAG_COOKIE_FLAGS);
+}
 
 // First-party traffic tracker — loaded alongside GA so it lands on every page
 // that already includes gtag.js. Skips admin pages internally.

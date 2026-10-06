@@ -75,11 +75,11 @@ M = [
  # BF-093 — display_name first, the mirror only as the fallback
  (UTL, "        if (typeof p.display_name === 'string' && p.display_name.trim()) return p.display_name.trim();\n", ""),
  (UTL, "            .map((p) => this.of(p))", "            .map((p) => this.display(p.full_name || ''))"),
- (PDP, "            const labelOf = (p) => p.display_name\n                || this._printerLabel(", "            const labelOf = (p) => this._printerLabel("),
+ (PDP, "            const labelOf = (p) => PrinterName.of(p);", "            const labelOf = (p) => p.full_name;"),
  (PDP, "                    const shown = m.display_name || m.full_name;", "                    const shown = m.full_name;"),
  (PDP, "                let label = p.display_name || p.full_name || p.name", "                let label = p.full_name || p.name"),
- (SHOP, "? ((printerData && PrinterName.of(printerData)) || PrinterName.display(rawPrinterName || '') || rawPrinterName)", "? (PrinterName.display(rawPrinterName || '') || rawPrinterName)"),
- (SHOP, "PrinterName.of(p) : (p.full_name || '')", "PrinterName.display(p.full_name || '') : (p.full_name || '')"),
+ (SHOP, "this.state.printerName = (typeof PrinterName !== 'undefined' && printerData && PrinterName.of(printerData))", "this.state.printerName = (false)"),
+ (SHOP, "PrinterName.of(p) : (p.full_name || '')", "p.full_name : (p.full_name || '')"),
  (INK, "            if (d.startsWith(prefix) && d.length > prefix.length) return d.slice(prefix.length);", ""),
  (INK, "                    name: modelLabel(m),", "                    name: m.model_name,"),
 ]

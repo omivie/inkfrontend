@@ -5120,7 +5120,8 @@ const GuestCartEmail = {
     SENT_COPY: (email) => `We'll email a copy of this cart to ${email} if you don't finish. Every email has an unsubscribe link.`,
     FAILED_COPY: "We couldn't save that just now. Your cart is unaffected. Try again, or carry on to checkout.",
     NEED_EMAIL_COPY: 'Enter your email address to get the copy.',
-    KEPT_COPY: 'Your address is already saved for this cart. Every reminder email has an unsubscribe link.',
+    WITHDRAWN_COPY: "Done. We won't email you about this cart.",
+    WITHDRAW_FAILED_COPY: "We couldn't remove your address just now, so a reminder may still be sent. Tick and untick the box to try again, or use the unsubscribe link in the email.",
 
     enabled() {
         return typeof Config !== 'undefined' && !!Config.DARK_FEATURES && Config.DARK_FEATURES.guestCartEmail === true;
@@ -5148,10 +5149,22 @@ const GuestCartEmail = {
     _wire(root, box, email, status) {
         const say = (text) => { if (status) { status.textContent = text; status.hidden = !text; } };
         let sentFor = null;
-        const send = async () => {
-            const value = (email.value || '').trim();
-            if (!box.checked) { say(sentFor ? this.KEPT_COPY : ''); return; }
-            if (!value || !email.checkValidity()) { say(this.NEED_EMAIL_COPY); return; }
+        const sync = async (ticked, value, valid) => {
+            if (!ticked) {
+                if (!sentFor) { say(''); return; }
+                // Untick after a send WITHDRAWS it server-side (BF-099). Until
+                // the server says ok, the address is still on file — say so.
+                let ok = false;
+                try {
+                    const resp = await API.withdrawGuestContact();
+                    ok = !!(resp && resp.ok);
+                } catch (_) { ok = false; }
+                root.dataset.guestContact = ok ? 'withdrawn' : 'withdraw-failed';
+                if (ok) sentFor = null;
+                say(ok ? this.WITHDRAWN_COPY : this.WITHDRAW_FAILED_COPY);
+                return;
+            }
+            if (!value || !valid) { say(this.NEED_EMAIL_COPY); return; }
             if (value === sentFor) { say(this.SENT_COPY(value)); return; }
             sentFor = value;
             let ok = false;
@@ -5162,6 +5175,17 @@ const GuestCartEmail = {
             root.dataset.guestContact = ok ? 'sent' : 'failed';
             if (!ok) sentFor = null;
             say(ok ? this.SENT_COPY(value) : this.FAILED_COPY);
+        };
+        // One request at a time, in event order, each with the box and the
+        // address AS THEY WERE AT THAT EVENT: a fast tick → untick must send
+        // the opt-in and then the withdrawal, never the reverse or neither.
+        let queue = Promise.resolve();
+        const send = () => {
+            const ticked = box.checked;
+            const value = (email.value || '').trim();
+            const valid = email.checkValidity();
+            const run = () => sync(ticked, value, valid);
+            return (queue = queue.then(run, run));
         };
         box.checked = false;
         root.hidden = false;

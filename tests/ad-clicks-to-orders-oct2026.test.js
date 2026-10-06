@@ -327,18 +327,22 @@ test('§4 both pages bind through the ONE owner', () => {
     }
 });
 
-function loadGuestCartEmail({ flag = true, authed = false, guestContact } = {}) {
+function loadGuestCartEmail({ flag = true, authed = false, guestContact, withdraw } = {}) {
     const block = blockAfter(read('js/cart.js'), 'const GuestCartEmail = {');
     const sent = [];
+    const log = [];   // every call in ORDER: 'in:<email>' / 'out'
     const ctx = {
         Config: { DARK_FEATURES: { guestCartEmail: flag } },
         Auth: { readyPromise: Promise.resolve(), isAuthenticated: () => authed },
-        API: { guestContact: async (email) => { sent.push(email); return guestContact ? guestContact(email) : { ok: true }; } },
+        API: {
+            guestContact: async (email) => { sent.push(email); log.push(`in:${email}`); return guestContact ? guestContact(email) : { ok: true }; },
+            withdrawGuestContact: async () => { log.push('out'); return withdraw ? withdraw() : { ok: true }; },
+        },
         Promise,
     };
     vm.createContext(ctx);
     vm.runInContext(`${block}; this.GuestCartEmail = GuestCartEmail;`, ctx);
-    return { G: ctx.GuestCartEmail, sent };
+    return { G: ctx.GuestCartEmail, sent, log };
 }
 
 function fakeEls({ checked = false, value = '', valid = true } = {}) {
@@ -414,16 +418,78 @@ for (const [label, guestContact] of [
     });
 }
 
-test('§4 unticking after a send is honest: the address is already saved', async () => {
-    const { G } = loadGuestCartEmail();
+test('§4 unticking after a send WITHDRAWS it server-side (BF-099), and says so', async () => {
+    const { G, log } = loadGuestCartEmail();
     const e = fakeEls({ value: 'a@b.co.nz' });
     await G.bind(e);
     e.box.checked = true;
     await e.fire('box:change');
     e.box.checked = false;
     await e.fire('box:change');
-    assert.match(e.status.textContent, /already saved/);
-    assert.match(e.status.textContent, /unsubscribe/);
+    assert.deepEqual(log, ['in:a@b.co.nz', 'out']);
+    assert.equal(e.root.dataset.guestContact, 'withdrawn');
+    assert.match(e.status.textContent, /won't email you/);
+    await e.fire('email:blur');
+    assert.deepEqual(log, ['in:a@b.co.nz', 'out'], 'unticked + nothing on file ⇒ no further calls');
+    e.box.checked = true;
+    await e.fire('box:change');
+    assert.deepEqual(log, ['in:a@b.co.nz', 'out', 'in:a@b.co.nz'], 're-ticking opts in again');
+});
+
+test('§4 unticking with NOTHING sent makes no call (no withdrawal of a consent never given)', async () => {
+    const { G, log } = loadGuestCartEmail();
+    const e = fakeEls({ value: 'a@b.co.nz' });
+    await G.bind(e);
+    e.box.checked = false;
+    await e.fire('box:change');
+    assert.deepEqual(log, []);
+    assert.equal(e.status.hidden, true);
+});
+
+for (const [label, withdraw] of [
+    ['an ok:false envelope', () => ({ ok: false, code: 'INTERNAL_ERROR' })],
+    ['a thrown 400 GUEST_SESSION_MISMATCH', () => { const e = new Error('mismatch'); e.code = 'GUEST_SESSION_MISMATCH'; throw e; }],
+]) {
+    test(`§4 a failed withdrawal (${label}) is LOUD: still on file, shopper told, retry allowed`, async () => {
+        let n = 0;
+        const { G, log } = loadGuestCartEmail({ withdraw: () => (++n === 1 ? withdraw() : { ok: true }) });
+        const e = fakeEls({ value: 'a@b.co.nz' });
+        await G.bind(e);
+        e.box.checked = true;
+        await e.fire('box:change');
+        e.box.checked = false;
+        await e.fire('box:change');
+        assert.equal(e.root.dataset.guestContact, 'withdraw-failed');
+        assert.match(e.status.textContent, /couldn't remove your address/);
+        assert.doesNotMatch(e.status.textContent, /won't email/, 'never claim a withdrawal the server refused');
+        await e.fire('email:blur');
+        assert.deepEqual(log, ['in:a@b.co.nz', 'out', 'out'], 'still on file ⇒ the next event retries');
+        assert.equal(e.root.dataset.guestContact, 'withdrawn');
+    });
+}
+
+test('§4 a fast tick → untick lands IN ORDER: the opt-in can never arrive after the withdrawal', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const { G, log } = loadGuestCartEmail({ guestContact: async () => { await gate; return { ok: true }; } });
+    const e = fakeEls({ value: 'a@b.co.nz' });
+    await G.bind(e);
+    e.box.checked = true;
+    const first = e.fire('box:change');           // opt-in in flight
+    e.box.checked = false;
+    const second = e.fire('box:change');          // untick while it is still in flight
+    release();
+    await first; await second;
+    assert.deepEqual(log, ['in:a@b.co.nz', 'out']);
+    assert.equal(e.root.dataset.guestContact, 'withdrawn');
+});
+
+test('§4 API.withdrawGuestContact: same route, same session store, consent:false and NO email', () => {
+    const api = stripComments(read('js/api.js'));
+    const fn = blockAfter(api, 'async withdrawGuestContact()');
+    assert.match(fn, /const guestSessionId = this\.getGuestSessionId\(\)/);
+    assert.match(fn, /this\.post\('\/api\/cart\/guest-contact', \{ guest_session_id: guestSessionId, consent: false \}\)/);
+    assert.doesNotMatch(fn, /email/);
 });
 
 test('§4 API.guestContact: body id and X-Guest-Session come from the same store', () => {

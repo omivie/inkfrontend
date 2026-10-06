@@ -206,31 +206,6 @@
         return new URLSearchParams(search || '').get('from') === 'finder';
     }
 
-    // The spellings the finder asks for (see renderLandingPrinterSearch): the
-    // query as typed, then with hyphens as spaces when that differs.
-    function finderSpellings(q) {
-        const raw = String(q || '').trim();
-        const spaced = raw.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
-        return spaced && spaced !== raw ? [raw, spaced] : [raw];
-    }
-
-    // Printer rows from several /api/printers/search answers, first answer first,
-    // one row per slug (or full_name when a row has no slug). Failed answers add nothing.
-    function mergePrinterAnswers(answers) {
-        const seen = new Set();
-        const out = [];
-        for (const resp of answers || []) {
-            const rows = resp && resp.ok && Array.isArray(resp.data) ? resp.data : [];
-            for (const p of rows) {
-                const key = p && (p.slug || p.full_name);
-                if (!key || seen.has(key)) continue;
-                seen.add(key);
-                out.push(p);
-            }
-        }
-        return out;
-    }
-
     // The way out when we cannot name the printer: a person, a photo, or the
     // code on the old cartridge. Phone from LegalConfig (the one owner of it),
     // with the same literal the static header ships as the fallback.
@@ -505,7 +480,7 @@
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
             partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn, identityIndex,
             reattachCompatProvenance, searchAlias, sectionTitleText,
-            finderSearchWithoutPrinter, finderHelpHtml, finderSpellings, mergePrinterAnswers,
+            finderSearchWithoutPrinter, finderHelpHtml,
         };
     }
 
@@ -1772,22 +1747,24 @@
                 const q = input.value.trim();
                 const mine = ++seq;
                 if (q.length < 2) { clear(); return; }
-                // `/api/printers/search` is separator-INTOLERANT (measured
-                // 2026-09-29: "Brother MFC-J5930DW" — this box's own placeholder —
-                // returns [], "Brother MFC J5930DW" returns the printer; and the
-                // reverse for stored "HLL-3210CDW"). ERR-296 made the empty answer
-                // say "We couldn't match that printer", so both spellings are asked,
-                // concurrently, raw first — the same rule as the printer-model
-                // resolver in loadProducts.
-                const answers = await Promise.all(finderSpellings(q).map((s) => API.searchPrinters(s).catch(() => null)));
-                const printers = mergePrinterAnswers(answers);
+                // ONE request: `/api/printers/search` matches on a separator-free
+                // key since BF-096 (backend 2026-10-06; measured "Brother
+                // MFC-J5930DW", "MFC J5930DW" and "MFCJ5930DW" → the same one
+                // printer), so the two-spelling fan-out is gone.
+                const resp = await API.searchPrinters(q).catch(() => null);
+                const answered = !!(resp && resp.ok && Array.isArray(resp.data));
+                const printers = answered ? resp.data : [];
                 if (mine !== seq) return;
                 const items = printers.slice(0, 6).map(p => {
                     const href = (typeof buildPrinterUrl === 'function' && buildPrinterUrl(p)) || `/shop?q=${encodeURIComponent(p.full_name || q)}`;
                     const name = (typeof PrinterName !== 'undefined') ? PrinterName.of(p) : (p.full_name || '');
                     return `<li><a class="landing-printer-search__hit" href="${Security.escapeAttr(href)}">${Security.escapeHtml(name)}</a></li>`;
                 });
-                if (!items.length) {
+                if (!answered) {
+                    // A failed lookup is NOT "no such printer": say so, never
+                    // the no-match copy (fail-soft must be loud).
+                    list.innerHTML = `<li class="landing-printer-search__none" data-finder-state="unavailable"><strong>Printer lookup isn't answering right now.</strong> Please try again in a moment, or search for the code printed on your old cartridge.${finderHelpHtml()}</li>`;
+                } else if (!items.length) {
                     // ERR-296 (turnaround doc #7): never imply a text search will
                     // find cartridges that FIT an unmatched printer.
                     list.innerHTML = `<li class="landing-printer-search__none"><strong>We couldn't match that printer.</strong> Check the code printed on your old cartridge and search for that instead, or send us a photo.${finderHelpHtml()}</li>`;
@@ -3462,11 +3439,10 @@
                     // Named once, here, so the breadcrumb, the H1 fallback and the
                     // section headings all print the name the backend's page prints
                     // ("Brother HL-L2375DW", not "Brother HL L2375DW"): the printer
-                    // object's own display_name (BF-093, ERR-299), else the mirror.
+                    // object's own display_name (BF-093/094), else the raw name.
                     const rawPrinterName = printerData?.full_name || this.state.printer;
-                    this.state.printerName = (typeof PrinterName !== 'undefined')
-                        ? ((printerData && PrinterName.of(printerData)) || PrinterName.display(rawPrinterName || '') || rawPrinterName)
-                        : rawPrinterName;
+                    this.state.printerName = (typeof PrinterName !== 'undefined' && printerData && PrinterName.of(printerData))
+                        || rawPrinterName;
                     this.updateBreadcrumb();
                     this.updateTitle();
 
@@ -3485,9 +3461,7 @@
 
                     // The badge carries the source word (displayProductInfo): "Compatible
                     // cartridges for Brother HL-L2375DW", never "… Compatible Products".
-                    const printerDisplayName = (typeof PrinterName !== 'undefined')
-                        ? PrinterName.display(this.state.printerName || '')
-                        : (this.state.printerName || '');
+                    const printerDisplayName = this.state.printerName || '';
                     const forPrinter = sectionTitleText(printerDisplayName ? `cartridges for ${printerDisplayName}` : 'cartridges');
                     this.elements.compatibleTitleText.textContent = forPrinter;
                     this.elements.genuineTitleText.textContent = forPrinter;
@@ -3634,44 +3608,21 @@
                 }
             }
 
-            // Stage 2 — ask the backend directly. `/api/printers/search` is
-            // separator-INTOLERANT (verified: "DCP J1050DW" hits, the identical
-            // "DCP-J1050DW" returns nothing), and stage 1's pool is capped
-            // server-side — HP came back at exactly 1000 rows — so a real
-            // printer can still be missing above. Try the spellings the backend
-            // is known to accept rather than trusting one of them.
-            const spellings = [];
-            const pushSpelling = (s) => {
-                const v = String(s || '').trim();
-                if (v && !spellings.includes(v)) spellings.push(v);
-            };
-            pushSpelling(printerModel);
-            pushSpelling(String(printerModel).replace(/-/g, ' ').replace(/\s+/g, ' '));
-            pushSpelling(String(printerModel).replace(/\s+/g, '-'));
-            pushSpelling(cs.stripBrandPrefix(printerModel));
-            pushSpelling(cs.stripBrandPrefix(printerModel).replace(/-/g, ' '));
-
-            // Fire the spellings CONCURRENTLY and keep preference order when
-            // reading the answers. Sequentially this cost one round trip per
-            // spelling: measured locally, an unresolvable model sat on a blank
-            // shop page for ~6 s before redirecting — five serial probes behind
-            // the brand-pool fetch. In parallel the whole stage is one round
-            // trip, and taking the first index with a hit preserves the
-            // preference (raw spelling wins over a rewritten one).
-            const settled = await Promise.allSettled(
-                spellings.map((spelling) => API.searchPrinters(spelling, brandSlug || null))
-            );
-            for (const outcome of settled) {
-                if (outcome.status !== 'fulfilled') continue;
-                try {
-                    const resp = outcome.value;
-                    const d = (resp && resp.ok && resp.data) ? resp.data : null;
-                    const rows = d ? (d.printers || d.results || (Array.isArray(d) ? d : [])) : [];
-                    const hit = (rows || []).find(rowMatches);
-                    if (hit && hit.slug) return hit.slug;
-                } catch (e) {
-                    // Try the next spelling.
-                }
+            // Stage 2 — ask the backend directly: stage 1's pool is capped
+            // server-side (HP came back at exactly 1000 rows), so a real
+            // printer can still be missing above. ONE request: since BF-096
+            // (backend 2026-10-06) `/api/printers/search` matches a
+            // separator-free key as a substring, so "DCP-J1050DW",
+            // "DCP J1050DW" and "DCPJ1050DW" all find the same row — the
+            // five-spelling fan-out this replaced is gone.
+            try {
+                const resp = await API.searchPrinters(printerModel, brandSlug || null);
+                const d = (resp && resp.ok && resp.data) ? resp.data : null;
+                const rows = d ? (d.printers || d.results || (Array.isArray(d) ? d : [])) : [];
+                const hit = (rows || []).find(rowMatches);
+                if (hit && hit.slug) return hit.slug;
+            } catch (e) {
+                // Search unavailable — fall through to null (search hand-off).
             }
 
             return null;
@@ -4669,7 +4620,7 @@
                     const printers = (r.data && Array.isArray(r.data.compatible_printers)) ? r.data.compatible_printers : [];
                     if (printers.length === 0) continue;
                     const cards = printers.slice(0, 4).map(p => {
-                        const name = Security.escapeHtml(p.name || p.full_name || p.model_name || '');
+                        const name = Security.escapeHtml((typeof PrinterName !== 'undefined' && PrinterName.of(p)) || p.name || p.full_name || p.model_name || '');
                         // Canonical printer URL per brand-canonical audit (May
                         // 2026): /shop?brand=&printer_slug=. compatible_printers
                         // ships brand.slug + brand_name, so buildPrinterUrl in
@@ -5873,8 +5824,7 @@
                     ? SeoMeta.h1For(SeoMeta.prerenderPathForLocation(window.location))
                     : null;
                 const name = this.state.printerName || this.state.printer || '';
-                const shown = (typeof PrinterName !== 'undefined') ? PrinterName.display(name) : name;
-                this.elements.title.textContent = mirrored || shown || 'Compatible Ink & Toner';
+                this.elements.title.textContent = mirrored || name || 'Compatible Ink & Toner';
                 this.elements.title.hidden = false;
                 this.elements.title.classList.remove('visually-hidden');
             } else if (this.state.level === 'products' || this.state.level === 'printer-model-products' || this.state.level === 'search-results') {

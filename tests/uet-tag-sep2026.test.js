@@ -293,7 +293,8 @@ test('§5 init() requests bat.js over explicit https', () => {
 });
 
 /* §5b THE ADMIN DASHBOARD IS NOT AN AD AUDIENCE (2026-10-02).
- * html/admin/index.html loads gtag.js, and init() runs at file load. Without
+ * html/admin/index.html USED TO load gtag.js (dropped 2026-10-06, backend
+ * response: GA4 + Ads off on /admin too), and init() runs at file load. Without
  * the /admin skip every dashboard visit was a Microsoft Ads pageview: staff in
  * the remarketing audience and in the conversion-rate denominator. Executed,
  * not grepped, and with a POSITIVE CONTROL on a storefront path so a harness

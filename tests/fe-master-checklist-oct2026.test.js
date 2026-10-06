@@ -47,10 +47,13 @@ function lift(src, head) {
     throw new Error(`unbalanced ${head}`);
 }
 
-// The live GET /api/site/trust `data`, trimmed to what the row reads (2026-10-05).
+// The live GET /api/site/trust `data`, trimmed to what the row reads.
+// Re-measured 2026-10-06 after BF-101: `tax_invoice` and
+// `shipping_promise.delivery_label` / min_days / max_days are new.
 const TRUST = () => ({
     returns: { days: 30, label: '30-day returns', change_of_mind_days: 30, url_path: '/returns' },
-    shipping_promise: { dispatch_cutoff_nzt: '14:00', label: 'Same-day dispatch before 2pm' },
+    shipping_promise: { dispatch_cutoff_nzt: '14:00', label: 'Same-day dispatch before 2pm', delivery_label: '1–3 business days NZ-wide', min_days: 1, max_days: 3 },
+    tax_invoice: { emailed_with_every_order: true, label: 'GST tax invoice emailed with every order' },
     organization: { gst_number: '94-509-459', trading_name: 'InkCartridges.co.nz' },
     contact: { phone_display: '027 474 0115', phone_tel_href: '+64274740115', support_email: 'support@inkcartridges.co.nz' },
     compatibility_promise: { label: 'Not sure it fits? 30-day returns on unopened items' },
@@ -63,8 +66,9 @@ const texts = (facts) => facts.map((f) => f.text);
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§5 series page (site trust only): four facts, exact words, in checklist order', () => {
+    // The days half now comes from shipping_promise.delivery_label (BF-101).
     assert.deepEqual(texts(ServiceRow.facts(TRUST())), [
-        'Auckland metro orders by 2pm ship same day',
+        'Auckland metro orders by 2pm ship same day · most of NZ in 1–3 business days',
         'Questions? Call 027 474 0115 or email support@inkcartridges.co.nz',
         'GST tax invoice emailed with every order',
         '30-day returns on unopened items',
@@ -85,10 +89,27 @@ test('§5 each absent field drops ONLY its own fact — nothing is defaulted', (
     };
     drop((t) => { delete t.shipping_promise; }, 'speed');
     drop((t) => { delete t.contact; }, 'people');
-    drop((t) => { t.organization.gst_number = null; }, 'paperwork');
+    drop((t) => { t.tax_invoice = { emailed_with_every_order: false, label: null }; }, 'paperwork');
+    drop((t) => { delete t.tax_invoice; }, 'paperwork');
     drop((t) => { delete t.returns; delete t.compatibility_promise; }, 'returns');
     assert.deepEqual(ServiceRow.facts({}), [], 'empty trust ⇒ no facts (row stays hidden)');
     assert.deepEqual(ServiceRow.facts(null), []);
+});
+
+test('§5 BF-101: the tax-invoice fact reads tax_invoice, NOT the GST number; days fall back to the site promise', () => {
+    const t = TRUST(); delete t.organization;
+    assert.ok(ServiceRow.facts(t).some((f) => f.key === 'paperwork'), 'no gst_number needed when tax_invoice says so');
+    const g = TRUST(); delete g.tax_invoice;
+    assert.ok(!ServiceRow.facts(g).some((f) => f.key === 'paperwork'), 'a GST number alone no longer makes the claim');
+    const l = TRUST(); l.tax_invoice.label = 'Tax invoice with every order';
+    assert.equal(ServiceRow.facts(l).find((f) => f.key === 'paperwork').text, 'Tax invoice with every order', 'the label is printed verbatim');
+    const m = TRUST(); m.tax_invoice.emailed_with_every_order = 'yes';
+    assert.ok(!ServiceRow.facts(m).some((f) => f.key === 'paperwork'), 'only a literal true makes the claim');
+    // The product's own label wins on a PDP; the site's label is the fallback.
+    const p = ServiceRow.facts(TRUST(), { deliveryEstimate: { ...DELIVERY(), label: '2–5 business days NZ-wide' } });
+    assert.match(p[0].text, /most of NZ in 2–5 business days$/);
+    const n = TRUST(); delete n.shipping_promise.delivery_label;
+    assert.equal(ServiceRow.facts(n)[0].text, 'Auckland metro orders by 2pm ship same day', 'no label anywhere ⇒ cutoff half alone');
 });
 
 test('§5 returns falls back to compatibility_promise; phone-only / email-only contact read right', () => {

@@ -80,13 +80,12 @@ function pdpDom() {
 function pdp(document, globals = {}) {
     const src = read('js/product-detail-page.js');
     const ctx = vm.createContext({
-        Security, document, DispatchCountdown: U.DispatchCountdown,
+        Security, document, DispatchCountdown: U.DispatchCountdown, PrinterName: U.PrinterName,
         formatPrice: (n) => '$' + Number(n).toFixed(2),
         Business: { breakLabel: (r) => (r && Number.isFinite(r.minQuantity) ? `${r.minQuantity}+` : '') },
         ...globals,
     });
     const self = {
-        _printerLabel: (n) => U.PrinterName.display(n),
         _printerHubHref: () => '/printers/x',
         _fitKey: (s) => String(s).toLowerCase(),
     };
@@ -97,7 +96,8 @@ function pdp(document, globals = {}) {
     return self;
 }
 
-const printers = (n) => Array.from({ length: n }, (_, i) => ({ full_name: `Brother MFC J${5910 + i}DW` }));
+// PDP rows carry display_name (BF-093/094, measured 2026-10-06).
+const printers = (n) => Array.from({ length: n }, (_, i) => ({ full_name: `Brother MFC J${5910 + i}DW`, display_name: `Brother MFC-J${5910 + i}DW` }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §1 /review
@@ -282,8 +282,9 @@ test('§2 CSS: desktop-only lines; compliance + chips order 1, reassurance order
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§3 fitsLine reads compatible_printers_count: LC73 (2 of 11) ⇒ +9', () => {
-    const P = (n) => ({ full_name: n });
-    const row = [P('Brother DCP J525W'), P('Brother DCP J725DW')];
+    // Listing rows carry display_name since BF-094 (measured 2026-10-06).
+    const P = (n) => ({ full_name: n.replace('-', ' '), display_name: n });
+    const row = [P('Brother DCP-J525W'), P('Brother DCP-J725DW')];
     assert.equal(U.PrinterName.fitsLine(row, 11), 'Fits Brother DCP-J525W, Brother DCP-J725DW +9');
     assert.equal(U.PrinterName.fitsLine(row, 2), 'Fits Brother DCP-J525W, Brother DCP-J725DW', 'nothing extra at 0');
     assert.equal(U.PrinterName.fitsLine(row, '11'), 'Fits Brother DCP-J525W, Brother DCP-J725DW +9', 'a numeric string counts');

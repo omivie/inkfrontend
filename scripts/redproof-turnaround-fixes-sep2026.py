@@ -59,8 +59,8 @@ M = [
  (SHOP, "Search ${Security.escapeHtml(toLabel)}</a>", "See every ${Security.escapeHtml(toLabel)} result</a>"),
  # §3 typeahead
  (SRCH, "alias_suggestion: data.alias_suggestion || null,", ""),
- # §4
- (UTL, "(ADS|DCP|FAX|HL|MFC|PT|QL)", "(DCP|FAX|HL|MFC|PT|QL)"),
+ # §4 — the Brother-hyphen mirror was deleted 2026-10-06 (BF-094); its
+ # mutations moved to redproof-backend-response-6oct-2026.py.
  # §5
  (CONF, "? apiOrder.business_account_offer === true\n                    : null,", "? apiOrder.business_account_offer === true\n                    : false,"),
  (CONF, "bizOffer.hidden = order.businessAccountOffer !== true;", "bizOffer.hidden = !order.businessAccountOffer && order.businessAccountOffer !== null;"),
@@ -82,10 +82,10 @@ M = [
  # §9
  (CARTP, "    form.hidden = isGuest;\n", ""),
  (CHK, "                formRow.hidden = true;\n", ""),
- (CARTH, "<span>Total before shipping</span>", "<span>Total</span>"),
- (CART, "const turnstileToken = await this._takeTurnstileToken();", "const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;"),
- (CART, "        this._turnstilePrefetch = null;\n        if (!pre ||", "        if (!pre ||"),
- (CART, "            return await Promise.race([pre.promise, cap]);", "            return await pre.promise;"),
+ # (Four §9 mutations — "Total before shipping" and the Turnstile prefetch race —
+ # went stale when ERR-305 rebuilt that code: the cart label is now "Estimated
+ # total" and the checkout click never waits for Turnstile. Their successors live
+ # in redproof-checkout-funnel-oct2026.py. Retired 2026-10-06; found STALE, not red.)
  # §10 CSS
  (PAGES, "font-size: 0.75rem; /* 12px floor on cards (ERR-296): was 0.62rem, 9.9px */", "font-size: 0.62rem;"),
  (SCSS, "font-size: 12px; /* 12px floor on cards (ERR-296): was 10px */", "font-size: 10px;"),
@@ -98,10 +98,8 @@ M = [
  (PDP, '<a href="/quote">Buying for several printers? Get a quote</a>', 'Buying for several printers?'),
  # the line appears twice (sign-in + register) — both are unhidden together
  (LOGIN, '<p class="auth-form__points" data-value-prop-scope hidden>', '<p class="auth-form__points" data-value-prop-scope>', 2),
- # §2 separator-intolerant printer search (found while building)
- (SHOP, "return spaced && spaced !== raw ? [raw, spaced] : [raw];", "return [raw];"),
- (SHOP, "if (!key || seen.has(key)) continue;", "if (!key) continue;"),
- (SHOP, "finderSpellings(q).map((s) => API.searchPrinters(s)", "[q].map((s) => API.searchPrinters(s)"),
+ # §2 the finder asks ONCE since BF-096 (2026-10-06): a second spelling is a regression
+ (SHOP, "const resp = await API.searchPrinters(q).catch(() => null);", "const resp = await Promise.all([API.searchPrinters(q), API.searchPrinters(q.replace(/-/g, ' '))]).then((a) => a[0]).catch(() => null);"),
 ]
 
 

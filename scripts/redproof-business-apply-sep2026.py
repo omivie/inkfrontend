@@ -48,6 +48,11 @@ M = [
  # rate limit, both shapes
  (BP, "res = { ok: false, error: e && e.message, code: e && e.code };", "res = { ok: false, error: e && e.message };"),
  (BP, "            if (res && res.code === 'RATE_LIMITED') {", "            if (false) {"),
+ # BF-095 (2026-10-06): the 409 codes decide the panel, never a re-read that can fail
+ (BP, "            if (res && res.code === 'APPLICATION_PENDING') {", "            if (false) {"),
+ (BP, "            if (res && res.code === 'ALREADY_APPROVED') {", "            if (false) {"),
+ # the limiter is per ACCOUNT now (after sign-in), not per connection
+ (BP, "online application from your account today", "online application from this connection today"),
  # a failed ladder says so
  # an outage must not read as "the programme is off"
  (BP, "            if (!res || !res.ok || !ready) {", "            if (false) {"),

@@ -27,13 +27,18 @@
  * does for its own wallet row. The charge itself is the PaymentIntent the
  * backend creates at POST /api/orders, priced server-side.
  *
- * REGION. Orders carry a region slug. The wallet gives `state`
- * (administrativeArea), which NZ wallets often leave blank. We match it
- * against the checkout's 16 regions. If there is no match, the sheet refuses
- * the address with a message that points to normal checkout. It never guesses:
- * a wrong region is a wrong delivery record. Asked as BF-100: can POST
- * /api/orders take postal_code alone? delivery_type is OMITTED, never guessed
- * (the ERR-25x rule payment-page.js documents).
+ * REGION. The wallet gives `state` (administrativeArea), which NZ wallets
+ * often leave blank. We match it against the checkout's 16 regions and send
+ * the slug when it matches. When it does not, the order goes WITHOUT a region
+ * — never a guess: a wrong region is a wrong delivery record. BF-100 (backend,
+ * 2026-10-06): `shipping_address.region` is optional; POST /api/orders zones
+ * by `postal_code` first, exactly as /api/shipping/options does, and stores
+ * `shipping_region` empty. `city` and a 4-digit `postal_code` stay required.
+ * delivery_type is OMITTED, never guessed (the ERR-25x rule payment-page.js
+ * documents): the order is priced at the URBAN rate for the postcode's zone and
+ * `orders.delivery_type` stays NULL. The sheet asks /api/shipping/options
+ * without delivery_type too, so the figure shown is the figure charged. A
+ * rural wallet address therefore pays the urban rate — accepted by the owner.
  *
  * GUEST BOT CHECK. POST /api/orders needs a Turnstile token for a guest. An
  * invisible widget runs as soon as the wallet mounts and re-runs every 240s
@@ -88,6 +93,11 @@ const CartWallet = {
         return this.REGIONS.includes(slug) ? slug : '';
     },
 
+    /** PURE. The backend requires a 4-digit postal_code (BF-100). */
+    isNzPostcode(value) {
+        return /^\d{4}$/.test(String(value == null ? '' : value).trim());
+    },
+
     /**
      * PURE. The wallet's confirm payload → the checkoutData shape that
      * PaymentPage.createStripeOrder reads. Returns { data } or { error }.
@@ -101,8 +111,8 @@ const CartWallet = {
         const region = this.regionSlug(addr.state);
         if (String(addr.country || '').toUpperCase() !== 'NZ') return { error: 'We deliver within New Zealand only.' };
         if (!name || !addr.line1 || !addr.city || !addr.postal_code) return { error: 'That address is incomplete.' };
+        if (!this.isNzPostcode(addr.postal_code)) return { error: 'That postcode is not a 4-digit New Zealand postcode.' };
         if (!bill.email) return { error: 'Your wallet did not share an email address.' };
-        if (!region) return { error: 'We could not tell which region that address is in. Please use Proceed to Checkout.' };
         if (!shipping || !Number.isFinite(shipping.fee)) return { error: 'We could not price delivery to that address.' };
         return {
             data: {
@@ -113,7 +123,7 @@ const CartWallet = {
                 address1: addr.line1,
                 address2: addr.line2 || '',
                 city: addr.city,
-                region,
+                region,   // '' when `state` matched none — payment-page omits it (BF-100)
                 postcode: String(addr.postal_code).trim(),
                 // deliveryType: OMITTED — never guessed (see header).
                 estimatedShipping: shipping.fee,
@@ -239,7 +249,7 @@ const CartWallet = {
 
         this.ece.on('shippingaddresschange', async (event) => {
             const a = event.address || {};
-            if (String(a.country || '').toUpperCase() !== 'NZ' || !a.postal_code) { event.reject(); return; }
+            if (String(a.country || '').toUpperCase() !== 'NZ' || !this.isNzPostcode(a.postal_code)) { event.reject(); return; }
             try {
                 const s = this._summary() || {};
                 const res = await API.getShippingOptions({ cart_total: s.subtotal, items: this._items(), postal_code: a.postal_code });

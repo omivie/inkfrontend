@@ -715,6 +715,19 @@ const API = {
     },
 
     /**
+     * Withdraw that consent (BF-099, built 2026-10-06): the same route with
+     * `{ guest_session_id, consent: false }` and no email clears the session's
+     * contact_email + contact_consent_at, so no reminder is sent. The body's
+     * session must equal X-Guest-Session (400 GUEST_SESSION_MISMATCH) — both
+     * come from getGuestSessionId(), so they agree by construction.
+     */
+    async withdrawGuestContact() {
+        const guestSessionId = this.getGuestSessionId();
+        if (!guestSessionId) return { ok: false, error: 'missing guest session' };
+        return this.post('/api/cart/guest-contact', { guest_session_id: guestSessionId, consent: false });
+    },
+
+    /**
      * Review-by-link for guests (conversion handoff 2026-09-23 §6a.2).
      * Proposed contract (backend-docs outbox, 2026-09-27):
      *   GET  /api/reviews/by-token/:token → { order_number, items:[{sku,name,image_url,reviewed}] }

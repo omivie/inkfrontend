@@ -342,7 +342,9 @@
          *   canApply false        talk to us, no form
          *   canApply null         form (loud warn): the server's 409 decides.
          *                         Hiding the form on a MISSING field would lock
-         *                         every prospect out silently.
+         *                         every prospect out silently. Since BF-095
+         *                         (2026-10-06) every status answer carries it, so
+         *                         null now means a contract break, not a branch.
          */
         renderApply(state) {
             const box = $('business-apply-state');
@@ -508,13 +510,14 @@
                 return;
             }
             if (res && res.code === 'RATE_LIMITED') {
-                // Measured 2026-09-29: /api/business/apply allows 5 attempts per
-                // IP per 24h (ratelimit-policy: 5;w=86400), counted BEFORE sign-in.
-                // "Try again in a minute" would be a lie; a shared office
-                // connection can hit it, so give them a person instead.
+                // /api/business/apply and /reapply allow 5 attempts per 24h.
+                // Since BF-095 (backend 2026-10-06) the limiter runs AFTER sign-in
+                // and counts per signed-in USER, no longer per IP — colleagues on
+                // one office connection no longer share 5. "Try again in a minute"
+                // would still be a lie, so give them a person instead.
                 const L = typeof LegalConfig !== 'undefined' ? LegalConfig : {};
                 if (box) box.querySelectorAll('.business-apply__error').forEach((el) => el.remove());
-                if (box) box.insertAdjacentHTML('beforeend', '<p class="business-apply__error" role="alert">We can\'t take another online application from this connection today. Your answers are still in the form. '
+                if (box) box.insertAdjacentHTML('beforeend', '<p class="business-apply__error" role="alert">We can\'t take another online application from your account today. Your answers are still in the form. '
                     + `Please call <a href="tel:${esc(L.phoneE164 || '+64274740115')}">${esc(L.phoneDisplay || '027 474 0115')}</a> or email <a href="mailto:${esc(L.email || 'support@inkcartridges.co.nz')}">${esc(L.email || 'support@inkcartridges.co.nz')}</a> and we\'ll set the account up with you.</p>`);
                 warn('[BusinessPage] application rate-limited', res.retry_after);
                 return;
@@ -526,8 +529,22 @@
                 this.showApplyErrors(form, known.length ? known : [{ name: 'company_name', text: res.error || 'Please check the form and try again.' }]);
                 return;
             }
-            // 409 (already pending / already approved) arrives with a code we were
-            // never told; a 5xx arrives with none. Either way the truth is the
+            // 409 codes (BF-095, backend 2026-10-06), on /apply AND /reapply.
+            // Each says outright what the account's state is, so the panel is
+            // rendered from the code itself — never from a status re-read that
+            // could fail and leave a pending applicant staring at a form.
+            if (res && res.code === 'APPLICATION_PENDING') {
+                Business.reset();
+                this.renderApply({ status: 'pending', canApply: false });
+                return;
+            }
+            if (res && res.code === 'ALREADY_APPROVED') {
+                form.hidden = true;
+                Business.reset();
+                await this.gate();
+                return;
+            }
+            // Any other refusal (a 5xx carries no code): the truth is the
             // server's CURRENT status, so re-read it rather than guess from the
             // error: a pending/approved answer re-renders the right panel, and
             // anything else keeps the form (values intact) with a plain error.

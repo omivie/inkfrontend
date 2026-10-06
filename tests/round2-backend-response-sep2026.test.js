@@ -36,7 +36,8 @@ const U = require('../inkcartridges/js/utils.js');
 
 // Rows measured 2026-09-29 on /api/products/GTN2445BK and by-brand/brother.
 const PDP_ROW = { model_name: 'HL L2375DW', full_name: 'Brother HL L2375DW', display_name: 'Brother HL-L2375DW', slug: 'brother-hl-l2375dw', brand: 'Brother' };
-const LISTING_ROW = { slug: 'brother-hl-1110', full_name: 'Brother HL 1110' };   // /api/shop listing: no display_name (BF-094)
+// /api/shop listing rows carry display_name since BF-094 (measured 2026-10-06); this one stands for a row that does NOT.
+const LISTING_ROW = { slug: 'brother-hl-1110', full_name: 'Brother HL 1110' };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §1 PrinterName.of
@@ -49,17 +50,17 @@ test('§1 display_name wins over the mirror', () => {
         'HP DeskJet 3520 e-All-in-One Printer');
 });
 
-test('§1 a row without display_name falls back to the mirror (BF-094 still open)', () => {
-    assert.equal(U.PrinterName.of(LISTING_ROW), 'Brother HL-1110');
-    assert.equal(U.PrinterName.of({ full_name: 'Brother HL L2375DW', display_name: '   ' }), 'Brother HL-L2375DW', 'blank is absent');
-    assert.equal(U.PrinterName.of({ brand: { name: 'Brother' }, model_name: 'MFC J5910DW' }), 'Brother MFC-J5910DW', 'brand object + model_name');
-    assert.equal(U.PrinterName.of({ brand: 'HP', model_name: 'LASER JET 1020' }), 'HP Laser Jet 1020');
+test('§1 a row without display_name prints the RAW name (mirror deleted, BF-094)', () => {
+    assert.equal(U.PrinterName.of(LISTING_ROW), 'Brother HL 1110');
+    assert.equal(U.PrinterName.of({ full_name: 'Brother HL L2375DW', display_name: '   ' }), 'Brother HL L2375DW', 'blank is absent');
+    assert.equal(U.PrinterName.of({ brand: { name: 'Brother' }, model_name: 'MFC J5910DW' }), 'Brother MFC J5910DW', 'brand object + model_name');
+    assert.equal(U.PrinterName.of({ brand: 'HP', model_name: 'LASER JET 1020' }), 'HP LASER JET 1020');
     assert.equal(U.PrinterName.of(null), '');
     assert.equal(U.PrinterName.of('Brother HL L2375DW'), '', 'a bare string is not a printer row');
 });
 
-test('§1 fitsLine reads display_name first and the mirror for a listing row', () => {
-    assert.equal(U.PrinterName.fitsLine([PDP_ROW, LISTING_ROW], 5), 'Fits Brother HL-L2375DW, Brother HL-1110 +3');
+test('§1 fitsLine reads display_name first, the raw name for a row without it', () => {
+    assert.equal(U.PrinterName.fitsLine([PDP_ROW, LISTING_ROW], 5), 'Fits Brother HL-L2375DW, Brother HL 1110 +3');
     // A display_name the mirror cannot produce: only reading it verbatim passes.
     const hp = { full_name: 'HP DESKJET 3520 E-ALL-IN-ONE-PRINTER', display_name: 'HP DeskJet 3520 e-All-in-One Printer' };
     assert.equal(U.PrinterName.fitsLine([hp]), 'Fits HP DeskJet 3520 e-All-in-One Printer');
@@ -73,14 +74,14 @@ const PDP = stripComments(read('js/product-detail-page.js'));
 const SHOP = stripComments(read('js/shop-page.js'));
 
 test('§2 PDP fit checker, grouped top_models and flat list read display_name first', () => {
-    assert.match(PDP, /const labelOf = \(p\) => p\.display_name\s*\|\| this\._printerLabel\(/);
+    assert.match(PDP, /const labelOf = \(p\) => PrinterName\.of\(p\);/);   // display_name first (BF-094)
     assert.match(PDP, /const shown = m\.display_name \|\| m\.full_name;/);
     assert.match(PDP, /group\.top_models\.filter\(m => m && \(m\.display_name \|\| m\.full_name\)\)/);
     assert.match(PDP, /let label = p\.display_name \|\| p\.full_name \|\| p\.name/);
 });
 
 test('§2 shop-page: the printer hub name and the landing printer search go through PrinterName.of', () => {
-    assert.match(SHOP, /\(printerData && PrinterName\.of\(printerData\)\)/);
+    assert.match(SHOP, /printerData && PrinterName\.of\(printerData\)\)/);
     assert.match(SHOP, /PrinterName\.of\(p\) : \(p\.full_name \|\| ''\)/);
 });
 
@@ -144,5 +145,5 @@ test('§4 POSITIVE CONTROL — the reads that are NOT retired are still there', 
     // The enrich fallback (5xx path) and the id-only compatibility read stay.
     assert.match(PDP, /rest\/v1\/products\?sku=eq\./);
     assert.match(stripComments(read('js/api.js')), /_CATEGORY_PRODUCT_TYPES:/);
-    assert.match(stripComments(read('js/utils.js')), /BROTHER_PREFIX:/, 'the mirror stays until BF-094');
+    assert.doesNotMatch(stripComments(read('js/utils.js')), /BROTHER_PREFIX:|WORDS:/, 'BF-094 landed 2026-10-06: the mirror is deleted');
 });

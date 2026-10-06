@@ -42,6 +42,10 @@ MUTATIONS = [
  ('inkcartridges/js/config.js', 'cartWallet: false,', 'cartWallet: true,'),
  (W, "        return this.REGIONS.includes(slug) ? slug : '';", "        return this.REGIONS.includes(slug) ? slug : 'auckland';"),
  (W, "                saveAddress: false,", "                saveAddress: true,"),
+ # BF-100: region optional (omitted, never '' or guessed); 4-digit postcode required
+ (P, "                    ...(this.checkoutData.region ? { region: this.checkoutData.region } : {}),", "                    region: this.checkoutData.region,"),
+ (W, "        if (!this.isNzPostcode(addr.postal_code)) return { error: 'That postcode is not a 4-digit New Zealand postcode.' };\n", ""),
+ (W, "        return /^\\d{4}$/.test(", "        return /\\d{3,}/.test("),
  (P, "        if (!document.getElementById('payment-form')) return;\n", ""),
 ]
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

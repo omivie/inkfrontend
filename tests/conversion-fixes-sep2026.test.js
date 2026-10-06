@@ -239,37 +239,21 @@ test('§2 bindAll hides the scope of a fact it could not confirm', async () => {
 // §3 printer names — SAME as the backend's crawler pages (measured fixtures)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§3 PrinterName.display matches the backend prerender <h1> for every measured printer', () => {
-    // raw full_name (GET /api/printers/search) → backend h1 (GET /api/prerender/printer/…), 2026-09-27.
-    // RE-MEASURED 2026-09-28 (ERR-294): the backend now display-cases PHASER and
-    // hyphenates Brother series prefixes; the two rows below changed with it. The
-    // full 119-word calibration lives in four-replies-backend-response-sep2026 §H.
-    const MEASURED = [
-        ['HP COLOR LASERJET 5500', 'HP Color LaserJet 5500'],
-        ['HP OFFICEJET PRO 8710', 'HP OfficeJet Pro 8710'],
-        ['HP DESKJET 3630', 'HP DeskJet 3630'],
-        ['HP DESK 3630', 'HP Desk 3630'],
-        ['HP LASERJET ENTERPRISE M506', 'HP LaserJet Enterprise M506'],
-        ['HP PAGEWIDE PRO 477DW', 'HP PageWide Pro 477DW'],
-        ['HP COLOR LASERJET CM 1312', 'HP Color LaserJet CM 1312'],
-        ['HP ENVY 4500', 'HP ENVY 4500'],
-        ['Kyocera ECOSYS M2040DN', 'Kyocera ECOSYS M2040DN'],
-        ['Fuji Xerox PHASER 5500', 'Fuji Xerox Phaser 5500'],
-        ['Brother MFC J5930DW', 'Brother MFC-J5930DW'],
-        ['HP LaserJet Pro MFP M428fdw', 'HP LaserJet Pro MFP M428fdw'],
-        ['Lexmark CS310dn', 'Lexmark CS310dn'],
-        ['Canon PIXMA MG3660', 'Canon PIXMA MG3660'],
-        ['Epson EcoTank ET-2720', 'Epson EcoTank ET-2720'],
-    ];
-    for (const [raw, backend] of MEASURED) assert.equal(U.PrinterName.display(raw), backend, raw);
-    assert.equal(U.PrinterName.display(null), '');
+test('§3 PrinterName.of prints the backend\'s display_name verbatim; the mirror is gone (BF-094)', () => {
+    // Until 2026-10-06 a 119-word casing mirror stood in for rows without
+    // display_name. The backend now ships it on every printer row (BF-094,
+    // measured on listing, PDP, search and hub rows), so the mirror was deleted.
+    assert.equal(U.PrinterName.of({ display_name: 'Brother MFC-J5930DW', full_name: 'Brother MFC J5930DW' }), 'Brother MFC-J5930DW');
+    assert.equal(U.PrinterName.of({ full_name: 'HP COLOR LASERJET 5500' }), 'HP COLOR LASERJET 5500', 'absent ⇒ raw, never re-cased');
+    assert.equal(U.PrinterName.of(null), '');
+    assert.equal(U.PrinterName.display, undefined);
 });
 
 test('§3 fitsLine: two models then +N, nothing when the row has no list', () => {
-    const P = (n) => ({ full_name: n });
-    assert.equal(U.PrinterName.fitsLine([P('Brother MFC J5930DW'), P('Brother MFC J6935DW'), P('A'), P('B')]),
+    const P = (n) => ({ full_name: n.replace(/-/g, ' '), display_name: n });
+    assert.equal(U.PrinterName.fitsLine([P('Brother MFC-J5930DW'), P('Brother MFC-J6935DW'), P('A'), P('B')]),
         'Fits Brother MFC-J5930DW, Brother MFC-J6935DW +2');
-    assert.equal(U.PrinterName.fitsLine([P('HP COLOR LASERJET 5500')]), 'Fits HP Color LaserJet 5500');
+    assert.equal(U.PrinterName.fitsLine([P('HP Color LaserJet 5500')]), 'Fits HP Color LaserJet 5500');
     assert.equal(U.PrinterName.fitsLine(undefined), '', 'a row with no list renders nothing');
     assert.equal(U.PrinterName.fitsLine([]), '');
 });
@@ -417,10 +401,11 @@ test('§6 the printer box is FIRST on the landing, uses /api/printers/search (no
     assert.doesNotMatch(html.slice(level, brands).replace(/<!--[\s\S]*?-->/g, ''), /<section(?![^>]*landing-printer-search)/,
         'no section may sit between the printer box and the brand picker');
     const fn = extractMethod(stripComments(read('js/shop-page.js')), 'renderLandingPrinterSearch').body;
-    // Both separator spellings (ERR-296: /api/printers/search is separator-intolerant).
-    assert.match(fn, /finderSpellings\(q\)\.map\(\(s\) => API\.searchPrinters\(s\)/);
+    // ONE request since BF-096 (the backend matches a separator-free key).
+    assert.match(fn, /await API\.searchPrinters\(q\)/);
+    assert.equal((fn.match(/API\.searchPrinters\(/g) || []).length, 1);
     assert.doesNotMatch(fn, /smartSearch|\/api\/search\//, 'ERR-254: a typeahead must not file searches');
-    assert.match(fn, /PrinterName\.of\(p\)/);   // display_name first, else the mirror (ERR-299)
+    assert.match(fn, /PrinterName\.of\(p\)/);   // display_name first (BF-094)
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -501,7 +486,9 @@ test('§8 cart email LIVE (ERR-302) and reviews LIVE, and the consent box is unt
     assert.match(fn, /GuestCartEmail\.bind\(/);
     const cart = stripComments(read('js/cart.js'));
     assert.match(cart, /Config\.DARK_FEATURES\.guestCartEmail === true/);
-    assert.match(cart, /if \(!box\.checked\)/);
+    // Nothing is sent unticked; the box state is read AT THE EVENT (BF-099 queue).
+    assert.match(cart, /const ticked = box\.checked;/);
+    assert.match(cart, /if \(!ticked\) \{/);
 });
 
 test('§8 review form validation', () => {

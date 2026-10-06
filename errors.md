@@ -41,6 +41,38 @@ describing the same incident.
 
 ---
 
+## ERR-308 — The backend answered eight FE replies at once: a name mirror, a double printer search and a wallet refusal were now dead weight, a consent untick withdrew nothing, the business page ignored two 409 codes, and staff were an Ads audience — **RESOLVED (frontend)** (2026-10-06)
+
+**Source.** `backend-docs/inbox/fe-replies-oct2026-backend-response.md` (backend, 6 Oct): BF-094..101 plus the guest-session cap, GA4/Ads on `/admin`, and the Ads `purchase` count. Answered by `backend-docs/outbox/fe-replies-6oct-backend-response-FE-reply-oct2026.md`.
+
+**Measured before acting (production API, GET only, 6 Oct).**
+- BF-094: `display_name` on listing rows (`/api/shop` 40/40, `/api/products?search=` rows), `/api/printers/search` (2/2), PDP `compatible_printers` 5/5 and `top_models` 5/5, `by-brand` 565/565, both printer-hub `printer` objects. 47 sampled names equal the backend's prerender `<h1>`.
+- BF-096: `Brother MFC-J5930DW`, `MFC J5930DW`, `MFCJ5930DW` → the same one printer; `HLL 3210CDW` → 1; `Brother DCP-J1050DW` with `brand=brother` → 1; `Brother HL-L2350DW` → 0, so the probe's negative control still holds.
+- BF-101: `/api/site/trust` carries `tax_invoice {emailed_with_every_order:true, label}` and `shipping_promise.delivery_label` "1–3 business days NZ-wide".
+- The "still open" list: items 14 and 15 were already shipped in `b2d07c0f` (served 12:32 NZT); the backend's check predates it. Item 6 is real. The cause is CSS, `pages.css` `.product-info > #product-value-lines { order: 2 }` at ≥1100px; a peer session owns it (FE master checklist v2).
+
+**The fix.**
+- **BF-094, the mirror is deleted.** `PrinterName.WORDS`, `BROTHER_PREFIX` and `display()` (119 calibrated words) are gone. `of(p)` = `display_name`, else the RAW `full_name`, with ONE `DebugLog.warn` naming BF-094. A mirror drifts when the other half moves (ERR-270), and the other half now ships the answer. Callers: the shop hub name, the H1 fallback, the zero-results rail, and the PDP fit list, placeholder and flat list.
+- **BF-096, one request.** `finderSpellings` + `mergePrinterAnswers` are gone from the landing finder. The resolver's five-spelling `Promise.allSettled` is now one `searchPrinters(printerModel, brand)`. **Found on the way:** a failed lookup used to render "We couldn't match that printer", an outage dressed as an answer. It now says the lookup isn't answering (`data-finder-state="unavailable"`).
+- **BF-095.** `APPLICATION_PENDING` renders the pending panel and `ALREADY_APPROVED` hands over to `gate()`, both from the CODE: the old path re-read status, and a failed re-read left a pending applicant at "try again in a minute". `RATE_LIMITED` copy now says "from your account today" (the limiter is per user, after sign-in). The probe's `can_apply` check is now hard. With `--post-controls` it also checks that the 401s carry no 24h limiter policy. Credit-reference upload: NOT built (backend: its URL does not open).
+- **BF-099.** Unticking after a send POSTs `{guest_session_id, consent:false}` (`API.withdrawGuestContact`). Ok ⇒ "We won't email you about this cart". Failure ⇒ LOUD "a reminder may still be sent" (`data-guest-contact="withdraw-failed"`) and the next event retries. Nothing sent ⇒ no call.
+- **BF-099, caught by its own test:** the handler read the box AFTER awaiting the queue, so a fast tick → untick sent NOTHING (both runs saw "unticked, nothing on file"). Events now queue with the box, address and validity captured AT THE EVENT.
+- **BF-100.** A wallet `state` that matches no region no longer refuses the sheet. `region` is omitted from `shipping_address` (never `''`, never guessed); the zone comes from the postcode, at the urban rate, with `delivery_type` NULL. A 4-digit postcode is now required (`isNzPostcode`) at both `shippingaddresschange` and confirm.
+- **BF-101.** The paperwork fact reads `tax_invoice` (literal `true` + its label), no longer `organization.gst_number`. The speed fact's days fall back to `shipping_promise.delivery_label`, so series and printer pages read "… · most of NZ in 1–3 business days".
+- **GA4 + Ads off `/admin`** (owner, via the backend: staff were joining "All visitors" and the 3-day exclusion). `html/admin/index.html` drops the Google tag, `gtag.js` and the consent banner (a banner with no tag gates nothing, consent-mode §1). `gtag.js` also skips both `config` calls on `/admin*`.
+
+**Measured cost, not hidden.** The service row is ONE clipped 18px line (ERR-306). With the longer speed fact, the GST fact drops off on series and printer pages at 1280, 1440 and 1920 (it fits at 1366 on a series page). Returns was already off at those widths. Before, the GST fact showed at 1280.
+
+**Stale red-proof anchors found and repointed.** Round2, four-replies and turnaround pointed at the deleted mirror and finder. Turnaround also carried four anchors that ERR-305 had already made STALE ("Total before shipping", the Turnstile prefetch race), reported as STALE, never red. They are retired, and their successors live in the checkout-funnel red-proof.
+
+**Proof.**
+- `tests/backend-response-6oct-2026.test.js` (GA4/Ads executed against `gtag.js` with a storefront positive control, admin HTML, the PrinterName warn, the one-request resolver), plus pins in business-apply §4, ad-clicks §4, checkout-funnel item 2, fe-master-checklist §5, turnaround §2/§4, round2, four-replies and conversion-fixes.
+- Red-proofs: `redproof-backend-response-6oct-2026.py` 9/9, business-apply 24/24, ad-clicks 25/25, checkout-funnel (BF-100 rows red), round2 31/31, turnaround 35/35.
+- `probe:four-replies` (READ-ONLY, prod API) 39/0/0, with BF-094 as hard checks.
+- Local Playwright: each finder spelling = 1 request + "Brother MFC-J5930DW"; `/admin` itself requests no Google tag (a signed-out visit redirects to `/account/login`, a storefront page that does).
+
+---
+
 ## ERR-307 — The cart kept the retail price at a volume rung and showed two quantities' figures at once, and checkout let an email the backend had already refused through to a Pay button that did nothing — **RESOLVED (frontend)** (2026-10-06)
 
 **Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, re-issued by the backend on 6 Oct with a "Status after the live check on 6 October 2026" section and two new items: 14 (owner report, cart volume price) and 15 (P0, order 2026100602, $486.81, nearly lost). Answered by `backend-docs/outbox/fe-master-checklist-6oct-FE-reply-oct2026.md`.

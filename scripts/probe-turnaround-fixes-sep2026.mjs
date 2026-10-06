@@ -157,10 +157,25 @@ if (!argv.has('--browser')) {
             check('empty state: "couldn\'t match", /quote, a tel: link', /couldn't match that printer/.test(html) && /href="\/quote"/.test(html) && /href="tel:/.test(html), html.replace(/<[^>]+>/g, '').slice(0, 120));
             // CONTROL, and the separator bug found building this (ERR-296): the
             // box's own placeholder spelling, hyphenated, must FIND the printer.
-            await input.fill('Brother MFC-J5930DW');
-            const hit = p.locator('.landing-printer-search__hit').first();
-            await hit.waitFor({ timeout: 20000 }).catch(() => {});
-            check('CONTROL: "Brother MFC-J5930DW" (hyphenated, the placeholder) DOES match', await hit.count() > 0, await hit.innerText().catch(() => 'no hit'));
+            // Since BF-096 (backend 2026-10-06) every separator spelling finds
+            // it with ONE request each — the FE's two-spelling fan-out is gone.
+            // /api/printers/search writes no search_analytics row (see
+            // tests/probe-search-analytics-honesty-sep2026.test.js), so typing
+            // here pollutes nothing.
+            for (const q of ['Brother MFC-J5930DW', 'MFC J5930DW', 'MFCJ5930DW']) {
+                const asked = [];
+                const onReq = (req) => { if (/\/api\/printers\/search\?/.test(req.url())) asked.push(req.url()); };
+                p.on('request', onReq);
+                await input.fill('');
+                await input.fill(q);
+                const hit = p.locator('.landing-printer-search__hit').first();
+                await hit.waitFor({ timeout: 20000 }).catch(() => {});
+                await p.waitForTimeout(600);   // let any second request show itself
+                p.off('request', onReq);
+                const text = await hit.innerText().catch(() => 'no hit');
+                check(`CONTROL: "${q}" finds Brother MFC-J5930DW (display_name)`, text.trim() === 'Brother MFC-J5930DW', text);
+                check(`"${q}": ONE /api/printers/search request (BF-096; was two for a hyphen)`, asked.length === 1, `${asked.length} request(s)`);
+            }
         }
         await ctx.close();
     }

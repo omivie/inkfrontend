@@ -1561,11 +1561,6 @@
             }
         },
 
-        /** Printer names as the backend's crawler pages spell them (PrinterName, utils.js). */
-        _printerLabel(name) {
-            return (typeof PrinterName !== 'undefined') ? PrinterName.display(name) : name;
-        },
-
         /** Letters and digits only, lower-cased — "MFC-J5930DW" and "mfc j5930dw" are one query. */
         _fitKey(s) {
             return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1597,9 +1592,8 @@
             const hasPromise = promise && typeof promise.label === 'string' && promise.label.trim();
             if (!printers.length && !hasPromise) { el.hidden = true; el.innerHTML = ''; this._setHeadline('product-headline-fit', ''); return; }
 
-            // The backend's display_name first (BF-093, ERR-299), else the mirror.
-            const labelOf = (p) => p.display_name
-                || this._printerLabel(p.full_name || [p.brand, p.model_name].filter(Boolean).join(' '));
+            // The backend's display_name (BF-093/094), else the raw name (PrinterName, utils.js).
+            const labelOf = (p) => PrinterName.of(p);
             const items = printers.map((p) => {
                 const raw = p.full_name || [p.brand, p.model_name].filter(Boolean).join(' ');
                 const href = this._printerHubHref(p);
@@ -1627,7 +1621,7 @@
                     + `<details class="product-fit__details" id="product-fit-details">`
                     + `<summary>Check your printer${printers.length > 2 ? ` (${printers.length} listed)` : ''}</summary>`
                     + `<label class="product-fit__check"><span class="visually-hidden">Your printer model</span>`
-                    + `<input type="search" class="product-fit__input" id="product-fit-input" placeholder="Type your printer model, e.g. ${Security.escapeAttr(this._printerLabel(printers[0].model_name || printers[0].full_name || ''))}" autocomplete="off" enterkeyhint="search"></label>`
+                    + `<input type="search" class="product-fit__input" id="product-fit-input" placeholder="Type your printer model, e.g. ${Security.escapeAttr(PrinterName.withoutBrand(PrinterName.of(printers[0]), printers[0].brand))}" autocomplete="off" enterkeyhint="search"></label>`
                     + `<p class="product-fit__result" id="product-fit-result" role="status" aria-live="polite" hidden></p>`
                     + `<ul class="product-fit__list" id="product-fit-list">${items}</ul>`;
             }
@@ -2150,7 +2144,6 @@
                 if (typeof ProductName !== 'undefined' && ProductName.compatModel) {
                     label = ProductName.compatModel(label, p.brand) || label;
                 }
-                label = this._printerLabel(label);
                 const href = this._printerHubHref(p);
                 return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
             }).join(', ');

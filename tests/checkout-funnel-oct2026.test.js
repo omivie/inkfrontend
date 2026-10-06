@@ -297,7 +297,8 @@ test('§8.5 the payment summary prints the region LABEL; the API still gets the 
     const co = stripComments(read('js/checkout-page.js'));
     assert.match(co, /region: formData\.get\('region'\),\s*regionLabel:/);
     const pay = stripComments(read('js/payment-page.js'));
-    assert.match(pay, /region: this\.checkoutData\.region,/, 'the order still carries the slug');
+    // The slug when there is one; omitted (never '') when a wallet address has none (BF-100).
+    assert.match(pay, /\.\.\.\(this\.checkoutData\.region \? \{ region: this\.checkoutData\.region \} : \{\}\),/, 'the order still carries the slug');
 });
 
 test('§8.5 NZ Post suggest asks for 8', () => {
@@ -338,8 +339,22 @@ test('item 2: the wallet address becomes the SAME checkoutData the card path sen
     assert.equal('deliveryType' in data, false, 'delivery_type is omitted, never guessed (ERR-25x)');
     assert.equal(data.saveAddress, false, 'a wallet address is not saved behind the shopper\'s back');
 
-    const blank = { ...ev, shippingAddress: { ...ev.shippingAddress, address: { ...ev.shippingAddress.address, state: '' } } };
-    assert.match(CartWallet.toCheckoutData(blank, ship).error, /Proceed to Checkout/);
+    // BF-100 (backend 2026-10-06): region is optional — a blank or unknown
+    // `state` sends NO region (the zone comes from the postcode), never a guess.
+    for (const state of ['', 'Kelston']) {
+        const blank = { ...ev, shippingAddress: { ...ev.shippingAddress, address: { ...ev.shippingAddress.address, state } } };
+        const r = CartWallet.toCheckoutData(blank, ship);
+        assert.equal(r.error, undefined, `state ${JSON.stringify(state)} is accepted`);
+        assert.equal(r.data.region, '', 'no region, never a guess');
+        assert.equal(r.data.postcode, '0602');
+    }
+    // …but city and a 4-digit postal_code stay required.
+    for (const postal_code of ['602', '06021', 'AB12', '']) {
+        const bad = { ...ev, shippingAddress: { ...ev.shippingAddress, address: { ...ev.shippingAddress.address, postal_code } } };
+        assert.ok(CartWallet.toCheckoutData(bad, ship).error, `postal_code ${JSON.stringify(postal_code)} refused`);
+    }
+    const noCity = { ...ev, shippingAddress: { ...ev.shippingAddress, address: { ...ev.shippingAddress.address, city: '' } } };
+    assert.match(CartWallet.toCheckoutData(noCity, ship).error, /incomplete/);
     const au = { ...ev, shippingAddress: { ...ev.shippingAddress, address: { ...ev.shippingAddress.address, country: 'AU' } } };
     assert.match(CartWallet.toCheckoutData(au, ship).error, /New Zealand/);
     assert.match(CartWallet.toCheckoutData(ev, null).error, /price delivery/);
