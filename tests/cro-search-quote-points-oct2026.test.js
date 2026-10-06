@@ -272,9 +272,12 @@ test('§3 the PDP slot exists only when the product carries reward_points; value
     const code = stripComments(PDP_SRC);
     const lines = extractMethod(code, 'renderValueLines').body;
     assert.match(lines, /this\._rewardPoints = this\.validRewardPoints\(info && info\.reward_points\)/);
-    assert.match(lines, /if \(this\._rewardPoints\) facts\.push/);
     assert.doesNotMatch(lines, /ValueProps\.loyalty/);
     const sync = extractMethod(code, 'syncPointsLine').body;
+    // Since FE master checklist v2 item 6 the slot is static markup in the
+    // PRICE row; "only when the product carries reward_points" is enforced
+    // here: no reward_points ⇒ the line is hidden and emptied.
+    assert.match(sync, /if \(!this\._rewardPoints\) \{ line\.hidden = true; line\.textContent = ''; return; \}/);
     assert.match(sync, /this\.rewardPointsFor\(this\._rewardPoints, unit, qty, this\._unitPrice\)/);
     assert.doesNotMatch(code, /ValueProps\.pointsFor/);
 });

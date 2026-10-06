@@ -5243,7 +5243,7 @@
                                         ${Security.escapeHtml(ctaText)}
                                     </button>`;
                                     if (!hasStepper) return cta;
-                                    return `<div class="product-card__buy">${QtyStepper.markup({ value: 1 })}${cta}</div>`;
+                                    return `<div class="product-card__buy">${QtyStepper.markup({ value: 1, stock: product.stock_quantity })}${cta}</div>`;
                                 })()}
                             </div>
                         </div>
@@ -5315,6 +5315,8 @@
                     color: product.color || '',
                     quantity,
                     product_source: product.source || null,
+                    // Item 17: the cart caps the new line at stock at once.
+                    stock_quantity: product.stock_quantity,
                     // The printer hub the shopper is browsing, if any
                     // (data-tracking-capture aug2026 §1.2). `state.printer` is
                     // the parsed ?printer_slug= at :853 — the same value already

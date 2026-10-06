@@ -9688,10 +9688,43 @@ body.page-shop {
     color: var(--color-text);
 }
 .product-value-lines p { margin: 0; }
-.product-value-lines__points { font-weight: 700; color: var(--cyan-dark); }
 .product-value-lines__facts { display: block; }
-.product-value-lines__points:not([hidden]) + .product-value-lines__ship::before { content: "·"; margin: 0 6px; color: var(--color-text-light); }
 .product-value-lines__call a { font-weight: 700; color: var(--cyan-dark); white-space: nowrap; }
+
+/* Reward points in the PRICE row (FE master checklist item 6, 6 Oct). The
+   price <dd> is a wrapping flex row, so the line sits beside the price when
+   it fits and wraps under it when it does not — never below Add. */
+.buy-box__value--price .product-info__points { font-size: var(--text-sm, 0.875rem); font-weight: 700; color: var(--cyan-dark); }
+.product-info__points[hidden] { display: none; }
+
+/* "Our compatible version" on a genuine PDP (item 16). Below Add and the fit
+   line; prices and page yields only (invariant 13). */
+.compat-alt {
+    margin: var(--spacing-md, 16px) 0 0;
+    padding: 12px var(--spacing-md, 16px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-background-alt);
+}
+.compat-alt[hidden] { display: none; }
+.compat-alt__heading { margin: 0 0 8px; font-size: 1rem; font-weight: 700; color: var(--color-text-heading); }
+.compat-alt__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.compat-alt__item { display: flex; align-items: center; gap: 12px; }
+.compat-alt__thumb { width: 56px; height: 56px; object-fit: contain; background: #fff; border-radius: var(--radius-sm); flex-shrink: 0; }
+.compat-alt__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.compat-alt__name { font-size: var(--font-size-sm, 0.875rem); font-weight: 600; color: var(--color-text-heading); }
+.compat-alt__price { font-size: 1rem; font-weight: 700; color: var(--color-text-heading); }
+.compat-alt__facts { font-size: var(--font-size-sm, 0.875rem); color: var(--color-text); }
+.compat-alt__fact + .compat-alt__fact::before { content: "·"; margin: 0 6px; color: var(--color-text-light); }
+.compat-alt__actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.compat-alt__view { display: inline-flex; align-items: center; min-height: 48px; padding: 0 6px; color: var(--cyan-dark); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.compat-alt__add { min-height: 48px; min-width: 64px; }
+.compat-alt__oos { font-size: var(--font-size-sm, 0.875rem); color: var(--color-text-light); }
+.compat-alt__note { margin: 8px 0 0; font-size: var(--font-size-sm, 0.875rem); color: var(--color-text-light); }
+@media (max-width: 480px) {
+    .compat-alt__item { flex-wrap: wrap; }
+    .compat-alt__actions { width: 100%; justify-content: flex-end; }
+}
 
 .product-info__printer-proof,
 .product-info__waitlist-proof {

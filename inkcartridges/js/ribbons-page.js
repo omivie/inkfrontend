@@ -978,7 +978,7 @@ const RibbonsPage = {
                                 <span class="product-card__price">${formatPrice(price)}</span>
                             </div>
                             ${inStock
-                                ? `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
+                                ? `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1, stock: ribbon.stock_quantity }) : ''}<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
                                         data-product-id="${ribbonId}"
                                         data-product-name="${Security.escapeAttr(displayName)}"
                                         aria-label="${Security.escapeAttr(typeof QtyStepper !== 'undefined' ? QtyStepper.ctaAriaLabel(1, displayName) : `Add ${displayName} to cart`)}">

@@ -308,11 +308,12 @@ const Products = {
                                         data-product-image="${Security.escapeAttr(resolvedImage)}"
                                         data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}"
                                         data-product-source="${Security.escapeAttr(product.source || '')}"
+                                        data-product-stock="${Security.escapeAttr(product.stock_quantity != null ? product.stock_quantity : '')}"
                                         aria-label="${Security.escapeAttr(ctaAria)}">
                                     ${Security.escapeHtml(ctaText)}
                                     </button>`;
                                     if (!hasStepper) return cta;
-                                    return `<div class="product-card__buy">${QtyStepper.markup({ value: 1 })}${cta}</div>`;
+                                    return `<div class="product-card__buy">${QtyStepper.markup({ value: 1, stock: product.stock_quantity })}${cta}</div>`;
                                 })()}
                             </div>
                         </div>
@@ -665,6 +666,9 @@ const Products = {
                     // COMPATIBLE/GENUINE badge. May be empty on legacy cards;
                     // _isCompatible falls back to the leading-word heuristic.
                     product_source: btn.dataset.productSource || null,
+                    // Item 17: lets the cart cap the new line at stock before
+                    // the server has described it ('' ⇒ unknown).
+                    stock_quantity: btn.dataset.productStock !== undefined && btn.dataset.productStock !== '' ? Number(btn.dataset.productStock) : null,
                     // ERR-218. Cart.addItem and API.addToCart have always taken a
                     // quantity; every card simply hard-coded one. read() returns 1
                     // when no stepper is present, so a surface that has not been

@@ -314,13 +314,16 @@ test('§4 points line: server reward_points, the rung price at the quantity in t
     const sync = method('js/product-detail-page.js', 'syncPointsLine', self,
         { document: doc, Business: { offerAtQuantity: () => ({ businessPrice: 32.49 }) } });
     sync();
-    assert.equal(line.textContent, 'Earn 100 reward points ($1.00) on this order', 'floor(33.49 × 3) = 100 points');
+    assert.equal(line.textContent, 'Earn 100 reward points ($1.00)', 'floor(33.49 × 3) = 100 points');
     self._volumeLadder = { breaks: [] };
     sync();
-    assert.equal(line.textContent, 'Earn 97 reward points ($0.97) on this order', 'at 3+ the rung price 32.49 × 3 = 97.47 applies');
+    assert.equal(line.textContent, 'Earn 97 reward points ($0.97)', 'at 3+ the rung price 32.49 × 3 = 97.47 applies');
     self._rewardPoints = null; line.hidden = false;
     sync();
-    assert.equal(line.textContent, 'Earn 97 reward points ($0.97) on this order', 'no reward_points ⇒ the function leaves the line alone (renderValueLines never created it)');
+    // The span is static markup in the price row since item 6 (FE master
+    // checklist v2, 6 Oct), so it outlives a render: no reward_points CLEARS it.
+    assert.equal(line.hidden, true, 'no reward_points ⇒ the line is hidden');
+    assert.equal(line.textContent, '', 'no reward_points ⇒ the line is emptied');
     assert.doesNotMatch(stripComments(read('js/product-detail-page.js')), /ValueProps\.pointsFor/, 'the PDP no longer computes points from value-props');
 });
 
@@ -477,7 +480,7 @@ test('§8 cart email LIVE (ERR-302) and reviews LIVE, and the consent box is unt
     // guestReviews went live with the backend's confirmation (ERR-290,
     // backend-docs/inbox/fe-post-deploy-fixes-sep2026.md §1); guestCartEmail
     // with the owner's approval of the ad-clicks-to-orders handoff §4 (ERR-302).
-    assert.match(stripComments(cfg), /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*true,\s*guestReviews:\s*true,\s*cartWallet:\s*false,?\s*\}/);
+    assert.match(stripComments(cfg), /DARK_FEATURES:\s*\{\s*guestCartEmail:\s*true,\s*guestReviews:\s*true,\s*cartWallet:\s*true,?\s*\}/);
     const box = read('html/checkout.html').match(/<input type="checkbox" id="guest-cart-email-consent"[^>]*>/)[0];
     assert.doesNotMatch(box, /checked/, 'NZ UEMA: consent is given by the shopper, never pre-ticked');
     assert.match(read('html/checkout.html'), /id="guest-cart-email-optin" hidden/);

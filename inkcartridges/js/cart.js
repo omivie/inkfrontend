@@ -664,6 +664,81 @@ const Cart = {
     // other places, so a programmatic set-to-100 silently became 99.
     MAX_QUANTITY: 100,
 
+    /**
+     * The most this LINE can hold (FE master checklist item 17, 6 Oct): its
+     * stock, capped at MAX_QUANTITY. The server has always refused a quantity
+     * above stock (400, now `STOCK_INSUFFICIENT`); before this the cart let +
+     * walk to 13 on a line with 8 and then snapped back. Unknown stock (a local
+     * line the server has not described yet) keeps MAX_QUANTITY — never a
+     * guessed number. Stock 0 caps at 1, so + stays disabled.
+     */
+    maxQuantityFor: function(item) {
+        const stock = item && item.stock_quantity != null ? Number(item.stock_quantity) : NaN;
+        if (!Number.isFinite(stock) || stock < 0) return this.MAX_QUANTITY;
+        return Math.max(1, Math.min(this.MAX_QUANTITY, Math.floor(stock)));
+    },
+
+    /** The line for a cart key or id, or undefined. */
+    _lineFor: function(itemId) {
+        return this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
+    },
+
+    /**
+     * "Only N in stock" — shown when a click or a typed value reaches the
+     * line's stock cap, and when the server refuses a quantity for stock.
+     * Only for a line whose stock is KNOWN and is what binds (a line capped by
+     * MAX_QUANTITY says nothing about stock).
+     */
+    _toastStockCap: function(available) {
+        const n = Math.floor(Number(available));
+        if (!Number.isFinite(n) || n < 0 || typeof showToast !== 'function') return;
+        showToast(n === 0
+            ? 'This item is out of stock.'
+            : 'Only ' + n + ' in stock \u2014 that is the most you can order.', 'info');
+    },
+
+    /**
+     * PURE. The stock figure in a server refusal, or null when it is not a
+     * stock refusal. Two shapes: the resolved envelope `{ ok:false,
+     * code:'STOCK_INSUFFICIENT', details:{ available } }` (api.js passes the
+     * code through), and the thrown Error that older backends produced with
+     * `BAD_REQUEST` + `details.available` (it used to toast "Network error").
+     */
+    stockRefusal: function(resOrErr) {
+        if (!resOrErr || typeof resOrErr !== 'object') return null;
+        const details = resOrErr.details;
+        const available = details && typeof details === 'object' && !Array.isArray(details)
+            ? Number(details.available) : NaN;
+        if (resOrErr.code === 'STOCK_INSUFFICIENT' || (resOrErr instanceof Error && Number.isFinite(available))) {
+            return Number.isFinite(available) && available >= 0 ? Math.floor(available) : null;
+        }
+        return null;
+    },
+
+    /**
+     * A quantity change the backend's limiter turned away (429 /
+     * `RATE_LIMITED`, either the resolved envelope or the thrown Error from
+     * _fetchWithAuth). Measured 6 Oct: a burst of changes earned a 429 and the
+     * cart toasted "Network error" — no network error had happened. Same
+     * honesty rule as the stock refusal above.
+     */
+    _isRateLimited: function(resOrErr) {
+        return !!resOrErr && typeof resOrErr === 'object'
+            && (resOrErr.code === 'RATE_LIMITED' || resOrErr.status === 429);
+    },
+    RATE_LIMITED_QTY_TEXT: 'Too many changes at once. Please wait a moment and try again.',
+
+    /**
+     * After a stock refusal: remember the stock the server named on the line
+     * (so every cap uses it straight away) and say so — never "Network error",
+     * never "Failed to update". The caller still reloads the cart.
+     */
+    _applyStockRefusal: function(itemId, available) {
+        const line = this._lineFor(itemId);
+        if (line) line.stock_quantity = available;
+        this._toastStockCap(available);
+    },
+
     // Backoff for automatic pricing revalidation (ERR-210). Length IS the attempt
     // budget — three tries per degraded episode, then the notice is earned.
     // Sized around a Render cold start: the first two land inside a typical warm
@@ -1555,7 +1630,11 @@ const Cart = {
                         line_savings: item.volume_line_savings != null ? Number(item.volume_line_savings) : 0,
                         next_break: Object.prototype.hasOwnProperty.call(item, 'volume_next_break') ? item.volume_next_break : undefined
                     }
-                    : null
+                    : null,
+                // Item 17: the line's stock, so every quantity cap can use it
+                // (maxQuantityFor). Absent ⇒ null = unknown, never 0.
+                stock_quantity: (item.product.stock_quantity != null && Number.isFinite(Number(item.product.stock_quantity)))
+                    ? Number(item.product.stock_quantity) : null
             };
             parsed.key = self.cartItemKey(parsed);
             // printer_slug is a CLIENT-SIDE annotation — the server cart has no
@@ -2554,11 +2633,16 @@ const Cart = {
                 const selector = increaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
-                const maxQty = this.MAX_QUANTITY;
+                const line = this._lineFor(itemId);
+                const maxQty = this.maxQuantityFor(line);
                 const newValue = parseInt(input.value) + 1;
                 if (newValue <= maxQty) {
                     input.value = newValue;
                     this._debouncedQuantityUpdate(itemId, newValue);
+                }
+                if (newValue >= maxQty && maxQty < this.MAX_QUANTITY) {
+                    increaseBtn.disabled = true;
+                    this._toastStockCap(line.stock_quantity);
                 }
             }
 
@@ -2610,7 +2694,8 @@ const Cart = {
             if (e.target.matches('.quantity-selector__input')) {
                 const selector = e.target.closest('.quantity-selector');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
-                const maxQty = this.MAX_QUANTITY;
+                const line = this._lineFor(itemId);
+                const maxQty = this.maxQuantityFor(line);
                 let newValue = parseInt(e.target.value);
 
                 // Clamp to valid range
@@ -2621,6 +2706,7 @@ const Cart = {
                 if (newValue > maxQty) {
                     newValue = maxQty;
                     e.target.value = maxQty;
+                    if (maxQty < this.MAX_QUANTITY) this._toastStockCap(line.stock_quantity);
                 }
 
                 this._debouncedQuantityUpdate(itemId, newValue);
@@ -2643,7 +2729,7 @@ const Cart = {
         // Changing a quantity supersedes an unconfirmed removal of the same line.
         this._dropPendingOpsFor(item.key || item.id);
 
-        const clampedQty = Math.min(quantity, this.MAX_QUANTITY);
+        const clampedQty = Math.min(quantity, this.maxQuantityFor(item));
         const oldQty = item.quantity;
         item.quantity = clampedQty;
         this._mutationEpoch++;
@@ -2770,23 +2856,35 @@ const Cart = {
                     } else {
                         // Generic failure — reload from server for correct state
                         await this.loadFromServer();
+                        // Item 17: a stock refusal names the stock. Keep it on
+                        // the line (after the reload, which rebuilt the lines)
+                        // and say so, instead of "Failed to update".
+                        const available = this.stockRefusal(response);
+                        if (available !== null) this._applyStockRefusal(itemId, available);
                         if (!hasPendingUpdate) {
                             this._updateCartItemDOM(itemId);
                             this._updateCartSummaryDOM();
                         }
-                        if (typeof showToast === 'function') {
-                            showToast('Failed to update quantity. Please try again.', 'error');
+                        if (available === null && typeof showToast === 'function') {
+                            if (this._isRateLimited(response)) showToast(this.RATE_LIMITED_QTY_TEXT, 'warning');
+                            else showToast('Failed to update quantity. Please try again.', 'error');
                         }
                     }
                 } catch (error) {
                     DebugLog.error('Failed to sync quantity to server:', error);
                     await this.loadFromServer();
+                    // An older backend THREW its stock refusal (BAD_REQUEST +
+                    // details.available): that was the "Network error" toast
+                    // on 6 Oct when no network error had happened.
+                    const available = this.stockRefusal(error);
+                    if (available !== null) this._applyStockRefusal(itemId, available);
                     if (!this._quantityQueued[itemId] && !this._quantityDebounceTimers[itemId]) {
                         this._updateCartItemDOM(itemId);
                         this._updateCartSummaryDOM();
                     }
-                    if (typeof showToast === 'function') {
-                        showToast('Network error. Quantity may have reverted.', 'error');
+                    if (available === null && typeof showToast === 'function') {
+                        if (this._isRateLimited(error)) showToast(this.RATE_LIMITED_QTY_TEXT, 'warning');
+                        else showToast('Network error. Quantity may have reverted.', 'error');
                     }
                 }
             }
@@ -2826,11 +2924,14 @@ const Cart = {
             input.value = item.quantity;
         }
 
-        // Update input max and + button disabled state
-        if (input) input.max = 100;
+        // Update input max and + button disabled state — the LINE's cap
+        // (its stock, item 17), not the global one.
+        const maxQty = this.maxQuantityFor(item);
+        if (input) input.max = maxQty;
+        cartItemEl.setAttribute('data-max-quantity', String(maxQty));
         const increaseBtn = cartItemEl.querySelector('.quantity-selector__btn--increase');
         if (increaseBtn) {
-            increaseBtn.disabled = item.quantity >= 100;
+            increaseBtn.disabled = item.quantity >= maxQty;
         }
 
         // Update line total — the server's own figure when it still describes
@@ -3393,7 +3494,11 @@ const Cart = {
                 key: key,
                 slug: product.slug || '',
                 // Present only when known; absent is the honest default.
-                ...(printerSlug ? { printer_slug: printerSlug } : {})
+                ...(printerSlug ? { printer_slug: printerSlug } : {}),
+                // Item 17: the caller's stock, so the cart caps this line before
+                // the server has described it. Absent ⇒ unknown ⇒ MAX_QUANTITY.
+                ...(product.stock_quantity != null && Number.isFinite(Number(product.stock_quantity))
+                    ? { stock_quantity: Number(product.stock_quantity) } : {})
             });
         }
 
@@ -3756,7 +3861,7 @@ const Cart = {
                             aria-label="Contact us about ${Security.escapeAttr(p.name || 'this product')}">
                             Contact us
                           </button>`
-                        : `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1 }) : ''}<button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
+                        : `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1, stock: p.stock_quantity }) : ''}<button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
                             data-product-id="${Security.escapeAttr(p.id || '')}"
                             data-product-sku="${Security.escapeAttr(p.sku || '')}"
                             data-product-name="${Security.escapeAttr(p.name || '')}"
@@ -3823,11 +3928,16 @@ const Cart = {
             this._dropPendingOpsFor(item.key || item.id);
         }
 
+        // The line's cap (its stock, item 17; else MAX_QUANTITY). The SAME
+        // clamped figure goes to the server: the raw one was sent before, so a
+        // set-above-stock earned a 400 the cap had already avoided locally.
+        const target = item ? Math.min(quantity, this.maxQuantityFor(item)) : Math.min(quantity, this.MAX_QUANTITY);
+
         // Update locally first (instant feedback)
         if (item) {
             // Single cap. This clamped to 99 while the six other sites used 100, so a
             // programmatic set-to-100 silently became 99.
-            item.quantity = Math.min(quantity, this.MAX_QUANTITY);
+            item.quantity = target;
             this._losePricing(PRICING.PENDING); // Invalidate until server confirms
             this._mutationEpoch++;
             this.saveToLocalStorage();
@@ -3838,7 +3948,7 @@ const Cart = {
         if (isCore && typeof API !== 'undefined') {
             try {
                 const putEpoch = this._mutationEpoch;
-                const response = await API.updateCartItem(actualId, quantity);
+                const response = await API.updateCartItem(actualId, target);
                 const putCart = response.ok ? this._putResponseCart(response) : null;
                 if (putCart && this._mutationEpoch === putEpoch) {
                     // The PUT's own re-priced cart (item 14): no second request.
@@ -3856,10 +3966,13 @@ const Cart = {
                         item.quantity = oldQuantity;
                         this.saveToLocalStorage();
                         await this.loadFromServer();
-                        this.updateUI();
                     }
-                    if (typeof showToast === 'function') {
-                        showToast('Failed to update quantity. Please try again.', 'error');
+                    const available = this.stockRefusal(response);
+                    if (available !== null) this._applyStockRefusal(itemId, available);
+                    if (item) this.updateUI();
+                    if (available === null && typeof showToast === 'function') {
+                        if (this._isRateLimited(response)) showToast(this.RATE_LIMITED_QTY_TEXT, 'warning');
+                        else showToast('Failed to update quantity. Please try again.', 'error');
                     }
                 }
             } catch (error) {
@@ -3869,10 +3982,13 @@ const Cart = {
                     item.quantity = oldQuantity;
                     this.saveToLocalStorage();
                     await this.loadFromServer();
-                    this.updateUI();
                 }
-                if (typeof showToast === 'function') {
-                    showToast('Network error. Quantity reverted.', 'error');
+                const available = this.stockRefusal(error);
+                if (available !== null) this._applyStockRefusal(itemId, available);
+                if (item) this.updateUI();
+                if (available === null && typeof showToast === 'function') {
+                    if (this._isRateLimited(error)) showToast(this.RATE_LIMITED_QTY_TEXT, 'warning');
+                    else showToast('Network error. Quantity reverted.', 'error');
                 }
             }
         }
@@ -4624,6 +4740,8 @@ const Cart = {
                     const escapedBrand = Security.escapeHtml(item.brand || '');
                     const escapedSku = Security.escapeHtml(item.sku || '');
                     const itemKey = item.key || self.cartItemKey(item);
+                    // The line's own cap (its stock, item 17).
+                    const maxQty = self.maxQuantityFor(item);
 
                     let productLink;
                     if (item.canonical_url) {
@@ -4636,7 +4754,7 @@ const Cart = {
                     }
 
                     return '\
-                    <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '" data-sku="' + Security.escapeAttr(item.sku || '') + '" data-quantity="' + Security.escapeAttr(String(item.quantity)) + '">\
+                    <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '" data-sku="' + Security.escapeAttr(item.sku || '') + '" data-quantity="' + Security.escapeAttr(String(item.quantity)) + '" data-max-quantity="' + maxQty + '">\
                         <div class="cart-item__image">\
                             ' + self.getItemImageHTML(item) + '\
                         </div>\
@@ -4661,8 +4779,8 @@ const Cart = {
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\
                                     </svg>\
                                 </button>\
-                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="' + self.MAX_QUANTITY + '" aria-label="Quantity">\
-                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (item.quantity >= 100 ? ' disabled' : '') + '>\
+                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="' + maxQty + '" aria-label="Quantity">\
+                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (item.quantity >= maxQty ? ' disabled' : '') + '>\
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
                                         <line x1="12" y1="5" x2="12" y2="19"></line>\
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\

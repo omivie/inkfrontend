@@ -225,6 +225,10 @@ const CartDeepLink = {
             quantity: qty,
             source: 'core',
             product_source: product.source || null,
+            // FE master checklist item 17: the line knows its stock from the
+            // moment it is added, not only after the next cart re-read (which
+            // a rate-limited or slow backend may not deliver).
+            stock_quantity: product.stock_quantity,
             // We own the reporting for this batch — see the summary below.
             silent: true,
         };

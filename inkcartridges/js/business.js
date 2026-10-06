@@ -1370,14 +1370,18 @@ const Business = {
         for (const line of lines) {
             const sku = line.getAttribute('data-sku');
             const qty = Number(line.getAttribute('data-quantity'));
+            // The LINE's cap (its stock, FE master checklist item 17) when the
+            // cart printed one: never "add 2 more" on a line that cannot grow.
+            const lineMax = Number(line.getAttribute('data-max-quantity'));
+            const max = Number.isFinite(lineMax) && lineMax >= 1 ? lineMax : maxQuantity;
             const fromServer = serverNext && serverNext.get ? serverNext.get(sku) : null;
             let html = (fromServer && fromServer.quantity === qty)
-                ? this.nudgeFromServer(fromServer.next, maxQuantity)
+                ? this.nudgeFromServer(fromServer.next, max)
                 : null;
             if (html === null) {
                 const ladder = this.describeLadder(items.get(sku));
                 if (!ladder) continue;
-                html = this.nudgeMarkup(ladder, qty, maxQuantity);
+                html = this.nudgeMarkup(ladder, qty, max);
             }
             if (!html) continue;
             const target = line.querySelector('.cart-item__details') || line;

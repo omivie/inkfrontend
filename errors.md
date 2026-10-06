@@ -41,6 +41,59 @@ describing the same incident.
 
 ---
 
+## ERR-309 — A genuine product page never showed the compatible we sell, the PDP's reward points rendered a screen below the price, and the cart let + walk past the stock and then called the refusal a "Network error" — **RESOLVED (frontend)** (2026-10-06)
+
+**Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, re-issued again on 6 Oct (afternoon) with "Status after the live check of the FE deploy" and two new items, 16 and 17. Answered by `backend-docs/outbox/fe-master-checklist-v2-FE-reply-oct2026.md`. The work was split by file with the ERR-308 session (backend's answer to our eight replies). That session owned `cart-wallet.js`, `payment-page.js`, `PrinterName` and the `GuestCartEmail` hunk in `cart.js`; this one owned the rest of the checklist.
+
+**What the v2 status got wrong, measured before acting.** Items 14 and 15 were listed as "not started". Both shipped in `b2d07c0f` (ERR-307) at 12:32 NZT; the backend's check ran on the earlier deploy. Item 6 was real.
+
+**The defects.**
+- **Item 6.** `#product-value-lines` (which held the points span) sits above Add in the markup. The ≥1100px rule in `pages.css` (ERR-293, `.product-info > #product-value-lines { order: 2 }`) sends it to the end of `.product-info`. Measured on production: price y 392, points y 1052 (GTN2030BK) and y 1234 (GLC3313BK) at 1366×599.
+- **Item 16.** `compatible_alternatives` (live on `GET /api/products/:sku` for genuine rows) was read nowhere.
+- **Item 17.** Every cap was the global `MAX_QUANTITY: 100`, plus two literal `100`s in `_updateCartItemDOM` and one in the render. `_parseServerCart` (a whitelist) dropped `product.stock_quantity`, so the cart never knew the stock. `updateQuantity` also sent the RAW quantity to the server, not the clamped one. No failure branch read `STOCK_INSUFFICIENT`. An older backend's thrown `BAD_REQUEST` became "Network error. Quantity may have reverted."
+
+**The fix.**
+- **Item 6.** The points span moved INTO the price `<dd>` (`#product-points-line`, `.product-info__points`), a wrapping flex row. The first cut kept "… on this order" and wrapped: the row is 381–442px wide at 1280/1366 and the sentence is 292px, so Add dropped 24px (G604BK 440→464 at 1280×551). The copy is now the checklist's own words, "Earn N reward points ($X)" (≈200px). It fits beside the price, and Add is back at the production figure (471–519 GTN2030BK, 440–488 G604BK). `#product-value-lines` keeps its `order: 2`; removing it would have added ~40px above Add, and 1280×551 has no spare. The span is now static markup, so `syncPointsLine` CLEARS it for a product without `reward_points` (before, `renderValueLines` re-created it).
+- **Item 16.** `renderCompatibleAlternatives` / `compatibleAlternativesHtml` (pure) mount `#compatible-alternatives` directly under `#product-promise` (the fit line) and above `#product-terms`.
+  - Shown only when `source === 'genuine'` and at least one valid row exists; at most 3.
+  - Each card has name, price, "N pages" (`page_yield` arrives as a STRING, "1,000"), a "View" link and an Add button. The warranty line comes from `trust_signals.warranty.compatible_label`.
+  - `capacityLabel` claims "higher" or "lower" only when BOTH tiers are known: "XL — higher capacity"; otherwise just "XL capacity".
+  - The rows carry no product id, so Add resolves the SKU with `API.getProduct` (as the `/cart?add=` deep link does). A miss is a toast, never a dead button.
+  - No "save", no percentages, no OEM tile.
+- **Item 17.**
+  - `Cart.maxQuantityFor(item)` (stock capped at 100; unknown ⇒ 100; 0 ⇒ 1) is used at every cap site.
+  - `_parseServerCart` keeps the stock. The deep link, `/shop` cards, product cards (`data-product-stock`), the PDP and the alternatives pass it into `addItem`. **Why that mattered, measured:** in the first `--record` run a 429 dropped the re-read after the add, the line had no stock, and 12 clicks sent `PUT {13}` ⇒ 400.
+  - `stockRefusal()` reads both refusal shapes and stores the stock on the line. The toast is "Only N in stock — that is the most you can order." The same toast fires when a click or typed value reaches the cap.
+  - `_isRateLimited()`: a 429 on a quantity change now says "Too many changes at once…" (measured: a PUT 429 toasted "Network error").
+  - The line carries `data-max-quantity`, so `Business.decorateCartLines` never nudges past stock.
+  - `QtyStepper.markup({ stock })` caps product-card steppers; `ceiling()` without arguments is unchanged.
+  - The PDP box caps at stock, and a refused PDP add no longer says "Added!".
+- **Item 2.** `DARK_FEATURES.cartWallet: true`; the owner waived the iPhone test order on 6 Oct, and the user confirmed it.
+
+**Proof.**
+- `tests/fe-master-checklist-v2-oct2026.test.js`: 24 tests that execute the real `cart.js` in a vm, the real QtyStepper and the real PDP and business methods. `python3 scripts/redproof-fe-master-v2-oct2026.py`: 25 of 25 mutations go red.
+- Full suite: 7016 tests, 0 failed.
+- `npm run probe:fe-master-6oct -- --record` on localhost against the production API: 56 passed, 0 failed, 0 skipped.
+  - §6: points y 404 beside price y 392; Add 471–519, hit-testable at 1366×599 and 1280×551. The negative control (line moved back) goes red at y 1459.
+  - §16: GTN2030BK ⇒ CTN2030BK $24.49, "1,000 pages"; G604BK ⇒ "XL — higher capacity"; G924CMY and CTN2030BK show no box; the box is below Add.
+  - §17: GDK11203WH (stock 8), 12 clicks ⇒ 8, + disabled, toast "Only 8 in stock"; typing 28 ⇒ 8; server ×8; PUT statuses 200/200/200.
+  - Both rollbacks were verified by re-reading the cart.
+- Existing pins moved deliberately:
+  - `checkout-funnel` §item 2 and `conversion-fixes` §8: `cartWallet: true`.
+  - `conversion-fixes` §4: new copy; no reward_points ⇒ cleared.
+  - `cro-search-quote-points` §3: the slot is no longer built by `renderValueLines`.
+  - `redproof-checkout-funnel`: wallet mutation flipped.
+  - `probe-conversion-fixes`: points regex.
+  - `pages.css`: two `.product-value-lines__points` rules deleted, because the dead-rule audit caught them.
+
+**Caught on the way.**
+- **Our own probe tripped the shared per-IP limiter (100/60 s).** A one-off shape check (rate-limited mid-run) left a guest cart holding GDK11203WH ×1 with no rollback; it had no `finally`. That cart is abandoned, with no email and no opt-in. The script now cleans up in `finally`, and `probe:fe-master-6oct` pauses 60 s before §17 (`PROBE_SECTION_PAUSE_MS`).
+- **Pre-existing, not changed here:** on the compatible PDP CTN2030BK, Add sits at y 548–596 at 1280×551, below the first screen. Production measured the same before this change. It is reported to the backend; it is not in this checklist.
+
+**Open.** Item 2's first real wallet charges are watched by the backend in Stripe. Item 13 still needs the owner's real guest order.
+
+---
+
 ## ERR-308 — The backend answered eight FE replies at once: a name mirror, a double printer search and a wallet refusal were now dead weight, a consent untick withdrew nothing, the business page ignored two 409 codes, and staff were an Ads audience — **RESOLVED (frontend)** (2026-10-06)
 
 **Source.** `backend-docs/inbox/fe-replies-oct2026-backend-response.md` (backend, 6 Oct): BF-094..101 plus the guest-session cap, GA4/Ads on `/admin`, and the Ads `purchase` count. Answered by `backend-docs/outbox/fe-replies-6oct-backend-response-FE-reply-oct2026.md`.

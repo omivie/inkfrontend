@@ -41,6 +41,22 @@ Checked in a fresh browser session (first-time visitor, consent banner open) at 
 - **14 (new, owner report 6 Oct):** the cart's unit price stays at retail when a volume rung is reached, and the summary mixes two quantities for about 1.5 s after each + or −.
 - **15 (new, P0, 6 Oct):** checkout lets an email the backend has already rejected through to Pay, where the order is refused and Pay appears to do nothing. It nearly lost a $486.81 order.
 
+## Status after the live check of the FE deploy (6 Oct, afternoon)
+
+Checked on www after the FE deploy of ~23:15 UTC 5 Oct, first-time visitor, consent banner open. Backend answers to the FE replies: `fe-replies-oct2026-backend-response.md`.
+
+**Done:** 1, 3 (1366×768: button at y 665–710; 390×664: sticky bar at y 527–599, clickable), 4, 5 (PDP row under Add; series row under the H1 at y 263), 7 (first series Add clickable at 1366×599 with the card at the right), 8 (no 2–4 / 1–4 on any page; all 6 `/faq` answers match the JSON-LD), 9 (click → `/checkout` commits in 117 ms), 10 (on the cart), 11, 12.
+
+**Built, needs the owner's real test:** 13 (a real guest order).
+
+**2: SHIP IT NOW (owner, 6 Oct).** The owner has waived the real-device test order and wants the cart wallet live for every shopper. In `js/config.js` set `DARK_FEATURES.cartWallet: true` and deploy. Nothing else is needed: Stripe has `www.inkcartridges.co.nz` active for Apple Pay and Google Pay, the CSP carries every Stripe/Link entry, and BF-100 needs no change. The backend has no lever for this flag (`/api/settings` only fills `Config.settings`). After the deploy, tell the backend; we will watch the first wallet charges in Stripe (there have been none, ever, on any page) and report any `cart-wallet` failure states.
+
+**Still open:**
+- **6, PDP:** "Earn 58 reward points ($0.58) on this order" is at y 1183 on 1366×599 (price y 418, Add y 497). Move it next to the price.
+- **14:** not started (unit price still retail; `PUT` cart not adopted).
+- **15:** not started (`test@gmail.con` passes checkout). P0.
+- **16 (new, 6 Oct):** show our compatible version under Add to Cart on genuine product pages (`compatible_alternatives`, live).
+
 ## Part 1: open work, in order
 
 ### 1. P0: remove the "I authorize this payment" tick
@@ -65,6 +81,8 @@ Today the wallet button appears only on the payment step, after the shopper has 
 - Guest orders still need the Turnstile token. Run Turnstile invisibly before enabling the button.
 
 **Done when:** on an iPhone with Apple Pay, cart → paid order takes no typing.
+
+**Go-live (6 Oct):** owner approved shipping without the test order. Flip `DARK_FEATURES.cartWallet` to `true` in `js/config.js` and deploy.
 
 ### 3. P1: cart, Proceed to Checkout on the first screen
 
@@ -271,6 +289,61 @@ On `POST /api/orders` the field is `guest_email`.
 
 **Done when:** on `/checkout` as a guest, typing `test@gmail.con` and leaving the field shows "Please enter a valid email address" under it and "Continue to payment" stays disabled. Correcting it to `test@gmail.com` clears the message and enables the button. Over the next week, Render logs show no `validation_failed` on `/orders` for `guest_email`.
 
+### 16. P1: show our compatible version on every genuine product page
+
+**Why (owner, 6 Oct):** in 60 days, 101 paid visits landed on GENUINE product pages and bought nothing; 80% left after one page. Genuine is where we cannot win on price, and the page never shows the compatible cartridge we can. Example: genuine TN-2030 is $113.99; our compatible TN-2030 is $24.49 and is not mentioned.
+
+**Backend (live):** `GET /api/products/:sku` on a genuine row now carries `compatible_alternatives` (absent when there is none, and always absent on compatible rows). Up to 3, same capacity first:
+
+```json
+"compatible_alternatives": [
+  { "sku": "C604XLBK", "slug": "604xlbk-compatible-…", "name": "604XLBK Compatible Ink Cartridge for Epson 604XL Black",
+    "retail_price": 25.49, "page_yield": null, "yield_tier": "XL", "same_capacity": false,
+    "image_url": "https://…", "in_stock": true }
+]
+```
+
+A match is the same brand, type, colour and single-vs-pack, sharing the series code. About 30% of genuine products have one (825 of 2,779), and so do 21 of the 40 genuine pages ads landed on.
+
+**What to build:**
+- On a genuine PDP, directly UNDER Add to Cart and the fit line (never above them: genuine stays the main choice), a small box per alternative: name, price, a "View" link to `/products/{slug}/{sku}`, and an Add button (`POST /api/cart/items`).
+- Heading: "Our compatible version". Under each: `page_yield` when present ("1,000 pages"). When `same_capacity` is false, say so plainly with the tier: "XL — higher capacity" (owner: a dearer higher-capacity cartridge is still worth offering, it lasts longer).
+- One line from `trust_signals.warranty.compatible_label` ("Compatible cartridges are covered by our 30-day satisfaction guarantee.").
+- **Wording rules (invariant 13):** prices and page yields only. No "save", "save up to", "same quality", "as good as genuine" or percentages. No OEM logo on the compatible card.
+- Keep Add to Cart on the first screen at 1280×551 and 1366×599: the box goes below the fold if it must.
+
+**Done when:** `/products/…/GTN2030BK` shows "Our compatible version" with CTN2030BK at $24.49 under Add to Cart; `/products/…/G604BK` shows C604XLBK labelled "XL — higher capacity"; a compatible PDP and a genuine PDP without alternatives (G924CMY) show no box; Add to Cart stays clickable on the first screen.
+
+### 17. P1: the cart quantity stops at stock
+
+**Owner report (6 Oct):** GDK11203WH has 8 in stock. In the cart, + kept going (to 28), then the quantity jumped back to 8.
+
+**Reproduced with Playwright on the live site (guest, 6 Oct):**
+- 12 clicks of + walked the line from 1 to 13. The debounced `PUT /api/cart/items/:id {quantity: 13}` got `400 Insufficient stock, details.available: 8`, and the line snapped back to 1.
+- Typing 28 in the box left 28 on screen while the server still held the old quantity.
+- Both showed the toast "Network error. Quantity may have reverted." No network error happened: the server said no.
+
+**Why (`js/cart.js`):** every cap uses the global `MAX_QUANTITY: 100`. `_parseServerCart` is a whitelist and drops `items[].product.stock_quantity`, so the cart never knows the stock. The server has always refused a quantity above stock.
+
+**Backend change (live after the next deploy):** every cart quantity refusal (`POST /api/cart/items`, `PUT /api/cart/items/:productId`) now has `error.code: 'STOCK_INSUFFICIENT'`, the code `api.js` already passes through with its `details`. The message is readable: "Only 8 in stock." on a PUT, or "Only 8 in stock, and 8 are already in your cart." on an add (`details: { available, current_in_cart }`). Under the old `BAD_REQUEST` the response threw, which is where the "Network error" toast came from. The same throw made an over-stock Add to Cart say "Item saved locally. It will sync when connection is restored." and keep the line. With the new code, `addItem` takes its server-rejected branch: it rolls back and shows the message. `volume_next_break` is now `null` when the next rung is above the line's stock, so the cart never says "add 2 more and save" on a line that cannot grow.
+
+**Fix (`js/cart.js`; we tested this patch against the live site by serving a patched copy):**
+- Keep the stock in `_parseServerCart`: `stock_quantity: item.product.stock_quantity != null ? Number(item.product.stock_quantity) : null`.
+- Add one per-line cap and use it everywhere `MAX_QUANTITY` or the literal `100` caps a cart line:
+  ```js
+  maxQuantityFor: function(item) {
+      const stock = item && item.stock_quantity != null ? Number(item.stock_quantity) : NaN;
+      if (!Number.isFinite(stock) || stock < 0) return this.MAX_QUANTITY;
+      return Math.max(1, Math.min(this.MAX_QUANTITY, Math.floor(stock)));
+  },
+  ```
+  The sites: the + click handler, the typed-quantity `change` handler, `_debouncedQuantityUpdate`'s clamp, `updateQuantity`'s clamp, `_updateCartItemDOM` (`input.max` and the + `disabled` state, both now hard-coded to 100), and the full render (`max="…"` and the `disabled` test on +). Unknown stock (a local line the server has not described yet) keeps `MAX_QUANTITY`. Stock 0 caps at 1, so + stays disabled on an out-of-stock line.
+- When a click or a typed value hits the cap, show an info toast: "Only 8 in stock — that is the most you can order."
+- In `_executeQuantityUpdate`'s failure branch, when `response.code === 'STOCK_INSUFFICIENT'`, show the same toast with `response.details.available` instead of "Failed to update quantity. Please try again." That covers stock that fell after the page loaded.
+- Recommended, same rule: `QtyStepper` (utils.js) also caps at `Cart.MAX_QUANTITY` on product cards and the PDP. Pass the product's `stock_quantity` (it is on every product response) as the stepper's ceiling.
+
+**Done when** (guest on `/cart` with GDK11203WH): + stops at 8 and is disabled there; typing 28 changes the box to 8; the toast reads "Only 8 in stock"; and no `PUT /api/cart/items` returns 400. The patched copy did exactly this on 6 Oct: 12 clicks ended at 8 with + disabled, typing 28 became 8, and both PUTs sent `{quantity: 8}` and got 200.
+
 ### Not to do
 
 - **PayPal: on hold by the owner.** Leave the PayPal button as it is. Do not apply the old hide rule.
@@ -330,4 +403,5 @@ After you tell us a deploy is live, we re-run, as a first-time visitor (consent 
 10. `/cart?add=SKU:QTY,…` fills the cart once, adding to what is there (12).
 11. A guest order's confirmation page offers the one-step account, and `next_order_offer` shows only when present (13).
 12. A mistyped email (`test@gmail.con`) is caught under the email field on `/checkout`, and "Continue to payment" stays disabled until it is fixed (15).
-13. Everything in Part 2 still holds.
+13. On `/cart`, + stops at the line's stock and a typed quantity above stock becomes the stock, with no `400` from `PUT /api/cart/items` (17).
+14. Everything in Part 2 still holds.

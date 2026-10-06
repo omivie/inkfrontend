@@ -4131,8 +4131,25 @@ const QtyStepper = (function () {
         return FALLBACK_MAX;
     }
 
-    function clamp(n) {
-        const max = ceiling();
+    /**
+     * The cap for ONE product: its stock, never above ceiling() (FE master
+     * checklist item 17 — the same rule as Cart.maxQuantityFor). Unknown
+     * stock ⇒ ceiling(); stock 0 ⇒ 1.
+     */
+    function capFor(stock) {
+        const s = stock == null || stock === '' ? NaN : Number(stock);
+        if (!Number.isFinite(s) || s < 0) return ceiling();
+        return Math.max(1, Math.min(ceiling(), Math.floor(s)));
+    }
+
+    /** A painted stepper's own cap (data-max, from markup's `stock`), else ceiling(). */
+    function limitOf(stepper) {
+        const own = stepper && stepper.dataset ? Number(stepper.dataset.max) : NaN;
+        return Number.isFinite(own) && own >= 1 ? Math.min(own, ceiling()) : ceiling();
+    }
+
+    function clamp(n, limit) {
+        const max = Number.isFinite(limit) ? limit : ceiling();
         const v = Math.floor(Number(n));
         if (!Number.isFinite(v)) return 1;
         return Math.min(max, Math.max(1, v));
@@ -4167,11 +4184,14 @@ const QtyStepper = (function () {
      *        aria-activedescendant on the search input, cards are role="option"
      *        and Tab closes the panel, so a focusable control inside a row would
      *        sit outside the model entirely.
+     * @param {number|null} [opts.stock]  the product's `stock_quantity`; caps
+     *        the stepper at it (item 17). Absent ⇒ the cart's global cap.
      */
     function markup(opts) {
         const o = opts || {};
-        const value = clamp(o.value == null ? 1 : o.value);
-        const max = ceiling();
+        const max = o.stock == null ? ceiling() : capFor(o.stock);
+        const value = clamp(o.value == null ? 1 : o.value, max);
+        const own = max < ceiling() ? ' data-max="' + max + '"' : '';
         const tab = o.focusable === false ? ' tabindex="-1"' : '';
         // type="button" is load-bearing on BOTH buttons: the search dropdown is
         // mounted inside the search <form>, and a bare <button> defaults to
@@ -4183,7 +4203,7 @@ const QtyStepper = (function () {
         // small version of the bug this whole change exists to remove.
         const downOff = value <= 1 ? ' disabled' : '';
         const upOff = value >= max ? ' disabled' : '';
-        return '<div class="product-card__qty" data-qty-stepper>' +
+        return '<div class="product-card__qty" data-qty-stepper' + own + '>' +
             '<button type="button" class="product-card__qty-btn" data-step="down"' + tab + downOff +
                 ' aria-label="Decrease quantity">−</button>' +
             '<input type="number" class="product-card__qty-input" value="' + value + '"' +
@@ -4214,7 +4234,7 @@ const QtyStepper = (function () {
         const stepper = stepperFor(el);
         if (!stepper) return 1;
         const input = stepper.querySelector('.product-card__qty-input');
-        return input ? clamp(input.value) : 1;
+        return input ? clamp(input.value, limitOf(stepper)) : 1;
     }
 
     /** Back to 1 after a successful add, and re-label the button that did it. */
@@ -4228,7 +4248,7 @@ const QtyStepper = (function () {
     }
 
     function syncButtons(stepper, qty) {
-        const max = ceiling();
+        const max = limitOf(stepper);
         const down = stepper.querySelector('[data-step="down"]');
         const up = stepper.querySelector('[data-step="up"]');
         if (down) down.disabled = qty <= 1;
@@ -4261,7 +4281,7 @@ const QtyStepper = (function () {
     }
 
     function apply(stepper, qty, onChange) {
-        const q = clamp(qty);
+        const q = clamp(qty, limitOf(stepper));
         const input = stepper.querySelector('.product-card__qty-input');
         if (input && String(input.value) !== String(q)) input.value = String(q);
         syncButtons(stepper, q);
@@ -4312,7 +4332,7 @@ const QtyStepper = (function () {
                 const stepper = btn.closest('.product-card__qty');
                 if (!stepper) return;
                 const input = stepper.querySelector('.product-card__qty-input');
-                const current = input ? clamp(input.value) : 1;
+                const current = input ? clamp(input.value, limitOf(stepper)) : 1;
                 apply(stepper, btn.dataset.step === 'up' ? current + 1 : current - 1, onChange);
                 return;
             }
@@ -4376,7 +4396,7 @@ const QtyStepper = (function () {
         cta.parentNode.insertBefore(row, cta);
         row.insertAdjacentHTML('afterbegin', markup(opts));
         row.appendChild(cta);
-        const q = clamp((opts && opts.value) || 1);
+        const q = clamp((opts && opts.value) || 1, limitOf(row.querySelector('.product-card__qty')));
         syncButtons(row.querySelector('.product-card__qty'), q);
         relabel(row.querySelector('.product-card__qty'), q);
         return row;
@@ -4390,7 +4410,7 @@ const QtyStepper = (function () {
     }
 
     return {
-        ceiling, clamp, ctaLabel, ctaAriaLabel,
+        ceiling, capFor, clamp, ctaLabel, ctaAriaLabel,
         markup, read, reset, bind, attach, busy,
         _apply: apply
     };

@@ -71,10 +71,11 @@ const Config = {
         guestCartEmail: true,
         guestReviews: true,
         // Apple Pay / Google Pay under "Proceed to Checkout" (js/cart-wallet.js,
-        // ERR-305). OFF until the owner has paid one real order with it on a
-        // real iPhone via /cart?wallet=1, and BF-100 (region from postcode) is
-        // answered. Flip to true to ship it.
-        cartWallet: false,
+        // ERR-305). ON since 6 Oct 2026 (FE master checklist item 2): the owner
+        // waived the real-iPhone test order and the backend watches the first
+        // wallet charges in Stripe. `?wallet=1` still forces it on for a test
+        // if this is ever set back to false.
+        cartWallet: true,
     },
 
     // Business settings (loaded from server, these are fallback defaults)

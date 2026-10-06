@@ -64,7 +64,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
     <link rel="stylesheet" href="/css/components.css?v=7430c563">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=765d90d5">
+    <link rel="stylesheet" href="/css/pages.css?v=57c639e8">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
 </head>
 <body>
@@ -288,6 +288,12 @@
                                     <meta itemprop="priceCurrency" content="NZD">
                                     <span class="product-info__gst">Incl. GST</span>
                                     <span class="product-info__exgst" id="product-exgst" data-exgst="" hidden></span>
+                                    <!-- Reward points NEXT TO the price (FE master checklist item 6,
+                                         6 Oct). It sat in #product-value-lines, which the >=1100px
+                                         layout moves below Add (pages.css, ERR-293): y 1183 at
+                                         1366x599. Filled by syncPointsLine(); hidden when the
+                                         product carries no reward_points. -->
+                                    <span class="product-info__points" id="product-points-line" data-testid="product-points" hidden></span>
                                 </dd>
 
                                 <dt class="buy-box__label">Availability</dt>
@@ -402,6 +408,14 @@
                                printer proof.
                         -->
                         <div class="product-promise" id="product-promise" data-testid="product-promise" hidden></div>
+
+                        <!-- "Our compatible version" on a GENUINE product (FE master checklist
+                             item 16, 6 Oct): directly UNDER Add and the fit line, never above —
+                             genuine stays the main choice. Filled by
+                             renderCompatibleAlternatives() from `compatible_alternatives`;
+                             stays hidden when the field is absent (compatible rows, and genuine
+                             rows with no match). -->
+                        <section class="compat-alt" id="compatible-alternatives" data-testid="compatible-alternatives" hidden aria-labelledby="compat-alt-heading"></section>
 
                         <!-- The ladder's first rung as one line (desktop >=1100px only),
                              BELOW Add since ERR-301; the chips sit below it (ERR-293). -->
@@ -551,19 +565,19 @@
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=e96b328a"></script>
+    <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/api.js?v=ae9d0845"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=faf92537"></script>
+    <script defer src="/js/utils.js?v=d848a1f5"></script>
     <script defer src="/js/service-row.js?v=35fb91d8"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
-    <script defer src="/js/business.js?v=90a53675"></script>
+    <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=088a164b"></script>
+    <script defer src="/js/cart.js?v=d7e52cd8"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=68c60f09"></script>
-    <script defer src="/js/products.js?v=effc0864"></script>
+    <script defer src="/js/products.js?v=6d50bf7c"></script>
     <script defer src="/js/search.js?v=06766039"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=ac859292"></script>
@@ -571,7 +585,7 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=9dab802a"></script>
+    <script defer src="/js/product-detail-page.js?v=30cd432c"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

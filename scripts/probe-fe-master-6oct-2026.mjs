@@ -6,7 +6,17 @@
  * check on 6 October 2026" + Part 4. Items 5/7/8 keep their own probe
  * (`npm run probe:fe-master`); this one measures what that one cannot:
  *
- *   §6   PDP: "Earn N reward points" near the price.                    READ-ONLY
+ *   §6   PDP: "Earn N reward points" IN THE PRICE ROW (v2: it rendered at
+ *        y 1183 at 1366x599) and Add still hit-testable on the first screen at
+ *        1280x551 / 1366x599. Negative control: the line moved back into
+ *        #product-value-lines MUST fail the position check.              READ-ONLY
+ *   §16  genuine PDP "Our compatible version" (v2 item 16): GTN2030BK ⇒
+ *        CTN2030BK $24.49 under Add; G604BK ⇒ "XL — higher capacity";
+ *        G924CMY and the compatible CTN2030BK ⇒ no box; Add stays on the
+ *        first screen.                                                   READ-ONLY
+ *   §17  /cart GDK11203WH (v2 item 17): 12 clicks of + stop at the live
+ *        stock with + disabled and "Only N in stock"; typing 28 becomes N;
+ *        zero PUT /api/cart/items answered 400.                           RECORDING
  *   §14  /cart GLC3313BK 1 → 3 → 1: the price column reads ~~$67.49~~ $66.14 at
  *        once; sampled every animation frame + every DOM change, the summary
  *        NEVER shows a money figure for a quantity it was not priced at (a
@@ -21,11 +31,11 @@
  *        qty-3 frame carrying the qty-1 total and MUST flag it.
  *
  * MODE: READ-ONLY unless `--record`, and the mode is PRINTED first.
- *   --record writes ONLY to this probe's own guest cart (one GLC3313BK line,
- *   quantity changes) and sends two POST /api/checkout/guest-prefill (the
+ *   --record writes ONLY to this probe's own guest cart (one GLC3313BK line and
+ *   one GDK11203WH line, quantity changes) and sends two POST /api/checkout/guest-prefill (the
  *   endpoint allows 5 a minute per IP). It NEVER posts /api/orders, never
  *   ticks the cart-copy opt-in, never types into a search box. ROLLBACK: the
- *   line is put back to the quantity it had before the run (removed if it was
+ *   lines are put back to the quantity they had before the run (removed if
  *   absent), and the rollback is VERIFIED by re-reading the cart — after first
  *   having seen the line present (an empty cart proves nothing on its own,
  *   ERR-269). Analytics hosts and /api/analytics/* are aborted in the browser.
@@ -42,6 +52,11 @@ const BASE = (process.env.PROBE_BASE || 'http://localhost:3000').replace(/\/+$/,
 const RECORD = process.argv.includes('--record');
 const REUSE = process.env.PROBE_GUEST_SESSION || '';
 const SKU = 'GLC3313BK';
+const STOCK_SKU = 'GDK11203WH';
+// The backend's per-IP limiter is 100 requests / 60 s SHARED across endpoints
+// (ERR-266); a PDP load spends ~10. Paced between READ-ONLY page loads.
+const PACE_MS = Number(process.env.PROBE_PACE_MS || 6000);
+const pace = () => new Promise((r) => setTimeout(r, PACE_MS));
 const ANALYTICS = /googletagmanager|google-analytics|bat\.bing|doubleclick|googleadservices|clarity\.ms|\/api\/analytics\//;
 
 let pass = 0, fail = 0, skips = 0;
@@ -82,22 +97,104 @@ function mixedFrames(frames, settledTotals) {
         || (/\$\d/.test(f.total || '') && settledTotals[f.qty] === undefined));
 }
 
-// ═══ §6 PDP copy (READ-ONLY) ═════════════════════════════════════════════════
-head('§6 PDP: "Earn N reward points" near the price (READ-ONLY)');
-{
-    const { ctx, page } = await newPage();
+// ═══ §6 PDP points in the price row (READ-ONLY) ═════════════════════════════
+/** Price, points line and Add geometry + Add centre hit-test. */
+const pdpGeometry = (page) => page.evaluate(() => {
+    const R = (el) => (el && !el.hidden && el.getClientRects().length ? el.getBoundingClientRect() : null);
+    const add = document.getElementById('add-to-cart-btn');
+    const a = R(add);
+    const at = a ? document.elementFromPoint(a.left + a.width / 2, a.top + a.height / 2) : null;
+    const pts = document.getElementById('product-points-line');
+    const pr = R(document.getElementById('product-price'));
+    const p = R(pts);
+    return {
+        text: pts && !pts.hidden ? pts.textContent.trim() : null,
+        price: pr ? Math.round(pr.top) : null,
+        points: p ? [Math.round(p.top), Math.round(p.bottom)] : null,
+        add: a ? [Math.round(a.top), Math.round(a.bottom)] : null,
+        addHit: !!(a && at && (at === add || add.contains(at)) && a.bottom <= innerHeight),
+        inPriceRow: !!(pts && pts.closest('.buy-box__value--price')),
+    };
+});
+const pointsNearPrice = (g) => !!(g.points && g.price !== null && g.add && g.points[0] - g.price <= 60 && g.points[1] <= g.add[0]);
+
+head('§6 PDP: "Earn N reward points" in the price row (READ-ONLY)');
+for (const vp of [{ width: 1366, height: 599 }, { width: 1280, height: 551 }]) {
+    const { ctx, page, limited } = await newPage(vp);
     await page.goto(`${BASE}/p/${SKU}`, { waitUntil: 'load' });
     const line = await page.waitForFunction(() => {
         const el = document.getElementById('product-points-line');
         return el && !el.hidden && el.textContent.trim() ? el.textContent.trim() : null;
     }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
-    if (line === null) bad('points line rendered', 'absent after 15 s');
-    else check('reads "Earn N reward points ($X) on this order"', /^Earn [\d,]+ reward points \(\$[\d.]+\) on this order$/.test(line), JSON.stringify(line));
+    await page.waitForTimeout(1500); // late rows (service row, fit) settle
+    const vpName = `${vp.width}x${vp.height}`;
+    if (limited.length) bad(`${vpName}: NOT MEASURED`, `429 on ${limited[0]}`);
+    else if (line === null) bad(`${vpName}: points line rendered`, 'absent after 15 s');
+    else {
+        if (vp.width === 1366) check('reads "Earn N reward points ($X)"', /^Earn [\d,]+ reward points \(\$[\d.]+\)$/.test(line), JSON.stringify(line));
+        const g = await pdpGeometry(page);
+        check(`${vpName}: points line next to the price, above Add`, g.inPriceRow && pointsNearPrice(g), `price y ${g.price}, points y ${g.points}, Add y ${g.add}`);
+        check(`${vpName}: Add to Cart still hit-testable on the first screen`, g.addHit, `Add y ${g.add}`);
+        if (vp.width === 1366) {
+            // NEGATIVE CONTROL: put the line back where it was (inside
+            // #product-value-lines, which the desktop layout sends below Add).
+            await page.evaluate(() => {
+                const vl = document.getElementById('product-value-lines');
+                vl.hidden = false;
+                vl.appendChild(document.getElementById('product-points-line'));
+            });
+            const neg = await pdpGeometry(page);
+            check('NEGATIVE CONTROL: the line moved back into #product-value-lines FAILS the position check', !(neg.inPriceRow && pointsNearPrice(neg)), `points y ${neg.points}`);
+        }
+    }
     await ctx.close();
+    await pace();
+}
+
+// ═══ §16 "Our compatible version" (READ-ONLY) ════════════════════════════════
+head('§16 genuine PDP: "Our compatible version" under Add (READ-ONLY)');
+const compatCases = [
+    { sku: 'GTN2030BK', want: { sku: 'CTN2030BK', price: '$24.49', text: /1,000 pages/ } },
+    { sku: 'G604BK', want: { sku: 'C604XLBK', text: /XL — higher capacity/ } },
+    { sku: 'G924CMY', want: null },
+    { sku: 'CTN2030BK', want: null },
+];
+for (const c of compatCases) {
+    for (const vp of (c.sku === 'GTN2030BK' ? [{ width: 1366, height: 599 }, { width: 1280, height: 551 }] : [{ width: 1366, height: 599 }])) {
+        const { ctx, page, limited } = await newPage(vp);
+        await page.goto(`${BASE}/p/${c.sku}`, { waitUntil: 'load' });
+        await page.waitForFunction(() => /\$/.test(document.getElementById('product-price')?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(1500);
+        const vpName = `${vp.width}x${vp.height}`;
+        const m = await page.evaluate(() => {
+            const box = document.getElementById('compatible-alternatives');
+            const add = document.getElementById('add-to-cart-btn');
+            const shown = !!(box && !box.hidden && box.getClientRects().length);
+            return {
+                shown,
+                text: shown ? box.innerText.replace(/\s+/g, ' ').trim() : '',
+                skus: shown ? [...box.querySelectorAll('.compat-alt__item')].map((li) => li.dataset.sku) : [],
+                below: shown && add ? box.getBoundingClientRect().top >= add.getBoundingClientRect().bottom : null,
+            };
+        });
+        const g = await pdpGeometry(page);
+        if (limited.length) bad(`${c.sku} ${vpName}: NOT MEASURED`, `429 on ${limited[0]}`);
+        else if (!c.want) check(`${c.sku}: no compatible box`, !m.shown, m.text.slice(0, 80) || 'hidden');
+        else {
+            check(`${c.sku} ${vpName}: "Our compatible version" lists ${c.want.sku}`, m.shown && /^Our compatible versions?/.test(m.text) && m.skus.includes(c.want.sku), JSON.stringify(m.skus));
+            if (c.want.price) check(`${c.sku}: ${c.want.sku} at ${c.want.price}`, m.text.includes(c.want.price), m.text.slice(0, 160));
+            check(`${c.sku}: ${c.want.text}`, c.want.text.test(m.text), m.text.slice(0, 160));
+            check(`${c.sku} ${vpName}: the box sits BELOW Add`, m.below === true);
+            check(`${c.sku}: no "save" / % wording`, !/\bsav(e|es|ing|ings)\b|%|same quality|as good as/i.test(m.text));
+        }
+        check(`${c.sku} ${vpName}: Add to Cart hit-testable on the first screen`, g.addHit, `Add y ${g.add}`);
+        await ctx.close();
+        await pace();
+    }
 }
 
 if (!RECORD) {
-    for (const s of ['§14 cart volume price', '§15 checkout email', '§3 phone sticky bar', '§9 click timing']) skip(s, 'needs --record (writes the probe\'s own guest cart)');
+    for (const s of ['§14 cart volume price', '§15 checkout email', '§3 phone sticky bar', '§9 click timing', '§17 cart stops at stock']) skip(s, 'needs --record (writes the probe\'s own guest cart)');
 } else {
     // ═══ §14 cart volume price, no mixed summary ═════════════════════════════
     head(`§14 /cart ${SKU} 1 → 3 → 1 (RECORDING)`);
@@ -293,27 +390,107 @@ if (!RECORD) {
         await c4.close();
     }
 
+
+    // ═══ §17 the cart quantity stops at stock ════════════════════════════════
+    head(`§17 /cart ${STOCK_SKU}: + stops at stock (RECORDING)`);
+    // §14/§15/§3/§9 spend the cart limiter's budget; a 429 here was measured
+    // on 6 Oct and would make §17 NOT MEASURED. Let the window roll over.
+    const SECTION_PAUSE_MS = Number(process.env.PROBE_SECTION_PAUSE_MS || 60000);
+    info(`pausing ${SECTION_PAUSE_MS / 1000} s for the per-IP limiter window`);
+    await new Promise((r) => setTimeout(r, SECTION_PAUSE_MS));
+    let stockBaseline = null;
+    {
+        const { ctx: c6, page: p6, limited: lim6 } = await newPage();
+        await p6.goto(`${BASE}/cart`, { waitUntil: 'load' });
+        await settled(p6).catch(() => {});
+        stockBaseline = await p6.evaluate((sku) => {
+            const it = Cart.items.find((i) => i.sku === sku);
+            return it ? it.quantity : 0;
+        }, STOCK_SKU);
+        const stock = await p6.evaluate(async (sku) => Number((await API.get(`/api/products/${encodeURIComponent(sku)}`)).data.stock_quantity), STOCK_SKU);
+        info(`baseline: ${STOCK_SKU} ×${stockBaseline}; live stock ${stock}`);
+        if (!(stock >= 2 && stock < 13)) {
+            bad('NOT MEASURED', `live stock ${stock} — the test needs 2..12 so 12 clicks would pass it; pick another SKU`);
+            if (stockBaseline === 0) stockBaseline = null; // nothing was added ⇒ nothing to roll back
+        } else {
+            if (stockBaseline !== 1) {
+                if (stockBaseline === 0) await p6.goto(`${BASE}/cart?add=${STOCK_SKU}:1`, { waitUntil: 'load' });
+                else {
+                    await p6.evaluate(async (sku) => { const it = Cart.items.find((i) => i.sku === sku); await Cart.updateQuantity(it.key || it.id, 1); }, STOCK_SKU);
+                    await p6.reload({ waitUntil: 'load' });
+                }
+                await settled(p6);
+            }
+            const puts = [];
+            p6.on('response', (r) => { if (r.request().method() === 'PUT' && /\/api\/cart\/items\//.test(r.url())) puts.push(r.status()); });
+            await p6.evaluate(() => {
+                window.__toasts = [];
+                new MutationObserver(() => {
+                    document.querySelectorAll('.toast').forEach((t) => { const x = t.textContent.trim(); if (x && !window.__toasts.includes(x)) window.__toasts.push(x); });
+                }).observe(document.body, { subtree: true, childList: true });
+            });
+            const row = p6.locator('.cart-item', { hasText: STOCK_SKU });
+            const plus = row.locator('.quantity-selector__btn--increase');
+            for (let i = 0; i < 12; i++) {
+                if (await plus.isDisabled()) break;
+                await plus.click();
+                await p6.waitForTimeout(60);
+            }
+            await p6.waitForTimeout(600);
+            await settled(p6).catch(() => {});
+            const after = await p6.evaluate(() => ({
+                qty: Number(document.querySelector('.cart-item[data-sku="GDK11203WH"] .quantity-selector__input')?.value),
+                plusDisabled: !!document.querySelector('.cart-item[data-sku="GDK11203WH"] .quantity-selector__btn--increase')?.disabled,
+                toasts: window.__toasts.slice(),
+            }));
+            check(`12 clicks of + stop at ${stock}`, after.qty === stock, `qty ${after.qty}`);
+            check('+ is disabled at the cap', after.plusDisabled);
+            check(`toast "Only ${stock} in stock"`, after.toasts.some((t) => t.startsWith(`Only ${stock} in stock`)), JSON.stringify(after.toasts));
+            check('no "Network error" / "Failed to update" toast', !after.toasts.some((t) => /Network error|Failed to update/.test(t)), JSON.stringify(after.toasts));
+            const input = row.locator('.quantity-selector__input');
+            await input.fill('28');
+            await input.press('Tab');
+            await p6.waitForTimeout(900);
+            await settled(p6).catch(() => {});
+            const typed = await p6.evaluate(() => Number(document.querySelector('.cart-item[data-sku="GDK11203WH"] .quantity-selector__input')?.value));
+            check(`typing 28 becomes ${stock}`, typed === stock, `box reads ${typed}`);
+            const serverQty = await p6.evaluate(async (sku) => {
+                const r = await API.getCart();
+                const l = ((r && r.data && r.data.items) || []).find((i) => i.product && i.product.sku === sku);
+                return l ? l.quantity : 0;
+            }, STOCK_SKU);
+            check(`server holds ×${stock} (never more)`, serverQty === stock, `server ×${serverQty}`);
+            check('zero PUT /api/cart/items answered 400', !puts.includes(400) && puts.length > 0, `PUT statuses ${puts.join(',') || 'none'}`);
+        }
+        if (lim6.length) bad('no 429 during §17', lim6.slice(0, 2).join(', '));
+        storageState = await c6.storageState();
+        await c6.close();
+    }
+
     // ═══ rollback, verified ══════════════════════════════════════════════════
     head('ROLLBACK');
     {
         const { ctx: c5, page: p5 } = await newPage();
         await p5.goto(`${BASE}/cart`, { waitUntil: 'load' });
         await settled(p5);
-        const seen = await p5.evaluate((sku) => Cart.items.some((i) => i.sku === sku), SKU);
-        check(`${SKU} present before rollback (so an absence after it means something)`, seen);
-        await p5.evaluate(async ({ sku, q }) => {
-            const it = Cart.items.find((i) => i.sku === sku);
-            if (!it) return;
-            if (q > 0) await Cart.updateQuantity(it.key || it.id, q);
-            else await Cart.removeItem(it.key || it.id);
-        }, { sku: SKU, q: baseline });
-        await p5.waitForTimeout(1500);
-        const reread = await p5.evaluate(async (sku) => {
-            const r = await API.getCart();
-            const line = ((r && r.data && r.data.items) || []).find((i) => i.product && i.product.sku === sku);
-            return line ? line.quantity : 0;
-        }, SKU);
-        check(`re-read cart holds ${SKU} ×${baseline} (as before the run)`, reread === baseline, `server says ×${reread}`);
+        for (const [sku, q] of [[SKU, baseline], [STOCK_SKU, stockBaseline]]) {
+            if (q === null) continue;
+            const seen = await p5.evaluate((s) => Cart.items.some((i) => i.sku === s), sku);
+            check(`${sku} present before rollback (so an absence after it means something)`, seen);
+            await p5.evaluate(async ({ sku, q }) => {
+                const it = Cart.items.find((i) => i.sku === sku);
+                if (!it) return;
+                if (q > 0) await Cart.updateQuantity(it.key || it.id, q);
+                else await Cart.removeItem(it.key || it.id);
+            }, { sku, q });
+            await p5.waitForTimeout(1500);
+            const reread = await p5.evaluate(async (s) => {
+                const r = await API.getCart();
+                const line = ((r && r.data && r.data.items) || []).find((i) => i.product && i.product.sku === s);
+                return line ? line.quantity : 0;
+            }, sku);
+            check(`re-read cart holds ${sku} ×${q} (as before the run)`, reread === q, `server says ×${reread}`);
+        }
         await c5.close();
     }
 }

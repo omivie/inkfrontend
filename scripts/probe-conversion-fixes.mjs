@@ -177,7 +177,8 @@ try {
                     a ? `Add y ${Math.round(a.top)}-${Math.round(a.bottom)} x${Math.round(a.left)}-${Math.round(a.right)}; banner ${b ? `x${Math.round(b.left)}-${Math.round(b.right)} y${Math.round(b.top)}-${Math.round(b.bottom)}` : 'not open'}` : 'no Add');
                 check(`${sku}: printer fit + value lines rendered (below Add on desktop)`, m.fitY !== null && m.valueY !== null && m.fitY > m.addY);
             }
-            check(`${sku}: points line rendered`, /^Earn \d[\d,]* points \(\$\d+\.\d\d\) on this order$/.test(m.points), m.points);
+            // Copy since FE master checklist v2 item 6: "Earn N reward points ($X)", in the price row.
+            check(`${sku}: points line rendered`, /^Earn \d[\d,]* reward points \(\$\d+\.\d\d\)$/.test(m.points), m.points);
             check(`${sku}: phone + founding year printed`, /027 474 0115/.test(m.call) && /since \d{4}/.test(m.call), m.call);
             if (eligible === false) check(`${sku}: no same-day promise while the API says not eligible`, !/same-day/i.test(m.delivery), m.delivery);
             else if (eligible === true) check(`${sku}: same-day line while eligible`, /same-day/i.test(m.delivery), m.delivery);

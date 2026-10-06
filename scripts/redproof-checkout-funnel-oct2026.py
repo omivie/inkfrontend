@@ -39,7 +39,7 @@ MUTATIONS = [
  (P, "            if (label && label.toLowerCase() !== city.toLowerCase()) parts.push(label);", "            if (slug) parts.push(slug);"),
  ('inkcartridges/js/api.js', 'async nzpostSuggest(query, max = 8)', 'async nzpostSuggest(query, max = 5)'),
  # item 2 wallet: off, never guess, one order path
- ('inkcartridges/js/config.js', 'cartWallet: false,', 'cartWallet: true,'),
+ ('inkcartridges/js/config.js', 'cartWallet: true,', 'cartWallet: false,'),
  (W, "        return this.REGIONS.includes(slug) ? slug : '';", "        return this.REGIONS.includes(slug) ? slug : 'auckland';"),
  (W, "                saveAddress: false,", "                saveAddress: true,"),
  # BF-100: region optional (omitted, never '' or guessed); 4-digit postcode required

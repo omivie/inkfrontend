@@ -305,12 +305,12 @@ test('§8.5 NZ Post suggest asks for 8', () => {
     assert.match(stripComments(read('js/api.js')), /async nzpostSuggest\(query, max = 8\)/);
 });
 
-// ═══ item 2 — Apple Pay / Google Pay from the cart (ships OFF) ════════════════
+// ═══ item 2 — Apple Pay / Google Pay from the cart (ON since 6 Oct, owner) ═══════
 
 const CartWallet = require(path.join(ROOT, 'js/cart-wallet.js'));
 
-test('item 2: OFF by default; on only by the flag or ?wallet=1', () => {
-    assert.match(stripComments(read('js/config.js')), /cartWallet: false,/);
+test('item 2: ON for every shopper (owner, 6 Oct); the flag or ?wallet=1 turns it on', () => {
+    assert.match(stripComments(read('js/config.js')), /cartWallet: true,/);
     assert.equal(CartWallet.isEnabled({ DARK_FEATURES: { cartWallet: false } }, ''), false);
     assert.equal(CartWallet.isEnabled({ DARK_FEATURES: { cartWallet: true } }, ''), true);
     assert.equal(CartWallet.isEnabled({ DARK_FEATURES: {} }, '?wallet=1'), true);

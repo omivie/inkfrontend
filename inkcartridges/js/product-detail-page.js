@@ -790,6 +790,7 @@
             this._unitPrice = price;
             this.renderFitCheck(info);
             this.renderPromise(info);
+            this.renderCompatibleAlternatives(info);
             this.renderValueLines(info);
             this.renderServiceRow(info);
 
@@ -1432,7 +1433,7 @@
 
         /**
          * The quantity box's real ceiling. setupEventListeners() clamps to
-         * min(product stock, 99); before it runs, fall back to the input's own
+         * Cart.maxQuantityFor(stock); before it runs, fall back to the input's own
          * max attribute. Read rather than duplicated so the chips and the clamp
          * cannot disagree about what is reachable.
          * @returns {number}
@@ -1699,6 +1700,146 @@
         },
 
         /**
+         * "Our compatible version" on a GENUINE PDP (FE master checklist item
+         * 16, owner 6 Oct): 101 paid visits landed on genuine pages in 60 days
+         * and bought nothing, and the page never showed the compatible we sell.
+         * `compatible_alternatives` (GET /api/products/:sku) is up to 3 rows,
+         * same capacity first; ABSENT on compatible rows and on genuine rows
+         * with no match ⇒ the section stays hidden (a correct empty state, not
+         * a failure). Mounted UNDER Add and the fit line, never above it.
+         *
+         * Wording (invariant 13): prices and page yields only. No "save", no
+         * percentages, no "same quality" / "as good as genuine", no OEM logo —
+         * the card shows the compatible's own tile image, never BrandSource.tile.
+         */
+        renderCompatibleAlternatives(info) {
+            const el = document.getElementById('compatible-alternatives');
+            if (!el) return;
+            const html = this.compatibleAlternativesHtml(info);
+            el.innerHTML = html;
+            el.hidden = !html;
+            if (html && el.dataset.compatBound !== '1') {
+                el.dataset.compatBound = '1';
+                el.addEventListener('click', (e) => {
+                    const btn = e.target.closest && e.target.closest('[data-compat-add]');
+                    if (btn && el.contains(btn)) this.addCompatibleAlternative(btn);
+                });
+            }
+        },
+
+        /** PURE: the section's markup, or '' when there is nothing to show. */
+        compatibleAlternativesHtml(info) {
+            if (!info || info.source !== 'genuine' || !Array.isArray(info.compatible_alternatives)) return '';
+            const rows = info.compatible_alternatives.filter((a) => a && typeof a === 'object'
+                && typeof a.sku === 'string' && a.sku && typeof a.slug === 'string' && a.slug
+                && Number.isFinite(Number(a.retail_price)) && Number(a.retail_price) > 0).slice(0, 3);
+            if (!rows.length) return '';
+            const warranty = info.trust_signals && info.trust_signals.warranty;
+            const note = warranty && typeof warranty.compatible_label === 'string' ? warranty.compatible_label.trim() : '';
+            const cards = rows.map((a) => {
+                const href = `/products/${encodeURIComponent(a.slug)}/${encodeURIComponent(a.sku)}`;
+                const name = a.name || a.sku;
+                const imgSrc = a.image_url
+                    ? Security.sanitizeUrl(typeof storageUrl === 'function' ? storageUrl(a.image_url) : a.image_url)
+                    : null;
+                const img = imgSrc && imgSrc !== '#'
+                    ? `<img class="compat-alt__thumb" src="${Security.escapeAttr(imgSrc)}" alt="" loading="lazy" width="56" height="56">`
+                    : '';
+                const yieldText = this.pageYieldText(a.page_yield);
+                const capacity = a.same_capacity === false ? this.capacityLabel(a.yield_tier, info.yield_tier) : '';
+                const facts = [yieldText, capacity].filter(Boolean)
+                    .map((t) => `<span class="compat-alt__fact">${Security.escapeHtml(t)}</span>`).join('');
+                const action = a.in_stock === false
+                    ? `<span class="compat-alt__oos">Out of stock</span>`
+                    : `<button type="button" class="btn btn--secondary compat-alt__add" data-compat-add data-sku="${Security.escapeAttr(a.sku)}" data-name="${Security.escapeAttr(name)}" data-price="${Security.escapeAttr(String(Number(a.retail_price)))}" data-image="${Security.escapeAttr(imgSrc && imgSrc !== '#' ? imgSrc : '')}" aria-label="Add ${Security.escapeAttr(name)} to cart" data-track="cta_click" data-track-cta="compatible_alternative_add" data-track-location="product_page">Add</button>`;
+                return `<li class="compat-alt__item" data-sku="${Security.escapeAttr(a.sku)}">`
+                    + img
+                    + `<span class="compat-alt__copy">`
+                    +     `<span class="compat-alt__name">${Security.escapeHtml(name)}</span>`
+                    +     `<span class="compat-alt__price">${Security.escapeHtml(formatPrice(Number(a.retail_price)))}</span>`
+                    +     (facts ? `<span class="compat-alt__facts">${facts}</span>` : '')
+                    + `</span>`
+                    + `<span class="compat-alt__actions">`
+                    +     `<a class="compat-alt__view" href="${Security.escapeAttr(href)}" data-track="cta_click" data-track-cta="compatible_alternative_view" data-track-location="product_page">View</a>`
+                    +     action
+                    + `</span>`
+                    + `</li>`;
+            }).join('');
+            const heading = rows.length > 1 ? 'Our compatible versions' : 'Our compatible version';
+            return `<h2 class="compat-alt__heading" id="compat-alt-heading">${heading}</h2>`
+                + `<ul class="compat-alt__list">${cards}</ul>`
+                + (note ? `<p class="compat-alt__note">${Security.escapeHtml(note)}</p>` : '');
+        },
+
+        /** PURE: "1,000 pages" from `page_yield` (a string such as "1,000", or a number); '' when absent. */
+        pageYieldText(pageYield) {
+            if (typeof pageYield === 'number') {
+                return Number.isFinite(pageYield) && pageYield > 0 ? `${pageYield.toLocaleString('en-NZ')} pages` : '';
+            }
+            const t = typeof pageYield === 'string' ? pageYield.trim() : '';
+            return /^\d[\d,]*$/.test(t) && Number(t.replace(/,/g, '')) > 0 ? `${t} pages` : '';
+        },
+
+        /**
+         * PURE: the capacity line when `same_capacity` is false — "XL — higher
+         * capacity" (owner: a dearer higher-capacity cartridge is still worth
+         * offering). Higher/lower is claimed only when BOTH tiers are known;
+         * otherwise the tier alone ("XL capacity"), never a guessed direction.
+         */
+        capacityLabel(altTier, genuineTier) {
+            const RANK = { STD: 1, XL: 2, XXL: 3, XXXL: 4 };
+            const a = typeof altTier === 'string' ? altTier.trim().toUpperCase() : '';
+            const g = typeof genuineTier === 'string' ? genuineTier.trim().toUpperCase() : '';
+            if (!a) return '';
+            const label = a === 'STD' ? 'Standard' : a;
+            if (RANK[a] && RANK[g] && RANK[a] > RANK[g]) return `${label} \u2014 higher capacity`;
+            if (RANK[a] && RANK[g] && RANK[a] < RANK[g]) return `${label} \u2014 lower capacity`;
+            return `${label} capacity`;
+        },
+
+        /**
+         * Add one alternative. The row carries no product `id`, so it is
+         * resolved by SKU first (GET /api/products/:sku — the same lookup the
+         * /cart?add= deep link uses). A miss is said OUT LOUD, never a silent
+         * dead button.
+         */
+        async addCompatibleAlternative(btn) {
+            if (!btn || btn.disabled) return;
+            const sku = btn.dataset.sku;
+            btn.disabled = true;
+            btn.textContent = 'Adding\u2026';
+            const reset = (text) => { btn.textContent = text; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, text === 'Add' ? 0 : 1500); };
+            try {
+                const res = (typeof API !== 'undefined') ? await API.getProduct(sku) : null;
+                const d = res && res.ok && res.data ? res.data : null;
+                if (!d || !d.id || typeof Cart === 'undefined') {
+                    if (typeof showToast === 'function') showToast('Couldn\u2019t add this item. Open its page to add it.', 'error');
+                    reset('Add');
+                    return;
+                }
+                const result = await Cart.addItem({
+                    id: d.id,
+                    name: d.name || btn.dataset.name || sku,
+                    price: Number(d.retail_price) || Number(btn.dataset.price) || 0,
+                    sku: d.sku || sku,
+                    image: d.image_url || btn.dataset.image || '',
+                    brand: (d.brand && typeof d.brand === 'object') ? (d.brand.name || '') : (d.brand || ''),
+                    quantity: 1,
+                    product_source: d.source || 'compatible',
+                    product_type: d.product_type || null,
+                    slug: d.slug || '',
+                    stock_quantity: d.stock_quantity
+                });
+                // A refusal is rolled back and toasted by addItem itself.
+                reset(result && result.ok === false ? 'Add' : 'Added!');
+            } catch (err) {
+                if (typeof DebugLog !== 'undefined') DebugLog.warn('compatible alternative add failed:', err);
+                if (typeof showToast === 'function') showToast('Couldn\u2019t add this item. Open its page to add it.', 'error');
+                reset('Add');
+            }
+        },
+
+        /**
          * Programme facts above the Add button (conversion handoff §4.2):
          * points this order earns, free-shipping threshold, and the phone number
          * with the founding year (older buyers call before they buy — §8.2).
@@ -1718,16 +1859,14 @@
             el.dataset.valueProps = vp.ok ? 'ok' : 'unavailable';
 
             const lines = [];
-            // Points and free shipping share ONE line ("Earn 142 points ($1.42)
-            // · Free shipping on orders over $100") so the block stays two lines
-            // tall above the Add button.
             const facts = [];
-            // The points slot exists only when the PRODUCT carries
-            // `reward_points` (CRO handoff 2026-10-04: absent = programme off
-            // for this product). value-props no longer decides it — its
-            // site-wide rate cannot see a per-product multiplier.
+            // Points are printed only when the PRODUCT carries `reward_points`
+            // (CRO handoff 2026-10-04: absent = programme off for this
+            // product). value-props no longer decides it — its site-wide rate
+            // cannot see a per-product multiplier. The line itself lives in the
+            // PRICE row (#product-points-line, FE master checklist item 6):
+            // this block sits below Add on desktop (pages.css, ERR-293).
             this._rewardPoints = this.validRewardPoints(info && info.reward_points);
-            if (this._rewardPoints) facts.push(`<span class="product-value-lines__points" id="product-points-line" hidden></span>`);
             if (ship && ship.headline) facts.push(`<span class="product-value-lines__ship">${Security.escapeHtml(ship.headline)}</span>`);
             if (facts.length) lines.push(`<p class="product-value-lines__facts">${facts.join('')}</p>`);
             const phone = contact && typeof contact.phone_display === 'string' ? contact.phone_display.trim() : '';
@@ -1792,7 +1931,10 @@
          */
         syncPointsLine() {
             const line = document.getElementById('product-points-line');
-            if (!line || !this._rewardPoints) return;
+            if (!line) return;
+            // The span is static markup now (price row, item 6), so it outlives
+            // a render: a product without `reward_points` must clear it.
+            if (!this._rewardPoints) { line.hidden = true; line.textContent = ''; return; }
             const qtyInput = document.getElementById('qty-input');
             const qty = Math.max(1, parseInt(qtyInput && qtyInput.value, 10) || 1);
             const ladder = this._volumeLadder;
@@ -1800,8 +1942,11 @@
             const unit = rung ? rung.businessPrice : this._unitPrice;
             const earn = this.rewardPointsFor(this._rewardPoints, unit, qty, this._unitPrice);
             if (!earn) { line.hidden = true; line.textContent = ''; return; }
-            // "reward points": the FE master checklist's own words (item 6, ERR-307).
-            line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} reward points (${formatPrice(earn.value)}) on this order`;
+            // "Earn N reward points": the FE master checklist's own words
+            // (item 6). No "on this order" since the line moved into the
+            // price row: at 1280px the row is 442px wide and the longer
+            // sentence (292px) wrapped under the price, pushing Add down 24px.
+            line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} reward points (${formatPrice(earn.value)})`;
             line.hidden = false;
         },
 
@@ -2846,9 +2991,16 @@
         setupEventListeners(info) {
             // Quantity controls
             const qtyInput = document.getElementById('qty-input');
-            const maxQty = 99;
+            // The product's stock, capped at the cart's own limit (FE master
+            // checklist item 17): the box never offers a quantity the cart
+            // would refuse. Unknown stock ⇒ the cart's cap. Same rule as the
+            // cart line (Cart.maxQuantityFor).
+            const maxQty = (typeof Cart !== 'undefined' && typeof Cart.maxQuantityFor === 'function')
+                ? Cart.maxQuantityFor({ stock_quantity: info.stock_quantity })
+                : 99;
             qtyInput.max = maxQty;
             const qtyIncreaseBtn = document.getElementById('qty-increase');
+            qtyIncreaseBtn.disabled = (parseInt(qtyInput.value, 10) || 1) >= maxQty;
             // Business volume pricing is a function of THIS number, so every
             // path that moves it repaints the ladder. One call site each rather
             // than a single listener, because the decrease/increase buttons set
@@ -2890,7 +3042,7 @@
                 btn.textContent = 'Adding...';
 
                 try {
-                    await Cart.addItem({
+                    const result = await Cart.addItem({
                         id: info.id,
                         name: info.name,
                         price: info.retail_price || 0,
@@ -2899,6 +3051,9 @@
                         brand: info.brandName || '',
                         quantity: qty,
                         product_source: info.source || null,
+                        // Item 17: lets the cart cap this line before the
+                        // server has described it.
+                        stock_quantity: info.stock_quantity,
                         // Read by the GA4 add_to_cart twin for `item_category`
                         // and by nothing else (ERR-256). The PDP is the only
                         // add-to-cart surface that knows the authoritative
@@ -2915,6 +3070,14 @@
                         // cart and on to the order, instead of dropping it here.
                         printer_slug: this._printerSlug || null
                     });
+                    // A server refusal (e.g. "Only 8 in stock, and 8 are
+                    // already in your cart.") is rolled back and toasted by
+                    // addItem; the button must not then claim "Added!".
+                    if (result && result.ok === false) {
+                        btn.textContent = 'Add to Cart';
+                        btn.disabled = false;
+                        return;
+                    }
                     btn.textContent = 'Added!';
                     setTimeout(() => {
                         btn.textContent = 'Add to Cart';
