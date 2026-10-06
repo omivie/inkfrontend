@@ -43,7 +43,7 @@ describing the same incident.
 
 ## ERR-309 — A genuine product page never showed the compatible we sell, the PDP's reward points rendered a screen below the price, and the cart let + walk past the stock and then called the refusal a "Network error" — **RESOLVED (frontend)** (2026-10-06)
 
-**Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, re-issued again on 6 Oct (afternoon) with "Status after the live check of the FE deploy" and two new items, 16 and 17. Answered by `backend-docs/outbox/fe-master-checklist-v2-FE-reply-oct2026.md`. The work was split by file with the ERR-308 session (backend's answer to our eight replies). That session owned `cart-wallet.js`, `payment-page.js`, `PrinterName` and the `GuestCartEmail` hunk in `cart.js`; this one owned the rest of the checklist.
+**Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, re-issued again on 6 Oct (afternoon) with "Status after the live check of the FE deploy" and two new items, 16 and 17. Answered by `backend-docs/outbox/fe-6oct-combined-FE-reply-oct2026.md`. The work was split by file with the ERR-308 session (backend's answer to our eight replies). That session owned `cart-wallet.js`, `payment-page.js`, `PrinterName` and the `GuestCartEmail` hunk in `cart.js`; this one owned the rest of the checklist.
 
 **What the v2 status got wrong, measured before acting.** Items 14 and 15 were listed as "not started". Both shipped in `b2d07c0f` (ERR-307) at 12:32 NZT; the backend's check ran on the earlier deploy. Item 6 was real.
 
@@ -97,7 +97,7 @@ describing the same incident.
 
 ## ERR-308 — The backend answered eight FE replies at once: a name mirror, a double printer search and a wallet refusal were now dead weight, a consent untick withdrew nothing, the business page ignored two 409 codes, and staff were an Ads audience — **RESOLVED (frontend)** (2026-10-06)
 
-**Source.** `backend-docs/inbox/fe-replies-oct2026-backend-response.md` (backend, 6 Oct): BF-094..101 plus the guest-session cap, GA4/Ads on `/admin`, and the Ads `purchase` count. Answered by `backend-docs/outbox/fe-replies-6oct-backend-response-FE-reply-oct2026.md`.
+**Source.** `backend-docs/inbox/fe-replies-oct2026-backend-response.md` (backend, 6 Oct): BF-094..101 plus the guest-session cap, GA4/Ads on `/admin`, and the Ads `purchase` count. Answered by `backend-docs/outbox/fe-6oct-combined-FE-reply-oct2026.md`.
 
 **Measured before acting (production API, GET only, 6 Oct).**
 - BF-094: `display_name` on listing rows (`/api/shop` 40/40, `/api/products?search=` rows), `/api/printers/search` (2/2), PDP `compatible_printers` 5/5 and `top_models` 5/5, `by-brand` 565/565, both printer-hub `printer` objects. 47 sampled names equal the backend's prerender `<h1>`.
