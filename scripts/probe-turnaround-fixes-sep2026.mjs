@@ -112,7 +112,9 @@ head('§S shipped markup on BASE');
 async function page(p) { await pause(200); const r = await fetch(`${BASE}${p}`).catch(() => null); return r ? await r.text() : ''; }
 {
     const cart = await page('/cart');
-    check('/cart: "Total before shipping" + sticky "Before shipping"', /<span>Total before shipping<\/span>/.test(cart) && /cart-sticky-bar__label">Before shipping</.test(cart));
+    // The shipped FALLBACK label (ERR-305 gave the span an id; cart.js swaps
+    // it for "Estimated total" once the server's summary.total lands).
+    check('/cart: fallback "Total before shipping" + sticky "Before shipping"', /<span id="cart-total-label">Total before shipping<\/span>/.test(cart) && /cart-sticky-bar__label" id="cart-sticky-label">Before shipping</.test(cart));
     check('/cart: guest coupon line ships hidden', /id="cart-coupon-guest" hidden>/.test(cart));
     const bulk = await page('/bulk-pricing');
     check('/bulk-pricing links /quote', /<a href="\/quote">Get a business quote<\/a>/.test(bulk));

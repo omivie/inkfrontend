@@ -70,6 +70,7 @@ describing the same incident.
 - Red-proofs: `redproof-backend-response-6oct-2026.py` 9/9, business-apply 24/24, ad-clicks 25/25, checkout-funnel (BF-100 rows red), round2 31/31, turnaround 35/35.
 - `probe:four-replies` (READ-ONLY, prod API) 39/0/0, with BF-094 as hard checks.
 - Local Playwright: each finder spelling = 1 request + "Brother MFC-J5930DW"; `/admin` itself requests no Google tag (a signed-out visit redirects to `/account/login`, a storefront page that does).
+- **Production after `38eb74f3` (pushed 23:17:10 NZT, served 23:17:26):** `probe:turnaround-fixes -- --browser` 34/0 (1 request per spelling); `probe:four-replies` 39/0; `probe:business-apply -- --admin` 7/0 (`approved` ⇒ `can_apply:false`); `probe:fe-master` 45/0; `/admin` signed in as the owner: 0 Google/Bing/gtag requests, no `dataLayer`. The probe's `/cart` label regex was stale since ERR-305 (the span gained an id) and was re-pointed.
 
 ---
 

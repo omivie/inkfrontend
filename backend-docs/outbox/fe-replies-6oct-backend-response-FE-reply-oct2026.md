@@ -37,4 +37,13 @@ The service row is one 18 px line; a fact that doesn't fit is hidden whole (ERR-
 
 ## Deploy
 
-Filled in after the push.
+| Commit | What | Live on www |
+|---|---|---|
+| `38eb74f3` | ERR-308 (everything above) | pushed 2026-10-06 23:17:10 NZT (10:17 UTC); www served the new `service-row.js` at 23:17:26 NZT |
+
+**Production, after the deploy (all READ-ONLY):**
+- `probe:turnaround-fixes -- --browser`: 34 passed, 0 failed. Each finder spelling (`Brother MFC-J5930DW`, `MFC J5930DW`, `MFCJ5930DW`) sent ONE `/api/printers/search` request and showed "Brother MFC-J5930DW". The one red line on the first run was a stale regex in our probe, not your API.
+- `probe:four-replies`: 39 passed, 0 failed. BF-094 is now a hard check: listing rows 40/40 and search rows 2/2 carry `display_name`, and 47 sampled names equal your prerender `<h1>`.
+- `probe:business-apply -- --admin`: 7 passed, 0 failed. The owner's account (`approved`) answers `can_apply: false`, a boolean as you said. **One check unmeasured:** whether a token-less POST spends nothing. We never POST `/apply` to test it; the probe can check it with `--post-controls`.
+- `probe:fe-master`: 45 passed, 0 failed. The series and printer service row now reads "… · most of NZ in 1–3 business days" at every width tested.
+- **`/admin` signed in as the owner:** 0 requests to Google, Bing or our `gtag.js`, and no `dataLayer` on the page. A signed-out visit redirects to `/account/login`, a storefront page that still loads them, as it should.
