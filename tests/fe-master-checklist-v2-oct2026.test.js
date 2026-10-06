@@ -464,6 +464,61 @@ test('§16 Add: SKU resolved to an id, added once; a lookup miss toasts and rese
 
 // ═══ §2 cart wallet ON ═══════════════════════════════════════════════════════
 
+// The wallet decided ONCE at load: a cart filled after load (the /cart?add=
+// reorder link) stayed at none/no-server-total all visit. Measured on www,
+// 6 Oct 23:30 NZT, right after it went live for every shopper.
+const CartWallet = require(path.join(ROOT, 'inkcartridges/js/cart-wallet.js'));
+function walletWith(state, why, { items = 1, summary = { subtotal: 67.49, discount: 0, shipping: 7, qualifies_for_free_shipping: false }, ece = null, device = true, amount } = {}) {
+    const w = Object.create(CartWallet);
+    const calls = { init: 0, update: [] };
+    Object.assign(w, {
+        state, why, ece, _deviceHasWallet: device, _amount: amount,
+        elements: ece ? { update: (o) => calls.update.push(o.amount) } : null,
+        _items: () => Array.from({ length: items }, () => ({ product_id: 'p', quantity: 1 })),
+        _summary: () => summary,
+        _setState(s2, y) { this.state = s2; this.why = y || ''; },
+        init() { calls.init++; },
+    });
+    return { w, calls };
+}
+
+test('§2 CartWallet.sync: a cart filled AFTER load mounts the wallet once a server total exists', () => {
+    let { w, calls } = walletWith('none', 'no-server-total');
+    w.sync();
+    assert.equal(calls.init, 1, 'never mounted + now eligible ⇒ init');
+    ({ w, calls } = walletWith('none', 'no-server-total', { items: 0 }));
+    w.sync();
+    assert.equal(calls.init, 0, 'still empty ⇒ nothing');
+    ({ w, calls } = walletWith('none', 'no-wallet-on-device'));
+    w.sync();
+    assert.equal(calls.init, 0, 'a device without a wallet is not retried');
+    for (const st of ['off', 'loading', 'error']) {
+        ({ w, calls } = walletWith(st, ''));
+        w.sync();
+        assert.equal(calls.init, 0, st);
+    }
+});
+
+test('§2 CartWallet.sync: a mounted wallet follows the CURRENT total, and hides when the cart empties', () => {
+    let { w, calls } = walletWith('ready', '', { ece: {}, amount: 7449 });
+    w._summary = () => ({ subtotal: 202.47, discount: 4.05, shipping: 0, qualifies_for_free_shipping: true });
+    w.sync();
+    assert.deepEqual(calls.update, [19842], 'qty 3: $198.42 in cents');
+    w.sync();
+    assert.deepEqual(calls.update, [19842], 'unchanged ⇒ no second update');
+    ({ w, calls } = walletWith('ready', '', { ece: {}, items: 0, amount: 7449 }));
+    w.sync();
+    assert.equal(w.state, 'none');
+    ({ w, calls } = walletWith('none', 'no-server-total', { ece: {}, amount: 0 }));
+    w.sync();
+    assert.equal(w.state, 'ready', 'mounted earlier, refilled ⇒ shown again');
+});
+
+test('§2 the cart calls CartWallet.sync from the settled-summary hook (both renderers end there)', () => {
+    const code = stripComments(CART_SRC);
+    assert.ok(/if \(!pending\) \{\s*if \(typeof CartWallet !== 'undefined' && typeof CartWallet\.sync === 'function'\) \{\s*try \{ CartWallet\.sync\(\); \}/.test(code));
+});
+
 test('§2 the cart wallet ships ON (owner, 6 Oct)', () => {
     assert.match(stripComments(read('js/config.js')), /cartWallet: true,/);
 });

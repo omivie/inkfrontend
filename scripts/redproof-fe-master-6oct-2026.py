@@ -7,7 +7,7 @@ M=[
  ('inkcartridges/js/cart.js',"if (oldQty !== clampedQty) this._losePricing(PRICING.PENDING);","if (this.serverSummary) { this.serverSummary.subtotal += item.price * (clampedQty - oldQty); }",'retail-delta patch back'),
  ('inkcartridges/js/cart.js',"return best && Number.isFinite(retail) && best.price < retail ? best.price : retail;","return retail;",'unit price = retail'),
  ('inkcartridges/js/cart.js',"if (putCart && this._mutationEpoch !== putEpoch) {","if (putCart && false) {",'no epoch guard'),
- ('inkcartridges/js/cart.js',"        if (!pending) return;\n        this._armPendingWatchdog();","        return;\n        this._armPendingWatchdog();",'no pending paint'),
+ ('inkcartridges/js/cart.js',"            return;\n        }\n        this._armPendingWatchdog();","            return;\n        }\n        return;\n        this._armPendingWatchdog();",'no pending paint'),
  ('inkcartridges/js/cart.js',"        this._armPendingWatchdog();\n        const UPDATING","        const UPDATING",'no watchdog'),
  ('inkcartridges/js/cart.js',"        if (!pv || pv.inflight || !pv.result || pv.epoch !== this._mutationEpoch) return null;","        return null;",'no prevalidation reuse'),
  ('inkcartridges/js/cart.js',"const putCart = this._putResponseCart(response);\n","const putCart = null;\n",'PUT cart ignored'),

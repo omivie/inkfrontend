@@ -31,6 +31,9 @@ M=[
  (P,"                    if (result && result.ok === false) {\n                        btn.textContent = 'Add to Cart';","                    if (false) {\n                        btn.textContent = 'Add to Cart';",'refused add says Added'),
  ('inkcartridges/html/product/index.html','                                    <span class="product-info__points" id="product-points-line" data-testid="product-points" hidden></span>\n','','points span removed from price row'),
  ('inkcartridges/js/config.js','cartWallet: true,','cartWallet: false,','wallet off'),
+ ('inkcartridges/js/cart-wallet.js',"            if (eligible && this.why === 'no-server-total') this.init();","",'wallet never retried'),
+ ('inkcartridges/js/cart-wallet.js',"            this.elements.update({ amount: cents });\n            this._amount = cents;","            this._amount = cents;",'wallet amount stale'),
+ (C,"                try { CartWallet.sync(); }","                try { }",'cart never calls sync'),
 ]
 ok=True
 for f,a,b,label in M:

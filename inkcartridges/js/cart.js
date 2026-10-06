@@ -3112,7 +3112,14 @@ const Cart = {
                 delete summary.dataset.pricing;
             }
         }
-        if (!pending) return;
+        if (!pending) {
+            // A settled server total: the cart wallet follows it (mounts if
+            // the cart was empty/unpriced at load, keeps its amount current).
+            if (typeof CartWallet !== 'undefined' && typeof CartWallet.sync === 'function') {
+                try { CartWallet.sync(); } catch (e) { DebugLog.warn('CartWallet.sync failed:', e); }
+            }
+            return;
+        }
         this._armPendingWatchdog();
         const UPDATING = 'Updating\u2026';
         const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };

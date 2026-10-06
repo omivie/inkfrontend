@@ -68,11 +68,11 @@ describing the same incident.
   - The line carries `data-max-quantity`, so `Business.decorateCartLines` never nudges past stock.
   - `QtyStepper.markup({ stock })` caps product-card steppers; `ceiling()` without arguments is unchanged.
   - The PDP box caps at stock, and a refused PDP add no longer says "Added!".
-- **Item 2.** `DARK_FEATURES.cartWallet: true`; the owner waived the iPhone test order on 6 Oct, and the user confirmed it.
+- **Item 2.** `DARK_FEATURES.cartWallet: true`; the owner waived the iPhone test order on 6 Oct, and the user confirmed it. See "Caught on the way" for the mount fix.
 
 **Proof.**
-- `tests/fe-master-checklist-v2-oct2026.test.js`: 24 tests that execute the real `cart.js` in a vm, the real QtyStepper and the real PDP and business methods. `python3 scripts/redproof-fe-master-v2-oct2026.py`: 25 of 25 mutations go red.
-- Full suite: 7016 tests, 0 failed.
+- `tests/fe-master-checklist-v2-oct2026.test.js`: 27 tests that execute the real `cart.js` in a vm, the real QtyStepper and CartWallet, and the real PDP and business methods. `python3 scripts/redproof-fe-master-v2-oct2026.py`: 28 of 28 mutations go red.
+- Full suite: 7019 tests, 0 failed.
 - `npm run probe:fe-master-6oct -- --record` on localhost against the production API: 56 passed, 0 failed, 0 skipped.
   - §6: points y 404 beside price y 392; Add 471–519, hit-testable at 1366×599 and 1280×551. The negative control (line moved back) goes red at y 1459.
   - §16: GTN2030BK ⇒ CTN2030BK $24.49, "1,000 pages"; G604BK ⇒ "XL — higher capacity"; G924CMY and CTN2030BK show no box; the box is below Add.
@@ -87,6 +87,7 @@ describing the same incident.
   - `pages.css`: two `.product-value-lines__points` rules deleted, because the dead-rule audit caught them.
 
 **Caught on the way.**
+- **The cart wallet went live for every shopper and could not mount on the reorder link's cart.** `CartWallet.init()` decides ONCE at DOMContentLoaded. A cart empty or unpriced at that moment stayed at `none/no-server-total` for the whole visit. `/cart?add=` (item 12, the reorder and refill emails) fills the cart AFTER load. Measured on www at 23:30 NZT, five minutes after `aeac442b` went live. Fix: `CartWallet.sync()`, called from `Cart._paintSummaryPending()` (the last step of both summary renderers) on every settled total. It mounts the wallet once eligible, keeps the sheet's opening amount current (it was frozen at the load-time total), and hides it if the cart empties. After the fix: the same flow reaches `none/no-wallet-on-device`. That is Stripe's own answer in a browser with no Apple Pay or Google Pay, so the element mounted.
 - **Our own probe tripped the shared per-IP limiter (100/60 s).** A one-off shape check (rate-limited mid-run) left a guest cart holding GDK11203WH ×1 with no rollback; it had no `finally`. That cart is abandoned, with no email and no opt-in. The script now cleans up in `finally`, and `probe:fe-master-6oct` pauses 60 s before §17 (`PROBE_SECTION_PAUSE_MS`).
 - **Pre-existing, not changed here:** on the compatible PDP CTN2030BK, Add sits at y 548–596 at 1280×551, below the first screen. Production measured the same before this change. It is reported to the backend; it is not in this checklist.
 

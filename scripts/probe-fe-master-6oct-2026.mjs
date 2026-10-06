@@ -16,7 +16,8 @@
  *        first screen.                                                   READ-ONLY
  *   §17  /cart GDK11203WH (v2 item 17): 12 clicks of + stop at the live
  *        stock with + disabled and "Only N in stock"; typing 28 becomes N;
- *        zero PUT /api/cart/items answered 400.                           RECORDING
+ *        zero PUT /api/cart/items answered 400. Also: the cart wallet (item 2,
+ *        ON) mounts on that cart although it was filled after load.      RECORDING
  *   §14  /cart GLC3313BK 1 → 3 → 1: the price column reads ~~$67.49~~ $66.14 at
  *        once; sampled every animation frame + every DOM change, the summary
  *        NEVER shows a money figure for a quantity it was not priced at (a
@@ -414,13 +415,32 @@ if (!RECORD) {
             if (stockBaseline === 0) stockBaseline = null; // nothing was added ⇒ nothing to roll back
         } else {
             if (stockBaseline !== 1) {
-                if (stockBaseline === 0) await p6.goto(`${BASE}/cart?add=${STOCK_SKU}:1`, { waitUntil: 'load' });
+                if (stockBaseline === 0) {
+                    await p6.goto(`${BASE}/cart?add=${STOCK_SKU}:1`, { waitUntil: 'load' });
+                    // Wait for the deep link's own summary toast: it is shown
+                    // only after the server add has ANSWERED (the URL param is
+                    // stripped before any await, so it proves nothing).
+                    // Measured on prod 6 Oct: clicking + earlier sent a PUT for
+                    // a line the server did not hold yet ⇒ 404 ⇒ "Failed to
+                    // update quantity".
+                    await p6.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => /^Added \d+ item/.test(t.textContent.trim())), null, { timeout: 20000 });
+                }
                 else {
                     await p6.evaluate(async (sku) => { const it = Cart.items.find((i) => i.sku === sku); await Cart.updateQuantity(it.key || it.id, 1); }, STOCK_SKU);
                     await p6.reload({ waitUntil: 'load' });
                 }
                 await settled(p6);
             }
+            // Item 2 (wallet ON): a cart filled AFTER load must still mount the
+            // Express Checkout Element. Measured 6 Oct: it stayed at
+            // none/no-server-total. A test browser has no Apple/Google Pay, so
+            // "no-wallet-on-device" (Stripe's own answer) is the pass here.
+            const wallet = await p6.waitForFunction(() => {
+                const w = document.getElementById('cart-wallet');
+                return w && w.dataset.wallet && w.dataset.wallet !== 'loading' && w.dataset.walletWhy !== 'no-server-total'
+                    ? { state: w.dataset.wallet, why: w.dataset.walletWhy || '' } : null;
+            }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
+            check('§2 cart wallet mounts on a cart filled after load (no ?wallet=1)', !!wallet && wallet.state !== 'off' && wallet.state !== 'error', wallet ? `${wallet.state}/${wallet.why}` : 'still none/no-server-total after 15 s');
             const puts = [];
             p6.on('response', (r) => { if (r.request().method() === 'PUT' && /\/api\/cart\/items\//.test(r.url())) puts.push(r.status()); });
             await p6.evaluate(() => {

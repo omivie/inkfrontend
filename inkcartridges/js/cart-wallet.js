@@ -141,6 +141,7 @@ const CartWallet = {
 
     _setState(state, why) {
         this.state = state;
+        this.why = why || '';
         const box = this._box();
         if (box) {
             box.dataset.wallet = state;
@@ -231,9 +232,11 @@ const CartWallet = {
         });
 
         const timer = setTimeout(() => { if (this.state === 'loading') this._setState('error', 'ready-timeout'); }, this.READY_TIMEOUT_MS);
+        this._amount = cents;
         this.ece.on('ready', ({ availablePaymentMethods: apm } = {}) => {
             clearTimeout(timer);
             const any = apm && Object.values(apm).some(Boolean);
+            this._deviceHasWallet = !!any;
             this._setState(any ? 'ready' : 'none', any ? '' : 'no-wallet-on-device');
         });
 
@@ -273,6 +276,37 @@ const CartWallet = {
 
         this.ece.on('confirm', (event) => this._confirm(event));
         this.ece.mount('#cart-wallet-element');
+    },
+
+    /**
+     * Follow the cart after page load. init() decides ONCE, at DOMContentLoaded;
+     * a cart that was empty or unpriced at that moment (the /cart?add= reorder
+     * link fills it AFTER load — FE master checklist item 12's traffic) left the
+     * wallet at none/no-server-total for the rest of the visit. Measured on www
+     * on 6 Oct, the evening it went live for every shopper (item 2, ERR-309).
+     * Called by Cart._paintSummaryPending() — the last step of BOTH summary
+     * renderers — whenever the cart holds a settled server total.
+     */
+    sync() {
+        if (this.state === 'off' || this.state === 'loading' || this.state === 'error') return;
+        const rate = this._initialRate();
+        const cents = rate ? this._amountCents(rate.amount / 100) : NaN;
+        const eligible = this._items().length > 0 && cents >= this.STRIPE_MIN_NZD_CENTS;
+        if (!this.ece) {
+            // Never mounted: only the "no total yet" refusal is retried.
+            if (eligible && this.why === 'no-server-total') this.init();
+            return;
+        }
+        if (!eligible) {
+            if (this.state === 'ready') this._setState('none', 'no-server-total');
+            return;
+        }
+        // The sheet opens on the cart's CURRENT total, not the one at load.
+        if (cents !== this._amount) {
+            this.elements.update({ amount: cents });
+            this._amount = cents;
+        }
+        if (this.state === 'none' && this.why === 'no-server-total' && this._deviceHasWallet) this._setState('ready');
     },
 
     async _confirm(event) {
