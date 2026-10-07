@@ -89,12 +89,12 @@ let storageState = null;
 /** Every #cart-wallet change from before the first script, against performance.now(). */
 const RECORDER = () => {
     window.__wallet = { changes: [], firstPaint: null, fcp: null };
-    const snap = (box, why) => window.__wallet.changes.push({
-        t: Math.round(performance.now()), why, state: box.dataset.wallet || '', hidden: box.hidden,
+    const snap = (box, how) => window.__wallet.changes.push({
+        t: Math.round(performance.now()), how, state: box.dataset.wallet || '', why: box.dataset.walletWhy || '', hidden: box.hidden,
     });
     const attach = (box) => {
         snap(box, 'parsed');
-        new MutationObserver(() => snap(box, 'attr')).observe(box, { attributes: true, attributeFilter: ['data-wallet', 'hidden'] });
+        new MutationObserver(() => snap(box, 'attr')).observe(box, { attributes: true, attributeFilter: ['data-wallet', 'data-wallet-why', 'hidden'] });
     };
     // The cart's first paint = the moment cart.js reveals #cart-layout.
     const firstPaint = () => {
@@ -179,8 +179,15 @@ if (!RECORD) {
                 await page.waitForFunction((sku) => typeof Cart !== 'undefined' && !Cart.loading
                     && Cart.items.some((i) => i.sku === sku), SKU, { timeout: 20000 });
             }
-            sawLine = await page.evaluate((sku) => Cart.items.some((i) => i.sku === sku), SKU);
-            check(`${SKU} is in the probe's cart`, sawLine);
+            // The SERVER must hold the line: a 429 on the add leaves it local-only,
+            // the cart then has no server total, and every run would end
+            // none/no-server-total — a probe artefact, not a wallet result (8 Oct).
+            sawLine = await page.evaluate(async (sku) => {
+                const r = await API.getCart();
+                return ((r && r.data && r.data.items) || []).some((i) => i.product && i.product.sku === sku);
+            }, SKU);
+            check(`${SKU} is in the probe's SERVER cart (re-read)`, sawLine);
+            if (!sawLine) throw new Error('seed line not on the server (rate limited?); no run would mean anything');
             storageState = await ctx.storageState();
             await ctx.close();
         }
@@ -199,12 +206,12 @@ if (!RECORD) {
             const ready = rec.changes.find((c) => c.state === 'ready' && !c.hidden);
             const fp = rec.firstPaint;
             info(`run ${i}: FCP ${rec.fcp ?? '?'}ms · cart painted ${fp ? `${fp.t}ms (${fp.state || '-'}, ${fp.hidden ? 'HIDDEN' : 'visible'}, slot ${fp.slot}px)` : 'never'} · `
-                + rec.changes.map((c) => `${c.t}ms ${c.state}${c.hidden ? '(hidden)' : ''}`).join(' → '));
+                + rec.changes.map((c) => `${c.t}ms ${c.state}${c.why ? '/' + c.why : ''}${c.hidden ? '(hidden)' : ''}`).join(' → '));
             check(`run ${i}: "or pay instantly" area visible when the cart first paints`, visibleAtFirstPaint(rec),
                 `firstPaint=${JSON.stringify(fp)}`);
             if (ready) readies.push(ready.t);
-            else if (final.state === 'none') skip(`run ${i}: wallet ready time`, `this browser reports no wallet (data-wallet=none); nothing to time`);
-            else bad(`run ${i}: wallet reached ready`, `ended ${final.state || '?'}`);
+            else if (final.state === 'none' && final.why === 'no-wallet-on-device') skip(`run ${i}: wallet ready time`, 'this browser reports no wallet (none/no-wallet-on-device); nothing to time');
+            else bad(`run ${i}: wallet reached ready`, `ended ${final.state || '?'}/${final.why || '?'}${limited.length ? ' — 429s this run' : ''}`);
             if (limited.length) bad(`run ${i}: no 429`, limited.slice(0, 2).join(', '));
             await ctx.close();
         }
@@ -236,6 +243,8 @@ if (!RECORD) {
             }
             await ctx.close();
         }
+    } catch (e) {
+        bad('probe aborted', e.message);
     } finally {
         // ─── rollback, verified ─────────────────────────────────────────────
         head('ROLLBACK');

@@ -96,6 +96,10 @@ describing the same incident.
 **Probe.** `npm run probe:cart-wallet-paint` (READ-ONLY by default). `--record` adds one line to its own guest cart through `/cart?add=`, and the rollback in `finally` is verified by a re-read. Its negative control feeds the detector the pre-fix record, which must fail.
 - **Locally (new code, prod API):** the placeholder was visible with a 48 px slot when the cart painted (762–861 ms). The §19 box was visible and unticked, and ticked-then-reloaded came back unticked.
 - **Not measured locally:** headless Chromium on `http://localhost` reports no wallet (`none`), so the ready time can only be measured on www after the deploy.
+- **On www after the deploy** (69e16600, live 2026-10-07 21:10:49 UTC):
+  - The placeholder was visible with a 48 px slot when the cart painted (1138–1296 ms), in 5 of 5 cold runs.
+  - Stripe's device check was timed on a local-only cart, 3 cold runs. The ECE mounted at 1270–1296 ms and Stripe reported a wallet (`_deviceHasWallet: true`) at 3181–3723 ms. Before the fix, the same machine reached `ready` at 5271–6268 ms.
+  - The full `ready` time with a server total was NOT measured. The guest-session MINT limiter (per IP, window over 1 h, shared with peer sessions) refused the seed add (`POST /api/cart/items` 429 with no session). The cart was then local-only, and every run ended `none`/`no-server-total`. That is a probe artefact, not a wallet result. The probe now re-reads the SERVER cart after seeding, aborts loudly when the line is missing, and prints `data-wallet-why` on every change.
 
 **Seen on the way, not fixed.**
 - The per-IP limiter is shared with every session on this machine. A 4 s probe pace saw 429s on `/api/site/*` and `/api/cart`, so the probe now paces 15 s.
