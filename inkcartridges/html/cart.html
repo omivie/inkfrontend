@@ -21,12 +21,15 @@
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Item 20: the cart wallet loads Stripe.js at init — open those connections now. -->
+    <link rel="preconnect" href="https://js.stripe.com">
+    <link rel="preconnect" href="https://b.stripecdn.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
     <link rel="stylesheet" href="/css/components.css?v=7430c563">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=57c639e8">
+    <link rel="stylesheet" href="/css/pages.css?v=b533e7aa">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
@@ -322,11 +325,12 @@
                                 Proceed to Checkout
                             </a>
                             <!-- Apple Pay / Google Pay from the cart (FE master checklist item 2,
-                                 ERR-305). Behind Config.DARK_FEATURES.cartWallet (OFF) — or
-                                 /cart?wallet=1 for the owner's device test. js/cart-wallet.js
-                                 mounts Stripe's Express Checkout Element here; it stays hidden
-                                 unless a wallet is actually available. -->
-                            <div class="cart-wallet" id="cart-wallet" data-testid="cart-wallet" hidden>
+                                 ERR-305; live since ERR-309). js/cart-wallet.js mounts Stripe's
+                                 Express Checkout Element here. Item 20: ships VISIBLE as
+                                 data-wallet="loading" so the divider + 48px placeholder hold
+                                 the button's space from the first paint; the script hides it
+                                 for off / none / error. -->
+                            <div class="cart-wallet" id="cart-wallet" data-testid="cart-wallet" data-wallet="loading">
                                 <p class="cart-wallet__or"><span>or pay instantly</span></p>
                                 <div id="cart-wallet-element"></div>
                                 <p class="cart-wallet__status" id="cart-wallet-status" role="status" aria-live="polite" hidden></p>
@@ -575,7 +579,7 @@
     <script defer src="/js/cart-page.js?v=35b9e028"></script>
     <script defer src="/js/cart-deep-link.js?v=4f6612d5"></script>
     <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
-    <script defer src="/js/cart-wallet.js?v=ecd2d819"></script>
+    <script defer src="/js/cart-wallet.js?v=701df7cc"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

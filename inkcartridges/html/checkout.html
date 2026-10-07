@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=0f497ae2">
     <link rel="stylesheet" href="/css/components.css?v=7430c563">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=57c639e8">
+    <link rel="stylesheet" href="/css/pages.css?v=b533e7aa">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
     <meta name="twitter:card" content="summary_large_image">
@@ -127,6 +127,15 @@
                                             <span>Email me a copy of my cart if I don't finish</span>
                                         </label>
                                         <p class="checkout-optin__status" id="guest-cart-email-status" role="status" aria-live="polite" hidden></p>
+                                        <!-- Reorder-reminder consent (FE master checklist item 19).
+                                             Shown to guests AND signed-in shoppers. UNTICKED on every
+                                             visit (a pre-ticked box is not consent; NZ UEMA):
+                                             CheckoutPage.setupReminderConsent forces it, including on a
+                                             bfcache restore. Only a tick sends reminder_consent: true. -->
+                                        <label class="checkout-optin" id="reminder-consent-optin">
+                                            <input type="checkbox" id="reminder-consent" name="reminder-consent" autocomplete="off">
+                                            <span>Email me when my cartridges are likely running low, so I can reorder in time.</span>
+                                        </label>
                                     </div>
                                     <div class="form-group">
                                         <label for="phone" class="form-label">Phone Number <span class="required">*</span></label>
@@ -525,7 +534,7 @@
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/checkout-page.js?v=2aef0f4b"></script>
+    <script defer src="/js/checkout-page.js?v=1885302a"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
     <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
 

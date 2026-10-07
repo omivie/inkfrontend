@@ -14170,9 +14170,14 @@ body.page-shop {
 @media (min-width: 1100px) {
     body.has-consent-banner .cart-sticky-bar { bottom: 0; }
 }
-/* Wallet row under Checkout (OFF by default: Config.DARK_FEATURES.cartWallet). */
+/* Wallet row under Checkout (cart-wallet.js; live since ERR-309). Item 20: the
+   box ships as data-wallet="loading" and the element slot reserves the 48px
+   Stripe button (buttonHeight: 48) as a quiet placeholder, so the button
+   replaces it in place with no jump. */
 .cart-wallet { margin-top: 12px; }
 .cart-wallet[hidden] { display: none; }
+#cart-wallet-element { min-height: 48px; }
+.cart-wallet[data-wallet="loading"] #cart-wallet-element { border-radius: 6px; background: var(--color-border); opacity: 0.6; }
 .cart-wallet__or { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 0.8125rem; color: var(--color-text-muted); }
 .cart-wallet__or::before, .cart-wallet__or::after { content: ""; flex: 1; border-top: 1px solid var(--color-border); }
 .cart-wallet__status { margin: 8px 0 0; font-size: 0.875rem; color: var(--color-text-muted); }

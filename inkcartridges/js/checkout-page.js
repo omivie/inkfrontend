@@ -57,6 +57,7 @@
             this.renderCart();
             this.setupFormHandlers();
             this.setupGuestCartEmail();
+            this.setupReminderConsent();
             this.setupShippingHandlers();
             this.setupBillingAddressToggle();
             this.initAddressAutocomplete();
@@ -755,6 +756,24 @@
                 email: document.getElementById('email'),
                 status: document.getElementById('guest-cart-email-status')
             });
+        },
+
+        /**
+         * "Email me when my cartridges are likely running low" (FE master
+         * checklist item 19). Consent must be the shopper's own act on THIS
+         * visit, so the box is forced unticked at load and again on a bfcache
+         * restore (`pageshow` persisted), where the browser keeps the old tick.
+         * restoreCheckoutState() never carries it back either. The tick rides to
+         * /payment as checkoutData.reminderConsent; PaymentPage.reminderConsentField
+         * turns only a literal true into `reminder_consent: true`.
+         */
+        setupReminderConsent() {
+            const untick = () => {
+                const box = document.getElementById('reminder-consent');
+                if (box) box.checked = false;
+            };
+            untick();
+            window.addEventListener('pageshow', (e) => { if (e.persisted) untick(); });
         },
 
         /**
@@ -2914,6 +2933,8 @@
                     // payment-page.js could not tell "not asked" from "not saved".
                     deliveryType: deliveryType,
                     estimatedShipping: this.totals.shipping,
+                    // Reorder-reminder consent (item 19): true ONLY when ticked.
+                    reminderConsent: document.getElementById('reminder-consent')?.checked === true,
                     // Terms accepted
                     // Timestamp
                     savedAt: Date.now()

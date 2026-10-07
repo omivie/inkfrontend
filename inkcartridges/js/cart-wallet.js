@@ -6,10 +6,28 @@
  * address. Here it sits under "Proceed to Checkout" and the wallet sheet
  * supplies all of that, so cart → paid order takes no typing.
  *
- * SHIPS OFF. Enabled only when Config.DARK_FEATURES.cartWallet === true, or for
- * one visit with /cart?wallet=1 (the owner's real-device test). It takes
- * payments and we cannot drive a real Apple Pay sheet from a test browser, so
- * the first real order must be the owner's, not a customer's.
+ * LIVE for every shopper since 6 Oct (Config.DARK_FEATURES.cartWallet === true,
+ * ERR-309; the owner waived the real-device test). /cart?wallet=1 still forces
+ * it on for one visit when the flag is off.
+ *
+ * FIRST PAINT (item 20, 8 Oct). The owner: "the 'Pay instantly' option appears
+ * too late". It used to run every step one after the other and keep the box
+ * `hidden` until Stripe's `ready`, so the whole wait read as a button popping
+ * in at 3.3 s (cold). Now:
+ *   1. The box ships VISIBLE as data-wallet="loading": the "or pay instantly"
+ *      divider plus a 48px placeholder hold the space from the first paint,
+ *      and the Stripe button replaces the placeholder in place. Only none /
+ *      error / off hide it. A device Stripe found NO wallet on is remembered
+ *      (localStorage NO_WALLET_KEY) and skips the placeholder next visit.
+ *   2. Stripe.js and payment-page.js start loading at init, in parallel with
+ *      the cart's own load (cart.html also preconnects to Stripe).
+ *      payment-page.js is awaited only where it is used, in _confirm.
+ *   3. The Express Checkout Element mounts on the cart's first lines with a
+ *      PROVISIONAL amount (STRIPE_MIN_NZD_CENTS) instead of waiting for the
+ *      server total. Two guards keep every figure the server's: the box turns
+ *      `ready` only when the ECE is ready AND _settle() has applied the server
+ *      total (_serverAmount), and the `click` handler never opens the sheet
+ *      while the amount is provisional.
  *
  * ONE ORDER PATH. The order is created by PaymentPage.createStripeOrder — the
  * same function, with the same duplicate / idempotency / error-code triage, that
@@ -57,6 +75,8 @@ const CartWallet = {
     STRIPE_MIN_NZD_CENTS: 50,
     READY_TIMEOUT_MS: 8000,
     TURNSTILE_REFRESH_MS: 240000,
+    /** localStorage: '1' when Stripe found no wallet on this device (item 20). */
+    NO_WALLET_KEY: 'inkc.cartWallet.noDevice',
 
     /** checkout.html's region <select> values — the slugs the order API takes. */
     REGIONS: ['northland', 'auckland', 'waikato', 'bay-of-plenty', 'gisborne', 'hawkes-bay',
@@ -71,6 +91,10 @@ const CartWallet = {
     turnstileToken: null,
     turnstileWidgetId: undefined,
     _refreshTimer: null,
+    _serverAmount: false,  // true once the sheet's amount is the SERVER's total
+    _deviceHasWallet: undefined,
+    _pageP: null,          // payment-page.js load, started at init, awaited in _confirm
+    _pageFailed: false,
 
     /** PURE. Flag on, or ?wallet=1 for one visit. */
     isEnabled(config, search) {
@@ -146,7 +170,36 @@ const CartWallet = {
         if (box) {
             box.dataset.wallet = state;
             if (why) box.dataset.walletWhy = why;
-            box.hidden = state !== 'ready';
+            // `loading` stays VISIBLE: the divider + 48px placeholder hold the
+            // button's space from the first paint (item 20).
+            box.hidden = !(state === 'ready' || state === 'loading');
+        }
+    },
+
+    _remembersNoWallet() {
+        try { return localStorage.getItem(this.NO_WALLET_KEY) === '1'; } catch (_) { return false; }
+    },
+
+    _rememberNoWallet(none) {
+        try {
+            if (none) localStorage.setItem(this.NO_WALLET_KEY, '1');
+            else localStorage.removeItem(this.NO_WALLET_KEY);
+        } catch (_) { /* storage blocked: the placeholder simply shows again */ }
+    },
+
+    /**
+     * Runs as the (deferred) script evaluates, before DOMContentLoaded. The
+     * markup ships data-wallet="loading" and visible; this corrects it at once
+     * when the flag is off, or when this device is known to have no wallet.
+     */
+    prepaint() {
+        if (!this._box()) return;
+        if (!this.isEnabled(typeof Config !== 'undefined' ? Config : null, window.location.search)) {
+            this._setState('off', 'flag');
+        } else if (this._remembersNoWallet()) {
+            this._setState('none', 'remembered-no-wallet');
+        } else {
+            this._setState('loading');
         }
     },
 
@@ -192,6 +245,52 @@ const CartWallet = {
         return ((typeof Cart !== 'undefined' && Cart.items) || []).map((i) => ({ product_id: i.id, quantity: i.quantity }));
     },
 
+    /** The server total in cents when the cart can be paid by wallet, else NaN. */
+    _eligibleCents() {
+        const rate = this._initialRate();
+        const cents = rate ? this._amountCents(rate.amount / 100) : NaN;
+        return this._items().length > 0 && cents >= this.STRIPE_MIN_NZD_CENTS ? cents : NaN;
+    },
+
+    _cartReady() {
+        return typeof CartDeepLink !== 'undefined' && CartDeepLink._waitForCartReady
+            ? Promise.resolve(CartDeepLink._waitForCartReady())
+            : Promise.resolve(true);
+    },
+
+    /** Resolves as soon as the cart holds a line (its localStorage copy), or when it is ready. */
+    async _firstItemsOr(ready) {
+        let done = false;
+        ready.then(() => { done = true; }, () => { done = true; });
+        while (!done && !this._items().length) await new Promise((r) => setTimeout(r, 50));
+    },
+
+    /** `ready` needs BOTH: Stripe found a wallet, and the amount is the server's. */
+    _maybeReady() {
+        if (this._pageFailed || this.state === 'off') return;
+        if (this._deviceHasWallet && this._serverAmount) this._setState('ready');
+    },
+
+    /**
+     * Apply the cart's SERVER total to the mounted element. The only place
+     * _serverAmount turns true. Ineligible (emptied, unpriced) ⇒ hide.
+     */
+    _settle() {
+        if (!this.elements) return;
+        const cents = this._eligibleCents();
+        if (!(cents >= this.STRIPE_MIN_NZD_CENTS)) {
+            this._serverAmount = false;
+            if (this.state === 'ready' || this.state === 'loading') this._setState('none', 'no-server-total');
+            return;
+        }
+        if (cents !== this._amount) {
+            this.elements.update({ amount: cents });
+            this._amount = cents;
+        }
+        this._serverAmount = true;
+        this._maybeReady();
+    },
+
     async init() {
         const box = this._box();
         if (!box) return;
@@ -199,28 +298,48 @@ const CartWallet = {
             this._setState('off', 'flag');
             return;
         }
-        this._setState('loading');
-        if (typeof CartDeepLink !== 'undefined' && CartDeepLink._waitForCartReady) await CartDeepLink._waitForCartReady();
+        // A remembered no-wallet device keeps its box hidden while we load; a
+        // later `ready` with a wallet still shows it (and clears the memory).
+        if (!(this.state === 'none' && this.why === 'remembered-no-wallet')) this._setState('loading');
 
-        const rate = this._initialRate();
-        const cents = rate ? this._amountCents(rate.amount / 100) : NaN;
-        if (!this._items().length || !(cents >= this.STRIPE_MIN_NZD_CENTS)) {
+        // Item 20: start Stripe.js and payment-page.js NOW, in parallel with the
+        // cart's own load. payment-page.js is awaited only in _confirm.
+        const stripeP = this._load(this.STRIPE_JS, () => typeof Stripe === 'function');
+        if (!this._pageP) {
+            this._pageP = this._load(this.PAYMENT_PAGE_JS, () => typeof PaymentPage !== 'undefined');
+            this._pageP.then((ok) => {
+                if (ok) return;
+                this._pageFailed = true;
+                this._setState('error', 'payment-page-js');
+            });
+        }
+        const cartReady = this._cartReady();
+
+        // Mount on the cart's first lines; an empty local cart waits for the server's.
+        await this._firstItemsOr(cartReady);
+        if (!this._items().length) {
             this._setState('none', 'no-server-total');
             return;
         }
 
-        const okStripe = await this._load(this.STRIPE_JS, () => typeof Stripe === 'function');
-        const okPage = await this._load(this.PAYMENT_PAGE_JS, () => typeof PaymentPage !== 'undefined');
-        if (!okStripe || !okPage || typeof Config === 'undefined' || !Config.STRIPE_PUBLISHABLE_KEY) {
-            this._setState('error', !okStripe ? 'stripe-js' : (!okPage ? 'payment-page-js' : 'no-key'));
+        const okStripe = await stripeP;
+        if (!okStripe || typeof Config === 'undefined' || !Config.STRIPE_PUBLISHABLE_KEY) {
+            this._setState('error', !okStripe ? 'stripe-js' : 'no-key');
             return;
         }
+        if (this.ece || this._pageFailed) return; // a re-entrant init already mounted, or the page JS failed
 
         this.isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
         if (this.isGuest) this._startTurnstile();
 
+        // PROVISIONAL amount until _settle() applies the server total. Neither
+        // the box (`ready`) nor the sheet (`click`) can be used before that.
+        const now = this._eligibleCents();
+        this._serverAmount = false;
+        this._amount = now >= this.STRIPE_MIN_NZD_CENTS ? now : this.STRIPE_MIN_NZD_CENTS;
+
         this.stripe = Stripe(Config.STRIPE_PUBLISHABLE_KEY);
-        this.elements = this.stripe.elements({ mode: 'payment', amount: cents, currency: 'nzd' });
+        this.elements = this.stripe.elements({ mode: 'payment', amount: this._amount, currency: 'nzd' });
         this.ece = this.elements.create('expressCheckout', {
             // 'always' — see payment-page.js initExpressCheckout (ERR-268).
             paymentMethods: { applePay: 'always', googlePay: 'always', link: 'never' },
@@ -232,15 +351,20 @@ const CartWallet = {
         });
 
         const timer = setTimeout(() => { if (this.state === 'loading') this._setState('error', 'ready-timeout'); }, this.READY_TIMEOUT_MS);
-        this._amount = cents;
         this.ece.on('ready', ({ availablePaymentMethods: apm } = {}) => {
             clearTimeout(timer);
-            const any = apm && Object.values(apm).some(Boolean);
-            this._deviceHasWallet = !!any;
-            this._setState(any ? 'ready' : 'none', any ? '' : 'no-wallet-on-device');
+            const any = !!(apm && Object.values(apm).some(Boolean));
+            this._deviceHasWallet = any;
+            this._rememberNoWallet(!any);
+            if (!any) { this._setState('none', 'no-wallet-on-device'); return; }
+            this._maybeReady();
         });
 
         this.ece.on('click', (event) => {
+            if (!this._serverAmount) {
+                this._say('One moment — updating your total. Tap again in a second.');
+                return; // not resolved ⇒ the sheet never opens on a provisional amount
+            }
             if (this.isGuest && !this.turnstileToken) {
                 this._say('One moment — finishing a quick security check. Tap again in a few seconds.');
                 return; // not resolved ⇒ the sheet stays closed
@@ -276,6 +400,9 @@ const CartWallet = {
 
         this.ece.on('confirm', (event) => this._confirm(event));
         this.ece.mount('#cart-wallet-element');
+
+        await cartReady;
+        this._settle();
     },
 
     /**
@@ -288,25 +415,13 @@ const CartWallet = {
      * renderers — whenever the cart holds a settled server total.
      */
     sync() {
-        if (this.state === 'off' || this.state === 'loading' || this.state === 'error') return;
-        const rate = this._initialRate();
-        const cents = rate ? this._amountCents(rate.amount / 100) : NaN;
-        const eligible = this._items().length > 0 && cents >= this.STRIPE_MIN_NZD_CENTS;
-        if (!this.ece) {
-            // Never mounted: only the "no total yet" refusal is retried.
-            if (eligible && this.why === 'no-server-total') this.init();
-            return;
-        }
-        if (!eligible) {
-            if (this.state === 'ready') this._setState('none', 'no-server-total');
-            return;
-        }
-        // The sheet opens on the cart's CURRENT total, not the one at load.
-        if (cents !== this._amount) {
-            this.elements.update({ amount: cents });
-            this._amount = cents;
-        }
-        if (this.state === 'none' && this.why === 'no-server-total' && this._deviceHasWallet) this._setState('ready');
+        if (this.state === 'off' || this.state === 'error') return;
+        // Mounted (possibly still `loading` on a provisional amount): the sheet
+        // follows the cart's CURRENT server total, not the one at load.
+        if (this.ece) { this._settle(); return; }
+        if (this.state === 'loading') return; // init is still deciding
+        // Never mounted: only the "no total yet" refusal is retried.
+        if (this.why === 'no-server-total' && this._eligibleCents() >= this.STRIPE_MIN_NZD_CENTS) this.init();
     },
 
     async _confirm(event) {
@@ -316,6 +431,12 @@ const CartWallet = {
         };
         const built = this.toCheckoutData(event, this.shipping);
         if (built.error) { fail(built.error); return; }
+        // payment-page.js started loading at init (item 20); this is its only await.
+        const okPage = await (this._pageP || this._load(this.PAYMENT_PAGE_JS, () => typeof PaymentPage !== 'undefined'));
+        if (!okPage || typeof PaymentPage === 'undefined') {
+            fail('We could not start the payment here. Please use Proceed to Checkout.');
+            return;
+        }
 
         const cartItems = (typeof Cart !== 'undefined' && Cart.items) ? Cart.items.slice() : [];
         const s = this._summary() || {};
@@ -389,6 +510,7 @@ const CartWallet = {
 
 if (typeof window !== 'undefined') {
     window.CartWallet = CartWallet;
+    CartWallet.prepaint();
     document.addEventListener('DOMContentLoaded', () => { CartWallet.init(); });
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = CartWallet;

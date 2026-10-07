@@ -41,6 +41,70 @@ describing the same incident.
 
 ---
 
+## ERR-312 — The cart's "Pay instantly" button popped in 3–6 s after the page, and nothing on /checkout asked a buyer for permission to send reorder reminders — **RESOLVED (frontend)** (2026-10-08)
+
+**Source.** The backend's re-issue of `FE-MASTER-CHECKLIST-oct2026` (8 Oct), items 19 and 20. The work was split by file with a peer session, which owns item 18 (the admin negative-keyword page), the compatible-PDP fold, `compatible_alternatives[].id` and the outbox reply. This entry covers 19 and 20 only.
+
+**Item 20. Seen.** The owner said: "The 'Pay instantly' option appears too late when I open the cart." The backend measured the button at 3.3 s with a cold cache (2.0 s warm) on /cart with one item. Our own baseline on www, before the fix (`probe:cart-wallet-paint --record`, 3 cold runs from NZ, 8 Oct):
+- the button reached `ready` at 6268, 5271 and 5381 ms (median 5381);
+- the box was `hidden` when the cart painted (slot 0 px).
+
+**Cause.** `cart-wallet.js` `init()` ran every step one after the other:
+1. set `loading`, which hid the box;
+2. wait for the cart;
+3. load Stripe.js;
+4. load payment-page.js;
+5. mount the Express Checkout Element (ECE);
+6. wait for Stripe's device check.
+
+`_setState` hid the box for every state except `ready`, so the whole chain showed as a button popping in late.
+
+**Fix (`js/cart-wallet.js`, `html/cart.html`, `css/pages.css`).**
+- **Hold the space.** The box ships visible as `data-wallet="loading"`. `#cart-wallet-element` reserves 48 px, the ECE's `buttonHeight`, and shows a quiet placeholder while loading. `_setState` now hides only `none`, `error` and `off`.
+- **`prepaint()`** runs as the deferred script evaluates:
+  - flag off ⇒ `off`;
+  - a device Stripe found no wallet on (localStorage `inkc.cartWallet.noDevice`, every access in try/catch) ⇒ `none`/`remembered-no-wallet`, with no placeholder. The ECE still mounts, and a later wallet clears the memory.
+- **Parallel loads.** `cart.html` preconnects to `js.stripe.com` and `b.stripecdn.com`. `init()` starts Stripe.js and payment-page.js before it waits for the cart. payment-page.js is awaited only in `_confirm`. If it fails to load, the box goes to `error`/`payment-page-js` and the sheet fails with "use Proceed to Checkout", never a dead button.
+- **Early mount.** The ECE mounts on the cart's first local lines with a provisional `STRIPE_MIN_NZD_CENTS`. `_settle()` is the only place `_serverAmount` becomes true. It applies the server total after the cart is ready and on every `sync()`, including while still `loading`.
+  - `ready` needs both a wallet on the device and `_serverAmount`.
+  - The `click` handler never opens the sheet on a provisional amount.
+  - Every figure the sheet shows is still the server's.
+
+**Item 19. Seen.** Reorder reminders may go only to customers who said yes (NZ UEMA). `POST /api/orders` accepts `reminder_consent: true` and records consent for a literal `true` only. The checkout never asked.
+
+**Fix.**
+- `html/checkout.html` has one box under the email field, shown to guests and to signed-in shoppers: "Email me when my cartridges are likely running low, so I can reorder in time." It has no `checked` attribute and carries `autocomplete="off"`.
+- `CheckoutPage.setupReminderConsent` forces the box unticked at load and again on a bfcache `pageshow`. `restoreCheckoutState` never brings a tick back.
+- `checkoutData.reminderConsent` is a strict boolean.
+- `PaymentPage.reminderConsentField` is the one owner: only a literal `true` becomes `{ reminder_consent: true }`, and `false` is never sent. Both order builders spread it: Stripe (card, /payment wallet, cart wallet) and PayPal.
+- The cart wallet shows no consent box, so it sends nothing. That is correct, and the backend reply says so.
+
+**Tests.**
+- `tests/fe-master-checklist-8oct-2026.test.js` has 17 tests. The real cart-wallet.js runs in a vm with a fake Stripe and a timed fake script loader; the real `setupReminderConsent` and `reminderConsentField` are extracted and executed.
+- Red-proofed: 9 mutations, 9 caught. The mutations were:
+  - `loading` hidden;
+  - `ready` on a provisional amount;
+  - no click guard;
+  - mount waits for the cart;
+  - no no-wallet memory;
+  - sync ignores `loading`;
+  - truthy consent;
+  - PayPal spread missing;
+  - no bfcache untick.
+- `checkout-funnel-oct2026.test.js` pinned the old `hidden` markup and now pins `data-wallet="loading"`.
+
+**Probe.** `npm run probe:cart-wallet-paint` (READ-ONLY by default). `--record` adds one line to its own guest cart through `/cart?add=`, and the rollback in `finally` is verified by a re-read. Its negative control feeds the detector the pre-fix record, which must fail.
+- **Locally (new code, prod API):** the placeholder was visible with a 48 px slot when the cart painted (762–861 ms). The §19 box was visible and unticked, and ticked-then-reloaded came back unticked.
+- **Not measured locally:** headless Chromium on `http://localhost` reports no wallet (`none`), so the ready time can only be measured on www after the deploy.
+
+**Seen on the way, not fixed.**
+- The per-IP limiter is shared with every session on this machine. A 4 s probe pace saw 429s on `/api/site/*` and `/api/cart`, so the probe now paces 15 s.
+- After a 429 on `GET /api/cart`, cart.js re-POSTed the local line to `/api/cart/items` (pre-existing behaviour, not this change).
+
+**Lesson.** A widget that is hidden until it is ready shows all its latency as a late pop-in. Reserve its space first, then start its slow parts in parallel, and gate only the action (the click) on the data it needs.
+
+---
+
 ## ERR-309 — A genuine product page never showed the compatible we sell, the PDP's reward points rendered a screen below the price, and the cart let + walk past the stock and then called the refusal a "Network error" — **RESOLVED (frontend)** (2026-10-06)
 
 **Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, re-issued again on 6 Oct (afternoon) with "Status after the live check of the FE deploy" and two new items, 16 and 17. Answered by `backend-docs/outbox/fe-6oct-combined-FE-reply-oct2026.md`. The work was split by file with the ERR-308 session (backend's answer to our eight replies). That session owned `cart-wallet.js`, `payment-page.js`, `PrinterName` and the `GuestCartEmail` hunk in `cart.js`; this one owned the rest of the checklist.

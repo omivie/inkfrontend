@@ -315,7 +315,10 @@ test('item 2: ON for every shopper (owner, 6 Oct); the flag or ?wallet=1 turns i
     assert.equal(CartWallet.isEnabled({ DARK_FEATURES: { cartWallet: true } }, ''), true);
     assert.equal(CartWallet.isEnabled({ DARK_FEATURES: {} }, '?wallet=1'), true);
     assert.equal(CartWallet.isEnabled({ DARK_FEATURES: {} }, '?wallet=yes'), false);
-    assert.match(html('html/cart.html'), /<div class="cart-wallet" id="cart-wallet" data-testid="cart-wallet" hidden>/);
+    // Item 20 (8 Oct): the box ships VISIBLE as data-wallet="loading" so its
+    // placeholder holds the space from the first paint; cart-wallet.js hides it
+    // for off / none / error (pinned in fe-master-checklist-8oct-2026.test.js).
+    assert.match(html('html/cart.html'), /<div class="cart-wallet" id="cart-wallet" data-testid="cart-wallet" data-wallet="loading">/);
 });
 
 test('item 2: the wallet address becomes the SAME checkoutData the card path sends — and never guesses', () => {

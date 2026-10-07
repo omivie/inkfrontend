@@ -1123,6 +1123,7 @@
                 customer_notes: this.checkoutData.orderNotes || '',
                 payment_method: 'stripe',
                 ...this.orderLevelPrinterSlug(items),
+                ...this.reminderConsentField(this.checkoutData),
                 idempotency_key: await this.getIdempotencyKey(idempotencyLabel),
                 gclid: typeof getGclid === 'function' ? getGclid() : null,
                 ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
@@ -1376,6 +1377,18 @@
                 : null;
             if (slug) line.printer_slug = slug;
             return line;
+        },
+
+        /**
+         * The `reminder_consent` spread for POST /api/orders (FE master checklist
+         * item 19), or `{}`. ONLY a literal true — the shopper ticked the unticked
+         * box on /checkout — sends it; the backend records consent for a literal
+         * true and nothing else, and we never send `false` (absent = not asked).
+         * ONE owner for both builders (Stripe + PayPal) so the rails cannot drift.
+         * The cart wallet's checkoutData has no such key ⇒ nothing is sent.
+         */
+        reminderConsentField(checkoutData) {
+            return checkoutData && checkoutData.reminderConsent === true ? { reminder_consent: true } : {};
         },
 
         /**
@@ -1660,6 +1673,7 @@
                         customer_notes: self.checkoutData.orderNotes || '',
                         payment_method: 'paypal',
                         ...self.orderLevelPrinterSlug(items),
+                        ...self.reminderConsentField(self.checkoutData),
                         idempotency_key: await self.getIdempotencyKey('paypal'),
                         gclid: typeof getGclid === 'function' ? getGclid() : null,
                         ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
