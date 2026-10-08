@@ -201,6 +201,44 @@ describing the same incident.
 
 ---
 
+## ERR-311 — Sorted by Margin % ascending, a 3.8% row sat among 10% rows: the backend sorts by gross margin, the cell shows net — **MITIGATED (frontend), backend ask open** (2026-10-07)
+
+**Seen.** `/admin#products`, 2026-10-07, no filters, Margin % ascending. `C-DYM-28MM-LBL-WH` ($4.50 / $3.40) showed **3.8%** between rows showing 10.3% and 10.6%.
+
+**Cause.** With no filters, a margin sort takes the backend leg, which sends `sort=margin_pct`. The backend orders rows by the stored GROSS column, with no card fee and no $0.30. `marginCell` shows `net_margin_incl_fixed_pct`. Gross for the three neighbouring rows is 13.05%, 13.1% and 13.2%, which is the correct order. On a $3.91 ex-GST price, the fixed $0.30 alone costs about 7.7 points. On a $1,746 item it costs nothing. So the two figures rank expensive rows the same way and cheap rows differently. Profit $ has the same split (`profit_ex_gst` vs `profit_incl_fixed_ex_gst`).
+
+**Second bug, found on the way.** The Supabase leg (pack, supplier or grouped type plus a margin sort) has its own client-side comparator. It read `margin_pct`/`profit_dollars` from `computeProfitability()`, which returns `marginPct`/`profitDollars`. Every value was `undefined ?? -Infinity`, so the comparator returned NaN and that sort did nothing.
+
+**Fix.**
+- `GROSS_SORT_NOTE` is now the `title` on the Margin % and Profit $ headers. `table.js` renders `col.title`, escaped.
+- `warnGrossSort()` shows the note as a toast on every backend-leg margin or profit sort.
+- The comparator now reads the camelCase keys. It still sorts only the fetched page of 100 (pre-existing).
+- Backend ask: `backend-docs/outbox/admin-products-net-margin-sort-oct2026.md` asks for `net_margin_incl_fixed_pct` and `profit_incl_fixed_ex_gst` as sort keys. When they exist, map both columns to them and delete the note.
+
+**Test.** `tests/admin-products-margin-sort-basis-oct2026.test.js` has 4 tests. Red-proofed: reverting the key fix fails test 4 with `computeProfitability() has no "profit_dollars"`. NOT verified in a live browser (needs an owner session).
+
+---
+
+## ERR-310 — The dashboard showed a −1.39% net margin as −139.0%, and "all time" refused the cash basis once the shop passed 200 orders — **RESOLVED (frontend)** (2026-10-07)
+
+**Seen.** `/admin#dashboard?period=all`, 2026-10-07: Revenue $31,500.69, Net Profit −$380.79, **Net Margin −139.0%**. Under the strip, a red note: *"Showing invoiced sales on the backend's accrual basis. Unpaid invoices could not be held out because only 200 of 217 orders in range were read."*
+
+**Cause 1 — `fmtPct` guessed the unit.** `fmtPct` (`js/admin/pages/dashboard.js`) multiplied any `|n| ≤ 1.5` by 100, on the theory that it might be handed a fraction. Every caller passes a percent: `marginOf` returns `profit / exGst × 100`, `invoice-cash-basis.js marginPct` does the same, and the backend's `margin_proxy`/`net_margin` are percents (ERR-111). −380.79 / (31,500.69 × 20/23) × 100 = −1.39, which the guard turned into −139.0%. Any margin between −1.5% and +1.5% was 100× too large, and a near-breakeven margin is the one the owner most needs to read. The trap was already known: `conversion-funnel-aug2026.test.js` §1 gave the funnel its own formatter to avoid it, but the dashboard's own tiles kept it.
+
+**Cause 2 — one page of orders.** The cash basis (ERR-197) must see every INV- shadow order in range, so slot 15 of `loadDashboard` fetched `getOrders({from,to}, 1, 200)`. When "all time" grew to 217 orders, `buildCashBasis` check #3 correctly refused and printed the red note. The refusal was right; the fetch was too small.
+
+**Fix.**
+- `fmtPct` no longer rescales. It prints the number it is given.
+- New `getAllOrdersInRange(from, to, signal)` reads 200-row pages **oldest-first** until `pagination.total`, capped at 10 pages. Oldest-first means an order placed between page reads appends at the end and does not shift a row into a page already read. A failed or empty page stops the loop and returns the short list with the original `total`, so check #3 still refuses LOUDLY instead of deducting from a partial list. A failed page 1 still returns `null`.
+- `APP_VERSION` bumped to `2026.10.08-margin-sort-net-err310-311` (the first bump was overwritten by the ERR-313 commit before this shipped); `app.js?v=` restamped to md5. The ERR-313 test that pinned its exact token now accepts any token dated on or after 2026-10-08.
+- Two tests pinned `APP_VERSION` to months `0[6-9]` and went red as soon as an October token shipped. They now accept `0[6-9]|1[0-2]`.
+
+**Not measured.** The live dashboard was not reloaded after the fix (needs an owner session). After deploy, check that "all" shows Net Margin ≈ −1.4% and that the red note is either gone or replaced by the blue cash-basis note. If the reconciliation (check #4) then refuses, that reason is new information, not this bug.
+
+**Guard.** `tests/dashboard-margin-and-cash-basis-pages-oct2026.test.js` (6 tests). Red-proofed: all 6 fail against HEAD `dashboard.js`.
+
+**Lesson.** A formatter that guesses its input's unit is right only until a real value lands in the guessed range. Fix the unit at the source and keep the formatter dumb.
+
 ## ERR-309 — A genuine product page never showed the compatible we sell, the PDP's reward points rendered a screen below the price, and the cart let + walk past the stock and then called the refusal a "Network error" — **RESOLVED (frontend)** (2026-10-06)
 
 **Source.** `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, re-issued again on 6 Oct (afternoon) with "Status after the live check of the FE deploy" and two new items, 16 and 17. Answered by `backend-docs/outbox/fe-6oct-combined-FE-reply-oct2026.md`. The work was split by file with the ERR-308 session (backend's answer to our eight replies). That session owned `cart-wallet.js`, `payment-page.js`, `PrinterName` and the `GuestCartEmail` hunk in `cart.js`; this one owned the rest of the checklist.

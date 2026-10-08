@@ -191,6 +191,7 @@ function buildColumns() {
     cols.push({
       key: 'margin_pct', label: 'Margin %', sortable: true, className: 'col-w-pct',
       gst: GST_BASE,
+      title: GROSS_SORT_NOTE,
       render: (r) => marginCell(r),
       align: 'right',
     });
@@ -202,6 +203,7 @@ function buildColumns() {
       // Stripe-fee convention (ERR-114, unsettled) — the label makes no claim
       // about the fee, only about the GST basis, which is the same either way.
       gst: GST_EXCL,
+      title: GROSS_SORT_NOTE,
       render: (r) => {
         // Prefer the backend's $0.30-inclusive profit; fall back to local compute
         // on the Supabase fast-path (which doesn't carry the server fields).
@@ -285,6 +287,13 @@ function buildColumns() {
 
   return cols;
 }
+
+// The backend's `margin_pct` / `profit_ex_gst` sort keys are the stored GROSS
+// columns (no card fee, no $0.30), while the cells show the net figures. On a
+// cheap item the $0.30 alone is several points, so a $4.50 Dymo label (gross
+// 13.1%, shown 3.8%) sorts among the ~10% rows (ERR-311). Until the backend
+// sorts by the displayed keys, say so — on the header and on every such sort.
+const GROSS_SORT_NOTE = 'Sorts by gross margin before fees. Figures shown include card fees and the $0.30 per-order fee, so cheap items can appear out of order.';
 
 // ─── Margin % cell (read-only) ────────────────────────────────────────────────
 // The Margin % column shows the backend's $0.30-inclusive net margin
@@ -845,6 +854,11 @@ function warnLostToBackend() {
   }
 }
 
+/** Backend leg only: its margin/profit order is GROSS, the cells are net (ERR-311). */
+function warnGrossSort() {
+  if (_sort === 'margin_pct' || _sort === 'profit_ex_gst') Toast.info(GROSS_SORT_NOTE);
+}
+
 /**
  * `/api/admin/products` returns `{ products: [...] }` and NO pagination block
  * (measured 2026-09-06, `npm run probe:admin-products`). The old
@@ -884,6 +898,7 @@ async function loadProducts() {
   const needsBackend = isMarginSort || !!_imageFilter || !!_stockFilter;
   if (needsBackend) {
     warnLostToBackend();
+    warnGrossSort();
     const data = await AdminAPI.getProducts(backendProductFilters(), _page, LIMIT);
     if (!_table) return;
     if (!data) { _table.setData([], null); return; }
@@ -985,7 +1000,10 @@ async function loadProducts() {
         sortedRows = [...sortedRows].sort((a, b) => {
           const ap = computeProfitability(a);
           const bp = computeProfitability(b);
-          const key = _sort === 'profit_ex_gst' ? 'profit_dollars' : 'margin_pct';
+          // computeProfitability returns camelCase — the old snake_case keys
+          // were always undefined, so every row compared as -Infinity and
+          // this sort did nothing (ERR-311).
+          const key = _sort === 'profit_ex_gst' ? 'profitDollars' : 'marginPct';
           const av = ap?.[key] ?? -Infinity;
           const bv = bp?.[key] ?? -Infinity;
           return (av - bv) * dir;

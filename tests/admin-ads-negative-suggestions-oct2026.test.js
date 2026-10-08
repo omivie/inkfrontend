@@ -99,7 +99,7 @@ test('nav: owner-only Marketing entry; APP_VERSION moved off the previous token'
     assert.match(APP, /\{ key: 'ads-negatives', label: 'Negative Keywords', icon: 'search', ownerOnly: true \}/);
     const marketing = APP.slice(APP.indexOf("{ section: 'Marketing' }"));
     assert.ok(marketing.indexOf("key: 'ads-negatives'") < marketing.indexOf('{ section:', 10), 'sits inside the Marketing section');
-    assert.match(APP, /const APP_VERSION = '2026\.10\.08-ads-negatives-err313';/);
+    assert.match(APP, /const APP_VERSION = '2026\.10\.(0[89]|[12]\d|3[01])-[a-z0-9-]+';/, 'APP_VERSION bumped on or after the ERR-313 deploy');
 });
 
 test('api: the three exact endpoints; reads THROW (empty ≠ failed); writes go through invoiceError', () => {

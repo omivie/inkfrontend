@@ -1316,7 +1316,7 @@ async function runDashboardLoad(mySeq) {
     // whose cash has not arrived. See utils/invoice-cash-basis.js for why the join
     // is needed and why `issue_date` is the wrong date to bucket on.
     AdminAPI.listInvoices({}, 1, 100),                        // 14  invoice status
-    AdminAPI.getOrders({ from, to }, 1, 200, signal),          // 15  INV- shadow orders in range
+    getAllOrdersInRange(from, to, signal),                     // 15  INV- shadow orders in range (all pages, ERR-310)
   ];
 
   const results = await Promise.allSettled(promises);
@@ -2048,14 +2048,37 @@ function renderKpiTile(t, extraClass = '', noDelta = false) {
   return h;
 }
 
-// Format a backend margin field as a percent. Margins arrive as percentages (e.g. 33.2);
-// guard the rare fraction shape (≤1.5 → ×100) so 0.33 doesn't render as "0.3%".
+// Format a margin as a percent. Every caller passes a PERCENT (e.g. 33.2). There used to be a
+// "fraction guard" here (|n| ≤ 1.5 → ×100); it cannot tell 0.33 from a real 0.33%, and live
+// 2026-10-07 it rendered a −1.39% net margin as −139.0% (ERR-310). A near-breakeven margin
+// is exactly the one the owner most needs to read correctly.
 function fmtPct(v) {
   if (v == null) return null;
-  let n = Number(v);
+  const n = Number(v);
   if (!Number.isFinite(n)) return null;
-  if (Math.abs(n) <= 1.5) n *= 100;
   return `${n.toFixed(1)}%`;
+}
+
+// Every order in the range, for the cash basis (ERR-310). One 200-row page left "all time"
+// (217 orders) refused with "only 200 of 217 orders in range were read". Oldest-first so an
+// order placed between page reads appends at the end instead of shifting a row into a page
+// already read. A failed or short page just stops: buildCashBasis's count check then refuses
+// LOUDLY rather than deducting from a partial list.
+async function getAllOrdersInRange(from, to, signal) {
+  const filters = { from, to, sort: 'created_at', order: 'asc' };
+  const first = await AdminAPI.getOrders(filters, 1, 200, signal);
+  const list = (d) => Array.isArray(d) ? d : (d?.orders || d?.items || null);
+  const rows = list(first);
+  const total = Number(first?.pagination?.total ?? first?.total);
+  if (!rows || !(total > rows.length)) return first;
+  // ponytail: 10-page cap (2,000 orders); past that the refusal fires — page the backend's
+  // invoice-orders instead if the shop outgrows it.
+  for (let page = 2; rows.length < total && page <= 10; page++) {
+    const next = list(await AdminAPI.getOrders(filters, page, 200, signal));
+    if (!next?.length) break;
+    rows.push(...next);
+  }
+  return Array.isArray(first) ? rows : { ...first, orders: rows };
 }
 
 /**

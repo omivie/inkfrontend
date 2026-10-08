@@ -130,7 +130,8 @@ class DataTable {
       // and drops to a second line. Escaped even though the inputs are frozen
       // constants — cheap, and it keeps the whole <th> render uniformly safe.
       const gstSub = col.gst ? `<span class="admin-th-sub">${esc(col.gst)}</span>` : '';
-      html += `<th class="${sortCls}${activeCls}${alignCls}${thExtra}" data-sort-key="${col.key || ''}">${esc(col.label)}${arrow}${gstSub}</th>`;
+      const thTitle = col.title ? ` title="${esc(col.title)}"` : '';
+      html += `<th class="${sortCls}${activeCls}${alignCls}${thExtra}" data-sort-key="${col.key || ''}"${thTitle}>${esc(col.label)}${arrow}${gstSub}</th>`;
     }
     html += '</tr></thead><tbody>';
 
