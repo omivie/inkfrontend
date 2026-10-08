@@ -50,7 +50,14 @@ That is below the screen at 1280×551, which matches your figure.
 
 **Ongoing check.** `npm run probe:fe-master-6oct` now measures all six titles at both sizes. It includes a negative control: when the wrapping breadcrumb is put back, Add measures 525–573, below the screen, and the check fails as it should.
 
-Production measurements will be added here after the deploy.
+**Production (www, after commit `a9c08373`, pushed 01:24:18 UTC 8 Oct; www served the new `layout.css` from 01:25:22 UTC).**
+- `probe:fe-master-6oct`, read-only: **53 passed, 0 failed.** Five sections were skipped because they need `--record`, which writes a guest cart. They were not run, and a skipped section does not count as a pass.
+  - All six long compatible titles, at both 1280×551 and 1366×599: breadcrumb 44 px, Add **471–519**, hit-testable.
+  - The negative control put the wrapping breadcrumb back: Add moved to 523–571, and the check failed as it should.
+  - GTN2030BK's compatible Add carries `data-id="f164e513-5131-46b4-8450-352ae3959bd1"`.
+- `probe:ad-visitor-dropoff --only=pdp`: **109 passed, 0 failed, 3 soft.**
+  - GGI690KCMY at 1280×551: Add at 500–548, fully on screen. It was 504–552 before.
+  - The three soft lines report that the fit promise ends below the first screen on short windows. The service row takes that space by design (ERR-306).
 
 ## `compatible_alternatives[].id`
 
