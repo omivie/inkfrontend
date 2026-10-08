@@ -59,6 +59,8 @@ describing the same incident.
   - the title clamps to two lines. `product-detail-page.js` sets `title=` to the full name. None of the six measured names needed the clamp; it is the next 31 px of safety.
   - `.product-info__actions--urgent` padding drops from 8 px to 4 px. **Second, separate bug found on the way:** GGI690KCMY (genuine 4-pack, "Only 4 left", Was/Save price wraps the points line) had Add at 504–552 on www at 1280x551, 1 px under the screen. It is now 500–548.
 
+**Production (www, `a9c08373`, live from 01:25 UTC 8 Oct).** `probe:fe-master-6oct`: 53 passed, 0 failed; all six titles at both sizes Add 471–519; the negative control (wrapping breadcrumb restored) put Add at 523–571 and failed as it should. `probe:ad-visitor-dropoff --only=pdp`: 109 passed, 0 failed, 3 soft; GGI690KCMY 500–548.
+
 **Measured after (local build, live API, 8 Oct).** All six long compatible SKUs at 1280x551 and 1366x599: breadcrumb 44 px, Add **471–519**, the same as a genuine page. Genuine pages (GTN2030BK, GLC3313BK, GLC3329XLBK) were unchanged at 471–519. CPG512BK moved from 464 to 440.
 
 **2. `compatible_alternatives[].id`.** The backend now sends the product UUID on every row (live 8 Oct: GTN2030BK → CTN2030BK `f164e513…`, G604BK → C604XLBK `23da2ecc…`).
