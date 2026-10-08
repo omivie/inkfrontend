@@ -15,7 +15,7 @@
 | `compatible_alternatives[].id` (your ask-2 build) | **Used.** Add goes straight to the cart. The SKU lookup is kept only for a row without `id`. |
 | 18: Negative keyword suggestions (admin) | **Done.** Owner-only page at `/admin#ads-negatives`. The live queue was empty when we checked. |
 | 19: reorder-reminder box on `/checkout` | **Done** (ERR-312). |
-| 20: cart wallet button with the page | **Done** (ERR-312). The full ready time with a server cart is still unmeasured. Details below. |
+| 20: cart wallet button with the page | **Done** (ERR-312). Placeholder visible at first paint; ready median 2830–2881 ms cold vs 3244 ms for the old build in the same hour. Details below. |
 | BF-095 (token-less apply) | **Re-measured, holds.** |
 
 ---
@@ -94,7 +94,14 @@ So no suggestion has been filed yet. We tested the populated table, the confirma
 - **Before the deploy** (www, `probe:cart-wallet-paint --record`, headless Chromium, 3 cold runs from NZ): the wallet reached ready at 6268, 5271 and 5381 ms (median 5381). The box was hidden when the cart painted.
 - **After the deploy** (5 cold runs): the "or pay instantly" divider and the 48 px placeholder were visible as soon as the cart painted, at 1138–1296 ms, in 5 of 5 runs.
 - On 3 cold runs, the ECE mounted at 1270–1296 ms and Stripe reported a wallet on the device at 3181–3723 ms. Before the fix, the same machine reached ready at 5271–6268 ms.
-- **Not yet measured:** the full ready time with a server total. The guest-session limit returned 429 on `POST /api/cart/items` with no session, so the server cart was empty. Every run therefore ended in `none`/`no-server-total`, which is not a wallet result. The probe now refuses to run when the cart line exists only locally.
+- **Full ready time, measured 8 Oct 03:00–03:20 UTC** (the guest-session limit had blocked the first attempt; `probe:cart-wallet-paint --record` now re-reads the server cart before it times anything):
+  - **Same-hour A/B on www, same network.** The probe served the OLD `cart-wallet.js` (`PROBE_WALLET_JS`) in some runs. The old build reached ready at a median of **3244 ms** (3129–3450), with the box hidden until then. The new build reached ready at a median of **2858 ms** (2720–3154) and showed the placeholder at paint (579–739 ms).
+  - A `<link rel="preload">` for Stripe.js in `cart.html` went live at 03:08:55 UTC (commit `e23f2f40`). After it, the medians were **2830 ms** (2626–3280, 5 runs) and **2881 ms** (2674–3107, 3 runs).
+  - **Where the time goes now:**
+    - Stripe.js loads and the ECE mounts at 560–760 ms, within 15–35 ms of the cart painting.
+    - Our server total is applied at 940–1740 ms.
+    - Stripe's own ECE `ready` (its iframes plus the device check) comes **about 2.0–2.2 s after mount**. That is the floor; no site-side change moves it.
+  - So the "~2 s" target is not reached on this machine. Our part takes ~0.6 s after paint, and Stripe's takes ~2.1 s. The old build measured 3244 ms here, close to your 3.3 s, so a ~0.4 s gain at the same scale should apply on your machine too. The visible placeholder means the shopper sees the option at about 0.6 s either way.
 
 **Item 19.**
 - On www, `/checkout` shows the box unticked, with the exact copy. Ticking it and reloading leaves it unticked.
