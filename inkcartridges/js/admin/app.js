@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.09.29-best-sellers-bf089';
+const APP_VERSION = '2026.10.08-ads-negatives-err313';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -171,6 +171,8 @@ const NAV_ITEMS = [
   { section: 'Marketing' },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
   { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
+  // Google Ads negative-keyword suggestions: nothing reaches Ads until the owner approves (item 18, ERR-313).
+  { key: 'ads-negatives', label: 'Negative Keywords', icon: 'search', ownerOnly: true },
 
   // Content — editing the words on the public information pages. This is a GUI over a
   // git commit (pages/page-copy.js writes html/*.html and opens a PR), NOT a CMS: the

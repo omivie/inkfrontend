@@ -2259,6 +2259,26 @@
         line-height: 44px;
     }
 }
+/* PDP, every width: ONE line too (ERR-313). On a 1280px laptop the trail
+   ended in "TN2030BK Compatible Toner Cartridge for Brother TN2030/TN2250
+   Black" and wrapped to three rows — 96px instead of 44px — which by itself
+   put Add to Cart 52px under the first screen of a 1280x551 window (backend
+   re-check 7 Oct). The current crumb repeats the H1 directly below it, so it
+   is the one that truncates; the links keep their size. */
+.breadcrumb--pdp .breadcrumb__list {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.breadcrumb--pdp .breadcrumb__item { flex: 0 0 auto; }
+.breadcrumb--pdp .breadcrumb__item--current {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    line-height: 44px;
+}
 
 .breadcrumb__link {
     color: var(--color-text-light);

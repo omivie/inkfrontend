@@ -17,9 +17,13 @@
  *       2026-09-29: two curls + one probe run exhausted it, retry-after
  *       84657s). Backend 2026-10-06 (BF-095): the limiter now runs AFTER
  *       sign-in, per user, and a token-less POST is refused 401 without
- *       spending anything. That is THEIR claim; the controls stay opt-in, and
- *       a run with them now also reports any ratelimit-* header on the 401
- *       (present ⇒ the limiter still ran first ⇒ the claim is false).
+ *       spending anything. CONFIRMED by the backend 2026-10-07 (ERR-313):
+ *       `requireAuth` runs before `businessLimiter` on both routes
+ *       (src/routes/business.js), their test sends 14 token-less POSTs ⇒ 14
+ *       × 401, 0 × 429, and a live POST answered 401 with only the global
+ *       per-minute headers. The controls stay opt-in (they are still POSTs to
+ *       production), and a run with them reports any 24h-window header on the
+ *       401 (present ⇒ the limiter ran first ⇒ the claim is false).
  *   §S  GET /api/business/status with no token = 401 (the control), and with
  *       --admin the owner's own status + can_apply are printed. `can_apply`
  *       absent FAILS since BF-095 (present on every branch); the page would
@@ -31,12 +35,12 @@
  *
  * MODE: READ-ONLY by default (GETs only). It NEVER posts a real application:
  * --post-controls sends token-less POSTs that the auth wall refuses (before
- * BF-095 they spent the 5/day/IP limiter; the backend says no longer). --admin adds one
+ * BF-095 they spent the 5/day/IP limiter; confirmed spent nothing since, 7 Oct). --admin adds one
  * Supabase sign-in and one GET.
  *
  *   npm run probe:business-apply
  *   npm run probe:business-apply -- --admin --browser
- *   npm run probe:business-apply -- --post-controls   (pre-BF-095 these spent 3 of 5 daily /apply slots)
+ *   npm run probe:business-apply -- --post-controls   (safe without a token since BF-095, backend-confirmed 7 Oct)
  *   PROBE_BASE=http://localhost:3000 npm run probe:business-apply -- --browser
  */
 import fs from 'node:fs';
@@ -58,9 +62,10 @@ const head = (t) => console.log(`\n\x1b[1m${t}\x1b[0m`);
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const POSTS = argv.has('--post-controls');
-console.log(`probe:business-apply — \x1b[33mMODE: READ-ONLY\x1b[0m (GET only; no application is ever submitted`
+const MODE = POSTS ? 'READ-ONLY + 3 TOKEN-LESS POSTs (refused 401)' : 'READ-ONLY';
+console.log(`probe:business-apply — \x1b[33mMODE: ${MODE}\x1b[0m (${POSTS ? 'GETs + the --post-controls POSTs' : 'GET only'}; no application is ever submitted`
     + `${argv.has('--admin') ? '; --admin: one sign-in + one GET' : ''})`);
-if (POSTS) console.log('  \x1b[31m--post-controls: 3 token-less POSTs. Refused 401; since BF-095 the backend says they spend NO limiter slot — any ratelimit-* header on the 401 says otherwise.\x1b[0m');
+if (POSTS) console.log('  \x1b[31m--post-controls: 3 token-less POSTs. Refused 401; since BF-095 they spend NO limiter slot (backend-confirmed 7 Oct: code, test, live) — a 24h-window header on the 401 would say otherwise.\x1b[0m');
 console.log(`API ${API}  SITE ${SITE}${argv.has('--browser') ? `  BASE ${BASE}` : ''}`);
 
 /** One request, waiting out a 429 (100 req/60s per IP, shared across endpoints — ERR-266). */
@@ -195,6 +200,6 @@ if (argv.has('--browser')) {
     await browser.close();
 }
 
-console.log(`\n  mode: READ-ONLY   passed: ${pass}   failed: ${fail}   soft: ${softs}   unmeasured: ${unmeasured}`
+console.log(`\n  mode: ${MODE}   passed: ${pass}   failed: ${fail}   soft: ${softs}   unmeasured: ${unmeasured}`
     + (unmeasured ? '  (UNMEASURED is not a pass)' : ''));
 process.exit(fail ? 1 : 0);

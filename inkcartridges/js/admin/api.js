@@ -5490,6 +5490,41 @@ const AdminAPI = {
   },
 
   // =========================================================================
+  // Admin — Google Ads negative-keyword suggestions (FE master checklist
+  // item 18, owner 7 Oct 2026, ERR-313). super_admin only. Automated jobs
+  // FILE suggestions; nothing reaches Google Ads until the owner approves one.
+  //
+  // `API.request()` RESOLVES 409 NOT_PENDING and a JSON 502 ADS_WRITE_FAILED
+  // as {ok:false, error:<string>, code}; `invoiceError()` turns either shape
+  // into an Error carrying `.code` and the backend's own message.
+  // =========================================================================
+  ads: {
+    // Throws: an empty queue and a failed read must not look the same.
+    async listNegativeSuggestions(status = 'pending') {
+      const qs = new URLSearchParams({ status });
+      const resp = await window.API.get(`/api/admin/ads/negative-suggestions?${qs}`);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not load negative keyword suggestions');
+      const rows = resp.data?.suggestions;
+      if (!Array.isArray(rows)) throw new Error('The server answered without a suggestions list');
+      return rows;
+    },
+
+    // THE ONLY CALL THAT WRITES A NEGATIVE KEYWORD TO GOOGLE ADS.
+    async approveNegativeSuggestion(id) {
+      const resp = await window.API.post(`/api/admin/ads/negative-suggestions/${encodeURIComponent(id)}/approve`, {});
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Approval failed');
+      return resp.data ?? null;
+    },
+
+    // Writes nothing to Google Ads; marks the suggestion rejected.
+    async rejectNegativeSuggestion(id) {
+      const resp = await window.API.post(`/api/admin/ads/negative-suggestions/${encodeURIComponent(id)}/reject`, {});
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Rejection failed');
+      return resp.data ?? null;
+    },
+  },
+
+  // =========================================================================
   // Admin — Control Center (May 2026 spec, src/routes/adminControlCenter.js)
   // 11 endpoints: super_admin only. See readfirst/control-center-may2026.md.
   //

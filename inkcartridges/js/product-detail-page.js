@@ -719,7 +719,11 @@
             }
 
             // Title and SKU
-            document.getElementById('product-title').textContent = info.displayName;
+            const titleEl = document.getElementById('product-title');
+            titleEl.textContent = info.displayName;
+            // A short laptop window clamps the title to two lines (pages.css,
+            // ERR-313); the tooltip keeps the full name one hover away.
+            titleEl.title = info.displayName;
             // "Model:" only on a genuine row. On a compatible row the
             // manufacturer_part_number is the SUPPLIER's own code (CTN2345BK →
             // "IBTN2345"), which names no printer and no OEM part (backend
@@ -1751,7 +1755,7 @@
                     .map((t) => `<span class="compat-alt__fact">${Security.escapeHtml(t)}</span>`).join('');
                 const action = a.in_stock === false
                     ? `<span class="compat-alt__oos">Out of stock</span>`
-                    : `<button type="button" class="btn btn--secondary compat-alt__add" data-compat-add data-sku="${Security.escapeAttr(a.sku)}" data-name="${Security.escapeAttr(name)}" data-price="${Security.escapeAttr(String(Number(a.retail_price)))}" data-image="${Security.escapeAttr(imgSrc && imgSrc !== '#' ? imgSrc : '')}" aria-label="Add ${Security.escapeAttr(name)} to cart" data-track="cta_click" data-track-cta="compatible_alternative_add" data-track-location="product_page">Add</button>`;
+                    : `<button type="button" class="btn btn--secondary compat-alt__add" data-compat-add${typeof a.id === 'string' && a.id ? ` data-id="${Security.escapeAttr(a.id)}"` : ''} data-sku="${Security.escapeAttr(a.sku)}" data-slug="${Security.escapeAttr(a.slug)}" data-name="${Security.escapeAttr(name)}" data-price="${Security.escapeAttr(String(Number(a.retail_price)))}" data-image="${Security.escapeAttr(imgSrc && imgSrc !== '#' ? imgSrc : '')}" aria-label="Add ${Security.escapeAttr(name)} to cart" data-track="cta_click" data-track-cta="compatible_alternative_add" data-track-location="product_page">Add</button>`;
                 return `<li class="compat-alt__item" data-sku="${Security.escapeAttr(a.sku)}">`
                     + img
                     + `<span class="compat-alt__copy">`
@@ -1798,10 +1802,19 @@
         },
 
         /**
-         * Add one alternative. The row carries no product `id`, so it is
-         * resolved by SKU first (GET /api/products/:sku — the same lookup the
-         * /cart?add= deep link uses). A miss is said OUT LOUD, never a silent
-         * dead button.
+         * Add one alternative. Since the backend's 7 Oct reply (ERR-313) each
+         * row carries the product `id`, so the line goes straight to
+         * Cart.addItem from the button's own data — no lookup on the click.
+         * A row WITHOUT `id` (GET /api/products/:sku is edge-cached for up to
+         * 5 minutes, so a pre-deploy copy can still arrive) is resolved by SKU
+         * first, the same lookup the /cart?add= deep link uses. A miss is said
+         * OUT LOUD, never a silent dead button.
+         *
+         * The row has no `stock_quantity`. The id path therefore adds the line
+         * with stock ABSENT (unknown, never 0 — addItem keeps it only when
+         * finite) and addItem's own loadFromServer() fills it from the server
+         * cart's `product.stock_quantity`, which is where every later cap reads
+         * it (maxQuantityFor). Quantity 1 cannot exceed stock on an in-stock row.
          */
         async addCompatibleAlternative(btn) {
             if (!btn || btn.disabled) return;
@@ -1810,6 +1823,21 @@
             btn.textContent = 'Adding\u2026';
             const reset = (text) => { btn.textContent = text; setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, text === 'Add' ? 0 : 1500); };
             try {
+                const id = btn.dataset.id;
+                if (id && typeof Cart !== 'undefined') {
+                    const result = await Cart.addItem({
+                        id,
+                        name: btn.dataset.name || sku,
+                        price: Number(btn.dataset.price) || 0,
+                        sku,
+                        image: btn.dataset.image || '',
+                        quantity: 1,
+                        product_source: 'compatible',
+                        slug: btn.dataset.slug || ''
+                    });
+                    reset(result && result.ok === false ? 'Add' : 'Added!');
+                    return;
+                }
                 const res = (typeof API !== 'undefined') ? await API.getProduct(sku) : null;
                 const d = res && res.ok && res.data ? res.data : null;
                 if (!d || !d.id || typeof Cart === 'undefined') {

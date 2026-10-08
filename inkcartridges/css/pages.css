@@ -14305,7 +14305,41 @@ body.page-shop {
     .product-info__pricing { margin-top: 2px; }
     .product-info__actions { margin-top: 4px; }
     .product-info__actions .btn { min-height: 44px; }
+    /* Low stock outlines the buy box (components.css, 8px padding). With a
+       Was/Save price the points line wraps too, and GGI690KCMY ("Only 4
+       left") had Add at 504-552 on 551 — 1px under the screen (ERR-313). */
+    .product-info__actions--urgent { padding: 4px 8px; }
     .product-promise { margin-top: 2px; }
+    /* ERR-313 (backend re-check 7 Oct): a COMPATIBLE page had Add at y 548-596
+       on 1280x551, ~77px lower than a genuine page. 52px of it was the
+       breadcrumb wrapping (layout.css, fixed there); 24px was the compliance
+       line and the fit line on two rows. They share one row when they fit and
+       wrap back to two when they do not — nothing is hidden. */
+    .product-headline:not([hidden]) {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        column-gap: 12px;
+        row-gap: 2px;
+    }
+    /* A flex item's margin no longer collapses into the strip's own 4px, so
+       the lines drop theirs (row-gap spaces a wrapped row) — otherwise every
+       GENUINE page would pay 2px for a fix it does not need. */
+    .product-headline__line { margin-top: 0; }
+    .product-headline__line + .product-headline__line:not([hidden]) {
+        padding-left: 12px;
+        border-left: 1px solid var(--color-border);
+    }
+    .product-headline__line[hidden] + .product-headline__line { padding-left: 0; border-left: 0; }
+    /* A third title line is the next 31px. Two lines, the full name in the
+       tooltip (product-detail-page.js sets title=) and in the breadcrumb. */
+    .product-info__title {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        overflow: hidden;
+    }
 }
 
 

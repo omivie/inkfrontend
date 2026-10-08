@@ -14,6 +14,12 @@
  *        CTN2030BK $24.49 under Add; G604BK ⇒ "XL — higher capacity";
  *        G924CMY and the compatible CTN2030BK ⇒ no box; Add stays on the
  *        first screen.                                                   READ-ONLY
+ *   §16a every compatible Add on GTN2030BK carries a UUID data-id (backend
+ *        7 Oct: rows now ship `id`, ERR-313).                            READ-ONLY
+ *   §16b the six longest-named compatible PDPs at 1280x551 / 1366x599: the
+ *        breadcrumb is one row and Add is hit-testable on the first screen
+ *        (backend 7 Oct: CTN2030BK Add at y 548-596). Negative control: the
+ *        wrapping breadcrumb restored MUST push Add off the screen.      READ-ONLY
  *   §17  /cart GDK11203WH (v2 item 17): 12 clicks of + stop at the live
  *        stock with + disabled and "Only N in stock"; typing 28 becomes N;
  *        zero PUT /api/cart/items answered 400. Also: the cart wallet (item 2,
@@ -189,6 +195,56 @@ for (const c of compatCases) {
             check(`${c.sku}: no "save" / % wording`, !/\bsav(e|es|ing|ings)\b|%|same quality|as good as/i.test(m.text));
         }
         check(`${c.sku} ${vpName}: Add to Cart hit-testable on the first screen`, g.addHit, `Add y ${g.add}`);
+        await ctx.close();
+        await pace();
+    }
+}
+
+// ═══ §16a the compatible row carries its product id (READ-ONLY) ═════════════
+// Backend 7 Oct (ERR-313): every compatible_alternatives row has `id`, so Add
+// goes straight to the cart. The button must carry it; nothing is clicked.
+head('§16a "Our compatible version" Add carries the product id (READ-ONLY)');
+{
+    const { ctx, page, limited } = await newPage({ width: 1366, height: 599 });
+    await page.goto(`${BASE}/p/GTN2030BK`, { waitUntil: 'load' });
+    const ids = await page.waitForFunction(() => {
+        const b = [...document.querySelectorAll('#compatible-alternatives [data-compat-add]')];
+        return b.length ? b.map((x) => x.dataset.id || null) : null;
+    }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
+    if (limited.length) bad('GTN2030BK: NOT MEASURED', `429 on ${limited[0]}`);
+    else check('GTN2030BK: every compatible Add has a UUID data-id', Array.isArray(ids) && ids.every((id) => /^[0-9a-f-]{36}$/.test(id || '')), JSON.stringify(ids));
+    await ctx.close();
+    await pace();
+}
+
+// ═══ §16b compatible PDP: Add on the first screen (READ-ONLY) ════════════════
+// Backend 7 Oct: CTN2030BK at 1280x551 had Add at y 548-596 — the long name
+// wrapped the breadcrumb to three rows (+52px) and the compliance + fit lines
+// took two rows (+24px). The six longest-named compatible SKUs measured 8 Oct.
+head('§16b compatible PDP: long titles keep Add on the first screen (READ-ONLY)');
+const LONG_COMPAT = ['CTN2030BK', 'CCART318M', 'CCWAA0759BK', 'CTN258XLKCMY', 'CB412DNBK-2', 'CC332M'];
+for (const vp of [{ width: 1280, height: 551 }, { width: 1366, height: 599 }]) {
+    for (const sku of LONG_COMPAT) {
+        const { ctx, page, limited } = await newPage(vp);
+        await page.goto(`${BASE}/p/${sku}`, { waitUntil: 'load' });
+        await page.waitForFunction(() => /\$/.test(document.getElementById('product-price')?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(1500);
+        const vpName = `${vp.width}x${vp.height}`;
+        const crumbs = await page.evaluate(() => Math.round(document.querySelector('.breadcrumb--pdp')?.getBoundingClientRect().height || 0));
+        const g = await pdpGeometry(page);
+        if (limited.length) bad(`${sku} ${vpName}: NOT MEASURED`, `429 on ${limited[0]}`);
+        else {
+            check(`${sku} ${vpName}: breadcrumb is one row`, crumbs > 0 && crumbs <= 48, `${crumbs}px`);
+            check(`${sku} ${vpName}: Add to Cart hit-testable on the first screen`, g.addHit, `Add y ${g.add}`);
+            if (sku === 'CTN2030BK' && vp.width === 1280) {
+                // NEGATIVE CONTROL: put the wrapping breadcrumb back. Add must
+                // then FAIL the same check, or the check cannot see this bug.
+                await page.addStyleTag({ content: '.breadcrumb--pdp .breadcrumb__list{flex-wrap:wrap!important;white-space:normal!important}.breadcrumb--pdp .breadcrumb__item--current{display:flex!important}' });
+                await page.waitForTimeout(200);
+                const neg = await pdpGeometry(page);
+                check('NEGATIVE CONTROL: a wrapping breadcrumb pushes Add off the first screen', !neg.addHit, `Add y ${neg.add}`);
+            }
+        }
         await ctx.close();
         await pace();
     }

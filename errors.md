@@ -41,6 +41,54 @@ describing the same incident.
 
 ---
 
+## ERR-313 — A long compatible product name put Add to Cart under the first screen of a 1280x551 laptop, and the "Our compatible version" Add still looked its product up on every click — **RESOLVED (frontend)** (2026-10-08)
+
+**Source.** The backend's 7 Oct answer to our 6 Oct combined reply (`backend-docs/inbox/fe-6oct-combined-reply-backend-response-oct2026.md`) and the re-issued `FE-MASTER-CHECKLIST-oct2026` (8 Oct), item 18. Split by file with a peer session, which owns items 19 and 20 (ERR-312).
+
+**1. Compatible PDP fold. Seen.** Backend, 7 Oct: CTN2030BK at 1280x551 had Add at y 548–596 (viewport 551), about 77 px lower than a genuine page. They asked us to measure several long compatible titles. We measured the six longest-named compatible SKUs from a paced catalogue read (CTN2030BK, CCART318M, CCWAA0759BK, CTN258XLKCMY, CB412DNBK-2, CC332M) on www, 8 Oct, at 1280x551 and 1366x599. All six were identical: breadcrumb 187–283, title 314–376, headline 380–427, Add **548–596**. That fails at 1280x551 and only just passes at 1366x599.
+
+**Cause (measured, not inferred).**
+- **+52 px:** the PDP breadcrumb ends in the full product name, and it wrapped to three rows (96 px against 44). The one-line truncation rule existed only below 768 px.
+- **+24 px:** a compatible page shows two headline lines ("Compatible — not made by Brother" and "Fits: …") on two rows. A genuine page shows only the fit line.
+
+**Fix (CSS only).**
+- `css/layout.css`: the PDP breadcrumb is one row at every width, and the current crumb (which repeats the H1 directly below it) truncates with an ellipsis.
+- `css/pages.css`, short-window block `(min-width: 1100px) and (max-height: 620px)`:
+  - the headline becomes one wrapping flex row, so compliance and fit share a row when they fit. Nothing is hidden.
+  - its lines drop their 2 px top margin. A flex item's margin no longer collapses into the strip's 4 px, and the first cut moved every GENUINE page 2 px down (471→473). That was caught by measurement and fixed.
+  - the title clamps to two lines. `product-detail-page.js` sets `title=` to the full name. None of the six measured names needed the clamp; it is the next 31 px of safety.
+  - `.product-info__actions--urgent` padding drops from 8 px to 4 px. **Second, separate bug found on the way:** GGI690KCMY (genuine 4-pack, "Only 4 left", Was/Save price wraps the points line) had Add at 504–552 on www at 1280x551, 1 px under the screen. It is now 500–548.
+
+**Measured after (local build, live API, 8 Oct).** All six long compatible SKUs at 1280x551 and 1366x599: breadcrumb 44 px, Add **471–519**, the same as a genuine page. Genuine pages (GTN2030BK, GLC3313BK, GLC3329XLBK) were unchanged at 471–519. CPG512BK moved from 464 to 440.
+
+**2. `compatible_alternatives[].id`.** The backend now sends the product UUID on every row (live 8 Oct: GTN2030BK → CTN2030BK `f164e513…`, G604BK → C604XLBK `23da2ecc…`).
+- `compatibleAlternativesHtml` puts `data-id` (string ids only, escaped) and `data-slug` on Add.
+- `addCompatibleAlternative` adds straight from the row with no `GET /api/products/:sku`.
+- A row without `id` (the product read is edge-cached for up to 5 minutes) still takes the SKU lookup.
+- The row carries no `stock_quantity`, so the id path leaves it ABSENT (unknown, never 0). `addItem`'s own `loadFromServer()` fills it from the server cart's `product.stock_quantity`, which is where `maxQuantityFor` reads it.
+
+**3. Item 18, Negative keyword suggestions (admin).** The owner's rule: nothing reaches Google Ads without approval.
+- New `js/admin/pages/ads-negatives.js` (owner-only `NAV_ITEMS` entry under Marketing, `APP_VERSION` bumped).
+- `AdminAPI.ads.{listNegativeSuggestions, approveNegativeSuggestion, rejectNegativeSuggestion}`. The read THROWS, so a failed read renders a loud error card with Retry and never "No suggestions".
+- Approve and Reject appear on pending rows only, with no bulk approve. Approve goes through a confirm that names the keyword, match type and target.
+- 409 `NOT_PENDING` shows "Already decided…". 502 `ADS_WRITE_FAILED` shows Google's reason and says the row is now failed. Every outcome re-reads the list.
+- Evidence is printed key by key as the server sent it: no unit is guessed (ERR-310), and absent is shown as an em dash, never 0.
+- **Live, 8 Oct, owner login, GET only:** pending and all both returned `200 {suggestions:[], count:0}`, so the queue is empty. The populated table, the confirm and the 409 toast were checked against `ctx.route` fixtures (UI only).
+- Approve and Reject were never sent for real: Approve writes to Google Ads.
+
+**Probes.**
+- `probe:fe-master-6oct` gained §16a (data-id is a UUID on GTN2030BK) and §16b (six long compatible SKUs × two viewports). §16b has a negative control: the wrapping breadcrumb is put back and must push Add off the screen (measured 525–573, red as it should be).
+- `probe:ad-visitor-dropoff`: its "fit promise directly under Add" check had been RED on www at every viewport since ERR-306 put the service row directly under Add on purpose. It now anchors on the service row when one is shown. "Below the first screen" is a SOFT line, because ERR-306 spent that room knowingly.
+- `probe:business-apply`: BF-095 is confirmed by the backend (code, test, live). The banner now prints the real mode when `--post-controls` runs. Re-measured 8 Oct: /apply 401, /reapply 401, no 24 h policy header, unknown route 404.
+
+**Tests.**
+- `tests/compat-pdp-fold-oct2026.test.js` (3, red against HEAD CSS 2/3).
+- `tests/fe-master-checklist-v2-oct2026.test.js` §16 (+2 id-path cases, red against HEAD JS).
+- `tests/admin-ads-negative-suggestions-oct2026.test.js` (9). It loads the real module with stubbed imports, and 7 of 7 mutations went red.
+- `tier-multiplier-approval-sep2026` guard: "one `/approve` call site" is now scoped to the pricing route.
+
+**Lesson.** When a fix touches a shared layout block, re-measure the pages the bug did NOT affect. The flex change was correct for compatible pages and silently cost every genuine page 2 px. On a viewport where one page already had 0 px spare, that is the difference between hit and miss.
+
 ## ERR-312 — The cart's "Pay instantly" button popped in 3–6 s after the page, and nothing on /checkout asked a buyer for permission to send reorder reminders — **RESOLVED (frontend)** (2026-10-08)
 
 **Source.** The backend's re-issue of `FE-MASTER-CHECKLIST-oct2026` (8 Oct), items 19 and 20. The work was split by file with a peer session, which owns item 18 (the admin negative-keyword page), the compatible-PDP fold, `compatible_alternatives[].id` and the outbox reply. This entry covers 19 and 20 only.

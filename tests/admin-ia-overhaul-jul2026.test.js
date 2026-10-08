@@ -47,6 +47,8 @@ const OWNER_PAGES = [
   // formerly nav-hidden but reachable by direct hash without the central stub:
   'promotions', 'analytics', 'price-monitor', 'genuine-image-audit',
   'pending-changes', 'segments', 'abuse', 'recovery',
+  // ERR-313, item 18:
+  'ads-negatives',
 ];
 
 test('§1 sidebar uses the business-workflow section headers', () => {

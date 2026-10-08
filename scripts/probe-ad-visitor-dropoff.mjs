@@ -14,8 +14,12 @@
  *        - its rect intersects neither the consent banner nor #google-reviews-badge,
  *        - document.elementFromPoint at its centre AND four inset corners
  *          returns the button (the handoff's own second condition),
- *        - the fit promise (#product-promise) starts directly under Add and is
- *          on screen,
+ *        - the fit promise (#product-promise) starts directly under Add — or,
+ *          since ERR-306 put the service row DIRECTLY under Add on purpose
+ *          (owner, checklist item 5), directly under that row. Whether it is
+ *          also on the first screen is a SOFT line: ERR-306 spent that room on
+ *          the service row knowingly (ERR-313 re-anchored this check; it had
+ *          been red on www at every viewport since 2026-10-05),
  *        - desktop card mode: banner bottom-left, ≤ 400px wide, badge NOT lifted,
  *        - CLS (layout-shift, hadRecentInput excluded).
  *      The handoff's literal `Add.bottom <= banner.top` is printed as INFO: with
@@ -135,6 +139,7 @@ function MEASURE_PDP() {
     const banner = document.querySelector('.consent-banner.is-open');
     const badge = document.getElementById('google-reviews-badge');
     const promise = document.querySelector('#product-promise:not([hidden]) .product-promise__label');
+    const serviceRow = document.querySelector('#product-service-row:not([hidden])');
     const a = r(add);
     const hits = [];
     if (a) {
@@ -147,7 +152,7 @@ function MEASURE_PDP() {
     return {
         vh: innerHeight, vw: innerWidth,
         title: document.getElementById('product-title')?.textContent.trim().slice(0, 60),
-        add: a, banner: r(banner), badge: r(badge), promise: r(promise),
+        add: a, banner: r(banner), badge: r(badge), promise: r(promise), serviceRow: r(serviceRow),
         promiseText: promise ? promise.textContent.trim() : null,
         badgeBottom: badge ? getComputedStyle(badge).bottom : null,
         hits, cls: +(window.__cls || 0).toFixed(3),
@@ -243,9 +248,14 @@ try {
                 check(`${tag}: Add fully inside the ${m.vh}px viewport`, inside, `bottom ${Math.round(a.bottom)}`);
                 check(`${tag}: nothing fixed overlaps Add (consent, badge)`, clear);
                 check(`${tag}: elementFromPoint returns Add at centre + 4 corners`, hitOk, m.hits.join(','));
-                check(`${tag}: fit promise directly under Add and on screen`,
-                    !!m.promise && m.promise.top >= a.bottom && m.promise.top - a.bottom <= 24 && m.promise.bottom <= m.vh,
-                    m.promise ? `"${m.promiseText}" at ${Math.round(m.promise.top)}–${Math.round(m.promise.bottom)}` : 'no #product-promise label');
+                // Anchor = the service row when it is shown (ERR-306 puts it
+                // directly under Add), else Add itself.
+                const anchor = m.serviceRow && m.serviceRow.top >= a.bottom ? m.serviceRow : a;
+                const anchorName = anchor === a ? 'Add' : 'the service row';
+                check(`${tag}: fit promise directly under ${anchorName}`,
+                    !!m.promise && m.promise.top >= anchor.bottom && m.promise.top - anchor.bottom <= 24,
+                    m.promise ? `"${m.promiseText}" at ${Math.round(m.promise.top)}–${Math.round(m.promise.bottom)}, ${anchorName} ends ${Math.round(anchor.bottom)}` : 'no #product-promise label');
+                if (m.promise && m.promise.bottom > m.vh) soft(`${tag}: fit promise below the first screen`, `ends ${Math.round(m.promise.bottom)} of ${m.vh} — the service row holds that room (ERR-306)`);
                 if (!m.banner) soft(`${tag}: consent banner open`, 'not open — a first visit should show it; was consent already stored?');
                 else if (vp.width >= 1100) {
                     check(`${tag}: consent is a bottom-left card (≤ 400px wide, left ≤ 24)`,

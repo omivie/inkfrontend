@@ -431,12 +431,52 @@ test('§16 the section sits UNDER Add and the fit line, above the terms; Add res
     const pdp = stripComments(read(PDP));
     assert.match(pdp, /this\.renderPromise\(info\);\s*this\.renderCompatibleAlternatives\(info\);/);
     const add = extractMethod(read(PDP), 'addCompatibleAlternative').body;
+    // ERR-313: the row's own id first; the SKU lookup stays as the fallback
+    // for a pre-deploy (edge-cached, ≤5 min) row without one.
+    assert.match(add, /const id = btn\.dataset\.id;\s*if \(id && typeof Cart !== 'undefined'\) \{/);
+    assert.ok(add.indexOf('btn.dataset.id') < add.indexOf('API.getProduct'), 'id path runs before the lookup');
     assert.match(add, /await API\.getProduct\(sku\)/);
     assert.match(add, /if \(!d \|\| !d\.id \|\| typeof Cart === 'undefined'\) \{\s*if \(typeof showToast === 'function'\) showToast\(/);
     assert.match(add, /product_source: d\.source \|\| 'compatible'/);
 });
 
-test('§16 Add: SKU resolved to an id, added once; a lookup miss toasts and resets', async () => {
+test('§16 ERR-313: a row WITH id puts data-id on Add; a row without id does not', () => {
+    const ID = 'f164e513-5131-46b4-8450-352ae3959bd1';
+    const withId = pdpSelf().compatibleAlternativesHtml({ source: 'genuine', yield_tier: 'STD', compatible_alternatives: [{ ...CTN2030BK, id: ID }] });
+    assert.match(withId, new RegExp(`data-compat-add data-id="${ID}" data-sku="CTN2030BK" data-slug="tn2030bk-compatible-toner-cartridge-for-brother-tn2030tn2250-black"`));
+    const noId = pdpSelf().compatibleAlternativesHtml({ source: 'genuine', yield_tier: 'STD', compatible_alternatives: [CTN2030BK] });
+    assert.doesNotMatch(noId, /data-id=/);
+    const hostile = pdpSelf().compatibleAlternativesHtml({ source: 'genuine', yield_tier: 'STD', compatible_alternatives: [{ ...CTN2030BK, id: '"><img src=x onerror=1>' }] });
+    assert.doesNotMatch(hostile, /<img src=x/);
+    const notString = pdpSelf().compatibleAlternativesHtml({ source: 'genuine', yield_tier: 'STD', compatible_alternatives: [{ ...CTN2030BK, id: 42 }] });
+    assert.doesNotMatch(notString, /data-id=/);
+});
+
+test('§16 ERR-313 Add with an id: no lookup, one addItem straight from the row, stock left ABSENT (never 0)', async () => {
+    const added = [];
+    let lookups = 0;
+    const btn = { dataset: { id: 'f164e513', sku: 'CTN2030BK', slug: 'tn2030bk-x', name: 'TN2030BK Compatible', price: '24.49', image: 'https://x/ctn.png' }, disabled: false, textContent: 'Add' };
+    const globals = {
+        API: { getProduct: async () => { lookups++; return { ok: false }; } },
+        Cart: { addItem: async (p) => { added.push(p); return { ok: true }; } },
+        showToast() {}, DebugLog: { warn() {} },
+    };
+    await method(PDP, 'addCompatibleAlternative', {}, globals)(btn);
+    assert.equal(lookups, 0);
+    assert.equal(added.length, 1);
+    assert.deepEqual({ ...added[0] }, { id: 'f164e513', name: 'TN2030BK Compatible', price: 24.49, sku: 'CTN2030BK', image: 'https://x/ctn.png', quantity: 1, product_source: 'compatible', slug: 'tn2030bk-x' });
+    assert.ok(!('stock_quantity' in added[0]), 'absent = unknown; the server cart fills it');
+    assert.equal(btn.textContent, 'Added!');
+
+    // A refusal (addItem rolls back + toasts itself) resets the button.
+    const btn2 = { dataset: { id: 'f164e513', sku: 'CTN2030BK', price: '24.49' }, disabled: false, textContent: 'Add' };
+    await method(PDP, 'addCompatibleAlternative', {}, { ...globals, Cart: { addItem: async () => ({ ok: false }) } })(btn2);
+    await sleep(5);
+    assert.equal(btn2.textContent, 'Add');
+    assert.equal(btn2.disabled, false);
+});
+
+test('§16 Add WITHOUT an id (fallback): SKU resolved to an id, added once; a lookup miss toasts and resets', async () => {
     const added = [];
     const toasts = [];
     const btn = { dataset: { sku: 'CTN2030BK', name: 'n', price: '24.49', image: '' }, disabled: false, textContent: 'Add' };

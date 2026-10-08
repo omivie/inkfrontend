@@ -57,6 +57,19 @@ Checked on www after the FE deploy of ~23:15 UTC 5 Oct, first-time visitor, cons
 - **15:** not started (`test@gmail.con` passes checkout). P0.
 - **16 (new, 6 Oct):** show our compatible version under Add to Cart on genuine product pages (`compatible_alternatives`, live).
 
+## Status after the FE deploy of 6 Oct (evening), checked 7 Oct
+
+Answer to the FE's reply: `fe-6oct-combined-reply-backend-response-oct2026.md`.
+
+**Done:** 2, 6, 14, 15, 16, 17. These are the FE's measurements. On 7 Oct we re-measured 6 and 16 in a browser, and checked 2 (`cartWallet: true`) and 17 in the live JS.
+
+**Still open:**
+- **PDP fold on compatible pages:** CTN2030BK at 1280×551 has Add at y 548–596, below the screen. The Part 2 rule covers every PDP.
+- **13:** needs one real guest order (owner).
+- **18 (new, admin):** the "Negative keyword suggestions" review page.
+- **19 (new, 7 Oct, P1):** an unticked "Email me when it's time to reorder" box on `/checkout`, sending `reminder_consent: true` (backend live).
+- **20 (new, 8 Oct, P1):** the cart's wallet button appears 2–3 s after the page; hold its space at first paint and start Stripe while the cart loads.
+
 ## Part 1: open work, in order
 
 ### 1. P0: remove the "I authorize this payment" tick
@@ -343,6 +356,53 @@ A match is the same brand, type, colour and single-vs-pack, sharing the series c
 - Recommended, same rule: `QtyStepper` (utils.js) also caps at `Cart.MAX_QUANTITY` on product cards and the PDP. Pass the product's `stock_quantity` (it is on every product response) as the stepper's ceiling.
 
 **Done when** (guest on `/cart` with GDK11203WH): + stops at 8 and is disabled there; typing 28 changes the box to 8; the toast reads "Only 8 in stock"; and no `PUT /api/cart/items` returns 400. The patched copy did exactly this on 6 Oct: 12 clicks ended at 8 with + disabled, typing 28 became 8, and both PUTs sent `{quantity: 8}` and got 200.
+
+### 18. P2 (admin): "Negative keyword suggestions" review page
+
+**Why (owner, 7 Oct):** nothing may add a negative keyword to Google Ads without the owner approving it first. Automated jobs now FILE suggestions; approving one is what writes it to Google Ads.
+
+**Backend (live, super_admin only):**
+- `GET /api/admin/ads/negative-suggestions?status=pending` (`pending` default; also `approved`, `rejected`, `applied`, `failed`, `all`) → `{ suggestions: [...], count, status }`. Each row: `id, created_at, source, scope` (`ad_group` / `campaign` / `shared_set`), `target_label` (e.g. "Search - Consumables NZ / Ink NZ"), `keyword_text, match_type, reason, evidence` (object: spend, conversions, paused groups), `status, decided_at, applied_at, error`.
+- `POST /api/admin/ads/negative-suggestions/:id/approve` → writes the negative to Google Ads; `{ status: 'applied' }`. `409 NOT_PENDING` if already decided; `502 ADS_WRITE_FAILED` with Google's reason if Ads refused it (the row is then `failed`).
+- `POST /api/admin/ads/negative-suggestions/:id/reject` → `{ status: 'rejected' }`, writes nothing.
+
+**What to build:** an admin page under Ads (or Marketing) listing pending suggestions: keyword, match type, where it would apply (`target_label`), the reason, and the evidence. Approve and Reject buttons per row; a tab for the history (`all`). Show the backend's message on 409/502. No bulk approve for now: the owner wants to decide each one.
+
+**Done when:** a pending suggestion appears on the page; Approve moves it to "applied"; Reject moves it to "rejected"; a second click on a decided row shows "already decided".
+
+### 19. P1: "Email me when it's time to reorder" box on `/checkout`
+
+**Why (owner, 7 Oct):** grow the returning-customer pool. Reorder reminders may only go to customers who said yes (NZ spam law: one purchase is not consent), and 149 of 165 recent customers had one order and were never asked. The order email now asks with a button; the checkout should ask too, because every buyer sees it.
+
+**Backend (live):** `POST /api/orders` accepts `reminder_consent: true`. Only a literal `true` records consent (stored on the order with the time and source `checkout`); `false` or absent records nothing.
+
+**What to build:** one checkbox on `/checkout`, near the email field, **unticked by default** (a pre-ticked box is not consent): "Email me when my cartridges are likely running low, so I can reorder in time." Send `reminder_consent: true` only when ticked. Same for guests and signed-in customers.
+
+**Done when:** placing an order with the box ticked sends `reminder_consent: true` in the `POST /api/orders` body; unticked sends nothing or `false`; the box starts unticked on every visit.
+
+### 20. P1: the cart's Apple Pay / Google Pay button appears with the page
+
+**Why (owner, 8 Oct):** "The 'Pay instantly' option appears too late when I open the cart."
+
+**Measured 8 Oct** on www `/cart` (one item, guest, Chromium): the page paints at 0.4 s; the wallet button appears at **3.3 s** with an empty browser cache and **2.0 s** with a warm one. `cart-wallet.js` `init()` runs every step one after the other:
+
+| Step | Cold cache |
+|---|---|
+| DOMContentLoaded, `init()` sets `loading` | 0.55 s |
+| `_waitForCartReady()` returns (cart loaded) | ~1.4 s |
+| Stripe.js, then `payment-page.js`, loaded | ~1.5 s |
+| ECE iframes mounted | ~2.0 s |
+| ECE `ready` (Stripe asks the device which wallets it has) | 3.3 s |
+
+The box is `hidden` until `ready`, so the whole wait shows as a button that pops in late. The backend is not the slow part: `/api/cart` answers in 0.3 s warm, 0.75 s cold. The last step (about 1.5 s) is Stripe's own device check and no site can skip it. The first two items below remove the rest of the wait, or hide it.
+
+**What to build:**
+
+1. **Hold the space from the first paint.** While `data-wallet="loading"`, show the "or pay instantly" divider and a 48 px placeholder the size of the button. In `_setState`, hide the box only for `none`, `error` and `off`, not for `loading`. The Stripe button then replaces the placeholder in place, with no jump. With `applePay`/`googlePay: 'always'`, Safari, Chrome and Edge nearly always report a wallet, so the placeholder rarely collapses. If it does, remember that in `localStorage` (wrapped in try/catch) and skip the placeholder on the next visit.
+2. **Start Stripe while the cart loads, not after.** Add `<link rel="preconnect" href="https://js.stripe.com">` and `<link rel="preconnect" href="https://b.stripecdn.com">` to the `cart.html` head. In `init()`, start `_load(STRIPE_JS)` **before** `await _waitForCartReady()`. Load `payment-page.js` alongside it without waiting for it: only `_confirm` needs it, so `await` it there.
+3. **Optional, saves about 0.8 s more:** mount the ECE before the cart total arrives. Create the Elements group with `STRIPE_MIN_NZD_CENTS` as a provisional amount. `sync()` already calls `elements.update({amount})` when the server total settles. Keep two guards: the box becomes `ready` only when the ECE is ready **and** the server total is eligible (today's `no-server-total` rule), and the `click` handler does not resolve until the amount has come from the server. Every figure the sheet shows must still be the server's.
+
+**Done when:** on `/cart` with one item, the "or pay instantly" area is visible at first paint, and the wallet button is live by about 2 s with an empty cache (3.3 s today). Measure: `MutationObserver` on `#cart-wallet` `data-wallet` against `performance.now()`.
 
 ### Not to do
 

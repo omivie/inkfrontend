@@ -371,7 +371,10 @@ test('§3 approve and reject send confirm:true; approve is the only POST to /app
   await cc.rejectTierProposal('p2');
   assert.deepEqual(calls[0], { verb: 'post', url: '/api/admin/pricing/tier-multipliers/proposals/a%20b/approve', body: { confirm: true, notes: 'ok' } });
   assert.deepEqual(calls[1].body, { confirm: true });
-  assert.equal((API_SRC.match(/\/approve`/g) || []).length, 1, 'exactly one approve call site in the API layer');
+  // Scoped to the PRICING approve: since ERR-313 the API layer has a second,
+  // unrelated approve (Google Ads negative-keyword suggestions, AdminAPI.ads).
+  assert.equal((API_SRC.match(/tier-multipliers\/proposals\/\$\{encodeURIComponent\(id\)\}\/approve`/g) || []).length, 1, 'exactly one pricing approve call site in the API layer');
+  assert.equal((API_SRC.match(/\/approve`/g) || []).length, 2, 'pricing + ads negative-suggestion approve, nothing else');
 });
 
 test('§3 propose (tiers AND offset) throws on a resolved refusal — never resolves to null for "Saved"', async () => {
