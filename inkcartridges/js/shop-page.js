@@ -823,7 +823,7 @@
 
             searchForm.addEventListener('submit', () => {
                 upsertHidden('brand', this.state.brand);
-                upsertHidden('type', this.state.type);
+                upsertHidden('source', this.state.type);
             });
         },
 
@@ -895,56 +895,46 @@
             // Invalidate cache
             this.cache.products = {};
 
-            this.updateURL();
+            // Series-page source filter handoff (2026-10-08): removing the
+            // source chip REPLACES the entry. The ad landed on ?source=…, and
+            // Back should leave the page, not restore a filter just dismissed.
+            this.updateURL({ replace: filterType === 'type' });
             this.navigationVersion++;
             this.loadCurrentLevel(this.navigationVersion);
             this.renderActiveFilters();
         },
 
-        // Render active filter chips
+        // The source chip — "Compatible only ×" / "Genuine only ×".
+        //
+        // Series-page source filter handoff (2026-10-08): ads land on
+        // /shop?brand=…&code=…&source=compatible|genuine, and the shopper must
+        // be able to SEE the page is narrowed and undo it. This method used to
+        // write into #active-filters, a bar removed from shop.html in Mar 2026
+        // (19580524), so it returned early on every call and a `?type=` filter
+        // narrowed the grid with nothing on screen saying so. It now owns one
+        // element in the header row (#source-filter-chip), next to the
+        // breadcrumb, so it adds no row to the first screen (ERR-301). Its
+        // callers (init, popstate, pageshow, removeFilter, Filter & Sort Apply)
+        // are every place `state.type` can change.
+        //
+        // The label names the product type ONLY — no price wording anywhere on
+        // this page (backend invariant 13).
         renderActiveFilters() {
-            const container = document.getElementById('active-filters');
-            const list = document.getElementById('active-filters-list');
-            const clearBtn = document.getElementById('clear-all-filters');
-
-            if (!container || !list) return;
-
-            list.innerHTML = '';
-            let hasFilters = false;
-
-            // Type filter (genuine/compatible)
-            if (this.state.type) {
-                hasFilters = true;
-                const chip = document.createElement('button');
-                chip.className = 'active-filters__chip';
-                chip.innerHTML = `
-                    ${this.state.type === 'genuine' ? 'Genuine Only' : 'Compatible Only'}
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                `;
-                chip.addEventListener('click', () => this.removeFilter('type'));
-                list.appendChild(chip);
+            const chip = document.getElementById('source-filter-chip');
+            if (!chip) return;
+            const label = this.state.type === 'genuine' ? 'Genuine only'
+                : this.state.type === 'compatible' ? 'Compatible only'
+                : null;
+            if (!label) {
+                chip.hidden = true;
+                chip.textContent = '';
+                chip.onclick = null;
+                return;
             }
-
-            // Search filter
-            if (this.state.search && this.state.level === 'search-results') {
-                hasFilters = true;
-                const chip = document.createElement('button');
-                chip.className = 'active-filters__chip';
-                chip.innerHTML = `
-                    Search: "${this.state.search}"
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                `;
-                chip.addEventListener('click', () => this.removeFilter('search'));
-                list.appendChild(chip);
-            }
-
-            // Show/hide container
-            container.hidden = !hasFilters;
-
-            // Set up clear all button
-            if (clearBtn && hasFilters) {
-                clearBtn.onclick = () => this.clearAllFilters();
-            }
+            chip.innerHTML = `<span>${label}</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+            chip.setAttribute('aria-label', `Remove filter: ${label}`);
+            chip.onclick = () => this.removeFilter('type');
+            chip.hidden = false;
         },
 
         /** True on /ink-cartridges and /toner-cartridges — the paid Search landings. */
@@ -1025,7 +1015,7 @@
             this.state.printerModel = params.get('printer_model');
             this.state.printerBrand = params.get('printer_brand'); // Brand of printer (for display, not filtering)
             this.state.search = params.get('search') || params.get('q'); // Support both 'search' and 'q' params
-            this.state.type = params.get('type'); // Support 'type' param for genuine/compatible filtering
+            this.state.type = this._sourceFilterFrom(params);
             // Filter & Sort refinements (mobile-ux-audit-jul2026 §2b).
             const _rawSort = params.get('sort');
             this.state.sort = this.SORT_OPTIONS.includes(_rawSort) ? _rawSort : 'recommended';
@@ -1078,6 +1068,22 @@
         },
 
         /**
+         * The genuine/compatible filter, from the URL. `source` is the name the
+         * ads and /api/shop use (series-page source filter handoff, 2026-10-08);
+         * `type` is the older name, still read so existing links keep working.
+         * Only the two values the API accepts survive: anything else is IGNORED
+         * (null), because /api/shop answers `source=<other>` with a 400
+         * VALIDATION_FAILED — forwarding it would blank the page.
+         */
+        _sourceFilterFrom(params) {
+            for (const key of ['source', 'type']) {
+                const v = String(params.get(key) || '').trim().toLowerCase();
+                if (v === 'genuine' || v === 'compatible') return v;
+            }
+            return null;
+        },
+
+        /**
          * ERR-301 — the ad's intent, from the raw URL. Returns null when the
          * URL asks for nothing beyond the family. Only `pack=value_pack` is
          * honoured: it is the one pack filter the API documents.
@@ -1097,7 +1103,7 @@
             return i && this.state.code && i.code === this.state.code ? i : null;
         },
 
-        updateURL() {
+        updateURL({ replace = false } = {}) {
             // Category-landing path: /ink-cartridges and /toner-cartridges
             // are the canonical URLs for the category-only state (no brand /
             // code / search / printer filters). Any extra filter switches the
@@ -1140,7 +1146,9 @@
             const _intent = this._freshIntent();
             if (this.state.code) params.set('code', (_intent && _intent.requested) || this.state.code);
             if (_intent && _intent.pack) params.set('pack', _intent.pack);
-            if (this.state.type) params.set('type', this.state.type);
+            // `source`, not the legacy `type`: one name for the filter in the
+            // address bar, the ads and the /api/shop request.
+            if (this.state.type) params.set('source', this.state.type);
             // Filter & Sort refinements — omit the defaults to keep URLs clean.
             if (this.state.sort && this.state.sort !== 'recommended') params.set('sort', this.state.sort);
             if (this.state.inStock) params.set('in_stock', '1');
@@ -1161,7 +1169,8 @@
                 ? `${pathname}?${params.toString()}`
                 : pathname;
 
-            history.pushState({ ...this.state }, '', newURL);
+            if (replace) history.replaceState({ ...this.state }, '', newURL);
+            else history.pushState({ ...this.state }, '', newURL);
         },
 
         // =========================================
@@ -1169,7 +1178,7 @@
         // =========================================
         // The list levels get a bottom "Filter & Sort" action bar (thumb zone)
         // that opens a full-screen sheet. Sort is client-side over the loaded
-        // rows; Source reuses the existing `type` param; In-stock is a
+        // rows; Source reuses `state.type` (URL `source=`); In-stock is a
         // client-side toggle. Facet counts are NOT available from the backend
         // (audit §7) so the bar shows an active-refinement count instead.
         FILTER_SORT_LEVELS: ['products', 'printer-products', 'printer-model-products', 'search-results'],
@@ -3114,6 +3123,14 @@
                 // holds the whole family).
                 const intent = this._freshIntent();
                 const packFilter = intent && intent.pack ? intent.pack : null;
+                // Series-page source filter handoff (2026-10-08): the ad's
+                // `source` goes on EVERY /api/shop request this level makes —
+                // the requested code, the family code and the stem reload.
+                // Until then only the client-side split below honoured it, so
+                // the page fetched both versions and an unfiltered edge entry
+                // answered a filtered ad. `state.type` is already validated
+                // (_sourceFilterFrom); typeKey keeps it in the cache key.
+                const sourceFilter = this.state.type || null;
 
                 // Per-code product cache key
                 const productCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-products-${code}${packFilter ? `-pack-${packFilter}` : ''}`;
@@ -3181,7 +3198,8 @@
                                 category: loadApiCategory,
                                 code: alias,
                                 limit: 200,
-                                ...(packFilter ? { pack: packFilter } : {})
+                                ...(packFilter ? { pack: packFilter } : {}),
+                                ...(sourceFilter ? { source: sourceFilter } : {})
                             // ERR-266 — a throw is a FAILED ASK, not an empty shelf.
                             // This used to be `.catch(() => null)`, which erased the
                             // difference. api.js throws for a non-JSON 5xx (:326-343),
@@ -3304,7 +3322,8 @@
                             category: stemApiCategory,
                             code: stem,
                             limit: 200,
-                            ...(packFilter ? { pack: packFilter } : {})
+                            ...(packFilter ? { pack: packFilter } : {}),
+                            ...(sourceFilter ? { source: sourceFilter } : {})
                         }).catch(() => null);
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 

@@ -269,10 +269,10 @@ test('§6 middleware routes bots on sole-filter categories to the category prere
 
 test('§6 middleware and seo-meta share a byte-identical excluded-param list', () => {
     const mwParams = [...MIDDLEWARE.matchAll(/!url\.searchParams\.get\('([a-z_]+)'\)/g)].map(m => m[1]);
-    assert.deepEqual(mwParams, ['code', 'q', 'search', 'type', 'printer_model'],
+    assert.deepEqual(mwParams, ['code', 'q', 'search', 'type', 'source', 'printer_model'],
         'middleware sole-filter exclusions changed — update seo-meta.js to match');
     // seo-meta has the same list twice (prerenderPathForLocation + surfaceForLocation).
-    const seoBlocks = [...SEO_JS.matchAll(/&& !params\.get\('code'\) && !params\.get\('q'\)\s*\n\s*&& !params\.get\('search'\) && !params\.get\('type'\)\s*\n\s*&& !params\.get\('printer_model'\)/g)];
+    const seoBlocks = [...SEO_JS.matchAll(/&& !params\.get\('code'\) && !params\.get\('q'\)\s*\n\s*&& !params\.get\('search'\) && !params\.get\('type'\)\s*\n\s*&& !params\.get\('source'\) && !params\.get\('printer_model'\)/g)];
     assert.equal(seoBlocks.length, 2,
         'seo-meta.js must mirror the middleware exclusion list in both location mappers');
 });

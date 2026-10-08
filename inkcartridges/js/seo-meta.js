@@ -242,7 +242,7 @@ const SeoMeta = {
             if (cat && CANON.includes(cat)
                 && !params.get('code') && !params.get('q')
                 && !params.get('search') && !params.get('type')
-                && !params.get('printer_model')) {
+                && !params.get('source') && !params.get('printer_model')) {
                 return `/api/prerender/category/${cat}`;
             }
             // Truly bare /shop → the backend's shop prerender. MIRROR of the
@@ -277,7 +277,7 @@ const SeoMeta = {
             if (cat && CANON.includes(cat)
                 && !params.get('code') && !params.get('q')
                 && !params.get('search') && !params.get('type')
-                && !params.get('printer_model')) {
+                && !params.get('source') && !params.get('printer_model')) {
                 return `category-${cat === 'ribbon' ? 'ribbons' : cat}`;
             }
             // Truly-bare /shop gets the new shop-landing builder copy (there is

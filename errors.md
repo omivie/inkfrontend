@@ -41,6 +41,40 @@ describing the same incident.
 
 ---
 
+## ERR-314 — A paid ad for the compatible LC3319XL landed on a page showing the genuine ones beside it: the series page ignored `&source=`, and the chip that should have said "Compatible only" had been dead since March — **RESOLVED (frontend)** (2026-10-08)
+
+**Source.** `backend-docs/inbox/series-page-source-filter-FE-handoff-oct2026.md` (8 Oct, FE master checklist item 21). On 8 Oct the owner split Search into "Winners" and "Exclusive" ad groups. When we are cheaper on only one version of a family, the ad lands on `/shop?brand=…&code=…&source=compatible|genuine`. Five such landing pages are live.
+
+**Seen (backend, 8 Oct; re-measured by us the same day).** `/shop?brand=brother&code=LC3319XL&source=compatible` sent `/api/shop?brand=brother&limit=200&code=LC3319XL` and `…&code=LC3319`, neither with `source`. It showed all 12 products where the ad paid for 6.
+
+**Cause. Three faults, and the handoff named one of them.**
+1. **`source` was never read.** The page already had a genuine/compatible filter, under the URL name **`type`**. `loadProducts` did not send it to `/api/shop`, either on the yield fan-out or on the ERR-216 stem reload. It only split the full family client-side. The chip-grid level one up did send it (`apiParams.source`).
+2. **`state.type` was unvalidated.** `params.get('type')` went straight into state, so `?type=foo` would have labelled the page "Compatible Only". `/api/shop` answers any `source` other than genuine/compatible with **400 VALIDATION_FAILED** (measured 8 Oct). Forwarding a raw value would have blanked the page.
+3. **The chip had been dead since Mar 2026.** `renderActiveFilters` wrote into `#active-filters`, and that bar was removed from shop.html in `19580524`. The method returned early on every call. A `?type=` filter narrowed the grid with nothing on screen saying so, and there was no way to undo it. The handoff said "if the brand page already has a chip for `&source=`, reuse it". The code had one, and nobody could see it.
+
+**Fix.**
+- `js/shop-page.js`:
+  - `_sourceFilterFrom(params)` is the ONE parser. It reads `source` first, then the legacy `type`, trims and lowercases, and accepts only `genuine|compatible`. Anything else is ignored (null), never forwarded.
+  - `loadProducts` spreads `source` into BOTH `getShopData` calls. Cache keys already carried `typeKey`.
+  - `updateURL({ replace })` writes `source`, never `type`, so the address bar, the ads and the API use one name. Old `type=` links still read.
+  - `removeFilter('type')` uses `replaceState` (handoff), so Back leaves the page instead of restoring a filter the shopper just dismissed.
+  - `renderActiveFilters` now owns `#source-filter-chip`: "Compatible only ×" / "Genuine only ×", `aria-label="Remove filter: …"`. It names the product type only (invariant 13: no price wording). The dead search-chip and clear-all writers went with the dead bar.
+- `html/shop.html` + `css/pages.css`: the chip sits in the breadcrumb row. **First cut, phones: the chip wrapped onto its own row and pushed the first card down 36 px at 390x664 (319 → 355, measured).** Below 480 px `.drilldown-header__left` is a column, so the chip is now pinned right on the breadcrumb row (12 px text), and the breadcrumb reserves 140 px via `:has()`. A long trail wraps instead of running under the chip.
+- `middleware.js` + `js/seo-meta.js` (both mapper copies): the category sole-filter gate now also excludes `source`, so `?category=ink&source=genuine` is not served the whole-category prerender. Both sides of the mirror changed together (ERR-270).
+- The canonical already left out `type`/`source`. The brand prerender forwards only `code`/`category`, so bots and the backend canonical see `/shop?brand=…&code=…`.
+
+**Measured (local build, live API, 8 Oct).** `npm run probe:series-source`: **40 passed, 0 failed, 0 not measured.**
+- LC3319XL source=compatible: both requests carry `source=compatible`, LC3319XL and LC3319 are both asked, and the page shows 6 cards, all compatible per the API's own rows. The chip reads "Compatible only". The canonical is `…/shop?brand=brother&code=LC3319`.
+- Chip click: URL `/shop?brand=brother&code=LC3319XL`, history.length 2 → 2, 12 cards from both sources.
+- LC531 6 compatible, PGI2600 6 genuine, PFI1000 13 genuine, C610 9 genuine.
+- HP 965 `pack=value_pack`: 4 value packs, no chip.
+- First card top with and without the chip: 331/331 px at 1280x551, 319/319 px at 390x664.
+- Negative controls: `source=bogus` sends no `source`, shows no chip and 12 cards. The "every request carries source" check is red on an unfiltered load.
+
+**Tests.** `tests/series-source-filter-oct2026.test.js` (12). Six mutations went red, one per behaviour: stem call without source, raw `type` read, URL emits `type`, pushState on removal, price word in label, bogus value accepted. Pins updated on purpose: `ia-reorg-jul2026` §6 and `chip-prerender-sep2026` §5 (exclusion list now six), `ad-visitor-dropoff-oct2026` §5 (`updateURL` signature). Full suite: 7053 passed, 0 failed. `probe:ad-visitor-dropoff --only=shop` (ERR-301 first screen, pack landing): 31 passed, 0 failed, 5 soft (the known consent-card lines).
+
+**Lesson.** A handoff that says "reuse the chip if one exists" is a prompt to check that the existing one RENDERS, not just that its code is there. `renderActiveFilters` had six callers and an early return that fired on every call. Grepping for the method found it. Only looking at the page showed it did nothing.
+
 ## ERR-313 — A long compatible product name put Add to Cart under the first screen of a 1280x551 laptop, and the "Our compatible version" Add still looked its product up on every click — **RESOLVED (frontend)** (2026-10-08)
 
 **Source.** The backend's 7 Oct answer to our 6 Oct combined reply (`backend-docs/inbox/fe-6oct-combined-reply-backend-response-oct2026.md`) and the re-issued `FE-MASTER-CHECKLIST-oct2026` (8 Oct), item 18. Split by file with a peer session, which owns items 19 and 20 (ERR-312).

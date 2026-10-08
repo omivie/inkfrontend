@@ -14363,6 +14363,55 @@ body.page-shop {
     text-underline-offset: 2px;
 }
 .drilldown-header__all[hidden] { display: none; }
+/* The source chip (series-page source filter, 2026-10-08): the
+   .active-filters__chip look, sized to sit in the breadcrumb row without
+   making it taller. Removing it is the whole interaction. */
+.drilldown-header__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: var(--spacing-sm);
+    padding: 2px 10px;
+    min-height: 28px;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--cyan-dark);
+    background-color: var(--cyan-light);
+    border: 1px solid var(--cyan-primary);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.drilldown-header__chip:hover,
+.drilldown-header__chip:focus-visible {
+    background-color: var(--cyan-primary);
+    color: var(--white-primary);
+}
+.drilldown-header__chip svg { flex-shrink: 0; }
+.drilldown-header__chip[hidden] { display: none; }
+/* Phones: .drilldown-header__left is a column there, so an in-flow chip got a
+   row of its own and pushed the first card down 36px at 390x664 (measured by
+   `npm run probe:series-source` §5). Pin it to the right of the breadcrumb
+   row instead, and reserve that room on the breadcrumb so a long trail wraps
+   rather than running under the chip. */
+@media (max-width: 480px) {
+    .drilldown-header__left { position: relative; }
+    .drilldown-header__chip {
+        position: absolute;
+        top: 8px;
+        right: 0;
+        margin-left: 0;
+        padding: 2px 7px;
+        gap: 4px;
+        font-size: 0.75rem;
+    }
+    .drilldown-header__chip svg { width: 12px; height: 12px; }
+    .drilldown-header__left:has(> .drilldown-header__chip:not([hidden])) .drilldown-breadcrumb {
+        padding-right: 140px;
+    }
+}
 
 @media (min-width: 1100px) and (max-height: 800px) {
     .shop-page .products-row .product-card .product-card__image-wrapper { aspect-ratio: 5 / 2; }

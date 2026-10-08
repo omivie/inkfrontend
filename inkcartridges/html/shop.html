@@ -43,7 +43,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
     <link rel="stylesheet" href="/css/components.css?v=7430c563">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=35b202c0">
+    <link rel="stylesheet" href="/css/pages.css?v=a7673084">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
 
     <script type="application/ld+json" id="shop-schema">
@@ -207,6 +207,11 @@
                         <!-- ERR-301: an ad can land on ?pack=value_pack, which lists the
                              family's packs only; this is the way back to every cartridge. -->
                         <a class="drilldown-header__all" id="family-all-link" href="/shop" hidden></a>
+                        <!-- Series-page source filter (2026-10-08): ads land on ?source=compatible|genuine;
+                             shop-page.js#renderActiveFilters shows "Compatible only ×" here, in the
+                             breadcrumb row so it adds no row to the first screen. Product type only:
+                             no price wording on this page (backend invariant 13). -->
+                        <button type="button" class="drilldown-header__chip" id="source-filter-chip" hidden></button>
                     </div>
                     <div class="drilldown-header__right-group">
                         <div class="drilldown-header__right" id="yield-banner" hidden>
@@ -446,7 +451,7 @@
              thumb-zone action bar + full-screen sheet. Hidden by default;
              shop-page.js reveals the bar on product-list levels only and the
              CSS shows it inside the mobile breakpoint. Sort is client-side,
-             Source reuses ?type=, In-stock is a client-side toggle. -->
+             Source is ?source= (legacy ?type= still read), In-stock is a client-side toggle. -->
         <div class="filter-sort-bar" id="filter-sort-bar" hidden>
             <button type="button" class="filter-sort-bar__btn btn btn--primary" id="filter-sort-open" aria-haspopup="dialog" aria-controls="filter-sort-sheet">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
@@ -492,7 +497,7 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=54791bfc"></script>
+    <script defer src="/js/shop-page.js?v=a7245427"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
@@ -500,7 +505,7 @@
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/api.js?v=ae9d0845"></script>
-    <script defer src="/js/seo-meta.js?v=69f45351"></script>
+    <script defer src="/js/seo-meta.js?v=42144c92"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=d848a1f5"></script>
     <script defer src="/js/service-row.js?v=35fb91d8"></script>

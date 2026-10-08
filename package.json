@@ -94,7 +94,8 @@
     "probe:checkout-funnel": "node scripts/probe-checkout-funnel-oct2026.mjs",
     "probe:fe-master": "node scripts/probe-fe-master-checklist-oct2026.mjs",
     "probe:fe-master-6oct": "node scripts/probe-fe-master-6oct-2026.mjs",
-    "probe:cart-wallet-paint": "node scripts/probe-cart-wallet-paint.mjs"
+    "probe:cart-wallet-paint": "node scripts/probe-cart-wallet-paint.mjs",
+    "probe:series-source": "node scripts/probe-series-source-filter.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

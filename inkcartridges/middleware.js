@@ -266,7 +266,7 @@ export default async function middleware(request) {
       const soleFilter = cat && CATEGORY_CANONICAL.has(cat)
         && !url.searchParams.get('code') && !url.searchParams.get('q')
         && !url.searchParams.get('search') && !url.searchParams.get('type')
-        && !url.searchParams.get('printer_model');
+        && !url.searchParams.get('source') && !url.searchParams.get('printer_model');
       if (soleFilter) prerenderPath = `/api/prerender/category/${cat}`;
       // Truly bare /shop (no query at all) → the backend's shop prerender.
       // Until Sep 2026 this fell through to the SPA shell, and Google indexed

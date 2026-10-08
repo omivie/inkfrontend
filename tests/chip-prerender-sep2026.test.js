@@ -257,14 +257,14 @@ test('§4 the measured rule is written down, not just the conclusion', () => {
 
 test('§5 the sole-filter exclusion grep ia-reorg §6 depends on is still exact', () => {
     // tests/ia-reorg-jul2026.test.js greps this file for
-    // `!url.searchParams.get('x')` and asserts the list is EXACTLY these five in
+    // `!url.searchParams.get('x')` and asserts the list is EXACTLY these six in
     // this order. The brand arm deliberately uses a different construction
     // (a URLSearchParams allowlist), so it adds no occurrence. If a future edit
     // reaches for `!url.searchParams.get(...)` in the brand arm, that test fails
     // somewhere else entirely and the reason will not be obvious — so it is
     // stated here too, next to the change that has to respect it.
     const found = [...MIDDLEWARE_SRC.matchAll(/!url\.searchParams\.get\('([a-z_]+)'\)/g)].map((m) => m[1]);
-    assert.deepEqual(found, ['code', 'q', 'search', 'type', 'printer_model']);
+    assert.deepEqual(found, ['code', 'q', 'search', 'type', 'source', 'printer_model']);
 });
 
 test('§5 neither source forwards a wildcard', () => {

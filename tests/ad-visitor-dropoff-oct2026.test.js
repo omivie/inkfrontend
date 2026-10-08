@@ -312,7 +312,7 @@ test('§5 getShopData: no compatible sidecar when a pack is requested (it would 
 });
 
 test('§5 the address bar keeps the ad\'s code and pack while on that family; the canonical does not', () => {
-    const fn = stripComments(liftMethod(SHOP_SRC, 'updateURL() {'));
+    const fn = stripComments(liftMethod(SHOP_SRC, 'updateURL({ replace = false } = {}) {'));
     assert.match(fn, /params\.set\('code', \(_intent && _intent\.requested\) \|\| this\.state\.code\)/);
     assert.match(fn, /if \(_intent && _intent\.pack\) params\.set\('pack', _intent\.pack\);/);
     assert.match(SHOP_HTML, /<a class="drilldown-header__all" id="family-all-link" href="\/shop" hidden><\/a>/);
