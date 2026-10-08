@@ -71,6 +71,8 @@ describing the same incident.
 - First card top with and without the chip: 331/331 px at 1280x551, 319/319 px at 390x664.
 - Negative controls: `source=bogus` sends no `source`, shows no chip and 12 cards. The "every request carries source" check is red on an unfiltered load.
 
+**Production (www, `15af9166`, live from 03:07:20 UTC 8 Oct).** `PROBE_BASE=https://www.inkcartridges.co.nz npm run probe:series-source`: **40 passed, 0 failed, 0 not measured.** The five landing pages showed 6 / 6 / 6 / 13 / 9 cards, all the ad's source, with the chip, and none of their canonicals carried `source`. Chip removal gave 12 cards with history.length 2 → 2. HP 965 pack gave 4. First card top was 331/331 at 1280x551 and 319/319 at 390x664. The bogus control was ignored. Reply with deploy time: `backend-docs/outbox/series-source-filter-FE-reply-oct2026.md`.
+
 **Tests.** `tests/series-source-filter-oct2026.test.js` (12). Six mutations went red, one per behaviour: stem call without source, raw `type` read, URL emits `type`, pushState on removal, price word in label, bogus value accepted. Pins updated on purpose: `ia-reorg-jul2026` §6 and `chip-prerender-sep2026` §5 (exclusion list now six), `ad-visitor-dropoff-oct2026` §5 (`updateURL` signature). Full suite: 7053 passed, 0 failed. `probe:ad-visitor-dropoff --only=shop` (ERR-301 first screen, pack landing): 31 passed, 0 failed, 5 soft (the known consent-card lines).
 
 **Lesson.** A handoff that says "reuse the chip if one exists" is a prompt to check that the existing one RENDERS, not just that its code is there. `renderActiveFilters` had six callers and an early return that fired on every call. Grepping for the method found it. Only looking at the page showed it did nothing.
