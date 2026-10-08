@@ -336,7 +336,7 @@ test('the Sent marker is legible on the light deck, not just the dark one', () =
 });
 
 test('APP_VERSION advanced so the edited invoices.js module is re-fetched', () => {
-  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.0[6-9]\.[0-9]{2}-[a-z0-9-]+'/,
+  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.(?:0[6-9]|1[0-2])\.[0-9]{2}-[a-z0-9-]+'/,
     'APP_VERSION must be a current date-stamped token');
   assert.doesNotMatch(APP_SRC, /APP_VERSION\s*=\s*'2026\.07\.08-invoice-cost-gst'/,
     'APP_VERSION must change off the previous build');

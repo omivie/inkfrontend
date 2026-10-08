@@ -183,7 +183,12 @@ describing the same incident.
 - **On www after the deploy** (69e16600, live 2026-10-07 21:10:49 UTC):
   - The placeholder was visible with a 48 px slot when the cart painted (1138–1296 ms), in 5 of 5 cold runs.
   - Stripe's device check was timed on a local-only cart, 3 cold runs. The ECE mounted at 1270–1296 ms and Stripe reported a wallet (`_deviceHasWallet: true`) at 3181–3723 ms. Before the fix, the same machine reached `ready` at 5271–6268 ms.
-  - The full `ready` time with a server total was NOT measured. The guest-session MINT limiter (per IP, window over 1 h, shared with peer sessions) refused the seed add (`POST /api/cart/items` 429 with no session). The cart was then local-only, and every run ended `none`/`no-server-total`. That is a probe artefact, not a wallet result. The probe now re-reads the SERVER cart after seeding, aborts loudly when the line is missing, and prints `data-wallet-why` on every change.
+  - **Measured later (8 Oct, 03:00 UTC, once the mint window had cleared), as an A/B on the same network in the same hour:**
+    - the OLD wallet JS (served by the probe's `PROBE_WALLET_JS`): ready 3129–3450 ms, median 3244. The box was hidden at paint.
+    - the NEW code: ready 2720–3154 ms, median 2858 (5 runs) and 2866 (3 runs). The placeholder was visible at paint (579–739 ms).
+    - Breakdown of the new code: Stripe.js loaded and the ECE mounted at 621–698 ms; the server amount was applied at 940–1054 ms; Stripe's own ECE `ready` (iframes plus device check) came about 2.1 s after mount. Our side is no longer the long pole.
+  - **Follow-up:** `<link rel="preload" href="https://js.stripe.com/v3/" as="script">` in `cart.html`, because the Stripe.js fetch only began after DOMContentLoaded (about 550 ms).
+  - Before that A/B, the full `ready` time with a server total had NOT been measured. The guest-session MINT limiter (per IP, window over 1 h, shared with peer sessions) refused the seed add (`POST /api/cart/items` 429 with no session). The cart was then local-only, and every run ended `none`/`no-server-total`. That is a probe artefact, not a wallet result. The probe now re-reads the SERVER cart after seeding, aborts loudly when the line is missing, and prints `data-wallet-why` on every change.
 
 **Seen on the way, not fixed.**
 - The per-IP limiter is shared with every session on this machine. A 4 s probe pace saw 429s on `/api/site/*` and `/api/cart`, so the probe now paces 15 s.

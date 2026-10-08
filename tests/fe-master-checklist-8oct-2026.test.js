@@ -246,6 +246,11 @@ test('§20 the markup ships visible as data-wallet="loading", with a 48px placeh
     hasNot(html, /id="cart-wallet"[^>]*\shidden/, 'not hidden at first paint');
     has(html, /<link rel="preconnect" href="https:\/\/js\.stripe\.com">/);
     has(html, /<link rel="preconnect" href="https:\/\/b\.stripecdn\.com">/);
+    // Preload = the SAME URL CartWallet._load injects, no crossorigin on either,
+    // or the browser fetches Stripe.js twice.
+    has(html, /<link rel="preload" href="https:\/\/js\.stripe\.com\/v3\/" as="script">/);
+    assert.equal(require(path.join(ROOT, 'inkcartridges/js/cart-wallet.js')).STRIPE_JS, 'https://js.stripe.com/v3/');
+    hasNot(stripComments(WALLET_SRC), /crossOrigin/, '_load injects a plain script');
     const css = stripComments(read('css/pages.css'));
     has(css, /#cart-wallet-element \{ min-height: 48px; \}/, 'the slot is the button height (buttonHeight: 48) in every state');
     has(css, /\.cart-wallet\[data-wallet="loading"\] #cart-wallet-element \{[^}]*background:/, 'a visible placeholder while loading');

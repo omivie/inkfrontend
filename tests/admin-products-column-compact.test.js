@@ -203,6 +203,6 @@ test('products page imports the bumped table.js token; APP_VERSION advanced', ()
   // APP_VERSION advances every time the SPA ships (so page modules re-fetch).
   // Assert it's a date-stamped token at or after the col-compact bump rather than
   // pinning a single literal that any later feature would (correctly) break.
-  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.0[6-9]\.[0-9]{2}-[a-z0-9-]+'/,
+  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.(?:0[6-9]|1[0-2])\.[0-9]{2}-[a-z0-9-]+'/,
     'APP_VERSION must be a current date-stamped token so SPA page modules re-fetch');
 });

@@ -21,9 +21,14 @@
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Item 20: the cart wallet loads Stripe.js at init — open those connections now. -->
+    <!-- Item 20: the cart wallet loads Stripe.js at init — open those connections now,
+         and start the Stripe.js download at parse time instead of after
+         DOMContentLoaded (measured 8 Oct: the fetch began at ~550 ms). The preload
+         carries no crossorigin, matching the plain <script> CartWallet._load
+         injects, so the browser reuses this response instead of fetching twice. -->
     <link rel="preconnect" href="https://js.stripe.com">
     <link rel="preconnect" href="https://b.stripecdn.com">
+    <link rel="preload" href="https://js.stripe.com/v3/" as="script">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">

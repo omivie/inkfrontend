@@ -42,8 +42,12 @@
  *   PROBE_RUNS=5               cold runs (default 3)
  *   PROBE_GUEST_SESSION=<id>   reuse an existing guest session (mints none; the
  *                              backend's guest-session mint cap is per IP, >1 h)
+ *   PROBE_WALLET_JS=<path>     A/B: serve THIS file as /js/cart-wallet.js (e.g. the
+ *                              pre-item-20 build from git) on the same network,
+ *                              same minute. Printed in the banner when set.
  */
 import { chromium } from 'playwright';
+import fs from 'node:fs';
 
 const BASE = (process.env.PROBE_BASE || 'http://localhost:3000').replace(/\/+$/, '');
 const RECORD = process.argv.includes('--record');
@@ -51,6 +55,7 @@ const REUSE = process.env.PROBE_GUEST_SESSION || '';
 const RUNS = Math.max(1, Number(process.env.PROBE_RUNS || 3));
 const SKU = process.env.PROBE_SKU || 'GLC3313BK';
 const READY_TARGET_MS = 2500;
+const WALLET_JS = process.env.PROBE_WALLET_JS || '';
 // The per-IP limiter (100/60 s) is SHARED across endpoints AND with every peer
 // session on this machine (ERR-266): a 4 s pace saw 429s on 8 Oct.
 const PACE_MS = Number(process.env.PROBE_PACE_MS || 15000);
@@ -69,6 +74,7 @@ console.log(RECORD
     ? `\x1b[31mMODE: RECORDING.\x1b[0m Writes ONLY this probe's own guest cart (one ${SKU} line via /cart?add=); never /api/orders; rollback in finally, verified by re-read.`
     : '\x1b[33mMODE: READ-ONLY.\x1b[0m Public GETs only. The timed cart runs and /checkout need --record and are SKIPPED.');
 console.log(`BASE ${BASE}  runs ${RUNS}${REUSE ? '  (reusing a guest session)' : ''}`);
+if (WALLET_JS) console.log(`\x1b[33mA/B: /js/cart-wallet.js is served from ${WALLET_JS}, not ${BASE}.\x1b[0m`);
 
 /** PURE. The box held its space when the cart first painted: visible, with the 48px slot. */
 function visibleAtFirstPaint(rec) {
@@ -88,7 +94,19 @@ let storageState = null;
 
 /** Every #cart-wallet change from before the first script, against performance.now(). */
 const RECORDER = () => {
-    window.__wallet = { changes: [], firstPaint: null, fcp: null };
+    window.__wallet = { changes: [], firstPaint: null, fcp: null, steps: {} };
+    // Where the time goes: Stripe.js loaded, ECE mounted, Stripe's device check
+    // answered, server total applied (CartWallet's own fields, read-only).
+    const step = (k) => { if (!window.__wallet.steps[k]) window.__wallet.steps[k] = Math.round(performance.now()); };
+    const poll = setInterval(() => {
+        if (typeof Stripe === 'function') step('stripe-js');
+        const w = window.CartWallet;
+        if (!w) return;
+        if (w.ece) step('mount');
+        if (w._deviceHasWallet !== undefined) step('device-check');
+        if (w._serverAmount) step('server-amount');
+        if (['ready', 'none', 'error', 'off'].includes(w.state) && w.state !== 'loading' && window.__wallet.steps['device-check']) clearInterval(poll);
+    }, 10);
     const snap = (box, how) => window.__wallet.changes.push({
         t: Math.round(performance.now()), how, state: box.dataset.wallet || '', why: box.dataset.walletWhy || '', hidden: box.hidden,
     });
@@ -182,9 +200,15 @@ if (!RECORD) {
             // The SERVER must hold the line: a 429 on the add leaves it local-only,
             // the cart then has no server total, and every run would end
             // none/no-server-total — a probe artefact, not a wallet result (8 Oct).
+            // Polled: the local line appears BEFORE the deep link's POST lands, so
+            // one immediate re-read raced it and aborted a healthy seed (8 Oct).
             sawLine = await page.evaluate(async (sku) => {
-                const r = await API.getCart();
-                return ((r && r.data && r.data.items) || []).some((i) => i.product && i.product.sku === sku);
+                for (let i = 0; i < 10; i++) {
+                    const r = await API.getCart();
+                    if (((r && r.data && r.data.items) || []).some((it) => it.product && it.product.sku === sku)) return true;
+                    await new Promise((res) => setTimeout(res, 1000));
+                }
+                return false;
             }, SKU);
             check(`${SKU} is in the probe's SERVER cart (re-read)`, sawLine);
             if (!sawLine) throw new Error('seed line not on the server (rate limited?); no run would mean anything');
@@ -199,6 +223,10 @@ if (!RECORD) {
             await pace();
             const { ctx, page, limited } = await newPage(); // fresh context ⇒ empty HTTP cache
             await ctx.addInitScript(RECORDER);
+            if (WALLET_JS) {
+                const body = fs.readFileSync(WALLET_JS, 'utf8');
+                await ctx.route(/\/js\/cart-wallet\.js/, (r) => r.fulfill({ contentType: 'application/javascript', body }));
+            }
             await page.goto(`${BASE}/cart`, { waitUntil: 'load' });
             await walletDone(page);
             const rec = await page.evaluate(() => window.__wallet);
@@ -206,7 +234,8 @@ if (!RECORD) {
             const ready = rec.changes.find((c) => c.state === 'ready' && !c.hidden);
             const fp = rec.firstPaint;
             info(`run ${i}: FCP ${rec.fcp ?? '?'}ms · cart painted ${fp ? `${fp.t}ms (${fp.state || '-'}, ${fp.hidden ? 'HIDDEN' : 'visible'}, slot ${fp.slot}px)` : 'never'} · `
-                + rec.changes.map((c) => `${c.t}ms ${c.state}${c.why ? '/' + c.why : ''}${c.hidden ? '(hidden)' : ''}`).join(' → '));
+                + rec.changes.map((c) => `${c.t}ms ${c.state}${c.why ? '/' + c.why : ''}${c.hidden ? '(hidden)' : ''}`).join(' → ')
+                + ` · steps ${Object.entries(rec.steps || {}).map(([k, v]) => `${k} ${v}ms`).join(', ')}`);
             check(`run ${i}: "or pay instantly" area visible when the cart first paints`, visibleAtFirstPaint(rec),
                 `firstPaint=${JSON.stringify(fp)}`);
             if (ready) readies.push(ready.t);
