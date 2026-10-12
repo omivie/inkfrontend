@@ -142,7 +142,7 @@
         // GET /api/admin/shipping/carriers. Nothing derives behaviour from this
         // array — see js/admin/utils/shipping-info.js.
         carriers:               ['NZ Post', 'Aramex (CourierPost network)', 'NZ Couriers'],
-        handlingTime:           'Auckland metro orders placed before 2:00pm NZT on a business day are dispatched same-day. Orders placed after 2:00pm, on weekends, or on NZ public holidays dispatch the next working day. Outside Auckland metro, dispatch is the next working day after order placement.',
+        handlingTime:           'Auckland metro orders placed before 12:00pm NZT on a business day are dispatched same-day. Orders placed after 12:00pm, on weekends, or on NZ public holidays dispatch the next working day. Outside Auckland metro, dispatch is the next working day after order placement.',
         shippingZones: [
             { zone: 'Auckland metro',        urban: '$7.00', rural: '$14.00', eta: '1–2 working days' },
             { zone: 'North Island',          urban: '$7.00 – $12.00', rural: '$14.00 – $20.00', eta: '1–3 working days' },
@@ -166,7 +166,7 @@
         // `compatibleWarrantyMonths` constant and the `compatible-warranty`
         // data-legal-bind were retired; page copy now states the guarantee as
         // prose to stay byte-identical with the backend prerender.
-        dispatchCutoffDisplay:   '2pm NZT, Auckland metro, business days',
+        dispatchCutoffDisplay:   '12pm NZT, Auckland metro, business days',
         returnsAddressSameAsBusiness: true,
         // CGA-aligned return rules. Note: faulty / not-as-described returns
         // are NEVER time-barred by the 30-day window — that's a Consumer

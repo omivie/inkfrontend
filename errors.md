@@ -64,6 +64,76 @@ describing the same incident.
 
 ---
 
+## ERR-319 — Same-day dispatch cutoff moved from 2pm to 12pm NZT (owner, 2026-10-12); static copy changed, live API values still 2pm — **PARTIAL (frontend done, backend pending)**
+
+**Request.** The owner asked to change "orders before 2pm ship the same day" to 12pm everywhere on the site, including terms and shipping policy.
+
+**Changed (FE).** /terms, /shipping (lead, handling time, glossary, cut-offs section), /faq (two answers plus the FAQPage JSON-LD), /about (three places, including the `dispatch-cutoff` legal-bind default), /business, and `js/legal-config.js` (`handlingTime`, `dispatchCutoffDisplay`). The PDP fallback is now `SPEC_DELIVERY_CUTOFF = '12pm'`. Comments that quoted the cutoff were updated. The `formatCutoff`/`formatDispatchCutoff` examples ("14:00" -> "2pm") are format examples, not policy, and stay as they are. Pinned tests now pin 12pm: google-ads-compliance (`dispatchHourNZ: 12`), product-buybox, retail-wording. `audit-merchant-center-readiness.mjs` now fails on a rendered **2pm** cutoff. Its regex was checked against both strings: "2pm … same-day" is flagged and "12pm … same-day" is not. `?v=` was restamped for cart, legal-config, product-detail-page, seo-meta, service-row and utils.
+
+**NOT changed: the backend owns the live value.** Measured 2026-10-12: `/api/site/trust` returns `dispatch_cutoff_nzt: "14:00"` and the label "Dispatched same day in Auckland metro (order by 2pm)". The service row, SEO meta, PDP delivery line (`dispatch_cutoff_human`) and the dispatch countdown (`cutoff_remaining_seconds`, `same_day_eligible`) all render the API value. **They will keep saying 2pm, and keep counting down to 14:00, until the backend ships.** The ask is in `backend-docs/outbox/dispatch-cutoff-12pm-FE-handoff-oct2026.md`. The Google Merchant Center handling cutoff is an owner action outside both repos.
+
+**Rule.** A policy number shown on the site lives in two places: static copy here, and API fields there. Changing only one side ships a contradiction. In this repo, a grep for the old value finds only half of the places it appears.
+
+---
+
+## ERR-318 — Product page cleanup: "For use in" moved above a 20% smaller image, the Fits line / "Check your printer" / "3+ from $X" line removed, Delivery/Returns under the buy-more chips, Colour/Page yield as chips on the SKU row — **RESOLVED (frontend) 2026-10-12**
+
+**Asked.** Owner, 12 Oct, screenshot of `/products/…/G215BK`: make the image about 20% smaller; move "For use in your printer" above the image and anchor the image directly under it (it floated vertically centred in the left column); remove "Search your printer model to see the cartridges listed for it…" from every page; remove "Check your printer"; remove the "Fits: …" line under the title; remove "3+ from $45.10 each · See all prices"; put Delivery / Returns below the prices; make Colour / Page yield more prominent. Follow-up answers: on a phone keep Add to Cart high (list above the image on desktop only); Delivery/Returns under Add AND under the buy-more chips; specs as chips under the title.
+
+**This supersedes owner decisions, it does not fix a defect:** the Fits headline line (ERR-293), the ladder line below Add (ERR-301) and the inline fit checker (conversion handoff 2026-09-27 §8.1) were each the owner's earlier call. They are removed at the owner's request. Never re-add them.
+
+**What changed.**
+- `#product-compat-slot` is the first child of `.product-gallery`. `_renderGroupedPrinterCompat`, `_renderFlatPrinterCompat` and the legacy Supabase fallback all fill it through ONE helper, `_mountCompat(html)`. `renderCompatiblePrinters` clears it first, so a product never inherits the last one's list. Ribbons keep their own routing (`#ribbon-col-left`, `renderCompatibleDevices`).
+- The gallery is a top-aligned flex column. `.product-gallery__main` is 80% of the column (it was absolutely stretched to the info column's height). Phone image `max-height` is 220 ⇒ 176px.
+- Phone (≤768): the layout becomes a flex column and `.product-gallery` becomes `display: contents`, so `#product-compat-slot { order: 1 }` puts the list after the buy box with no JS branch. **`--compatible` sets `align-items: start` for its grid; in a flex column that sized every child to max-content. Measured: CLC73BK was 1421px wide on a 390px phone.** Fixed with `align-items: stretch`.
+- `renderFitCheck`, `_fitKey`, `renderVolumeSummary`, `#product-fit`, `#product-headline-fit`, `#volume-pricing-summary` and their CSS are deleted. `renderPromise` no longer renders `how_to_check`. The label "Not sure it fits? 30-day returns…" and "See our reviews on Google" stay (not asked).
+- `.product-info` is a flex column at EVERY width (it was ≥1100 only). `#volume-pricing`, `#product-terms` and `#pack-upsell` are `order: 1`, so it reads Add ⇒ chips ⇒ Delivery/Returns. `#product-value-lines` is `order: 2`. `#compat-disclaimer` is `order: 1` on desktop only: on a phone there is no headline line standing in for it.
+- Colour / Page yield are pill chips with a palette colour dot (`getColorStyle`, map-only). The labels are visually hidden, not removed. **First cut put the chips on their own row under the SKU: 43px against the 23px Fits line it replaced, and GGI690KCMY's Add went to 521-569 on 1280x551 — past the fold (probe:ad-visitor-dropoff RED).** Now SKU + chips share one wrapping row (`.product-info__meta`), with compact chips in the short-window block.
+
+**Measured** (localhost:3000, Playwright; HEAD versions of the three PDP files swapped in by route for "before"):
+- Phone 390x664, Add top: G215BK 1245 ⇒ 783, CLC73BK 1357 ⇒ 878, GLC3329XLBK 1245 ⇒ 783. scrollWidth 390 on all three.
+- 1280x551, Add: G215BK 471-519 ⇒ 451-499, CLC73BK 440-488 ⇒ 442-490, GLC3329XLBK 471-519 ⇒ 478-526.
+- `probe:ad-visitor-dropoff --only=pdp` (PROBE_PACE_MS=12000): 109 passed, 0 failed, 2 soft.
+- `probe:mobile-cta`: 13 passed, 0 failed, 2 not exercised.
+- `probe:fe-master-6oct`: 49 passed. 2 NOT MEASURED (429 on CCWAA0759BK 1280x551 and CTN258XLKCMY 1366x599). 5 skipped (need `--record`).
+- Not measured: production. Deploy is pending owner approval.
+
+**Measurement side effect.** The first two local measuring runs (18 PDP loads on localhost:3000) did NOT abort analytics, and gtag.js has no localhost guard. They likely sent GA4/UET page_views with hostname `localhost`. Later runs aborted google-analytics / googletagmanager / bat.bing / /api/analytics.
+
+**Tests.** New `pdp-layout-compat-left-oct2026` (8). Rewritten as the new contract: post-deploy-fixes §2, ad-visitor-dropoff §1/§2, conversion-fixes §4/§9/§10, cro-search-quote-points §3, four-replies §H, round2 §2. `scripts/redproof-post-deploy-fixes.py`: 17/17 mutations caught. `probe-post-deploy-fixes.mjs` and `probe-conversion-fixes.mjs` now check the removal.
+
+---
+
+## ERR-317 — A super_admin searching "admin test" on the live site saw two ribbons and neither admin-only test product: admin preview never switched on, and /smart never returns admin-only rows anyway — **RESOLVED (frontend)** (2026-10-12)
+
+**Asked.** Owner, 12 Oct, signed in as admin: `/search?q=admin test` showed only the compatible ribbons 81001.01 and 81001.02. The admin table lists `ADMIN-INK-001` "Admin Test Cartridge" and `TEST-ADMIN-001` "Admin Test Product".
+
+**Measured** (super_admin JWT, GET only, 2026-10-12):
+- `/api/admin/verify` = 200 `role: super_admin`. The role was not the problem.
+- `/api/admin/catalog/shop?limit=1` = **400 `BAD_REQUEST` "Brand is required for shop endpoint"**. Public `/api/shop?limit=1` gives the same 400.
+- Mirror `/api/admin/catalog/search/smart?q=admin test` returns ONLY 81001.01 + 81001.02 (both `compatibility`). Public /smart gives the same set.
+- Mirror `/api/admin/catalog/products?search=admin test` returns `ADMIN-INK-001` and `TEST-ADMIN-001`. Neither list row carries `admin_only`.
+- In a browser (Playwright, localhost:3000, admin signed in, then reload): `AdminPreview.state` = **`anonymous`** while `Auth.isAuthenticated()` = true.
+
+**Three causes, each on its own enough to hide the rows:**
+1. **Auth race.** The first catalogue read calls `AdminPreview.ensure()` before `Auth.init` has restored the stored session. `_run` read "not signed in" and stopped at `anonymous`, a terminal state. So preview was off on every page load for every admin. Only an in-page sign-in (which re-arms through `purgeCatalogCache`) could switch it on.
+2. **Capability check on /shop.** Even past the race, `_run` checked `/api/admin/catalog/shop?limit=1`. That route now needs a brand and answers 400. A 400 is not `NOT_FOUND`, so the state became `unreachable`.
+3. **/smart does not index admin-only rows.** This is true on the mirror too, so even a granted preview had nothing to show on /search.
+
+**Fix.**
+- `AdminPreview._run` (utils.js) waits for `Auth.readyPromise` before it decides, capped at 5 s so a page without `Auth.init` still ends in a terminal state. First paint is not delayed, because `ensure()` is still never awaited.
+- The capability check reads `/api/admin/catalog/products?limit=1` (measured 200).
+- `Shop.loadSearchResults`: for a granted admin on page 1, put TEST-/ADMIN- SKU rows from `API.getProducts({search})` (mirror) first. It never removes a row. It uses the same args as the repair call, so `getWithSWR` answers it with no second request when the repair already ran. A failed lookup is a `DebugLog.warn` that says admin-only products may be missing.
+
+**After** (browser, same session): signed out = `[81001.01, 81001.02]`. Admin = `granted`, and `TEST-ADMIN-001` and `ADMIN-INK-001` are on the page with both ribbons.
+
+**Tests.** `tests/admin-preview-search-oct2026.test.js` has 3 tests. Each one was red-proofed by reverting its half of the fix: auth wait, capability path, search lookup. `backend-move-sep2026` §1 now counts three `getProducts({search})` sites and requires that all three use one SWR key.
+
+**Not fixed / noted.**
+- `probe:admin-only` is stale in three ways. Its mirror /shop check has no brand, so it always gives 400. `.env` `BUSINESS_EMAIL` is the super_admin account, so its §4 "non-admin can see it" findings are measuring an admin. Its §1 `/smart` "returned TEST-ADMIN-001" is the blunt `mentions()` matching the echoed query: the edge answers `72970.01 (did_you_mean)` only. The probe needs a real non-admin account and a branded /shop URL before its exit code means anything.
+- Backend ask, not sent: make /smart return admin-only rows to a super_admin, so the FE lookup can go.
+- `?v=` tokens for `utils.js` and `shop-page.js` were not restamped, because peer sessions are restamping the same 41 HTML files. Restamp at commit time.
+
 ## ERR-316 — Adding to cart confirmed itself three different ways (toast, desktop-only modal, PDP strip) and none looked like a cart; replaced by one slide-in cart drawer modelled on smartink.co.nz — **RESOLVED (frontend), phase 1 of the cart/checkout restyle** (2026-10-12)
 
 **Asked.** Owner, 12 Oct: make add-to-cart, the cart and checkout look "professional and clean like smartink.co.nz". Smartink's flow was measured with Playwright at 1280×800. After Add to Cart, a right-hand drawer about 460px wide opens over a dimmed page. It shows the lines with − / + and Remove, then "You may also like" rows with a round add button, then a sticky footer with the totals, View cart and Checkout. Decisions taken with the owner: one drawer replaces all three old surfaces on every add path; checkout keeps its two pages (restyle only); the cart keeps every feature, made quieter. The cart and checkout restyle is phase 2.
@@ -303,6 +373,30 @@ Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mc
 **Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
 
 **Files.** `inkcartridges/js/cart-drawer.js` (new) · `js/cart.js` · `js/product-detail-page.js` · `js/search.js` · `css/components.css` · `css/pages.css` · `html/product/index.html` · 37 HTML pages (script tag + `?v=` restamp) · `tests/cart-drawer-oct2026.test.js` (new) + 10 updated suites
+
+---
+
+## ERR-315 — The product drawer 500'd on Save for any product whose supplier was not DSNZ or Augmento: the Supplier select had no option for it, so Save sent `supplier: null` — **RESOLVED (frontend)** (2026-10-08)
+
+**Seen.** Owner, 8 Oct, editing `C-DYM-28MM-LBL-WH` (Compatible Dymo 99010/S0722370, inactive) on the Pricing tab. Save Changes answered `Save failed: Failed to update product (ref 64de7346)`.
+
+**Measured (READ-ONLY, admin GET, all 4453 rows, 8 Oct).** The row's `supplier` is `consumables_co_nz`. Live `supplier` values: dsnz 3462, augmento 864, unknown 106, okin 18, internal 1, consumables_co_nz 2, **NULL 0**.
+
+**Cause.** `sourcingFieldsHtml` (`js/admin/pages/products.js`) hand-built the Supplier `<select>` from `SUPPLIER_LABELS`, which lists only `dsnz` and `augmento`. With no matching `<option>`, the browser selects the first one, "— not recorded —". `sourcingPayload` then sends `supplier: null` on every save of the 127 rows with any other slug. No row in the table holds NULL, so the backend 500 is consistent with a NOT NULL column. **That last link is inferred, not measured** — we did not write to production to prove it. Render log ref `64de7346` would confirm. If the column had accepted NULL, the same bug would instead have wiped the supplier silently.
+
+This is the ERR-163 / `source='ribbon'` trap again. `buildSelect` (same file) was written to stop it and already appends an unknown current value as `"<value> (legacy)"`, pre-selected. The supplier select was the one select that did not use it.
+
+**Fix.** The supplier select goes through `buildSelect`. A listed slug renders as before; an unlisted one stays selected and is written back unchanged. The create modal (no product) still defaults to "— not recorded —". Admin `APP_VERSION` bumped.
+
+**Ruled out.** SKU grammar (a similar `G-DYM-12MM-LBL-2PK` label_tape saved on 7 Oct). `pack_type` (all 4453 rows hold a value the select lists).
+
+**Test.** `tests/admin-product-supplier-legacy-oct2026.test.js` renders the shipped `sourcingFieldsHtml` + `buildSelect` and reads the value a browser would submit. 4 slugs + a control. Red-proof: against the old select, 4/5 fail. Full suite 7058 pass / 0 fail.
+
+**Not verified yet.** That the save now succeeds on production. After deploy, retry Save on `C-DYM-28MM-LBL-WH`. If it still 500s, the cause is elsewhere: pull ref `64de7346` from Render.
+
+**Lesson.** A `<select>` whose options are a subset of the column's live values is a write path that rewrites data. Check the live distinct values before trusting a label map as the option list.
+
+**Files.** `inkcartridges/js/admin/pages/products.js` · `inkcartridges/js/admin/app.js` · `tests/admin-product-supplier-legacy-oct2026.test.js` (new)
 
 ---
 

@@ -504,9 +504,9 @@ test('§H the grouped "Fits <brand>" row lists models without the brand again', 
     const obj = vm.runInNewContext(`({ ${body} })`, {
         Array, Number, PrinterName: U.PrinterName, ProductName: U.ProductName,
         Security: { escapeHtml: (s) => String(s), escapeAttr: (s) => String(s) },
-        document: { querySelector: () => ({ insertAdjacentHTML: (_, h) => { html = h; } }) },
     });
     obj._printerHubHref = (p) => `/shop?printer_slug=${p.slug}`;
+    obj._mountCompat = (h) => { html = h; return true; };   // the gallery slot (owner, 12 Oct 2026)
     // Shape measured 2026-10-06 (GLC3317BK): top_models carry display_name (BF-093/094).
     obj._renderGroupedPrinterCompat({ category: 'toner', compatible_printers_grouped: [{ brand: 'Brother', brand_slug: 'brother', total: 6,
         top_models: [{ full_name: 'Brother HL L2300D', display_name: 'Brother HL-L2300D', slug: 'brother-hl-l2300d' }, { full_name: 'Brother MFC L2700DW', display_name: 'Brother MFC-L2700DW', slug: 'brother-mfc-l2700dw' }] }] });

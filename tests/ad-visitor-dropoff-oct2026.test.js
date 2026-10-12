@@ -102,7 +102,7 @@ const UTILS = loadUtils();
 // §1 PDP markup — the decision first
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§1 PDP: Price + Availability, then Add, then promise, ladder line, then the terms block', () => {
+test('§1 PDP: Price + Availability, then Add, then promise, then the terms block (ladder line removed 12 Oct)', () => {
     const at = (needle) => {
         const i = PDP_HTML.indexOf(needle);
         assert.ok(i >= 0, `${needle} must be in html/product/index.html`);
@@ -115,7 +115,6 @@ test('§1 PDP: Price + Availability, then Add, then promise, ladder line, then t
         'class="product-info__actions"',
         'id="add-to-cart-btn"',
         'id="product-promise"',
-        'id="volume-pricing-summary"',
         'id="product-terms"',
         'id="product-buybox-terms"',
         'id="product-delivery"',
@@ -138,9 +137,10 @@ test('§1 PDP: the Offer microdata stays on the Price/Availability <dl>; the ter
     assert.doesNotMatch(terms, /itemprop=/, 'Delivery/Returns rows never carried microdata — moving them out of the Offer is safe');
 });
 
-test('§1 PDP: phones keep the fit + value lines ABOVE Add in the DOM (the >=1100 order:2 drops them on desktop)', () => {
-    assert.ok(PDP_HTML.indexOf('id="product-fit"') < PDP_HTML.indexOf('id="add-to-cart-btn"'));
-    assert.ok(PDP_HTML.indexOf('id="product-value-lines"') < PDP_HTML.indexOf('id="add-to-cart-btn"'));
+test('§1 PDP: the value lines stay in the DOM above Add (CSS order 2 drops them below), the fit box is gone', () => {
+    assert.equal(PDP_HTML.indexOf('id="product-fit"'), -1, '"Check your printer" removed (owner, 12 Oct 2026)');
+    const value = PDP_HTML.indexOf('id="product-value-lines"');
+    assert.ok(value >= 0 && value < PDP_HTML.indexOf('id="add-to-cart-btn"'));
 });
 
 test('§1 PDP: the price-block CLS reserve fits the two rows it now holds, and the short-window rungs are gated', () => {
@@ -180,11 +180,11 @@ function runPromise(info, { trustStats = UTILS.TrustStats } = {}) {
     return el;
 }
 
-test('§2 the backend label and how-to-check render verbatim, under Add, with the reviews link', () => {
+test('§2 the backend label renders verbatim, under Add, with the reviews link; how_to_check is NOT rendered (owner, 12 Oct)', () => {
     const el = runPromise({ trust_signals: { compatibility_promise: LIVE_PROMISE, organization: LIVE_ORG } });
     assert.equal(el.hidden, false);
     assert.match(el.innerHTML, /<p class="product-promise__label">Not sure it fits\? 30-day returns on unopened items<\/p>/);
-    assert.match(el.innerHTML, /<a class="product-promise__how" href="\/\?scroll=ink-finder">Search your printer model/);
+    assert.doesNotMatch(el.innerHTML, /product-promise__how|Search your printer model/, 'removed from every PDP');
     assert.match(el.innerHTML, /<a class="product-promise__reviews" href="https:\/\/www\.google\.com\/maps\/search\/\?api=1&amp;query=[^"]+" target="_blank" rel="noopener">See our reviews on Google<\/a>/);
     assert.doesNotMatch(el.innerHTML, /★|stars?|rating|\(\d+\)/i, 'no star rating or review count (handoff §6)');
 });
@@ -210,9 +210,8 @@ test('§2 nothing from the backend ⇒ hidden; never invents copy', () => {
     assert.equal(none.hidden, true);
 });
 
-test('§2 the label moved, it was not copied: renderFitCheck no longer prints it', () => {
-    const fn = stripComments(liftMethod(PDP_SRC, 'renderFitCheck(info) {'));
-    assert.doesNotMatch(fn, /product-fit__promise-label|product-fit__how/);
+test('§2 the fit checker is gone and nothing promises a fit', () => {
+    assert.doesNotMatch(stripComments(PDP_SRC), /renderFitCheck|product-fit__/);
     assert.doesNotMatch(stripComments(PDP_SRC), /guaranteed (to )?fit|fits your printer/i, 'no fit guarantee (inv 13)');
 });
 

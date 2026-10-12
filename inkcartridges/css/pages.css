@@ -1822,20 +1822,28 @@
 .product-detail__layout > * { min-width: 0; }
 
 .product-detail__layout .product-gallery {
-    position: relative;
-    min-height: 0;
-    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    align-self: start;
 }
 
+/* "For use in your printer" sits above the image, and the image follows
+   directly under it at 80% of the column (owner, 12 Oct 2026: "20% smaller",
+   no longer stretched to the info column's height and centred in it). */
+.product-gallery__compat:empty { display: none; }
+.product-gallery__compat .product-printers-banner { margin-bottom: 0; }
+
 .product-detail__layout .product-gallery__main {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    aspect-ratio: unset;
-    margin-bottom: 0;
+    width: 80%;
+    margin: 0 auto;
     background-color: var(--product-image-bg);
+}
+
+/* A no-image product shows a narrow colour block in an `auto` column; with a
+   printer list above it the column needs real width. */
+.product-detail__layout--color-only:has(.product-gallery__compat:not(:empty)) {
+    grid-template-columns: 1fr 1fr;
 }
 
 .product-detail__layout .product-gallery__main img {
@@ -2000,30 +2008,57 @@
     color: var(--cyan-primary);
 }
 
-/* Quick-spec list: Colour · Page yield */
+/* Quick-spec chips: Colour · Page yield, on the SKU row under the title
+   (owner, 12 Oct 2026: "more prominent, more professional"). The labels stay
+   in the markup for screen readers; the value reads on its own. Sharing the
+   SKU's row is what pays for them above Add on a 1280x551 laptop: as their
+   own row they cost 43px against the 23px Fits line they replaced, and put
+   GGI690KCMY's Add at 521-569 (probe:ad-visitor-dropoff). */
+.product-info__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    margin-bottom: var(--spacing-sm);
+}
+.product-info__meta > .product-info__sku { margin: 0; }
 .product-info__specs {
     list-style: none;
-    margin: 0 0 var(--spacing-sm);
+    margin: 0;
     padding: 0;
     display: flex;
     flex-wrap: wrap;
-    gap: var(--spacing-xs) var(--spacing-lg);
+    gap: var(--spacing-xs);
 }
 .product-info__spec {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg-light, #f8f9fa);
+    line-height: 1.4;
 }
 .product-info__spec-label {
-    font-family: var(--font-family-mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-spacing-extra-wide);
-    color: var(--steel-400);
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
 }
 .product-info__spec-value {
     font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--color-text);
+}
+.product-info__spec-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    flex: none;
 }
 
 .product-info__pricing {
@@ -2100,10 +2135,6 @@
 .related-products {
     padding: var(--spacing-md) 0 var(--spacing-lg);
     border-top: none;
-}
-
-.product-printers-wrap {
-    padding: var(--spacing-sm) 0 0;
 }
 
 
@@ -2819,17 +2850,31 @@
     }
 
 
-    /* Compact product image on mobile — prioritize purchase info */
+    /* Compact product image on mobile — prioritize purchase info.
+       176px = 220px less 20% (owner, 12 Oct 2026). */
     .product-detail__layout .product-gallery__main {
         position: relative;
         aspect-ratio: 3 / 2;
-        max-height: 220px;
+        max-height: 176px;
         margin-bottom: var(--spacing-sm);
     }
 
-    .product-detail__layout .product-gallery {
-        min-height: auto;
+    /* Phone: one column, and the printer list goes BELOW the buy box so Add
+       to Cart stays high (owner, 12 Oct 2026). The gallery dissolves into
+       the layout so its two children can be ordered around .product-info. */
+    .product-detail__layout,
+    .product-detail__layout--color-only,
+    .product-detail__layout--compatible {
+        display: flex;
+        flex-direction: column;
+        /* --compatible sets align-items: start for the grid; in a flex column
+           that sizes every child to max-content (measured: a 1421px-wide page
+           on a 390px phone). */
+        align-items: stretch;
     }
+    .product-detail__layout .product-gallery { display: contents; }
+    .product-gallery__main--color-only { align-self: center; }
+    .product-gallery__compat { order: 1; }
 }
 
 
@@ -9420,66 +9465,11 @@ body.page-shop {
     color: var(--color-text-muted, #6b7280);
 }
 
-/* Printer fit + programme facts above Add to Cart (conversion handoff
-   2026-09-23 §4.2 / 2026-09-27 §8.1). Inline, in flow — never an overlay.
-   Helper text uses --color-text-light (steel-600): --color-text-muted
+/* Programme facts (conversion handoff 2026-09-23 §4.2). The printer-fit
+   checker that shared this block was removed at the owner's call (12 Oct
+   2026). Helper text uses --color-text-light (steel-600): --color-text-muted
    (steel-400) is below 4.5:1 on white (handoff §8.2, WCAG AA). */
-.product-fit {
-    margin: 10px 0 0;
-    font-size: 1rem;
-    color: var(--color-text);
-}
-.product-fit[hidden],
 .product-value-lines[hidden] { display: none; }
-.product-fit__summary { margin: 0; }
-.product-fit__more-count { color: var(--color-text-light); }
-.product-fit__details { margin: 2px 0 0; }
-.product-fit__details > summary {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    color: var(--cyan-dark);
-    font-weight: 600;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    cursor: pointer;
-}
-.product-fit__details[open] {
-    padding: 0 12px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-}
-.product-fit__check { display: block; margin: 4px 0 8px; }
-.product-fit__input {
-    width: 100%;
-    min-height: 48px;
-    padding: 10px 12px;
-    font-size: 1rem; /* 16px+ stops iOS zooming the page on focus */
-    border: 1px solid var(--color-border-dark);
-    border-radius: var(--radius-md);
-    background: var(--color-background);
-    color: var(--color-text);
-}
-.product-fit__result {
-    margin: 0 0 6px;
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    color: var(--color-success-green);
-}
-.product-fit__result--miss { color: var(--color-text); font-weight: 400; }
-.product-fit__result a,
-.product-fit__list a { color: var(--cyan-dark); text-decoration: underline; text-underline-offset: 2px; }
-.product-fit__list {
-    margin: 0 0 8px;
-    padding: 0 0 0 1.1em;
-    columns: 2 200px;
-    column-gap: 16px;
-    line-height: 1.7;
-    max-height: 320px;
-    overflow-y: auto;
-}
-.product-fit__item { break-inside: avoid; }
-.product-fit__promise-desc { margin: 6px 0 0; font-size: var(--font-size-sm); color: var(--color-text-light); }
 
 .product-value-lines {
     margin: 10px 0 0;
@@ -14004,31 +13994,36 @@ body.page-shop {
    above Add, ONE compliance line + ONE fit line under the title
    (#product-headline) and ONE ladder line (#volume-pricing-summary); the full
    compliance text and the chips move below Add (order 1), still on the page.
-   The reassurance group follows them (order 2). Phones are unchanged: the
-   headline and summary lines are hidden below 1100px. */
-.product-headline,
-.volume-pricing-summary { display: none; }
+   The reassurance group follows them (order 2). The headline line is hidden
+   below 1100px.
+
+   Owner, 12 Oct 2026: the fit line, the "Check your printer" box and the
+   "3+ from $X" ladder line are REMOVED (printer list now above the image).
+   At EVERY width the buy-more chips sit below Add and Delivery / Returns
+   (#product-terms) directly below the chips, so on a phone Add rises by the
+   chips' height. The full compliance panel stays above Add on phones (the
+   one-line headline that stands in for it is desktop-only). The spec chips
+   (Colour / Page yield) stay at their DOM spot under the title. */
+.product-headline { display: none; }
+.product-info {
+    display: flex;
+    flex-direction: column;
+}
+.product-info > #volume-pricing,
+.product-info > #product-terms,
+.product-info > #pack-upsell {
+    order: 1;   /* every price break, then Delivery / Returns, below Add */
+}
+.product-info > #product-value-lines {
+    order: 2;   /* programme facts, one screen down */
+}
 @media (min-width: 1100px) {
-    .product-info {
-        display: flex;
-        flex-direction: column;
+    .product-info > #compat-disclaimer {
+        order: 1;   /* full compliance text below Add; the headline line stands in above */
+        margin-top: 12px;
     }
-    .product-info > #compat-disclaimer,
-    .product-info > #volume-pricing {
-        order: 1;   /* full compliance text + every price break, directly below Add */
-    }
-    .product-info > #product-fit,
-    .product-info > #product-value-lines,
-    .product-info > #product-specs {
-        order: 2;   /* colour + page yield also restate the title; one screen down on desktop */
-    }
-    .product-info > #product-fit { margin-top: 16px; }
-    /* The fit summary is printed under the title at this width. */
-    #product-fit .product-fit__summary { display: none; }
-    .product-info > #compat-disclaimer { margin-top: 12px; }
     .product-headline:not([hidden]) { display: block; margin: 4px 0 0; }
     .product-headline__line { margin: 2px 0 0; font-size: 0.9375rem; color: var(--color-text); }
-    .volume-pricing-summary:not([hidden]) { display: block; margin: 8px 0 0; font-size: 0.9375rem; }
     /* Tighter ladder box: same chips (each still >= 48px tall), less air.
        Together with the reorder this is what brings Add to Cart back above
        the consent bar at scroll 0 on a 900px window. */
@@ -14070,7 +14065,6 @@ body.page-shop {
 }
 /* --color-text-light (steel-600): --color-text-muted is below 4.5:1 on white
    (conversion handoff §8.2, WCAG AA). */
-.product-promise__how,
 .product-promise__reviews {
     font-size: 0.875rem;
     line-height: 1.4;
@@ -14079,11 +14073,6 @@ body.page-shop {
     text-underline-offset: 2px;
 }
 .product-promise__reviews { color: var(--cyan-dark); }
-
-@media (min-width: 1100px) {
-    /* The ladder line now sits under the promise, not over the button. */
-    .volume-pricing-summary:not([hidden]) { margin-top: 6px; }
-}
 
 /* Short laptop windows (1280x551 is a 720-tall screen under browser chrome):
    claw back the air above the buy box, one rung at a time, only as far as
@@ -14095,7 +14084,8 @@ body.page-shop {
        one-line title; on a 551px window that air is the fit line's room. */
     .product-info__title { min-height: 0; }
     .product-info__badge { margin-bottom: 4px; }
-    .product-info__sku { margin-bottom: 4px; }
+    .product-info__meta { margin-bottom: 4px; }
+    .product-info__spec { padding: 1px 10px; }
     .product-info__pricing { margin-top: 2px; }
     .product-info__actions { margin-top: 4px; }
     .product-info__actions .btn { min-height: 44px; }

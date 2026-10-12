@@ -64,7 +64,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
     <link rel="stylesheet" href="/css/components.css?v=2282fee8">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=4e4d6704">
+    <link rel="stylesheet" href="/css/pages.css?v=0deea8b9">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
 </head>
 <body>
@@ -213,6 +213,10 @@
             <div class="container">
                 <div class="product-detail__layout">
                     <div class="product-gallery">
+                        <!-- "For use in your printer", above the image (owner, 12 Oct 2026).
+                             Filled by renderCompatiblePrinters() → _mountCompat(). Phones
+                             move it below the buy box with CSS order (pages.css). -->
+                        <div class="product-gallery__compat" id="product-compat-slot"></div>
                         <div class="product-gallery__main" id="product-image">
                             <div class="product-gallery__image-placeholder">
                                 <svg width="200" height="200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -228,18 +232,26 @@
                             <span class="product-info__badge" id="product-badge" hidden>COMPATIBLE</span>
                             <h1 class="product-info__title" id="product-title"><span class="skeleton" style="display:inline-block;width:280px;height:1.2em;"></span></h1>
                             <!--
-                              Desktop (>=1100px) only: one compliance line and one
-                              printer-fit line directly under the title, so both are
-                              read BEFORE Add to Cart without pushing it under the
-                              consent bar (ERR-293). Filled by renderComplianceDisclaimer
-                              and renderFitCheck; the full compliance text and the full
-                              printer list stay on the page below Add.
+                              Desktop (>=1100px) only: one compliance line directly
+                              under the title, read BEFORE Add to Cart (ERR-293).
+                              Filled by renderComplianceDisclaimer; the full compliance
+                              text stays on the page below Add. The "Fits:" line was
+                              removed at the owner's call (12 Oct 2026).
                             -->
                             <div class="product-headline" id="product-headline" hidden>
                                 <p class="product-headline__line" id="product-headline-compliance" hidden></p>
-                                <p class="product-headline__line" id="product-headline-fit" hidden></p>
                             </div>
-                            <p class="product-info__sku" id="product-sku"><span class="skeleton" style="display:inline-block;width:100px;height:1em;"></span></p>
+                            <!--
+                              SKU + quick-spec chips (Colour · Page yield) on ONE row where
+                              they fit, wrapping where they do not (owner, 12 Oct 2026: specs
+                              "more prominent"). Chips filled by renderSpecs(); hidden until a
+                              reliable spec exists. Kept OUTSIDE the test-pinned buy-box <dl>
+                              so they never disturb the prerender-mirrored rows.
+                            -->
+                            <div class="product-info__meta">
+                                <p class="product-info__sku" id="product-sku"><span class="skeleton" style="display:inline-block;width:100px;height:1em;"></span></p>
+                                <ul class="product-info__specs" id="product-specs" hidden></ul>
+                            </div>
                             <!--
                               Aggregate star rating. Display-only, populated by
                               product-detail-page.js → renderProduct() from
@@ -250,16 +262,6 @@
                             -->
                             <a class="product-info__rating" id="product-rating-badge" href="#product-reviews" hidden></a>
                         </div>
-
-                        <!--
-                          Quick-spec list (Colour · Page yield). Populated by
-                          product-detail-page.js → renderSpecs(); stays hidden
-                          until at least one reliable spec is available. Kept
-                          OUTSIDE the test-pinned buy-box <dl> so it never
-                          disturbs the prerender-mirrored Price/Availability/
-                          Delivery/Returns rows.
-                        -->
-                        <ul class="product-info__specs" id="product-specs" hidden></ul>
 
                         <!--
                           Four-row buy-box per product-page-buybox-may2026.md.
@@ -307,12 +309,11 @@
                         </div>
 
                         <!--
-                          Printer fit + programme facts, ABOVE the Add button
-                          (conversion handoff 2026-09-23 §4.2, 2026-09-27 §8.1).
-                          Filled by renderFitCheck() / renderValueLines(); both ship
-                          hidden and stay hidden when their source is absent.
+                          Programme facts (conversion handoff 2026-09-23 §4.2). Filled by
+                          renderValueLines(); ships hidden and stays hidden when its
+                          source is absent. The "Check your printer" box that sat here
+                          was removed at the owner's call (12 Oct 2026).
                         -->
-                        <section class="product-fit" id="product-fit" data-testid="product-fit" hidden aria-label="Printer compatibility"></section>
                         <div class="product-value-lines" id="product-value-lines" data-testid="product-value-lines" hidden></div>
 
                         <div id="product-shipping-note" class="product-shipping-note" hidden></div>
@@ -389,10 +390,7 @@
                             1. #product-promise — the fit reassurance, one line, directly
                                under the button (trust_signals.compatibility_promise), plus
                                "See our reviews on Google";
-                            2. #volume-pricing-summary — the "3+ from $X each" line
-                               (moved from above Add; supersedes ERR-293 at the owner's
-                               call, 2026-10-02);
-                            3. #product-terms — Delivery + Returns (the second half of
+                            2. #product-terms — Delivery + Returns (the second half of
                                the prerender-mirrored buy box; copy still locked, row
                                order still Price, Availability, Delivery, Returns across
                                the two <dl>s), the dispatch countdown, pack savings and
@@ -407,10 +405,6 @@
                              stays hidden when the field is absent (compatible rows, and genuine
                              rows with no match). -->
                         <section class="compat-alt" id="compatible-alternatives" data-testid="compatible-alternatives" hidden aria-labelledby="compat-alt-heading"></section>
-
-                        <!-- The ladder's first rung as one line (desktop >=1100px only),
-                             BELOW Add since ERR-301; the chips sit below it (ERR-293). -->
-                        <p class="volume-pricing-summary" id="volume-pricing-summary" data-testid="volume-summary" hidden></p>
 
                         <div class="product-info__terms" id="product-terms" data-testid="product-terms">
                             <dl class="buy-box buy-box--terms" id="product-buybox-terms" data-testid="buy-box-terms">
@@ -433,7 +427,7 @@
                               out of sync. Rendered by renderBuyBoxDeliveryAndReturns() from
                               delivery_estimate.{same_day_eligible,cutoff_remaining_seconds};
                               stays hidden when not eligible (incl. weekends), where the
-                              locked "Order before 2pm NZT" row is the fallback framing.
+                              locked "Order before 12pm NZT" row is the fallback framing.
 
                               role="timer" + aria-live="off": the text changes every second
                               and a polite live region would read it aloud each time.
@@ -560,24 +554,24 @@
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/api.js?v=ae9d0845"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=d848a1f5"></script>
-    <script defer src="/js/service-row.js?v=35fb91d8"></script>
+    <script defer src="/js/utils.js?v=5269666d"></script>
+    <script defer src="/js/service-row.js?v=2a4a5a3a"></script>
     <script defer src="/js/auth.js?v=b9c4c394"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=fb83ebe4"></script>
+    <script defer src="/js/cart.js?v=1b7a7651"></script>
     <script defer src="/js/cart-drawer.js?v=5951c293"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=68c60f09"></script>
     <script defer src="/js/products.js?v=6d50bf7c"></script>
     <script defer src="/js/search.js?v=9ff3c6b9"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
-    <script defer src="/js/legal-config.js?v=ac859292"></script>
+    <script defer src="/js/legal-config.js?v=3b1de764"></script>
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=afee17b0"></script>
+    <script defer src="/js/product-detail-page.js?v=7cfedfee"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

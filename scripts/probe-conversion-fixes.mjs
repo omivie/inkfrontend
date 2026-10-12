@@ -164,10 +164,10 @@ try {
             console.log(`    points="${m.points}"  call="${m.call}"`);
             console.log(`    delivery="${m.delivery}"  (API same_day_eligible=${eligible})`);
             if (kind === 'phone') {
-                // Phones: fit + value lines ABOVE Add (handoff §4.2/§8.1); the sticky
-                // Add bar already carries the first screen.
-                check(`${sku}: printer fit ABOVE Add`, m.fitY !== null && m.addY !== null && m.fitY < m.addY);
-                check(`${sku}: value lines ABOVE Add`, m.valueY !== null && m.valueY < m.addY);
+                // Owner, 12 Oct 2026 (ERR-318): the fit box is removed and the
+                // value lines sit BELOW Add at every width, so Add rises on a phone.
+                check(`${sku}: no printer fit box`, m.fitY === null);
+                check(`${sku}: value lines BELOW Add`, m.valueY !== null && m.addY !== null && m.valueY > m.addY);
             } else {
                 // Desktop: Add keeps its first screen, clear of the consent banner
                 // (D-P0-2; measured rects, ERR-301); fit + value lines render below it.
@@ -175,7 +175,7 @@ try {
                 const overlaps = !!(a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom);
                 check(`${sku}: Add to Cart on the first screen and clear of the consent banner`, !!a && a.bottom <= DESKTOP.height && !overlaps,
                     a ? `Add y ${Math.round(a.top)}-${Math.round(a.bottom)} x${Math.round(a.left)}-${Math.round(a.right)}; banner ${b ? `x${Math.round(b.left)}-${Math.round(b.right)} y${Math.round(b.top)}-${Math.round(b.bottom)}` : 'not open'}` : 'no Add');
-                check(`${sku}: printer fit + value lines rendered (below Add on desktop)`, m.fitY !== null && m.valueY !== null && m.fitY > m.addY);
+                check(`${sku}: value lines rendered below Add; no fit box (ERR-318)`, m.fitY === null && m.valueY !== null && m.valueY > m.addY);
             }
             // Copy since FE master checklist v2 item 6: "Earn N reward points ($X)", in the price row.
             check(`${sku}: points line rendered`, /^Earn \d[\d,]* reward points \(\$\d+\.\d\d\)$/.test(m.points), m.points);

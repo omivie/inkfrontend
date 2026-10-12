@@ -62,12 +62,8 @@ function el(id, cls = '') {
 function pdpDom() {
     const strip = el('product-headline');
     const compliance = el('product-headline-compliance', 'product-headline__line');
-    const fit = el('product-headline-fit', 'product-headline__line');
-    strip.children = [compliance, fit];
-    const byId = {
-        'product-headline': strip, 'product-headline-compliance': compliance, 'product-headline-fit': fit,
-        'volume-pricing-summary': el('volume-pricing-summary'), 'product-fit': el('product-fit'),
-    };
+    strip.children = [compliance];
+    const byId = { 'product-headline': strip, 'product-headline-compliance': compliance };
     const pricing = el('', 'product-info__pricing');
     const document = {
         getElementById: (id) => byId[id] || null,
@@ -85,11 +81,8 @@ function pdp(document, globals = {}) {
         Business: { breakLabel: (r) => (r && Number.isFinite(r.minQuantity) ? `${r.minQuantity}+` : '') },
         ...globals,
     });
-    const self = {
-        _printerHubHref: () => '/printers/x',
-        _fitKey: (s) => String(s).toLowerCase(),
-    };
-    for (const name of ['_setHeadline', 'renderComplianceDisclaimer', 'renderFitCheck', 'renderVolumeSummary', '_dispatchClause']) {
+    const self = {};
+    for (const name of ['_setHeadline', 'renderComplianceDisclaimer', '_dispatchClause']) {
         const { params, body } = extractMethod(src, name);
         self[name] = vm.runInContext(`(function (${params}) ${body})`, ctx).bind(self);
     }
@@ -209,72 +202,40 @@ test('§2 brand name in the headline is escaped', () => {
     assert.equal(byId['product-headline-compliance'].innerHTML, 'Compatible — not made by &lt;img src=x&gt;');
 });
 
-test('§2 fit headline: "Fits: {first two} +N more" from the PDP\'s full list; none ⇒ hidden', () => {
-    const { byId, document } = pdpDom();
-    const P = pdp(document);
-    P.renderFitCheck({ category: 'ink', compatible_printers: printers(11) });
-    assert.equal(byId['product-headline-fit'].innerHTML, '<strong>Fits:</strong> Brother MFC-J5910DW, Brother MFC-J5911DW +9 more');
-    P.renderFitCheck({ category: 'ink', compatible_printers: printers(2) });
-    assert.equal(byId['product-headline-fit'].innerHTML, '<strong>Fits:</strong> Brother MFC-J5910DW, Brother MFC-J5911DW');
-    P.renderFitCheck({ category: 'ink', compatible_printers: [] });
-    assert.equal(byId['product-headline-fit'].hidden, true, 'no list ⇒ no line (next product must not inherit the last one)');
-    P.renderFitCheck({ category: 'ribbon', compatible_printers: printers(3) });
-    assert.equal(byId['product-headline-fit'].hidden, true, 'ribbons are owner-manual (ERR-086)');
+// Owner, 12 Oct 2026: the "Fits:" headline line, the "Check your printer"
+// box and the "3+ from $X each" ladder line are REMOVED from the PDP (the
+// printer list sits above the image instead). These pin the removal.
+test('§2 removed: no Fits line, no fit checker, no ladder line — in markup, code or CSS', () => {
+    const html = read('html/product/index.html').replace(/<!--[\s\S]*?-->/g, '');
+    const code = stripComments(read('js/product-detail-page.js'));
+    const css = stripComments(read('css/pages.css'));
+    for (const id of ['product-headline-fit', 'product-fit', 'volume-pricing-summary']) {
+        assert.doesNotMatch(html, new RegExp(`id="${id}"`), id);
+        assert.doesNotMatch(code, new RegExp(id), id);
+    }
+    assert.doesNotMatch(code, /renderFitCheck|renderVolumeSummary|Check your printer|<strong>Fits:<\/strong>/);
+    assert.doesNotMatch(css, /\.product-fit\b|\.volume-pricing-summary/);
 });
 
-test('§2 ladder line: entry rung + its backend price, never a maximum saving; no ladder ⇒ hidden', () => {
-    const { byId, document } = pdpDom();
-    const P = pdp(document);
-    const line = byId['volume-pricing-summary'];
-    // CLC73BK, measured 2026-09-28: quantity_breaks[0] = {min_quantity: 3, business_price: 5.56}
-    P.renderVolumeSummary({ entry: { minQuantity: 3, businessPrice: 5.56 }, best: { minQuantity: 8, businessPrice: 5.21, percent: 10 } });
-    assert.equal(line.hidden, false);
-    assert.match(line.innerHTML, /^3\+ from \$5\.56 each <span aria-hidden="true">·<\/span> <a href="#volume-pricing">See all prices<\/a>$/);
-    assert.doesNotMatch(line.innerHTML, /up to|save|5\.21|10%/i, 'the best rung is never advertised above Add');
-    P.renderVolumeSummary(null);
-    assert.equal(line.hidden, true);
-    P.renderVolumeSummary({ entry: { minQuantity: 3 } });
-    assert.equal(line.hidden, true, 'an entry with no price is not a claim');
-});
-
-test('§2 renderVolumePricing clears the line first and fills it only after the stale-product guard', () => {
-    const fn = extractMethod(stripComments(read('js/product-detail-page.js')), 'renderVolumePricing').body;
-    const clear = fn.indexOf('this.renderVolumeSummary(null)');
-    const guard = fn.indexOf('this.product.sku !== sku');
-    const fill = fn.indexOf('this.renderVolumeSummary(ladder)');
-    assert.ok(clear >= 0 && guard > clear && fill > guard, `clear ${clear} < guard ${guard} < fill ${fill}`);
-});
-
-test('§2 markup: the strip sits under the title, the ladder line AFTER the actions (ERR-301), both ship hidden', () => {
+test('§2 markup: the compliance strip still sits under the title and ships hidden', () => {
     const html = read('html/product/index.html');
     const title = html.indexOf('id="product-title"');
     const strip = html.indexOf('id="product-headline"');
     const sku = html.indexOf('id="product-sku"');
     assert.ok(title < strip && strip < sku, 'directly under the title');
     assert.match(html, /id="product-headline" hidden/);
-    const ladder = html.indexOf('id="volume-pricing"');
-    const summary = html.indexOf('id="volume-pricing-summary"');
-    const actions = html.indexOf('class="product-info__actions"');
-    // ERR-301 (ad-clicks-to-orders §1, owner's call 2026-10-02): the "3+ from
-    // $X each" line moved BELOW Add — under the fit promise — so the button
-    // sits directly under the price and stock line on a laptop.
-    const promise = html.indexOf('id="product-promise"');
-    assert.ok(ladder < actions && actions < promise && promise < summary,
-        'chips, then Add, then the fit promise, then the one-line ladder');
-    assert.match(html, /id="volume-pricing-summary"[^>]*hidden/);
 });
 
-test('§2 CSS: desktop-only lines; compliance + chips order 1, reassurance order 2; summary hidden in #product-fit', () => {
+test('§2 CSS: headline desktop-only; chips + terms order 1 at every width; compliance panel order 1 on desktop only', () => {
     const css = stripComments(read('css/pages.css'));
-    assert.match(css, /\.product-headline,\s*\.volume-pricing-summary\s*\{\s*display:\s*none;\s*\}/, 'hidden below 1100px (phones unchanged)');
-    const i = css.indexOf('@media (min-width: 1100px) {\n    .product-info {\n        display: flex;');
-    assert.ok(i > 0);
+    assert.match(css, /\.product-headline\s*\{\s*display:\s*none;\s*\}/, 'hidden below 1100px');
+    assert.match(css, /\.product-info > #volume-pricing,\s*\.product-info > #product-terms,\s*\.product-info > #pack-upsell\s*\{\s*order:\s*1;/);
+    const i = css.indexOf('@media (min-width: 1100px) {\n    .product-info > #compat-disclaimer {');
+    assert.ok(i > 0, 'the compliance panel moves below Add on desktop only (phones have no headline line standing in)');
     const block = css.slice(i, css.indexOf('\n}', i));
-    assert.match(block, /#compat-disclaimer,\s*\.product-info > #volume-pricing\s*\{\s*order:\s*1;/);
-    assert.match(block, /#product-specs\s*\{\s*order:\s*2;/);
-    assert.match(block, /#product-fit \.product-fit__summary\s*\{\s*display:\s*none;/);
+    assert.match(block, /#compat-disclaimer\s*\{\s*order:\s*1;/);
     assert.match(block, /\.product-headline:not\(\[hidden\]\)\s*\{\s*display:\s*block;/);
-    assert.match(block, /\.volume-pricing-summary:not\(\[hidden\]\)\s*\{\s*display:\s*block;/);
+    assert.doesNotMatch(css, /#product-specs\s*\{\s*order/, 'spec chips stay under the title');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

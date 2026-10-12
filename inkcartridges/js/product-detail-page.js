@@ -788,11 +788,10 @@
             // the page looks identical to today when nothing qualifies.
             this.renderPackSavingsVsSingles(info);
 
-            // Printer fit + value props, ABOVE the Add button (conversion
-            // handoff 2026-09-23 §4.2 / 2026-09-27 §8.1). A shopper unsure the
-            // cartridge fits does not add it; 51% of orders are one unit.
+            // The inline "Fits:" line and "Check your printer" box were removed
+            // at the owner's call (12 Oct 2026); the printer list now sits above
+            // the image (renderCompatiblePrinters → #product-compat-slot).
             this._unitPrice = price;
-            this.renderFitCheck(info);
             this.renderPromise(info);
             this.renderCompatibleAlternatives(info);
             this.renderValueLines(info);
@@ -1097,7 +1096,10 @@
             if (!el) return;
             const rows = [];
             if (info.color) {
-                rows.push(`<li class="product-info__spec"><span class="product-info__spec-label">Colour</span><span class="product-info__spec-value">${Security.escapeHtml(String(info.color))}</span></li>`);
+                // Map-derived style only (a fixed palette), never product data.
+                const dotStyle = this.getColorStyle(String(info.color));
+                const dot = dotStyle ? `<span class="product-info__spec-dot" style="${Security.escapeAttr(dotStyle)}" aria-hidden="true"></span>` : '';
+                rows.push(`<li class="product-info__spec">${dot}<span class="product-info__spec-label">Colour</span><span class="product-info__spec-value">${Security.escapeHtml(String(info.color))}</span></li>`);
             }
             const yieldN = this.plausibleYield(info.pageYield);
             if (yieldN) {
@@ -1113,7 +1115,7 @@
         },
 
         renderBuyBoxDeliveryAndReturns(info) {
-            const SPEC_DELIVERY_CUTOFF = '2pm';
+            const SPEC_DELIVERY_CUTOFF = '12pm';
             const SPEC_RETURNS_DAYS = 30;
             const SPEC_RETURNS_URL = '/returns';
 
@@ -1191,7 +1193,7 @@
          * The dispatch clause after the delivery label, driven by
          * `delivery_estimate.same_day_eligible` (conversion handoff 2026-09-23 §3).
          *
-         * Until Sep 2026 the "Order before 2pm NZT for same-day dispatch" line
+         * Until Sep 2026 the "Order before <cutoff> NZT for same-day dispatch" line
          * printed UNCONDITIONALLY: at 20:55 NZT the PDP made that promise while
          * the same response said `same_day_eligible: false` — a claim the
          * business could not keep, on a page paid ad clicks land on.
@@ -1283,26 +1285,6 @@
         },
 
         /**
-         * "3+ from $5.56 each · See all prices" — the ladder as ONE line above
-         * Add on desktop (ERR-293); the chips render below Add at >=1100px.
-         * The rung is `ladder.entry` (the first real rung after describeLadder's
-         * clean-up — never a constant, the entry rung is band-dependent) and
-         * the price is its backend `business_price`, rendered as-is. Never a
-         * maximum saving: the owner ruled "up to" claims out. No ladder, or an
-         * entry without a price ⇒ the line stays hidden.
-         */
-        renderVolumeSummary(ladder) {
-            const el = document.getElementById('volume-pricing-summary');
-            if (!el) return;
-            const entry = ladder && ladder.entry;
-            const label = entry && typeof Business !== 'undefined' ? Business.breakLabel(entry) : '';
-            if (!label || !Number.isFinite(entry.businessPrice)) { el.hidden = true; el.innerHTML = ''; return; }
-            el.innerHTML = `${Security.escapeHtml(label)} from ${Security.escapeHtml(formatPrice(entry.businessPrice))} each`
-                + ` <span aria-hidden="true">·</span> <a href="#volume-pricing">See all prices</a>`;
-            el.hidden = false;
-        },
-
-        /**
          * Business-account VOLUME price breaks (business-account-pricing v2,
          * Jul 2026).
          *
@@ -1338,7 +1320,6 @@
          */
         async renderVolumePricing(info) {
             const sku = info && info.sku;
-            this.renderVolumeSummary(null);   // never carry a previous product's line
             const section = document.getElementById('volume-pricing');
             if (!sku || !section || typeof Business === 'undefined') return;
 
@@ -1366,7 +1347,6 @@
             if (!this.product || this.product.sku !== sku) return;
 
             this._contractPrice = contract || null;
-            this.renderVolumeSummary(ladder);
             // A contract price is worth showing even when there is no ladder at
             // all: it IS the price this customer pays. Returning early on a null
             // ladder would hide the negotiated rate on every product whose band
@@ -1566,115 +1546,15 @@
             }
         },
 
-        /** Letters and digits only, lower-cased — "MFC-J5930DW" and "mfc j5930dw" are one query. */
-        _fitKey(s) {
-            return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
-        },
-
-        /**
-         * "Fits these printers" + "Check your printer" + the compatibility
-         * promise, directly under the price (conversion handoff 2026-09-27 §8.1).
-         *
-         * Source: the product's OWN `compatible_printers` (never a sibling's —
-         * ERR-135). The first two are named; all of them are in the checker.
-         * The check box filters that same list client-side; a query that matches
-         * nothing says so and points at printer search — it never claims the
-         * cartridge does not fit, because the compatibility data has known gaps.
-         *
-         * `trust_signals.compatibility_promise` is restated verbatim; nothing
-         * here may say "guaranteed to fit" or "zero risk" (inv 13 — pinned by
-         * tests/conversion-fixes-sep2026.test.js).
-         *
-         * Ribbons are owner-manual (ERR-086) and render nothing here.
-         */
-        renderFitCheck(info) {
-            const el = document.getElementById('product-fit');
-            if (!el) return;
-            const printers = info && info.category !== 'ribbon' && Array.isArray(info.compatible_printers)
-                ? info.compatible_printers.filter(p => p && (p.full_name || p.model_name))
-                : [];
-            const promise = info && info.trust_signals && info.trust_signals.compatibility_promise;
-            const hasPromise = promise && typeof promise.label === 'string' && promise.label.trim();
-            if (!printers.length && !hasPromise) { el.hidden = true; el.innerHTML = ''; this._setHeadline('product-headline-fit', ''); return; }
-
-            // The backend's display_name (BF-093/094), else the raw name (PrinterName, utils.js).
-            const labelOf = (p) => PrinterName.of(p);
-            const items = printers.map((p) => {
-                const raw = p.full_name || [p.brand, p.model_name].filter(Boolean).join(' ');
-                const href = this._printerHubHref(p);
-                return `<li class="product-fit__item" data-fit-key="${Security.escapeAttr(this._fitKey(raw))}">`
-                    + `<a href="${Security.escapeAttr(href)}">${Security.escapeHtml(labelOf(p))}</a></li>`;
-            }).join('');
-
-            /* COMPACT BY DESIGN. The first cut listed six printers and the full
-             * promise above the button, and pushed a desktop PDP's Add to Cart to
-             * y 1400 on a 900px screen (measured, probe:mobile-cta §3) — the
-             * reassurance cost the buy button its first screen. Now: one summary
-             * line and the promise label stay visible; the checker, the full list
-             * and the promise's detail open on demand. */
-            const shown = printers.slice(0, 2).map(labelOf);
-            const more = printers.length - shown.length;
-            // Desktop headline twin (ERR-293): at >=1100px #product-fit sits
-            // below Add, so the same summary is printed under the title.
-            this._setHeadline('product-headline-fit', printers.length
-                ? `<strong>Fits:</strong> ${Security.escapeHtml(shown.join(', '))}${more > 0 ? ` +${more} more` : ''}`
-                : '');
-            let html = '';
-            if (printers.length) {
-                html += `<p class="product-fit__summary"><strong>Fits:</strong> ${Security.escapeHtml(shown.join(', '))}`
-                    + (more > 0 ? ` <span class="product-fit__more-count">+${more} more</span>` : '') + `</p>`
-                    + `<details class="product-fit__details" id="product-fit-details">`
-                    + `<summary>Check your printer${printers.length > 2 ? ` (${printers.length} listed)` : ''}</summary>`
-                    + `<label class="product-fit__check"><span class="visually-hidden">Your printer model</span>`
-                    + `<input type="search" class="product-fit__input" id="product-fit-input" placeholder="Type your printer model, e.g. ${Security.escapeAttr(PrinterName.withoutBrand(PrinterName.of(printers[0]), printers[0].brand))}" autocomplete="off" enterkeyhint="search"></label>`
-                    + `<p class="product-fit__result" id="product-fit-result" role="status" aria-live="polite" hidden></p>`
-                    + `<ul class="product-fit__list" id="product-fit-list">${items}</ul>`;
-            }
-            // ERR-301: the promise LABEL and `how_to_check` moved to
-            // #product-promise, directly under Add (renderPromise). Only the
-            // longer `description` stays here, inside the checker, on demand.
-            const desc = hasPromise && typeof promise.description === 'string' ? promise.description.trim() : '';
-            if (printers.length) {
-                html += (desc ? `<p class="product-fit__promise-desc">${Security.escapeHtml(desc)}</p>` : '') + `</details>`;
-            } else if (desc) {
-                html += `<details class="product-fit__details"><summary>Our returns promise</summary><p class="product-fit__promise-desc">${Security.escapeHtml(desc)}</p></details>`;
-            }
-            if (!html) { el.hidden = true; el.innerHTML = ''; return; }
-            el.innerHTML = html;
-            el.hidden = false;
-
-            const input = el.querySelector('#product-fit-input');
-            const result = el.querySelector('#product-fit-result');
-            const list = el.querySelector('#product-fit-list');
-            if (!input || !list) return;
-            input.addEventListener('input', () => {
-                const q = this._fitKey(input.value);
-                let hits = 0;
-                list.querySelectorAll('.product-fit__item').forEach(li => {
-                    const match = !q || li.getAttribute('data-fit-key').includes(q);
-                    li.hidden = !match;
-                    if (q && match) hits++;
-                });
-                if (!result) return;
-                if (!q) { result.hidden = true; result.textContent = ''; return; }
-                result.hidden = false;
-                result.classList.toggle('product-fit__result--miss', hits === 0);
-                if (hits > 0) {
-                    result.textContent = hits === 1 ? 'Listed for your printer:' : `${hits} matching printers listed:`;
-                } else {
-                    result.innerHTML = `Not listed for this cartridge. <a href="/shop?q=${encodeURIComponent(input.value.trim())}">Search your printer model</a> to see the cartridges listed for it.`;
-                }
-            });
-        },
-
         /**
          * ERR-301 (ad-clicks-to-orders handoff, 2026-10-02 §2 + §6): the fit
-         * reassurance, ONE line directly under Add to Cart, then the backend's
-         * "how to check" as small link text to the printer finder, then a plain
-         * "See our reviews on Google" link.
+         * reassurance, ONE line directly under Add to Cart, then a plain
+         * "See our reviews on Google" link. The backend's `how_to_check`
+         * ("Search your printer model…") is NOT rendered: owner removed it from
+         * every PDP, 12 Oct 2026.
          *
-         * Every word comes from the product response: `label` and
-         * `how_to_check` from trust_signals.compatibility_promise (the return
+         * Every word comes from the product response: `label` from
+         * trust_signals.compatibility_promise (the return
          * days are the backend's setting — never hard-code them), the reviews
          * URL from trust_signals.organization via TrustStats.googleReviewsUrl,
          * which refuses anything that is not an https Google URL. No stars, no
@@ -1689,13 +1569,11 @@
             const ts = (info && info.trust_signals) || {};
             const promise = ts.compatibility_promise || {};
             const label = typeof promise.label === 'string' ? promise.label.trim() : '';
-            const how = typeof promise.how_to_check === 'string' ? promise.how_to_check.trim() : '';
             const reviewsUrl = (typeof TrustStats !== 'undefined' && typeof TrustStats.googleReviewsUrl === 'function')
                 ? TrustStats.googleReviewsUrl(ts.organization)
                 : null;
             let html = '';
             if (label) html += `<p class="product-promise__label">${Security.escapeHtml(label)}</p>`;
-            if (how) html += `<a class="product-promise__how" href="/?scroll=ink-finder">${Security.escapeHtml(how)}</a>`;
             if (reviewsUrl) {
                 html += `<a class="product-promise__reviews" href="${Security.escapeAttr(reviewsUrl)}" target="_blank" rel="noopener">See our reviews on Google</a>`;
             }
@@ -2277,21 +2155,24 @@
                 </li>`;
             }).join('');
 
-            const html = `
-                <div class="product-printers-wrap">
-                    <div class="container">
-                        <div class="product-printers-banner product-printers-banner--grouped" data-testid="compat-grouped">
-                            <strong class="product-printers-banner__label">For use in your printer</strong>
-                            <ul class="compat-groups">${rows}</ul>
-                        </div>
-                    </div>
-                </div>`;
-            const insertTarget = document.querySelector('.related-products');
-            if (insertTarget) {
-                insertTarget.insertAdjacentHTML('beforebegin', html);
-                return true;
-            }
-            return false;
+            return this._mountCompat(`
+                <div class="product-printers-banner product-printers-banner--grouped" data-testid="compat-grouped">
+                    <strong class="product-printers-banner__label">For use in your printer</strong>
+                    <ul class="compat-groups">${rows}</ul>
+                </div>`);
+        },
+
+        /**
+         * Put the "For use in" banner at the top of the gallery column, above
+         * the image (#product-compat-slot; owner, 12 Oct 2026). Phones show it
+         * below the buy box via CSS order (pages.css), so Add stays high there.
+         * @returns {boolean} true when the slot exists and was filled.
+         */
+        _mountCompat(html) {
+            const slot = document.getElementById('product-compat-slot');
+            if (!slot) return false;
+            slot.innerHTML = html;
+            return true;
         },
 
         /**
@@ -2321,21 +2202,11 @@
                 return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
             }).join(', ');
 
-            const html = `
-                <div class="product-printers-wrap">
-                    <div class="container">
-                        <div class="product-printers-banner" data-testid="compat-flat">
-                            <strong>For Use In:</strong>
-                            <span>${links}</span>
-                        </div>
-                    </div>
-                </div>`;
-            const insertTarget = document.querySelector('.related-products');
-            if (insertTarget) {
-                insertTarget.insertAdjacentHTML('beforebegin', html);
-                return true;
-            }
-            return false;
+            return this._mountCompat(`
+                <div class="product-printers-banner" data-testid="compat-flat">
+                    <strong>For Use In:</strong>
+                    <span>${links}</span>
+                </div>`);
         },
 
         /**
@@ -2475,6 +2346,9 @@
             // server-side; this only governs what the PAGE displays.
             if (info.category === 'ribbon') return;
 
+            // Never carry the previous product's list.
+            this._mountCompat('');
+
             // Fast path 1 — backend grouped compatibility (audit §1.4).
             if (this._renderGroupedPrinterCompat(info)) return;
             // Fast path 2 — flat compatible_printers[] with slug/brand_slug (§2).
@@ -2509,21 +2383,11 @@
                     return `<a href="${href}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
-                const html = `
-                    <div class="product-printers-wrap">
-                        <div class="container">
-                            <div class="product-printers-banner">
-                                <strong>For Use In:</strong>
-                                <span>${printerLinks}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                const insertTarget = document.querySelector('.related-products');
-                if (insertTarget) {
-                    insertTarget.insertAdjacentHTML('beforebegin', html);
-                }
+                this._mountCompat(`
+                    <div class="product-printers-banner">
+                        <strong>For Use In:</strong>
+                        <span>${printerLinks}</span>
+                    </div>`);
             } catch (error) {
                 // Silently fail — compatible printers are optional
             }

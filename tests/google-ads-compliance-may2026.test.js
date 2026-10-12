@@ -62,7 +62,7 @@ const FACTS = {
     returnFaultyDays: 30,
     returnChangeDays: 14,
     compatibleWarrantyMonths: 12,
-    dispatchHourNZ:   2,           // 2pm cutoff (NOT 12pm)
+    dispatchHourNZ:   12,          // 12pm cutoff (owner, 12 Oct 2026; was 2pm)
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -261,11 +261,11 @@ test('legal-config.js no longer carries the 12-month compatible-warranty constan
 test('legal-config.js exposes disambiguationLine() helper', () => {
     assert.match(LEGAL_CFG_SRC, /disambiguationLine\s*:\s*function\b/);
 });
-test('legal-config.js handlingTime mentions 2pm + Auckland metro qualifier', () => {
-    const re = /handlingTime:\s*['"][^'"]*\b2(?::00)?pm[^'"]*Auckland metro[^'"]*['"]/i;
-    const reAlt = /handlingTime:\s*['"][^'"]*Auckland metro[^'"]*\b2(?::00)?pm[^'"]*['"]/i;
+test('legal-config.js handlingTime mentions 12pm + Auckland metro qualifier', () => {
+    const re = /handlingTime:\s*['"][^'"]*\b12(?::00)?pm[^'"]*Auckland metro[^'"]*['"]/i;
+    const reAlt = /handlingTime:\s*['"][^'"]*Auckland metro[^'"]*\b12(?::00)?pm[^'"]*['"]/i;
     assert.ok(re.test(LEGAL_CFG_SRC) || reAlt.test(LEGAL_CFG_SRC),
-        'handlingTime must mention both "2pm" and "Auckland metro"');
+        'handlingTime must mention both "12pm" and "Auckland metro"');
 });
 
 // ─────────────────────────────────────────────────────────────────────────

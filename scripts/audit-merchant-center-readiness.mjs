@@ -142,15 +142,15 @@ function auditEmailsAndClaims() {
 
 function auditDispatchCutoff() {
   const files = [...walk(SITE, '.html'), ...walk(path.join(SITE, 'js'), '.js')];
-  const CUTOFF = '2pm';
+  const CUTOFF = '12pm';
   for (const f of files) {
     const src = read(f);
     if (!src) continue;
     const rel = path.relative(ROOT, f);
-    // A rendered "12pm ... dispatch/cut-off" would contradict the 2pm cut-off.
-    const bad = src.match(/12\s?pm[^\n]{0,40}(dispatch|cut[-\s]?off|same[-\s]day)/i)
-             || src.match(/(dispatch|cut[-\s]?off|same[-\s]day)[^\n]{0,40}12\s?pm/i);
-    if (bad) fail('shipping', `${rel} advertises a 12pm cut-off — the site standard is ${CUTOFF}`);
+    // A rendered "2pm ... dispatch/cut-off" would contradict the 12pm cut-off (moved from 2pm, owner, 12 Oct 2026).
+    const bad = src.match(/\b2(?::00)?\s?pm[^\n]{0,40}(dispatch|cut[-\s]?off|same[-\s]day)/i)
+             || src.match(/(dispatch|cut[-\s]?off|same[-\s]day)[^\n]{0,40}\b2(?::00)?\s?pm/i);
+    if (bad) fail('shipping', `${rel} advertises a 2pm cut-off — the site standard is ${CUTOFF}`);
   }
 }
 

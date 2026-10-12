@@ -4848,16 +4848,21 @@ async function bulkSetActiveFor(ids, activate) {
  */
 function sourcingFieldsHtml(formGroup, product = null) {
   const p = product || {};
-  const supplierOptions = ['<option value="">— not recorded —</option>']
-    .concat(Object.entries(SUPPLIER_LABELS).map(([slug, label]) =>
-      `<option value="${esc(slug)}"${p.supplier === slug ? ' selected' : ''}>${esc(label)}</option>`))
-    .join('');
+  // buildSelect, not a hand-rolled list (ERR-315). Live rows also hold okin,
+  // unknown, internal and consumables_co_nz; with no matching <option> the
+  // browser fell back to "— not recorded —" and Save sent `supplier: null`,
+  // which the backend 500s ("Failed to update product"). buildSelect keeps an
+  // unlisted slug selected as "(legacy)" so a save writes it back unchanged.
+  const supplierSelect = buildSelect('edit-supplier',
+    [{ value: '', label: '— not recorded —' }]
+      .concat(Object.entries(SUPPLIER_LABELS).map(([value, label]) => ({ value, label }))),
+    p.supplier);
   const packOptions = ['single'].concat(PACK_PACK_TYPES)
     .map(v => `<option value="${esc(v)}"${p.pack_type === v ? ' selected' : ''}>${esc(v.replace(/_/g, ' '))}</option>`)
     .join('');
   return `
     <div class="admin-form-row">
-      ${formGroup('Supplier', `<select class="admin-select" id="edit-supplier">${supplierOptions}</select>`, 'supplier')}
+      ${formGroup('Supplier', supplierSelect, 'supplier')}
       ${formGroup('Supplier SKU', `<input class="admin-input" id="edit-supplier-sku" value="${esc(p.supplier_sku || '')}" placeholder="their code for it">`, 'supplier_sku')}
     </div>
     <div class="admin-form-row">

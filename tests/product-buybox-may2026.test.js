@@ -170,8 +170,8 @@ test('§D delivery label: NO hard-coded fallback window (CRO handoff 2026-10-04)
     // tests/cro-search-quote-points-oct2026.test.js).
     assert.doesNotMatch(pdpCode, /SPEC_DELIVERY_LABEL/, 'no hard-coded delivery window');
     assert.doesNotMatch(pdpCode, /[1-4]\s*[–-]\s*[2-5] business days/, 'no literal delivery window in PDP code');
-    assert.match(pdpCode, /SPEC_DELIVERY_CUTOFF\s*=\s*'2pm'/,
-        'PDP must hard-code the spec-locked dispatch cutoff ("2pm") as a fallback');
+    assert.match(pdpCode, /SPEC_DELIVERY_CUTOFF\s*=\s*'12pm'/,
+        'PDP must hard-code the spec-locked dispatch cutoff ("12pm") as a fallback');
 });
 
 test('§D PDP falls back to 30 days / /returns when trust_signals.returns is absent', () => {

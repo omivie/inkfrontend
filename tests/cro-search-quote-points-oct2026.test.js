@@ -284,7 +284,7 @@ test('§3 the PDP slot exists only when the product carries reward_points; value
 
 test('§3 the quantity ladder never headlines a maximum percentage', () => {
     const code = stripComments(PDP_SRC);
-    for (const name of ['renderVolumePricing', 'renderVolumeSummary']) {
+    for (const name of ['renderVolumePricing']) {   // renderVolumeSummary removed (owner, 12 Oct 2026)
         assert.doesNotMatch(extractMethod(code, name).body, /up to|max_discount_percent/i, `${name}: each rung is floor-clamped per line`);
     }
 });

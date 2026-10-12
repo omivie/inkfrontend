@@ -73,8 +73,7 @@ test('§1 fitsLine reads display_name first, the raw name for a row without it',
 const PDP = stripComments(read('js/product-detail-page.js'));
 const SHOP = stripComments(read('js/shop-page.js'));
 
-test('§2 PDP fit checker, grouped top_models and flat list read display_name first', () => {
-    assert.match(PDP, /const labelOf = \(p\) => PrinterName\.of\(p\);/);   // display_name first (BF-094)
+test('§2 PDP grouped top_models and flat list read display_name first (fit checker removed, owner 12 Oct 2026)', () => {
     assert.match(PDP, /const shown = m\.display_name \|\| m\.full_name;/);
     assert.match(PDP, /group\.top_models\.filter\(m => m && \(m\.display_name \|\| m\.full_name\)\)/);
     assert.match(PDP, /let label = p\.display_name \|\| p\.full_name \|\| p\.name/);

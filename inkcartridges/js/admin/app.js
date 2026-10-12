@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.10.08-margin-sort-net-err310-311';
+const APP_VERSION = '2026.10.08-supplier-legacy-err315';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

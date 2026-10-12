@@ -8,7 +8,7 @@
  * on a PDP, the product's own `delivery_estimate`. NOTHING HERE IS A FACT OF
  * ITS OWN: a field that is absent drops its fact, it is never defaulted.
  *
- *   - speed      "Auckland metro orders by 2pm ship same day · most of NZ in
+ *   - speed      "Auckland metro orders by 12pm ship same day · most of NZ in
  *                1–3 business days". Scoped to Auckland metro always (Part 2
  *                invariant: never an unscoped "same-day dispatch"). The days
  *                half is the product's `delivery_estimate.label` on a PDP, else

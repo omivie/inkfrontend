@@ -3131,7 +3131,7 @@ if (typeof window !== 'undefined') window.PrinterName = PrinterName;
  * user looks at it again.
  *
  * `same_day_eligible === false` (incl. weekends) renders NOTHING; the static
- * "Order before 2pm NZT for same-day dispatch" copy already on the page is the
+ * "Order before 12pm NZT for same-day dispatch" copy already on the page is the
  * fallback framing, and it stays untouched.
  */
 const DispatchCountdown = {
@@ -3535,6 +3535,15 @@ const AdminPreview = {
     async _run() {
         // No session → no request. Anonymous shoppers, the overwhelming
         // majority, pay nothing at all for this feature.
+        //
+        // Wait for Auth to restore the stored session first (ERR-317). The
+        // first catalogue read fires before Auth.init's getSession() resolves,
+        // so a signed-in admin was read as 'anonymous' on EVERY page load and
+        // preview never switched on. Capped so a page without Auth.init still
+        // reaches a terminal state.
+        if (typeof Auth !== 'undefined' && Auth.readyPromise) {
+            await Promise.race([Auth.readyPromise, new Promise(r => setTimeout(r, 5000))]);
+        }
         const signedIn = typeof Auth !== 'undefined'
             && typeof Auth.isAuthenticated === 'function'
             && Auth.isAuthenticated();
@@ -3572,7 +3581,10 @@ const AdminPreview = {
         // quietly showing an admin a shopper's catalogue.
         this.role = outcome.role || null;
         let probe = null;
-        try { probe = await API.get('/api/admin/catalog/shop?limit=1'); } catch (e) { probe = null; }
+        // /products, NOT /shop: /shop now 400s BAD_REQUEST "Brand is required"
+        // without a brand (measured 2026-10-12, public and mirror alike), which
+        // landed every admin in 'unreachable' and switched preview off site-wide.
+        try { probe = await API.get('/api/admin/catalog/products?limit=1'); } catch (e) { probe = null; }
 
         if (probe && probe.ok) return this._set('granted', outcome);
 

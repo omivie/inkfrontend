@@ -95,8 +95,10 @@ const MEASURE = () => {
     const cd = document.getElementById('product-dispatch-countdown');
     return {
         addTop: a ? Math.round(a.top) : null, addBottom: a ? Math.round(a.bottom) : null, barTop, hittable,
-        compliance: line('product-headline-compliance'), fit: line('product-headline-fit'),
-        summary: line('volume-pricing-summary'),
+        compliance: line('product-headline-compliance'),
+        // Owner, 12 Oct 2026: the Fits line, the fit box and the ladder line are
+        // REMOVED; these read null on a correct page and are checked as such.
+        fit: line('product-headline-fit'), summary: line('volume-pricing-summary'),
         panel: panel ? { text: panel.textContent.replace(/\s+/g, ' ').trim(), y: Math.round(box(panel).top) } : null,
         fitBlockY: shown(document.getElementById('product-fit')) ? Math.round(box(document.getElementById('product-fit')).top) : null,
         countdown: cd && !cd.hidden ? cd.textContent.trim() : null,
@@ -149,20 +151,10 @@ try {
         } else {
             check(`${sku}: genuine — no compliance line (control)`, m.compliance === null && m.panel === null);
         }
-        const n = Array.isArray(api?.compatible_printers) ? api.compatible_printers.length : 0;
-        if (n) {
-            check(`${sku}: "Fits:" line above Add`, !!m.fit && /^Fits: /.test(m.fit.text) && m.fit.y < m.addTop, m.fit && `@y${m.fit.y}`);
-            if (n > 2) check(`${sku}: +N matches the list (${n} printers)`, !!m.fit && m.fit.text.endsWith(`+${n - 2} more`), m.fit?.text);
-        } else soft(`${sku}: no compatible_printers in the API row`, 'fit line not checked');
-        const rung = Array.isArray(api?.quantity_breaks) && api.quantity_breaks[0];
-        if (rung) {
-            // ERR-301 (ad-clicks-to-orders §1, owner 2026-10-02): the line moved
-            // BELOW Add so the button sits directly under price + stock.
-            check(`${sku}: one ladder line BELOW Add (ERR-301), from the API's first rung`,
-                !!m.summary && m.summary.y > m.addTop && m.summary.text.startsWith(`${rung.min_quantity}+ from $${Number(rung.business_price).toFixed(2)} each`),
-                m.summary?.text);
-            check(`${sku}: never a maximum saving in the ladder line`, !!m.summary && !/up to|save/i.test(m.summary.text));
-        } else soft(`${sku}: no quantity_breaks`, 'ladder line not checked');
+        // Owner, 12 Oct 2026 (ERR-318): the Fits line, the "Check your printer"
+        // box and the "3+ from $X" line are removed; the printer list sits above
+        // the image.
+        check(`${sku}: no Fits line, no fit box, no ladder line (removed by owner)`, !m.fit && !m.summary && m.fitBlockY === null);
         if (m.countdown) {
             const scoped = /auckland metro/i.test(api?.delivery_estimate?.promise || '');
             check(`${sku}: countdown carries the promise's scope`, scoped === / \(Auckland metro\)$/.test(m.countdown), m.countdown);
@@ -179,7 +171,7 @@ try {
         const addY = await page.evaluate(() => Math.round(document.getElementById('add-to-cart-btn').getBoundingClientRect().top));
         check('headline + ladder lines not displayed on a phone', !m.compliance && !m.fit && !m.summary);
         check('full compliance panel above Add on a phone (as before)', !!m.panel && m.panel.y < addY, m.panel && `@y${m.panel.y} vs Add ${addY}`);
-        check('printer fit block above Add on a phone (as before)', m.fitBlockY !== null && m.fitBlockY < addY, `${m.fitBlockY} vs ${addY}`);
+        check('no printer fit block on a phone (removed by owner, ERR-318)', m.fitBlockY === null);
         await ctx.close();
     }
 

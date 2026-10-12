@@ -292,13 +292,12 @@ test('§4 pack offer copy uses the backend numbers and count exactly as returned
     assert.match(fn, /savings <= 0/, 'no saving ⇒ no card (the pack is not cheaper)');
 });
 
-test('§4 PDP fit + value slots sit ABOVE the Add button, and ship hidden', () => {
+test('§4 PDP value slot precedes the Add button in the DOM and ships hidden; the fit box is removed (owner, 12 Oct 2026)', () => {
     const html = read('html/product/index.html');
-    const fit = html.indexOf('id="product-fit"');
     const vl = html.indexOf('id="product-value-lines"');
     const add = html.indexOf('id="add-to-cart-btn"');
-    assert.ok(fit > 0 && vl > 0 && fit < add && vl < add, 'printer fit and value lines precede Add to Cart');
-    assert.match(html, /id="product-fit"[^>]*hidden/);
+    assert.ok(vl > 0 && vl < add, 'value lines precede Add to Cart in the DOM');
+    assert.equal(html.indexOf('id="product-fit"'), -1);
     assert.match(html, /id="product-value-lines"[^>]*hidden/);
     // After Add, Checkout is right there: the cart drawer's footer (ERR-316),
     // opened by cart:item-added, replaced the in-flow strip.
@@ -535,7 +534,7 @@ test('§9 banned claims appear in none of the new copy', () => {
         'html/value-packs.html', 'html/review.html'];
     // Comments are stripped: the modules' own docblocks NAME the banned phrases.
     for (const f of files) assert.doesNotMatch(f.endsWith('.js') ? stripComments(read(f)) : read(f).replace(/<!--[\s\S]*?-->/g, ''), BANNED, f);
-    for (const [f, name] of [['js/product-detail-page.js', 'renderFitCheck'], ['js/product-detail-page.js', 'renderValueLines'],
+    for (const [f, name] of [['js/product-detail-page.js', 'renderPromise'], ['js/product-detail-page.js', 'renderValueLines'],
         ['js/utils.js', 'fitsLine'], ['js/shop-page.js', 'renderLandingPrinterSearch']]) {
         assert.doesNotMatch(extractMethod(read(f), name).body, BANNED, `${f}#${name}`);
     }
@@ -582,11 +581,9 @@ test('§10 the phone header hides on scroll-down only when it is safe to', () =>
     assert.match(stripComments(read('css/layout.css')), /\.site-header--hidden\s*\{\s*transform:\s*translateY\(-100%\)/);
 });
 
-test('§10 desktop: fit + value lines move BELOW Add (order 2, after the ladder + compliance at order 1), phones keep DOM order (above)', () => {
+test('§10 every width: value lines move BELOW Add (order 2, after the chips + terms at order 1)', () => {
     const css = stripComments(read('css/pages.css'));
-    const i = css.indexOf('@media (min-width: 1100px) {\n    .product-info {\n        display: flex;');
-    assert.ok(i > 0, 'the wide-layout reorder block must exist');
-    const block = css.slice(i, css.indexOf('\n}', i));
-    assert.match(block, /#product-fit,\s*\.product-info > #product-value-lines,\s*\.product-info > #product-specs\s*\{\s*order:\s*2;/);
+    assert.match(css, /\n\.product-info \{\s*display: flex;\s*flex-direction: column;\s*\}/, 'the reorder applies at every width (owner, 12 Oct 2026)');
+    assert.match(css, /\n\.product-info > #product-value-lines \{\s*order:\s*2;/);
     assert.match(css, /\.product-detail__layout > \* \{ min-width: 0; \}/, 'the info column must not overflow its phone track');
 });

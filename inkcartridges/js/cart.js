@@ -4921,7 +4921,7 @@ const Cart = {
         const meta = this.serverCartMeta || {};
         const hasItems = this.items.length > 0;
 
-        // Delivery estimate — "Order by 2pm — arrives in X–Y days".
+        // Delivery estimate — "Order by 12pm — arrives in X–Y days".
         const deliveryEl = document.getElementById('cart-delivery');
         if (deliveryEl) {
             const d = hasItems ? meta.delivery_estimate : null;

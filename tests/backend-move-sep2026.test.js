@@ -400,9 +400,13 @@ test('§1 the repair consumes the speculative promises, and still fires the same
     assert.match(block, /await Promise\.all\(speculative\s*\? \[speculative\.fallback, speculative\.suggest\]/);
     assert.match(block, /: \[\s*API\.getProducts\(\{ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage \}\)/,
         'no speculation ⇒ exactly the calls it made before');
-    // Exactly two getProducts({ search… }) sites in the function: the speculative
-    // one and the non-speculative repair. A third would double-fetch.
-    assert.equal((SEARCH_FN.match(/API\.getProducts\(\{ search: searchQuery/g) || []).length, 2);
+    // Exactly three getProducts({ search… }) sites in the function: the
+    // speculative one, the non-speculative repair, and the admin-only lookup
+    // (ERR-317). The third does not double-fetch: it passes the SAME args, so
+    // getWithSWR answers it from the repair's entry. Any other site would.
+    const sites = SEARCH_FN.match(/API\.getProducts\(\{ search: searchQuery[^)]*\)/g) || [];
+    assert.equal(sites.length, 3);
+    assert.equal(new Set(sites).size, 1, 'every site must share one SWR key');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

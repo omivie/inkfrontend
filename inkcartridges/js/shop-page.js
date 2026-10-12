@@ -4109,6 +4109,28 @@
                     }
                 }
 
+                // Admin preview (ERR-317): /api/search/smart never returns an
+                // admin-only (TEST-/ADMIN- SKU) row, mirror included. Measured
+                // 2026-10-12 as super_admin: mirror /smart?q=admin test gave two
+                // compat ribbons, mirror /api/products?search= gave ADMIN-INK-001
+                // and TEST-ADMIN-001. So ask the literal route and put those rows
+                // first. Admins only, page 1 only, adds rows and never removes one.
+                if (requestedPage === 1 && window.AdminPreview?.isGranted?.()) {
+                    const lit = await (speculative
+                        ? speculative.fallback
+                        : API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage })
+                    ).catch(() => null);
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    if (!lit || lit.ok !== true) {
+                        DebugLog.warn(`[Shop.loadSearchResults] admin-only lookup failed for "${searchQuery}" — admin-only products may be missing from this page.`);
+                    } else {
+                        const have = new Set(products.map(p => String(p?.sku || '').toUpperCase()));
+                        const adminRows = (Array.isArray(lit.data?.products) ? lit.data.products : [])
+                            .filter(p => /^(TEST|ADMIN)-/i.test(p?.sku || '') && !have.has(String(p.sku).toUpperCase()));
+                        if (adminRows.length) products = adminRows.concat(products);
+                    }
+                }
+
                 // Spec §2.2 — banners for did-you-mean / corrected_from /
                 // matched_printer must show on results AND on the empty state,
                 // so render before either branch.

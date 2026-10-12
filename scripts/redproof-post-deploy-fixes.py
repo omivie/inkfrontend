@@ -21,15 +21,11 @@ M = [
  ("inkcartridges/js/review-page.js", "        const heading = data.order_number\n", "        const heading = false\n"),
  # §2 PDP desktop
  ("inkcartridges/js/product-detail-page.js", "info && info.source === 'compatible'\n", "info\n"),
- ("inkcartridges/js/product-detail-page.js", "${more > 0 ? ` +${more} more` : ''}`", "`"),
  ("inkcartridges/js/product-detail-page.js", "if (strip) strip.hidden = !strip.querySelector('.product-headline__line:not([hidden])');", ""),
- ("inkcartridges/js/product-detail-page.js", "const entry = ladder && ladder.entry;", "const entry = ladder && ladder.best;"),
- ("inkcartridges/js/product-detail-page.js", "if (!label || !Number.isFinite(entry.businessPrice))", "if (!label)"),
- ("inkcartridges/js/product-detail-page.js", "            this.renderVolumeSummary(null);   // never carry a previous product's line\n", ""),
- ("inkcartridges/js/product-detail-page.js", "{ el.hidden = true; el.innerHTML = ''; this._setHeadline('product-headline-fit', ''); return; }", "{ el.hidden = true; el.innerHTML = ''; return; }"),
- ("inkcartridges/css/pages.css", "    .product-info > #compat-disclaimer,\n    .product-info > #volume-pricing {\n        order: 1;", "    .product-info > #compat-disclaimer,\n    .product-info > #volume-pricing {\n        order: 0;"),
- ("inkcartridges/css/pages.css", ".product-headline,\n.volume-pricing-summary { display: none; }", ""),
- ("inkcartridges/css/pages.css", "    #product-fit .product-fit__summary { display: none; }\n", ""),
+ # (Fits line, ladder line and fit box removed by owner 12 Oct 2026, ERR-318)
+ ("inkcartridges/css/pages.css", ".product-info > #volume-pricing,\n.product-info > #product-terms,\n.product-info > #pack-upsell {\n    order: 1;", ".product-info > #volume-pricing,\n.product-info > #product-terms,\n.product-info > #pack-upsell {\n    order: 0;"),
+ ("inkcartridges/css/pages.css", ".product-headline { display: none; }", ""),
+ ("inkcartridges/css/pages.css", "    .product-info > #compat-disclaimer {\n        order: 1;", "    .product-info > #compat-disclaimer {\n        order: 0;"),
  # §3 card +N
  ("inkcartridges/js/utils.js", "const rest = Math.max(Number.isFinite(count) ? count : 0, names.length) - shown.length;", "const rest = names.length - shown.length;"),
  ("inkcartridges/js/utils.js", "const rest = Math.max(Number.isFinite(count) ? count : 0, names.length) - shown.length;", "const rest = (Number.isFinite(count) ? count : names.length) - names.length;"),
