@@ -417,6 +417,7 @@ function loadProducts() {
         ProductColors: {
             getStyle: () => null, getProductStyle: () => null,
             detectFromName: () => null, isPlaceholderSwatchImage: () => false,
+            packLabel: () => 'Value pack',
         },
         // The real ProductName + ProductIdentity, not stubs — renderCard reads
         // ProductName.clean, and stubbing it would hide a de-doubler regression.

@@ -5140,9 +5140,11 @@
             // Spec §4 — bundle-pack visual differentiation.
             const packTypeRibbon = (() => {
                 const pt = (product.pack_type || '').toLowerCase();
-                // "Full-set value pack" (conversion handoff 2026-09-27 §8.4): the
+                // Value-pack ribbon (conversion handoff 2026-09-27 §8.4): the
                 // pack should read as the better buy, not a dearer single.
-                if (pt === 'value_pack') return `<span class="product-card__ribbon product-card__ribbon--value-pack">Full-set value pack</span>`;
+                // "Three-colour value pack" / "Four-colour value pack" from
+                // ProductColors.packLabel — same label as products.js.
+                if (pt === 'value_pack') return `<span class="product-card__ribbon product-card__ribbon--value-pack">${Security.escapeHtml(ProductColors.packLabel(product))}</span>`;
                 if (pt === 'multipack')  return `<span class="product-card__ribbon product-card__ribbon--multipack">Multipack</span>`;
                 return '';
             })();

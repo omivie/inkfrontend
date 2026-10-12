@@ -192,7 +192,7 @@ const Products = {
         // handoff 2026-09-27 §8.4). Same ribbon + wording as the shop grid
         // (shop-page.js createProductCard) — one vocabulary, both renderers.
         const packRibbonHTML = String(product.pack_type || '').toLowerCase() === 'value_pack'
-            ? '<span class="product-card__ribbon product-card__ribbon--value-pack">Full-set value pack</span>'
+            ? `<span class="product-card__ribbon product-card__ribbon--value-pack">${Security.escapeHtml(ProductColors.packLabel(product))}</span>`
             : '';
         // "Fits <two models> +N" from the product's own compatible_printers
         // (§8.1). Empty until listing payloads carry the field.

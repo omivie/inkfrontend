@@ -4139,6 +4139,14 @@ body.has-consent-banner {
     max-height: var(--google-badge-max);
     overflow: hidden;
 }
+/* ERR-323: the clip above also cut the card Google opens on click (344x570)
+   to a blank 100x100 corner, so the badge "did nothing". footer.js adds
+   .is-settled once the 86x64 badge has landed in view; from then on there are
+   no load hops left to hide, and the card must be allowed its full size. */
+#google-reviews-badge.is-settled {
+    max-width: none;
+    max-height: none;
+}
 
 /* ERR-301: below 1100px only. From 1100px the banner is a bottom-LEFT card
    (see the end of the consent rules), so it no longer shares the badge's

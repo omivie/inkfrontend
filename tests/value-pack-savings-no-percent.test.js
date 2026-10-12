@@ -114,6 +114,7 @@ function loadProducts() {
             getProductStyle() { return null; },
             detectFromName() { return null; },
             isPlaceholderSwatchImage() { return false; },
+            packLabel() { return 'Value pack'; },
         },
         getStockStatus: () => ({ class: 'in-stock', text: 'In stock' }),
         getSourceBadge: (s) => s === 'compatible' ? { class: 'compatible', text: 'COMPATIBLE' } : { class: 'genuine', text: 'GENUINE' },

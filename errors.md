@@ -41,6 +41,45 @@ describing the same incident.
 
 ---
 
+## ERR-324 — The favourite heart covered the value-pack card ribbon ("FULL-SET VALUE PA♡"), and the label did not say how many colours — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** The owner sent a screenshot of `/shop?brand=brother&category=ink&code=LC3313`. On every value-pack card, the top-right favourite heart covered the end of the top-left "FULL-SET VALUE PACK" ribbon. The owner asked for "three colour value pack" / "four colour value pack", and asked whether the burnt-amber fill (`#b45309`) invites a buy.
+
+**Cause.** `.product-card__ribbon` (`css/search.css`) is absolute top-left of the image. `.product-card__fav-btn` (`css/pages.css`) is absolute top-right of the card. The ribbon has `max-width: calc(100% - 16px)`, so a long label runs under the heart.
+
+**Fix.**
+- The heart stays where it is: favourites is how repeat ink buyers re-order, and top-right is where shoppers look for it. The ribbon moves to the image's bottom-left corner (base rule, so Multipack moves too).
+- `ProductColors.packLabel(product)` (`js/utils.js`) is the one label source for both card renderers (`shop-page.js` grid, `products.js` search cards). It counts inks from the stored colour code only (B and K are one black): CMY = "Three‑colour value pack", KCMY/CMYK/BCMY = "Four‑colour value pack". Any other colour ("Value Pack", "Black/Colour", missing) says "Value pack". It never counts from the name: a "5-Pack" of KCMY plus a spare black is still four colours. The hyphen is U+2011 (non-breaking), so "Three-/colour" never splits across lines.
+- Fill is emerald-700 `#047857` (white on it ~5.5:1, WCAG AA). Green is the "you save" colour and matches the card's green "Buy 3+" and FREE SHIPPING lines. Value-pack ribbon is sentence case: in uppercase it wrapped to two lines on a 1440 card and four on the phone thumbnail.
+
+**Measured** (local `/shop?brand=brother&category=ink&code=LC3313`, headless Chromium, live API). 1440x900: 4 value-pack ribbons, 147–156x20 px (one line), no overlap with the heart's box. 390x664: 88x35 px (two lines), no overlap, not clipped.
+
+**Test.** `tests/value-pack-ribbon-oct2026.test.js` runs the real `ProductColors.packLabel` in a vm, checks both renderers use it escaped, and checks the CSS position and colour. Negative control: against the HEAD versions of the five files, 3 of 3 tests fail. Three render tests that stub `ProductColors` gained a `packLabel` stub.
+
+---
+
+## ERR-323 — Clicking the Google reviews badge (bottom-right) did nothing — our 100px clip hid the card Google opens — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** The owner said the Google button in the bottom-right corner of the site does not work.
+
+**Measured** (Playwright, live home page, 1440x900, read-only).
+- Before the click the badge is 86x64, and the topmost element at the corner is Google's iframe. Nothing covers it.
+- A click opens no popup. Google grows its iframe to a 344x570 "Shop quality by Google" card.
+- `#google-reviews-badge` has `max-width/max-height: var(--google-badge-max)` (100px) and `overflow: hidden` in `css/components.css`. That clip was added to hide Google's 450x150 and 614x64 load hops. It also cut the open card to a blank 100x100 corner, so the badge seemed to vanish. The click worked; we hid its result.
+
+**Fix.**
+- `footer.js` `publishBadgeFootprint` adds `.is-settled` to the badge once Google's IFRAME (not our clipped div) is in view and no larger than the clip box: the landed 86x64 badge, never the 2x2 parked / 450x150 / 614x64 hops. One-way.
+- `components.css`: `#google-reviews-badge.is-settled { max-width: none; max-height: none; }`. The base clip stays for the load hops, and `--google-badge-max` still lifts the /shop consent card.
+- While settled and the iframe is larger than the clip (card open), the footprint is not republished. Before, the open card republished `--google-badge-width: 100px`; now the consent bar keeps the 86px reserve.
+
+**Verified** (live HTML with the local footer.js + components.css routed in). At 1440x900 the badge settles about 0.4 s after it lands, the card opens at 344x570 and is topmost at its centre, and close returns it to 86x64. On /shop, Accept is still topmost. At 1024x768 the card's centre is the iframe. At 1280x551 the card opened and was still loading (spinner) at 3 s. Phones (≤480px) hide the badge on purpose (`layout.css`), so nothing changes there.
+
+**Known gap.** A click inside the ~0.4 s settle debounce, right after the badge lands, still gets the clipped card.
+
+**Test.** `tests/google-badge-click-oct2026.test.js` runs the shipped `publishBadgeFootprint` in a vm against each load state. Negative control: against the old footer.js/components.css, 3 of 4 tests fail.
+
+---
+
 ## ERR-322 — "Account sync failed. Some features may not work." toast — sync limiter exhausted by repeat syncs — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** The owner, signed in as admin with 8+ site tabs open, saw the red toast "Account sync failed. Some features may not work." on a PDP.

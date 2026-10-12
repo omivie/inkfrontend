@@ -199,8 +199,8 @@ test('§4 /value-packs keeps its "Full colour sets" heading and its own pack req
     assert.ok(h.some((t) => ROW_HEADING.test(t)), 'ROW_HEADING must match the kept heading, or §1 proves nothing');
 });
 
-test('§4 the "Full-set value pack" card badge stays', () => {
-    assert.match(stripComments(read('js', 'shop-page.js')), /Full-set value pack/);
+test('§4 the value-pack card badge stays (wording since ERR-324: ProductColors.packLabel)', () => {
+    assert.match(stripComments(read('js', 'shop-page.js')), /product-card__ribbon--value-pack">\$\{Security\.escapeHtml\(ProductColors\.packLabel\(product\)\)\}/);
 });
 
 test('§4 the PDP pack offer and the cart\'s "Switch to the set" stay', () => {

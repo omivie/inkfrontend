@@ -432,7 +432,24 @@ const ProductColors = {
     // G3YP09AACMYK, G932XLCMYK, G60BKCLRVP), so the admin Packs filter was
     // showing them as singles. ERR-075 cuts both ways — a pack colour MISSING
     // from this list hides real packs just as surely as a bogus value shows none.
-    PACK_VALUES: ['CMY', 'KCMY', 'CMYK', 'Black/Colour', 'Value Pack', 'Multipack']
+    PACK_VALUES: ['CMY', 'KCMY', 'CMYK', 'Black/Colour', 'Value Pack', 'Multipack'],
+
+    // Value-pack card ribbon label, counted from the stored colour code:
+    // CMY → "Three-colour value pack", KCMY/CMYK/BCMY → "Four-colour value
+    // pack" (B and K are the same black). Never counted from the name — a
+    // "5-Pack" of KCMY plus a spare black is still four colours. Any other
+    // colour ('Value Pack', 'Black/Colour', missing) says "Value pack".
+    packLabel(product) {
+        const code = String((product && product.color) || '').trim().toUpperCase();
+        if (/^[BKCMY]+$/.test(code)) {
+            const n = new Set(code.replace(/B/g, 'K')).size;
+            const word = ['', '', 'Two', 'Three', 'Four'][n];
+            // U+2011 non-breaking hyphen: a plain one broke "Three-/colour" across
+            // lines on the 96px phone thumbnail.
+            if (word) return `${word}\u2011colour value pack`;
+        }
+        return 'Value pack';
+    }
 };
 
 // Make ProductColors available globally (browser-only; Node test runs skip this).

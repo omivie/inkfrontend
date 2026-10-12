@@ -630,10 +630,12 @@ mark.smart-ac__mark {
     letter-spacing: 0.02em;
 }
 
-/* Spec §4 — value-pack / multipack ribbon. */
+/* Spec §4 — value-pack / multipack ribbon. Bottom-left of the image, not
+   top-left: the card's favourite heart (.product-card__fav-btn, pages.css)
+   sits top-right and covered the end of the label ("FULL-SET VALUE PA♡"). */
 .product-card__ribbon {
     position: absolute;
-    top: 8px;
+    bottom: 8px;
     left: 8px;
     z-index: 2;
     padding: 3px 8px;
@@ -647,12 +649,21 @@ mark.smart-ac__mark {
     box-shadow: 0 2px 4px rgba(0,0,0,0.12);
 }
 .product-card__ribbon--multipack { background: #8b5cf6; }
-/* "Full-set value pack" (conversion handoff 2026-09-27 §8.4). #b45309 not the
-   base #f59e0b: white on amber-500 is ~2.2:1, under WCAG AA (handoff §8.2);
-   amber-700 is ~5:1. The longer label may wrap inside the image corner. */
+/* Value-pack ribbon (conversion handoff 2026-09-27 §8.4), label from
+   ProductColors.packLabel ("Three-colour value pack"). Emerald-700, not the
+   old burnt amber #b45309 (read as a warning tag): green is the "you save"
+   colour, matching the card's green "Buy 3+" and FREE SHIPPING lines. White
+   on #047857 is ~5.5:1, WCAG AA (handoff §8.2). May wrap in the corner.
+   Sentence case, not the base uppercase: "THREE-COLOUR VALUE PACK" wrapped
+   to two lines on a 1440 card and four on a phone thumbnail (measured). */
 .product-card__ribbon--value-pack {
-    background: #b45309;
-    max-width: calc(100% - 16px);
+    background: #047857;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 3px 6px;
+    left: 4px;
+    bottom: 4px;
+    max-width: calc(100% - 8px);
     white-space: normal;
     line-height: 1.2;
 }

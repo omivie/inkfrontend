@@ -275,6 +275,7 @@ function loadProducts({ withBrandSource = true } = {}) {
             sanitizeUrl: (u) => u,
         },
         ProductColors: {
+            packLabel: () => 'Value pack',
             // Use the real map shape so getProductStyle returns a non-null
             // gradient for KCMY.
             getStyle(name) {

@@ -718,6 +718,27 @@
              already lifted off the bar by the rule in components.css, which
              needs no measurement of Google's at all, so during that window the
              buttons are clickable and simply keep their normal position. */
+          /* ERR-323 — LIFT OUR CLIP ONCE THE BADGE HAS LANDED, SO A CLICK CAN
+             OPEN ITS CARD. components.css clips this mount to --google-badge-max
+             (100px) to hide the load hops above. Clicking the badge makes Google
+             grow the iframe to its rating card (measured 344x570 on the live
+             site), and the clip cut that card down to a blank 100x100 corner:
+             the click worked, we hid its result. `.is-settled` removes the clip.
+             Judge the IFRAME, not this div: the div is clipped, so it can never
+             look bigger than the clip. Only the final in-view corner badge
+             (86x64) counts — never the 2x2 parked at top:-10000px, nor the
+             450x150 / 614x64 hops. One-way: Google parks nothing after landing. */
+          var max = parseFloat(window.getComputedStyle(document.documentElement)
+            .getPropertyValue('--google-badge-max')) || 100;
+          var frame = el.querySelector('iframe');
+          var fr = frame ? frame.getBoundingClientRect() : null;
+          var frameIsCorner = !!fr && fr.top >= 0 &&
+            fr.width > 10 && fr.width <= max && fr.height > 10 && fr.height <= max;
+          if (rendered && frameIsCorner) el.classList.add('is-settled');
+          /* The open card is not a footprint: keep the last published reserve
+             rather than push 344px of padding onto the consent bar. */
+          if (el.classList.contains('is-settled') && !frameIsCorner) return;
+
           var isCornerSized = r.width <= (window.innerWidth || 0) / 4;
           var w = (rendered && isCornerSized) ? Math.ceil(r.width) : 0;
           var h = (rendered && isCornerSized) ? Math.ceil(r.height) : 0;
