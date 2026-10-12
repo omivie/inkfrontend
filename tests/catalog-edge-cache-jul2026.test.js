@@ -437,8 +437,8 @@ test('§7 the cart cross-sell fetch omits credentials', () => {
     // above the fetch pushed `credentials: 'omit'` outside it and reddened this
     // test while the code was still correct (Sep 2026, ERR-223). A slice whose
     // length is a magic number tests the length of the function, not the claim.
-    const _cs = CART_SRC.indexOf('async _showCrossSellModal(payload)');
-    assert.ok(_cs > 0, 'located _showCrossSellModal');
+    const _cs = CART_SRC.indexOf('async _crossSellProducts(payload)');
+    assert.ok(_cs > 0, 'located _crossSellProducts');
     let _d = 0, _i = CART_SRC.indexOf('{', _cs), _end = _i;
     for (; _i < CART_SRC.length; _i++) {
         if (CART_SRC[_i] === '{') _d++;

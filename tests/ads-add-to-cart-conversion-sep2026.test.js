@@ -599,7 +599,7 @@ test('§6 the cold-cache cross-sell URL is resolved against the API host', () =>
     // fetching it as-is resolved it against the storefront origin, where
     // nothing proxies /api/. Every cold-cache cross-sell died silently: the
     // failure path is a bare `return` and the caller is `.catch(() => {})`.
-    const fn = blockAfter(CART_SRC, 'async _showCrossSellModal(payload)');
+    const fn = blockAfter(CART_SRC, 'async _crossSellProducts(payload)');
     assert.match(fn, /Config\.API_URL/,
         'a root-relative /api/ path must be prefixed with the API host');
     assert.doesNotMatch(codeOnly(fn), /fetch\(payload\.url\b/,
@@ -609,6 +609,6 @@ test('§6 the cold-cache cross-sell URL is resolved against the API host', () =>
 test('§6 an absolute URL from the backend is left alone', () => {
     // If the server ever starts returning a fully-qualified URL, rewriting it
     // would be us overriding a decision it already made.
-    const fn = codeOnly(blockAfter(CART_SRC, 'async _showCrossSellModal(payload)'));
+    const fn = codeOnly(blockAfter(CART_SRC, 'async _crossSellProducts(payload)'));
     assert.match(fn, /\^https\?:/, 'absolute URLs are detected and passed through');
 });

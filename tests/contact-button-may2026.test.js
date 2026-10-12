@@ -129,24 +129,22 @@ test('§2 ribbons-page.js OOS branch renders Contact us → /contact', () => {
     );
 });
 
-test('§2 cart.js cross-sell modal renders Contact us for any not-buyable row', () => {
-    // The crosssell card lives inside an outer <a class="crosssell-modal__card">,
-    // so we render a button with data-action="contact" rather than a nested <a>.
+test('§2 the cart drawer upsell never offers Add on a not-buyable row', () => {
+    // The "Customers also bought" modal rendered a Contact us button for these
+    // rows. Its successor, the cart drawer's "You may also like" (ERR-316),
+    // DROPS them instead: an upsell row exists to be added, and a Contact us
+    // detour from inside the cart is not an upsell.
     //
-    // ERR-263: this used to pin the literal `in_stock === false`, which is only
-    // ONE of the signals that mean "not buyable". A deliberate contact_us row, an
-    // out_of_stock row, and a row at stock_quantity 0 all rendered Add to cart
-    // here while every other surface said Contact us — and the old assertion
-    // passed throughout, because it was satisfied by the very expression that was
-    // too narrow. Pin the shared vocabulary instead: strictly stronger, since
-    // getStockStatus() covers all three signals and is itself behaviourally
-    // tested in tests/stock-status-surface-agreement-sep2026.test.js.
-    assert.match(CART_CODE, /getStockStatus\(p\)\.class === 'contact-us'[\s\S]{0,400}Contact us/,
-        'cart.js cross-sell must branch on getStockStatus(...).class === "contact-us" → "Contact us"');
-    assert.doesNotMatch(CART_CODE, /\$\{p\.in_stock\s*===\s*false/,
-        'cart.js must not re-derive stock from a raw field in the cross-sell template');
-    assert.match(CART_CODE, /data-action\s*=\s*["']contact["']/,
-        'cart.js cross-sell must mark the OOS CTA with data-action="contact"');
+    // ERR-263 still holds: the test pins the shared vocabulary
+    // getStockStatus(...).class === "contact-us", never a raw field like
+    // `in_stock === false`, which is only ONE of the signals that mean "not
+    // buyable".
+    const DRAWER_CODE = READ(path.join(__dirname, '..', 'inkcartridges', 'js', 'cart-drawer.js'));
+    assert.match(DRAWER_CODE, /getStockStatus\(p\)\.class !== 'contact-us'/,
+        'cart-drawer.js must filter upsell rows through getStockStatus(...).class');
+    assert.doesNotMatch(DRAWER_CODE, /in_stock\s*===\s*false/,
+        'cart-drawer.js must not re-derive stock from a raw field');
+    // The global contact delegate stays for every other nested-button surface.
     assert.match(CART_CODE, /window\.location\.href\s*=\s*['"]\/contact['"]/,
         'cart.js must wire a global handler that navigates contact buttons to /contact');
 });

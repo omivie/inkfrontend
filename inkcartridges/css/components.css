@@ -1660,105 +1660,245 @@ a.product-card__contact-btn {
     white-space: nowrap;
 }
 
-/* Cross-sell modal (frequently bought together after add-to-cart) */
-.crosssell-modal {
+/* Cart drawer (js/cart-drawer.js, ERR-316) — replaces the "Customers also
+   bought" modal, the add-to-cart toast and the PDP confirmation strip.
+   Right slide-in panel over a dimmed page; full width on a phone. */
+.cart-drawer {
     position: fixed;
     inset: 0;
     z-index: 10000;
+}
+.cart-drawer[hidden] { display: none; }
+.cart-drawer__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+.cart-drawer__panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(460px, 100%);
+    display: flex;
+    flex-direction: column;
+    background: var(--color-background);
+    color: var(--color-text);
+    box-shadow: var(--shadow-xl);
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    outline: none;
+}
+.cart-drawer.is-open .cart-drawer__backdrop { opacity: 1; }
+.cart-drawer.is-open .cart-drawer__panel { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+    .cart-drawer__backdrop, .cart-drawer__panel { transition: none; }
+}
+html.cart-drawer-open, html.cart-drawer-open body { overflow: hidden; }
+
+.cart-drawer__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 20px 4px;
+}
+.cart-drawer__title {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--color-text-heading);
+}
+.cart-drawer__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+    border: 0;
+    background: none;
+    color: var(--color-text-heading);
+    cursor: pointer;
+}
+.cart-drawer__continue {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-start;
+    min-height: 32px;
+    margin: 0 20px 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-primary-dark);
+    font-weight: 600;
+    cursor: pointer;
+}
+.cart-drawer__continue:hover { text-decoration: underline; }
+
+.cart-drawer__body {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 20px;
+}
+.cart-drawer__lines,
+.cart-drawer__upsell-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.cart-drawer__line,
+.cart-drawer__upsell-item {
+    display: flex;
+    gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--color-border-light);
+}
+.cart-drawer__thumb {
+    flex: 0 0 64px;
+    width: 64px;
+    height: 64px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 16px;
+    overflow: hidden;
+    border-radius: 6px;
 }
-.crosssell-modal__panel {
-    background: #fff;
-    border-radius: 12px;
-    max-width: 760px;
-    width: 100%;
-    padding: 24px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-    max-height: 90vh;
-    overflow-y: auto;
+.cart-drawer__thumb img {
+    max-width: 64px;
+    max-height: 100%;
+    object-fit: contain;
 }
-.crosssell-modal__head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-}
-.crosssell-modal__head h3 {
-    margin: 0;
-    font-size: 1.125rem;
-}
-.crosssell-modal__close {
-    background: none;
-    border: 0;
-    font-size: 1.5rem;
-    line-height: 1;
-    cursor: pointer;
-    color: var(--color-text-muted, #6b7280);
-}
-.crosssell-modal__grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 16px;
-}
-.crosssell-modal__card {
+.cart-drawer__info {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    text-decoration: none;
-    color: inherit;
-    border: 1px solid var(--color-border, #e5e7eb);
-    border-radius: 8px;
-    padding: 12px;
-    background: #fff;
-    transition: border-color 0.15s;
+    gap: 10px;
 }
-.crosssell-modal__card:hover {
-    border-color: var(--color-primary, #2563eb);
+.cart-drawer__row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
 }
-/* Capped at 120px (ERR-296, turnaround doc #8). The grid is auto-fit, so ONE
-   suggestion stretched its card — and a width:100% square image — across the
-   760px panel: a 686px "COMPATIBLE" placeholder that pushed the name and price
-   out of view. */
-.crosssell-modal__img {
-    width: 100%;
-    max-width: 120px;
-    margin: 0 auto;
-    display: block;
-    aspect-ratio: 1;
-    object-fit: contain;
-    background: #f9fafb;
-    border-radius: 4px;
-}
-.crosssell-modal__img--placeholder {
-    background: #f3f4f6;
-}
-.crosssell-modal__name {
-    font-size: 0.875rem;
-    font-weight: 500;
-    line-height: 1.3;
+.cart-drawer__name {
     display: -webkit-box;
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    font-weight: 700;
+    font-size: 0.95rem;
+    line-height: 1.35;
+    color: var(--color-text-heading);
+    text-decoration: none;
 }
-.crosssell-modal__price {
-    font-weight: 600;
-    color: var(--color-text, #111827);
+a.cart-drawer__name:hover { text-decoration: underline; }
+.cart-drawer__price {
+    flex-shrink: 0;
+    text-align: right;
+    font-weight: 700;
+    color: var(--color-text-heading);
 }
-.crosssell-modal__foot {
-    margin: 4px 0 20px;
+/* lineTotalHtml's volume-price parts, stacked in the narrow column. */
+.cart-drawer__price .cart-item__total-was { display: block; font-weight: 400; color: var(--color-text-muted); font-size: 0.85em; }
+.cart-drawer__price .cart-item__total-unit { display: block; font-weight: 400; color: var(--color-text-muted); font-size: 0.75em; }
+.cart-drawer__controls {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
 }
-.crosssell-modal__checkout { min-height: 48px; }
-.crosssell-modal__keep { min-height: 48px; }
-.crosssell-modal__cart-link { color: var(--cyan-dark); text-decoration: underline; }
+.cart-drawer__qty {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    height: 40px;
+}
+.cart-drawer__qty button {
+    width: 36px;
+    height: 100%;
+    border: 0;
+    background: none;
+    font-size: 1.1rem;
+    color: var(--color-text-heading);
+    cursor: pointer;
+}
+.cart-drawer__qty button:disabled { color: var(--color-border-dark); cursor: default; }
+.cart-drawer__qty span {
+    min-width: 24px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.cart-drawer__remove {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--color-text);
+    font-weight: 600;
+    cursor: pointer;
+}
+.cart-drawer__remove:hover { color: var(--color-text-heading); text-decoration: underline; }
+.cart-drawer__empty { padding: 32px 0; text-align: center; color: var(--color-text-muted); }
+
+.cart-drawer__upsell { padding-top: 20px; }
+.cart-drawer__upsell-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-text-heading);
+}
+.cart-drawer__upsell-item { align-items: center; }
+.cart-drawer__upsell-item .cart-drawer__info { gap: 6px; }
+.cart-drawer__upsell-price { font-weight: 700; color: var(--color-text-heading); }
+.cart-drawer__upsell-add {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: var(--color-primary);
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.cart-drawer__upsell-add:hover { background: var(--color-primary-dark); }
+
+.cart-drawer__foot {
+    padding: 16px 20px 20px;
+    border-top: 1px solid var(--color-border-light);
+    background: var(--color-background);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.cart-drawer__foot[hidden] { display: none; }
+.cart-drawer__totals { margin: 0 0 4px; }
+.cart-drawer__total-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 4px;
+}
+.cart-drawer__total-row dt, .cart-drawer__total-row dd { margin: 0; }
+.cart-drawer__total-row--main { font-weight: 700; color: var(--color-text-heading); font-size: 1.05rem; }
+.cart-drawer__total-row--main[data-pricing="pending"] dd,
+.cart-drawer__total-row--main[data-pricing="unpriced"] dd { font-weight: 600; color: var(--color-text-muted); }
+.cart-drawer__note { margin: 0; font-size: 0.8rem; color: var(--color-text-muted); }
+.cart-drawer__view,
+.cart-drawer__checkout {
+    min-height: 48px;
+    border-radius: 999px;
+    justify-content: center;
+}
 
 .product-detail__savings {
     color: var(--color-success, #22c55e);

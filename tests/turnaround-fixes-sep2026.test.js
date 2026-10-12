@@ -543,8 +543,10 @@ test('§10 card text floor is 12px (was 9.9px "3+ PRICE", 9.9px "Save", 10px rib
     for (const [file, sel] of rules) assert.ok(px(ruleBody(CSS[file], sel)) >= 12, `${file}.css ${sel}`);
 });
 
-test('§10 the cross-sell image is capped at 120px (one suggestion stretched it to 686px)', () => {
-    assert.match(ruleBody(CSS.components, '.crosssell-modal__img'), /max-width:\s*120px/);
+test('§10 the upsell image is capped (one cross-sell suggestion stretched to 686px)', () => {
+    // The cross-sell modal became the cart drawer's "You may also like" (ERR-316);
+    // its thumbnails share the drawer's 64px box.
+    assert.match(ruleBody(CSS.components, '.cart-drawer__thumb img'), /max-width:\s*64px/);
 });
 
 test('§10 phones: toasts at the TOP; Filter & Sort follows the header\'s hide signal', () => {

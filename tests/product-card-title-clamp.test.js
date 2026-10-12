@@ -108,11 +108,11 @@ test('search.css — .smart-ac__name clamps to 4 lines', () => {
     assert.equal(clampValue(body), 4);
 });
 
-// ─── Cross-sell modal product list ─────────────────────────────────────────
+// ─── Cart drawer lines + "You may also like" (replaced the cross-sell modal, ERR-316)
 
-test('components.css — .crosssell-modal__name clamps to 4 lines', () => {
+test('components.css — .cart-drawer__name clamps to 4 lines', () => {
     const css = loadCss('components.css');
-    const body = ruleBody(css, '.crosssell-modal__name {');
+    const body = ruleBody(css, '.cart-drawer__name {');
     assert.equal(clampValue(body), 4);
 });
 

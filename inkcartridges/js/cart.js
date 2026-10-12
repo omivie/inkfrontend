@@ -3312,6 +3312,8 @@ const Cart = {
         }
         try { localStorage.setItem('cart_count', itemCount); } catch (e) { /* ignore */ }
 
+        if (typeof CartDrawer !== 'undefined') CartDrawer.refresh();
+
         // Only update summary section if on cart page
         if (!document.querySelector('.cart-page')) return;
 
@@ -3632,7 +3634,10 @@ const Cart = {
             }
         }
 
-        if (typeof showToast === 'function' && !product.silent) {
+        // The cart drawer (js/cart-drawer.js, ERR-316) IS the confirmation on
+        // every page it runs on; the toast stays only where it does not
+        // (/cart, /checkout, /payment, or a page without the script).
+        if (typeof showToast === 'function' && !product.silent && !this.drawerHandlesAdds()) {
             showToast(product.name + ' added to cart', 'success');
         }
 
@@ -3674,6 +3679,9 @@ const Cart = {
                         quantity: product.quantity || 1,
                         serverConfirmed: !!serverConfirmed,
                         silent: !!product.silent,
+                        // The add's frequently-bought-together hint, for the
+                        // drawer's "You may also like" (ERR-316). Null when absent.
+                        crossSell: crossSellPayload || null,
                     },
                 }));
             }
@@ -3752,13 +3760,6 @@ const Cart = {
             }
         }
 
-        // Show "Customers also bought" carousel from add-to-cart response.
-        // Inline products render immediately; URL fallback fetches on idle so
-        // the cart-confirmation flow isn't blocked.
-        if (crossSellPayload) {
-            this._showCrossSellModal(crossSellPayload).catch(() => {});
-        }
-
         return {
             ok: true,
             reason: serverConfirmed ? 'confirmed' : 'local-only',
@@ -3768,20 +3769,16 @@ const Cart = {
     },
 
     /**
-     * Render a "Customers also bought" carousel after a successful add-to-cart.
-     * Accepts either { products: [...] } (warm cache) or { url } (cold cache).
+     * The "frequently bought together" rows an add answered with, for the cart
+     * drawer's "You may also like" (ERR-316). Accepts either { products: [...] }
+     * (warm cache) or { url } (cold cache). Always resolves to an array; [] on
+     * any failure — the drawer hides an empty section.
+     *
+     * The "Customers also bought" modal this used to render was retired by the
+     * drawer (owner, 2026-10-12): the drawer carries View cart + Checkout, so
+     * it also runs on phones, where the modal never did (D-P0-3).
      */
-    async _showCrossSellModal(payload) {
-        // NEVER ON A PHONE (conversion handoff 2026-09-23 D-P0-3). Below the
-        // tablet breakpoint this was a full-screen z-10000 sheet opened right
-        // after a successful add, offering only × and more products — no way on
-        // to the cart or checkout. The PDP already shows the pack upsell under
-        // the Add button (#pack-upsell) and the in-flow confirmation carries
-        // View cart + Checkout, so on a phone the modal is simply dropped.
-        if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-            const tablet = (typeof Config !== 'undefined' && Config.BREAKPOINTS && Config.BREAKPOINTS.tablet) || 768;
-            if (!window.matchMedia(`(min-width: ${tablet}px)`).matches) return;
-        }
+    async _crossSellProducts(payload) {
         let products = payload.products || null;
         if (!products && payload.url) {
             // Lazy-fetch on idle — backend says hot path is cache.set'd for 1h
@@ -3809,7 +3806,7 @@ const Cart = {
                 //   https://api.inkcartridges.co.nz/api/products/…  -> 200
                 // so every cold-cache cross-sell died on arrival, silently: the
                 // caller is `.catch(() => {})` and the failure is a `return`,
-                // so the modal simply never appeared and nothing was logged.
+                // so the modal (now the drawer's upsell) simply never appeared and nothing was logged.
                 // Found in-browser 2026-09-06 while verifying ERR-223.
                 //
                 // An ABSOLUTE url from the backend is left alone — it is
@@ -3819,99 +3816,14 @@ const Cart = {
                     ? payload.url
                     : (typeof Config !== 'undefined' && Config.API_URL ? Config.API_URL : '') + payload.url;
                 const res = await fetch(crossSellUrl, { credentials: 'omit' });
-                if (!res.ok) return;
+                if (!res.ok) return [];
                 const json = await res.json();
                 products = json?.data?.bought_together || json?.data?.products || [];
             } catch (_) {
-                return;
+                return [];
             }
         }
-        if (!products || !products.length) return;
-
-        const top = products.slice(0, 3);
-        const existing = document.getElementById('crosssell-modal');
-        if (existing) existing.remove();
-
-        const overlay = document.createElement('div');
-        overlay.id = 'crosssell-modal';
-        overlay.className = 'crosssell-modal';
-
-        const cards = top.map(p => {
-            const img = typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '');
-            // Prefer backend-supplied canonical_url. Reduce absolute URLs to a
-            // path so router-based navigation stays in-app.
-            const link = (() => {
-                if (p.canonical_url) {
-                    try { return new URL(p.canonical_url).pathname; }
-                    catch (_) { return p.canonical_url; }
-                }
-                return p.slug && p.sku
-                    ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}`
-                    : `/p/${encodeURIComponent(p.sku || '')}`;
-            })();
-            const price = p.retail_price != null && typeof formatPrice === 'function' ? formatPrice(p.retail_price) : '';
-            const crosssellName = (typeof ProductName !== 'undefined') ? ProductName.clean(p) : (p.name || '');
-            // ERR-263: was `p.in_stock === false`, which is only ONE of the
-            // signals that mean "not buyable" — a deliberate contact_us product,
-            // an out_of_stock one, and a row at stock_quantity 0 all slipped
-            // through and showed Add to cart here while every other surface on
-            // the site said Contact us. getStockStatus() is the one vocabulary.
-            return `
-                <a class="crosssell-modal__card" href="${Security.escapeAttr(link)}">
-                    ${img ? `<img class="crosssell-modal__img" src="${Security.escapeAttr(img)}" alt="${Security.escapeAttr(crosssellName)}" loading="lazy">` : '<div class="crosssell-modal__img crosssell-modal__img--placeholder"></div>'}
-                    <div class="crosssell-modal__name">${Security.escapeHtml(crosssellName)}</div>
-                    <div class="crosssell-modal__price">${Security.escapeHtml(price)}</div>
-                    ${getStockStatus(p).class === 'contact-us'
-                        ? `<button type="button"
-                            class="btn btn--primary crosssell-modal__add"
-                            data-action="contact"
-                            aria-label="Contact us about ${Security.escapeAttr(p.name || 'this product')}">
-                            Contact us
-                          </button>`
-                        : `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1, stock: p.stock_quantity }) : ''}<button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
-                            data-product-id="${Security.escapeAttr(p.id || '')}"
-                            data-product-sku="${Security.escapeAttr(p.sku || '')}"
-                            data-product-name="${Security.escapeAttr(p.name || '')}"
-                            data-product-price="${Security.escapeAttr(p.retail_price != null ? p.retail_price : '')}"
-                            data-product-image="${Security.escapeAttr(img || '')}"
-                            data-product-color="${Security.escapeAttr(p.color || '')}"
-                            data-product-source="${Security.escapeAttr(p.source || '')}"
-                            aria-label="${Security.escapeAttr(typeof QtyStepper !== 'undefined' ? QtyStepper.ctaAriaLabel(1, p.name || '') : `Add ${p.name || 'this product'} to cart`)}">
-                            ${typeof QtyStepper !== 'undefined' ? QtyStepper.ctaLabel(1) : 'Add to cart'}
-                          </button></div>`}
-                </a>`;
-        }).join('');
-
-        overlay.innerHTML = `
-            <div class="crosssell-modal__panel" role="dialog" aria-modal="true" aria-labelledby="crosssell-title">
-                <div class="crosssell-modal__head">
-                    <h3 id="crosssell-title">Customers also bought</h3>
-                    <button type="button" class="crosssell-modal__close" aria-label="Close">&times;</button>
-                </div>
-                <!-- The way ON comes first (D-P0-3): Checkout is the primary,
-                     Keep shopping closes, the upsell sits below both. -->
-                <div class="crosssell-modal__foot">
-                    <a href="/checkout" class="btn btn--primary crosssell-modal__checkout" data-track="cta_click" data-track-cta="crosssell_checkout">Checkout</a>
-                    <button type="button" class="btn btn--secondary crosssell-modal__keep">Keep shopping</button>
-                    <a href="/cart" class="crosssell-modal__cart-link">View cart</a>
-                </div>
-                <div class="crosssell-modal__grid">${cards}</div>
-            </div>
-        `;
-        // ERR-218: the modal's cards get the same stepper as every other
-        // surface. The document delegate in bindEvents does the add.
-        if (typeof QtyStepper !== 'undefined') QtyStepper.bind(overlay);
-        document.body.appendChild(overlay);
-
-        const close = () => overlay.remove();
-        overlay.querySelector('.crosssell-modal__close').addEventListener('click', close);
-        overlay.querySelector('.crosssell-modal__keep').addEventListener('click', close);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-        document.addEventListener('keydown', function escClose(e) {
-            if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-        });
-        // Add-to-cart on cross-sell items goes through the normal Cart.addItem path
-        // via the global delegate already bound in bindEvents().
+        return Array.isArray(products) ? products : [];
     },
 
     /**
@@ -4222,6 +4134,11 @@ const Cart = {
      * Check if we have server-verified pricing
      * SECURITY: Checkout should be blocked if this returns false
      */
+    /** True when the cart drawer will confirm an add on this page (ERR-316). */
+    drawerHandlesAdds: function() {
+        return typeof CartDrawer !== 'undefined' && typeof CartDrawer.enabled === 'function' && CartDrawer.enabled();
+    },
+
     hasServerPricing: function() {
         return this.serverSummary && this.serverSummary.subtotal !== undefined;
     },
@@ -4528,6 +4445,8 @@ const Cart = {
         if (cartPage) {
             this.renderCartPage();
         }
+
+        if (typeof CartDrawer !== 'undefined') CartDrawer.refresh();
     },
 
     /**

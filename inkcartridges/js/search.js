@@ -1098,10 +1098,13 @@
                 Products.attachCardListeners(state.list);
             }
 
-            // Toast feedback when an Add-to-Cart button is clicked inside the dropdown
+            // Toast feedback when an Add-to-Cart button is clicked inside the
+            // dropdown — only where the cart drawer does not confirm the add
+            // (ERR-316).
             state.list.querySelectorAll('.product-card__add-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    if (typeof showToast === 'function') {
+                    const drawer = typeof Cart !== 'undefined' && typeof Cart.drawerHandlesAdds === 'function' && Cart.drawerHandlesAdds();
+                    if (typeof showToast === 'function' && !drawer) {
                         const name = btn.dataset.productName || 'Item';
                         // Read the quantity BEFORE the add path resets the
                         // stepper to 1, or the toast reports "added" for a

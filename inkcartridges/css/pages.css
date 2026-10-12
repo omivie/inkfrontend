@@ -2094,77 +2094,8 @@
 }
 
 
-/* Add-to-Cart Confirmation Strip */
-.atc-confirmation {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 16px;
-    background: #f0fdf4;
-    border: 1px solid #86efac;
-    border-radius: 8px;
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.35s ease, margin-top 0.35s ease;
-    margin-top: 0;
-}
-.atc-confirmation.atc-confirmation--visible {
-    /* Room for the Checkout button (48px) on its own row on a phone. */
-    max-height: 160px;
-    opacity: 1;
-    padding: 12px 16px;
-    margin-top: 12px;
-}
-.atc-confirmation__check {
-    color: #16a34a;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-}
-.atc-confirmation__text {
-    flex: 1;
-    font-size: 0.9rem;
-    color: #15803d;
-    font-weight: 500;
-}
-.atc-confirmation__cta {
-    display: inline-flex;
-    align-items: center;
-    padding: 6px 14px;
-    background: #16a34a;
-    color: #fff;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-decoration: none;
-    white-space: nowrap;
-    transition: background 0.15s ease;
-}
-.atc-confirmation__cta:hover {
-    background: #15803d;
-    color: #fff;
-}
-/* After Add, the way on is CHECKOUT (conversion handoff 2026-09-23 D-P0-3):
-   it is the one filled button; View Cart steps down to a text link. */
-.atc-confirmation { flex-wrap: wrap; }
-.atc-confirmation__cta {
-    padding: 6px 4px;
-    background: none;
-    color: #15803d;
-    text-decoration: underline;
-    min-height: 44px;
-}
-.atc-confirmation__cta:hover { background: none; color: #166534; }
-.atc-confirmation__checkout {
-    min-height: 48px;
-    padding: 0 20px;
-    white-space: nowrap;
-}
-@media (max-width: 767px) {
-    .atc-confirmation__checkout { flex: 1 1 100%; justify-content: center; }
-}
-
+/* The Add-to-Cart confirmation strip was retired by the cart drawer
+   (js/cart-drawer.js, ERR-316); its View cart + Checkout live in the drawer. */
 
 .related-products {
     padding: var(--spacing-md) 0 var(--spacing-lg);

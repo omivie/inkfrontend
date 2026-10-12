@@ -472,7 +472,7 @@ test('§5 Cart.addItem returns a result on ALL FOUR branches', () => {
 test('§5 addItem has no bare `return;` left — undefined is indistinguishable from success', () => {
     const start = CART_SRC.indexOf('async addItem(product) {');
     assert.ok(start > -1);
-    const end = CART_SRC.indexOf('\n    async _showCrossSellModal', start);
+    const end = CART_SRC.indexOf('\n    async _crossSellProducts', start);
     assert.ok(end > start);
     const body = CART_SRC.slice(start, end);
     assert.doesNotMatch(body, /^\s+return;\s*$/m,
@@ -481,7 +481,7 @@ test('§5 addItem has no bare `return;` left — undefined is indistinguishable 
 
 test('§5 the silent flag gates only the toasts, and every toast in addItem respects it', () => {
     const start = CART_SRC.indexOf('async addItem(product) {');
-    const end = CART_SRC.indexOf('\n    async _showCrossSellModal', start);
+    const end = CART_SRC.indexOf('\n    async _crossSellProducts', start);
     const body = CART_SRC.slice(start, end);
     const toasts = [...body.matchAll(/typeof showToast === 'function'([^)]*)\)/g)];
     assert.ok(toasts.length >= 3, `expected >=3 toast guards in addItem, found ${toasts.length}`);

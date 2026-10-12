@@ -3056,10 +3056,9 @@
                 onQtyChanged();
             });
 
-            // Add to cart using Cart.addItem (server-first for authenticated users)
-            let atcTotalQty = 0;
-            const atcConfirmation = document.getElementById('atc-confirmation');
-            const atcConfirmationText = document.getElementById('atc-confirmation-text');
+            // Add to cart using Cart.addItem (server-first for authenticated users).
+            // The confirmation (View cart + Checkout) is the cart drawer, opened
+            // by Cart.addItem's `cart:item-added` (js/cart-drawer.js, ERR-316).
 
             const addToCartBtn = document.getElementById('add-to-cart-btn');
             if (addToCartBtn) addToCartBtn.addEventListener('click', async () => {
@@ -3111,17 +3110,6 @@
                         btn.textContent = 'Add to Cart';
                         btn.disabled = false;
                     }, 1500);
-
-                    // Update and show confirmation strip
-                    atcTotalQty += qty;
-                    if (atcConfirmationText) {
-                        atcConfirmationText.textContent = atcTotalQty === 1
-                            ? '1 item added to cart'
-                            : `${atcTotalQty} items in cart`;
-                    }
-                    if (atcConfirmation) {
-                        atcConfirmation.classList.add('atc-confirmation--visible');
-                    }
                 } catch (error) {
                     btn.textContent = 'Error';
                     setTimeout(() => {

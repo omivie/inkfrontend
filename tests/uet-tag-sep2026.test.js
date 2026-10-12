@@ -884,7 +884,7 @@ test('§8 view_item mirrors only what the twin reported, behind the test-product
 test('§8 add_to_cart mirrors inside the serverConfirmed gate, and derives nothing', () => {
     const body = region(SITES.cart,
         "if (serverConfirmed && typeof Ga4Ecommerce !== 'undefined')",
-        '_showCrossSellModal(crossSellPayload)',
+        "reason: serverConfirmed ? 'confirmed' : 'local-only'",
         [/Ga4Ecommerce\.addToCart/], 'cart add_to_cart');
 
     assert.ok(/UetTag\.addToCart/.test(body), 'the UET twin is not wired in cart.js');

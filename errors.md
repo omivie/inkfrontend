@@ -41,6 +41,56 @@ describing the same incident.
 
 ---
 
+## ERR-316 — Adding to cart confirmed itself three different ways (toast, desktop-only modal, PDP strip) and none looked like a cart; replaced by one slide-in cart drawer modelled on smartink.co.nz — **RESOLVED (frontend), phase 1 of the cart/checkout restyle** (2026-10-12)
+
+**Asked.** Owner, 12 Oct: make add-to-cart, the cart and checkout look "professional and clean like smartink.co.nz". Smartink's flow was measured with Playwright at 1280×800. After Add to Cart, a right-hand drawer about 460px wide opens over a dimmed page. It shows the lines with − / + and Remove, then "You may also like" rows with a round add button, then a sticky footer with the totals, View cart and Checkout. Decisions taken with the owner: one drawer replaces all three old surfaces on every add path; checkout keeps its two pages (restyle only); the cart keeps every feature, made quieter. The cart and checkout restyle is phase 2.
+
+**Before.** One add produced up to three different confirmations:
+- a toast "<name> added to cart" (`Cart.addItem`), plus a second toast from the search dropdown;
+- on desktop only, a centred "Customers also bought" modal (`_showCrossSellModal`), which was never shown on phones (D-P0-3);
+- on the PDP, the green `#atc-confirmation` strip.
+
+**Fix.**
+- `js/cart-drawer.js` (new) listens to `cart:item-added`, the event cart.js had reserved for "a future inline surface" (ERR-276). A `silent` add never opens it, so the `?add=` deep link's twelve adds stay quiet.
+- The drawer is not mounted on /cart, /checkout or /payment. Those pages keep the toast, through `Cart.drawerHandlesAdds()`.
+- **The drawer computes no price.** Line figures come from `Cart.lineTotalHtml`. The subtotal is the server's `summary.subtotal`. While a change is in flight it shows "Updating…". With no server summary it says so in words, never as a sum of the lines.
+- Quantity changes go through `_debouncedQuantityUpdate` and are capped by `Cart.maxQuantityFor`. Remove goes through `Cart.removeItem`. `updateUI` and `_updateCartSummaryDOM` both repaint the drawer.
+- "You may also like" comes from the add's own frequently-bought-together payload (`_showCrossSellModal` became `_crossSellProducts`, keeping its API-host and `credentials: 'omit'` fixes), else `/api/products/:sku/related`. Rows already in the cart, contact-us rows and unpriced rows are dropped. With no rows the section is hidden.
+- Its add buttons wear `.add-to-cart-btn`, so the add itself is `Cart.bindEvents`' delegate. This is a one-tap add with no stepper, by design. That is a **named exemption** in `qty-stepper-sep2026`: the line lands right above, with its own − / +.
+- Accessibility: `role="dialog"`, `aria-modal`, a focus trap, Esc, backdrop click, and scroll lock. Full width on a phone. At 390×664 Checkout's bottom edge sits at 644px.
+- Removed: the modal and its CSS, the PDP strip (markup, CSS and handler code), and the add toast on drawer pages. The script tag is added after cart.js on all 37 pages that load cart.js.
+
+**Measured (localhost:3000 against the production API, 12 Oct).**
+- PDP `CLC431XLBK`: Add opened the drawer with the line at $43.49 and two upsell rows.
+- + set qty 2, and the server re-priced the subtotal to $86.98 (`data-pricing="server"`).
+- The upsell add put `LC431XLCMY` in the cart, and the subtotal became $188.97 (3 items). No toast appeared. Esc closed the drawer.
+- Phone 390×664: the panel is 390px wide, with no horizontal scroll.
+- **Cleanup:** both lines were removed. A reload of /cart then read 0 items from the server.
+
+**Tests.** `tests/cart-drawer-oct2026.test.js` (new, 8 tests) covers:
+- open on non-silent, shut on silent;
+- not listening on cart, checkout or payment;
+- the three subtotal states, never a sum;
+- no price arithmetic in the source;
+- empty upsell hidden;
+- Esc closes;
+- the cart.js hooks;
+- every page loads the drawer.
+
+Red-proof: with the silent guard removed and `Cart.getSubtotal()` swapped in, 2 of the 8 tests fail.
+
+Ten older suites pinned the modal or the strip. Each was rewritten to the drawer's equivalent, keeping its intent ("Checkout is right there after Add"; the cross-sell fetch is still API-host and credentials-omit; the name still clamps at 4 lines; the image is still capped).
+
+Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mcp/` (this session's screenshots, deleted before commit) and two on-disk, untracked `.DS_Store` files that were already there.
+
+**Not verified yet.** Production after deploy. The upsell when the backend returns neither frequently-bought-together nor related rows: the section hides, by design.
+
+**Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
+
+**Files.** `inkcartridges/js/cart-drawer.js` (new) · `js/cart.js` · `js/product-detail-page.js` · `js/search.js` · `css/components.css` · `css/pages.css` · `html/product/index.html` · 37 HTML pages (script tag + `?v=` restamp) · `tests/cart-drawer-oct2026.test.js` (new) + 10 updated suites
+
+---
+
 ## ERR-314 — A paid ad for the compatible LC3319XL landed on a page showing the genuine ones beside it: the series page ignored `&source=`, and the chip that should have said "Compatible only" had been dead since March — **RESOLVED (frontend)** (2026-10-08)
 
 **Source.** `backend-docs/inbox/series-page-source-filter-FE-handoff-oct2026.md` (8 Oct, FE master checklist item 21). On 8 Oct the owner split Search into "Winners" and "Exclusive" ad groups. When we are cheaper on only one version of a family, the ad lands on `/shop?brand=…&code=…&source=compatible|genuine`. Five such landing pages are live.

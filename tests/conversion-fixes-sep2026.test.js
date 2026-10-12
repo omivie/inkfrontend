@@ -300,7 +300,10 @@ test('§4 PDP fit + value slots sit ABOVE the Add button, and ship hidden', () =
     assert.ok(fit > 0 && vl > 0 && fit < add && vl < add, 'printer fit and value lines precede Add to Cart');
     assert.match(html, /id="product-fit"[^>]*hidden/);
     assert.match(html, /id="product-value-lines"[^>]*hidden/);
-    assert.match(html, /class="btn btn--primary atc-confirmation__checkout"/, 'after Add, Checkout is right there');
+    // After Add, Checkout is right there: the cart drawer's footer (ERR-316),
+    // opened by cart:item-added, replaced the in-flow strip.
+    assert.match(read('js/cart-drawer.js'), /href="\/checkout" class="btn btn--primary btn--full-width cart-drawer__checkout"/, 'after Add, Checkout is right there');
+    assert.match(html, /\/js\/cart-drawer\.js/, 'the PDP loads the drawer');
 });
 
 test('§4 points line: server reward_points, the rung price at the quantity in the box (CRO handoff 2026-10-04)', () => {
@@ -343,15 +346,18 @@ test('§5 cart shipping row: server numbers only, never "free" from absence', ()
     assert.equal(row({ shipping: 7, is_shipping_estimate: true }, false), '$7.00', 'no threshold ⇒ no threshold clause');
 });
 
-test('§5 the cross-sell modal never opens on a phone, and leads with Checkout on desktop', () => {
-    const src = stripComments(read('js/cart.js'));
-    const fn = extractMethod(src, '_showCrossSellModal').body;
-    assert.match(fn.slice(0, 600), /matchMedia\(`\(min-width: \$\{tablet\}px\)`\)\.matches\) return;/,
-        'the phone bail-out must run FIRST, before any fetch');
-    const foot = fn.indexOf('crosssell-modal__foot'), grid = fn.indexOf('crosssell-modal__grid');
-    assert.ok(foot > 0 && foot < grid, 'the way on comes before the upsell');
-    assert.match(fn, /href="\/checkout" class="btn btn--primary crosssell-modal__checkout"/);
-    assert.match(fn, /crosssell-modal__keep/);
+test('§5 the cart drawer leads with the way on, and the upsell sits below it (D-P0-3, ERR-316)', () => {
+    // The modal it replaced never opened on a phone because it offered only ×
+    // and more products. The drawer carries View cart + Checkout in a footer
+    // that never scrolls away, so it runs at every width.
+    const src = stripComments(read('js/cart-drawer.js'));
+    const lines = src.indexOf('cart-drawer__lines'), upsell = src.indexOf('cart-drawer__upsell"'), foot = src.indexOf('cart-drawer__foot"');
+    assert.ok(lines > 0 && lines < upsell, 'the shopper\'s own lines come before the upsell');
+    assert.ok(foot > upsell, 'the footer follows the scrolling body');
+    assert.match(src, /href="\/checkout" class="btn btn--primary btn--full-width cart-drawer__checkout"/);
+    assert.match(src, /href="\/cart" class="btn btn--outline btn--full-width cart-drawer__view"/);
+    assert.doesNotMatch(src, /matchMedia/, 'no phone bail-out: the drawer has a way on at every width');
+    assert.doesNotMatch(stripComments(read('js/cart.js')), /crosssell-modal/, 'the modal is gone, not hidden');
 });
 
 test('§5 guest loyalty chip keeps the message verbatim and adds a link, never a gate', () => {

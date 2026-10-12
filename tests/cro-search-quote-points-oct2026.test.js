@@ -326,8 +326,10 @@ test('§5 the service row sits directly UNDER Add (zero fold cost at 1280x551), 
     const html = read('html/product/index.html');
     const actions = html.indexOf('<div class="product-info__actions">');
     const row = html.indexOf('id="product-service-row"');
-    const confirm = html.indexOf('id="atc-confirmation"');
-    assert.ok(actions > 0 && row > actions && row < confirm, 'after the Add row, before the confirmation');
+    // The confirmation strip it used to precede is gone: the cart drawer
+    // confirms an add now (ERR-316), so the row is simply after the Add row.
+    assert.ok(actions > 0 && row > actions, 'after the Add row');
+    assert.doesNotMatch(html, /id="atc-confirmation"/, 'the in-flow strip is retired, not hidden');
     assert.match(html, /<div class="service-row" id="product-service-row"[^>]*hidden><\/div>/, 'ships hidden');
     assert.ok(html.indexOf('/js/utils.js?v=') < html.indexOf('/js/service-row.js?v='), 'needs TrustStats + Security from utils.js');
 });

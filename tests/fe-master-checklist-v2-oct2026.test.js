@@ -247,7 +247,9 @@ test('§17 every cart cap site uses the LINE\'s cap — no literal 100 left, the
     has(code, /max="' \+ maxQty \+ '"/);
     has(code, /\(item\.quantity >= maxQty \? ' disabled' : ''\)/);
     has(code, /data-max-quantity="' \+ maxQty \+ '"/, 'the line tells the volume nudge its cap');
-    has(code, /QtyStepper\.markup\(\{ value: 1, stock: p\.stock_quantity \}\)/, 'cross-sell stepper');
+    // The cross-sell stepper went with the modal (ERR-316); the drawer's own
+    // − / + is capped by the same line cap.
+    has(stripComments(fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'js', 'cart-drawer.js'), 'utf8')), /Cart\.maxQuantityFor\(line\)/, 'drawer stepper cap');
 });
 
 test('§17 the volume nudge reads the LINE\'s cap: never "add N more" past stock', async () => {

@@ -141,9 +141,15 @@ const CARD_SURFACES = {
     'shop-page.js (/shop, /search, brand pages)': SHOP,
     'ribbons-page.js (/ribbons)': RIBBONS,
     'favourites.js (the reorder list)': FAVOURITES,
-    'cart.js (cross-sell modal)': CART,
     'business-page.js (reorder tiles)': BUSINESS_PAGE,
 };
+// Named exemption, not a silent skip (a skip is not a pass): the cart
+// drawer's "You may also like" (js/cart-drawer.js, ERR-316) replaced the
+// cross-sell modal and is a ONE-TAP add by design (owner, 2026-10-12, modelled
+// on smartink.co.nz). The line it adds lands in the drawer directly above,
+// with its own − / + stepper, so the quantity is still the shopper's to set.
+// Its button wears .add-to-cart-btn, so the add itself is Cart.bindEvents'
+// delegate, which reads QtyStepper.read() — never a hard-coded 1.
 
 test('ENROLMENT — every add-to-cart surface emits the stepper', () => {
     for (const [name, src] of Object.entries(CARD_SURFACES)) {
@@ -196,7 +202,7 @@ test('ENROLMENT — no card add path hard-codes quantity: 1', () => {
 test('ENROLMENT — every grid binds one delegated stepper listener', () => {
     for (const [name, src] of Object.entries({
         'products.js': PRODUCTS, 'shop-page.js': SHOP, 'ribbons-page.js': RIBBONS,
-        'favourites.js': FAVOURITES, 'cart.js': CART, 'business-page.js': BUSINESS_PAGE,
+        'favourites.js': FAVOURITES, 'business-page.js': BUSINESS_PAGE,
     })) {
         assert.match(src, /QtyStepper\.bind\(/,
             `${name} never calls QtyStepper.bind — its + and − would do nothing`);
@@ -521,7 +527,6 @@ test('ENROLMENT — the anchor guard lives in QtyStepper alone', () => {
         'products.js': PRODUCTS,      // <a class="product-card__link"> wraps the buy row
         'shop-page.js': SHOP,         // same shape, second template
         'ribbons-page.js': RIBBONS,   // same shape
-        'cart.js': CART,              // <a class="crosssell-modal__card">
     };
     // Named exemptions, not a silent skip (a skip is not a pass):
     //   favourites.js     — the buy row is OUTSIDE .favourite-item__link
