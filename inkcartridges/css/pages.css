@@ -3179,17 +3179,6 @@ body.filter-sort-open { overflow: hidden; }
     padding-top: 22px;
 }
 
-/* Compact checkout progress for cart page - same style but narrower */
-.checkout-progress--compact {
-    margin: 0;
-    flex: 0 1 400px;
-    max-width: 400px;
-}
-
-.checkout-progress--compact .checkout-progress__steps::before {
-    left: 12%;
-    right: 12%;
-}
 
 @media (max-width: 768px) {
     .cart-page__header {
@@ -3197,30 +3186,6 @@ body.filter-sort-open { overflow: hidden; }
         align-items: flex-start;
     }
 
-    .checkout-progress--compact {
-        width: 100%;
-        max-width: 100%;
-        /* FLEX-BASIS IS MAIN-AXIS, AND THE MAIN AXIS JUST FLIPPED.
-         *
-         * `.checkout-progress--compact` above declares `flex: 0 1 400px` beside
-         * `max-width: 400px`, and that pairing is the proof of intent: the
-         * author meant "this bar is at most 400px WIDE", which is exactly what
-         * flex-basis means in the desktop ROW.
-         *
-         * This block turns .cart-page__header into `flex-direction: column`.
-         * The same declaration now sizes the MAIN axis, which is vertical — so
-         * the bar became 400px TALL to render 52px of step pills, and
-         * `max-width` cannot catch it because max-width is not a height.
-         * Measured at 390x844: 400px box, 325px of it empty, pushing the first
-         * checkout field to 1621px on an 844px viewport.
-         *
-         * Resetting the basis is the whole fix; width/max-width above already
-         * say what the bar should do horizontally. Same family as ERR-217's
-         * `transform: translateY(0)` is not `none` — a property whose meaning
-         * depends on a context declared somewhere else.
-         */
-        flex-basis: auto;
-    }
 }
 
 /* Checkout page header - same style as cart page */
@@ -3781,72 +3746,6 @@ body.filter-sort-open { overflow: hidden; }
     min-width: 0;
 }
 
-/* Checkout Progress */
-.checkout-progress:not(.checkout-progress--compact) {
-    margin-bottom: var(--spacing-lg);
-}
-
-.checkout-progress__steps {
-    display: flex;
-    justify-content: space-between;
-    position: relative;
-}
-
-.checkout-progress__steps::before {
-    content: '';
-    position: absolute;
-    top: 16px;
-    left: 10%;
-    right: 10%;
-    height: 2px;
-    background-color: var(--color-border);
-}
-
-.checkout-progress__step {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--spacing-xs);
-    position: relative;
-    z-index: 1;
-}
-
-.checkout-progress__number {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-background);
-    border: 2px solid var(--color-border);
-    border-radius: var(--radius-full);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-text-muted);
-}
-
-.checkout-progress__label {
-    font-size: var(--font-size-sm);
-    color: var(--color-text-muted);
-}
-
-.checkout-progress__step--active .checkout-progress__number {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
-    color: var(--color-text-inverse);
-}
-
-.checkout-progress__step--active .checkout-progress__label {
-    color: var(--color-primary);
-    font-weight: var(--font-weight-medium);
-}
-
-.checkout-progress__step--completed .checkout-progress__number {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
-    color: var(--color-text-inverse);
-}
-
 
 /* Cart Summary Enhancements */
 .cart-summary__coupon {
@@ -4367,13 +4266,7 @@ body.filter-sort-open { overflow: hidden; }
         position: relative;
     }
 
-    .checkout-progress__steps::before {
-        display: none;
-    }
 
-    .checkout-progress__label {
-        font-size: var(--font-size-xs);
-    }
 }
 
 
@@ -4444,9 +4337,6 @@ body.filter-sort-open { overflow: hidden; }
 }
 
 /* Checkout Progress */
-.checkout-progress:not(.checkout-progress--compact) {
-    margin-bottom: var(--spacing-2xl);
-}
 
 /* Checkout Sections */
 .checkout-section {
@@ -4739,26 +4629,6 @@ body.filter-sort-open { overflow: hidden; }
     border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
-}
-
-/* Checkout Submit */
-.checkout-submit {
-    padding-top: var(--spacing-xl);
-    border-top: 1px solid var(--color-border);
-}
-
-.checkout-submit__button {
-    margin-top: var(--spacing-lg);
-}
-
-.checkout-submit__secure {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--spacing-sm);
-    margin-top: var(--spacing-md);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-muted);
 }
 
 
@@ -11444,13 +11314,6 @@ body.page-shop {
         display: none;
     }
 
-    /* S3.6 — keep the 4-step checkout stepper on one line at phone widths. */
-    .checkout-progress--compact .checkout-progress__label {
-        font-size: var(--font-size-xs);
-    }
-    .checkout-progress--compact .checkout-progress__steps {
-        flex-wrap: nowrap;
-    }
 }
 
 /* S0.11 — modern-effects.css forces `html { overflow-y: scroll }` to keep a

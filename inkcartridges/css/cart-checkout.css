@@ -204,40 +204,6 @@ section.checkout-page .form-select {
     padding: 12px 14px;
 }
 
-/* Progress: a small breadcrumb (Cart › Details › Payment › Confirm), not
-   four numbered pills. Same markup and data-step hooks. */
-section.checkout-page .checkout-progress,
-section.checkout-page .checkout-progress--compact {
-    padding: 0;
-    margin: 6px 0 0;
-    flex: none;
-    max-width: none;
-}
-section.checkout-page .checkout-progress__steps {
-    justify-content: flex-start;
-    gap: 0;
-    padding: 0;
-    margin: 0;
-}
-section.checkout-page .checkout-progress__step {
-    flex: none;
-    max-width: none;
-    flex-direction: row;
-    gap: 0;
-    font-size: 0.85rem;
-}
-section.checkout-page .checkout-progress__step::after { display: none; }
-section.checkout-page .checkout-progress__step:not(:last-child)::before {
-    content: '\203A';
-    order: 2;
-    padding: 0 8px;
-    color: var(--color-text-muted);
-}
-section.checkout-page .checkout-progress__number { display: none; }
-section.checkout-page .checkout-progress__label { color: var(--color-text-muted); font-weight: 500; }
-section.checkout-page .checkout-progress__step--completed .checkout-progress__label { color: var(--color-primary-dark); }
-section.checkout-page .checkout-progress__step--active .checkout-progress__label { color: var(--color-text-heading); font-weight: 700; }
-
 section.checkout-page .cart-page__header {
     display: block;
     margin-bottom: var(--spacing-lg);
@@ -561,21 +527,6 @@ section.checkout-page .payment-col-alt {
     }
 }
 
-/* Split layout: details on the left, the order summary pinned on the right
-   while the left column scrolls (smartink/Shopify). Desktop only — phones
-   keep the collapsed summary disclosure at the top (#checkout-summary-toggle). */
-@media (min-width: 1025px) {
-    section.checkout-page .checkout-layout {
-        grid-template-columns: minmax(0, 1fr) 420px;
-        gap: 56px;
-    }
-    section.checkout-page .checkout-sidebar {
-        position: sticky;
-        top: 24px;
-        align-self: start;
-    }
-}
-
 /* Express row at the top: title, the wallet buttons, then OR. */
 .checkout-express { margin-bottom: 8px; }
 .checkout-express .cart-wallet { margin-top: 0; }
@@ -596,21 +547,376 @@ section.checkout-page .payment-col-alt {
 .checkout-express__or::before,
 .checkout-express__or::after { content: ""; flex: 1; border-top: 1px solid var(--color-border); }
 
-/* The payment step on the same page. Waiting: shown but inert, saying what
-   unlocks it. Stale: details changed after Continue. */
-.checkout-payment { margin-top: 32px; }
-.checkout-payment__pending,
-.checkout-payment__stale {
-    margin: 0 0 12px;
-    padding: 14px 16px;
-    border-radius: 5px;
-    font-size: 0.9rem;
+
+/* ══ SHOPIFY PARITY (ERR-316 phase 4, owner 2026-10-13: "almost exactly like
+   smartink.co.nz"). Figures measured on smartink's live checkout with
+   Playwright, 2026-10-13, 1280x800: left column 500px ending 40px before the
+   divider at x=689; grey (#f5f5f5) right half from header to bottom; summary
+   content 400px; fields 48px, 1px #dedede, 12px radius, 14px system font;
+   h2 20px/600; Pay now #005BD1, 50px, 12px radius, 14px/600. ═════════════ */
+
+body:has(section.checkout-page) {
+    --shop-blue: #005BD1;
+    --shop-line: #dedede;
+    --shop-grey: #f5f5f5;
+    --shop-muted: #707070;
+    --shop-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #fff;
 }
-.checkout-payment__pending { background: var(--color-background); border: 1px dashed var(--steel-300); color: var(--color-text-muted); }
-.checkout-payment__stale { background: var(--color-warning-bg); border: 1px solid var(--color-warning); color: var(--color-text-heading); }
-.checkout-payment__pending[hidden],
-.checkout-payment__stale[hidden] { display: none; }
-.checkout-payment.is-waiting .payment-col-alt,
-.checkout-payment.is-waiting .pay-terms,
-.checkout-payment.is-waiting .secure-badge,
-.checkout-payment.is-waiting .powered-by { opacity: 0.5; pointer-events: none; }
+body:has(section.checkout-page) .site-main,
+body:has(section.checkout-page) .site-header--checkout { font-family: var(--shop-font); color: #000; }
+
+/* Header: wordmark left, bag right, hairline under. */
+.site-header--checkout { border-bottom: 1px solid var(--shop-line); box-shadow: none; background: #fff; }
+.site-header--checkout .header-main { padding: 18px 0; }
+.site-header--checkout .header-main .container { max-width: 1012px; }
+.site-header--checkout .logo__text { font-size: 1.25rem; }
+.checkout-header__bag { display: inline-flex; color: var(--shop-blue); }
+
+/* The big site footer: on checkout only its legal line, like Shopify's bare
+   page (the noscript block stays in the HTML for the compliance pins). */
+/* Shopify's checkout has no site footer: the policy links under Pay replace
+   it. The <noscript> company block stays in the HTML (compliance pins). */
+body:has(section.checkout-page) .site-footer { display: none; }
+
+section.checkout-page { padding: 0; }
+section.checkout-page > .container { max-width: none; padding: 0; }
+
+/* Desktop split: the grey half runs from the header to the bottom. */
+@media (min-width: 1000px) {
+    section.checkout-page .checkout-layout {
+        display: grid;
+        grid-template-columns: calc(50% + 49px) 1fr;
+        gap: 0;
+        align-items: stretch;
+    }
+    section.checkout-page .checkout-form-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        padding: 32px 40px 48px 20px;
+    }
+    section.checkout-page .checkout-form-wrapper > * { width: 100%; max-width: 500px; }
+    section.checkout-page .checkout-sidebar {
+        position: static;
+        align-self: stretch;
+        background: var(--shop-grey);
+        border-left: 1px solid var(--shop-line);
+        padding: 38px 20px 48px 40px;
+    }
+    section.checkout-page .checkout-sidebar .checkout-summary {
+        position: sticky;
+        top: 38px;
+        max-width: 400px;
+        background: none;
+        border: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+}
+@media (max-width: 999px) {
+    section.checkout-page .checkout-form-wrapper { padding: 20px 16px 40px; }
+    section.checkout-page .checkout-sidebar { background: var(--shop-grey); border-bottom: 1px solid var(--shop-line); }
+}
+
+/* Section headings and the Sign in link. */
+section.checkout-page .checkout-section { position: relative; margin: 0 0 28px; padding: 0; border: 0; background: none; box-shadow: none; }
+section.checkout-page .checkout-section__heading {
+    display: block;
+    width: 100%;
+    margin: 0 0 14px;
+    padding: 0;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #000;
+}
+section.checkout-page .checkout-section__login-prompt {
+    position: absolute;
+    top: 3px;
+    right: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    font-size: 14px;
+}
+section.checkout-page .checkout-section__login-prompt a,
+section.checkout-page .checkout-policies a,
+section.checkout-page .pay-terms a { color: var(--shop-blue); text-decoration: underline; text-underline-offset: 2px; }
+section.checkout-page .checkout-subheading { margin: 22px 0 12px; font-size: 16px; font-weight: 600; color: #000; }
+
+/* Rows of fields, 12px apart. */
+section.checkout-page .checkout-section .form-row { display: grid; gap: 12px; margin: 0 0 12px; grid-template-columns: 1fr; }
+section.checkout-page .checkout-section .form-row--two-col { grid-template-columns: 1fr 1fr; }
+section.checkout-page .checkout-section .form-row--three-col { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 560px) {
+    section.checkout-page .checkout-section .form-row--two-col { grid-template-columns: 1fr; }
+}
+section.checkout-page .checkout-section .form-group { position: relative; margin: 0; }
+
+/* Fields: 48px, hairline, 12px radius; the label lives INSIDE the box —
+   full size while empty, small at the top once filled or focused. */
+section.checkout-page .checkout-section .form-input,
+section.checkout-page .checkout-section .form-select,
+section.checkout-page .form-static,
+section.checkout-page .phone-input-group {
+    width: 100%;
+    min-height: 48px;
+    height: 48px;
+    margin: 0;
+    padding: 20px 12px 6px;
+    border: 1px solid var(--shop-line);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: none;
+    font: 400 14px/1.3 var(--shop-font);
+    color: #000;
+}
+section.checkout-page .checkout-section .form-select { padding-right: 34px; }
+section.checkout-page .form-static { display: flex; align-items: flex-end; }
+section.checkout-page .checkout-section .form-input:focus,
+section.checkout-page .checkout-section .form-select:focus,
+section.checkout-page .phone-input-group:focus-within {
+    border-color: var(--shop-blue);
+    box-shadow: 0 0 0 1px var(--shop-blue);
+    outline: none;
+}
+section.checkout-page .checkout-section .form-input.is-error,
+section.checkout-page .checkout-section .form-select.is-error { border-color: #dd1d1d; box-shadow: 0 0 0 1px #dd1d1d; }
+section.checkout-page .checkout-section .form-group:not(.form-group--checkbox) > .form-label {
+    position: absolute;
+    z-index: 1;
+    top: 6px;
+    left: 13px;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.2;
+    color: var(--shop-muted);
+    pointer-events: none;
+    transition: top 0.12s ease, font-size 0.12s ease;
+}
+/* Descendant, not child: address autocomplete wraps #address1 in its own box. */
+section.checkout-page .checkout-section .form-group:has(.form-input:placeholder-shown:not(:focus)) > .form-label {
+    top: 15px;
+    font-size: 14px;
+}
+section.checkout-page .checkout-section .form-label .required { display: none; }
+section.checkout-page .checkout-section .form-error { margin-top: 6px; font-size: 13px; color: #dd1d1d; }
+
+/* Phone: the +64 picker and the number share one box. */
+section.checkout-page .phone-input-group { display: flex; padding: 0; gap: 0; }
+section.checkout-page .phone-input-group .phone-country-code {
+    width: 76px;
+    height: 100%;
+    padding: 18px 4px 4px 12px;
+    border: 0;
+    border-right: 1px solid var(--shop-line);
+    border-radius: 12px 0 0 12px;
+    background: transparent;
+    font: 400 14px var(--shop-font);
+    text-align: left;
+}
+section.checkout-page .phone-input-group .phone-number {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 20px 12px 6px;
+    border: 0;
+    border-radius: 0 12px 12px 0;
+    background: transparent;
+    box-shadow: none;
+    font: 400 14px var(--shop-font);
+}
+section.checkout-page .phone-input-group .phone-country-code:focus,
+section.checkout-page .phone-input-group .phone-number:focus { box-shadow: none; outline: none; }
+section.checkout-page .form-group--phone > .form-label { left: 90px !important; }
+section.checkout-page .form-group--phone:has(.phone-number:placeholder-shown:not(:focus)) > .form-label { top: 15px; font-size: 14px; }
+
+/* Checkboxes: 14px text, square box, Shopify blue tick. */
+section.checkout-page .checkout-optin,
+section.checkout-page .form-group--checkbox { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; font-size: 14px; color: #000; }
+section.checkout-page .form-group--checkbox .form-label--checkbox { position: static; margin: 0; font-size: 14px; color: #000; text-transform: none; letter-spacing: 0; }
+section.checkout-page input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--shop-blue); flex: 0 0 auto; }
+
+/* Shipping method: one bordered list, price on the right. */
+section.checkout-page .delivery-type-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    border: 1px solid var(--shop-line);
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+}
+section.checkout-page .delivery-type-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+    box-shadow: none;
+    cursor: pointer;
+}
+section.checkout-page .delivery-type-option + .delivery-type-option { border-top: 1px solid var(--shop-line); }
+section.checkout-page .delivery-type-option:has(input:checked) { background: #f0f5ff; box-shadow: inset 0 0 0 1px var(--shop-blue); }
+section.checkout-page .delivery-type-option__radio { position: static; opacity: 1; width: 18px; height: 18px; accent-color: var(--shop-blue); }
+section.checkout-page .delivery-type-option__icon-wrap,
+section.checkout-page .delivery-type-option__check { display: none; }
+section.checkout-page .delivery-type-option__content {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 12px;
+    font-size: 14px;
+}
+section.checkout-page .delivery-type-option__name { font-weight: 400; color: #000; }
+section.checkout-page .delivery-type-option__desc { grid-column: 1; font-size: 13px; color: var(--shop-muted); }
+section.checkout-page .delivery-type-option__price { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-weight: 600; color: #000; }
+
+section.checkout-page .checkout-order-notes__heading { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+section.checkout-page .checkout-order-notes .form-textarea {
+    border: 1px solid var(--shop-line);
+    border-radius: 12px;
+    padding: 12px;
+    font: 400 14px/1.4 var(--shop-font);
+}
+
+/* Payment. */
+section.checkout-page .checkout-payment { margin-top: 32px; }
+section.checkout-page .payment-section__header { padding: 0 0 12px; }
+section.checkout-page .payment-section__title { font-size: 20px; font-weight: 600; color: #000; }
+section.checkout-page .payment-section__subtitle { margin-top: 4px; font-size: 14px; color: var(--shop-muted); }
+section.checkout-page .payment-section__body { padding: 0; border: 0; background: none; border-radius: 0; gap: 0; }
+section.checkout-page .payment-element-wrapper { margin-bottom: 20px; }
+section.checkout-page #pay-now-btn {
+    width: 100%;
+    min-height: 50px;
+    height: 50px;
+    margin: 8px 0 0;
+    padding: 14px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--shop-blue);
+    color: #fff;
+    font: 600 14px var(--shop-font);
+    box-shadow: none;
+    transform: none;
+}
+section.checkout-page #pay-now-btn::before { display: none; }
+section.checkout-page #pay-now-btn:hover:not(:disabled) { background: #004aab; box-shadow: none; transform: none; }
+section.checkout-page #pay-now-btn:disabled { background: var(--shop-blue); opacity: 0.55; cursor: not-allowed; }
+section.checkout-page .pay-terms,
+section.checkout-page .pay-reassurance { margin: 12px 0 0; font-size: 12px; color: var(--shop-muted); text-align: left; }
+section.checkout-page .payment-col-alt { padding-top: 20px; margin-top: 20px; border-top: 1px solid var(--shop-line); align-items: stretch; }
+section.checkout-page .payment-col-alt__label { text-align: center; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 14px; color: var(--shop-muted); }
+section.checkout-page .payment-col-alt__sublabel { display: none; }
+
+/* Policy links under Pay. */
+section.checkout-page .checkout-policies {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 40px;
+    padding-top: 18px;
+    border-top: 1px solid var(--shop-line);
+    font-size: 14px;
+}
+
+/* Express row: Shopify's small grey title and OR. */
+section.checkout-page .checkout-express__title { font-size: 14px; color: var(--shop-muted); }
+
+/* Summary: thumbnail + black qty badge, rows, big total, GST line. */
+section.checkout-page .checkout-summary__item { display: flex; align-items: center; gap: 14px; padding: 0 0 16px; border: 0; }
+section.checkout-page .checkout-summary__item-image {
+    position: relative;
+    flex: 0 0 64px;
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--shop-line);
+    border-radius: 8px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+section.checkout-page .checkout-summary__item-qty {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: #000;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+}
+section.checkout-page .checkout-summary__item-name { font-size: 14px; color: #000; }
+section.checkout-page .checkout-summary__item-price { font-size: 14px; color: #000; }
+section.checkout-page .checkout-summary__row { padding: 4px 0; font-size: 14px; color: #000; border: 0; }
+section.checkout-page .checkout-summary__totals { border: 0; padding-top: 8px; }
+section.checkout-page .checkout-summary__row--total {
+    align-items: baseline;
+    margin-top: 10px;
+    padding-top: 0;
+    border: 0;
+    font-size: 19px;
+    font-weight: 600;
+}
+section.checkout-page .checkout-summary__currency { font-size: 12px; font-weight: 400; color: var(--shop-muted); margin-right: 4px; }
+section.checkout-page .checkout-summary__tax { margin: 2px 0 0; font-size: 14px; color: var(--shop-muted); }
+section.checkout-page .checkout-summary__points,
+section.checkout-page .checkout-summary__shipping-info,
+section.checkout-page .checkout-summary__trust { font-size: 13px; }
+
+/* Phone: Shopify's grey "Order summary ▾  $X" bar under the header. */
+@media (max-width: 999px) {
+    section.checkout-page .checkout-summary__toggle {
+        width: 100%;
+        margin: 0;
+        padding: 16px;
+        border: 0;
+        border-radius: 0;
+        background: var(--shop-grey);
+        color: var(--shop-blue);
+        font: 400 14px var(--shop-font);
+    }
+    section.checkout-page .checkout-summary__toggle-total { color: #000; font-weight: 600; font-size: 17px; }
+    section.checkout-page .checkout-sidebar .checkout-summary { background: var(--shop-grey); border: 0; border-radius: 0; padding: 0; box-shadow: none; }
+    section.checkout-page .checkout-summary__inner { padding: 0 16px 16px; }
+}
+
+section.checkout-page .checkout-delivery-type { padding: 0; margin: 0 0 4px; border: 0; background: none; }
+section.checkout-page .checkout-order-notes .form-textarea { width: 100%; }
+section.checkout-page .checkout-order-notes__heading,
+section.checkout-page .checkout-summary,
+section.checkout-page .checkout-summary * { font-family: var(--shop-font); }
+section.checkout-page .checkout-summary .quote-pdf { font-size: 13px; }
+section.checkout-page .checkout-summary .quote-pdf .btn {
+    min-height: 40px;
+    border: 1px solid var(--shop-line);
+    border-radius: 12px;
+    background: #fff;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+section.checkout-page .phone-input-group .phone-country-code { padding: 0 4px 0 12px; }
+section.checkout-page .checkout-order-notes .form-row,
+section.checkout-page .checkout-order-notes .form-group { display: block; width: 100%; margin: 0; }
+section.checkout-page .checkout-order-notes .form-textarea { display: block; width: 100%; max-width: none; }
+section.checkout-page .delivery-type-option:has(input:checked) { background-color: #f0f5ff; }
+/* No white strip under the split: the grey half reaches the bottom. */
+body:has(section.checkout-page) .site-main { padding-bottom: 0; margin-bottom: 0; }
+@media (min-width: 1000px) {
+    section.checkout-page .checkout-layout { min-height: calc(100vh - 69px); }
+}

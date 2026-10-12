@@ -26,10 +26,10 @@
     <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
     <link rel="stylesheet" href="/css/components.css?v=2282fee8">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=454c6911">
+    <link rel="stylesheet" href="/css/pages.css?v=4e4d6704">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=34f10d85">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=5b9cfd74">
 
     <script defer src="https://js.stripe.com/v3/"></script>
     <script defer src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD&disable-funding=card"></script>
@@ -49,14 +49,10 @@
                     <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
                 </a>
 
-                <div class="checkout-header__secure">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                    <span>Secure Checkout</span>
-                </div>
-
-                <a href="/cart" class="checkout-header__back">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-                    Back to Cart
+                <!-- Shopify/smartink header (ERR-316 phase 4): the wordmark and a bag
+                     icon back to the cart. Nothing else competes with checkout. -->
+                <a href="/cart" class="checkout-header__bag" aria-label="Back to cart">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 7h12l1 13H5L6 7z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>
                 </a>
             </div>
         </div>
@@ -65,32 +61,7 @@
     <main id="main-content" class="site-main">
         <section class="checkout-page">
             <div class="container">
-                <div class="cart-page__header">
-                    <h1 class="cart-page__title">Checkout</h1>
-
-                    <div class="checkout-progress checkout-progress--compact" id="progress-top" aria-label="Checkout progress">
-                        <ol class="checkout-progress__steps">
-                            <li class="checkout-progress__step checkout-progress__step--completed" data-step="cart">
-                                <span class="checkout-progress__number">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-                                </span>
-                                <span class="checkout-progress__label">Cart</span>
-                            </li>
-                            <li class="checkout-progress__step checkout-progress__step--active" data-step="details">
-                                <span class="checkout-progress__number">2</span>
-                                <span class="checkout-progress__label">Details</span>
-                            </li>
-                            <li class="checkout-progress__step" data-step="payment">
-                                <span class="checkout-progress__number">3</span>
-                                <span class="checkout-progress__label">Payment</span>
-                            </li>
-                            <li class="checkout-progress__step" data-step="confirm">
-                                <span class="checkout-progress__number">4</span>
-                                <span class="checkout-progress__label">Confirm</span>
-                            </li>
-                        </ol>
-                    </div>
-                </div>
+                <h1 class="visually-hidden">Checkout</h1>
 
                 <div class="checkout-layout">
                     <div class="checkout-form-wrapper">
@@ -118,27 +89,23 @@
                         <form class="checkout-form checkout-form--loading" id="checkout-form" novalidate>
 
                             <fieldset class="checkout-section">
-                                <legend class="checkout-section__heading">
-                                    <span class="checkout-section__num">1</span>
-                                    Contact Information
-                                </legend>
+                                <legend class="checkout-section__heading">Contact</legend>
 
                                 <p class="checkout-section__login-prompt" id="login-prompt">
-                                    Already have an account? <a href="/account/login?redirect=/checkout">Log in</a> for faster checkout.
+                                    <a href="/account/login?redirect=/checkout">Sign in</a>
                                 </p>
                                 <p class="checkout-section__welcome" id="welcome-message" style="display: none;">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                                     Good to see you, <strong id="user-display-name"></strong>!
                                 </p>
 
-                                <div class="form-row form-row--two-col">
+                                <div class="form-row">
                                     <div class="form-group">
-                                        <label for="email" class="form-label">Email Address <span class="required">*</span></label>
-                                        <input type="email" id="email" name="email" class="form-input" required autocomplete="email">
+                                        <label for="email" class="form-label">Email <span class="required">*</span></label>
+                                        <input type="email" id="email" name="email" class="form-input" required autocomplete="email" placeholder=" ">
                                         <!-- Typo hint ("Did you mean name@gmail.com?"), filled by
                                              CheckoutPage._renderEmailSuggestion (item 15, ERR-307). -->
                                         <p class="email-suggest" id="email-suggest" aria-live="polite" hidden></p>
-                                        <span class="form-hint">We'll send your order confirmation here</span>
                                         <!-- Guest cart-copy consent (conversion handoff §6a.1; live ERR-302).
                                              UNTICKED by default — NZ UEMA needs the shopper's own consent.
                                              Ships hidden; GuestCartEmail (cart.js) shows it to guests only. -->
@@ -157,64 +124,65 @@
                                             <span>Email me when my cartridges are likely running low, so I can reorder in time.</span>
                                         </label>
                                     </div>
-                                    <div class="form-group">
-                                        <label for="phone" class="form-label">Phone Number <span class="required">*</span></label>
-                                        <div class="phone-input-group">
-                                            <select id="phone-country" name="phone-country" class="phone-country-code" aria-label="Country code">
-                                                <option value="+64" selected>+64</option>
-                                                <option value="+61">+61</option>
-                                                <option value="+1">+1</option>
-                                                <option value="+44">+44</option>
-                                            </select>
-                                            <input type="tel" id="phone" name="phone" class="phone-number" required autocomplete="tel-national" placeholder="21 123 4567">
-                                        </div>
-                                        <span class="form-hint">For delivery updates</span>
-                                    </div>
+                                </div>
+                                <div class="form-group form-group--checkbox">
+                                    <input type="checkbox" id="newsletter" name="newsletter" class="form-checkbox">
+                                    <label for="newsletter" class="form-label form-label--checkbox">
+                                        Email me with news and offers
+                                    </label>
                                 </div>
 
                             </fieldset>
 
                             <fieldset class="checkout-section">
-                                <legend class="checkout-section__heading">
-                                    <span class="checkout-section__num">2</span>
-                                    Shipping Address
-                                </legend>
+                                <legend class="checkout-section__heading">Delivery</legend>
 
                                 <div id="saved-addresses-picker" class="saved-addresses-picker" style="display:none;"></div>
 
+                                <!-- NZ only: shown like Shopify's Country/Region field, not editable. -->
+                                <div class="form-row">
+                                    <div class="form-group form-group--static">
+                                        <span class="form-label">Country/Region</span>
+                                        <div class="form-static">New Zealand</div>
+                                    </div>
+                                </div>
+
                                 <div class="form-row form-row--two-col">
                                     <div class="form-group">
-                                        <label for="first-name" class="form-label">First Name <span class="required">*</span></label>
-                                        <input type="text" id="first-name" name="firstName" class="form-input" required autocomplete="given-name" maxlength="100">
+                                        <label for="first-name" class="form-label">First name <span class="required">*</span></label>
+                                        <input type="text" id="first-name" name="firstName" class="form-input" required autocomplete="given-name" maxlength="100" placeholder=" ">
                                     </div>
                                     <div class="form-group">
-                                        <label for="last-name" class="form-label">Last Name <span class="required">*</span></label>
-                                        <input type="text" id="last-name" name="lastName" class="form-input" required autocomplete="family-name" maxlength="100">
+                                        <label for="last-name" class="form-label">Last name <span class="required">*</span></label>
+                                        <input type="text" id="last-name" name="lastName" class="form-input" required autocomplete="family-name" maxlength="100" placeholder=" ">
                                     </div>
                                 </div>
 
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="company" class="form-label">Company (optional)</label>
-                                        <input type="text" id="company" name="company" class="form-input" autocomplete="organization">
+                                        <input type="text" id="company" name="company" class="form-input" autocomplete="organization" placeholder=" ">
                                     </div>
                                 </div>
 
-                                <div class="form-row form-row--two-col">
-                                    <div class="form-group">
+                                <div class="form-row">
+                                    <div class="form-group form-group--search">
                                         <label for="address1" class="form-label">Address <span class="required">*</span></label>
-                                        <input type="text" id="address1" name="address1" class="form-input" required autocomplete="address-line1" placeholder="Street address" maxlength="255">
+                                        <input type="text" id="address1" name="address1" class="form-input" required autocomplete="address-line1" placeholder=" " maxlength="255">
                                     </div>
+                                </div>
+
+                                <div class="form-row">
                                     <div class="form-group">
                                         <label for="address2" class="form-label">Apartment, suite, etc. (optional)</label>
-                                        <input type="text" id="address2" name="address2" class="form-input" autocomplete="address-line2">
+                                        <input type="text" id="address2" name="address2" class="form-input" autocomplete="address-line2" placeholder=" ">
                                     </div>
                                 </div>
 
                                 <div class="form-row form-row--three-col">
                                     <div class="form-group">
                                         <label for="city" class="form-label">City <span class="required">*</span></label>
-                                        <input type="text" id="city" name="city" class="form-input" required autocomplete="address-level2" maxlength="100">
+                                        <input type="text" id="city" name="city" class="form-input" required autocomplete="address-level2" maxlength="100" placeholder=" ">
                                     </div>
                                     <div class="form-group">
                                         <label for="region" class="form-label">Region <span class="required">*</span></label>
@@ -240,12 +208,27 @@
                                     </div>
                                     <div class="form-group">
                                         <label for="postcode" class="form-label">Postcode <span class="required">*</span></label>
-                                        <input type="text" id="postcode" name="postcode" class="form-input" required autocomplete="postal-code" pattern="[0-9]{4}" maxlength="20">
+                                        <input type="text" id="postcode" name="postcode" class="form-input" required autocomplete="postal-code" pattern="[0-9]{4}" maxlength="20" placeholder=" ">
                                     </div>
                                 </div>
 
+                                <div class="form-row">
+                                    <div class="form-group form-group--phone">
+                                    <label for="phone" class="form-label">Phone <span class="required">*</span></label>
+                                    <div class="phone-input-group">
+                                        <select id="phone-country" name="phone-country" class="phone-country-code" aria-label="Country code">
+                                            <option value="+64" selected>+64</option>
+                                            <option value="+61">+61</option>
+                                            <option value="+1">+1</option>
+                                            <option value="+44">+44</option>
+                                        </select>
+                                        <input type="tel" id="phone" name="phone" class="phone-number" required autocomplete="tel-national" placeholder=" ">
+                                    </div>
+                                </div>
+                                </div>
+
                                 <div class="checkout-delivery-type" id="delivery-type-section">
-                                    <label class="form-label">Select Delivery Area <span class="required">*</span></label>
+                                    <h3 class="checkout-subheading">Shipping method</h3>
                                     <div class="delivery-type-options">
                                         <label class="delivery-type-option">
                                             <input type="radio" name="delivery_type" value="urban" class="delivery-type-option__radio" required checked>
@@ -274,7 +257,6 @@
                                     </div>
                                     <p class="delivery-type-notice" id="delivery-type-notice" role="status" aria-live="polite" hidden></p>
                                     <p class="delivery-type-attention-text">Please select your delivery area to continue</p>
-                                    <p class="delivery-type-hint">Urban: city/town address &nbsp;·&nbsp; Rural: rural delivery route. Affects shipping cost.</p>
                                 </div>
 
                                 <div class="form-row" id="save-address-row" style="display: none; margin-top: 14px;">
@@ -298,33 +280,33 @@
                                 <div id="billing-address-fields" style="display: none;">
                                     <div class="form-row form-row--two-col">
                                         <div class="form-group">
-                                            <label for="billing-first-name" class="form-label">First Name <span class="required">*</span></label>
-                                            <input type="text" id="billing-first-name" name="billingFirstName" class="form-input" autocomplete="billing given-name">
+                                            <label for="billing-first-name" class="form-label">First name <span class="required">*</span></label>
+                                            <input type="text" id="billing-first-name" name="billingFirstName" class="form-input" autocomplete="billing given-name" placeholder=" ">
                                         </div>
                                         <div class="form-group">
-                                            <label for="billing-last-name" class="form-label">Last Name <span class="required">*</span></label>
-                                            <input type="text" id="billing-last-name" name="billingLastName" class="form-input" autocomplete="billing family-name">
+                                            <label for="billing-last-name" class="form-label">Last name <span class="required">*</span></label>
+                                            <input type="text" id="billing-last-name" name="billingLastName" class="form-input" autocomplete="billing family-name" placeholder=" ">
                                         </div>
                                     </div>
 
                                     <div class="form-row">
                                         <div class="form-group">
                                             <label for="billing-address1" class="form-label">Address <span class="required">*</span></label>
-                                            <input type="text" id="billing-address1" name="billingAddress1" class="form-input" autocomplete="billing address-line1" placeholder="Street address">
+                                            <input type="text" id="billing-address1" name="billingAddress1" class="form-input" autocomplete="billing address-line1" placeholder=" ">
                                         </div>
                                     </div>
 
                                     <div class="form-row">
                                         <div class="form-group">
                                             <label for="billing-address2" class="form-label">Apartment, suite, etc. (optional)</label>
-                                            <input type="text" id="billing-address2" name="billingAddress2" class="form-input" autocomplete="billing address-line2">
+                                            <input type="text" id="billing-address2" name="billingAddress2" class="form-input" autocomplete="billing address-line2" placeholder=" ">
                                         </div>
                                     </div>
 
                                     <div class="form-row form-row--three-col">
                                         <div class="form-group">
                                             <label for="billing-city" class="form-label">City <span class="required">*</span></label>
-                                            <input type="text" id="billing-city" name="billingCity" class="form-input" autocomplete="billing address-level2">
+                                            <input type="text" id="billing-city" name="billingCity" class="form-input" autocomplete="billing address-level2" placeholder=" ">
                                         </div>
                                         <div class="form-group">
                                             <label for="billing-region" class="form-label">Region <span class="required">*</span></label>
@@ -350,7 +332,7 @@
                                         </div>
                                         <div class="form-group">
                                             <label for="billing-postcode" class="form-label">Postcode <span class="required">*</span></label>
-                                            <input type="text" id="billing-postcode" name="billingPostcode" class="form-input" autocomplete="billing postal-code" pattern="[0-9]{4}">
+                                            <input type="text" id="billing-postcode" name="billingPostcode" class="form-input" autocomplete="billing postal-code" pattern="[0-9]{4}" placeholder=" ">
                                         </div>
                                     </div>
                                 </div>
@@ -366,35 +348,13 @@
                                 </div>
                             </div>
 
-                            <div class="checkout-submit">
-                                <!-- No Terms tick box (ERR-305, ad-clicks handoff §8.4; owner, 2026-10-05).
-                                     Agreement is a line next to the Pay button on /payment instead:
-                                     "By placing this order you agree to our Terms and Privacy Policy". -->
-                                <div class="form-group form-group--checkbox">
-                                    <input type="checkbox" id="newsletter" name="newsletter" class="form-checkbox">
-                                    <label for="newsletter" class="form-label form-label--checkbox">
-                                        Email me with news and offers
-                                    </label>
-                                </div>
-
-                                <button type="button" id="continue-to-payment-btn" class="btn btn--primary btn--lg btn--full-width checkout-submit__button">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-                                    Continue to Payment
-                                </button>
-
-                                <p class="checkout-submit__secure">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                    Your details are secure
-                                </p>
-                            </div>
-
                         </form>
 
                         <!-- ONE-PAGE CHECKOUT (ERR-316 phase 3, owner 2026-10-12): the payment
                              step lives here, under the details, like smartink/Shopify. /payment
                              only redirects to /checkout now. #payment-form sits OUTSIDE
                              #checkout-form because forms cannot nest. -->
-                        <section class="checkout-payment is-waiting" id="checkout-payment" data-state="waiting" aria-labelledby="payment-heading">
+                        <section class="checkout-payment" id="checkout-payment" aria-labelledby="payment-heading">
                             <form id="payment-form" novalidate>
                                 <div class="payment-section">
                                     <div class="payment-section__header">
@@ -410,13 +370,6 @@
                                     <div class="payment-section__body">
                                         <!-- Main column: Stripe + pay button -->
                                         <div class="payment-col-main">
-                                            <!-- Waiting state: the card form mounts only after the details
-                                                 above validate (PaymentPage.attach), so Link's email prefill
-                                                 is always the email the shopper just typed. -->
-                                            <p class="checkout-payment__pending" id="payment-pending">Enter your contact and delivery details above, then press <strong>Continue to payment</strong>.</p>
-                                            <!-- A detail edited AFTER Continue: every pay path refuses until
-                                                 Continue runs again (PaymentPage.detailsStale). -->
-                                            <p class="checkout-payment__stale" id="payment-stale-note" role="status" hidden>You changed your details. Press <strong>Update details</strong> above before paying.</p>
                                             <div class="payment-element-wrapper">
                                                 <div id="payment-element">
                                                 </div>
@@ -432,8 +385,7 @@
                                             </div>
 
                                             <button type="submit" id="pay-now-btn" class="pay-button" disabled>
-                                                <svg class="pay-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                                <span id="pay-button-text">Pay Now</span>
+                                                <span id="pay-button-text">Pay now</span>
                                             </button>
 
                                             <!-- Replaces the "I agree to the Terms" tick box on /checkout (ERR-305,
@@ -448,22 +400,11 @@
                                                  piece hides when its source is absent. -->
                                             <p class="pay-reassurance" id="pay-reassurance" data-testid="pay-reassurance" hidden></p>
 
-                                            <div class="secure-badge">
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-                                                <span>Your payment is protected with 256-bit SSL encryption</span>
-                                            </div>
-
-                                            <div class="powered-by">
-                                                <span>Powered by</span>
-                                                <svg viewBox="0 0 60 25" xmlns="http://www.w3.org/2000/svg" width="60" height="25">
-                                                    <path fill="#635bff" d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.02 1.04-.06 1.48zm-3.67-3.14c0-1.07-.37-2.87-2.22-2.87-1.61 0-2.32 1.64-2.42 2.87h4.64zM40.95 20.3V5.57l4.09-.86v15.58h-4.09zm0-17.87l4.09-.86v3.48l-4.09.86V2.43zm-5.43 8.02c0-1.99-.56-2.87-2.01-2.87-.79 0-1.63.4-2.33.97v11.75h-4.08V9.27c0-2.09-.08-3.48-.16-4.87h3.57l.24 1.55c1.11-.99 2.56-1.8 4.35-1.8 3.52 0 4.5 2.5 4.5 5.95v10.2h-4.08v-9.85zm-15.35 2.08c-1.54-.36-2.32-1.03-2.32-2.03 0-1.15.95-1.87 2.34-1.87.96 0 2.05.28 3.28.89l1.27-3.08a9.49 9.49 0 0 0-4.47-1.15c-3.52 0-6.09 1.98-6.09 5.23 0 2.43 1.55 4.07 4.23 4.79 1.74.44 2.39 1.03 2.39 2.03 0 1.15-.95 1.87-2.71 1.87-1.43 0-3.05-.5-4.29-1.27l-1.34 3.16a10.8 10.8 0 0 0 5.55 1.48c4.01 0 6.5-2.14 6.5-5.47 0-2.63-1.7-4.15-4.34-4.58zM7.65 11.65c0-1.87.73-3.01 2.49-3.01.51 0 .95.08 1.53.24l.72-3.76a6.02 6.02 0 0 0-1.89-.32C7.3 4.8 4.2 7.38 4.2 12.52c0 2.46.56 4.46 1.53 6.06l3.25-.4c-1-.89-1.33-3.39-1.33-6.53z"/>
-                                                </svg>
-                                            </div>
                                         </div>
 
                                         <!-- Alt column: PayPal -->
                                         <div class="payment-col-alt">
-                                            <span class="payment-col-alt__label">or pay with</span>
+                                            <span class="payment-col-alt__label">or pay with PayPal</span>
                                             <div id="paypal-button-container"></div>
                                             <p class="payment-col-alt__sublabel">Pay securely with your PayPal account</p>
                                         </div>
@@ -471,6 +412,15 @@
                                 </div>
                             </form>
                         </section>
+
+                        <!-- Policy links under Pay, as on Shopify. -->
+                        <nav class="checkout-policies" aria-label="Store policies">
+                            <a href="/returns">Refund policy</a>
+                            <a href="/shipping">Shipping</a>
+                            <a href="/privacy">Privacy policy</a>
+                            <a href="/terms">Terms of service</a>
+                            <a href="/contact">Contact</a>
+                        </nav>
                     </div>
 
                     <div class="checkout-sidebar">
@@ -491,7 +441,7 @@
                             <svg class="checkout-summary__toggle-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                         <div class="checkout-summary__inner" id="checkout-summary-inner">
-                            <h2 class="checkout-summary__heading">Order Summary</h2>
+                            <h2 class="checkout-summary__heading visually-hidden">Order summary</h2>
 
                             <!-- Durable disclosure for pricing we could not confirm, and for a
                                  discount that is displayed but not deducted (ERR-169/ERR-210).
@@ -558,14 +508,15 @@
                                     <span id="checkout-b2b-label">Volume discount</span>
                                     <span id="checkout-b2b-discount" class="text-success">-$0.00</span>
                                 </div>
-                                <div class="checkout-summary__row">
-                                    <span>GST (15%)</span>
-                                    <span>Included</span>
-                                </div>
                                 <div class="checkout-summary__row checkout-summary__row--total">
-                                    <span>Estimated Total</span>
-                                    <span id="checkout-total">Calculating…</span>
+                                    <span>Total</span>
+                                    <span><small class="checkout-summary__currency">NZD</small> <span id="checkout-total">Calculating…</span></span>
                                 </div>
+                                <!-- Prices are GST-inclusive. No dollar figure here: the
+                                     frontend never computes tax, and the cart's server GST
+                                     figure is priced on its own shipping estimate, not the
+                                     address-priced fee above (ERR-316 phase 4). -->
+                                <p class="checkout-summary__tax">Including GST</p>
                             </div>
                             <!-- Points this order earns, from the cart's own `loyalty`
                                  (conversion handoff 2026-09-23 §4.2). Guests also get a
@@ -637,11 +588,11 @@
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/payment-page.js?v=3a19ef55"></script>
-    <script defer src="/js/checkout-page.js?v=5abbe24a"></script>
+    <script defer src="/js/payment-page.js?v=180cdac1"></script>
+    <script defer src="/js/checkout-page.js?v=e1d679be"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
     <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
-    <script defer src="/js/cart-wallet.js?v=42a35402"></script>
+    <script defer src="/js/cart-wallet.js?v=bc377241"></script>
 
     <style>
     .animate-spin {

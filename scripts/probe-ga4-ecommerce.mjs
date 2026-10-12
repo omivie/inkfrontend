@@ -420,13 +420,11 @@ async function pressDeliveryContinue(page) {
         if (!radio) return { state: 'no-delivery-control' };
         const section = radio.closest('fieldset.checkout-section');
         if (!section) return { state: 'no-section' };
-        const btn = section.querySelector('.checkout-section__continue-btn');
-        if (!btn) return { state: 'no-continue-button' };
-        if (btn.hidden || btn.offsetParent === null) {
-            const heading = section.querySelector('.checkout-section__heading');
-            if (heading) heading.click();
-        }
-        btn.click();
+        // One-button checkout (ERR-316 phase 4): no section Continue. The step
+        // that commits the delivery area (and emits add_shipping_info) is the
+        // collect "Pay now" runs first. Called directly; Pay is never pressed.
+        if (typeof CheckoutPage === 'undefined' || !CheckoutPage.collectCheckoutData) return { state: 'no-collect-step' };
+        CheckoutPage.collectCheckoutData();
         // Did validation accept it? An error node or is-error class means no.
         const errors = Array.from(section.querySelectorAll('.form-error')).map((e) => e.textContent.trim());
         const invalid = Array.from(section.querySelectorAll('.is-error')).length;

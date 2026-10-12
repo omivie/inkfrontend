@@ -269,12 +269,12 @@ try {
         await page.waitForTimeout(2500);
         await fillShipping(page, URBAN_ADDRESS.address1);
         const before = page.url();
-        const result = await page.evaluate(() => {
+        // One-button checkout (ERR-316 phase 4): ask the step "Pay now" runs
+        // first. It must refuse; nothing is paid, Pay is never pressed.
+        const result = await page.evaluate(async () => {
             document.querySelectorAll('input[name="delivery_type"]').forEach((r) => { r.checked = false; });
-            const btn = document.getElementById('continue-to-payment-btn');
-            if (!btn) return 'no continue button';
-            btn.click();
-            return 'clicked';
+            if (typeof CheckoutPage === 'undefined' || !CheckoutPage.collectCheckoutData) return 'no collect step';
+            return (await CheckoutPage.collectCheckoutData()) === null ? 'clicked' : 'collected';
         });
         await page.waitForTimeout(2500);
         const after = page.url();

@@ -75,33 +75,16 @@ function blockAfter(src, marker, from = 0) {
 // 1. The 400px that was never a height
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('§1 the desktop rule still declares the basis AND the max-width together', () => {
-    // Both are load-bearing and they are the pair that explains the bug. If
-    // someone deletes max-width the intent stops being legible; if they delete
-    // the basis the desktop bar stops being 400px wide.
-    const rule = blockAfter(PAGES, '.checkout-progress--compact {');
-    assert.match(rule, /flex:\s*0 1 400px/);
-    assert.match(rule, /max-width:\s*400px/);
-});
-
-test('§1 the mobile column block resets flex-basis', () => {
-    // This is the whole fix. Without it the bar is 400px TALL to draw 52px.
-    const mobile = PAGES.slice(PAGES.indexOf('@media (max-width: 768px)', PAGES.indexOf('.checkout-progress--compact')));
-    const rule = blockAfter(mobile, '.checkout-progress--compact {');
-    assert.match(rule, /flex-basis:\s*auto/,
-        'flex-basis sizes the MAIN axis, and this block makes the main axis vertical');
-    // width/max-width say what it does horizontally and must stay.
-    assert.match(rule, /width:\s*100%/);
-    assert.match(rule, /max-width:\s*100%/);
-});
-
-test('§1 the block that flips the axis is still the one being compensated for', () => {
-    // If .cart-page__header stops becoming a column, the reset is harmless —
-    // but if it moves to a different breakpoint the reset must move with it.
-    const mobile = PAGES.slice(PAGES.indexOf('@media (max-width: 768px)', PAGES.indexOf('.checkout-progress--compact')));
-    const hdr = blockAfter(mobile, '.cart-page__header {');
-    assert.match(hdr, /flex-direction:\s*column/,
-        'the reset above exists because THIS rule makes flex-basis mean height');
+test('§1 the 400px-tall stepper is gone, not merely fixed (ERR-316 phase 4)', () => {
+    // §1 used to pin the flex-basis reset that stopped .checkout-progress--compact
+    // rendering 400px TALL on a phone. The stepper itself was removed from the
+    // cart (ERR-316 phase 2) and from checkout (phase 4, Shopify parity), so the
+    // bug's whole surface is gone. Pin the absence: a stepper that comes back
+    // must come back with that fix, and this test is where to restore it.
+    for (const page of ['inkcartridges/html/cart.html', 'inkcartridges/html/checkout.html']) {
+        assert.doesNotMatch(read(page), /class="checkout-progress/, `${page} has no stepper`);
+    }
+    assert.doesNotMatch(PAGES, /\.checkout-progress--compact\s*\{/, 'and pages.css carries no rule for one');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

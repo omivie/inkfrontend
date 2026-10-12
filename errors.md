@@ -156,6 +156,74 @@ Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mc
 - The cart's free-shipping banner and ticks list keep their place under the Checkout button (ERR-305's fold order is pinned).
 - `PAYMENT_PAGE_JS` in cart-wallet.js lazy-loads an unversioned `/js/payment-page.js` on /cart. That predates this change.
 
+**Phase 4 (13 Oct): the checkout made to work and look like smartink's.**
+
+*Asked.* Owner: "using playwright … make sure everything is done correctly and professionally … work and look almost exactly like smartink.co.nz".
+
+*Reference, measured read-only on smartink's live checkout, 1280×800 and 390×844:*
+- Header: wordmark, bag icon, hairline.
+- No H1 or stepper.
+- Every section open: Express, Contact, Delivery, Shipping method, Payment.
+- **One** "Pay now": `#005BD1`, 50px tall, 12px radius, 14px/600.
+- Fields: 48px, 1px `#dedede`, 12px radius, label inside the field.
+- Layout: 500px left column ending at x=649, a grey `#f5f5f5` right half from x=689, a 400px summary at x=730.
+- Policy links under Pay. No site footer.
+
+*Behaviour: one button.*
+- The accordion is gone, along with its per-section Continue buttons, "Continue to Payment", "Update details" and the stepper. Removed code: `setupAccordion` and its helpers, `setupProgressValidation` and `updateProgressIndicators`.
+- `handleContinueToPayment` became `collectCheckoutData(form)`. It keeps the same checks in the same order: verification, delivery area, `validateFormFields`, `_emailPassesGate`, billing, phone join, `_emitShippingInfo(null)`, `sessionStorage`. It returns the data, or `null` with the errors shown.
+- The card form now mounts at page load (`PaymentPage.attach(null)`).
+- **"Pay now"** (`PaymentPage.payNow`) runs: collect, then re-read the server total, then the unchanged `handlePayment`. Details that fail validation never reach Stripe.
+- PayPal's `onClick` runs the same collect step and calls `actions.reject()` on null.
+- Phase 3's `detailsStale` machinery is deleted. Pay reads the form at the moment of payment, so stale details cannot happen.
+- While a total is pending, `PaymentPage.pendingShipping` carries the address-priced fee, so Stripe's amount (which Afterpay and Klarna display) matches the panel.
+- A backend-refused email now holds `#pay-now-btn`. The refusal flag is read by the ONE writer of its disabled state, `updatePayButton`.
+
+*Look.*
+- Header: wordmark and bag icon only.
+- Contact holds the email, the existing consent ticks and the newsletter tick (moved up). Phone moved to the end of Delivery.
+- Delivery opens with a static "Country/Region: New Zealand" box.
+- Shipping method is a single bordered list with prices on the right.
+- Floating labels are pure CSS (`placeholder=" "` + `:has(:placeholder-shown)`).
+- Stripe appearance and layout: `accordion`, radios, system font, `#005BD1`, 12px radius.
+- Summary: "Order summary" heading visually hidden; thumbnails with a black qty badge; "Total", a small "NZD" and the amount; then "Including GST".
+  - **No GST dollar figure.** The FE never computes tax, and the cart's server `gst_amount` is priced on the cart's own shipping estimate, not the address-priced fee.
+- The site footer is hidden on checkout. Its `<noscript>` company block stays in the HTML for the compliance pins.
+- The cart's button reads "Checkout".
+- The wallet's fallback text, now shown on both /cart and /checkout, reads "Please pay by card instead."
+- Dead rules removed from `pages.css`: `.checkout-progress*` and `.checkout-submit*`, exact selectors only.
+
+*Measured on local, fresh guest Playwright context, against the production API. Pay and PayPal were never pressed.*
+- Desktop: form x=149 w=500; divider x=689; summary x=730 w=400; fields 48px with 12px radius at 14px/400; Pay 50px, `rgb(0,91,209)`, 12px radius, 14px/600; h2 20px/600. All within 1px of smartink's figures.
+- On load: Stripe iframe mounted, Pay disabled ("Pay now"), 0 Continue buttons, headings in the order Contact, Delivery, Shipping method, Payment.
+- Empty form: `collectCheckoutData()` returned null.
+- Filled form: it returned email, address, phone `+64 211234567` and shipping 7.
+- `PaymentPage.totals.total` 50.49 matched the panel's `$50.49`.
+- Summary sticky at top 38px.
+- Phone 390×844: a grey "Order summary $50.49" bar; no horizontal scroll.
+- `/payment` → `/checkout`.
+- Full shopper path: PDP Add → drawer (1 line, "Subtotal (1 item) $43.49") → View cart → "Checkout" → /checkout with 1 item.
+- Cart cleaned to 0 after each run. No page errors.
+
+*Tests.*
+- `one-page-checkout-oct2026` was rewritten (9 tests). Red-proof: letting an invalid form through to Pay, plus dropping the pending shipping, reddens 2/9.
+- Also updated:
+  - `fe-master-checklist-6oct-2026` §15 (order now in `collectCheckoutData`; the email block holds Pay now)
+  - `fe-master-checklist-8oct-2026` (wallet copy)
+  - `mobile-checkout-fold-sep2026` §1. It now pins that the stepper is **absent**, which is the only way its 400px-tall bug cannot return.
+  - `updatePayButton` was made null-safe on `dataset` (checkout-funnel §8.1 stub).
+- Probes moved to the one-button flow; they measure or call collect and never press Pay: `probe-mobile-ux`, `probe-mobile-checkout-fold`, `probe-checkout-delivery`, `probe-fe-master-6oct-2026`, `probe-ga4-ecommerce`. **Not run against production.**
+- Full suite 7081 pass / 1 fail (`no-ghost-files` `.DS_Store`: untracked Finder files, pre-existing).
+
+*Not done (deliberate).*
+- **Not done:**
+  - No Ship/Pickup toggle; we don't offer pickup.
+  - No "Save my information" Shop panel; Stripe Link's own panel appears inside the card form instead.
+  - PayPal's button stays below the card form, not in the top express row: its order needs the address first.
+  - The region select still starts at "Select region".
+- **Not measured:** Apple Pay / Google Pay on a real device. Headless Chromium reports no wallet, so the top express row was hidden in every local run.
+- **Production unverified** until deploy.
+
 **Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
 
 **Files.** `inkcartridges/js/cart-drawer.js` (new) · `js/cart.js` · `js/product-detail-page.js` · `js/search.js` · `css/components.css` · `css/pages.css` · `html/product/index.html` · 37 HTML pages (script tag + `?v=` restamp) · `tests/cart-drawer-oct2026.test.js` (new) + 10 updated suites

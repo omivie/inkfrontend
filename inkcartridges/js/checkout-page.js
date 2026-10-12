@@ -61,7 +61,6 @@
             this.setupShippingHandlers();
             this.setupBillingAddressToggle();
             this.initAddressAutocomplete();
-            this.setupProgressValidation();
 
             // Wait for Auth to initialize, then check auth status
             await this.checkAuthAndPrefill();
@@ -72,12 +71,8 @@
             // Sent back from /payment by "Change email" (item 15 backstop).
             this.focusEmailFromHash();
 
-            // Mobile order-summary disclosure (ERR-224). Before the accordion so
-            // the summary is already collapsed when the form sections settle.
+            // Mobile order-summary disclosure (ERR-224).
             this.setupSummaryDisclosure();
-
-            // Setup accordion for checkout sections
-            this.setupAccordion();
 
             // Check email verification status
             await this.checkEmailVerification();
@@ -87,6 +82,11 @@
             if (loadingEl) loadingEl.style.display = 'none';
             const form = document.getElementById('checkout-form');
             if (form) form.classList.remove('checkout-form--loading');
+
+            // ONE PAGE, ONE BUTTON (ERR-316 phase 4, owner 2026-10-13: "almost
+            // exactly like smartink"). Every section is open; the card form is
+            // mounted now, and "Pay now" collects + validates the details first.
+            this._mountPayment(form);
 
             // Track checkout started for analytics
             if (typeof CartAnalytics !== 'undefined') {
@@ -205,97 +205,9 @@
             });
         },
 
-        // Setup progress indicator validation
-        setupProgressValidation() {
-            const form = document.getElementById('checkout-form');
-            if (!form) return;
 
-            // Details section fields (Contact + Shipping Address + Shipping Method)
-            const detailsFields = ['email', 'phone', 'first-name', 'last-name', 'address1', 'city', 'region', 'postcode'];
 
-            // Payment section fields
-            const paymentFields = ['card-number', 'card-expiry', 'card-cvc', 'card-name'];
 
-            // Listen for input changes
-            form.addEventListener('input', () => {
-                this.updateProgressIndicators();
-            });
-
-            form.addEventListener('change', () => {
-                this.updateProgressIndicators();
-            });
-
-            // Initial check
-            this.updateProgressIndicators();
-        },
-
-        // Check if details section is complete
-        isDetailsComplete() {
-            const requiredFields = ['email', 'phone', 'first-name', 'last-name', 'address1', 'city', 'region', 'postcode'];
-
-            for (const fieldId of requiredFields) {
-                const field = document.getElementById(fieldId);
-                if (!field || !field.value.trim()) {
-                    return false;
-                }
-                // Basic email validation
-                if (fieldId === 'email' && !field.value.includes('@')) {
-                    return false;
-                }
-            }
-            // Check delivery type is selected
-            if (!document.querySelector('input[name="delivery_type"]:checked')) {
-                return false;
-            }
-            return true;
-        },
-
-        // Payment happens on payment.html, so always false here
-        isPaymentComplete() {
-            return false;
-        },
-
-        // Update all progress indicators
-        updateProgressIndicators() {
-            const detailsComplete = this.isDetailsComplete();
-            const paymentComplete = this.isPaymentComplete();
-
-            // Get all progress indicator containers
-            const progressContainers = document.querySelectorAll('.checkout-progress');
-
-            progressContainers.forEach(container => {
-                const detailsStep = container.querySelector('[data-step="details"]');
-                const paymentStep = container.querySelector('[data-step="payment"]');
-
-                if (detailsStep) {
-                    if (detailsComplete) {
-                        detailsStep.classList.remove('checkout-progress__step--active');
-                        detailsStep.classList.add('checkout-progress__step--completed');
-                        detailsStep.querySelector('.checkout-progress__number').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
-                    } else {
-                        detailsStep.classList.add('checkout-progress__step--active');
-                        detailsStep.classList.remove('checkout-progress__step--completed');
-                        detailsStep.querySelector('.checkout-progress__number').textContent = '2';
-                    }
-                }
-
-                if (paymentStep) {
-                    if (paymentComplete && detailsComplete) {
-                        paymentStep.classList.remove('checkout-progress__step--active');
-                        paymentStep.classList.add('checkout-progress__step--completed');
-                        paymentStep.querySelector('.checkout-progress__number').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
-                    } else if (detailsComplete) {
-                        paymentStep.classList.add('checkout-progress__step--active');
-                        paymentStep.classList.remove('checkout-progress__step--completed');
-                        paymentStep.querySelector('.checkout-progress__number').textContent = '3';
-                    } else {
-                        paymentStep.classList.remove('checkout-progress__step--active');
-                        paymentStep.classList.remove('checkout-progress__step--completed');
-                        paymentStep.querySelector('.checkout-progress__number').textContent = '3';
-                    }
-                }
-            });
-        },
 
         // Load cart from Cart object (server-first for authenticated users)
         async loadCart() {
@@ -807,7 +719,12 @@
         updateTotalsDisplay() {
             // One-page checkout: a coupon / points / shipping change re-reads the
             // server total the payment section charges (debounced in PaymentPage).
-            if (typeof PaymentPage !== 'undefined' && PaymentPage._attached) PaymentPage.refreshTotalsSoon();
+            if (typeof PaymentPage !== 'undefined' && PaymentPage._attached) {
+                // The address-priced fee, so the amount Stripe holds (Afterpay /
+                // Klarna show it before Pay) matches this panel. Read, not added.
+                PaymentPage.pendingShipping = Number.isFinite(this.totals.shipping) ? this.totals.shipping : null;
+                PaymentPage.refreshTotalsSoon();
+            }
             const subtotalEl = document.getElementById('checkout-subtotal');
             const shippingEl = document.getElementById('checkout-shipping');
             const discountRow = document.getElementById('checkout-discount-row');
@@ -864,8 +781,9 @@
             }
 
             if (totalEl) {
+                // "NZD" is static markup beside it, Shopify-style (ERR-316 phase 4).
                 totalEl.textContent = Number.isFinite(this.totals.total)
-                    ? `$${this.totals.total.toFixed(2)} NZD` : 'Calculating\u2026';
+                    ? `$${this.totals.total.toFixed(2)}` : 'Calculating\u2026';
             }
         },
 
@@ -975,18 +893,15 @@
          * the next time a section is added or reordered. Asking which section
          * CONTAINS the control cannot drift.
          *
-         * Called from two places, and it needs both:
-         *   - the section's Continue button, the normal path; and
-         *   - handleContinueToPayment, because _expandAccordionSection collapses
-         *     other sections WITHOUT validating, so a shopper who clicks a later
-         *     heading skips the Continue handler entirely and would never emit
-         *     the step. Ga4Ecommerce dedupes on the tier, so the two callers
-         *     cannot double-count, and a genuine urban -> rural change still
-         *     re-fires.
+         * Called from collectCheckoutData with `null` (ERR-316 phase 4: every
+         * section is open and "Pay now" is the one way on, so that is the
+         * moment the delivery area is committed). The per-section form above
+         * stays for any caller that passes its section. Ga4Ecommerce dedupes
+         * on the tier, and a genuine urban -> rural change still re-fires.
          *
          * `|| null`, never `|| 'urban'`. An invented urban is the ERR-235 shape
          * - the page quoting a rate nobody chose - and it is the same reason
-         * handleContinueToPayment records null. Ga4Ecommerce omits the tier
+         * collectCheckoutData records null. Ga4Ecommerce omits the tier
          * rather than guessing it. */
         _emitShippingInfo(data) {
             if (typeof Ga4Ecommerce === 'undefined') return;
@@ -1208,8 +1123,6 @@
             if (window.location.hash !== '#email') return;
             const field = document.getElementById('email');
             if (!field) return;
-            const contact = this._accordionSections && this._accordionSections[0];
-            if (contact && contact.collapsed) this._expandAccordionSection(contact);
             field.scrollIntoView({ block: 'center' });
             field.focus({ preventScroll: true });
             if (typeof field.select === 'function') field.select();
@@ -1253,7 +1166,7 @@
                 });
 
                 // The delivery area rides in `checkoutData` as `deliveryType`
-                // (see the save at the end of handleContinueToPayment) and was
+                // (see the save at the end of collectCheckoutData) and was
                 // never read back, so a shopper who reached /payment and tapped
                 // back silently lost a price-affecting choice and got Urban
                 // again. It is a deliberate choice once restored, so nothing
@@ -1291,15 +1204,8 @@
             const form = document.getElementById('checkout-form');
             if (!form) return;
 
-            const continueBtn = document.getElementById('continue-to-payment-btn');
-
-            // "Continue to Payment" - validates form and redirects to payment page
-            if (continueBtn) {
-                continueBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    await this.handleContinueToPayment(form);
-                });
-            }
+            // No Continue button (ERR-316 phase 4): "Pay now" in the payment
+            // section runs collectCheckoutData() — see _mountPayment().
 
             // Clear validation errors on input/change
             form.addEventListener('input', (e) => {
@@ -1456,7 +1362,8 @@
             field.classList.add('is-error');
             field.setAttribute('aria-invalid', 'true');
             field.setAttribute('aria-describedby', 'email-error');
-            const btn = document.getElementById('continue-to-payment-btn');
+            // Pay now stays disabled while the backend refuses the address.
+            const btn = document.getElementById('pay-now-btn');
             if (btn) {
                 btn.disabled = true;
                 btn.dataset.emailBlocked = 'true';
@@ -1472,10 +1379,13 @@
                 field.removeAttribute('aria-invalid');
                 if (field.getAttribute('aria-describedby') === 'email-error') field.removeAttribute('aria-describedby');
             }
-            const btn = document.getElementById('continue-to-payment-btn');
+            const btn = document.getElementById('pay-now-btn');
             if (btn && btn.dataset.emailBlocked === 'true') {
                 delete btn.dataset.emailBlocked;
-                if (!this.isSubmitting) btn.disabled = false;
+                // ONE writer of Pay's state once the card form exists: it also
+                // waits for a complete card (ERR-305).
+                if (typeof PaymentPage !== 'undefined' && PaymentPage._attached) PaymentPage.updatePayButton();
+                else if (!this.isSubmitting) btn.disabled = false;
             }
         },
 
@@ -1683,251 +1593,11 @@
             } catch (_) { /* no observer: the label simply stays as first seen */ }
         },
 
-        setupAccordion() {
-            const form = document.getElementById('checkout-form');
-            if (!form) return;
 
-            const sections = form.querySelectorAll('fieldset.checkout-section');
-            if (sections.length === 0) return;
 
-            this._accordionSections = [];
 
-            sections.forEach((section, idx) => {
-                const heading = section.querySelector('.checkout-section__heading');
-                if (!heading) return;
 
-                // Create edit button (hidden initially)
-                const editBtn = document.createElement('button');
-                editBtn.type = 'button';
-                editBtn.className = 'checkout-section__edit-btn';
-                editBtn.textContent = 'Edit';
-                editBtn.hidden = true;
-                heading.appendChild(editBtn);
 
-                // Create summary div (hidden initially)
-                const summary = document.createElement('div');
-                summary.className = 'checkout-section__summary';
-                summary.hidden = true;
-                heading.after(summary);
-
-                // Wrap body content in a collapsible div
-                const body = document.createElement('div');
-                body.className = 'checkout-section__body';
-                const children = Array.from(section.children).filter(
-                    el => el !== heading && el !== summary
-                );
-                children.forEach(child => body.appendChild(child));
-                section.appendChild(body);
-
-                // Continue button at bottom of body
-                const continueBtn = document.createElement('button');
-                continueBtn.type = 'button';
-                continueBtn.className = 'btn btn--primary checkout-section__continue-btn';
-                continueBtn.textContent = 'Continue';
-                body.appendChild(continueBtn);
-
-                const data = { section, heading, summary, editBtn, body, continueBtn, collapsed: false, index: idx };
-                this._accordionSections.push(data);
-
-                // Continue button handler
-                continueBtn.addEventListener('click', () => {
-                    if (this._validateAccordionSection(data)) {
-                        this._emitShippingInfo(data);
-                        this._collapseAccordionSection(data);
-                        const nextIdx = this._accordionSections.indexOf(data) + 1;
-                        const next = this._accordionSections[nextIdx];
-                        if (next) {
-                            this._expandAccordionSection(next);
-                        } else {
-                            // Last section — scroll to Continue to Payment
-                            const payBtn = document.getElementById('continue-to-payment-btn');
-                            if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-                    }
-                });
-
-                // Heading click to expand collapsed section
-                heading.addEventListener('click', () => {
-                    if (data.collapsed) this._expandAccordionSection(data);
-                });
-
-                // Edit button click
-                editBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    if (data.collapsed) this._expandAccordionSection(data);
-                });
-            });
-
-            // Initial state: first section open, rest collapsed
-            this._accordionSections.forEach((data, idx) => {
-                if (idx > 0) {
-                    data.body.hidden = true;
-                    data.continueBtn.hidden = true;
-                    data.collapsed = true;
-                    data.section.classList.add('is-collapsed');
-                }
-            });
-        },
-
-        // Validate required fields in a section, show errors if invalid
-        _validateAccordionSection(data) {
-            const { body } = data;
-
-            // Clear previous errors
-            body.querySelectorAll('.is-error').forEach(el => el.classList.remove('is-error'));
-            body.querySelectorAll('.form-error').forEach(el => el.remove());
-
-            let firstInvalid = null;
-            const checkedRadioGroups = new Set();
-
-            for (const field of body.querySelectorAll('input[required], select[required], textarea[required]')) {
-                if (field.offsetParent === null) continue;
-
-                // Radio buttons — validate once per group
-                if (field.type === 'radio') {
-                    if (checkedRadioGroups.has(field.name)) continue;
-                    checkedRadioGroups.add(field.name);
-                    const groupChecked = body.querySelector(`input[name="${field.name}"]:checked`);
-                    if (!groupChecked) {
-                        const container = field.closest('.delivery-type-options') || field.closest('.form-group');
-                        if (container) {
-                            container.classList.add('is-error');
-                            if (!container.parentElement.querySelector('.form-error')) {
-                                const errorMsg = document.createElement('div');
-                                errorMsg.className = 'form-error';
-                                errorMsg.textContent = 'Please select an option';
-                                container.parentElement.appendChild(errorMsg);
-                            }
-                        }
-                        if (!firstInvalid) firstInvalid = container || field;
-                    }
-                    continue;
-                }
-
-                // Text / select / textarea
-                if (!field.value.trim()) {
-                    field.classList.add('is-error');
-                    const group = field.closest('.form-group');
-                    if (group && !group.querySelector('.form-error')) {
-                        const errorMsg = document.createElement('div');
-                        errorMsg.className = 'form-error';
-                        errorMsg.textContent = 'This field is required';
-                        group.appendChild(errorMsg);
-                    }
-                    if (!firstInvalid) firstInvalid = field;
-                }
-            }
-
-            // The clear above also wiped a backend-refused email's message;
-            // the address is still refused, so the step may not complete (item 15).
-            const emailHere = body.querySelector('#email');
-            const verdict = emailHere && emailHere.value.trim() ? this._currentEmailVerdict() : undefined;
-            if (verdict && verdict.state === 'invalid') {
-                this._showEmailError(verdict.message);
-                if (!firstInvalid) firstInvalid = emailHere;
-            }
-
-            if (firstInvalid) {
-                firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                if (firstInvalid.focus) firstInvalid.focus({ preventScroll: true });
-                return false;
-            }
-            return true;
-        },
-
-        // Get summary text for a collapsed section
-        _getAccordionSummary(data) {
-            const { section } = data;
-            // esc() provided by utils.js
-
-            // Contact Information
-            const email = section.querySelector('#email');
-            if (email) {
-                const phone = section.querySelector('#phone');
-                const parts = [];
-                if (email.value) parts.push(esc(email.value));
-                if (phone && phone.value) parts.push(esc(phone.value));
-                return parts.join(' · ');
-            }
-
-            // Shipping Address
-            const firstName = section.querySelector('#first-name');
-            if (firstName) {
-                const lastName = section.querySelector('#last-name')?.value || '';
-                const addr = section.querySelector('#address1')?.value || '';
-                const city = section.querySelector('#city')?.value || '';
-                const region = section.querySelector('#region');
-                const regionText = region ? region.options[region.selectedIndex]?.text || '' : '';
-                const postcode = section.querySelector('#postcode')?.value || '';
-                const deliveryType = section.querySelector('input[name="delivery_type"]:checked');
-                const deliveryLabel = deliveryType ? (deliveryType.value === 'rural' ? 'Rural' : 'Urban') : '';
-                const addressLine = `${firstName.value} ${lastName}, ${addr}, ${city} ${regionText} ${postcode}`.replace(/\s+/g, ' ').trim();
-                return esc(deliveryLabel ? `${addressLine} · ${deliveryLabel}` : addressLine);
-            }
-
-            return '';
-        },
-
-        _collapseAccordionSection(data) {
-            if (data.collapsed) return;
-            data.collapsed = true;
-            data.section.classList.add('is-collapsed');
-            data.section.classList.add('is-complete');
-            data.body.hidden = true;
-            data.continueBtn.hidden = true;
-            data.summary.hidden = false;
-            data.summary.textContent = this._getAccordionSummary(data);
-            data.editBtn.hidden = false;
-            data.heading.style.cursor = 'pointer';
-        },
-
-        _expandAccordionSection(data) {
-            // Collapse all other sections first
-            this._accordionSections.forEach(other => {
-                if (other !== data && !other.collapsed) {
-                    this._collapseAccordionSection(other);
-                }
-            });
-
-            data.collapsed = false;
-            data.section.classList.remove('is-collapsed');
-            data.body.hidden = false;
-            data.continueBtn.hidden = false;
-            data.summary.hidden = true;
-            data.editBtn.hidden = true;
-            data.heading.style.cursor = '';
-
-            // Focus first input (never touch billing checkbox state)
-            const firstInput = data.body.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea');
-            if (firstInput) firstInput.focus({ preventScroll: true });
-        },
-
-        // Auto-advance: collapse Contact and open Shipping when returning user data is prefilled
-        _autoAdvanceContactIfPrefilled() {
-            if (!this._accordionSections || this._accordionSections.length < 2) return;
-            const contactData = this._accordionSections[0];
-            const shippingData = this._accordionSections[1];
-
-            // Only act if Contact is currently open
-            if (contactData.collapsed) return;
-
-            // Require email and phone to be filled
-            const email = document.getElementById('email');
-            const phone = document.getElementById('phone');
-            if (!email?.value || !phone?.value) return;
-
-            // Collapse contact (marks is-complete)
-            this._collapseAccordionSection(contactData);
-
-            // Expand shipping without stealing focus (avoids jarring scroll on load)
-            shippingData.collapsed = false;
-            shippingData.section.classList.remove('is-collapsed');
-            shippingData.body.hidden = false;
-            shippingData.continueBtn.hidden = false;
-            shippingData.summary.hidden = true;
-            shippingData.editBtn.hidden = true;
-            shippingData.heading.style.cursor = '';
-        },
 
         // Setup coupon code handler
         /**
@@ -2738,68 +2408,45 @@
         },
 
         // Handle "Continue to Payment" - validates form, saves data, redirects to payment page
-        async handleContinueToPayment(form) {
-            if (this.isSubmitting) return;
+        /**
+         * Shopify's one button (ERR-316 phase 4): "Pay now" calls this first.
+         * Runs every check the old "Continue to Payment" ran — verification,
+         * delivery area, required fields, the backend email gate, billing —
+         * then builds checkoutData. Returns it, or null after showing the
+         * shopper what to fix (scrolled into view). Never navigates.
+         * @returns {Promise<object|null>}
+         */
+        async collectCheckoutData(form) {
+            form = form || document.getElementById('checkout-form');
+            if (!form || this.isSubmitting) return null;
 
             // Block unverified authenticated users from proceeding to payment
             if (!this.isEmailVerified && typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
                 this.showVerificationRequired();
-                return;
+                return null;
             }
 
-            const continueBtn = document.getElementById('continue-to-payment-btn');
-            const originalBtnText = continueBtn.innerHTML;
-
-            // Check contact section is complete before delivery type check
-            const contactAccordionData = this._accordionSections?.[0];
-            if (contactAccordionData) {
-                if (!contactAccordionData.collapsed) {
-                    // Section is open — validate in place
-                    if (!this._validateAccordionSection(contactAccordionData)) {
-                        return;
-                    }
-                } else {
-                    // Section collapsed — verify required fields actually have values
-                    const contactRequired = contactAccordionData.body.querySelectorAll('input[required], select[required], textarea[required]');
-                    const hasEmpty = Array.from(contactRequired).some(f => {
-                        if (f.type === 'radio') {
-                            return !contactAccordionData.body.querySelector(`input[name="${f.name}"]:checked`);
-                        }
-                        return !f.value.trim();
-                    });
-                    if (hasEmpty) {
-                        this._expandAccordionSection(contactAccordionData);
-                        this._validateAccordionSection(contactAccordionData);
-                        return;
-                    }
-                }
-            }
-
-            // If delivery type hasn't been selected yet, expand shipping section and prompt
-            const shippingAccordionData = this._accordionSections?.[1];
+            // If delivery type hasn't been selected yet, prompt at it
             const deliverySection = document.getElementById('delivery-type-section');
             const deliveryAlreadySelected = deliverySection?.querySelector('input[name="delivery_type"]:checked');
             if (!deliveryAlreadySelected) {
-                if (shippingAccordionData && shippingAccordionData.collapsed) {
-                    this._expandAccordionSection(shippingAccordionData);
-                }
                 if (deliverySection) {
                     deliverySection.classList.add('needs-attention');
                     setTimeout(() => {
                         deliverySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }, 300);
                 }
-                return;
+                return null;
             }
 
             // Validate form with custom error display
             if (!this.validateFormFields(form)) {
-                return;
+                return null;
             }
 
             // The backend's verdict on a guest email, BEFORE /payment (item 15).
             if (!(await this._emailPassesGate())) {
-                return;
+                return null;
             }
 
             // Validate billing address if different billing is checked
@@ -2820,7 +2467,7 @@
                         field.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         field.focus({ preventScroll: true });
                     }
-                    return;
+                    return null;
                 }
             }
 
@@ -2828,14 +2475,6 @@
             // "By placing this order you agree…" line beside Pay on /payment.
 
             this.isSubmitting = true;
-            continueBtn.disabled = true;
-            continueBtn.innerHTML = `
-                <svg class="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
-                    <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
-                </svg>
-                Saving Details...
-            `;
 
             try {
                 // Collect all form data
@@ -2945,57 +2584,31 @@
 
                 // Save to sessionStorage
                 sessionStorage.setItem('checkoutData', JSON.stringify(checkoutData));
-                DebugLog.log('Checkout data saved, opening the payment section');
-
-                // ONE PAGE (ERR-316 phase 3, owner 2026-10-12): payment lives
-                // under the details on /checkout; /payment only redirects here.
-                await this._openPayment(checkoutData);
-                continueBtn.disabled = false;
-                continueBtn.innerHTML = this._updateDetailsLabel();
+                DebugLog.log('Checkout data collected for payment');
                 this.isSubmitting = false;
+                return checkoutData;
 
             } catch (error) {
                 DebugLog.error('Error saving checkout data:', error);
-                alert('An error occurred. Please try again.');
-
-                continueBtn.disabled = false;
-                continueBtn.innerHTML = originalBtnText;
+                showToast('Something went wrong reading your details. Please try again.', 'error');
                 this.isSubmitting = false;
+                return null;
             }
-        },
-
-        _updateDetailsLabel() {
-            return 'Update details';
         },
 
         /**
-         * Hand the validated details to the payment section below the form
-         * (PaymentPage.attach), and from then on mark them stale on any edit so
-         * no pay path can charge against an old address. The section shows a
-         * waiting state until this runs.
+         * Mount the card form now and make "Pay now" collect the details first
+         * (PaymentPage.attach with no data; PaymentPage.collect is this page's
+         * collectCheckoutData). The card form is open from the first paint, as
+         * on Shopify.
          */
-        async _openPayment(checkoutData) {
-            const section = document.getElementById('checkout-payment');
-            if (typeof PaymentPage === 'undefined' || !section) {
-                // Payment section missing (an old cached page): the two-page flow still works.
-                window.location.href = '/payment';
-                return;
-            }
-            if (!this._staleBound) {
-                this._staleBound = true;
-                const form = document.getElementById('checkout-form');
-                const stale = () => PaymentPage.markStale();
-                if (form) {
-                    form.addEventListener('input', stale);
-                    form.addEventListener('change', stale);
-                }
-            }
-            const pending = document.getElementById('payment-pending');
-            if (pending) pending.hidden = true;
-            section.classList.remove('is-waiting');
-            await PaymentPage.attach(checkoutData);
-            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        _mountPayment(form) {
+            if (typeof PaymentPage === 'undefined' || !document.getElementById('payment-form')) return;
+            PaymentPage.collect = () => this.collectCheckoutData(form);
+            PaymentPage.attach(null);
         },
+
+
 
         // Check auth and prefill form
         async checkAuthAndPrefill() {
@@ -3143,8 +2756,6 @@
 
                     if (defaultAddress) {
                         this.fillAddressFields(defaultAddress);
-                        // Auto-advance accordion: collapse Contact, open Shipping for returning users
-                        this._autoAdvanceContactIfPrefilled();
                     }
 
                     // Render address picker if multiple addresses

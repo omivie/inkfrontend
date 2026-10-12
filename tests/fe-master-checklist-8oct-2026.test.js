@@ -389,7 +389,8 @@ test('§20 _confirm is where payment-page.js is awaited, and a failed load fails
         paymentFailed: (o) => { failed = o; },
     });
     assert.equal(failed.reason, 'fail');
-    assert.match(h.status.textContent, /Proceed to Checkout/);
+    // The wallet runs on /cart AND /checkout's express row (ERR-316): one way out that is true on both.
+    assert.match(h.status.textContent, /pay by card instead/);
 });
 
 test('§20 sync: a mounted wallet still `loading` follows the server total; off / error are left alone', async () => {

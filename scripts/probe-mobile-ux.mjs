@@ -188,7 +188,7 @@ const OVERLAYS = [
     {
         id: 'checkout-summary', routes: ['checkout'],
         trigger: '#checkout-summary-toggle', panel: '.checkout-summary:not(.is-collapsed)',
-        cta: '#continue-to-payment-btn', scrolls: true,
+        cta: '#pay-now-btn', scrolls: true, // one-button checkout (ERR-316 phase 4); measured, never pressed
     },
 ];
 
@@ -198,7 +198,7 @@ const OVERLAYS = [
 const PRIMARY_CTA = {
     home: '.hero__cta .btn--primary, #hero-cta-primary',
     cart: '.cart-sticky-bar .btn, #checkout-btn, .cart-summary__checkout',
-    checkout: '#continue-to-payment-btn',
+    checkout: '#pay-now-btn', // measured for reachability only — never pressed
     search: '.product-card__add-btn',
     shop: '#level-brands a, #level-brands button',
 };

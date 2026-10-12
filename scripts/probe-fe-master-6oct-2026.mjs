@@ -29,7 +29,7 @@
  *        NEVER shows a money figure for a quantity it was not priced at (a
  *        "mixed" state); qty 3 settles at the server's own total.        RECORDING
  *   §15  /checkout: `test@gmail.con` + Tab ⇒ the backend's message under the
- *        field, aria-invalid, "Continue to Payment" disabled, the typo hint;
+ *        field, aria-invalid, "Pay now" held, the typo hint;
  *        one tap on the hint ⇒ cleared and enabled.                       RECORDING
  *   §3   phone 390x664: a "Proceed to Checkout" control on the first screen
  *        (elementFromPoint), consent open and after Decline.            RECORDING
@@ -379,18 +379,18 @@ if (!RECORD) {
             const st = await p2.evaluate(() => ({
                 inv: document.getElementById('email').getAttribute('aria-invalid'),
                 desc: document.getElementById('email').getAttribute('aria-describedby'),
-                disabled: document.getElementById('continue-to-payment-btn').disabled,
+                blocked: document.getElementById('pay-now-btn')?.dataset.emailBlocked === 'true',
                 hint: document.getElementById('email-suggest')?.hidden === false ? document.getElementById('email-suggest').textContent : null,
             }));
             check('aria-invalid + aria-describedby', st.inv === 'true' && st.desc === 'email-error');
-            check('"Continue to Payment" is disabled', st.disabled === true);
+            check('"Pay now" is held for the refused email', st.blocked === true);
             check('typo hint offers test@gmail.com', st.hint === 'Did you mean test@gmail.com?', JSON.stringify(st.hint));
             await p2.click('.email-suggest__btn');
             const fixed = await p2.waitForFunction(() => !document.getElementById('email-error')
                 && document.getElementById('email').value === 'test@gmail.com', null, { timeout: 6000 }).then(() => true).catch(() => false);
             await p2.waitForTimeout(1500); // the second prefill answer
-            const after = await p2.evaluate(() => ({ disabled: document.getElementById('continue-to-payment-btn').disabled, err: !!document.getElementById('email-error') }));
-            check('one tap fixes it: message gone, button enabled', fixed && !after.err && !after.disabled, `prefill statuses ${prefill.join(',')}`);
+            const after = await p2.evaluate(() => ({ blocked: document.getElementById('pay-now-btn')?.dataset.emailBlocked === 'true', err: !!document.getElementById('email-error') }));
+            check('one tap fixes it: message gone, Pay no longer held for the email', fixed && !after.err && !after.blocked, `prefill statuses ${prefill.join(',')}`);
         }
         if (lim2.length) info(`429s: ${lim2.length}`);
         await c2.close();

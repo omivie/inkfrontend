@@ -448,23 +448,27 @@ test('§15 fail OPEN: a 429/5xx/network null never blocks; a slow check past the
 });
 
 test('§15 the gate runs AFTER field validation and BEFORE checkoutData is saved', () => {
-    const fn = stripComments(extractMethod(read('js/checkout-page.js'), 'handleContinueToPayment').body);
+    // One button since ERR-316 phase 4: "Pay now" runs collectCheckoutData,
+    // which holds the old Continue step's checks in the same order.
+    const fn = stripComments(extractMethod(read('js/checkout-page.js'), 'collectCheckoutData').body);
     const fields = fn.indexOf('this.validateFormFields(form)');
     const gate = fn.indexOf('await this._emailPassesGate()');
     const save = fn.indexOf("sessionStorage.setItem('checkoutData'");
     assert.ok(fields > 0 && fields < gate && gate < save);
-    const acc = stripComments(extractMethod(read('js/checkout-page.js'), '_validateAccordionSection').body);
-    assert.match(acc, /_currentEmailVerdict\(\)[\s\S]{0,120}state === 'invalid'/, 'the contact step cannot complete on a refused address');
+    // The accordion that once held a second copy of the verdict check is gone;
+    // the gate itself refuses a known-invalid address.
+    const gateFn = stripComments(extractMethod(read('js/checkout-page.js'), '_emailPassesGate').body);
+    assert.match(gateFn, /_currentEmailVerdict\(\)[\s\S]{0,400}state === 'invalid'/, 'Pay cannot go through on a refused address');
 });
 
-test('§15 the error is accessible: aria-invalid, aria-describedby, role=alert; Continue is disabled', () => {
+test('§15 the error is accessible: aria-invalid, aria-describedby, role=alert; Pay now is disabled', () => {
     const btn = { disabled: false, dataset: {} };
     const field = makeEl('email');
     let inserted = null;
     const group = { insertBefore(el) { inserted = el; } };
     field.closest = () => group;
     const doc = {
-        getElementById: (id) => (id === 'email' ? field : id === 'continue-to-payment-btn' ? btn : null),
+        getElementById: (id) => (id === 'email' ? field : id === 'pay-now-btn' ? btn : null),
         querySelectorAll: () => [],
         createElement: () => makeEl('new'),
     };

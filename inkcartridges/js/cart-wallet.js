@@ -471,7 +471,7 @@ const CartWallet = {
         // payment-page.js started loading at init (item 20); this is its only await.
         const okPage = await (this._pageP || this._load(this.PAYMENT_PAGE_JS, () => typeof PaymentPage !== 'undefined'));
         if (!okPage || typeof PaymentPage === 'undefined') {
-            fail('We could not start the payment here. Please use Proceed to Checkout.');
+            fail('We could not start the payment here. Please pay by card instead.');
             return;
         }
 
@@ -489,7 +489,7 @@ const CartWallet = {
             // The backend refused the wallet's email. PaymentPage's own version
             // writes to #card-errors, which /cart does not have — it failed in
             // silence (found 12 Oct). Say it where the shopper is looking.
-            showEmailRejected(msg) { self._say(msg || 'We could not use that email address. Please use Proceed to Checkout.'); },
+            showEmailRejected(msg) { self._say(msg || 'We could not use that email address. Please pay by card instead.'); },
             resetTurnstile() { self._resetTurnstile(); },
         });
 
@@ -524,7 +524,7 @@ const CartWallet = {
         const host = document.getElementById('cart-wallet-turnstile');
         if (!siteKey || !host) return;
         const ok = await this._load(this.TURNSTILE_JS, () => typeof turnstile !== 'undefined');
-        if (!ok) { this._say('The security check could not load. Please use Proceed to Checkout.'); return; }
+        if (!ok) { this._say('The security check could not load. Please pay by card instead.'); return; }
         host.hidden = false;
         this.turnstileWidgetId = turnstile.render(host, {
             sitekey: siteKey,

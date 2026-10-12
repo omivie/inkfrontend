@@ -1,15 +1,17 @@
 /**
- * One-page checkout (ERR-316 phase 3, owner 2026-10-12: "like smartink").
+ * One-page checkout, Shopify-style (ERR-316 phases 3–4, owner 2026-10-12/13:
+ * "almost exactly like smartink.co.nz").
  *
- * /payment folded into /checkout. CheckoutPage validates the details, then
- * calls PaymentPage.attach(checkoutData), which mounts Stripe/Turnstile/PayPal
- * ONCE, under the form. This file runs js/payment-page.js in a VM and checks:
- *   - attach() initialises once; a second Continue only swaps the details;
- *   - embedded, calculateTotals paints the Pay label and syncs Stripe's
- *     amount but NEVER the summary rows (CheckoutPage owns those);
- *   - a detail edited after Continue makes every pay path refuse;
+ * /payment folded into /checkout. Every section is open; the card form mounts
+ * at page load (PaymentPage.attach(null)); ONE "Pay now" collects + validates
+ * the details (CheckoutPage.collectCheckoutData) before anything is charged.
+ * This file runs js/payment-page.js in a VM and checks:
+ *   - attach() initialises once;
+ *   - embedded, calculateTotals syncs Stripe's amount (with the address-priced
+ *     shipping) and paints NO summary row (CheckoutPage owns those);
+ *   - Pay never reaches handlePayment when the details do not validate;
  *   - the /payment boot cannot run on /checkout (it would redirect-loop);
- *   - payment.html is only a redirect.
+ *   - payment.html is only a redirect; the page reads like Shopify's.
  */
 'use strict';
 
@@ -52,7 +54,7 @@ function load({ summary = { subtotal: 43.49, shipping: 7, discount: 0 }, ids = [
     return { P: ctx.__PP, nodes, toasts };
 }
 
-test('attach() initialises Stripe/Turnstile/PayPal ONCE; a second Continue only swaps the details', async () => {
+test('attach(null) at page load mounts Stripe/Turnstile/PayPal ONCE', async () => {
     const { P } = load();
     const calls = [];
     for (const m of ['initWalletDiag', 'initStripe', 'initTurnstile', 'initPayPalButton', 'setupEventHandlers', 'renderPayReassurance']) {
@@ -60,29 +62,28 @@ test('attach() initialises Stripe/Turnstile/PayPal ONCE; a second Continue only 
     }
     let totals = 0;
     P.calculateTotals = async () => { totals++; };
-    await P.attach({ address1: '1 Queen St' });
-    assert.deepEqual(calls.filter((c) => c === 'initStripe'), ['initStripe']);
+    await P.attach(null);
     assert.equal(P.embedded, true);
-    assert.equal(P._attached, true);
-    await P.attach({ address1: '2 Queen St' });
+    assert.equal(P.checkoutData, null, 'no details yet — the card form opens before they are typed');
+    await P.attach(null);
     assert.equal(calls.filter((c) => c === 'initStripe').length, 1, 'never mounts a second card form');
     assert.equal(calls.filter((c) => c === 'initPayPalButton').length, 1, 'never renders PayPal twice');
-    assert.equal(P.checkoutData.address1, '2 Queen St', 'the order is built from the NEW details');
-    assert.equal(totals, 2, 'and the server total is re-read');
+    assert.equal(totals, 2);
 });
 
-test('embedded: calculateTotals syncs Stripe and the Pay label, and paints NO summary row', async () => {
+test('embedded: calculateTotals syncs Stripe (address-priced shipping) and paints NO summary row', async () => {
     const ids = ['checkout-subtotal', 'checkout-shipping', 'checkout-total', 'checkout-discount-row', 'checkout-discount', 'checkout-loyalty-row', 'checkout-b2b-row'];
-    const { P, nodes } = load({ ids });
+    const { P, nodes } = load({ ids, summary: { subtotal: 43.49, shipping: 7, discount: 0 } });
     let amount = null;
     P.elements = { update: (o) => { amount = o.amount; } };
     P.embedded = true;
-    P.checkoutData = { estimatedShipping: 7 };
+    P.checkoutData = null;
+    P.pendingShipping = 14; // rural, priced for the address CheckoutPage is showing
     for (const id of ids) nodes[id].textContent = 'CHECKOUTPAGE';
     await P.calculateTotals();
     for (const id of ids) assert.equal(nodes[id].textContent, 'CHECKOUTPAGE', `#${id} belongs to CheckoutPage on /checkout`);
-    assert.equal(nodes['pay-button-text'].textContent, 'Pay $50.49 NZD');
-    assert.equal(amount, 5049, 'Stripe charges the server total');
+    assert.equal(nodes['pay-button-text'].textContent, 'Pay now', "Shopify's label");
+    assert.equal(amount, 5749, 'Stripe holds subtotal + the address-priced fee, not the cart estimate');
 
     // CONTROL: not embedded (the old /payment), the same call paints the rows.
     const two = load({ ids });
@@ -91,26 +92,25 @@ test('embedded: calculateTotals syncs Stripe and the Pay label, and paints NO su
     assert.equal(two.nodes['checkout-total'].textContent, '$50.49 NZD');
 });
 
-test('a detail edited after Continue: Pay refuses, the note shows; before attach nothing is marked', async () => {
-    const { P, nodes, toasts } = load();
-    P.markStale();
-    assert.equal(P.detailsStale, false, 'nothing attached yet ⇒ nothing to go stale');
-    P._attached = true;
-    P.markStale();
-    assert.equal(P.detailsStale, true);
-    assert.equal(nodes['payment-stale-note'].hidden, false);
-    assert.equal(nodes['checkout-payment'].dataset.state, 'stale');
-    let submitted = false;
-    P.elements = { submit: async () => { submitted = true; return {}; } };
-    P.paymentElementReady = true;
-    await P.handlePayment();
-    assert.equal(submitted, false, 'no charge against the old address');
-    assert.match(toasts.join(' '), /Update details/);
+test('Pay now: details that do not validate never reach handlePayment; valid ones are charged as collected', async () => {
+    const { P } = load();
+    let paid = 0, totals = 0;
+    P.embedded = true;
+    P.handlePayment = async () => { paid++; };
+    P.calculateTotals = async () => { totals++; };
+    P.collect = async () => null;
+    await P.payNow();
+    assert.equal(paid, 0, 'a form with errors is never charged');
+    P.collect = async () => ({ address1: '1 Queen St', estimatedShipping: 7 });
+    await P.payNow();
+    assert.equal(paid, 1);
+    assert.equal(P.checkoutData.address1, '1 Queen St', 'the order is built from the form as it is at Pay');
+    assert.equal(totals, 1, 'and the server total is re-read first');
 });
 
-test('PayPal refuses before its popup opens when the details are stale', () => {
+test('PayPal collects + validates the details before its popup opens', () => {
     const code = stripComments(PAY_SRC);
-    assert.match(code, /onClick: \(data, actions\) => \{\s*if \(self\.detailsStale\) \{\s*self\._refuseStale\(\);\s*return actions\.reject\(\);/);
+    assert.match(code, /onClick: async \(data, actions\) => \{\s*if \(self\.embedded && typeof self\.collect === 'function'\) \{\s*const d = await self\.collect\(\);\s*if \(!d\) return actions\.reject\(\);/);
 });
 
 test('the /payment boot never runs on /checkout (it would read no sessionStorage and redirect-loop)', () => {
@@ -119,25 +119,39 @@ test('the /payment boot never runs on /checkout (it would read no sessionStorage
     assert.match(boot, /if \(!document\.getElementById\('payment-form'\)\) return;\s*if \(document\.getElementById\('checkout-form'\)\) return;/);
 });
 
-test('CheckoutPage: Continue opens the payment section in place; summary changes re-read the charge', () => {
+test('CheckoutPage: one button — collect runs every check, and the card form mounts at load', () => {
     const code = stripComments(read('js/checkout-page.js'));
-    const cont = code.slice(code.indexOf('async handleContinueToPayment(form)'), code.indexOf('async checkAuthAndPrefill()'));
-    const save = cont.indexOf("sessionStorage.setItem('checkoutData'");
-    const open = cont.indexOf('await this._openPayment(checkoutData)');
-    assert.ok(save > 0 && open > save, 'validate → gate → save → open, in that order');
-    assert.match(cont, /form\.addEventListener\('input', stale\)/, 'any edit after Continue marks the details stale');
+    const collect = code.slice(code.indexOf('async collectCheckoutData(form)'), code.indexOf('_mountPayment(form) {'));
+    const fields = collect.indexOf('this.validateFormFields(form)');
+    const gate = collect.indexOf('await this._emailPassesGate()');
+    const save = collect.indexOf("sessionStorage.setItem('checkoutData'");
+    assert.ok(fields > 0 && fields < gate && gate < save, 'validate → email gate → record, in that order');
+    assert.match(collect, /return checkoutData;/);
+    assert.doesNotMatch(code, /window\.location\.href = '\/payment'/, 'never leaves the page to pay');
+    assert.match(code, /PaymentPage\.collect = \(\) => this\.collectCheckoutData\(form\);\s*PaymentPage\.attach\(null\);/);
+    assert.doesNotMatch(code, /setupAccordion|_accordionSections|continue-to-payment-btn/, 'no accordion, no Continue');
     const totals = code.slice(code.indexOf('updateTotalsDisplay() {'));
-    assert.match(totals.slice(0, 400), /PaymentPage\._attached\) PaymentPage\.refreshTotalsSoon\(\)/);
+    assert.match(totals.slice(0, 700), /PaymentPage\.pendingShipping = Number\.isFinite\(this\.totals\.shipping\)[\s\S]{0,120}PaymentPage\.refreshTotalsSoon\(\)/);
 });
 
-test('checkout.html carries the payment section OUTSIDE the details form, waiting until Continue', () => {
+test('checkout.html reads like Shopify: open sections in order, one Pay now, policy links', () => {
     const html = read('html/checkout.html');
     const formEnd = html.indexOf('</form>', html.indexOf('id="checkout-form"'));
     const pay = html.indexOf('id="payment-form"');
     assert.ok(formEnd > 0 && pay > formEnd, 'forms cannot nest');
-    assert.match(html, /id="checkout-payment" data-state="waiting"/);
-    assert.match(html, /id="payment-pending">Enter your contact and delivery details above/);
-    assert.match(html, /id="pay-now-btn" class="pay-button" disabled/);
+    const order = ['>Contact</legend>', '>Delivery</legend>', '>Shipping method</h3>', 'id="payment-heading">Payment</h2>'].map((t) => html.indexOf(t));
+    assert.ok(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])), 'Contact, Delivery, Shipping method, Payment');
+    assert.match(html, /id="pay-now-btn" class="pay-button" disabled>\s*<span id="pay-button-text">Pay now<\/span>/);
+    assert.doesNotMatch(html, /continue-to-payment-btn|checkout-section__num|class="checkout-progress|payment-pending|payment-stale-note/);
+    assert.match(html, /<nav class="checkout-policies"[\s\S]*Refund policy[\s\S]*Shipping[\s\S]*Privacy policy[\s\S]*Terms of service[\s\S]*Contact[\s\S]*<\/nav>/);
+    // The detail fields (the summary's coupon box keeps its own placeholder).
+    for (const m of html.matchAll(/<input type="(?:text|email|tel)"[^>]*class="(?:form-input|phone-number)"[^>]*>/g)) {
+        assert.match(m[0], /placeholder=" "/, `floating label needs placeholder=" ": ${m[0].slice(0, 80)}`);
+    }
+    // GST: a fact, never a computed figure (the FE never computes tax).
+    assert.match(html, /<p class="checkout-summary__tax">Including GST<\/p>/);
+    assert.ok(html.indexOf('id="email"') < html.indexOf('id="reminder-consent-optin"')
+        && html.indexOf('id="reminder-consent-optin"') < html.indexOf('id="phone"'), 'phone now lives in Delivery');
     for (const src of [/js\.stripe\.com\/v3/, /paypal\.com\/sdk\/js/, /turnstile\/v0\/api\.js/, /\/js\/payment-page\.js\?v=/]) {
         assert.match(html, src);
     }

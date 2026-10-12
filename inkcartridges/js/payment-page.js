@@ -41,18 +41,23 @@
         turnstileToken: null,
         turnstileWidgetId: undefined,
 
-        // ── One-page checkout (ERR-316 phase 3, owner 2026-10-12) ─────────────
-        // /checkout now carries the payment section under the details form and
-        // drives this object through attach(); /payment only redirects there.
-        // `embedded`: /checkout's CheckoutPage owns the order-summary DOM, so
-        //   calculateTotals() computes this.totals and syncs Stripe's amount but
-        //   paints nothing except the Pay button.
-        // `detailsStale`: the shopper edited a detail AFTER Continue. The order
-        //   payload is built from this.checkoutData, so every pay path refuses
-        //   until Continue runs again — never charge against an old address.
+        // ── One-page checkout (ERR-316 phases 3–4) ────────────────────────────
+        // /checkout carries the payment section under the details and drives
+        // this object: attach(null) mounts the card form at page load, and
+        // "Pay now" runs `collect` (CheckoutPage.collectCheckoutData) before
+        // anything is charged, so the order is always built from the form as
+        // it is at that moment. /payment only redirects to /checkout.
+        // `embedded`: CheckoutPage owns the order-summary DOM; calculateTotals
+        //   computes this.totals and syncs Stripe's amount, and paints nothing
+        //   else.
+        // `pendingShipping`: the address-priced fee CheckoutPage is showing,
+        //   used for Stripe's amount until Pay builds checkoutData.
         embedded: false,
         _attached: false,
-        detailsStale: false,
+        collect: null,
+        pendingShipping: null,
+        _paying: false,
+        _paymentStarted: false,
         _refreshTimer: null,
 
 
@@ -130,17 +135,13 @@
         },
 
         /**
-         * Hand the validated details to the payment section on /checkout.
-         * First call mounts Stripe, Turnstile and PayPal (once); later calls (the
-         * shopper changed a detail and pressed Continue again) only swap in the
-         * new details and re-read the server total. Never reads sessionStorage:
-         * the caller passes the same object it just stored there.
+         * Mount the payment section on /checkout (once). `checkoutData` is null
+         * at page load — the card form is open before the details are typed,
+         * as on Shopify — and is filled by payNow() from the form at Pay.
          */
         async attach(checkoutData) {
             this.embedded = true;
-            this.checkoutData = checkoutData;
-            this.detailsStale = false;
-            this._paintStale();
+            if (checkoutData) this.checkoutData = checkoutData;
             if (this._attached) {
                 await this.calculateTotals();
                 return;
@@ -154,33 +155,31 @@
             this.initPayPalButton();
             this.setupEventHandlers();
             this.renderPayReassurance();
-            if (typeof CartAnalytics !== 'undefined') {
-                CartAnalytics.trackPaymentStarted();
+        },
+
+        /**
+         * "Pay now" on /checkout: collect + validate the details (null ⇒ the
+         * form already shows what to fix), re-read the server total with the
+         * address-priced shipping, then the unchanged card flow.
+         */
+        async payNow() {
+            if (this._paying || this.isSubmitting) return;
+            this._paying = true;
+            try {
+                if (this.embedded && typeof this.collect === 'function') {
+                    const data = await this.collect();
+                    if (!data) return;
+                    this.checkoutData = data;
+                    if (!this._paymentStarted && typeof CartAnalytics !== 'undefined') {
+                        this._paymentStarted = true;
+                        CartAnalytics.trackPaymentStarted();
+                    }
+                    await this.calculateTotals();
+                }
+                await this.handlePayment();
+            } finally {
+                this._paying = false;
             }
-        },
-
-        /** A detail changed after Continue: refuse every pay path until Continue again. */
-        markStale() {
-            if (!this._attached || this.detailsStale) return;
-            this.detailsStale = true;
-            this._paintStale();
-        },
-
-        _paintStale() {
-            const note = document.getElementById('payment-stale-note');
-            if (note) note.hidden = !this.detailsStale;
-            const section = document.getElementById('checkout-payment');
-            if (section) section.dataset.state = this.detailsStale ? 'stale' : (this._attached || this.checkoutData ? 'ready' : 'waiting');
-        },
-
-        /** Said wherever a pay path refuses because the details moved. */
-        _refuseStale() {
-            const note = document.getElementById('payment-stale-note');
-            if (note) {
-                note.hidden = false;
-                note.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-            showToast('You changed your details. Press "Update details" above, then pay.', 'error', 6000);
         },
 
         /** Coupon / points changed in the summary: re-read the server total, debounced. */
@@ -376,7 +375,7 @@
                 setText('checkout-subtotal', 'Loading...');
                 setText('checkout-shipping', 'Loading...');
                 setText('checkout-total', 'Loading...');
-                document.getElementById('pay-button-text').textContent = 'Loading...';
+                if (!this.embedded) document.getElementById('pay-button-text').textContent = 'Loading...';
 
                 // Get cart with validated totals from backend
                 const response = await API.getCart();
@@ -419,7 +418,7 @@
                 // Use backend-validated prices — frontend never computes totals
                 // Prefer the shipping fee from checkout (from /api/shipping/options with real address)
                 // over the cart summary's generic shipping estimate
-                const checkoutShipping = this.checkoutData?.estimatedShipping;
+                const checkoutShipping = this.checkoutData?.estimatedShipping ?? this.pendingShipping;
                 const shipping = checkoutShipping != null ? checkoutShipping : (summary.shipping ?? 0);
 
                 this.totals = {
@@ -503,7 +502,9 @@
                 }
 
                 setText('checkout-total', `$${this.totals.total.toFixed(2)} NZD`);
-                document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
+                // Shopify's label on /checkout; the amount is in the summary beside it.
+                document.getElementById('pay-button-text').textContent = this.embedded
+                    ? 'Pay now' : `Pay $${this.totals.total.toFixed(2)} NZD`;
 
                 // Update Elements amount if already initialized. Keep BOTH the card
                 // and the Express Checkout (wallet) instances in sync so the wallet
@@ -566,34 +567,40 @@
                 );
                 return;
             }
-            const fonts = [
-                { cssSrc: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap' }
-            ];
+            // Matches /checkout's Shopify look (ERR-316 phase 4, measured on
+            // smartink 2026-10-13): system font, 14px, 1px #dedede fields with
+            // a 12px radius, #005BD1 accents.
+            const fonts = [];
             const appearance = {
                 theme: 'stripe',
                 variables: {
-                    colorPrimary: '#267FB5',
+                    colorPrimary: '#005BD1',
                     colorBackground: '#ffffff',
-                    colorText: '#1e293b',
-                    colorDanger: '#ef4444',
-                    fontFamily: '"Inter", system-ui, -apple-system, sans-serif',
-                    fontSizeBase: '16px',
+                    colorText: '#000000',
+                    colorTextSecondary: '#707070',
+                    colorDanger: '#dd1d1d',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+                    fontSizeBase: '14px',
                     spacingUnit: '4px',
-                    borderRadius: '8px'
+                    borderRadius: '12px'
                 },
                 rules: {
                     '.Input': {
-                        border: '2px solid #e2e8f0',
+                        border: '1px solid #dedede',
                         boxShadow: 'none',
-                        padding: '12px'
+                        padding: '14px 12px'
                     },
                     '.Input:focus': {
-                        border: '2px solid #267FB5',
-                        boxShadow: '0 0 0 4px rgba(38, 127, 181, 0.1)'
+                        border: '1px solid #005BD1',
+                        boxShadow: '0 0 0 1px #005BD1'
                     },
                     '.Input--invalid': {
-                        border: '2px solid #ef4444',
-                        boxShadow: '0 0 0 4px rgba(239, 68, 68, 0.1)'
+                        border: '1px solid #dd1d1d',
+                        boxShadow: '0 0 0 1px #dd1d1d'
+                    },
+                    '.AccordionItem': {
+                        border: '1px solid #dedede',
+                        boxShadow: 'none'
                     }
                 }
             };
@@ -609,14 +616,21 @@
             // wallets:{applePay/googlePay:'never'} — Apple/Google Pay now live in the
             // Express Checkout row ABOVE the card form, not duplicated in the card tab.
             // Link stays inside the card tab (email autofill) as before.
+            // /checkout mounts this before the details are typed (ERR-316 phase
+            // 4), so the defaults may be empty; Pay sends the real billing
+            // details at confirm. Accordion with radios = Shopify's
+            // "Credit card" list on smartink.
+            const cd = this.checkoutData || {};
             const paymentElement = this.elements.create('payment', {
-                layout: 'tabs',
+                layout: this.embedded
+                    ? { type: 'accordion', radios: true, spacedAccordionItems: false, defaultCollapsed: false }
+                    : 'tabs',
                 wallets: { applePay: 'never', googlePay: 'never' },
                 defaultValues: {
                     billingDetails: {
-                        name: `${this.checkoutData.firstName || ''} ${this.checkoutData.lastName || ''}`.trim(),
-                        email: this.checkoutData.email || '',
-                        phone: this.checkoutData.phone || ''
+                        name: `${cd.firstName || ''} ${cd.lastName || ''}`.trim(),
+                        email: cd.email || '',
+                        phone: cd.phone || ''
                     }
                 }
             });
@@ -929,7 +943,7 @@
             if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
-                    await this.handlePayment();
+                    await this.payNow();
                 });
             }
         },
@@ -949,7 +963,8 @@
             const payBtn = document.getElementById('pay-now-btn');
             if (!payBtn) return;
             if (this.isSubmitting) return;
-            payBtn.disabled = !this.paymentElementReady;
+            // A backend-refused email (CheckoutPage._showEmailError) also holds it.
+            payBtn.disabled = !this.paymentElementReady || !!(payBtn.dataset && payBtn.dataset.emailBlocked === 'true');
         },
 
         /** The longest a Pay press waits for the guest bot-check token before giving up. */
@@ -1003,7 +1018,6 @@
          */
         async handlePayment() {
             if (this.isSubmitting) return;
-            if (this.detailsStale) { this._refuseStale(); return; }
 
             if (!this.paymentElementReady) {
                 showToast('Please complete your payment details.', 'error');
@@ -1740,13 +1754,15 @@
                     height: 48
                 },
 
-                // One-page checkout: a detail edited after Continue would
-                // otherwise ship to the OLD address (createOrder reads
-                // self.checkoutData). Refuse before the popup opens.
-                onClick: (data, actions) => {
-                    if (self.detailsStale) {
-                        self._refuseStale();
-                        return actions.reject();
+                // One-page checkout: PayPal is a way to PAY, not to skip the
+                // details. Collect + validate the form first (createOrder reads
+                // self.checkoutData); a form with errors keeps the popup shut.
+                onClick: async (data, actions) => {
+                    if (self.embedded && typeof self.collect === 'function') {
+                        const d = await self.collect();
+                        if (!d) return actions.reject();
+                        self.checkoutData = d;
+                        await self.calculateTotals();
                     }
                     return actions.resolve();
                 },

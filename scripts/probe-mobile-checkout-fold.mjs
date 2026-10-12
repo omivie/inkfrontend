@@ -107,7 +107,7 @@ const MEASURE = () => {
         }
     });
     const toggle = q('#checkout-summary-toggle');
-    const cta = q('#continue-to-payment-btn');
+    const cta = q('#pay-now-btn'); // one-button checkout (ERR-316 phase 4): hit-tested, never pressed
     const banner = q('#consent-banner');
     return {
         email: box('input[name="email"]'),
@@ -121,7 +121,7 @@ const MEASURE = () => {
         toggleTotal: (q('#checkout-summary-toggle-total') || {}).textContent ?? null,
         checkoutTotal: (q('#checkout-total') || {}).textContent ?? null,
         formWrapper: box('.checkout-form-wrapper'),
-        cta: box('#continue-to-payment-btn'),
+        cta: box('#pay-now-btn'),
         // What is actually painted at the CTA's own centre? If the consent bar
         // covers it, something else answers this hit-test.
         ctaHit: (() => {
@@ -195,9 +195,9 @@ try {
             check('and above this viewport’s own fold', m.email.top < PHONE.height,
                 `email top = ${m.email.top}px vs fold ${PHONE.height}`);
         }
-        check('the progress bar is its content height, not a flex-basis',
-            !!m.progress && m.progress.height <= 140,
-            `.checkout-progress = ${m.progress ? m.progress.height : '?'}px (was 400px; 52px of pills + 24px padding = 100px)`);
+        // The stepper is gone (ERR-316 phase 4, Shopify has none): its 400px-tall
+        // bug cannot come back while there is no stepper to grow.
+        check('no progress stepper on checkout', !m.progress, m.progress ? `.checkout-progress = ${m.progress.height}px` : 'absent');
         check('the order summary is collapsed on arrival',
             !!m.sidebar && m.sidebar.height <= 160,
             `.checkout-sidebar = ${m.sidebar ? m.sidebar.height : '?'}px (was 858px expanded)`);
@@ -243,13 +243,13 @@ try {
         /* Scroll the CTA into view and hit-test it: does the button answer at
            its own centre, or does the bar? */
         await page.evaluate(() => {
-            const b = document.querySelector('#continue-to-payment-btn');
+            const b = document.querySelector('#pay-now-btn');
             if (b) b.scrollIntoView({ block: 'center' });
         });
         await page.waitForTimeout(600);
         const cta = await page.evaluate(MEASURE);
-        if (!cta.cta) soft('the Continue button was not found', 'could not hit-test the CTA');
-        else check('the Continue button is what answers at its own centre', cta.ctaHit === 'cta',
+        if (!cta.cta) soft('the Pay now button was not found', 'could not hit-test the CTA');
+        else check('the Pay now button is what answers at its own centre', cta.ctaHit === 'cta',
             `elementFromPoint returned "${cta.ctaHit}"`);
 
         /* ── expanded ── */
