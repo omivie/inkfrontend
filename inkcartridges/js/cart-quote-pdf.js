@@ -162,8 +162,11 @@ const QuotePdf = {
             <button type="button" class="btn btn--outline btn--full-width quote-pdf__button" data-testid="quote-pdf-button"
                 data-track="cta_click" data-track-cta="Download PDF quote" data-track-location="${location}_summary">Download PDF quote</button>
             <details class="quote-pdf__details">
-                <summary>Add company or PO reference to the quote</summary>
-                ${fields}
+                <summary><span class="quote-pdf__summary-text">Add company or PO number</span><span class="quote-pdf__summary-hint">Optional</span></summary>
+                <div class="quote-pdf__fields">
+                    <p class="quote-pdf__fields-hint">Printed on the quote.</p>
+                    ${fields}
+                </div>
             </details>
             <p class="form-hint quote-pdf__status" role="status" aria-live="polite" data-testid="quote-pdf-status" hidden></p>`;
     },

@@ -491,7 +491,9 @@ test('§9 guests: the coupon form is HIDDEN and the free-account line shown; mem
         assert.equal(els['cart-coupon-guest'].hidden, guestHidden, `authed=${authed}`);
         assert.equal(sandbox.r, !authed);
     }
-    assert.match(read('html/cart.html'), /id="cart-coupon-guest" hidden>Have a code\? <a href="\/account\/login\?tab=register&amp;redirect=%2Fcart">Create a free account to use it<\/a>/);
+    // The cart no longer carries the coupon field (ERR-316 phase 6, owner 2026-10-13):
+    // the guest line that matters is checkout's, asserted below.
+    assert.doesNotMatch(read('html/cart.html'), /id="cart-coupon-guest"/);
     const checkout = stripComments(read('js/checkout-page.js'));
     assert.ok(!checkout.includes('Sign in to use coupon codes.'));
     assert.match(checkout, /formRow\.hidden = true;[\s\S]{0,400}Create a free account to use it/);

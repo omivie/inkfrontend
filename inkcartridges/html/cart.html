@@ -34,9 +34,9 @@
     <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
     <link rel="stylesheet" href="/css/components.css?v=2282fee8">
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
-    <link rel="stylesheet" href="/css/pages.css?v=0deea8b9">
+    <link rel="stylesheet" href="/css/pages.css?v=6b0ec116">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=83e75013">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=833e4ff9">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
     <meta name="twitter:description" content="Review your shopping cart - InkCartridges.co.nz">
@@ -373,70 +373,12 @@
                              only when the backend supplies the data. -->
                         <div class="cart-free-ship-unlock" id="cart-free-ship-unlock" hidden></div>
 
-                        <!-- Coupon (mobile-parity-may2026 S3.2) + loyalty redemption
-                             (loyalty-points-jun2026) merged into ONE disclosure. The two
-                             are mutually exclusive server-side, so offering them as a
-                             single "discounts" drawer costs nothing and buys ~250px above
-                             the checkout button. Both JS initialisers are unchanged —
-                             initCouponForm / initLoyaltyControl resolve by id only, so
-                             nesting is invisible to them. Do NOT nest a <details> inside
-                             this one: two triangles, two open states, two clicks.
-                             cart-page.js#syncDiscountAccordion auto-opens it whenever a
-                             code or points are actually applied — a closed <details> does
-                             not render its contents, so the aria-live feedback would
-                             never announce and "Remove points" would be unreachable. -->
-                        <details class="cart-discount" id="cart-discount">
-                            <summary class="cart-discount__summary">
-                                <span>Coupon or loyalty points</span>
-                                <span class="cart-discount__hint" id="cart-discount-hint"></span>
-                            </summary>
-                            <div class="cart-discount__body">
-                                <label class="cart-discount__label" for="cart-coupon-input">Have a coupon?</label>
-                                <!-- Blur / 600ms-idle previews the code; submit applies. -->
-                                <form class="cart-coupon__form" id="cart-coupon-form" novalidate>
-                                    <input type="text" id="cart-coupon-input" class="cart-coupon__input"
-                                           name="coupon" inputmode="text" autocomplete="off"
-                                           autocapitalize="characters" spellcheck="false"
-                                           placeholder="Enter coupon code" maxlength="40">
-                                    <button type="submit" id="cart-coupon-apply" class="btn btn--secondary cart-coupon__apply">Apply</button>
-                                </form>
-                                <p class="cart-coupon__feedback" id="cart-coupon-feedback" role="status" aria-live="polite"></p>
-                                <!-- Guests (ERR-296, turnaround doc P2): coupons need sign-in +
-                                     a verified email (backend, deliberate — coupon abuse). The
-                                     form is hidden for a guest, not shown dead beside this line. -->
-                                <p class="cart-coupon__guest" id="cart-coupon-guest" hidden>Have a code? <a href="/account/login?tab=register&amp;redirect=%2Fcart">Create a free account to use it</a>.</p>
-                                <!-- Business accounts cannot apply a promo coupon (a coupon
-                                     isn't floor-clamped, so stacking it on volume pricing could
-                                     sell below cost). Unhidden by initBusinessCouponLock();
-                                     loyalty points below stay usable. -->
-                                <p class="cart-coupon__blocked" id="cart-coupon-blocked" data-testid="coupon-b2b-blocked" hidden></p>
-
-                                <p class="cart-discount__or"><span>or</span></p>
-
-                                <!-- Apply loyalty points directly to the cart (arbitrary
-                                     amount in 100-pt steps, min from server, plus a Max
-                                     button). Logged-in + verified-email only; guests see
-                                     a sign-in affordance. -->
-                                <div class="cart-loyalty" id="cart-loyalty" hidden>
-                                    <div class="cart-loyalty__head">
-                                        <span class="cart-loyalty__title">Use loyalty points</span>
-                                        <span class="cart-loyalty__balance" id="cart-loyalty-balance"></span>
-                                    </div>
-                                    <div class="cart-loyalty__guest" id="cart-loyalty-guest" hidden>
-                                        <a href="/account/login?redirect=/cart">Sign in</a> to spend your points.
-                                    </div>
-                                    <form class="cart-loyalty__form" id="cart-loyalty-form" novalidate>
-                                        <input type="number" id="cart-loyalty-input" class="cart-loyalty__input"
-                                               name="points" inputmode="numeric" autocomplete="off"
-                                               min="0" step="100" placeholder="Points" aria-label="Points to redeem">
-                                        <button type="button" id="cart-loyalty-max" class="btn btn--ghost cart-loyalty__max">Max</button>
-                                        <button type="submit" id="cart-loyalty-apply" class="btn btn--secondary cart-loyalty__apply">Apply</button>
-                                    </form>
-                                    <button type="button" id="cart-loyalty-remove" class="cart-loyalty__remove" hidden>Remove points</button>
-                                    <p class="cart-loyalty__feedback" id="cart-loyalty-feedback" role="status" aria-live="polite"></p>
-                                </div>
-                            </div>
-                        </details>
+                        <!-- Coupon codes and loyalty points are applied at CHECKOUT only
+                             (owner, 2026-10-13, ERR-316 phase 6): /checkout carries both
+                             controls. The summary rows above still report any discount
+                             already applied, and #cart-loyalty-chip says "Redeem at
+                             checkout". The ?coupon= recovery link still auto-applies
+                             (cart-page.js, API only — it never needed this form). -->
 
                         <div class="cart-summary__loyalty-chip" id="cart-loyalty-chip" hidden></div>
 
@@ -562,9 +504,9 @@
     <script defer src="/js/cart.js?v=1b7a7651"></script>
     <script defer src="/js/cart-drawer.js?v=5951c293"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
-    <script defer src="/js/cart-page.js?v=35b9e028"></script>
+    <script defer src="/js/cart-page.js?v=38240ff9"></script>
     <script defer src="/js/cart-deep-link.js?v=4f6612d5"></script>
-    <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
+    <script defer src="/js/cart-quote-pdf.js?v=2cf94b58"></script>
     <script defer src="/js/cart-wallet.js?v=bc377241"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>

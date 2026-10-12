@@ -1400,8 +1400,10 @@ test('the coupon field is disabled up front for a business account, on both page
     assert.match(CHECKOUT_CODE, /lockCouponForBusinessAccount/);
     assert.match(CHECKOUT_CODE, /this\.lockCouponForBusinessAccount\(couponInput, couponBtn\)/);
 
-    assert.match(HTML('html/cart.html'), /id="cart-coupon-blocked"[^>]*hidden/,
-        'the explanation ships hidden and is unhidden only for a business account');
+    // Coupon codes and loyalty points are entered at CHECKOUT only since ERR-316 phase 6 (owner, 2026-10-13):
+    // the cart no longer carries the field, so the business lock that matters
+    // is checkout's (asserted above).
+    assert.doesNotMatch(HTML('html/cart.html'), /id="cart-coupon-(?:form|blocked)"/, 'no coupon field on the cart');
 });
 
 test('a failed status check must NOT lock a retail customer out of coupons', () => {

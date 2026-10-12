@@ -84,3 +84,27 @@ test('cart line: unit price moves under the name on desktop; pill and nudge span
     // The same figure on both cells (ERR-307): markup still renders both.
     assert.match(CART, /cart-item__price-mobile/);
 });
+
+test('coupon codes and loyalty points are entered at checkout only; the cart keeps the totals rows and the chip (ERR-316 phase 6)', () => {
+    const cart = read('html/cart.html');
+    assert.doesNotMatch(cart, /id="cart-discount"|id="cart-coupon-form"|id="cart-coupon-input"|id="cart-loyalty-form"/);
+    for (const id of ['cart-savings-row', 'cart-loyalty-row', 'cart-b2b-row', 'cart-coupon-note', 'cart-loyalty-chip']) {
+        assert.match(cart, new RegExp(`id="${id}"`), `${id} still reports what was applied`);
+    }
+    const checkout = read('html/checkout.html');
+    assert.match(checkout, /id="coupon-code"/);
+    assert.match(checkout, /id="cart-loyalty-form"/);
+    // A failed ?coupon= recovery link says where to retry, since the field moved.
+    assert.match(stripComments(read('js/cart-page.js')), /if \(!det && !input\) \{\s*if \(typeof showToast === 'function'\) showToast\('You can enter ' \+ code \+ ' at checkout\.'/);
+});
+
+test('cart summary starts level with the "Cart" title on desktop; the PO control is a full 48px row', () => {
+    const css = read('css/cart-checkout.css');
+    const block = css.slice(css.indexOf('/* ── No dead band beside "Cart"'));
+    assert.match(block, /@media \(min-width: 1025px\)/);
+    assert.match(block, /grid-template-rows: auto 1fr;/);
+    assert.match(block, /section\.cart-page #cart-layout:not\(\[hidden\]\) \{ display: contents; \}/);
+    assert.match(block, /\.cart-summary \{ grid-column: 2; grid-row: 1 \/ span 2; \}/);
+    assert.match(css, /\.quote-pdf__details > summary \{[^}]*min-height: 48px;/);
+    assert.match(read('js/cart-quote-pdf.js'), /<span class="quote-pdf__summary-text">Add company or PO number<\/span>/);
+});

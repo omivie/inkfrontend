@@ -370,6 +370,28 @@ Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mc
 - Red-proof: 4/4 reverts turn tests red.
 - Full suite: 7086 pass, 1 fail. The fail is the pre-existing `.DS_Store` check.
 
+**Phase 6 (13 Oct, after the deploy): coupon and points only at checkout, a clear PO control, and no dead band beside "Cart".**
+
+The owner sent screenshots of **www** (`a7cef57d` was live, pushed with `8bf04423`). The live cart already showed Apple Pay, Google Pay and Klarna, so the wallet works in production.
+
+Three changes:
+- **Coupon and points move to checkout.** The cart's `details#cart-discount` (coupon form, guest and business notes, loyalty control) is deleted.
+  - /checkout keeps both controls.
+  - The cart keeps the rows that report a discount already applied (`#cart-savings-row`, `#cart-loyalty-row`, `#cart-b2b-row`, `#cart-coupon-note`) and the "Redeem at checkout" chip.
+  - The `?coupon=` recovery link still auto-applies (API only). If it fails, a toast says "You can enter CODE at checkout."
+  - 12 dead coupon rules were removed from `pages.css`.
+- **PO control.** It is now a full 48px row with an icon, "Add company or PO number", "Optional" and a chevron. Opened, it shows a bordered box: "Printed on the quote." and sentence-case labels.
+- **Dead band beside "Cart".** On desktop, the container is a 2-column grid and `#cart-layout` uses `display: contents`, so the summary spans rows 1–2 beside the title. `grid-template-rows: auto 1fr` stops row 1 stretching. Phones are unchanged.
+
+Measured at 1280, local, paced guest:
+- The H1 and the summary top are both at y=251. Before, the summary started about 110px lower.
+- The lines start at y=367.
+- The PO row is 48px. The quote downloaded with the company and PO.
+- Phone 390: no horizontal scroll, same order as before.
+- /checkout still has the coupon and loyalty controls.
+
+Tests: 4 suites flipped to "absent on cart, present on checkout", and 2 new tests in `cart-totals-sense-oct2026`, both red-proofed. Full suite 7089/0.
+
 **Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
 
 **Files.** `inkcartridges/js/cart-drawer.js` (new) · `js/cart.js` · `js/product-detail-page.js` · `js/search.js` · `css/components.css` · `css/pages.css` · `html/product/index.html` · 37 HTML pages (script tag + `?v=` restamp) · `tests/cart-drawer-oct2026.test.js` (new) + 10 updated suites

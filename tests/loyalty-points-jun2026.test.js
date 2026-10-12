@@ -168,12 +168,13 @@ test('loyalty.html: points page scaffolding, no stamp markup, nav relabelled', (
     assert.doesNotMatch(src, /Loyalty Card/, 'no "Loyalty Card" label left');
 });
 
-test('cart.html + checkout.html: loyalty control + summary row present', () => {
-    for (const rel of ['html/cart.html', 'html/checkout.html']) {
-        const src = HTML(rel);
-        assert.match(src, /id="cart-loyalty"/, `${rel} must have the loyalty control`);
-        assert.match(src, /id="cart-loyalty-max"/, `${rel} must have the Max button`);
-    }
+test('checkout.html: loyalty control; cart.html: summary row and the "redeem at checkout" chip only', () => {
+    // Coupon codes and loyalty points are entered at CHECKOUT only since ERR-316 phase 6 (owner, 2026-10-13).
+    const checkout = HTML('html/checkout.html');
+    assert.match(checkout, /id="cart-loyalty"/, 'checkout must have the loyalty control');
+    assert.match(checkout, /id="cart-loyalty-max"/, 'checkout must have the Max button');
+    assert.doesNotMatch(HTML('html/cart.html'), /id="cart-loyalty"[\s>]|id="cart-loyalty-max"/, 'no points control on the cart');
+    assert.match(HTML('html/cart.html'), /id="cart-loyalty-chip"/, 'the cart still says how many points and where to use them');
     assert.match(HTML('html/cart.html'), /id="cart-loyalty-row"/, 'cart summary loyalty row');
     assert.match(HTML('html/checkout.html'), /id="checkout-loyalty-row"/, 'checkout summary loyalty row');
     // /payment folded into /checkout (ERR-316 phase 3): ONE summary, and the

@@ -201,11 +201,11 @@ test('S3.1 the sticky bar is mobile-only, safe-area aware, and JS-driven by an I
 // S3.2 — coupon entry UI wired to the existing preview/apply API
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('S3.2 cart.html exposes a "Have a coupon?" disclosure with an input + apply', () => {
-    assert.match(CART_HTML, /id="cart-coupon-form"/, 'coupon form missing');
-    assert.match(CART_HTML, /id="cart-coupon-input"/, 'coupon input missing');
-    assert.match(CART_HTML, /Have a coupon\?/, 'coupon disclosure summary missing');
-    assert.match(CART_HTML, /aria-live="polite"/, 'coupon feedback must be an aria-live region');
+test('S3.2 coupon entry lives on CHECKOUT, not the cart (ERR-316 phase 6)', () => {
+    // Coupon codes and loyalty points are entered at CHECKOUT only since ERR-316 phase 6 (owner, 2026-10-13).
+    assert.doesNotMatch(CART_HTML, /id="cart-coupon-form"|id="cart-coupon-input"|id="cart-discount"/, 'no coupon field on the cart');
+    const CHECKOUT_HTML = fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'html', 'checkout.html'), 'utf8');
+    assert.match(CHECKOUT_HTML, /id="coupon-code"/, 'checkout keeps its coupon field');
 });
 
 test('S3.2 cart-page.js wires preview (idle/blur) + apply (submit)', () => {

@@ -751,12 +751,17 @@ async function autoApplyCouponFromUrl() {
 
 /**
  * A ?coupon= link that failed leaves the shopper with a toast and no obvious
- * next step — the field is behind a collapsed drawer. Open it and prefill the
- * code so retrying is one tap rather than a hunt.
+ * next step. Codes are entered at CHECKOUT since ERR-316 phase 6 (owner,
+ * 2026-10-13) — the cart no longer has the field — so say where to retry.
+ * The drawer branch stays for any page that still carries the field.
  */
 function revealCouponForRetry(code) {
     const det = document.getElementById('cart-discount');
-    if (det) { det.open = true; det.dataset.autoOpened = '1'; }
     const input = document.getElementById('cart-coupon-input');
+    if (!det && !input) {
+        if (typeof showToast === 'function') showToast('You can enter ' + code + ' at checkout.', 'info', 6000);
+        return;
+    }
+    if (det) { det.open = true; det.dataset.autoOpened = '1'; }
     if (input && !input.value) input.value = code;
 }
