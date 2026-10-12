@@ -678,7 +678,10 @@ const Products = {
 
                 // Add to cart (server-first for authenticated users)
                 if (typeof Cart !== 'undefined') {
-                    await Cart.addItem(productData);
+                    const result = await Cart.addItem(productData);
+                    // A refusal (ok:false) was rolled back and toasted by addItem;
+                    // leave the button as it was rather than claim "Added!" (ERR-321).
+                    if (result && result.ok === false) return;
                 }
 
                 // Show feedback. busy() stops the stepper's relabel from

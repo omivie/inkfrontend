@@ -5346,7 +5346,7 @@
             try {
                 // Use Cart.addItem - server-first for authenticated users,
                 // localStorage for guest users
-                await Cart.addItem({
+                const result = await Cart.addItem({
                     id: product.id,
                     name: product.name,
                     price: product.retail_price || 0,
@@ -5364,6 +5364,9 @@
                     // appended to every product-card href.
                     printer_slug: (this.state && this.state.printer) || null
                 });
+                // A refusal (ok:false) was rolled back and toasted by addItem; the
+                // button must not then claim "Added!" (ERR-321). The catch resets it.
+                if (result && result.ok === false) throw new Error(result.error || 'Add refused');
 
                 button.textContent = 'Added!';
                 button.classList.add('btn--success');

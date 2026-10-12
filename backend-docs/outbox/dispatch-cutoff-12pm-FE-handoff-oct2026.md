@@ -19,9 +19,19 @@ The FE renders these values exactly as the API sends them. Until the backend cha
 | `shipping_promise.label` ("Same-day dispatch before 2pm") and the trust label "Dispatched same day in Auckland metro (order by 2pm)" | wherever it is surfaced | 12pm wording |
 | `delivery_estimate.promise` ("…placed before 14:00 NZT…") | PDP dispatch clause | 12:00 wording |
 | `cutoff_remaining_seconds`, `same_day_eligible` | PDP and cart dispatch countdown | computed against 12:00 NZT |
+| `/api/prerender/*` meta descriptions ("Auckland metro orders by 2pm NZT dispatch same day.") | `<meta name="description">` on home, /shop, series pages and /ribbons. `SeoMeta.reconcile()` copies it, and Google's snippet uses it | 12pm |
+| Cart `delivery_estimate.promise` ("Order by 2pm for same-day dispatch (Auckland metro) — 1–3 business days NZ-wide") | /cart summary, owner screenshot 2026-10-13 | 12pm |
+| `trust_signals` label "Dispatched same day in Auckland metro (order by 2pm)" | /cart trust badges | 12pm |
 | Any email or order-confirmation template that quotes the cutoff | emails | 12pm |
 
 **The countdown matters most.** Until `cutoff_remaining_seconds` and `same_day_eligible` are computed against 12:00, shoppers between 12:00 and 14:00 see "same-day dispatch" counting down to a cutoff that has already passed.
+
+## FE side verified (2026-10-13, Playwright against the local working tree)
+
+- With live API responses: the only 2pm text left on 21 pages comes from the API. It appears in the prerender meta descriptions, the PDP delivery line (`dispatch_cutoff_human`), the PDP service row, and the countdown. Static pages (/shipping, /terms, /faq, /about, /business) render 12pm.
+- With API responses rewritten in the browser (14:00 to 12:00, 2pm to 12pm, `cutoff_remaining_seconds` minus 7200), the same pages show **0** instances of 2pm, and the PDP reads "Order before 12pm NZT…". **Once you ship, nothing else is needed on the FE.**
+- Countdown measured at about 01:50 NZT on 10-13: `cutoff_remaining_seconds` = 43803, which gives a 14:00 deadline.
+- The /cart signals were not exercised: that needs a cart add, which writes a guest session. The cart code renders the API strings verbatim (`cart.js` `renderCartSignals`).
 
 ## Outside both repos
 

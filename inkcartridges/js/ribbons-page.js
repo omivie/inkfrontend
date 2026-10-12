@@ -1049,7 +1049,7 @@ const RibbonsPage = {
         button.disabled = true;
 
         try {
-            await Cart.addItem({
+            const result = await Cart.addItem({
                 id: ribbon.id,
                 name: ribbon.name,
                 price: ribbon.sale_price || ribbon.retail_price || 0,
@@ -1060,6 +1060,9 @@ const RibbonsPage = {
                 quantity,
                 product_source: ribbon.source || null
             });
+            // A refusal (ok:false) was rolled back and toasted by addItem; the
+            // button must not then claim "Added!" (ERR-321). The catch resets it.
+            if (result && result.ok === false) throw new Error(result.error || 'Add refused');
 
             button.textContent = 'Added!';
             button.classList.add('btn--success');

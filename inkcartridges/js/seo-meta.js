@@ -392,7 +392,7 @@ const SeoMeta = {
     // backend dropped every unqualified "same-day dispatch" from its titles and
     // descriptions on 2026-09-30. Titles copy its "— Fast NZ Delivery" exactly
     // (measured on the prerender 2026-10-02, ERR-300). The description clause
-    // is a shorter, equally qualified form of its "Auckland metro orders by 12pm
+    // is a shorter, equally qualified form of its "Auckland metro orders by <cutoff>
     // NZT dispatch same day." — the full sentence pushed home/shop past 155
     // chars and truncation cut "Free shipping over $100" down to a stub.
     _trustClauses(trust) {

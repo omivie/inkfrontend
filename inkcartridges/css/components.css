@@ -2455,6 +2455,10 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     transition: all var(--transition-normal);
 }
 
+/* The ONE toast owner (ERR-321). modern-effects.css loads after this file and
+   used to carry its own `.toast { opacity: 0 }` keyed to a `.show` class no JS
+   ever sets — same specificity, later file, so every toast on the site was
+   invisible. Never style `.toast` opacity/transform in a later stylesheet. */
 .toast--visible {
     transform: translateX(0);
     opacity: 1;

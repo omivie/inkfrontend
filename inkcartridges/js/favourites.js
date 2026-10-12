@@ -577,7 +577,10 @@ const Favourites = {
                         quantity: (typeof QtyStepper !== 'undefined') ? QtyStepper.read(btn) : 1
                     };
 
-                    await Cart.addItem(product);
+                    const result = await Cart.addItem(product);
+                    // A refusal (ok:false) was rolled back and toasted by addItem; leave
+                    // the button as it was rather than claim "Added!" (ERR-321).
+                    if (result && result.ok === false) return;
 
                     if (typeof QtyStepper !== 'undefined') QtyStepper.busy(btn, true);
                     btn.textContent = 'Added!';

@@ -41,6 +41,36 @@ describing the same incident.
 
 ---
 
+## ERR-321 — "Add does nothing": every toast on the site was invisible, and card buttons said "Added!" on a refused add — **RESOLVED (frontend); owner action outstanding** (2026-10-13)
+
+**Reported.** The owner, signed in as admin, clicked Add on `/shop?brand=brother&category=ink&code=LC23` and on the PDP. Nothing visible happened and the cart did not change. The header badge showed 1.
+
+**Measured (Playwright, 1000x650).**
+- Guest, one real add on prod: `POST /api/cart/items` 201, drawer opened, line in cart. Rolled back: 1 line, then 0. The add path works.
+- Admin, cart writes intercepted: shop and PDP buttons both went "Adding..." and POSTed. The click path works.
+- The admin account's server cart holds `ADMIN-INK-001` "Admin Test Cartridge". The server refuses a real product in a cart with a test product (`MIXED_TEST_CART`, ERR-246). **Not measured against the real server**: a real admin add was blocked by permission. The refusal was simulated (intercepted POST answered 400 MIXED_TEST_CART).
+- With the simulated refusal, `Cart.addItem` rolled back and called `showToast(..., 7000)`. The toast was in the DOM with `toast--visible`, but computed `opacity` was `0`. A direct `showToast()` call on live /shop and the live PDP measured the same: opacity 0, `transform: matrix(0.95, 0, 0, 0.95, 0, 20)`.
+- The /shop card also flashed "Added!" on the refused add.
+
+**Cause.**
+- `css/modern-effects.css` loads after `css/components.css` on every page. It carried `.toast { opacity: 0; transform: ... }` with a `.toast.show` / `.toast.hide` pair. No JS ever sets `show` or `hide`.
+- `.toast` and `.toast--visible` have the same specificity, so the later file wins: every toast on the site rendered invisible. The block dates from the initial commit.
+- It went unnoticed because the cart drawer (ERR-316) replaced the success toast. The toasts left were the error ones, and a shopper who cannot see an error sees "nothing happened".
+- `shop-page.js`, `products.js`, `ribbons-page.js`, `business-page.js` and `favourites.js` ignored `Cart.addItem`'s `{ ok: false }` return (ERR-269) and printed "Added!". The PDP already checked it.
+
+**Fix.**
+- Deleted the dead toast block from `modern-effects.css`. `components.css` is the one owner, with a comment at `.toast--visible`.
+- The five callers check `result && result.ok === false`. Callers with an error branch throw into it ("Error", quantity kept). `products.js` and `favourites.js` return before "Added!".
+- `?v=` restamped (md5) for the seven changed assets.
+- Verified on localhost with the simulated refusal: toast opacity 1 and in view on /shop and the PDP; the card button shows "Error", then "Add".
+- `tests/toast-visible-oct2026.test.js`. Negative control: the same check on HEAD's `modern-effects.css` finds 3 offending rules.
+
+**Owner action.** Remove "Admin Test Cartridge" from the admin cart at /cart. Until then the server refuses every real add on that account. The refusal message is now visible.
+
+**Rule.** A later stylesheet that styles a component's base class at the same specificity silently beats the component's own state class. One component, one stylesheet.
+
+---
+
 ## ERR-320 — After a coupon, /checkout subtracted loyalty points and the volume discount TWICE, showing a lower total than Stripe would charge — **RESOLVED (frontend)** (2026-10-13)
 
 **Found.** While checking, at the owner's request, that "the total price and shipping all make sense and are correct" (ERR-316 phase 5). Found by reading the code; not seen by a shopper, and not reproduced live (a coupon needs a signed-in, verified account).
@@ -71,6 +101,8 @@ describing the same incident.
 **Changed (FE).** /terms, /shipping (lead, handling time, glossary, cut-offs section), /faq (two answers plus the FAQPage JSON-LD), /about (three places, including the `dispatch-cutoff` legal-bind default), /business, and `js/legal-config.js` (`handlingTime`, `dispatchCutoffDisplay`). The PDP fallback is now `SPEC_DELIVERY_CUTOFF = '12pm'`. Comments that quoted the cutoff were updated. The `formatCutoff`/`formatDispatchCutoff` examples ("14:00" -> "2pm") are format examples, not policy, and stay as they are. Pinned tests now pin 12pm: google-ads-compliance (`dispatchHourNZ: 12`), product-buybox, retail-wording. `audit-merchant-center-readiness.mjs` now fails on a rendered **2pm** cutoff. Its regex was checked against both strings: "2pm … same-day" is flagged and "12pm … same-day" is not. `?v=` was restamped for cart, legal-config, product-detail-page, seo-meta, service-row and utils.
 
 **NOT changed: the backend owns the live value.** Measured 2026-10-12: `/api/site/trust` returns `dispatch_cutoff_nzt: "14:00"` and the label "Dispatched same day in Auckland metro (order by 2pm)". The service row, SEO meta, PDP delivery line (`dispatch_cutoff_human`) and the dispatch countdown (`cutoff_remaining_seconds`, `same_day_eligible`) all render the API value. **They will keep saying 2pm, and keep counting down to 14:00, until the backend ships.** The ask is in `backend-docs/outbox/dispatch-cutoff-12pm-FE-handoff-oct2026.md`. The Google Merchant Center handling cutoff is an owner action outside both repos.
+
+**Follow-up 2026-10-13.** The owner's screenshot of the live /cart showed three 2pm strings: the `delivery_estimate.promise`, the countdown and a `trust_signals` label. All three come from the API. **The owner chose backend only, with no FE override.** Playwright ran against the local working tree on 21 pages. With live API responses, every remaining 2pm comes from the API, including the `/api/prerender/*` meta description. With API responses rewritten in the browser to 12:00/12pm, the pages showed 0 instances of 2pm. /cart signals were not exercised, because that needs a cart add.
 
 **Rule.** A policy number shown on the site lives in two places: static copy here, and API fields there. Changing only one side ships a contradiction. In this repo, a grep for the old value finds only half of the places it appears.
 

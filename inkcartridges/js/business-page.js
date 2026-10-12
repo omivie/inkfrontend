@@ -1383,7 +1383,7 @@
                             setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
                             return;
                         }
-                        await Cart.addItem({
+                        const result = await Cart.addItem({
                             id: prod.id,
                             sku: prod.sku || sku,
                             name: prod.name || btn.dataset.productName || sku,
@@ -1394,6 +1394,9 @@
                             quantity,
                             product_source: prod.source || null
                         });
+                        // A refusal (ok:false) was rolled back and toasted by addItem; the
+                        // button must not then claim "Added!" (ERR-321). The catch resets it.
+                        if (result && result.ok === false) throw new Error(result.error || 'Add refused');
                         btn.textContent = 'Added!';
                         setTimeout(() => {
                             btn.disabled = false;
