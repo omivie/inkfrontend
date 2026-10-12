@@ -1,0 +1,288 @@
+/* ==========================================================================
+   CART + CHECKOUT RESTYLE (ERR-316 phase 2, owner 2026-10-12)
+
+   Modelled on smartink.co.nz (measured with Playwright, 1280x800). The
+   targets are a white page, flat rows split by hairlines, one filled
+   pill CTA, and a quiet grey order-summary panel on checkout.
+
+   Loaded LAST on /cart, /checkout and /payment, so it restyles without
+   touching the rules it overrides. Every id/class the tests and probes
+   pin is unchanged. Only the look moves here — no element is hidden that
+   was visible before, and no order changes (ERR-305's "money rows, then
+   the button" holds).
+   ========================================================================== */
+
+/* ── Cart page ──────────────────────────────────────────────────────────── */
+
+.cart-page__header {
+    display: block;
+    margin-bottom: var(--spacing-lg);
+}
+.cart-page__title {
+    padding-top: var(--spacing-md);
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.cart-page__header .cart-actions__continue {
+    gap: 4px;
+    min-height: 36px;
+    color: var(--color-primary-dark);
+    font-weight: 600;
+    text-decoration: none;
+}
+.cart-page__header .cart-actions__continue:hover { text-decoration: underline; }
+
+@media (min-width: 1025px) {
+    .cart-layout { grid-template-columns: 1fr 340px; gap: 48px; }
+}
+
+/* Lines: no card, hairlines between rows. */
+section.cart-page .cart-items {
+    border: 0;
+    border-top: 1px solid var(--color-border-light);
+    border-radius: 0;
+    background: none;
+}
+section.cart-page .cart-item {
+    padding: 18px 0;
+    border-bottom: 1px solid var(--color-border-light);
+    animation: none;
+}
+section.cart-page .cart-item:last-child { border-bottom: 1px solid var(--color-border-light); }
+section.cart-page .cart-item__image {
+    width: 80px;
+    height: 80px;
+    background: none;
+}
+section.cart-page .cart-item__name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--color-text-heading);
+}
+
+/* Summary: a plain column, not a boxed card. */
+.cart-page .cart-summary {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+}
+.cart-page .cart-summary__totals {
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--color-border-light);
+}
+.cart-page .cart-summary__row { padding: 6px 0; }
+.cart-page .cart-summary__row--total {
+    margin-top: 6px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border-light);
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--color-text-heading);
+}
+.cart-page .cart-summary__row--total > span { white-space: nowrap; }
+
+/* One filled pill: the way on. */
+.cart-page #checkout-btn,
+section.checkout-page #continue-to-payment-btn,
+section.checkout-page #pay-now-btn {
+    min-height: 52px;
+    border-radius: 999px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+/* The extras under the button, quieter: hairline-separated, smaller type. */
+.cart-page .cart-summary__secure { font-size: 0.8rem; }
+.cart-page .cart-discount {
+    border: 0;
+    border-top: 1px solid var(--color-border-light);
+    border-bottom: 1px solid var(--color-border-light);
+    border-radius: 0;
+    background: none;
+}
+.cart-page .cart-discount__summary { padding-left: 0; padding-right: 0; font-weight: 700; }
+.cart-page .cart-delivery {
+    border: 0;
+    background: none;
+    padding-left: 0;
+    padding-right: 0;
+}
+.cart-page .cart-summary__payment-icons { justify-content: center; }
+
+/* ── Checkout + payment: Shopify-style two-panel shell ─────────────────── */
+
+section.checkout-page .checkout-page__title,
+section.checkout-page .cart-page__title {
+    font-size: 1.6rem;
+    font-weight: 800;
+}
+
+/* The order summary becomes the grey right panel. */
+@media (min-width: 1025px) {
+    section.checkout-page .checkout-summary {
+        background: var(--color-background-alt);
+        border: 0;
+        border-left: 1px solid var(--color-border-light);
+        border-radius: 0;
+        box-shadow: none;
+        padding: var(--spacing-xl) var(--spacing-lg);
+        min-height: calc(100vh - 2 * var(--spacing-lg));
+    }
+}
+
+/* Section headings: plain, bold, no numbered chips. */
+section.checkout-page .checkout-section__heading,
+section.checkout-page .payment-section__title {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--color-text-heading);
+}
+
+/* Inputs: 48px, 5px radius, hairline border, primary focus ring. */
+section.checkout-page .form-input,
+section.checkout-page .form-select,
+section.checkout-page .form-textarea {
+    min-height: 48px;
+    border: 1px solid var(--steel-300);
+    border-radius: 5px;
+    box-shadow: none;
+}
+section.checkout-page .form-input:focus,
+section.checkout-page .form-select:focus,
+section.checkout-page .form-textarea:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px var(--color-primary);
+    outline: none;
+}
+
+/* Delivery area radios as bordered option rows (Shopify's shipping method). */
+section.checkout-page #delivery-type-section label:has(input[name="delivery_type"]) {
+    border: 1px solid var(--steel-300);
+    border-radius: 5px;
+    padding: 14px 16px;
+    background: var(--color-background);
+}
+section.checkout-page #delivery-type-section label:has(input[name="delivery_type"]:checked) {
+    border-color: var(--color-primary);
+    background: var(--color-primary-bg);
+}
+
+/* Sections: no boxes, no number chips — a bold heading over plain fields.
+   The accordion's "Edit" and collapsed summary still work; only the chip
+   that numbered them is gone (the heading says what the step is). */
+section.checkout-page .checkout-section {
+    border: 0;
+    background: none;
+    box-shadow: none;
+    padding: 0;
+    margin-bottom: 28px;
+}
+section.checkout-page .checkout-section__heading {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 14px;
+    font-size: 1.3rem;
+    font-weight: 800;
+}
+section.checkout-page .checkout-section__num { display: none; }
+
+/* Labels in sentence case, quiet; the field carries the weight. */
+section.checkout-page .form-label {
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-text);
+}
+section.checkout-page .form-input,
+section.checkout-page .form-select {
+    padding: 12px 14px;
+}
+
+/* Progress: a small breadcrumb (Cart › Details › Payment › Confirm), not
+   four numbered pills. Same markup and data-step hooks. */
+section.checkout-page .checkout-progress,
+section.checkout-page .checkout-progress--compact {
+    padding: 0;
+    margin: 6px 0 0;
+    flex: none;
+    max-width: none;
+}
+section.checkout-page .checkout-progress__steps {
+    justify-content: flex-start;
+    gap: 0;
+    padding: 0;
+    margin: 0;
+}
+section.checkout-page .checkout-progress__step {
+    flex: none;
+    max-width: none;
+    flex-direction: row;
+    gap: 0;
+    font-size: 0.85rem;
+}
+section.checkout-page .checkout-progress__step::after { display: none; }
+section.checkout-page .checkout-progress__step:not(:last-child)::before {
+    content: '\203A';
+    order: 2;
+    padding: 0 8px;
+    color: var(--color-text-muted);
+}
+section.checkout-page .checkout-progress__number { display: none; }
+section.checkout-page .checkout-progress__label { color: var(--color-text-muted); font-weight: 500; }
+section.checkout-page .checkout-progress__step--completed .checkout-progress__label { color: var(--color-primary-dark); }
+section.checkout-page .checkout-progress__step--active .checkout-progress__label { color: var(--color-text-heading); font-weight: 700; }
+
+section.checkout-page .cart-page__header {
+    display: block;
+    margin-bottom: var(--spacing-lg);
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+section.checkout-page .checkout-order-notes__heading {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--color-text-heading);
+}
+
+/* ── /payment: Shopify's "Payment — all transactions are secure" block ───
+   The inline <style> in payment.html paints a navy header and splits card
+   and PayPal into two columns; here it is one white column, card first,
+   PayPal under it, as on smartink. */
+section.checkout-page .shipping-summary {
+    background: var(--color-background);
+    border: 1px solid var(--steel-300);
+    border-radius: 5px;
+}
+section.checkout-page .payment-section {
+    background: none;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+}
+section.checkout-page .payment-section__header {
+    background: none;
+    padding: 8px 0 12px;
+}
+section.checkout-page .payment-section__icon { display: none; }
+section.checkout-page .payment-section__subtitle { color: var(--color-text-muted); font-size: 0.9rem; }
+section.checkout-page .payment-section__body {
+    grid-template-columns: 1fr;
+    padding: 20px;
+    border: 1px solid var(--steel-300);
+    border-radius: 5px;
+    background: var(--color-background-alt);
+}
+section.checkout-page .payment-col-alt {
+    width: 100%;
+    padding-left: 0;
+    border-left: 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--steel-200);
+}

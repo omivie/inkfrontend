@@ -36,6 +36,7 @@
     <link rel="stylesheet" href="/css/modern-effects.css?v=41b5beb0">
     <link rel="stylesheet" href="/css/pages.css?v=454c6911">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=77cba239">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
     <meta name="twitter:description" content="Review your shopping cart - InkCartridges.co.nz">
@@ -185,29 +186,17 @@
 
         <section class="cart-page">
             <div class="container">
+                <!-- Smartink-style header (ERR-316 phase 2, owner 2026-10-12): a plain
+                     "Cart" title with the way back under it. The 4-step progress pills
+                     went — the cart is not a form step, and they cost the first screen
+                     ~60px. The link keeps .cart-actions__continue: a text link, never a
+                     button, because it leads AWAY from the cart (ERR-305, §8.2). -->
                 <div class="cart-page__header">
-                    <h1 class="cart-page__title">Shopping Cart</h1>
-
-                    <div class="checkout-progress checkout-progress--compact" aria-label="Checkout progress">
-                        <ol class="checkout-progress__steps">
-                            <li class="checkout-progress__step checkout-progress__step--active">
-                                <span class="checkout-progress__number">1</span>
-                                <span class="checkout-progress__label">Cart</span>
-                            </li>
-                            <li class="checkout-progress__step">
-                                <span class="checkout-progress__number">2</span>
-                                <span class="checkout-progress__label">Details</span>
-                            </li>
-                            <li class="checkout-progress__step">
-                                <span class="checkout-progress__number">3</span>
-                                <span class="checkout-progress__label">Payment</span>
-                            </li>
-                            <li class="checkout-progress__step">
-                                <span class="checkout-progress__number">4</span>
-                                <span class="checkout-progress__label">Confirm</span>
-                            </li>
-                        </ol>
-                    </div>
+                    <h1 class="cart-page__title">Cart</h1>
+                    <a href="/shop" class="cart-actions__continue">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+                        Continue shopping
+                    </a>
                 </div>
 
                 <div class="cart-loading" id="cart-loading">
@@ -257,19 +246,10 @@
 
                         <div class="cart-items" id="cart-items">
                         </div>
-
-                        <div class="cart-actions">
-                            <!-- A plain text link (ERR-305, §8.2): as a magenta button it was the
-                                 loudest thing on the first screen, and it leads AWAY from the cart. -->
-                            <a href="/shop" class="cart-actions__continue">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-                                Continue Shopping
-                            </a>
-                        </div>
                     </div>
 
                     <aside class="cart-summary">
-                        <h2 class="cart-summary__heading">Order Summary</h2>
+                        <h2 class="cart-summary__heading visually-hidden">Order summary</h2>
 
                         <div class="cart-summary__totals">
                             <div class="cart-summary__row">

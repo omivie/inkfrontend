@@ -85,6 +85,18 @@ Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mc
 
 **Not verified yet.** Production after deploy. The upsell when the backend returns neither frequently-bought-together nor related rows: the section hides, by design.
 
+**Phase 2 (same day): the cart, checkout and payment pages restyled.**
+- A new `css/cart-checkout.css` loads last on those three pages. Every id and class the tests and probes pin is unchanged, and the order of elements is unchanged (ERR-305's "money rows, then the button" holds).
+- **Cart.** The title is now "Cart" with a "Continue shopping" link under it. The link keeps `.cart-actions__continue` and is still a text link. The 4-step progress pills are gone. The lines are flat rows with hairline separators. The summary is a plain column rather than a boxed card. The Checkout button is a 52px pill. The discount and delivery rows are quieter.
+- **Checkout.** Sections are bold headings with no boxes and no number chips. Labels are sentence case. Fields are 48px high with a 5px radius. The progress is a small breadcrumb (Cart › Details › Payment › Confirm), using the same markup and `data-step` hooks.
+- **Payment.** The navy header became white, with the subtitle "All transactions are secure and encrypted.". Card and PayPal are now one column with PayPal below, inside a bordered grey box.
+- Measured locally: at 390×664 the cart's Checkout button bottom is at 579px.
+- **Side effect, logged so nobody repeats it.** Opening /payment in the logged-in Playwright profile let Stripe Link send a verification code to the owner's phone, because the email was prefilled. No order was created: we never clicked Pay or PayPal, and orders are only created on confirm. The cart was cleaned back to 0.
+- **Not done in phase 2 (deliberate).**
+  - The inline `<style>` in payment.html is overridden, not moved.
+  - The sticky mobile checkout bar still shows while the real button is on screen at 390×664. That behaviour predates this change and is owned by cart-page.js's IntersectionObserver; it is flagged, not changed.
+  - The PayPal button did not render on localhost. This was not investigated, and production has not been checked.
+
 **Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
 
 **Files.** `inkcartridges/js/cart-drawer.js` (new) · `js/cart.js` · `js/product-detail-page.js` · `js/search.js` · `css/components.css` · `css/pages.css` · `html/product/index.html` · 37 HTML pages (script tag + `?v=` restamp) · `tests/cart-drawer-oct2026.test.js` (new) + 10 updated suites
