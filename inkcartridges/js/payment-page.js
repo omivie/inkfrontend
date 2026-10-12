@@ -169,6 +169,12 @@
                 if (this.embedded && typeof this.collect === 'function') {
                     const data = await this.collect();
                     if (!data) return;
+                    // Never charge on an unknown fee: calculateTotals would read a
+                    // missing one as $0 and Stripe would take goods only.
+                    if (!(typeof data.estimatedShipping === 'number' && Number.isFinite(data.estimatedShipping))) {
+                        this.showError('Shipping is still being calculated — one moment, then press Pay now again.');
+                        return;
+                    }
                     this.checkoutData = data;
                     if (!this._paymentStarted && typeof CartAnalytics !== 'undefined') {
                         this._paymentStarted = true;
@@ -1761,6 +1767,10 @@
                     if (self.embedded && typeof self.collect === 'function') {
                         const d = await self.collect();
                         if (!d) return actions.reject();
+                        if (!(typeof d.estimatedShipping === 'number' && Number.isFinite(d.estimatedShipping))) {
+                            self.showError('Shipping is still being calculated — one moment, then try PayPal again.');
+                            return actions.reject();
+                        }
                         self.checkoutData = d;
                         await self.calculateTotals();
                     }

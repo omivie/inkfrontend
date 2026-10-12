@@ -41,6 +41,29 @@ describing the same incident.
 
 ---
 
+## ERR-320 — After a coupon, /checkout subtracted loyalty points and the volume discount TWICE, showing a lower total than Stripe would charge — **RESOLVED (frontend)** (2026-10-13)
+
+**Found.** While checking, at the owner's request, that "the total price and shipping all make sense and are correct" (ERR-316 phase 5). Found by reading the code; not seen by a shopper, and not reproduced live (a coupon needs a signed-in, verified account).
+
+**Cause.**
+- `GET /api/cart` `summary.discount` is the **aggregate**: coupon + loyalty + volume/b2b. `computeDiscountBreakdown` (cart.js) has documented this since ERR-169.
+- /checkout keeps its own coupon, loyalty and b2b rows and computes `subtotal − discount − loyaltyDiscount − b2bDiscount + shipping`.
+- Four coupon re-read paths stored the aggregate as `totals.discount`:
+  - apply success;
+  - apply failure re-sync;
+  - the loyalty `refreshFromCart` fallback;
+  - the applied-pill render fallback.
+- So the panel took loyalty and volume off a second time.
+- `PaymentPage.calculateTotals` (`subtotal + shipping − summary.discount`) was right, so the panel and the charge disagreed. **The shopper was charged the correct amount; the page showed less.**
+
+**Fix.** A new `CheckoutPage._couponPart(summary, data)` returns `computeDiscountBreakdown(summary, summary.discount, data.volume_discount).other`. This is the shared split that payment-page.js and the cart already use, so it is a lookup, not new maths. All four paths use it.
+
+**Test.** `tests/cart-totals-sense-oct2026.test.js` runs the real `computeDiscountBreakdown` with `_couponPart`: aggregate 18 − loyalty 5 − volume 3 = coupon 10. It also pins that no path stores the aggregate. Red-proof: reverting `_couponPart` to `summary.discount` turns it red.
+
+**Not verified live:** the coupon path end to end. That needs a signed-in, verified account with a coupon and points.
+
+---
+
 ## ERR-316 — Adding to cart confirmed itself three different ways (toast, desktop-only modal, PDP strip) and none looked like a cart; replaced by one slide-in cart drawer modelled on smartink.co.nz — **RESOLVED (frontend), phase 1 of the cart/checkout restyle** (2026-10-12)
 
 **Asked.** Owner, 12 Oct: make add-to-cart, the cart and checkout look "professional and clean like smartink.co.nz". Smartink's flow was measured with Playwright at 1280×800. After Add to Cart, a right-hand drawer about 460px wide opens over a dimmed page. It shows the lines with − / + and Remove, then "You may also like" rows with a round add button, then a sticky footer with the totals, View cart and Checkout. Decisions taken with the owner: one drawer replaces all three old surfaces on every add path; checkout keeps its two pages (restyle only); the cart keeps every feature, made quieter. The cart and checkout restyle is phase 2.
@@ -223,6 +246,59 @@ Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mc
   - The region select still starts at "Select region".
 - **Not measured:** Apple Pay / Google Pay on a real device. Headless Chromium reports no wallet, so the top express row was hidden in every local run.
 - **Production unverified** until deploy.
+
+**Phase 5 (13 Oct): the cart line wrap, the PDF quote, and whether the totals make sense.**
+
+**Asked.** On localhost /cart at 1280px, the owner reported three things:
+- "why is there a cutoff on the text… wrapping a third of the way";
+- check that the PDF download works, and make it more professional;
+- check that the total price and shipping "make sense and are correct".
+
+**Line wrap.**
+- **Measured.** The line grid gave the details column 342px of a 748px line, because the unit price had a column of its own.
+- **Fix, CSS only.** On desktop:
+  - the unit price sits under the name, in the same `.cart-item__price-mobile` cell phones use (same `unitPriceFor` figure, ERR-307);
+  - `.cart-item__details` becomes `display: contents`;
+  - the value-pack pill and the volume nudge span `grid-column: 2 / -1`.
+- **Result, measured.**
+  - HP 711: the name is now 1 line.
+  - The owner's pill and nudge text, injected because a guest gets neither, now each sit on 1 line: 274px and 432px, previously wrapping at 342px.
+
+**The contradictory summary.**
+- The owner's screenshot showed "Shipping: Calculated at checkout", "Total before shipping $136.99" and a green "You've qualified for FREE shipping!" together. That is the **no-server-pricing** state.
+- The green box came from the local `Shipping.getSpendMore` fallback (hardcoded $100), with no server confirmation behind it.
+- **Measured cause of the state on localhost:** rapid probe runs from this machine tripped the API's per-IP limiter (ERR-266), so `/cart?add=` stayed local-only. `GET /api/cart` returned an empty cart, and the quote returned 400 "Your cart is empty".
+  - After a 90s cool-down the same cart priced at `subtotal 136.99, shipping 0, qualifies true, total 136.99`.
+  - **The owner shares this IP, so their screenshot was very likely that same state.**
+- **Fix:** the fallback never says "qualified". Only the server's "Free" row does.
+
+**Totals matrix.** Paced, fresh guest context, Pay never pressed. All 5 cases agree across `GET /api/cart` = cart rows = checkout panel = `PaymentPage.totals` = Stripe amount.
+
+| Case | Cart rows | Checkout panel | Stripe amount |
+|---|---|---|---|
+| a. CLC431XLBK × 1, Auckland urban | $43.49 + est. $7 = $50.49 | $50.49 | 5049 |
+| b. same, rural | estimate $50.49 | $14 / $57.49 | 5749 |
+| c. same, Canterbury | $50.49 | South Island $7 / $50.49 | 5049 |
+| d. G71180MLBK × 1 | Free / $136.99 | FREE / $136.99 | 13699 |
+| e. CLC431XLBK × 3 | subtotal $130.47, volume −$3.90, Free, $126.57 | $126.57 | 12657 |
+
+- GST on the cart equalled the server's `gst_amount` in every case.
+- **Also fixed:**
+  - ERR-320 (checkout coupon double subtraction).
+  - Pay now and PayPal now refuse while the fee is unknown (`estimatedShipping` not a number). Previously `calculateTotals` would have read it as $0.
+
+**PDF quote.** It works. Two real downloads (cart + checkout, South Island) returned 200, `%PDF-`, PDFKit, 1 page A4, filename `inkcartridges-quote-Q-261012-*.pdf`. The company and PO printed, and every figure equalled the server.
+- The PDF is the backend's. Two defects and a design brief went to `backend-docs/outbox/quote-pdf-design-FE-request-oct2026.md`:
+  - Q1: the description is garbled (`…80mlBK Ink Cartridge 711 80ml Black`);
+  - Q2: the date is UTC (12 Oct at 00:33 NZDT on 13 Oct);
+  - Q3: the design brief.
+- On the FE, the control was restyled: an outlined button with a document icon, and a "+ Add company or PO reference" link.
+
+**Tests.**
+- New `tests/cart-totals-sense-oct2026.test.js` (4 tests).
+- A Pay-now unknown-fee test added to `one-page-checkout-oct2026`.
+- Red-proof: 4/4 reverts turn tests red.
+- Full suite: 7086 pass, 1 fail. The fail is the pre-existing `.DS_Store` check.
 
 **Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
 

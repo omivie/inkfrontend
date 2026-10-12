@@ -920,3 +920,100 @@ body:has(section.checkout-page) .site-main { padding-bottom: 0; margin-bottom: 0
 @media (min-width: 1000px) {
     section.checkout-page .checkout-layout { min-height: calc(100vh - 69px); }
 }
+
+/* ── Cart line: name, value-pack pill and volume nudge on ONE line ─────────
+   (owner, 13 Oct: "why is there a cutoff on the text … wrapping a third of
+   the way"). Measured: `70px 1fr auto auto auto auto` left the details column
+   ~340 of 780px at 1280 because the unit price had a column of its own. The
+   unit price now sits under the name (the SAME cell phones already use —
+   .cart-item__price-mobile, the same unitPriceFor figure, ERR-307), which
+   gives the details ~110px back. Markup unchanged. */
+@media (min-width: 769px) {
+    section.cart-page .cart-item {
+        grid-template-columns: 80px minmax(0, 1fr) auto auto auto;
+        column-gap: 20px;
+        row-gap: 2px;
+        align-items: start;
+    }
+    /* The details' children join the line's grid, so the value-pack pill and
+       the volume nudge can run the FULL width under the name instead of
+       wrapping inside the name column. */
+    section.cart-page .cart-item__details { display: contents; }
+    section.cart-page .cart-item__details > * { grid-column: 2; margin-top: 0; margin-bottom: 0; }
+    section.cart-page .cart-item__details > :is(.cart-line-pack, .cart-item__volume-nudge) {
+        grid-column: 2 / -1;
+        justify-self: start;
+        margin-top: 8px;
+    }
+    section.cart-page .cart-item__image { grid-column: 1; grid-row: 1 / span 4; }
+    section.cart-page .cart-item__quantity { grid-column: 3; grid-row: 1 / span 4; align-self: center; }
+    section.cart-page .cart-item__total { grid-column: 4; grid-row: 1 / span 4; align-self: center; }
+    section.cart-page .cart-item__remove { grid-column: 5; grid-row: 1 / span 4; align-self: center; }
+    section.cart-page .cart-item__price { display: none; }
+    section.cart-page .cart-item__price-mobile {
+        display: block;
+        margin-top: 4px;
+        font-size: 13px;
+        font-weight: 400;
+        color: var(--color-text-muted);
+    }
+}
+
+/* ── PDF quote control: a quiet secondary action, not a second CTA ────────
+   (owner, 13 Oct: "more professional"). The PDF itself is the backend's;
+   this styles the button and the company/PO disclosure on /cart and
+   /checkout. The status line stays visible — every failure is said. */
+:is(.cart-page, section.checkout-page) .quote-pdf { margin-top: 14px; }
+:is(.cart-page, section.checkout-page) .quote-pdf__button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border, #dedede);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--color-text-heading, #000);
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: none;
+    transform: none;
+}
+:is(.cart-page, section.checkout-page) .quote-pdf__button::before {
+    content: "";
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3Cline x1='12' y1='12' x2='12' y2='18'/%3E%3Cpolyline points='9 15 12 18 15 15'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3Cline x1='12' y1='12' x2='12' y2='18'/%3E%3Cpolyline points='9 15 12 18 15 15'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+:is(.cart-page, section.checkout-page) .quote-pdf__button:hover:not(:disabled) { background: #f7f7f7; color: var(--color-text-heading, #000); box-shadow: none; }
+:is(.cart-page, section.checkout-page) .quote-pdf__details { margin-top: 8px; font-size: 13px; }
+:is(.cart-page, section.checkout-page) .quote-pdf__details > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    color: var(--color-primary-dark, #005BD1);
+    font-size: 13px;
+    font-weight: 500;
+    list-style: none;
+}
+:is(.cart-page, section.checkout-page) .quote-pdf__details > summary::-webkit-details-marker { display: none; }
+:is(.cart-page, section.checkout-page) .quote-pdf__details > summary::before { content: "+"; font-weight: 700; }
+:is(.cart-page, section.checkout-page) .quote-pdf__details[open] > summary::before { content: "−"; }
+:is(.cart-page, section.checkout-page) .quote-pdf__details .form-group { margin-top: 8px; }
+:is(.cart-page, section.checkout-page) .quote-pdf__details .form-input { min-height: 40px; border-radius: 10px; font-size: 14px; }
+:is(.cart-page, section.checkout-page) .quote-pdf__status { margin-top: 6px; font-size: 12px; }
+/* .btn carries a decorative ::before (modern-effects.css); the icon must not inherit its absolute box. */
+:is(.cart-page, section.checkout-page) .quote-pdf__button::before {
+    position: static;
+    inset: auto;
+    transform: none;
+    opacity: 1;
+    border-radius: 0;
+    transition: none;
+}

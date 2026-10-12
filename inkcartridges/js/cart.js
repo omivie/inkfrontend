@@ -4774,8 +4774,6 @@ const Cart = {
             // local Shipping.getSpendMore fallback below is a frontend threshold
             // calc, fine for nudge copy but never good enough to print. Unknown
             // shipping stays "Calculated at checkout" and is never shown as free.
-            const serverQualifies = !!(this.serverSummary
-                && this.serverSummary.qualifies_for_free_shipping === true);
             this.renderShippingRow();
 
             if (shippingMsgEl) {
@@ -4833,13 +4831,15 @@ const Cart = {
                     const spendMore = (typeof Shipping !== 'undefined') ? Shipping.getSpendMore(subtotal) : null;
 
                     if (spendMore && spendMore.qualifies) {
-                        // Suppress only when the shipping row already says "Free" —
-                        // i.e. the server confirmed it but withheld the nudge fields.
-                        // Otherwise this banner is the only free-shipping signal the
-                        // shopper gets, since the row can't be trusted to print it.
-                        shippingMsgEl.querySelector('span').textContent = "You've qualified for FREE shipping!";
-                        shippingMsgEl.className = 'cart-summary__shipping-message cart-summary__shipping-message--success';
-                        shippingMsgEl.hidden = serverQualifies;
+                        // NEVER a local "you qualify" (ERR-316 phase 5, owner 13 Oct).
+                        // This branch runs exactly when the server sent no nudge
+                        // fields — commonly no pricing at all — and the row above
+                        // then reads "Calculated at checkout" under "Total before
+                        // shipping". A green "You've qualified for FREE shipping!"
+                        // from the hardcoded $100 beside that was a contradiction
+                        // on screen, and a promise the server had not made. When
+                        // the server DOES qualify the cart, the row says "Free".
+                        shippingMsgEl.hidden = true;
                         if (shippingBarEl) shippingBarEl.hidden = true;
                     } else if (spendMore) {
                         const priceStr = (typeof formatPrice === 'function') ? formatPrice(spendMore.needed) : '$' + spendMore.needed.toFixed(2);

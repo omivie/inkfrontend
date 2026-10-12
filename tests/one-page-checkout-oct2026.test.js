@@ -108,6 +108,24 @@ test('Pay now: details that do not validate never reach handlePayment; valid one
     assert.equal(totals, 1, 'and the server total is re-read first');
 });
 
+test('Pay now refuses while the shipping fee is unknown — Stripe must never take goods only', async () => {
+    const { P } = load();
+    let paid = 0; const said = [];
+    P.embedded = true;
+    P.handlePayment = async () => { paid++; };
+    P.calculateTotals = async () => {};
+    P.showError = (m) => said.push(m);
+    for (const fee of [null, undefined, NaN, '7']) {
+        P.collect = async () => ({ address1: '1 Queen St', estimatedShipping: fee });
+        await P.payNow();
+    }
+    assert.equal(paid, 0, 'null / missing / NaN / a string fee all stop before Stripe');
+    assert.match(said[0], /Shipping is still being calculated/);
+    P.collect = async () => ({ address1: '1 Queen St', estimatedShipping: 0 });
+    await P.payNow();
+    assert.equal(paid, 1, 'a real $0 (free shipping) pays');
+});
+
 test('PayPal collects + validates the details before its popup opens', () => {
     const code = stripComments(PAY_SRC);
     assert.match(code, /onClick: async \(data, actions\) => \{\s*if \(self\.embedded && typeof self\.collect === 'function'\) \{\s*const d = await self\.collect\(\);\s*if \(!d\) return actions\.reject\(\);/);

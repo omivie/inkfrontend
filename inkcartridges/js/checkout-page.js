@@ -261,6 +261,21 @@
             this.updateShippingCost();
         },
 
+        /**
+         * The COUPON part of a server summary (ERR-316 follow-up). `summary.discount`
+         * is the AGGREGATE — coupon + loyalty + volume/b2b — and this page shows
+         * and subtracts loyalty and b2b on rows of their own, so storing the
+         * aggregate as `totals.discount` took those off TWICE: a volume-priced
+         * or points cart with a coupon showed a lower total than Stripe charges.
+         * The split is the shared computeDiscountBreakdown (cart.js), the one
+         * payment-page.js and the cart already use — a lookup, not new maths.
+         */
+        _couponPart(summary, data) {
+            if (!summary) return 0;
+            if (typeof computeDiscountBreakdown !== 'function') return 0;
+            return computeDiscountBreakdown(summary, summary.discount, data && data.volume_discount).other || 0;
+        },
+
         // SECURITY: Discount comes from backend only
         // Cart object stores server-validated discount amount
         calculateDiscount() {
@@ -1946,7 +1961,7 @@
                             const summary = cartRes?.data?.summary;
                             if (summary) {
                                 if (summary.subtotal != null) this.totals.subtotal = summary.subtotal;
-                                if (summary.discount != null) this.totals.discount = summary.discount;
+                                if (summary.discount != null) this.totals.discount = this._couponPart(summary, cartRes.data);
                                 else this.totals.discount = serverDiscount;
                                 this._adoptCartShipping(summary);
                             } else {
@@ -2015,7 +2030,7 @@
                         const summary = cartRes?.data?.summary;
                         const activeCoupon = cartRes?.data?.coupon?.code || null;
                         this.appliedCoupon = activeCoupon;
-                        this.totals.discount = activeCoupon && summary?.discount ? summary.discount : 0;
+                        this.totals.discount = activeCoupon && summary?.discount ? this._couponPart(summary, cartRes.data) : 0;
                         if (summary?.subtotal != null) this.totals.subtotal = summary.subtotal;
                         this._adoptCartShipping(summary);
 
@@ -2167,7 +2182,7 @@
                     self.appliedCoupon = data.coupon?.code || null;
                     if (summary) {
                         if (summary.subtotal != null) self.totals.subtotal = summary.subtotal;
-                        self.totals.discount = self.appliedCoupon ? (summary.coupon_discount != null ? summary.coupon_discount : (summary.discount || 0)) : 0;
+                        self.totals.discount = self.appliedCoupon ? (summary.coupon_discount != null ? summary.coupon_discount : self._couponPart(summary, data)) : 0;
                         self.totals.loyaltyDiscount = summary.loyalty_discount_amount || 0;
                         self._adoptCartShipping(summary);
                     }
@@ -2243,7 +2258,7 @@
 
             if (coupon && coupon.code) {
                 this.appliedCoupon = coupon.code;
-                this.totals.discount = coupon.discount_amount || summary?.discount || 0;
+                this.totals.discount = coupon.discount_amount || this._couponPart(summary, cartRes?.data);
                 if (typeof Cart !== 'undefined') {
                     Cart.appliedCoupon = coupon.code;
                     Cart.discountAmount = this.totals.discount;
