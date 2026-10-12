@@ -1412,10 +1412,10 @@ function openCreateProductModal(context = null) {
 
   const pricingHtml = `
     <div class="admin-form-row">
-      <div class="admin-form-group"><label>Retail Price (NZD)<span class="required-star">*</span></label><input class="admin-input" id="edit-retail-price" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="admin-form-group"><label>Retail Price (NZD, ${GST_INCL})<span class="required-star">*</span></label><input class="admin-input" id="edit-retail-price" type="number" step="0.01" placeholder="0.00"><p class="manual-price-override__hint">What the customer pays, GST included.</p></div>
       ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" placeholder="0.00">`)}
     </div>
-    ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" placeholder="0.00">`) : ''}
+    ${isOwner ? formGroup(`Supplier Price (${GST_EXCL})`, `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" placeholder="0.00"><p class="manual-price-override__hint">Enter the supplier's price before GST.</p>`) : ''}
   `;
 
   const inventoryHtml = `
@@ -1757,10 +1757,10 @@ function buildProductModalTabs(modal, full, isOwner) {
   // Pricing panel
   let pricingHtml = `
     <div class="admin-form-row">
-      ${formGroup('Retail Price', `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}">`, 'retail_price')}
+      ${formGroup(`Retail Price (${GST_INCL})`, `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}"><p class="manual-price-override__hint">What the customer pays, GST included.</p>`, 'retail_price')}
       ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_price ?? full.compare_at_price ?? ''}">`, 'compare_price')}
     </div>
-    ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`, 'cost_price') : ''}
+    ${isOwner ? formGroup(`Supplier Price (${GST_EXCL})`, `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}"><p class="manual-price-override__hint">Enter the supplier's price before GST.</p>`, 'cost_price') : ''}
     ${isOwner ? `
     <div class="admin-form-group manual-price-override">
       <label for="edit-manual-retail-price">Override price (exact)</label>

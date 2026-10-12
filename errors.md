@@ -41,6 +41,18 @@ describing the same incident.
 
 ---
 
+## ERR-325 — Admin product Pricing tab did not say which prices include GST (Supplier Price is excl. GST, Retail Price is incl. GST) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** The owner sent a screenshot of the admin product drawer, Pricing tab. They asked that Supplier Price show it is entered excl. GST, and Retail Price show it is incl. GST.
+
+**Cause.** Labels only. The data already has these bases: `cost_price` is ex-GST (`utils/profitability.js`, `components/product-search.js`, `utils/gst-basis.js`), `retail_price` is incl-GST. The drawer labels said "Retail Price" and "Supplier Price" with no basis.
+
+**Fix.** `js/admin/pages/products.js`, edit drawer and create form: labels read "Retail Price (incl. GST)" and "Supplier Price (excl. GST)" from the shared `GST_INCL`/`GST_EXCL` constants, with a one-line muted hint under each input. No value conversion and no payload change: converting would change what is saved. Compare Price stays unlabelled, its basis is not documented. `APP_VERSION` bumped and `app.js?v=` restamped (md5) so admins get the new page module.
+
+**Measured.** `tests/admin-*.test.js` + cache tests: 1784 pass, 0 fail. NOT checked in a signed-in browser (no admin creds in session).
+
+---
+
 ## ERR-324 — The favourite heart covered the value-pack card ribbon ("FULL-SET VALUE PA♡"), and the label did not say how many colours — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** The owner sent a screenshot of `/shop?brand=brother&category=ink&code=LC3313`. On every value-pack card, the top-right favourite heart covered the end of the top-left "FULL-SET VALUE PACK" ribbon. The owner asked for "three colour value pack" / "four colour value pack", and asked whether the burnt-amber fill (`#b45309`) invites a buy.
