@@ -1008,16 +1008,11 @@ const AccountPage = {
         if (!user) return;
 
         try {
-            // Use accountSync (creates profile if missing, fills empty fields from OAuth metadata)
-            const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;
-            const syncResult = await API.accountSync(turnstileToken);
-            // Same capture as auth.js. Doing it here too is not redundancy for its
-            // own sake: login-page.js navigates away on SIGNED_IN, which can kill
-            // auth.js's in-flight sync, so this is often the call that actually
-            // returns the retro block.
-            if (typeof Auth !== 'undefined' && Auth.captureRetroClaim) {
-                Auth.captureRetroClaim(syncResult);
-            }
+            // Not redundant with auth.js: login-page.js navigates away on
+            // SIGNED_IN, which can kill auth.js's in-flight sync, so this is
+            // often the call that returns the retro block. Auth.syncAccount
+            // skips once a sync has succeeded (ERR-322: 5/15min/IP limiter).
+            if (typeof Auth !== 'undefined' && Auth.syncAccount) await Auth.syncAccount();
         } catch (error) {
             // Non-critical - auth.js onAuthStateChange also calls accountSync
         }

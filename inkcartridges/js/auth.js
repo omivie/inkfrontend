@@ -208,12 +208,7 @@ const Auth = {
                     // CRITICAL: Sync account profile first (creates profile if first login)
                     if (typeof API !== 'undefined') {
                         try {
-                            const turnstileToken = await this.getTurnstileToken();
-                            const syncResult = await API.accountSync(turnstileToken);
-                            // A converting guest's prior orders are claimed and their
-                            // points awarded DURING this call. Stash the result so the
-                            // dashboard can tell them (see captureRetroClaim).
-                            this.captureRetroClaim(syncResult);
+                            const syncResult = await this.syncAccount();
                             if (syncResult && !syncResult.ok && syncResult.code === 'DISPOSABLE_EMAIL') {
                                 if (typeof showToast === 'function') {
                                     showToast('This email provider is not supported. Please use a permanent email address.', 'error', 0);
@@ -251,6 +246,7 @@ const Auth = {
                 }
 
                 // Handle sign out - notify favourites to reload from localStorage
+                if (event === 'SIGNED_OUT') this._clearSyncMarkers();
                 if (event === 'SIGNED_OUT' && typeof Favourites !== 'undefined' && Favourites.onAuthStateChange) {
                     Favourites.onAuthStateChange(false);
                 }
@@ -383,6 +379,68 @@ const Auth = {
             DebugLog.warn('takeRetroClaim failed:', e.message);
             return null;
         }
+    },
+
+    /**
+     * POST /api/account/sync at most once per user per SYNC_TTL_MS (ERR-322).
+     *
+     * supabase-js emits SIGNED_IN on every page load with a stored session AND
+     * on every tab refocus, and /account syncs again on load. The backend allows
+     * 5 syncs per 15 min per IP, so a shopper with a few tabs open hit 429 within
+     * minutes and every later sign-in event toasted "Account sync failed".
+     *
+     * The marker is written ONLY after an ok response, so a sync that never
+     * succeeded (first sign-in killed by login-page navigation, a real outage)
+     * is retried by the next caller. SIGNED_OUT clears it, so a real sign-in
+     * always syncs — that call creates the profile, awards welcome points and
+     * claims guest orders. A skip says so: `{ ok: true, skipped: true }`.
+     */
+    // ponytail: 12h TTL, so OAuth-metadata profile fill can lag 12h; drop TTL if that matters
+    SYNC_TTL_MS: 12 * 60 * 60 * 1000,
+    SYNC_MARKER_PREFIX: 'ic_account_synced:',
+    _syncInFlight: null,
+
+    async syncAccount() {
+        const userId = this.user?.id;
+        if (!userId || typeof API === 'undefined') return { ok: false, skipped: true, code: 'NO_USER' };
+        const key = this.SYNC_MARKER_PREFIX + userId;
+        const fresh = () => {
+            try {
+                const at = Number(localStorage.getItem(key));
+                return !!at && Date.now() - at < this.SYNC_TTL_MS;
+            } catch (e) { return false; /* storage blocked: sync every time, as before */ }
+        };
+        if (fresh()) return { ok: true, skipped: true };
+
+        if (this._syncInFlight) return this._syncInFlight;
+        // supabase-js broadcasts SIGNED_IN to EVERY open tab, so one sign-in
+        // with N tabs open fired N syncs at once. The Web Locks API serialises
+        // them across tabs; the marker re-check inside lets the losers skip.
+        const run = async () => {
+            if (fresh()) return { ok: true, skipped: true };
+            const turnstileToken = await this.getTurnstileToken();
+            const result = await API.accountSync(turnstileToken);
+            // A converting guest's prior orders are claimed and their points
+            // awarded DURING this call — stash it for the dashboard.
+            this.captureRetroClaim(result);
+            if (result && result.ok) {
+                try { localStorage.setItem(key, String(Date.now())); } catch (e) { /* ignore */ }
+            }
+            return result;
+        };
+        const locks = typeof navigator !== 'undefined' && navigator.locks;
+        this._syncInFlight = (locks ? locks.request('ic-account-sync', run) : run())
+            .finally(() => { this._syncInFlight = null; });
+        return this._syncInFlight;
+    },
+
+    _clearSyncMarkers() {
+        try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith(this.SYNC_MARKER_PREFIX)) localStorage.removeItem(k);
+            }
+        } catch (e) { /* ignore */ }
     },
 
     /**

@@ -202,7 +202,7 @@ test('onAuthStateChange does not branch on the OAuth provider', () => {
     assert.ok(listener.length > 0, 'could not locate onAuthStateChange listener');
     assert.doesNotMatch(listener, /provider\s*===\s*'(azure|google|microsoft)'/,
         'the post-login listener must stay provider-agnostic');
-    assert.match(listener, /API\.accountSync/,
+    assert.match(listener, /this\.syncAccount\(\)/,
         'expected the shared account-sync call in the listener');
 });
 

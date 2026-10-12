@@ -41,6 +41,31 @@ describing the same incident.
 
 ---
 
+## ERR-322 — "Account sync failed. Some features may not work." toast — sync limiter exhausted by repeat syncs — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** The owner, signed in as admin with 8+ site tabs open, saw the red toast "Account sync failed. Some features may not work." on a PDP.
+
+**Measured.**
+- The toast comes from the `catch` around `API.accountSync()` in `js/auth.js`. It fires only when the call throws.
+- `POST /api/account/sync` from the owner's IP (unauthenticated curl, which cannot write) returned `429 RATE_LIMITED`, "Too many account sync attempts". Headers: `ratelimit-policy: 5;w=900`, `ratelimit-remaining: 0`, `retry-after: 594`. CORS headers present.
+- `API._fetchWithAuth` throws on any non-GET 429, so the limiter reaches the catch and shows the toast.
+
+**Why the budget ran out.** Sync ran on every `SIGNED_IN` event and again on every `/account` load. supabase-js 2.98 broadcasts `SIGNED_IN` over a BroadcastChannel to every open tab, so one sign-in with N tabs open fired N syncs at once. The limiter is per IP, so probes and other devices on the same network share the same 5 calls.
+
+A first theory — that supabase emits `SIGNED_IN` on every page load and tab refocus — was checked against the 2.98 source and is wrong. Page load emits `INITIAL_SESSION`, which the listener does not sync on, and refocus emits `SIGNED_IN` only for a proxy user we never create.
+
+**Fix.** `Auth.syncAccount()` is the one owner of the call, and both `auth.js` and `account.js` route through it.
+- It writes a localStorage marker `ic_account_synced:<user id>` only after an ok response, and skips while the marker is under 12 h old. A skip returns `{ ok: true, skipped: true }`.
+- `navigator.locks` serialises the call across tabs, and the marker is re-checked inside the lock.
+- Concurrent callers in one tab share one request.
+- `SIGNED_OUT` clears the marker, so a real sign-in always syncs (profile create, welcome points, retro claim).
+
+**Not measured.** I did not count syncs in a signed-in browser, because there were no credentials in the session. A user whose sync has never succeeded and who is rate-limited still sees the toast. That is correct, because the sync really did fail.
+
+**Test.** `tests/account-sync-once-oct2026.test.js`. Negative control: with the lock removed, the cross-tab case makes 4 requests and the test fails.
+
+---
+
 ## ERR-321 — "Add does nothing": every toast on the site was invisible, and card buttons said "Added!" on a refused add — **RESOLVED (frontend); owner action outstanding** (2026-10-13)
 
 **Reported.** The owner, signed in as admin, clicked Add on `/shop?brand=brother&category=ink&code=LC23` and on the PDP. Nothing visible happened and the cart did not change. The header badge showed 1.

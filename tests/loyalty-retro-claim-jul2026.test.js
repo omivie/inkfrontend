@@ -328,8 +328,10 @@ test('renderRetroClaimBanner is a no-op when the markup is absent', () => {
 
 test('auth.js captures the retro block at the sync call site', () => {
     const src = JS('auth.js');
-    assert.match(src, /const syncResult = await API\.accountSync\(turnstileToken\);[\s\S]{0,400}?this\.captureRetroClaim\(syncResult\)/,
-        'captureRetroClaim must run on the response from the sync in onAuthStateChange');
+    // Since ERR-322 the one sync call lives in Auth.syncAccount(), which both
+    // onAuthStateChange and the dashboard route through.
+    assert.match(src, /const result = await API\.accountSync\(turnstileToken\);[\s\S]{0,400}?this\.captureRetroClaim\(result\)/,
+        'captureRetroClaim must run on the response from the shared sync');
 });
 
 test('account.js captures from ITS OWN sync too, and renders twice', () => {
@@ -338,9 +340,11 @@ test('account.js captures from ITS OWN sync too, and renders twice', () => {
     // own sync is often the call that actually returns the retro block, so the
     // capture is deliberately double-sited.
     const src = JS('account.js');
-    assert.match(src, /const syncResult = await API\.accountSync\(turnstileToken\)/,
-        'syncProfileToBackend must keep the response, not discard it');
-    assert.match(src, /Auth\.captureRetroClaim\(syncResult\)/);
+    // ERR-322: the dashboard's sync goes through Auth.syncAccount(), which
+    // captures the retro block itself and skips only after a SUCCESSFUL sync —
+    // so a sync killed by login-page navigation is still re-run here.
+    assert.match(src, /await Auth\.syncAccount\(\)/,
+        'syncProfileToBackend must run the shared sync');
     assert.match(src, /this\.renderRetroClaimBanner\(\);[\s\S]{0,400}?syncProfileToBackend\(\)[\s\S]{0,80}?renderRetroClaimBanner\(\)/,
         'loadDashboard must render once immediately and once after its own sync');
 });
