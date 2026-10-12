@@ -176,7 +176,9 @@ test('cart.html + checkout.html: loyalty control + summary row present', () => {
     }
     assert.match(HTML('html/cart.html'), /id="cart-loyalty-row"/, 'cart summary loyalty row');
     assert.match(HTML('html/checkout.html'), /id="checkout-loyalty-row"/, 'checkout summary loyalty row');
-    assert.match(HTML('html/payment.html'), /id="checkout-loyalty-row"/, 'payment summary loyalty row');
+    // /payment folded into /checkout (ERR-316 phase 3): ONE summary, and the
+    // payment code does not paint it there (PaymentPage.embedded).
+    assert.doesNotMatch(HTML('html/payment.html'), /id="checkout-loyalty-row"/, '/payment is a redirect now');
     assert.doesNotMatch(HTML('html/cart.html'), /cart-stamp-card-chip/, 'old stamp chip id gone from cart');
 });
 

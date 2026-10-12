@@ -34,7 +34,7 @@ MUTATIONS = [
  (P, "                waiters.forEach((resolve) => resolve(this.turnstileToken));", ""),
  ('inkcartridges/css/pages.css', '    .cart-sticky-bar { display: block; }\n    .cart-sticky-bar__inner', '    .cart-sticky-bar { display: none; }\n    .cart-sticky-bar__inner'),
  # §8.4 ticks
- ('inkcartridges/html/payment.html', '<p class="pay-terms" id="pay-terms"', '<p class="pay-terms" id="pay-terms-x"'),
+ ('inkcartridges/html/checkout.html', '<p class="pay-terms" id="pay-terms"', '<p class="pay-terms" id="pay-terms-x"'),
  # §8.5
  (P, "            if (label && label.toLowerCase() !== city.toLowerCase()) parts.push(label);", "            if (slug) parts.push(slug);"),
  ('inkcartridges/js/api.js', 'async nzpostSuggest(query, max = 8)', 'async nzpostSuggest(query, max = 5)'),

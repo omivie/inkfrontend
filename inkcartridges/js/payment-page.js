@@ -41,6 +41,20 @@
         turnstileToken: null,
         turnstileWidgetId: undefined,
 
+        // ── One-page checkout (ERR-316 phase 3, owner 2026-10-12) ─────────────
+        // /checkout now carries the payment section under the details form and
+        // drives this object through attach(); /payment only redirects there.
+        // `embedded`: /checkout's CheckoutPage owns the order-summary DOM, so
+        //   calculateTotals() computes this.totals and syncs Stripe's amount but
+        //   paints nothing except the Pay button.
+        // `detailsStale`: the shopper edited a detail AFTER Continue. The order
+        //   payload is built from this.checkoutData, so every pay path refuses
+        //   until Continue runs again — never charge against an old address.
+        embedded: false,
+        _attached: false,
+        detailsStale: false,
+        _refreshTimer: null,
+
 
         // Idempotency key — deterministic SHA-256 hash including payment method
         async getIdempotencyKey(paymentMethod) {
@@ -113,6 +127,67 @@
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackPaymentStarted();
             }
+        },
+
+        /**
+         * Hand the validated details to the payment section on /checkout.
+         * First call mounts Stripe, Turnstile and PayPal (once); later calls (the
+         * shopper changed a detail and pressed Continue again) only swap in the
+         * new details and re-read the server total. Never reads sessionStorage:
+         * the caller passes the same object it just stored there.
+         */
+        async attach(checkoutData) {
+            this.embedded = true;
+            this.checkoutData = checkoutData;
+            this.detailsStale = false;
+            this._paintStale();
+            if (this._attached) {
+                await this.calculateTotals();
+                return;
+            }
+            this._attached = true;
+            this.initWalletDiag();
+            this.cartItems = (typeof Cart !== 'undefined' && Array.isArray(Cart.items)) ? Cart.items : [];
+            await this.calculateTotals();
+            this.initStripe();
+            this.initTurnstile();
+            this.initPayPalButton();
+            this.setupEventHandlers();
+            this.renderPayReassurance();
+            if (typeof CartAnalytics !== 'undefined') {
+                CartAnalytics.trackPaymentStarted();
+            }
+        },
+
+        /** A detail changed after Continue: refuse every pay path until Continue again. */
+        markStale() {
+            if (!this._attached || this.detailsStale) return;
+            this.detailsStale = true;
+            this._paintStale();
+        },
+
+        _paintStale() {
+            const note = document.getElementById('payment-stale-note');
+            if (note) note.hidden = !this.detailsStale;
+            const section = document.getElementById('checkout-payment');
+            if (section) section.dataset.state = this.detailsStale ? 'stale' : (this._attached || this.checkoutData ? 'ready' : 'waiting');
+        },
+
+        /** Said wherever a pay path refuses because the details moved. */
+        _refuseStale() {
+            const note = document.getElementById('payment-stale-note');
+            if (note) {
+                note.hidden = false;
+                note.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            showToast('You changed your details. Press "Update details" above, then pay.', 'error', 6000);
+        },
+
+        /** Coupon / points changed in the summary: re-read the server total, debounced. */
+        refreshTotalsSoon() {
+            if (!this._attached) return;
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = setTimeout(() => { this.calculateTotals(); }, 500);
         },
 
         /**
@@ -244,6 +319,7 @@
          * Render order summary items
          */
         renderOrderSummary() {
+            if (this.embedded) return; // CheckoutPage paints #checkout-items on /checkout
             const container = document.getElementById('checkout-items');
             if (!container) return;
 
@@ -291,11 +367,15 @@
          * Uses GET /api/cart which returns validated totals from backend
          */
         async calculateTotals() {
+            // Embedded on /checkout, CheckoutPage owns the summary rows; this
+            // only computes this.totals, the Pay label and Stripe's amount.
+            const el = (id) => (this.embedded ? null : document.getElementById(id));
+            const setText = (id, text) => { const n = el(id); if (n) n.textContent = text; };
             try {
                 // Show loading state
-                document.getElementById('checkout-subtotal').textContent = 'Loading...';
-                document.getElementById('checkout-shipping').textContent = 'Loading...';
-                document.getElementById('checkout-total').textContent = 'Loading...';
+                setText('checkout-subtotal', 'Loading...');
+                setText('checkout-shipping', 'Loading...');
+                setText('checkout-total', 'Loading...');
                 document.getElementById('pay-button-text').textContent = 'Loading...';
 
                 // Get cart with validated totals from backend
@@ -362,8 +442,8 @@
                 }
 
                 // Update display with backend values
-                document.getElementById('checkout-subtotal').textContent = `$${this.totals.subtotal.toFixed(2)}`;
-                document.getElementById('checkout-shipping').textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
+                setText('checkout-subtotal', `$${this.totals.subtotal.toFixed(2)}`);
+                setText('checkout-shipping', this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`);
 
                 // Loyalty and business-account discounts each show on their own
                 // row; both are netted out of the generic discount line so they
@@ -384,8 +464,8 @@
                 this.totals.b2bDiscount = b2bDiscount;
 
                 // Show discount if present
-                const discountRow = document.getElementById('checkout-discount-row');
-                const discountEl = document.getElementById('checkout-discount');
+                const discountRow = el('checkout-discount-row');
+                const discountEl = el('checkout-discount');
                 if (discountRow && discountEl) {
                     if (otherDiscount > 0) {
                         discountRow.hidden = false;
@@ -396,8 +476,8 @@
                 }
 
                 // Show loyalty points discount if present
-                const loyaltyRow = document.getElementById('checkout-loyalty-row');
-                const loyaltyEl = document.getElementById('checkout-loyalty-discount');
+                const loyaltyRow = el('checkout-loyalty-row');
+                const loyaltyEl = el('checkout-loyalty-discount');
                 if (loyaltyRow && loyaltyEl) {
                     if (loyaltyDiscount > 0) {
                         loyaltyRow.hidden = false;
@@ -409,20 +489,20 @@
 
                 // Business-account (B2B) discount — already floored per line by
                 // the backend. Rendered verbatim; never recomputed from the tier %.
-                const b2bRow = document.getElementById('checkout-b2b-row');
-                const b2bEl = document.getElementById('checkout-b2b-discount');
+                const b2bRow = el('checkout-b2b-row');
+                const b2bEl = el('checkout-b2b-discount');
                 if (b2bRow && b2bEl) {
                     if (b2bDiscount > 0) {
                         b2bRow.hidden = false;
                         b2bEl.textContent = `-$${b2bDiscount.toFixed(2)}`;
-                        const label = document.getElementById('checkout-b2b-label');
+                        const label = el('checkout-b2b-label');
                         if (label) label.textContent = businessDiscountLabel(breakdown.b2bMeta);
                     } else {
                         b2bRow.hidden = true;
                     }
                 }
 
-                document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
+                setText('checkout-total', `$${this.totals.total.toFixed(2)} NZD`);
                 document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
 
                 // Update Elements amount if already initialized. Keep BOTH the card
@@ -923,6 +1003,7 @@
          */
         async handlePayment() {
             if (this.isSubmitting) return;
+            if (this.detailsStale) { this._refuseStale(); return; }
 
             if (!this.paymentElementReady) {
                 showToast('Please complete your payment details.', 'error');
@@ -1502,7 +1583,28 @@
                 <a href="/checkout#email" class="card-errors__change-email" id="change-email-link">Change email</a>
             `;
             errorEl.dataset.error = 'email-rejected';
+            // One page: the email field is above, so a hash link would only
+            // scroll the URL. Open its section and put the caret in it.
+            const link = this.embedded ? document.getElementById('change-email-link') : null;
+            if (link) {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    PaymentPage.focusEmail();
+                });
+            }
             errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        },
+
+        /** Open the Contact section if collapsed and focus #email (one-page checkout). */
+        focusEmail() {
+            const email = document.getElementById('email');
+            if (!email) return;
+            const section = email.closest('.checkout-section');
+            const edit = section && section.classList.contains('is-collapsed')
+                ? section.querySelector('.checkout-section__edit-btn') : null;
+            if (edit) edit.click();
+            email.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            email.focus();
         },
 
         showEmailVerificationRequired() {
@@ -1636,6 +1738,17 @@
                     shape: 'rect',
                     label: 'paypal',
                     height: 48
+                },
+
+                // One-page checkout: a detail edited after Continue would
+                // otherwise ship to the OLD address (createOrder reads
+                // self.checkoutData). Refuse before the popup opens.
+                onClick: (data, actions) => {
+                    if (self.detailsStale) {
+                        self._refuseStale();
+                        return actions.reject();
+                    }
+                    return actions.resolve();
                 },
 
                 createOrder: async () => {
@@ -1825,6 +1938,10 @@
     // createStripeOrder; init() there would bounce the shopper to /checkout.
     document.addEventListener('DOMContentLoaded', () => {
         if (!document.getElementById('payment-form')) return;
+        // /checkout carries #payment-form too (one-page checkout, ERR-316
+        // phase 3) and drives PaymentPage.attach() itself; init() there would
+        // read no sessionStorage and bounce the shopper to /checkout forever.
+        if (document.getElementById('checkout-form')) return;
         if (typeof Auth !== 'undefined') {
             let initialized = false;
             const checkAuth = setInterval(() => {

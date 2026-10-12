@@ -140,15 +140,15 @@ const run = async () => {
   console.log('\x1b[1m§1 — the DEPLOYED header permits Stripe and Link\x1b[0m');
   let csp = '';
   try {
-    const res = await fetch(`${SITE}/payment`, { redirect: 'follow' });
+    const res = await fetch(`${SITE}/checkout`, { redirect: 'follow' }) /* one-page checkout: payment lives on /checkout (ERR-316) */;
     csp = res.headers.get('content-security-policy') || '';
     if (!csp) {
-      bad('no CSP header on /payment',
+      bad('no CSP header on /checkout',
         'the page is served with no Content-Security-Policy at all — either the header '
         + 'config was dropped, or this is not the production host. Check www, never the '
         + 'apex: the apex 307s before headers apply.');
     } else {
-      ok(`/payment answers ${res.status} with a CSP header`);
+      ok(`/checkout answers ${res.status} with a CSP header`);
       const d = directives(csp);
       for (const [dir, src, cost] of REQUIRED) {
         if ((d[dir] || []).includes(src)) ok(`${dir} allows ${src}`);
@@ -162,7 +162,7 @@ const run = async () => {
       }
     }
   } catch (e) {
-    cannotRun(`${SITE}/payment unreachable: ${e.message}`);
+    cannotRun(`${SITE}/checkout unreachable: ${e.message}`);
   }
 
   // ── §2 ────────────────────────────────────────────────────────────────────
@@ -384,7 +384,7 @@ const run = async () => {
     'Apple Pay on the web is a Safari/WebKit API gated on a real device with a card in '
     + 'Wallet. Chromium reports it false however correct the site is, so a green run above '
     + 'is NOT evidence Apple Pay works. A skip is not a pass.\n'
-    + `      Settle it by hand: open ${SITE}/payment?wallet-debug=1 in Safari on a Mac with\n`
+    + `      Settle it by hand: open ${SITE}/checkout?wallet-debug=1 in Safari on a Mac with\n`
     + '      Touch ID, or on an iPhone, with a real cart through to step 3. The console prints\n'
     + '        [wallets] ready: applePay, link        -> working\n'
     + '        [wallets] ready, but NO eligible wallet -> the device reported nothing\n'

@@ -484,21 +484,27 @@ test('§7 DebugLog is left exactly as it was', () => {
 // §8 — the change actually reaches a browser
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§8 payment.html serves the payment-page.js we just edited', () => {
-  const m = /payment-page\.js\?v=([0-9a-f]{8})"/.exec(PAY_HTML);
-  assert.ok(m, 'payment.html must reference /js/payment-page.js with an 8-hex ?v= token');
+// One-page checkout (ERR-316 phase 3): payment-page.js runs on /checkout now;
+// payment.html is a redirect and loads no payment code at all.
+const CHECKOUT_HTML = fs.readFileSync(path.join(ROOT, 'inkcartridges/html/checkout.html'), 'utf8');
+
+test('§8 checkout.html serves the payment-page.js we just edited', () => {
+  assert.doesNotMatch(PAY_HTML, /payment-page\.js/, 'the /payment redirect loads no payment code');
+  const m = /payment-page\.js\?v=([0-9a-f]{8})"/.exec(CHECKOUT_HTML);
+  assert.ok(m, 'checkout.html must reference /js/payment-page.js with an 8-hex ?v= token');
   const expected = crypto.createHash('md5').update(fs.readFileSync(
     path.join(ROOT, 'inkcartridges/js/payment-page.js'))).digest('hex').slice(0, 8);
   assert.strictEqual(m[1], expected,
-    `The cache token is stale: payment.html says ?v=${m[1]}, the file hashes to ` +
+    `The cache token is stale: checkout.html says ?v=${m[1]}, the file hashes to ` +
     `${expected}. Returning shoppers would keep the OLD payment-page.js out of cache ` +
     'and none of this would reach them. This is the same md5 that ' +
     'inkcartridges/scripts/stamp-versions.js computes at build time.');
 });
 
 test('§8 [CONTROL] the express checkout markup is still there to mount into', () => {
-  assert.match(PAY_HTML, /id="express-checkout-wrapper"/);
-  assert.match(PAY_HTML, /id="express-checkout-element"/);
-  assert.ok(PAY_HTML.indexOf('express-checkout-wrapper') < PAY_HTML.indexOf('id="payment-element"'),
+  // The wallet row on /checkout is the cart's module (#cart-wallet-element),
+  // at the TOP of the page — above the details AND the card form.
+  assert.match(CHECKOUT_HTML, /id="cart-wallet-element"/);
+  assert.ok(CHECKOUT_HTML.indexOf('id="cart-wallet-element"') < CHECKOUT_HTML.indexOf('id="payment-element"'),
     'the wallet row must stay above the card form');
 });

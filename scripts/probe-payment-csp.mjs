@@ -85,14 +85,14 @@ const run = async () => {
     console.log('\x1b[1m§1 — the DEPLOYED header still permits PayPal\x1b[0m');
     let csp = '';
     try {
-        const res = await fetch(`${SITE}/payment`, { redirect: 'follow' });
+        const res = await fetch(`${SITE}/checkout`, { redirect: 'follow' }) /* one-page checkout: payment lives on /checkout (ERR-316) */;
         csp = res.headers.get('content-security-policy') || '';
         if (!csp) {
-            bad('no CSP header on /payment',
+            bad('no CSP header on /checkout',
                 'the page is being served without a Content-Security-Policy at all — either the '
                 + 'header config was dropped or this is not the production host.');
         } else {
-            ok(`/payment answers ${res.status} with a CSP header`);
+            ok(`/checkout answers ${res.status} with a CSP header`);
             const script = csp.split(';').map(s => s.trim()).find(s => s.startsWith('script-src '));
             if (!script) {
                 bad('no script-src directive', 'the CSP exists but does not constrain scripts');
@@ -116,7 +116,7 @@ const run = async () => {
             }
         }
     } catch (e) {
-        cannotRun(`${SITE}/payment unreachable: ${e.message}`);
+        cannotRun(`${SITE}/checkout unreachable: ${e.message}`);
     }
 
     // ── §2 ────────────────────────────────────────────────────────────────

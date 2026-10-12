@@ -29,7 +29,11 @@
     <link rel="stylesheet" href="/css/pages.css?v=454c6911">
     <link rel="stylesheet" href="/css/search.css?v=899b74a6">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=77cba239">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=34f10d85">
+
+    <script defer src="https://js.stripe.com/v3/"></script>
+    <script defer src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD&disable-funding=card"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Checkout | InkCartridges.co.nz">
     <meta name="twitter:description" content="Secure checkout - InkCartridges.co.nz">
@@ -95,6 +99,21 @@
                             <div class="loading-spinner"></div>
                             <p>Loading checkout...</p>
                         </div>
+
+                        <!-- Express checkout (ERR-316 phase 3): the cart's own Apple Pay /
+                             Google Pay module (js/cart-wallet.js, same ids — one per page).
+                             The wallet sheet collects the address itself, so it works
+                             before the form below is filled. Hidden when the device has
+                             no wallet; ?wallet-debug=1 shows why. -->
+                        <section class="checkout-express" aria-label="Express checkout">
+                            <div class="cart-wallet" id="cart-wallet" data-testid="cart-wallet" data-wallet="loading">
+                                <p class="checkout-express__title">Express checkout</p>
+                                <div id="cart-wallet-element"></div>
+                                <p class="cart-wallet__status" id="cart-wallet-status" role="status" aria-live="polite" hidden></p>
+                                <div id="cart-wallet-turnstile" class="cart-wallet__turnstile" hidden></div>
+                                <p class="checkout-express__or"><span>OR</span></p>
+                            </div>
+                        </section>
 
                         <form class="checkout-form checkout-form--loading" id="checkout-form" novalidate>
 
@@ -370,6 +389,88 @@
                             </div>
 
                         </form>
+
+                        <!-- ONE-PAGE CHECKOUT (ERR-316 phase 3, owner 2026-10-12): the payment
+                             step lives here, under the details, like smartink/Shopify. /payment
+                             only redirects to /checkout now. #payment-form sits OUTSIDE
+                             #checkout-form because forms cannot nest. -->
+                        <section class="checkout-payment is-waiting" id="checkout-payment" data-state="waiting" aria-labelledby="payment-heading">
+                            <form id="payment-form" novalidate>
+                                <div class="payment-section">
+                                    <div class="payment-section__header">
+                                        <div class="payment-section__icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                                        </div>
+                                        <div>
+                                            <h2 class="payment-section__title" id="payment-heading">Payment</h2>
+                                            <p class="payment-section__subtitle">All transactions are secure and encrypted.</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="payment-section__body">
+                                        <!-- Main column: Stripe + pay button -->
+                                        <div class="payment-col-main">
+                                            <!-- Waiting state: the card form mounts only after the details
+                                                 above validate (PaymentPage.attach), so Link's email prefill
+                                                 is always the email the shopper just typed. -->
+                                            <p class="checkout-payment__pending" id="payment-pending">Enter your contact and delivery details above, then press <strong>Continue to payment</strong>.</p>
+                                            <!-- A detail edited AFTER Continue: every pay path refuses until
+                                                 Continue runs again (PaymentPage.detailsStale). -->
+                                            <p class="checkout-payment__stale" id="payment-stale-note" role="status" hidden>You changed your details. Press <strong>Update details</strong> above before paying.</p>
+                                            <div class="payment-element-wrapper">
+                                                <div id="payment-element">
+                                                </div>
+                                                <div id="card-errors" role="alert"></div>
+                                            </div>
+
+                                            <!-- Turnstile widget (guest checkouts only). Invisible unless Cloudflare
+                                                 needs an interaction (appearance: interaction-only). Pay is NOT disabled
+                                                 while it runs: a Pay press waits for the token behind a spinner
+                                                 (ERR-305, §8.1). -->
+                                            <div id="turnstile-container" style="display:none; margin-bottom: 0.75rem;">
+                                                <div id="turnstile-widget"></div>
+                                            </div>
+
+                                            <button type="submit" id="pay-now-btn" class="pay-button" disabled>
+                                                <svg class="pay-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                                <span id="pay-button-text">Pay Now</span>
+                                            </button>
+
+                                            <!-- Replaces the "I agree to the Terms" tick box on /checkout (ERR-305,
+                                                 §8.4; owner decision 2026-10-05). -->
+                                            <p class="pay-terms" id="pay-terms" data-testid="pay-terms">By placing this order you agree to our <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+
+                                            <!-- Next to the Pay button (conversion handoff 2026-09-27
+                                                 §8.3/§8.2): the surcharge note from
+                                                 /api/site/trust organization.pricing_footer_note, and
+                                                 the phone number printed in full with the founding year.
+                                                 Filled by payment-page.js renderPayReassurance(); each
+                                                 piece hides when its source is absent. -->
+                                            <p class="pay-reassurance" id="pay-reassurance" data-testid="pay-reassurance" hidden></p>
+
+                                            <div class="secure-badge">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                                                <span>Your payment is protected with 256-bit SSL encryption</span>
+                                            </div>
+
+                                            <div class="powered-by">
+                                                <span>Powered by</span>
+                                                <svg viewBox="0 0 60 25" xmlns="http://www.w3.org/2000/svg" width="60" height="25">
+                                                    <path fill="#635bff" d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.02 1.04-.06 1.48zm-3.67-3.14c0-1.07-.37-2.87-2.22-2.87-1.61 0-2.32 1.64-2.42 2.87h4.64zM40.95 20.3V5.57l4.09-.86v15.58h-4.09zm0-17.87l4.09-.86v3.48l-4.09.86V2.43zm-5.43 8.02c0-1.99-.56-2.87-2.01-2.87-.79 0-1.63.4-2.33.97v11.75h-4.08V9.27c0-2.09-.08-3.48-.16-4.87h3.57l.24 1.55c1.11-.99 2.56-1.8 4.35-1.8 3.52 0 4.5 2.5 4.5 5.95v10.2h-4.08v-9.85zm-15.35 2.08c-1.54-.36-2.32-1.03-2.32-2.03 0-1.15.95-1.87 2.34-1.87.96 0 2.05.28 3.28.89l1.27-3.08a9.49 9.49 0 0 0-4.47-1.15c-3.52 0-6.09 1.98-6.09 5.23 0 2.43 1.55 4.07 4.23 4.79 1.74.44 2.39 1.03 2.39 2.03 0 1.15-.95 1.87-2.71 1.87-1.43 0-3.05-.5-4.29-1.27l-1.34 3.16a10.8 10.8 0 0 0 5.55 1.48c4.01 0 6.5-2.14 6.5-5.47 0-2.63-1.7-4.15-4.34-4.58zM7.65 11.65c0-1.87.73-3.01 2.49-3.01.51 0 .95.08 1.53.24l.72-3.76a6.02 6.02 0 0 0-1.89-.32C7.3 4.8 4.2 7.38 4.2 12.52c0 2.46.56 4.46 1.53 6.06l3.25-.4c-1-.89-1.33-3.39-1.33-6.53z"/>
+                                                </svg>
+                                            </div>
+                                        </div>
+
+                                        <!-- Alt column: PayPal -->
+                                        <div class="payment-col-alt">
+                                            <span class="payment-col-alt__label">or pay with</span>
+                                            <div id="paypal-button-container"></div>
+                                            <p class="payment-col-alt__sublabel">Pay securely with your PayPal account</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </section>
                     </div>
 
                     <div class="checkout-sidebar">
@@ -536,9 +637,11 @@
     <script defer src="/js/footer.js?v=dc59c4f6"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/checkout-page.js?v=1885302a"></script>
+    <script defer src="/js/payment-page.js?v=3a19ef55"></script>
+    <script defer src="/js/checkout-page.js?v=5abbe24a"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
     <script defer src="/js/cart-quote-pdf.js?v=fdaaa627"></script>
+    <script defer src="/js/cart-wallet.js?v=42a35402"></script>
 
     <style>
     .animate-spin {

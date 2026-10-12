@@ -36,7 +36,6 @@ const ROOT = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const PAY_JS = read('inkcartridges/js/payment-page.js');
-const PAY_HTML = read('inkcartridges/html/payment.html');
 const VERCEL = read('inkcartridges/vercel.json');
 
 // Slice of JUST the initExpressCheckout METHOD (not its call site in initStripe),
@@ -48,20 +47,29 @@ const ECE = PAY_JS.slice(eceStart, PAY_JS.indexOf('// Note: PayPal uses a separa
 // E1 — markup: ECE mounts above the card form with a divider
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('E1 payment.html has the ECE wrapper/element/divider ABOVE #payment-element', () => {
-    assert.match(PAY_HTML, /id="express-checkout-wrapper"/, 'missing #express-checkout-wrapper');
-    assert.match(PAY_HTML, /id="express-checkout-element"/, 'missing #express-checkout-element mount');
-    assert.match(PAY_HTML, /class="express-divider"[^>]*>\s*<span>or pay with card<\/span>/,
-        'missing the "or pay with card" divider');
-
-    const eceIdx = PAY_HTML.indexOf('id="express-checkout-element"');
-    const cardIdx = PAY_HTML.indexOf('id="payment-element"');
-    assert.ok(eceIdx > -1 && cardIdx > -1 && eceIdx < cardIdx,
-        'the Express Checkout element must appear ABOVE the card Payment Element');
+// ONE-PAGE CHECKOUT (ERR-316 phase 3, owner 2026-10-12): the card form moved
+// from /payment to the bottom of /checkout, and the wallet row moved to the
+// TOP of /checkout as the cart's own module (js/cart-wallet.js), whose sheet
+// collects the address itself. PaymentPage's own ECE mounts only where
+// #express-checkout-wrapper exists — /checkout has none, on purpose: two
+// wallet rows on one page, one of them before the address is known, is the
+// thing the move avoids. initExpressCheckout's 'no-wrapper' branch is that path.
+test('E1 /checkout: the express wallet row sits ABOVE the details form and the card Payment Element', () => {
+    const CHECKOUT = read('inkcartridges/html/checkout.html');
+    const wallet = CHECKOUT.indexOf('id="cart-wallet-element"');
+    const form = CHECKOUT.indexOf('id="checkout-form"');
+    const card = CHECKOUT.indexOf('id="payment-element"');
+    assert.ok(wallet > -1 && form > -1 && card > -1, 'wallet mount, details form and card mount all present');
+    assert.ok(wallet < form && form < card, 'express first, then the details, then the card form');
+    assert.match(CHECKOUT, /class="checkout-express__or"><span>OR<\/span>/, 'the OR divider under the wallet row');
+    assert.doesNotMatch(CHECKOUT, /id="express-checkout-wrapper"/, 'no second wallet row on the same page');
+    assert.match(CHECKOUT, /\/js\/cart-wallet\.js\?v=/, 'the wallet module loads on /checkout');
+    assert.match(ECE, /diag\.eceStatus = 'no-wrapper'/, 'PaymentPage\'s own ECE stands down without its wrapper');
 });
 
-test('E1b payment.html styles the express divider (::before/::after 1px rules)', () => {
-    assert.match(PAY_HTML, /\.express-divider::before,\s*\n\s*\.express-divider::after/,
+test('E1b the express OR divider is styled (::before/::after 1px rules)', () => {
+    const CSS = read('inkcartridges/css/cart-checkout.css');
+    assert.match(CSS, /\.checkout-express__or::before,\s*\n\s*\.checkout-express__or::after \{[^}]*border-top: 1px solid/,
         'express divider ::before/::after rules missing');
 });
 
@@ -185,7 +193,8 @@ test('E8b CSP frame-src allows pay.google.com for the Google Pay sheet', () => {
     assert.match(frameSrc[1], /https:\/\/pay\.google\.com/, 'Google Pay needs pay.google.com in frame-src');
 });
 
-test('E8c payment.html references payment-page.js with an 8-hex cache token', () => {
-    assert.match(PAY_HTML, /\/js\/payment-page\.js\?v=[0-9a-f]{8}/,
+test('E8c checkout.html references payment-page.js with an 8-hex cache token', () => {
+    // One-page checkout: /checkout is where payment-page.js runs now.
+    assert.match(read('inkcartridges/html/checkout.html'), /\/js\/payment-page\.js\?v=[0-9a-f]{8}/,
         'payment-page.js must carry a build-stamped ?v= token (bump via npm run build)');
 });

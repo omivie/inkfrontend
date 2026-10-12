@@ -805,6 +805,9 @@
         },
 
         updateTotalsDisplay() {
+            // One-page checkout: a coupon / points / shipping change re-reads the
+            // server total the payment section charges (debounced in PaymentPage).
+            if (typeof PaymentPage !== 'undefined' && PaymentPage._attached) PaymentPage.refreshTotalsSoon();
             const subtotalEl = document.getElementById('checkout-subtotal');
             const shippingEl = document.getElementById('checkout-shipping');
             const discountRow = document.getElementById('checkout-discount-row');
@@ -2942,10 +2945,14 @@
 
                 // Save to sessionStorage
                 sessionStorage.setItem('checkoutData', JSON.stringify(checkoutData));
-                DebugLog.log('Checkout data saved, redirecting to payment page');
+                DebugLog.log('Checkout data saved, opening the payment section');
 
-                // Redirect to payment page
-                window.location.href = '/payment';
+                // ONE PAGE (ERR-316 phase 3, owner 2026-10-12): payment lives
+                // under the details on /checkout; /payment only redirects here.
+                await this._openPayment(checkoutData);
+                continueBtn.disabled = false;
+                continueBtn.innerHTML = this._updateDetailsLabel();
+                this.isSubmitting = false;
 
             } catch (error) {
                 DebugLog.error('Error saving checkout data:', error);
@@ -2955,6 +2962,39 @@
                 continueBtn.innerHTML = originalBtnText;
                 this.isSubmitting = false;
             }
+        },
+
+        _updateDetailsLabel() {
+            return 'Update details';
+        },
+
+        /**
+         * Hand the validated details to the payment section below the form
+         * (PaymentPage.attach), and from then on mark them stale on any edit so
+         * no pay path can charge against an old address. The section shows a
+         * waiting state until this runs.
+         */
+        async _openPayment(checkoutData) {
+            const section = document.getElementById('checkout-payment');
+            if (typeof PaymentPage === 'undefined' || !section) {
+                // Payment section missing (an old cached page): the two-page flow still works.
+                window.location.href = '/payment';
+                return;
+            }
+            if (!this._staleBound) {
+                this._staleBound = true;
+                const form = document.getElementById('checkout-form');
+                const stale = () => PaymentPage.markStale();
+                if (form) {
+                    form.addEventListener('input', stale);
+                    form.addEventListener('change', stale);
+                }
+            }
+            const pending = document.getElementById('payment-pending');
+            if (pending) pending.hidden = true;
+            section.classList.remove('is-waiting');
+            await PaymentPage.attach(checkoutData);
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         },
 
         // Check auth and prefill form

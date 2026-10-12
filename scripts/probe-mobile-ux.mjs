@@ -133,7 +133,7 @@ const ROUTES = [
     // Seeded THROUGH THE REAL UI (never by writing storage), same as the fold probe.
     { path: '/cart', name: 'cart', needsCart: true },
     { path: '/checkout', name: 'checkout', ready: '#checkout-form', needsCart: true },
-    { path: '/payment', name: 'payment', needsCart: true },
+    // /payment folded into /checkout (ERR-316 phase 3); it only redirects now.
     { path: '/quote', name: 'quote' },
     { path: '/business', name: 'business' },
     { path: '/contact', name: 'contact' },

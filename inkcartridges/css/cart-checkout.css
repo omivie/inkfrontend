@@ -131,7 +131,6 @@ section.checkout-page .cart-page__title {
         border-radius: 0;
         box-shadow: none;
         padding: var(--spacing-xl) var(--spacing-lg);
-        min-height: calc(100vh - 2 * var(--spacing-lg));
     }
 }
 
@@ -286,3 +285,332 @@ section.checkout-page .payment-col-alt {
     padding-top: 1rem;
     border-top: 1px solid var(--steel-200);
 }
+
+
+/* ── ONE-PAGE CHECKOUT (ERR-316 phase 3) ────────────────────────────────────
+   Payment moved from /payment into /checkout. First, payment.html's own
+   inline rules, carried over verbatim (their variables are scoped to the
+   section so they cannot leak into the rest of the page). */
+#checkout-payment {
+            --cyan: #267FB5;
+            --cyan-dark: #1a5a8a;
+            --cyan-light: #3a9fd5;
+            --magenta: #C71F6E;
+            --magenta-dark: #a01858;
+            --yellow: #F4C430;
+            --dark: #0d1b2a;
+            --dark-light: #1b2d45;
+            --gray-50: #f8fafc;
+            --gray-100: #f1f5f9;
+            --gray-200: #e2e8f0;
+            --gray-300: #cbd5e1;
+            --gray-400: #94a3b8;
+            --gray-500: #64748b;
+            --gray-600: #475569;
+            --gray-700: #334155;
+            --gray-800: #1e293b;
+            --gray-900: #0f172a;
+            --success: #10b981;
+            --error: #ef4444;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+.payment-section {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+}
+
+.payment-section__header {
+            background: linear-gradient(135deg, var(--dark) 0%, var(--dark-light) 100%);
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+}
+
+.payment-section__icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--cyan-light);
+}
+
+.payment-section__title {
+            color: white;
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin: 0;
+}
+
+.payment-section__subtitle {
+            color: var(--gray-400);
+            font-size: 0.8125rem;
+            margin: 0.25rem 0 0;
+}
+
+.payment-section__body {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1.5rem;
+            align-items: start;
+            padding: 1.25rem;
+}
+
+.payment-col-main {
+            min-width: 0;
+}
+
+.payment-col-alt {
+            width: 190px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+            padding-left: 1.5rem;
+            border-left: 1px solid var(--gray-200);
+            align-self: center;
+}
+
+.payment-col-alt__label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--gray-400);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+}
+
+.payment-col-alt__sublabel {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            text-align: center;
+}
+
+#express-checkout-wrapper {
+            margin-bottom: 1rem;
+}
+
+.express-divider {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 0.75rem 0 0;
+            color: var(--gray-500);
+            font-size: 0.8125rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+}
+
+.express-divider::before,
+        .express-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--gray-200);
+}
+
+.payment-element-wrapper {
+            margin-bottom: 1rem;
+}
+
+#card-errors {
+            color: var(--error);
+            font-size: 0.8125rem;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+}
+
+#card-errors:empty {
+            display: none;
+}
+
+.pay-terms {
+            margin: 0.5rem 0 0;
+            font-size: 0.8125rem;
+            line-height: 1.4;
+            color: var(--gray-600, #4b5563);
+            text-align: center;
+}
+
+.pay-terms a { color: inherit; text-decoration: underline;
+}
+
+.pay-button.is-verifying { cursor: progress;
+}
+
+.pay-button {
+            width: 100%;
+            padding: 0.875rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: white;
+            background: linear-gradient(135deg, var(--cyan) 0%, var(--cyan-dark) 100%);
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            margin-top: 0.75rem;
+}
+
+.pay-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+}
+
+.pay-button:hover:not(:disabled)::before {
+            left: 100%;
+}
+
+.pay-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(38, 127, 181, 0.4);
+}
+
+.pay-button:active:not(:disabled) {
+            transform: translateY(0);
+}
+
+.pay-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: var(--gray-400);
+}
+
+.pay-button__icon {
+            width: 20px;
+            height: 20px;
+}
+
+@keyframes spin {
+            to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+            animation: spin 1s linear infinite;
+}
+
+.secure-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--gray-50);
+            border-radius: var(--radius-sm);
+            font-size: 0.8125rem;
+            color: var(--gray-600);
+}
+
+.secure-badge svg {
+            color: var(--success);
+}
+
+.powered-by {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--gray-200);
+            font-size: 0.75rem;
+            color: var(--gray-400);
+}
+
+.powered-by svg {
+            height: 20px;
+            width: auto;
+}
+
+@media (max-width: 768px) {
+    .payment-section__body {
+                grid-template-columns: 1fr;
+    }
+    .payment-col-alt {
+                width: 100%;
+                padding-left: 0;
+                border-left: none;
+                padding-top: 1rem;
+                border-top: 1px solid var(--gray-200);
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: center;
+    }
+}
+
+/* Split layout: details on the left, the order summary pinned on the right
+   while the left column scrolls (smartink/Shopify). Desktop only — phones
+   keep the collapsed summary disclosure at the top (#checkout-summary-toggle). */
+@media (min-width: 1025px) {
+    section.checkout-page .checkout-layout {
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 56px;
+    }
+    section.checkout-page .checkout-sidebar {
+        position: sticky;
+        top: 24px;
+        align-self: start;
+    }
+}
+
+/* Express row at the top: title, the wallet buttons, then OR. */
+.checkout-express { margin-bottom: 8px; }
+.checkout-express .cart-wallet { margin-top: 0; }
+.checkout-express__title {
+    margin: 0 0 10px;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+}
+.checkout-express__or {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0 6px;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+}
+.checkout-express__or::before,
+.checkout-express__or::after { content: ""; flex: 1; border-top: 1px solid var(--color-border); }
+
+/* The payment step on the same page. Waiting: shown but inert, saying what
+   unlocks it. Stale: details changed after Continue. */
+.checkout-payment { margin-top: 32px; }
+.checkout-payment__pending,
+.checkout-payment__stale {
+    margin: 0 0 12px;
+    padding: 14px 16px;
+    border-radius: 5px;
+    font-size: 0.9rem;
+}
+.checkout-payment__pending { background: var(--color-background); border: 1px dashed var(--steel-300); color: var(--color-text-muted); }
+.checkout-payment__stale { background: var(--color-warning-bg); border: 1px solid var(--color-warning); color: var(--color-text-heading); }
+.checkout-payment__pending[hidden],
+.checkout-payment__stale[hidden] { display: none; }
+.checkout-payment.is-waiting .payment-col-alt,
+.checkout-payment.is-waiting .pay-terms,
+.checkout-payment.is-waiting .secure-badge,
+.checkout-payment.is-waiting .powered-by { opacity: 0.5; pointer-events: none; }

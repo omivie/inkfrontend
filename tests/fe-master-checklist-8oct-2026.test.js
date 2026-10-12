@@ -263,11 +263,19 @@ test('§20 prepaint: flag off ⇒ off; a remembered no-wallet device ⇒ hidden;
     h.w.prepaint();
     assert.equal(h.w.state, 'off');
     assert.equal(h.box.hidden, true);
-    h = wallet({ storage: { 'inkc.cartWallet.noDevice': '1' } });
+    // The memory holds WHEN it was written and expires after 7 days (ERR-316:
+    // a forever-'1' hid Google Pay from a browser that later got a card).
+    h = wallet({ storage: { 'inkc.cartWallet.noDevice': String(Date.now() - 60000) } });
     h.w.prepaint();
     assert.equal(h.w.state, 'none');
     assert.equal(h.w.why, 'remembered-no-wallet');
     assert.equal(h.box.hidden, true);
+    h = wallet({ storage: { 'inkc.cartWallet.noDevice': String(Date.now() - 8 * 24 * 3600 * 1000) } });
+    h.w.prepaint();
+    assert.equal(h.w.state, 'loading', 'an 8-day-old answer is asked again');
+    h = wallet({ storage: { 'inkc.cartWallet.noDevice': '1' } });
+    h.w.prepaint();
+    assert.equal(h.w.state, 'loading', 'the legacy forever-flag counts as expired');
     h = wallet();
     h.w.prepaint();
     assert.equal(h.w.state, 'loading');
@@ -339,9 +347,9 @@ test('§20 no wallet on this device ⇒ hidden and REMEMBERED; a wallet later cl
     await sleep(20);
     assert.equal(h.w.state, 'none');
     assert.equal(h.w.why, 'no-wallet-on-device');
-    assert.equal(h.store['inkc.cartWallet.noDevice'], '1');
+    assert.ok(Math.abs(Number(h.store['inkc.cartWallet.noDevice']) - Date.now()) < 5000, 'remembered WITH its time');
 
-    h = wallet({ storage: { 'inkc.cartWallet.noDevice': '1' } });
+    h = wallet({ storage: { 'inkc.cartWallet.noDevice': String(Date.now()) } });
     h.w.prepaint();
     assert.equal(h.box.hidden, true, 'remembered ⇒ no placeholder');
     await h.w.init();

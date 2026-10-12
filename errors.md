@@ -97,6 +97,65 @@ Full suite: 7064 pass. The only 2 failures are `no-ghost-files`: `.playwright-mc
   - The sticky mobile checkout bar still shows while the real button is on screen at 390×664. That behaviour predates this change and is owned by cart-page.js's IntersectionObserver; it is flagged, not changed.
   - The PayPal button did not render on localhost. This was not investigated, and production has not been checked.
 
+**Phase 3 (same day): one-page checkout, express pay at the top, and why Google Pay "wasn't there".**
+
+*Asked.* After phase 2, the owner said: "shouldn't we have fast pay options on our cart page for google pay etc?" They also asked for smartink's split checkout, with the details on the left, the products pinned on the right, and payment on the same page. They chose: merge /checkout and /payment.
+
+*The Google Pay question.*
+- The cart has had Apple Pay / Google Pay since ERR-309. That is `js/cart-wallet.js`, a Stripe Express Checkout Element, with `DARK_FEATURES.cartWallet: true` in production.
+- The owner looked at **localhost:3000/cart**. There, no wallet ever shows.
+- The box also hid itself **forever** in a browser that once reported "no wallet": `localStorage inkc.cartWallet.noDevice = '1'` never expired.
+- Fixes:
+  - The memory now holds the time it was written and expires after 7 days. A legacy `'1'` counts as expired.
+  - `?wallet-debug=1` ignores the memory, keeps the box visible and prints `Wallet: <state> (<why>)` in its status line. This is the only way to read the reason on www, where DebugLog is off.
+  - The buttons sit side by side (`layout.maxColumns: 2`).
+- Separately, the cart wallet never overrode `showEmailRejected`, so a refused guest email wrote to a `#card-errors` that /cart does not have, and failed in silence. It now speaks in the wallet's own status line.
+- **Not measured:** whether www shows Google Pay on the owner's Chrome. Only a real device with a card can answer that. After deploy, open `/cart?wallet-debug=1` and read the line.
+
+*One page.*
+- **Layout.** `html/checkout.html` now holds, top to bottom:
+  - an **Express checkout** row (the same `cart-wallet.js`, same ids, one per page; its sheet collects the address, so it works before the form is filled), then "OR";
+  - the details form;
+  - the **Payment** section, moved verbatim from payment.html: card Payment Element, Turnstile, Pay, the Terms line, PayPal. It sits outside `#checkout-form` because forms cannot nest.
+  - The order summary is `position: sticky; top: 24px` at ≥1025px.
+- **Flow.** `handleContinueToPayment` keeps validate → email gate → `sessionStorage.setItem` (fe-master §15 order). It then calls `_openPayment()` → `PaymentPage.attach(checkoutData)` instead of `location.href = '/payment'`.
+- **`attach()`.** It mounts Stripe, Turnstile and PayPal **once**. A later Continue (button now reads "Update details") only swaps the details and re-reads the server total.
+  - The card form mounts only after Continue, so Link's email prefill is always the email the shopper just typed.
+- **One owner of the summary.** While embedded, `PaymentPage.calculateTotals` computes `this.totals`, the Pay label and Stripe's amount, but paints no summary row. CheckoutPage owns those rows. Coupon or points changes call `PaymentPage.refreshTotalsSoon()` (debounced 500ms).
+- **Stale details.** Any `input`/`change` in the details form after Continue sets `PaymentPage.detailsStale`. While it is set:
+  - card Pay refuses, and a note says "Press Update details";
+  - PayPal `onClick` rejects before the popup opens.
+  - The order payload is built from `checkoutData`, so without this an edited address could have been charged against the old one.
+- **Boot guard.** payment-page.js's DOMContentLoaded boot returns when `#checkout-form` exists. Without that, `init()` would find no sessionStorage and redirect /checkout to itself forever.
+- **/payment.** It keeps the full site shell (the page-wide tests still apply) but loads no payment code, and sends the shopper to /checkout with `<meta http-equiv="refresh">`. A meta refresh needs no new inline script under the CSP.
+- payment.html's inline payment rules moved into `css/cart-checkout.css`, with their variables scoped to `#checkout-payment`.
+
+*Measured.* Local, fresh guest Playwright context (no logged-in profile, so no Link SMS), 1280×800 and 390×664, CLC431XLBK. **Pay was never pressed.**
+- Before Continue: `data-state="waiting"`, Pay disabled, no Stripe iframe.
+- After Continue, on the same URL: iframe mounted, `PaymentPage.totals.total` 50.49 = panel `$50.49 NZD` = "Pay $50.49 NZD", and 1 summary line.
+- Scrolled 900px: sidebar top stays at 24px.
+- Edit address → stale + note. Update details → `checkoutData.address1` is the new one, still 1 iframe.
+- Phone: no horizontal scroll.
+- `/payment` → `/checkout`.
+- Cart cleaned to 0. No page errors.
+- The wallet reported `none/no-wallet-on-device` (headless Chromium has none).
+
+*Tests.*
+- New `tests/one-page-checkout-oct2026.test.js` (9 tests). Red-proof: dropping the embedded guard, the stale refusal and the attach-once guard reddens 3/9.
+- Rewritten to the one-page equivalents, each keeping its intent:
+  - `express-checkout-jul2026` E1/E1b/E8c
+  - `stripe-wallet-csp-sep2026` §8 (the token check now reads checkout.html)
+  - `checkout-funnel-oct2026` §8.4
+  - `loyalty-points-jun2026`
+  - `fe-master-checklist-8oct-2026` §20 (memory now timed and expiring)
+- Probes moved from /payment to /checkout: `probe-payment-csp`, `probe-stripe-wallets`, `probe-checkout-funnel-oct2026`, `probe-mobile-ux` and `redproof-checkout-funnel`. Not run against production.
+- Full suite 7083 pass / 1 fail. The fail is `no-ghost-files` `.DS_Store`: untracked Finder files that were already there.
+
+*Not done (deliberate).*
+- The full site footer stays on /checkout (Shopify shows policy links only). Several compliance tests pin footer content on every page.
+- The cart's free-shipping banner and ticks list keep their place under the Checkout button (ERR-305's fold order is pinned).
+- `PAYMENT_PAGE_JS` in cart-wallet.js lazy-loads an unversioned `/js/payment-page.js` on /cart. That predates this change.
+
 **Lesson.** When three surfaces answer the same moment, every new one adds a fourth. The event existed for exactly this; one listener replaced three emitters.
 
 **Files.** `inkcartridges/js/cart-drawer.js` (new) · `js/cart.js` · `js/product-detail-page.js` · `js/search.js` · `css/components.css` · `css/pages.css` · `html/product/index.html` · 37 HTML pages (script tag + `?v=` restamp) · `tests/cart-drawer-oct2026.test.js` (new) + 10 updated suites

@@ -252,7 +252,8 @@ test('§8.1 payment: Pay is not disabled waiting for the bot check; a press wait
 test('§8.4 no "I authorize this payment" tick; no Terms tick; the agreement line sits under Pay', () => {
     const payJs = stripComments(read('js/payment-page.js'));
     assert.doesNotMatch(payJs, /paymentAuthorized|AuthorizationBox|authorize-payment/);
-    const pay = html('html/payment.html').replace(/\/\*[\s\S]*?\*\//g, '');
+    // One-page checkout (ERR-316 phase 3): the Pay button lives on /checkout.
+    const pay = html('html/checkout.html').replace(/\/\*[\s\S]*?\*\//g, '');
     assert.doesNotMatch(pay, /id="authorize-payment"|I authorize this payment|class="payment-authorization/);
     // \sid= — `data-testid="pay-terms"` contains the bare substring too (red-proof caught it).
     const btn = pay.search(/\sid="pay-now-btn"/), terms = pay.search(/\sid="pay-terms"/);

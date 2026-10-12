@@ -69,8 +69,10 @@ async function markup() {
         const src = (payment.match(/src="(\/js\/api\.js[^"]*)"/) || [])[1];
         api = src ? await (await fetch(BASE + src)).text() : '';
     } catch (e) { nm('page HTML', e.message); return; }
-    check('/payment has no "I authorize this payment" tick', !/id="authorize-payment"|>\s*I authorize this payment\s*</.test(payment));
-    check('/payment has the Terms line under Pay', /id="pay-terms"[^>]*>By placing this order you agree to our <a href="\/terms"/.test(payment));
+    // One-page checkout (ERR-316 phase 3): Pay and its Terms line live on /checkout; /payment redirects there.
+    check('/checkout has no "I authorize this payment" tick', !/id="authorize-payment"|>\s*I authorize this payment\s*</.test(checkout));
+    check('/checkout has the Terms line under Pay', /id="pay-terms"[^>]*>By placing this order you agree to our <a href="\/terms"/.test(checkout));
+    check('/payment only redirects to /checkout', /<meta http-equiv="refresh" content="0; url=\/checkout">/.test(payment));
     check('/checkout has no Terms tick box', !/id="terms"/.test(checkout));
     check('/cart "Continue Shopping" is a text link, not .btn', /class="cart-actions__continue"/.test(cart) && !/class="btn btn--secondary">\s*<svg[^]*?Continue Shopping/.test(cart));
     const iTotals = cart.indexOf('cart-summary__totals'), iCta = cart.indexOf('id="checkout-btn"'), iMsg = cart.indexOf('id="cart-shipping-message"');

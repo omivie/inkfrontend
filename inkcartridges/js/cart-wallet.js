@@ -163,6 +163,11 @@ const CartWallet = {
 
     _box() { return document.getElementById('cart-wallet'); },
 
+    /** ?wallet-debug=1: keep the box visible and print WHY in its status line (ERR-316). */
+    _debug() {
+        try { return /[?&]wallet-debug=1\b/.test(window.location.search); } catch (_) { return false; }
+    },
+
     _setState(state, why) {
         this.state = state;
         this.why = why || '';
@@ -172,17 +177,35 @@ const CartWallet = {
             if (why) box.dataset.walletWhy = why;
             // `loading` stays VISIBLE: the divider + 48px placeholder hold the
             // button's space from the first paint (item 20).
-            box.hidden = !(state === 'ready' || state === 'loading');
+            const debug = this._debug();
+            box.hidden = !(state === 'ready' || state === 'loading') && !debug;
+            // On www, DebugLog is off: this line is the only way to read why the
+            // buttons are missing on a real device ("is there no card?").
+            if (debug) this._say('Wallet: ' + state + (why ? ' (' + why + ')' : ''));
         }
     },
 
+    /** How long a "this device has no wallet" answer is trusted before we ask Stripe again. */
+    NO_WALLET_TTL_MS: 7 * 24 * 60 * 60 * 1000,
+
+    /**
+     * The memory used to be a bare '1' kept FOREVER, so a browser that had no
+     * card on its first visit never offered Google Pay again after a card was
+     * added (owner, 12 Oct: "there's no card?"). It now holds the time it was
+     * written and expires; a legacy '1' counts as expired. ?wallet-debug=1
+     * ignores it.
+     */
     _remembersNoWallet() {
-        try { return localStorage.getItem(this.NO_WALLET_KEY) === '1'; } catch (_) { return false; }
+        if (this._debug()) return false;
+        try {
+            const at = Number(localStorage.getItem(this.NO_WALLET_KEY));
+            return at > 1 && Date.now() - at < this.NO_WALLET_TTL_MS;
+        } catch (_) { return false; }
     },
 
     _rememberNoWallet(none) {
         try {
-            if (none) localStorage.setItem(this.NO_WALLET_KEY, '1');
+            if (none) localStorage.setItem(this.NO_WALLET_KEY, String(Date.now()));
             else localStorage.removeItem(this.NO_WALLET_KEY);
         } catch (_) { /* storage blocked: the placeholder simply shows again */ }
     },
@@ -253,9 +276,20 @@ const CartWallet = {
     },
 
     _cartReady() {
-        return typeof CartDeepLink !== 'undefined' && CartDeepLink._waitForCartReady
-            ? Promise.resolve(CartDeepLink._waitForCartReady())
-            : Promise.resolve(true);
+        if (typeof CartDeepLink !== 'undefined' && CartDeepLink._waitForCartReady) {
+            return Promise.resolve(CartDeepLink._waitForCartReady());
+        }
+        // /checkout's express row (ERR-316 phase 3) has no deep-link module and
+        // no cart summary painter to call sync(): wait for Cart's own first
+        // server read instead, capped so a dead API cannot hold the box forever.
+        return new Promise((resolve) => {
+            const t0 = Date.now();
+            const tick = () => {
+                if (typeof Cart === 'undefined' || Cart.loading === false || Date.now() - t0 > 8000) resolve(true);
+                else setTimeout(tick, 100);
+            };
+            tick();
+        });
     },
 
     /** Resolves as soon as the cart holds a line (its localStorage copy), or when it is ready. */
@@ -348,6 +382,9 @@ const CartWallet = {
             shippingAddressRequired: true,
             allowedShippingCountries: ['NZ'],
             buttonHeight: 48,
+            // Apple Pay and Google Pay side by side when both are offered, as on
+            // smartink's cart (owner, 12 Oct). One wallet still fills the row.
+            layout: { maxColumns: 2, maxRows: 1, overflow: 'auto' },
         });
 
         const timer = setTimeout(() => { if (this.state === 'loading') this._setState('error', 'ready-timeout'); }, this.READY_TIMEOUT_MS);
@@ -449,6 +486,10 @@ const CartWallet = {
             turnstileToken: this.turnstileToken,
             showError(msg) { self._say(msg); },
             showEmailVerificationRequired() { self._say('Please verify your email address first, then try again.'); },
+            // The backend refused the wallet's email. PaymentPage's own version
+            // writes to #card-errors, which /cart does not have — it failed in
+            // silence (found 12 Oct). Say it where the shopper is looking.
+            showEmailRejected(msg) { self._say(msg || 'We could not use that email address. Please use Proceed to Checkout.'); },
             resetTurnstile() { self._resetTurnstile(); },
         });
 
