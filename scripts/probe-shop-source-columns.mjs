@@ -268,7 +268,10 @@ try {
                 check(`${vp.width}px ${label}: "View Genuine products" button is showing`,
                     !!btn && !btn.hidden && btn.h > 0, btn ? `${btn.w}x${btn.h} bg ${btn.bg}` : 'no #source-jump');
                 if (btn && !btn.hidden) {
-                    await page.click('#source-jump');
+                    // force: the button pulses forever (ERR-332), so Playwright's
+                    // "wait until stable" never passes. The pulse scales around the
+                    // centre, so the centre point it clicks stays on the button.
+                    await page.click('#source-jump', { force: true });
                     await page.waitForTimeout(1200); // smooth scroll settles
                     const landed = await page.evaluate(() => Math.round(
                         document.getElementById('genuine-title').getBoundingClientRect().top));
@@ -282,7 +285,7 @@ try {
                         /^Click here for genuine (?!products)/.test(labels[0] || '') && /^Click here for compatible (?!products)/.test(labels[1] || ''),
                         JSON.stringify(labels));
                     if (labels[1]) {
-                        await page.click('#source-jump-compatible');
+                        await page.click('#source-jump-compatible', { force: true });
                         await page.waitForTimeout(1200);
                         // Owner 2026-10-13: the screen must top out ABOVE the cyan
                         // button, i.e. the whole button is visible after the click.

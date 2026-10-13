@@ -8515,9 +8515,15 @@ a.account-review-card__product:focus-visible {
    the Genuine heading. Shown by _syncSourceColumns only when BOTH sections
    have rows.
    Owner, 2026-10-13: a slow wave of shades runs through each button to catch
-   the eye. The shades never go lighter than the base colour, so white-on-cyan
-   and black-on-yellow keep today's contrast. The gradient starts and ends on
-   the same colour and travels one tile, so the loop has no seam. */
+   the eye. Owner asked for it more prominent the same day, so the swing is
+   wider and the loop faster. The text is 19px bold (WCAG "large", needs 3:1):
+   white on the lightest blue #3A92CC is 3.41:1, black on the darkest gold
+   #C99400 is 6.4:1. The gradient starts and ends on the same colour and
+   travels one tile, so the loop has no seam. A second ask for more made the
+   loop 3s and added a pulsing glow in the button's own colour. The glow sits
+   OUTSIDE the button, so it never touches text contrast. A third ask ("very
+   prominent") made the glow wider and stronger, the loop 2.5s, and added a
+   gentle grow-and-shrink pulse (scale 1 to 1.06) in time with the glow. */
 .source-jump {
     display: inline-flex;
     align-items: center;
@@ -8527,10 +8533,11 @@ a.account-review-card__product:focus-visible {
     padding: var(--spacing-xs) var(--spacing-lg);
     margin-left: auto;
     background: var(--cyan-primary);
-    background-image: linear-gradient(90deg, var(--cyan-primary), var(--cyan-dark),
-        var(--cyan-primary), var(--cyan-dark), var(--cyan-primary));
+    background-image: linear-gradient(90deg, #3A92CC, #0E3A57, #3A92CC, #0E3A57, #3A92CC);
     background-size: 200% 100%;
-    animation: source-jump-wave 6s linear infinite;
+    --source-jump-glow: rgba(38, 127, 181, 0.85);
+    animation: source-jump-wave 2.5s linear infinite,
+        source-jump-glow 1.5s ease-in-out infinite alternate;
     color: var(--white-primary);
     border: 0;
     border-radius: var(--radius-md);
@@ -8553,6 +8560,10 @@ a.account-review-card__product:focus-visible {
     from { background-position: 100% 0; }
     to { background-position: -100% 0; }
 }
+@keyframes source-jump-glow {
+    from { box-shadow: 0 0 0 0 var(--source-jump-glow); transform: scale(1); }
+    to { box-shadow: 0 0 28px 8px var(--source-jump-glow); transform: scale(1.06); }
+}
 @media (prefers-reduced-motion: reduce) {
     .source-jump {
         animation: none;
@@ -8563,9 +8574,9 @@ a.account-review-card__product:focus-visible {
    (white on #F4C430 fails contrast). */
 .source-jump--compatible {
     background: var(--yellow-primary);
-    background-image: linear-gradient(90deg, var(--yellow-primary), #FFDC6B,
-        var(--yellow-primary), #FFDC6B, var(--yellow-primary));
+    background-image: linear-gradient(90deg, #FFE58A, #C99400, #FFE58A, #C99400, #FFE58A);
     background-size: 200% 100%; /* the shorthand above reset it */
+    --source-jump-glow: rgba(224, 168, 0, 1);
     color: var(--black-primary);
 }
 .source-jump--compatible:focus-visible {

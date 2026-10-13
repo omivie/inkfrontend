@@ -49,6 +49,12 @@ describing the same incident.
 
 **Measured.** Playwright at 1440×900 on `/shop?brand=brother&category=ink&code=LC431`: both buttons report `animation-name: source-jump-wave`, `background-size: 200% 100%`, and `background-position` moved 39.4% → -10.6% over 1.5 s; with reduced motion emulated, both report `animation-name: none`. Guard: `tests/shop-source-columns-sep2026.test.js` (20/20), full `npm test` 0 fail.
 
+**Follow-up, same day (owner: "a little more prominent").** Wider shade swing and a faster loop (6s to 4s). Blue now runs #3A92CC ↔ #0E3A57, yellow #FFE58A ↔ #C99400. The button text is 19px bold, which is WCAG "large" text (3:1 needed): white on #3A92CC measures 3.41:1, black on #C99400 measures 6.4:1. Both buttons verified in Playwright at `animation: 4s linear infinite source-jump-wave`; pages.css `?v=` restamped again in 41 HTML files.
+
+**Second follow-up, same day (owner asked again for more).** Loop 4s to 3s, plus a pulsing outer glow in each button's own colour (`@keyframes source-jump-glow`, 1.5s alternate, `box-shadow` 0 to 16px/4px; colour from `--source-jump-glow`: cyan rgba(38,127,181,.6), darker gold rgba(224,168,0,.85) because pale yellow vanished on the white page). The glow is outside the button, so text contrast is unchanged. Measured in Playwright: `animation-name: source-jump-wave, source-jump-glow` and the box-shadow grew 3.7px to 15.4px blur over 1.2 s on both buttons; reduced motion reports `none` on both.
+
+**Third follow-up, same day (owner: "very prominent").** Wave loop 3s to 2.5s. Glow widened to 28px blur / 8px spread and made stronger (cyan alpha .85, gold alpha 1). The glow keyframes also grow the button: `transform: scale(1)` to `scale(1.06)` in time with the glow. `transform` does not move layout, and measured `scrollWidth == clientWidth` at 1440, 390 and 320 (no sideways scroll at the pulse peak). Side effect: Playwright's `page.click` waits for an element to stop moving, and this one never does, so `scripts/probe-shop-source-columns.mjs` now clicks both buttons with `{ force: true }`. The pulse scales around the centre, so the centre point stays on the button; force-clicks measured Genuine head at 30px and the cyan button at 24px after the round trip on localhost. The probe itself was not run (its /search leg logs a live search_analytics row, ERR-271).
+
 ---
 
 ## ERR-331 — Phone header: "InkCartridges.co.nz" wordmark ran under the phone icon and Business briefcase; IC logo mark is now the home button below 768px (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
