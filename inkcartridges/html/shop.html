@@ -40,10 +40,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
-    <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
+    <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
     <link rel="stylesheet" href="/css/components.css?v=9a82f9d3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=01ccefbf">
+    <link rel="stylesheet" href="/css/pages.css?v=c2e9562d">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
 
     <script type="application/ld+json" id="shop-schema">
@@ -218,16 +218,6 @@
                             <strong>Page Yield:</strong>
                             <span id="yield-value"></span>
                         </div>
-                        <div class="shipping-info-bar shipping-info-bar--inline" data-shipping-info-bar>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                            <span class="shipping-info-bar__text">Free shipping on orders over $100 <span class="shipping-info-bar__sep">&bull;</span> Fast NZ-wide delivery</span>
-                        </div>
-                        <!-- 2026-10-13 (ERR-327): Compatible is stacked above Genuine; this
-                             scrolls to #genuine-section. AFTER the shipping pill (owner swap,
-                             same day), inside the right group so both wrap together.
-                             Shown by shop-page.js _syncSourceColumns only when BOTH sections
-                             have rows. -->
-                        <button type="button" class="source-jump" id="source-jump" hidden><span class="source-jump__text">View genuine products</span> <span aria-hidden="true">&darr;</span></button>
                     </div>
                 </div>
 
@@ -328,10 +318,17 @@
                              across both grids in document order. -->
                         <div class="products-sections" id="source-sections">
                             <div class="products-section" id="compatible-section">
-                                <h2 class="products-section__title" id="compatible-title">
-                                    <span class="products-section__badge products-section__badge--compatible">Compatible</span>
-                                    <span id="compatible-title-text">Compatible Inkjet Cartridges</span>
-                                </h2>
+                                <!-- ERR-327: heading left, cyan "Click here for genuine …" right,
+                                     mirroring Genuine's head row; outside the <h2> so the heading's
+                                     accessible name stays the heading. Shown by shop-page.js
+                                     _syncSourceColumns only when BOTH sections have rows. -->
+                                <div class="products-section__head">
+                                    <h2 class="products-section__title" id="compatible-title">
+                                        <span class="products-section__badge products-section__badge--compatible">Compatible</span>
+                                        <span id="compatible-title-text">Compatible Inkjet Cartridges</span>
+                                    </h2>
+                                    <button type="button" class="source-jump" id="source-jump" hidden><span class="source-jump__text">Click here for genuine products</span> <span aria-hidden="true">&darr;</span></button>
+                                </div>
                                 <div class="products-row" id="compatible-products">
                                 </div>
                             </div>
@@ -345,7 +342,7 @@
                                         <span class="products-section__badge products-section__badge--genuine">Genuine</span>
                                         <span id="genuine-title-text">Original Inkjet Cartridges</span>
                                     </h2>
-                                    <button type="button" class="source-jump source-jump--compatible" id="source-jump-compatible" hidden><span class="source-jump__text">View compatible products</span> <span aria-hidden="true">&uarr;</span></button>
+                                    <button type="button" class="source-jump source-jump--compatible" id="source-jump-compatible" hidden><span class="source-jump__text">Click here for compatible products</span> <span aria-hidden="true">&uarr;</span></button>
                                 </div>
                                 <div class="products-row" id="genuine-products">
                                 </div>
@@ -503,7 +500,7 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=f4580d5e"></script>
+    <script defer src="/js/shop-page.js?v=10d3a444"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 

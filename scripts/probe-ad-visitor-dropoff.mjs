@@ -19,7 +19,10 @@
  *          (owner, checklist item 5), directly under that row. Whether it is
  *          also on the first screen is a SOFT line: ERR-306 spent that room on
  *          the service row knowingly (ERR-313 re-anchored this check; it had
- *          been red on www at every viewport since 2026-10-05),
+ *          been red on www at every viewport since 2026-10-05). ERR-330: the
+ *          free-shipping line (#product-free-ship) now sits directly under Add
+ *          (owner, 13 Oct 2026); when it is visible it is checked against Add
+ *          and the promise is checked against it,
  *        - desktop card mode: banner bottom-left, ≤ 400px wide, badge NOT lifted,
  *        - CLS (layout-shift, hadRecentInput excluded).
  *      The handoff's literal `Add.bottom <= banner.top` is printed as INFO: with
@@ -139,6 +142,7 @@ function MEASURE_PDP() {
     const banner = document.querySelector('.consent-banner.is-open');
     const badge = document.getElementById('google-reviews-badge');
     const promise = document.querySelector('#product-promise:not([hidden]) .product-promise__label');
+    const freeShip = document.querySelector('#product-free-ship:not([hidden])');
     const a = r(add);
     const hits = [];
     if (a) {
@@ -153,6 +157,7 @@ function MEASURE_PDP() {
         title: document.getElementById('product-title')?.textContent.trim().slice(0, 60),
         add: a, banner: r(banner), badge: r(badge), promise: r(promise),
         promiseText: promise ? promise.textContent.trim() : null,
+        freeShip: r(freeShip), freeShipText: freeShip ? freeShip.textContent.trim() : null,
         badgeBottom: badge ? getComputedStyle(badge).bottom : null,
         hits, cls: +(window.__cls || 0).toFixed(3),
     };
@@ -247,9 +252,17 @@ try {
                 check(`${tag}: Add fully inside the ${m.vh}px viewport`, inside, `bottom ${Math.round(a.bottom)}`);
                 check(`${tag}: nothing fixed overlaps Add (consent, badge)`, clear);
                 check(`${tag}: elementFromPoint returns Add at centre + 4 corners`, hitOk, m.hits.join(','));
-                // Anchor = Add (the ERR-306 service row under it was removed, ERR-329).
-                const anchor = a;
-                const anchorName = 'Add';
+                // Anchor = Add (the ERR-306 service row under it was removed, ERR-329),
+                // or the ERR-330 free-shipping line when it renders under Add.
+                let anchor = a;
+                let anchorName = 'Add';
+                if (m.freeShip) {
+                    check(`${tag}: free-shipping line directly under Add`,
+                        m.freeShip.top >= a.bottom && m.freeShip.top - a.bottom <= 24,
+                        `"${m.freeShipText}" at ${Math.round(m.freeShip.top)}–${Math.round(m.freeShip.bottom)}, Add ends ${Math.round(a.bottom)}`);
+                    anchor = m.freeShip;
+                    anchorName = 'the free-shipping line';
+                } else soft(`${tag}: free-shipping line under Add`, 'not rendered (value-props absent or inactive)');
                 check(`${tag}: fit promise directly under ${anchorName}`,
                     !!m.promise && m.promise.top >= anchor.bottom && m.promise.top - anchor.bottom <= 24,
                     m.promise ? `"${m.promiseText}" at ${Math.round(m.promise.top)}–${Math.round(m.promise.bottom)}, ${anchorName} ends ${Math.round(anchor.bottom)}` : 'no #product-promise label');

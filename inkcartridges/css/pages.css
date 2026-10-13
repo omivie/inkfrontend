@@ -8078,9 +8078,9 @@ a.account-review-card__product:focus-visible {
     font-size: var(--font-size-sm);
 }
 
-/* Wraps yield-banner + inline shipping pill so both live to the right of
-   the breadcrumb and lift the H1 above the fold. Contract pinned by
-   tests/shipping-bar-inline-may2026.test.js. */
+/* Wraps yield-banner + the source jump button so both live to the right of
+   the breadcrumb and lift the H1 above the fold. The shipping pill that also
+   lived here was removed by the owner (13 Oct 2026, ERR-330). */
 .drilldown-header__right-group {
     display: flex;
     align-items: center;
@@ -8495,25 +8495,25 @@ a.account-review-card__product:focus-visible {
     row-gap: var(--spacing-xl);
 }
 
-/* The jumps land their target at the top of the screen with a small gap:
-   cyan to the Genuine section, yellow back to the header row that holds the
-   cyan button (so the screen tops out ABOVE it). Desktop header is not
-   sticky; phones pin it (layout.css), so clear it there. */
+/* Each jump lands the OTHER section's head row at the top of the screen with
+   a small gap, so the button in that row is fully on screen. Desktop header
+   is not sticky; phones pin it (layout.css), so clear it there. */
 #genuine-section,
-.shop-page .drilldown-header {
+#compatible-section {
     scroll-margin-top: 24px;
 }
 @media (max-width: 1024px) {
     #genuine-section,
-    .shop-page .drilldown-header {
+    #compatible-section {
         scroll-margin-top: calc(var(--header-h, 56px) + 16px);
     }
 }
 
-/* "View Genuine products" — same cyan as the Genuine badge, white text.
-   Last child of .drilldown-header__right-group, AFTER the shipping pill (owner
-   swap 2026-10-13), so it wraps with the pill; shown by _syncSourceColumns
-   only when BOTH sections have rows. */
+/* ERR-327 jump buttons, one per section head row, on the right:
+   cyan "Click here for genuine …" beside the Compatible heading (Genuine
+   badge cyan, white text) and yellow "Click here for compatible …" beside
+   the Genuine heading. Shown by _syncSourceColumns only when BOTH sections
+   have rows. */
 .source-jump {
     display: inline-flex;
     align-items: center;
@@ -8521,6 +8521,7 @@ a.account-review-card__product:focus-visible {
     gap: var(--spacing-xs);
     min-height: 44px;
     padding: var(--spacing-xs) var(--spacing-lg);
+    margin-left: auto;
     background: var(--cyan-primary);
     color: var(--white-primary);
     border: 0;
@@ -8540,28 +8541,19 @@ a.account-review-card__product:focus-visible {
 .source-jump[hidden] {
     display: none;
 }
-/* <=480px __right-group is a COLUMN (flex-direction: column, below), so
-   flex-basis here would be the HEIGHT (ERR-224). It already stretches its
-   children; this keeps the button full width if that ever changes. */
-@media (max-width: 480px) {
-    .source-jump {
-        align-self: stretch;
-    }
-}
 
-/* "View compatible …" — the Compatible badge's yellow AND its black text
-   (white on #F4C430 fails contrast). Right of the Genuine heading. */
+/* The yellow one: the Compatible badge's yellow AND its black text
+   (white on #F4C430 fails contrast). */
 .source-jump--compatible {
     background: var(--yellow-primary);
     color: var(--black-primary);
-    margin-left: auto;
 }
 .source-jump--compatible:focus-visible {
     outline-color: var(--yellow-primary);
 }
 
-/* Genuine's head row: heading left, jump right. The row owns the rule line
-   the bare <h2> draws everywhere else, so the line runs under both. */
+/* A source section's head row: heading left, jump right. The row owns the
+   rule line the bare <h2> draws everywhere else, so the line runs under both. */
 .products-section__head {
     display: flex;
     align-items: center;
@@ -8576,10 +8568,10 @@ a.account-review-card__product:focus-visible {
     padding-bottom: 0;
     border-bottom: 0;
 }
-/* The head is a ROW, so a flex-basis is a WIDTH here (unlike the header
-   column above): the button takes its own full-width line on a phone. */
+/* The head is a ROW, so a flex-basis is a WIDTH here: on a phone the button
+   takes its own full-width line under the heading. */
 @media (max-width: 480px) {
-    .products-section__head .source-jump--compatible {
+    .products-section__head .source-jump {
         flex: 1 0 100%;
         margin-left: 0;
     }
@@ -9002,20 +8994,14 @@ body.page-shop {
         margin-bottom: var(--spacing-1);
     }
 
-    /* When the breadcrumb wraps onto its own row, drop the inline pill to a
-       full-width strip rather than leaving it stranded right-aligned on a
+    /* When the breadcrumb wraps onto its own row, the right group takes the
+       full width rather than leaving it stranded right-aligned on a
        half-empty row. The 480px rules go further (column stack); these
        cover the tablet middle ground. */
     .drilldown-header__right-group {
         width: 100%;
         margin-left: 0;
         justify-content: flex-start;
-    }
-
-    .shipping-info-bar--inline {
-        flex: 1 1 auto;
-        justify-content: center;
-        white-space: normal;
     }
 
     .drilldown-grid--brands {
@@ -9115,13 +9101,6 @@ body.page-shop {
         flex-direction: column;
         align-items: stretch;
         gap: var(--spacing-xs);
-    }
-
-    .shipping-info-bar--inline {
-        width: 100%;
-        justify-content: center;
-        white-space: normal;
-        text-align: center;
     }
 
     .drilldown-header__product-type {
@@ -9426,7 +9405,6 @@ body.page-shop {
     color: var(--color-text);
 }
 .product-value-lines p { margin: 0; }
-.product-value-lines__facts { display: block; }
 .product-value-lines__call a { font-weight: 700; color: var(--cyan-dark); white-space: nowrap; }
 
 /* Reward points in the PRICE row (FE master checklist item 6, 6 Oct). The
@@ -10239,65 +10217,28 @@ body.page-shop {
     .loyalty-ledger { flex-wrap: wrap; }
 }
 
-/* ── GMC Compliance: Shipping callouts ── */
-
-.shipping-info-bar {
+/* PDP free-shipping line, directly under Add to Cart (owner, 13 Oct 2026,
+   ERR-330). Replaces the /shop "Free shipping … Fast NZ-wide delivery" pill,
+   which is removed. Text comes ONLY from /api/site/value-props
+   (renderValueLines); absent or inactive => the line stays hidden. */
+.product-free-ship[hidden] { display: none; }
+.product-free-ship {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
-    margin: 12px 0 20px;
+    margin: 10px 0 0;
+    padding: 8px 12px;
     background: #f0fdf4;
     border: 1px solid #bbf7d0;
     border-radius: var(--radius-md, 6px);
-    font-size: var(--text-sm, 0.875rem);
-    color: #166534;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #047857;
 }
-
-.shipping-info-bar svg {
+.product-free-ship svg {
     flex-shrink: 0;
     color: #16a34a;
-}
-
-.shipping-info-bar a {
-    color: #166534;
-    font-weight: 600;
-    text-decoration: underline;
-}
-
-/* Inline variant: lives inside .drilldown-header__right-group on /shop,
-   sits to the right of the breadcrumb so the H1 lifts up. Compact padding
-   matches the breadcrumb height; margin is removed because the parent
-   .drilldown-header already owns vertical rhythm. */
-.shipping-info-bar--inline {
-    margin: 0;
-    padding: 6px 12px;
-    font-size: var(--font-size-xs, 0.8125rem);
-    line-height: 1.2;
-    /* NO white-space:nowrap here: this rule sits AFTER the <=768px override
-       blocks in source order, so a nowrap here silently killed their
-       white-space:normal (same specificity, later source wins) — that was
-       the <=390px pill overflow. Desktop has room; if squeezed, wrap.
-       min-width:0 lets the pill shrink inside its flex row.
-       (text-fit audit Jul 2026) */
-    min-width: 0;
-}
-
-/* The pill text is one span with NORMAL spaces around the bullet so it can
-   wrap into two clean lines on small phones (was `&nbsp;&bull;&nbsp;`,
-   which glued "$100 • Fast" into an unbreakable run). */
-.shipping-info-bar__text {
-    min-width: 0;
-}
-
-.shipping-info-bar__sep {
-    color: #4ade80;
-}
-
-.shipping-info-bar--inline svg {
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
 }
 
 .product-shipping-note {

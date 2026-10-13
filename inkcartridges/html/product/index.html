@@ -61,10 +61,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
-    <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
+    <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
     <link rel="stylesheet" href="/css/components.css?v=9a82f9d3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=01ccefbf">
+    <link rel="stylesheet" href="/css/pages.css?v=c2e9562d">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
 </head>
 <body>
@@ -375,6 +375,10 @@
                             </button>
                         </div>
 
+                        <!-- Free-shipping line, directly under Add (owner, 13 Oct 2026, ERR-330).
+                             Text ONLY from /api/site/value-props via renderValueLines(); ships
+                             hidden and stays hidden when the threshold is absent or inactive. -->
+                        <p class="product-free-ship" id="product-free-ship" data-testid="product-free-ship" hidden></p>
 
                         <!--
                           ERR-301 (ad-clicks-to-orders handoff, 2026-10-02 §1-§2): on a
@@ -564,7 +568,7 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=2de47ad7"></script>
+    <script defer src="/js/product-detail-page.js?v=28aa44c7"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

@@ -226,8 +226,8 @@
             .replace(/^(compatible|genuine|original)\s+/i, '');
     }
 
-    // ERR-327 — what the two jump buttons name: "View genuine LC436 ink",
-    // "View compatible MFC 970 cartridges". A printer wins (brand prefix
+    // ERR-327 — what the two jump buttons name: "Click here for genuine LC436 ink",
+    // "Click here for compatible MFC 970 cartridges". A printer wins (brand prefix
     // dropped, "Brother MFC 970" reads "MFC 970"); else the code + ink/toner
     // from the category or, on /search, from the rows' product_type; else
     // "products". ponytail: a multi-word query keeps the shopper's casing,
@@ -607,9 +607,6 @@
             sourceSections: document.getElementById('source-sections'),
             sourceJump: document.getElementById('source-jump'),
             sourceJumpCompatible: document.getElementById('source-jump-compatible'),
-            // The yellow jump's target: the header row that holds the cyan
-            // button, so the screen tops out ABOVE it (owner, 2026-10-13).
-            drilldownHeader: document.querySelector('.shop-page .drilldown-header'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
             // category-page-contract-may2026.md §2 — the page-level
@@ -640,14 +637,14 @@
         // INITIALIZATION
         // =========================================
         async init() {
-            // ERR-327 jump buttons — Compatible is stacked above Genuine. The
-            // cyan one (header) lands the Genuine header at the top of the
-            // screen. The yellow one (Genuine's head row) goes back up to the
-            // header row, NOT the Compatible heading: landing on the heading
-            // left the cyan button half off the top (owner screenshot). Gaps
-            // are scroll-margin-top in pages.css. Shown only by
+            // ERR-327 jump buttons — Compatible is stacked above Genuine and
+            // each section's head row carries a button to the OTHER one: cyan
+            // (beside the Compatible heading) goes down to Genuine, yellow
+            // (beside the Genuine heading) back up to Compatible, landing its
+            // head row — cyan button included — fully on screen (gaps are
+            // scroll-margin-top in pages.css). Shown only by
             // _syncSourceColumns. No hash: the route lives in the query.
-            [['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'drilldownHeader']]
+            [['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'compatibleSection']]
                 .forEach(([btnKey, sectionKey]) => {
                     const btn = this.elements[btnKey];
                     if (!btn) return;
@@ -4948,8 +4945,8 @@
                 const t = btn && btn.querySelector('.source-jump__text');
                 if (t) t.textContent = text;
             };
-            write(this.elements.sourceJump, `View genuine ${s}`);
-            write(this.elements.sourceJumpCompatible, `View compatible ${s}`);
+            write(this.elements.sourceJump, `Click here for genuine ${s}`);
+            write(this.elements.sourceJumpCompatible, `Click here for compatible ${s}`);
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {

@@ -41,6 +41,35 @@ describing the same incident.
 
 ---
 
+## ERR-331 — Phone header: "InkCartridges.co.nz" wordmark ran under the phone icon and Business briefcase; IC logo mark is now the home button below 768px (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner screenshot at ~394px on `/shop?brand=brother&category=ink&code=LC431`. The wordmark ".co.nz" sat under the tap-to-call icon, and the ink dot touched the Business briefcase. The owner asked for the logo mark to be the home button at phone widths so more fits in the row.
+
+**Cause.** `.logo__text` is `white-space: nowrap` and its fluid font-size was solved for "logo + 3 action icons". The phone row now carries the tel icon (D-P0-4) and, for B2B accounts, the Business item (5 targets). `.logo-block` had `min-width: 0` but nothing clipped the text, so the text overflowed its box onto its neighbours. Budget at 480px with Business: about 255px wordmark + 44 tel + 4x48 actions = 491px against a row of about 445px. So the overlap covers the whole phone mode, not only the smallest widths.
+
+**Change (CSS only, `css/layout.css`; header markup is byte-locked by navbar-parity).** The IC mark home link `.header-lead__logo` already shipped on 34 pages, hidden below 768. In the `max-width: 767.98px` phone block: `.header-lead` takes `order: 1; flex: 1 1 auto`, the mark shows at 40px with `order: -1` (before the tel icon), and `.header-main .container:has(.header-lead__logo) .logo-block { display: none }`. The `:has` guard keeps the wordmark on the pages that ship no mark (checkout, payment, order-confirmation, account login/forgot/reset/verify) and in a browser without `:has`. Tablet and desktop (>=768) are unchanged. The layout.css `?v=` token is restamped in 45 HTML files (combined md5 with a peer session's ERR-330 deletion in the same file).
+
+**Tests.** `responsive-header-jul2026` R8: the phone block shows the mark, and hides the wordmark only behind `:has(.header-lead__logo)`, never bare. Header, navbar-parity, admin-header-link, text-fit and asset-cache-tokens suites: 54 pass, 0 fail.
+
+**Measured.** Local Playwright (API calls aborted; layout only) on `/`, `/html/shop?brand=brother` and `/html/account/login` at 320, 360, 390, 430, 480, 600, 767, 768 and 1000px, with a Business item injected (worst case). Result: 0 overlapping rects among mark, wordmark, tel and action items, and 0px horizontal scroll at every width. The brand row is one line from 360 to 767. At 320 with Business the row wraps to 2 lines (324px of targets in about 300px); nothing overlaps. In the scrolled state the mark stays visible, and its href is `/`. Login keeps its wordmark at every width. Negative control: re-applying the old phone rules in-page at 390 put the wordmark's right edge at 160px over the tel icon's left edge at 134px (overlap true).
+
+---
+
+## ERR-330 — /shop "Free shipping on orders over $100 • Fast NZ-wide delivery" pill removed; PDP free-shipping line moved directly under Add to Cart (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner screenshots. On `/shop?brand=brother&category=ink&code=LC431`, the green pill next to the "View genuine … ink" button should go. On the PDP (`GLC431BK`), the plain "Free shipping on orders over $100" line sat at the bottom of the buy column, under the compatible box, the buy-more chips, Delivery/Returns and the full-set upsell. The owner wants it near Add to Cart and more prominent. Asked where: above Add would push Add off the first screen at 1280×551 (0px spare, ERR-301). Owner chose directly under Add.
+
+**Change.**
+- /shop: deleted the `.shipping-info-bar--inline` div from `html/shop.html` (markup removed, not hidden). Deleted every `.shipping-info-bar*` rule in pages.css (base, `--inline`, `__text`, `__sep`, and the two ≤768/≤480 overrides) and the layout.css rule that hid the pill on phones under the value strip. No other page used the class. The value strip's "Free shipping over $100" stays.
+- PDP: new `<p id="product-free-ship" hidden>` right after `.product-info__actions`, before `#product-promise`. `renderValueLines` is its ONE writer. The text comes only from `ValueProps.freeShipping(...).headline` (/api/site/value-props), escaped, with a truck icon. If the threshold is absent or inactive, or value-props fails, the line stays hidden and empty. There is no default text. `#product-value-lines` now holds only "Questions? Call … · NZ company since …". Style: emerald `#047857`, bold 1rem, on `#f0fdf4` with a `#bbf7d0` border (the old pill's palette).
+- `?v=` restamped: layout.css (45 HTML), product-detail-page.js. pages.css is restamped to the combined md5 shared with a peer session's ERR-327 edits in the same file.
+
+**Tests and probes.** `shipping-bar-inline-may2026.test.js` deleted: it pinned the pill. `text-fit-jul2026` T1 (pill nbsp/min-width) deleted. New `free-ship-under-add-oct2026.test.js` EXECUTES `renderValueLines` against a fake DOM. It checks the headline goes to `#product-free-ship` verbatim and escaped, never to `#product-value-lines`, and that inactive, absent, failed or blank value-props leave the line hidden and empty. It also checks DOM order (actions, free-ship, promise) and that /shop, pages.css and layout.css carry no `shipping-info-bar`. Negative control: against HEAD's `product-detail-page.js` the render test fails (3 pass / 1 fail). `probe-ad-visitor-dropoff`: when the free-shipping line renders, it must start ≤24px under Add, and the fit promise is then checked against it. If the line is absent, that is a SOFT line.
+
+**Measured.** Full suite 7120 tests: 7101 pass, 0 fail, 19 skipped. Local browser, live API: at 1280×800 the PDP `GLC431BK` showed Add at 524–572, the free-shipping line at 586–625, and the promise at 631. `/shop?…code=LC431` had no pill. The jump button stayed right-aligned (941–1231 of a group ending at 1231). At 390×664 the button spanned 24–356 with no horizontal scroll (scrollWidth 380). `probe:ad-visitor-dropoff` (READ-ONLY): 119 passed, 8 failed, 6 soft. **All 8 fails are `NOT MEASURED` because of 429s from the shared IP limiter.** They are not layout failures: 1280×551 GLC3329XLBK, all three 1280×720 PDPs, and four /shop rows. Every PDP that WAS measured passed "Add fully inside" plus both "directly under" checks, including 1280×551 (Add ends 528, line 547–586). A second run, `--only=pdp` with `PROBE_PACE_MS=15000`, gave 64 passed, 9 failed, 4 soft. All 9 fails were again `NOT MEASURED` (429s, with peer sessions on the same IP). It filled the 1280×551 GLC3329XLBK gap: Add ends 526, Add inside the viewport, nothing covers it. **The three 1280×720 PDPs were NOT measured in either run.**
+
+---
+
 ## ERR-329 — Service row ("Auckland metro orders by 2pm ship same day · most of NZ in 1–3 business days · Questions? Call …") removed from every page (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** Owner screenshot of `/shop?brand=brother&category=ink&code=LC432`: the grey line under the drilldown header. The owner wants it gone from every page that shows it.
@@ -100,6 +129,19 @@ Measured locally at 1280×551:
 - 375×664: header row at 72px, button at 151–195px.
 
 The probe now asserts the header row's top and the whole cyan button on screen: 192/192. Full suite 7108/0.
+
+**Fourth follow-up (owner screenshot, `/shop?…code=LC431`): cyan in line with the Compatible heading, and "Click here for …" wording.**
+- `#source-jump` left the page header. It now sits in a `.products-section__head` row in `#compatible-section`, after the `<h2>`, which mirrors the yellow button in Genuine's head row. Both buttons get `margin-left: auto`, so they sit on the right.
+- The labels are "Click here for genuine LC431 ink" and "Click here for compatible LC431 ink" (printer pages: "… MFC-L3770CDW cartridges").
+- The yellow click targets `#compatible-section` again, because its head row now holds the cyan button. The `.drilldown-header` scroll target is gone.
+
+Measured locally:
+- 1280×551, `code=LC431`: cyan button at 263–307px sits level with the Compatible `<h2>` at 269–301px; the first card is at 325px.
+- After cyan then yellow: the Compatible head row is at 24px and the cyan button at 24–68px.
+- 1000×650: after yellow, cyan is at 72–116px.
+- 375×664: the button takes its own row under the heading, 65px tall because the label wraps to two lines.
+- probe:shop-columns 192/192.
+- Full suite 7100 pass, 1 fail: a `.playwright-mcp/` directory that this session did not create.
 
 ---
 

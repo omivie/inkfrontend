@@ -241,3 +241,18 @@ test('R7b the Admin pin is gated on there being a gutter to pin into', () => {
     assert.match(LAYOUT, /@media \(min-width: 1100px\)[\s\S]*?\.header-actions__item--admin\s*\{[^}]*display:\s*flex/,
         'Admin must be revealed at >=1100px');
 });
+
+test('R8 phones use the IC mark as the home button, and hide the wordmark only where the mark exists (ERR-331)', () => {
+    // The nowrap wordmark does not shrink: at 390px with the Business item it
+    // ran under the phone icon and the briefcase. Below 768 the mark replaces it.
+    const phone = LAYOUT.match(/@media \(max-width: 767\.98px\)\s*\{([\s\S]*?)\n\}/g)
+        .find(b => b.includes('.header-lead__logo'));
+    assert.ok(phone, 'the 767.98 phone block must style .header-lead__logo');
+    assert.match(phone, /\.header-lead__logo\s*\{[^}]*display:\s*block/, 'phones must show the IC mark');
+    // Guarded by :has — pages that ship no mark (checkout, account auth) keep
+    // the wordmark, and so does a browser without :has. Never hide it bare.
+    assert.match(phone, /\.header-main \.container:has\(\.header-lead__logo\) \.logo-block\s*\{\s*display:\s*none/,
+        'the wordmark must hide only behind :has(.header-lead__logo)');
+    assert.ok(!/^\s*\.logo-block\s*\{[^}]*display:\s*none/m.test(phone),
+        'an unguarded .logo-block { display:none } would leave pages without the mark brandless');
+});

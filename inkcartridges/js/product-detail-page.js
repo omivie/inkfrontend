@@ -1745,9 +1745,10 @@
         },
 
         /**
-         * Programme facts above the Add button (conversion handoff §4.2):
-         * points this order earns, free-shipping threshold, and the phone number
-         * with the founding year (older buyers call before they buy — §8.2).
+         * Programme facts (conversion handoff §4.2): the free-shipping
+         * threshold, in its own line directly under Add (#product-free-ship,
+         * owner 13 Oct 2026, ERR-330), and the phone number with the founding
+         * year (older buyers call before they buy — §8.2).
          *
          * Points come ONLY from this product's `reward_points` (CRO handoff
          * 2026-10-04); the free-shipping line ONLY from /api/site/value-props;
@@ -1764,7 +1765,6 @@
             el.dataset.valueProps = vp.ok ? 'ok' : 'unavailable';
 
             const lines = [];
-            const facts = [];
             // Points are printed only when the PRODUCT carries `reward_points`
             // (CRO handoff 2026-10-04: absent = programme off for this
             // product). value-props no longer decides it — its site-wide rate
@@ -1772,8 +1772,15 @@
             // PRICE row (#product-points-line, FE master checklist item 6):
             // this block sits below Add on desktop (pages.css, ERR-293).
             this._rewardPoints = this.validRewardPoints(info && info.reward_points);
-            if (ship && ship.headline) facts.push(`<span class="product-value-lines__ship">${Security.escapeHtml(ship.headline)}</span>`);
-            if (facts.length) lines.push(`<p class="product-value-lines__facts">${facts.join('')}</p>`);
+            const shipEl = document.getElementById('product-free-ship');
+            if (shipEl) {
+                const headline = ship && typeof ship.headline === 'string' ? ship.headline.trim() : '';
+                shipEl.innerHTML = headline
+                    ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>'
+                        + `<span>${Security.escapeHtml(headline)}</span>`
+                    : '';
+                shipEl.hidden = !headline;
+            }
             const phone = contact && typeof contact.phone_display === 'string' ? contact.phone_display.trim() : '';
             const tel = contact && typeof contact.phone_tel_href === 'string' ? contact.phone_tel_href.replace(/[^+\d]/g, '') : '';
             if (phone && tel) {

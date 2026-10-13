@@ -31,15 +31,6 @@ const COMPONENTS = read('inkcartridges/css/components.css');
 const LAYOUT = read('inkcartridges/css/layout.css');
 const SHOP_HTML = read('inkcartridges/html/shop.html');
 
-test('T1 shop shipping pill has no nbsp-glued bullet and can shrink', () => {
-    assert.ok(!SHOP_HTML.includes('&nbsp;&bull;&nbsp;'),
-        'the pill separator must use normal spaces (span.shipping-info-bar__sep), not &nbsp; glue');
-    assert.match(SHOP_HTML, /shipping-info-bar__sep/,
-        'the pill separator span must exist');
-    assert.match(PAGES, /\.shipping-info-bar--inline\s*\{[^}]*min-width:\s*0/s,
-        '.shipping-info-bar--inline needs min-width:0 to shrink inside its flex row');
-});
-
 test('T2 contact card value cell shrinks and long values wrap', () => {
     assert.match(PAGES, /\.contact-card__item\s*\{[^}]*grid-template-columns:\s*36px\s+minmax\(0,\s*1fr\)/s,
         '.contact-card__item value column must be minmax(0,1fr) — implicit min-width:auto let the email prop the card open');

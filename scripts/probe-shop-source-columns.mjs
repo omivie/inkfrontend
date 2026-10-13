@@ -279,7 +279,7 @@ try {
                         .map((id) => { const el = document.getElementById(id); return el && !el.hidden ? el.textContent.trim() : null; }));
                     console.log(`     labels: ${JSON.stringify(labels)}`);
                     check(`${vp.width}px ${label}: both labels name the subject, not "products"`,
-                        /^View genuine (?!products)/.test(labels[0] || '') && /^View compatible (?!products)/.test(labels[1] || ''),
+                        /^Click here for genuine (?!products)/.test(labels[0] || '') && /^Click here for compatible (?!products)/.test(labels[1] || ''),
                         JSON.stringify(labels));
                     if (labels[1]) {
                         await page.click('#source-jump-compatible');
@@ -288,14 +288,15 @@ try {
                         // button, i.e. the whole button is visible after the click.
                         const up = await page.evaluate(() => {
                             const r = document.getElementById('source-jump').getBoundingClientRect();
-                            const h = document.querySelector('.shop-page .drilldown-header').getBoundingClientRect();
+                            // The cyan button lives in Compatible's head row (owner 2026-10-13).
+                            const h = document.querySelector('#compatible-section .products-section__head').getBoundingClientRect();
                             return { top: Math.round(r.top), bottom: Math.round(r.bottom), header: Math.round(h.top) };
                         });
                         // Header row lands with its gap (24px desktop, sticky bar + 16 below 1024),
                         // and the whole cyan button is on screen under it.
                         check(`${vp.width}px ${label}: yellow click shows the whole cyan button, with a gap above`,
                             up.header >= 8 && up.header <= 100 && up.top >= up.header && up.bottom <= vp.height,
-                            `header row top ${up.header}px, cyan button ${up.top}..${up.bottom}px`);
+                            `Compatible head row top ${up.header}px, cyan button ${up.top}..${up.bottom}px`);
                     }
                 }
             }

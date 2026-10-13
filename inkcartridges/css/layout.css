@@ -157,9 +157,9 @@
    it took the slot the Admin shortcut used to hold, which moved to the far
    right of .header-actions).
 
-   Desktop-only on purpose: below 768px the lead is its own full-width row
-   UNDER the wordmark, so a second brand mark would sit beneath the one it
-   duplicates, and the scrolled collapse hides the whole lead anyway. */
+   Hidden at the base width; >=768 shows it beside the wordmark. On PHONES
+   (<768) it is shown too, but as the home button IN PLACE of the wordmark:
+   see the 767.98 phone block near the end of this file (ERR-331). */
 .header-lead__logo {
     display: none;
     flex: 0 0 auto;
@@ -2532,9 +2532,7 @@ summary.footer-column__heading::-webkit-details-marker {
    number must stay reachable. */
 @media (max-width: 767.98px) {
     .header-lead {
-        order: 2;
         width: auto;
-        flex: 0 0 auto;
     }
     .header-contact__item[href^="tel:"] {
         font-size: 0;
@@ -2549,10 +2547,25 @@ summary.footer-column__heading::-webkit-details-marker {
     .site-header--scrolled .header-lead {
         display: flex;
     }
-    /* Make room on ONE row for logo + phone + the three actions at 390px:
-       the logo yields first (it has min-width:0 and truncates last), the
-       48px action targets sit edge to edge (each still >= --tap-min). */
-    .logo-block { flex: 1 1 0; }
+    /* ERR-331 (Oct 2026): the IC mark is the phone home button. The nowrap
+       "InkCartridges.co.nz" wordmark does not shrink: at 390px it ran under
+       the phone icon and the Business briefcase (480px budget with Business:
+       ~255 wordmark + 44 phone + 4x48 actions = 491 vs ~445 row). The lead
+       (mark + phone) takes the left of ONE row and pushes the actions right.
+       The wordmark hides only where the mark exists (:has), so the pages that
+       ship no mark (checkout, payment, account auth) keep their wordmark, and
+       a browser without :has keeps it too. The 48px action targets sit edge
+       to edge (each still >= --tap-min). */
+    .header-lead {
+        order: 1;
+        flex: 1 1 auto;
+    }
+    .header-lead__logo {
+        display: block;
+        order: -1;
+    }
+    .header-lead__logo .logo__icon { height: 40px; }
+    .header-main .container:has(.header-lead__logo) .logo-block { display: none; }
     .header-actions { gap: 0; }
 }
 @media (max-width: 479.98px) {
@@ -2624,13 +2637,6 @@ summary.footer-column__heading::-webkit-details-marker {
 @media (max-width: 767.98px) {
     .value-strip__long { display: none; }
     .value-strip__short { display: inline; }
-    /* The strip states free shipping on every page; on a phone the shop
-       pages' own shipping pill said it a second time, 50px lower. CSS-only
-       (no shift on load). If the strip is dismissed or its facts could not be
-       read, the pill stays hidden too: a threshold we could not confirm is
-       not re-asserted from a literal. */
-    .value-strip ~ main .shipping-info-bar--inline,
-    .value-strip ~ * .shipping-info-bar--inline { display: none; }
     .value-strip { font-size: 0.8125rem; }
     .value-strip__item--wide { display: none; }
     .value-strip__list { justify-content: flex-start; }

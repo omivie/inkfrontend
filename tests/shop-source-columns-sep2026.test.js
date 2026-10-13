@@ -4,9 +4,11 @@
  *
  * Sep-2026 put the two sources side by side (three cards a column). The owner
  * reversed it on 2026-10-13 (ERR-327): each section is full width again, six
- * cards to a row from 1100px, Compatible first, and a cyan "View Genuine
- * products" button (#source-jump) in the header scrolls to Genuine. The button
- * shows only when BOTH sources have rows.
+ * cards to a row from 1100px, Compatible first. Each section's head row
+ * carries a jump to the other one, on the right: cyan "Click here for genuine
+ * …" (#source-jump) beside the Compatible heading, yellow "Click here for
+ * compatible …" (#source-jump-compatible) beside the Genuine heading. Both
+ * show only when BOTH sources have rows.
  *
  * /search, /ink-cartridges and /toner-cartridges are Vercel rewrites onto this
  * same shell (vercel.json), so these assertions cover every one of them.
@@ -193,13 +195,18 @@ test('pages.css — six-up defers to the global ladder below 1100px', () => {
 // 4. The "View Genuine products" jump (ERR-327)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('shop.html — #source-jump sits AFTER the shipping pill, inside the right group', () => {
-    // Owner swap 2026-10-13: pill first, button after it, wrapping together.
-    const group = SHOP_HTML.indexOf('class="drilldown-header__right-group"');
-    const pill = SHOP_HTML.indexOf('data-shipping-info-bar', group);
-    const btn = SHOP_HTML.indexOf('id="source-jump"', group);
-    const title = SHOP_HTML.indexOf('id="drilldown-title"');
-    assert.ok(group !== -1 && pill !== -1 && pill < btn && btn < title, 'button must follow the shipping pill inside the header');
+test('shop.html — cyan #source-jump sits in Compatible\'s head row, AFTER the <h2>, not in the page header', () => {
+    // Owner 2026-10-13: in line with the Compatible heading, mirroring the yellow one.
+    const sec = SHOP_HTML.indexOf('id="compatible-section"');
+    const head = SHOP_HTML.indexOf('class="products-section__head"', sec);
+    const h2 = SHOP_HTML.indexOf('id="compatible-title"', sec);
+    const h2End = SHOP_HTML.indexOf('</h2>', h2);
+    const btn = SHOP_HTML.indexOf('id="source-jump"', sec);
+    const grid = SHOP_HTML.indexOf('id="compatible-products"', sec);
+    assert.ok(sec < head && head < h2 && h2End < btn && btn < grid,
+        'outside the <h2> so the heading\'s accessible name stays the heading');
+    const header = SHOP_HTML.slice(SHOP_HTML.indexOf('class="drilldown-header"'), SHOP_HTML.indexOf('id="drilldown-title"'));
+    assert.doesNotMatch(header, /source-jump/, 'the jump left the page header');
     assert.match(SHOP_HTML, /<button type="button" class="source-jump" id="source-jump" hidden>/,
         'ships hidden: a single-source page must never flash a dead button');
 });
@@ -212,7 +219,7 @@ test('shop-page.js — _syncSourceColumns is the ONE writer of both buttons\' hi
     assert.doesNotMatch(SHOP_JS, /sourceJump(?:Compatible)?\.hidden\s*=/, 'no second writer by name');
 });
 
-test('shop.html — yellow "View compatible" sits in Genuine\'s head row, AFTER the <h2>', () => {
+test('shop.html — yellow "Click here for compatible" sits in Genuine\'s head row, AFTER the <h2>', () => {
     const sec = SHOP_HTML.indexOf('id="genuine-section"');
     const head = SHOP_HTML.indexOf('class="products-section__head"', sec);
     const h2 = SHOP_HTML.indexOf('id="genuine-title"', sec);
@@ -230,12 +237,15 @@ test('shop.html — yellow "View compatible" sits in Genuine\'s head row, AFTER 
     const yellow = ruleBody(PAGES_CSS, '.source-jump--compatible {');
     assert.match(yellow, /background:\s*var\(--yellow-primary\)/, 'the Compatible badge yellow');
     assert.match(yellow, /color:\s*var\(--black-primary\)/, 'the badge\'s black text — white on yellow fails contrast');
-    assert.match(PAGES_CSS, /#genuine-section,\s*\.shop-page \.drilldown-header\s*\{\s*scroll-margin-top/);
-    assert.match(SHOP_JS, /drilldownHeader: document\.querySelector\('\.shop-page \.drilldown-header'\)/);
+    assert.match(PAGES_CSS, /#genuine-section,\s*#compatible-section\s*\{\s*scroll-margin-top/);
 });
 
 test('shop-page.js — both jump labels are written ONLY by _setSourceJumpLabels, at all three title sites', () => {
     assert.equal((SHOP_JS.match(/querySelector\('\.source-jump__text'\)/g) || []).length, 1);
+    // Owner wording 2026-10-13: "Click here for genuine LC431 ink".
+    assert.match(SHOP_JS, /`Click here for genuine \$\{s\}`/);
+    assert.match(SHOP_JS, /`Click here for compatible \$\{s\}`/);
+    assert.doesNotMatch(SHOP_HTML, />View (?:genuine|compatible) products</i);
     // printer level, /search, displayProductInfo (code pages)
     assert.equal((SHOP_JS.match(/this\._setSourceJumpLabels\(sourceJumpSubject\(/g) || []).length, 3);
     assert.match(SHOP_JS, /matched_printer[\s\S]{0,200}printer: mp\.name, brand: mp\.brand_name/);
@@ -257,9 +267,8 @@ test('sourceJumpSubject — names the code or printer the shopper asked for', ()
 });
 
 test('shop-page.js — the clicks scroll to their sections, no URL hash', () => {
-    // Yellow goes to the HEADER ROW, not the Compatible heading: landing on the
-    // heading left the cyan button half off the top (owner, 2026-10-13).
-    const i = SHOP_JS.indexOf("[['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'drilldownHeader']]");
+    // Yellow lands Compatible's head row (cyan button included) at the top.
+    const i = SHOP_JS.indexOf("[['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'compatibleSection']]");
     assert.ok(i !== -1, 'expected ONE binding loop over [button, section] pairs');
     const body = SHOP_JS.slice(i, i + 600);
     assert.match(body, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
