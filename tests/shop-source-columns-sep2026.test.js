@@ -284,3 +284,15 @@ test('pages.css — Genuine lands with a gap, button uses the Genuine badge cyan
     assert.match(ruleBody(PAGES_CSS, '.source-jump[hidden] {') || '', /display:\s*none/,
         '.source-jump declares display, so [hidden] needs its own rule');
 });
+
+test('pages.css — both jump buttons run the shade wave, and it stops for reduced motion', () => {
+    const btn = ruleBody(PAGES_CSS, '.source-jump {');
+    assert.match(btn, /animation:\s*source-jump-wave\b/);
+    assert.match(btn, /background-size:\s*200% 100%/);
+    const yellow = ruleBody(PAGES_CSS, '.source-jump--compatible {') || '';
+    assert.match(yellow, /background-image:\s*linear-gradient\(/);
+    // Its `background:` shorthand resets background-size; without this the wave stands still.
+    assert.match(yellow, /background-size:\s*200% 100%/);
+    assert.match(PAGES_CSS, /@keyframes source-jump-wave/);
+    assert.match(PAGES_CSS, /prefers-reduced-motion: reduce\)\s*\{\s*\.source-jump\s*\{\s*animation:\s*none/);
+});

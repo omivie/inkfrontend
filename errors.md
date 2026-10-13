@@ -41,6 +41,16 @@ describing the same incident.
 
 ---
 
+## ERR-332 — /shop "Click here for …" jump buttons now carry a slow shade wave (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner request: make the ERR-327 jump buttons catch the shopper's eye with a gradient that moves through them like a wave — blue shades through "Click here for genuine …", yellow shades through "Click here for compatible …".
+
+**Change (CSS only, `css/pages.css`).** `.source-jump` keeps `background: var(--cyan-primary)` as the fallback colour and adds a 200%-wide `linear-gradient` (cyan-primary ↔ cyan-dark) animated by `@keyframes source-jump-wave` (6s linear infinite, `background-position` 100% → -100%, one full tile, so the loop has no seam). `.source-jump--compatible` swaps in yellow-primary ↔ `#FFDC6B`. Its `background:` shorthand resets `background-size`, so the rule re-declares `background-size: 200% 100%` — without it the yellow wave stands still. Shades never go lighter than the cyan base (white text) or darker than the yellow base (black text), so contrast is unchanged. `prefers-reduced-motion: reduce` sets `animation: none` (static gradient stays). The pages.css `?v=` token is restamped in 41 HTML files.
+
+**Measured.** Playwright at 1440×900 on `/shop?brand=brother&category=ink&code=LC431`: both buttons report `animation-name: source-jump-wave`, `background-size: 200% 100%`, and `background-position` moved 39.4% → -10.6% over 1.5 s; with reduced motion emulated, both report `animation-name: none`. Guard: `tests/shop-source-columns-sep2026.test.js` (20/20), full `npm test` 0 fail.
+
+---
+
 ## ERR-331 — Phone header: "InkCartridges.co.nz" wordmark ran under the phone icon and Business briefcase; IC logo mark is now the home button below 768px (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** Owner screenshot at ~394px on `/shop?brand=brother&category=ink&code=LC431`. The wordmark ".co.nz" sat under the tap-to-call icon, and the ink dot touched the Business briefcase. The owner asked for the logo mark to be the home button at phone widths so more fits in the row.

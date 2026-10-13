@@ -8513,7 +8513,11 @@ a.account-review-card__product:focus-visible {
    cyan "Click here for genuine …" beside the Compatible heading (Genuine
    badge cyan, white text) and yellow "Click here for compatible …" beside
    the Genuine heading. Shown by _syncSourceColumns only when BOTH sections
-   have rows. */
+   have rows.
+   Owner, 2026-10-13: a slow wave of shades runs through each button to catch
+   the eye. The shades never go lighter than the base colour, so white-on-cyan
+   and black-on-yellow keep today's contrast. The gradient starts and ends on
+   the same colour and travels one tile, so the loop has no seam. */
 .source-jump {
     display: inline-flex;
     align-items: center;
@@ -8523,6 +8527,10 @@ a.account-review-card__product:focus-visible {
     padding: var(--spacing-xs) var(--spacing-lg);
     margin-left: auto;
     background: var(--cyan-primary);
+    background-image: linear-gradient(90deg, var(--cyan-primary), var(--cyan-dark),
+        var(--cyan-primary), var(--cyan-dark), var(--cyan-primary));
+    background-size: 200% 100%;
+    animation: source-jump-wave 6s linear infinite;
     color: var(--white-primary);
     border: 0;
     border-radius: var(--radius-md);
@@ -8541,11 +8549,23 @@ a.account-review-card__product:focus-visible {
 .source-jump[hidden] {
     display: none;
 }
+@keyframes source-jump-wave {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .source-jump {
+        animation: none;
+    }
+}
 
 /* The yellow one: the Compatible badge's yellow AND its black text
    (white on #F4C430 fails contrast). */
 .source-jump--compatible {
     background: var(--yellow-primary);
+    background-image: linear-gradient(90deg, var(--yellow-primary), #FFDC6B,
+        var(--yellow-primary), #FFDC6B, var(--yellow-primary));
+    background-size: 200% 100%; /* the shorthand above reset it */
     color: var(--black-primary);
 }
 .source-jump--compatible:focus-visible {
