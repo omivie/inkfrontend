@@ -285,14 +285,12 @@ test('pages.css — Genuine lands with a gap, button uses the Genuine badge cyan
         '.source-jump declares display, so [hidden] needs its own rule');
 });
 
-test('pages.css — both jump buttons run the shade wave, and it stops for reduced motion', () => {
+test('pages.css — the jump buttons stand still; only the label pulses every 6s, off for reduced motion', () => {
     const btn = ruleBody(PAGES_CSS, '.source-jump {');
-    assert.match(btn, /animation:\s*source-jump-wave\b/);
-    assert.match(btn, /background-size:\s*200% 100%/);
-    const yellow = ruleBody(PAGES_CSS, '.source-jump--compatible {') || '';
-    assert.match(yellow, /background-image:\s*linear-gradient\(/);
-    // Its `background:` shorthand resets background-size; without this the wave stands still.
-    assert.match(yellow, /background-size:\s*200% 100%/);
-    assert.match(PAGES_CSS, /@keyframes source-jump-wave/);
-    assert.match(PAGES_CSS, /prefers-reduced-motion: reduce\)\s*\{\s*\.source-jump\s*\{\s*animation:\s*none/);
+    assert.doesNotMatch(btn, /animation|background-image/, 'the button itself is the plain original (ERR-332)');
+    assert.match(ruleBody(PAGES_CSS, '.source-jump__label {') || '', /animation:\s*source-jump-text-pulse 6s\b/);
+    // Text and arrow scale as ONE unit; each on its own ran the text over the arrow.
+    assert.equal((SHOP_HTML.match(/<span class="source-jump__label"><span class="source-jump__text">/g) || []).length, 2);
+    assert.match(PAGES_CSS, /@keyframes source-jump-text-pulse/);
+    assert.match(PAGES_CSS, /prefers-reduced-motion: reduce\)\s*\{\s*\.source-jump__label\s*\{\s*animation:\s*none/);
 });
