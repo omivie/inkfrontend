@@ -70,6 +70,7 @@ const CartDrawer = {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
                     Continue shopping
                 </button>
+                <p class="cart-summary__loyalty-chip cart-drawer__loyalty" id="cart-drawer-loyalty" hidden></p>
                 <div class="cart-drawer__body">
                     <ul class="cart-drawer__lines" id="cart-drawer-lines"></ul>
                     <section class="cart-drawer__upsell" id="cart-drawer-upsell" hidden aria-labelledby="cart-drawer-upsell-title">
@@ -159,6 +160,10 @@ const CartDrawer = {
         if (typeof Cart.bindImageFallbacks === 'function') Cart.bindImageFallbacks(list);
         this.root.querySelector('#cart-drawer-totals').innerHTML = this._totalsHtml(items);
         this.root.querySelector('.cart-drawer__foot').hidden = !items.length;
+        // Same chip as the cart page, same writer (ERR-333); no message ⇒ hidden.
+        const chip = this.root.querySelector('#cart-drawer-loyalty');
+        if (items.length && typeof Cart._fillLoyaltyChip === 'function') Cart._fillLoyaltyChip(chip);
+        else chip.hidden = true;
         this._renderUpsell();
     },
 

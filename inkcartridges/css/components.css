@@ -1873,6 +1873,12 @@ a.cart-drawer__name:hover { text-decoration: underline; }
 }
 .cart-drawer__upsell-add:hover { background: var(--color-primary-dark); }
 
+/* Loyalty chip at the top of the drawer (ERR-333); look comes from
+   .cart-summary__loyalty-chip in pages.css, this only sets the gutter. Scoped
+   under .cart-drawer because pages.css loads AFTER this file and its chip
+   margin would otherwise win (measured: 0px side gutter). */
+.cart-drawer .cart-drawer__loyalty { flex: 0 0 auto; margin: 0 20px 8px; }
+
 .cart-drawer__foot {
     padding: 16px 20px 20px;
     border-top: 1px solid var(--color-border-light);

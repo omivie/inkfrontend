@@ -4079,11 +4079,12 @@ body.filter-sort-open { overflow: hidden; }
 /* Loyalty message chip (earn nudge / applied summary). Tightened in the Jul 2026
    CTA lift — the copy is backend-supplied and can run to two sentences, so it is
    never truncated, just set smaller so it wraps to one or two lines instead of
-   four. align-items:flex-start keeps the ★ on the first line when it wraps. */
+   four. A plain BLOCK, not flex (owner, 2026-10-13, ERR-333): as an inline-flex
+   with flex-wrap the text node was its own flex item and wrapped onto a new row
+   UNDER the ★. Inline flow keeps the ★ first, text straight after it. Also used
+   at the top of the cart drawer (#cart-drawer-loyalty, cart-drawer.js). */
 .cart-summary__loyalty-chip {
-    display: inline-flex;
-    align-items: flex-start;
-    gap: 6px;
+    display: block;
     padding: 6px 10px;
     margin: 0 0 var(--spacing-sm);
     background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
@@ -4095,10 +4096,10 @@ body.filter-sort-open { overflow: hidden; }
 }
 .cart-summary__loyalty-chip::before {
     content: "★";
+    margin-right: 6px;
     font-size: 0.875rem;
     line-height: 1.35;
 }
-.cart-summary__loyalty-chip { flex-wrap: wrap; }
 /* Guest carts (backend `loyalty.guest`, Sep 2026): the earn message plus the
    link that makes it actionable. A link, never a gate on checkout. */
 .cart-summary__loyalty-link {

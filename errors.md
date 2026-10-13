@@ -41,6 +41,18 @@ describing the same incident.
 
 ---
 
+## ERR-333 — Cart loyalty chip: text wrapped onto its own line under the ★; same chip now also at the top of the cart drawer (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner screenshot of /cart: the green chip showed "★" alone on the first line and "You have 205 points — that's $2.05 off. Redeem at checkout." on the next. Owner asked for the text straight after the star, and for the same green chip at the top of the cart drawer.
+
+**Cause.** `.cart-summary__loyalty-chip` (`css/pages.css`) was `inline-flex` with `flex-wrap: wrap`. The `::before` star was one flex item and the whole message text node was a second one; a long message did not fit beside the star, so the text item wrapped to a new row.
+
+**Change.** The chip is now `display: block`; the star is an inline `::before` with `margin-right: 6px`, so the text flows after it and wraps under it like normal text. `Cart._renderLoyaltyChip` now delegates to a new `Cart._fillLoyaltyChip(el)`, the ONE writer of chip content (message verbatim, guest link, hidden with no `loyalty.message`). `js/cart-drawer.js` mounts `<p class="cart-summary__loyalty-chip cart-drawer__loyalty" id="cart-drawer-loyalty">` between "Continue shopping" and the lines, and `refresh()` fills it through `Cart._fillLoyaltyChip` (hidden when the cart is empty). Drawer gutter is `.cart-drawer .cart-drawer__loyalty { margin: 0 20px 8px }` in `components.css`; the first cut used the bare class and pages.css (loaded later) won, so the chip measured 0px from the panel edge. `?v=` restamped for pages.css, components.css, cart.js and cart-drawer.js in every HTML file.
+
+**Measured.** Local Playwright (in-memory `Cart.items`/`Cart.loyalty`, no cart API writes), /shop drawer at 1280×800 and 390×664: chip `display: block`, text's first line 7px below the chip top (6px padding), chip bottom 156 above lines top 164, chip hidden when `Cart.loyalty = null`. /cart at 1280: text first line at chip top + 7px, 30px from chip left, i.e. on the star's line. Tests: `tests/cart-drawer-oct2026.test.js` (new drawer chip test) and `tests/conversion-fixes-sep2026.test.js` (§5 now reads `_fillLoyaltyChip`) pass; full `npm test` 7103 pass, 1 fail — `no-ghost-files` on an untracked `backend-docs/.DS_Store` (Finder file on disk, gitignored, not part of this change). Not measured: the drawer with a real logged-in account's server `loyalty` on /shop.
+
+---
+
 ## ERR-332 — /shop "Click here for …" jump buttons now carry a slow shade wave (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** Owner request: make the ERR-327 jump buttons catch the shopper's eye with a gradient that moves through them like a wave — blue shades through "Click here for genuine …", yellow shades through "Click here for compatible …".

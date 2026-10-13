@@ -4463,7 +4463,15 @@ const Cart = {
      * checkout — it is a link, not a gate.
      */
     _renderLoyaltyChip: function() {
-        const chipEl = document.getElementById('cart-loyalty-chip');
+        this._fillLoyaltyChip(document.getElementById('cart-loyalty-chip'));
+    },
+
+    /**
+     * The ONE writer of a loyalty chip's content (ERR-333): the cart page's
+     * #cart-loyalty-chip and the drawer's #cart-drawer-loyalty both route here,
+     * so the drawer can never say something the cart page would not.
+     */
+    _fillLoyaltyChip: function(chipEl) {
         if (!chipEl) return;
         const lo = this.loyalty;
         if (!lo || !lo.message) {

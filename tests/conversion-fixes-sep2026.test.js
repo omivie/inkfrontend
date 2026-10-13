@@ -361,7 +361,9 @@ test('§5 the cart drawer leads with the way on, and the upsell sits below it (D
 
 test('§5 guest loyalty chip keeps the message verbatim and adds a link, never a gate', () => {
     const src = stripComments(read('js/cart.js'));
-    const fn = extractMethod(src, '_renderLoyaltyChip').body;
+    // ERR-333: the content moved to _fillLoyaltyChip, the ONE writer shared with the drawer.
+    assert.match(extractMethod(src, '_renderLoyaltyChip').body, /_fillLoyaltyChip\(document\.getElementById\('cart-loyalty-chip'\)\)/);
+    const fn = extractMethod(src, '_fillLoyaltyChip').body;
     assert.match(fn, /chipEl\.textContent = lo\.message;/);
     assert.match(fn, /lo\.guest === true/);
     assert.match(fn, /\/account\/login\?tab=register/);

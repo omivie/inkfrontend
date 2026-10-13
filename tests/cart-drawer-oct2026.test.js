@@ -165,3 +165,26 @@ test('every page that loads cart.js loads the drawer right after it', () => {
     }
     assert.deepEqual(missing, []);
 });
+
+test('loyalty chip at the top of the drawer: same writer as the cart page, hidden with an empty cart (ERR-333)', () => {
+    const code = stripComments(SRC);
+    const chipAt = code.indexOf('id="cart-drawer-loyalty"');
+    assert.ok(chipAt > 0 && chipAt < code.indexOf('cart-drawer__body'), 'the chip sits above the lines, not in the footer');
+    assert.match(code, /class="cart-summary__loyalty-chip cart-drawer__loyalty"/, 'the cart page\'s green chip look');
+
+    const el = (extra = {}) => Object.assign({ hidden: false, innerHTML: '' }, extra);
+    const nodes = { '#cart-drawer-lines': el(), '#cart-drawer-totals': el(), '.cart-drawer__foot': el(), '#cart-drawer-loyalty': el() };
+    const filled = [];
+    const { Drawer, Cart } = load({ cart: { items: [{ key: 'a', quantity: 1 }], lineTotalHtml: () => '', getItemImageHTML: () => '',
+        maxQuantityFor: () => 9, _fillLoyaltyChip: (c) => filled.push(c) } });
+    Drawer.root = { hidden: false, querySelector: (sel) => nodes[sel] };
+    Drawer._renderUpsell = () => {};
+    Drawer.isOpen = () => true;
+    Drawer.refresh();
+    assert.deepEqual(filled, [nodes['#cart-drawer-loyalty']], 'Cart._fillLoyaltyChip writes it — no second copy of the message logic');
+
+    Cart.items = [];
+    Drawer.refresh();
+    assert.equal(nodes['#cart-drawer-loyalty'].hidden, true, 'empty cart ⇒ no chip');
+    assert.equal(filled.length, 1);
+});
