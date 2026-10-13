@@ -8495,15 +8495,17 @@ a.account-review-card__product:focus-visible {
     row-gap: var(--spacing-xl);
 }
 
-/* The jump lands the Genuine header at the top of the screen with a small gap.
-   Desktop header is not sticky; phones pin it (layout.css), so clear it there. */
+/* The jumps land their target at the top of the screen with a small gap:
+   cyan to the Genuine section, yellow back to the header row that holds the
+   cyan button (so the screen tops out ABOVE it). Desktop header is not
+   sticky; phones pin it (layout.css), so clear it there. */
 #genuine-section,
-#compatible-section {
+.shop-page .drilldown-header {
     scroll-margin-top: 24px;
 }
 @media (max-width: 1024px) {
     #genuine-section,
-    #compatible-section {
+    .shop-page .drilldown-header {
         scroll-margin-top: calc(var(--header-h, 56px) + 16px);
     }
 }

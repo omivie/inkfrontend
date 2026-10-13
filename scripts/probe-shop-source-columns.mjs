@@ -284,10 +284,18 @@ try {
                     if (labels[1]) {
                         await page.click('#source-jump-compatible');
                         await page.waitForTimeout(1200);
-                        const up = await page.evaluate(() => Math.round(
-                            document.getElementById('compatible-title').getBoundingClientRect().top));
-                        check(`${vp.width}px ${label}: yellow click lands the Compatible header near the top`,
-                            up > 0 && up <= 120, `header top ${up}px`);
+                        // Owner 2026-10-13: the screen must top out ABOVE the cyan
+                        // button, i.e. the whole button is visible after the click.
+                        const up = await page.evaluate(() => {
+                            const r = document.getElementById('source-jump').getBoundingClientRect();
+                            const h = document.querySelector('.shop-page .drilldown-header').getBoundingClientRect();
+                            return { top: Math.round(r.top), bottom: Math.round(r.bottom), header: Math.round(h.top) };
+                        });
+                        // Header row lands with its gap (24px desktop, sticky bar + 16 below 1024),
+                        // and the whole cyan button is on screen under it.
+                        check(`${vp.width}px ${label}: yellow click shows the whole cyan button, with a gap above`,
+                            up.header >= 8 && up.header <= 100 && up.top >= up.header && up.bottom <= vp.height,
+                            `header row top ${up.header}px, cyan button ${up.top}..${up.bottom}px`);
                     }
                 }
             }

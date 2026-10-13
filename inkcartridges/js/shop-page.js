@@ -607,6 +607,9 @@
             sourceSections: document.getElementById('source-sections'),
             sourceJump: document.getElementById('source-jump'),
             sourceJumpCompatible: document.getElementById('source-jump-compatible'),
+            // The yellow jump's target: the header row that holds the cyan
+            // button, so the screen tops out ABOVE it (owner, 2026-10-13).
+            drilldownHeader: document.querySelector('.shop-page .drilldown-header'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
             // category-page-contract-may2026.md §2 — the page-level
@@ -639,10 +642,12 @@
         async init() {
             // ERR-327 jump buttons — Compatible is stacked above Genuine. The
             // cyan one (header) lands the Genuine header at the top of the
-            // screen, the yellow one (Genuine's head row) goes back up to
-            // Compatible (scroll-margin-top in pages.css). Shown only by
+            // screen. The yellow one (Genuine's head row) goes back up to the
+            // header row, NOT the Compatible heading: landing on the heading
+            // left the cyan button half off the top (owner screenshot). Gaps
+            // are scroll-margin-top in pages.css. Shown only by
             // _syncSourceColumns. No hash: the route lives in the query.
-            [['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'compatibleSection']]
+            [['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'drilldownHeader']]
                 .forEach(([btnKey, sectionKey]) => {
                     const btn = this.elements[btnKey];
                     if (!btn) return;

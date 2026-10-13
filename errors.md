@@ -94,6 +94,13 @@ Measured locally at 1280×551:
 - **Cost:** the longer labels no longer fit in the header row at 1280px. Measured for `tn258`: left group 475 + right group 733 > 1192, so the header grows from 52px to 104px and the first card moves down 52px. The printer label is 458px wide.
 - probe:shop-columns 192/192 local. Full suite 7107 pass, 1 fail: the untracked `backend-docs/.DS_Store`.
 
+**Third follow-up (owner screenshot, live `/shop?…code=LC436`): the yellow click did not scroll high enough.** It targeted `#compatible-section`, so the screen stopped at the Compatible heading and the cyan "View genuine LC436 ink" button was cut off at the top. It now targets `.shop-page .drilldown-header`, the row that holds the cyan button, which has the same scroll margin (24px desktop, sticky bar + 16px at ≤1024). `#compatible-section` no longer has a scroll margin. Measured locally after a cyan then yellow click on `code=LC436`:
+- 1280×551: header row at 24px, cyan button at 84–128px, Compatible heading at 136px.
+- 1000×650: header row at 72px, button at 132–176px.
+- 375×664: header row at 72px, button at 151–195px.
+
+The probe now asserts the header row's top and the whole cyan button on screen: 192/192. Full suite 7108/0.
+
 ---
 
 ## ERR-326 — Search result card images shrank to a thin 5:2 strip on short laptop windows — **RESOLVED (frontend)** (2026-10-13)

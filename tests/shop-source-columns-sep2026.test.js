@@ -230,7 +230,8 @@ test('shop.html — yellow "View compatible" sits in Genuine\'s head row, AFTER 
     const yellow = ruleBody(PAGES_CSS, '.source-jump--compatible {');
     assert.match(yellow, /background:\s*var\(--yellow-primary\)/, 'the Compatible badge yellow');
     assert.match(yellow, /color:\s*var\(--black-primary\)/, 'the badge\'s black text — white on yellow fails contrast');
-    assert.match(PAGES_CSS, /#genuine-section,\s*#compatible-section\s*\{\s*scroll-margin-top/);
+    assert.match(PAGES_CSS, /#genuine-section,\s*\.shop-page \.drilldown-header\s*\{\s*scroll-margin-top/);
+    assert.match(SHOP_JS, /drilldownHeader: document\.querySelector\('\.shop-page \.drilldown-header'\)/);
 });
 
 test('shop-page.js — both jump labels are written ONLY by _setSourceJumpLabels, at all three title sites', () => {
@@ -256,7 +257,9 @@ test('sourceJumpSubject — names the code or printer the shopper asked for', ()
 });
 
 test('shop-page.js — the clicks scroll to their sections, no URL hash', () => {
-    const i = SHOP_JS.indexOf("[['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'compatibleSection']]");
+    // Yellow goes to the HEADER ROW, not the Compatible heading: landing on the
+    // heading left the cyan button half off the top (owner, 2026-10-13).
+    const i = SHOP_JS.indexOf("[['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'drilldownHeader']]");
     assert.ok(i !== -1, 'expected ONE binding loop over [button, section] pairs');
     const body = SHOP_JS.slice(i, i + 600);
     assert.match(body, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
