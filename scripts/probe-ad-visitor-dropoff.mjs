@@ -139,7 +139,6 @@ function MEASURE_PDP() {
     const banner = document.querySelector('.consent-banner.is-open');
     const badge = document.getElementById('google-reviews-badge');
     const promise = document.querySelector('#product-promise:not([hidden]) .product-promise__label');
-    const serviceRow = document.querySelector('#product-service-row:not([hidden])');
     const a = r(add);
     const hits = [];
     if (a) {
@@ -152,7 +151,7 @@ function MEASURE_PDP() {
     return {
         vh: innerHeight, vw: innerWidth,
         title: document.getElementById('product-title')?.textContent.trim().slice(0, 60),
-        add: a, banner: r(banner), badge: r(badge), promise: r(promise), serviceRow: r(serviceRow),
+        add: a, banner: r(banner), badge: r(badge), promise: r(promise),
         promiseText: promise ? promise.textContent.trim() : null,
         badgeBottom: badge ? getComputedStyle(badge).bottom : null,
         hits, cls: +(window.__cls || 0).toFixed(3),
@@ -248,14 +247,13 @@ try {
                 check(`${tag}: Add fully inside the ${m.vh}px viewport`, inside, `bottom ${Math.round(a.bottom)}`);
                 check(`${tag}: nothing fixed overlaps Add (consent, badge)`, clear);
                 check(`${tag}: elementFromPoint returns Add at centre + 4 corners`, hitOk, m.hits.join(','));
-                // Anchor = the service row when it is shown (ERR-306 puts it
-                // directly under Add), else Add itself.
-                const anchor = m.serviceRow && m.serviceRow.top >= a.bottom ? m.serviceRow : a;
-                const anchorName = anchor === a ? 'Add' : 'the service row';
+                // Anchor = Add (the ERR-306 service row under it was removed, ERR-329).
+                const anchor = a;
+                const anchorName = 'Add';
                 check(`${tag}: fit promise directly under ${anchorName}`,
                     !!m.promise && m.promise.top >= anchor.bottom && m.promise.top - anchor.bottom <= 24,
                     m.promise ? `"${m.promiseText}" at ${Math.round(m.promise.top)}–${Math.round(m.promise.bottom)}, ${anchorName} ends ${Math.round(anchor.bottom)}` : 'no #product-promise label');
-                if (m.promise && m.promise.bottom > m.vh) soft(`${tag}: fit promise below the first screen`, `ends ${Math.round(m.promise.bottom)} of ${m.vh} — the service row holds that room (ERR-306)`);
+                if (m.promise && m.promise.bottom > m.vh) soft(`${tag}: fit promise below the first screen`, `ends ${Math.round(m.promise.bottom)} of ${m.vh}`);
                 if (!m.banner) soft(`${tag}: consent banner open`, 'not open — a first visit should show it; was consent already stored?');
                 else if (vp.width >= 1100) {
                     check(`${tag}: consent is a bottom-left card (≤ 400px wide, left ≤ 24)`,

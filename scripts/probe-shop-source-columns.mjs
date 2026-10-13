@@ -274,6 +274,21 @@ try {
                         document.getElementById('genuine-title').getBoundingClientRect().top));
                     check(`${vp.width}px ${label}: click lands the Genuine header near the top with a gap`,
                         landed > 0 && landed <= 120, `header top ${landed}px`);
+                    // The yellow way back up, from Genuine's head row.
+                    const labels = await page.evaluate(() => ['source-jump', 'source-jump-compatible']
+                        .map((id) => { const el = document.getElementById(id); return el && !el.hidden ? el.textContent.trim() : null; }));
+                    console.log(`     labels: ${JSON.stringify(labels)}`);
+                    check(`${vp.width}px ${label}: both labels name the subject, not "products"`,
+                        /^View genuine (?!products)/.test(labels[0] || '') && /^View compatible (?!products)/.test(labels[1] || ''),
+                        JSON.stringify(labels));
+                    if (labels[1]) {
+                        await page.click('#source-jump-compatible');
+                        await page.waitForTimeout(1200);
+                        const up = await page.evaluate(() => Math.round(
+                            document.getElementById('compatible-title').getBoundingClientRect().top));
+                        check(`${vp.width}px ${label}: yellow click lands the Compatible header near the top`,
+                            up > 0 && up <= 120, `header top ${up}px`);
+                    }
                 }
             }
             if (m.sections.length) {
@@ -350,6 +365,11 @@ try {
             });
             check(`?type=${type}: no "View Genuine products" button on a one-source page`,
                 jumpHidden, jumpHidden ? 'hidden' : 'VISIBLE');
+            const yellowHidden = await page.evaluate(() => {
+                const el = document.getElementById('source-jump-compatible');
+                return !el || el.hidden;
+            });
+            check(`?type=${type}: no "View compatible" button either`, yellowHidden, yellowHidden ? 'hidden' : 'VISIBLE');
             check(`?type=${type}: it takes the WHOLE width, not half a split grid`,
                 Math.abs(s.width - m.wrapClient) <= 2,
                 `section ${s.width}px vs wrapper ${m.wrapClient}px`);

@@ -226,6 +226,33 @@
             .replace(/^(compatible|genuine|original)\s+/i, '');
     }
 
+    // ERR-327 — what the two jump buttons name: "View genuine LC436 ink",
+    // "View compatible MFC 970 cartridges". A printer wins (brand prefix
+    // dropped, "Brother MFC 970" reads "MFC 970"); else the code + ink/toner
+    // from the category or, on /search, from the rows' product_type; else
+    // "products". ponytail: a multi-word query keeps the shopper's casing,
+    // only a single token (a code) is uppercased.
+    function sourceJumpSubject({ code, printer, brand, products, category } = {}) {
+        const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+        let name = clean(printer);
+        if (name) {
+            const b = clean(brand);
+            if (b && name.toLowerCase().startsWith(b.toLowerCase() + ' ')) name = name.slice(b.length + 1);
+            return `${name} cartridges`;
+        }
+        const c = clean(code);
+        if (!c) return 'products';
+        let word = 'cartridges';
+        if (category === 'ink' || category === 'toner') {
+            word = category;
+        } else if (Array.isArray(products) && products.length) {
+            const types = products.map((p) => String((p && p.product_type) || '').toLowerCase());
+            if (types.every((t) => t === 'ink_cartridge' || t === 'ink_bottle')) word = 'ink';
+            else if (types.every((t) => t === 'toner_cartridge')) word = 'toner';
+        }
+        return `${/\s/.test(c) ? c : c.toUpperCase()} ${word}`;
+    }
+
     function mergeLiteralResults(suggestList, fallbackProducts) {
         const fallback = Array.isArray(fallbackProducts) ? fallbackProducts : [];
         const suggest = Array.isArray(suggestList) ? suggestList : [];
@@ -479,7 +506,7 @@
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
             partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn, identityIndex,
-            reattachCompatProvenance, searchAlias, sectionTitleText,
+            reattachCompatProvenance, searchAlias, sectionTitleText, sourceJumpSubject,
             finderSearchWithoutPrinter, finderHelpHtml,
         };
     }
@@ -579,6 +606,7 @@
             compatibleSection: document.getElementById('compatible-section'),
             sourceSections: document.getElementById('source-sections'),
             sourceJump: document.getElementById('source-jump'),
+            sourceJumpCompatible: document.getElementById('source-jump-compatible'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
             // category-page-contract-may2026.md §2 — the page-level
@@ -609,18 +637,22 @@
         // INITIALIZATION
         // =========================================
         async init() {
-            // "View Genuine products" — Compatible is stacked above Genuine
-            // (2026-10-13); this lands the Genuine header at the top of the
-            // screen (#genuine-section scroll-margin-top in pages.css). Shown
-            // only by _syncSourceColumns. No hash: the route lives in the query.
-            if (this.elements.sourceJump) {
-                this.elements.sourceJump.addEventListener('click', () => {
-                    const target = this.elements.genuineSection;
-                    if (target && target.scrollIntoView) {
-                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
+            // ERR-327 jump buttons — Compatible is stacked above Genuine. The
+            // cyan one (header) lands the Genuine header at the top of the
+            // screen, the yellow one (Genuine's head row) goes back up to
+            // Compatible (scroll-margin-top in pages.css). Shown only by
+            // _syncSourceColumns. No hash: the route lives in the query.
+            [['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'compatibleSection']]
+                .forEach(([btnKey, sectionKey]) => {
+                    const btn = this.elements[btnKey];
+                    if (!btn) return;
+                    btn.addEventListener('click', () => {
+                        const target = this.elements[sectionKey];
+                        if (target && target.scrollIntoView) {
+                            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    });
                 });
-            }
 
             // Re-run the current level once admin preview turns on (ERR-234).
             //
@@ -3500,6 +3532,11 @@
                     const forPrinter = sectionTitleText(printerDisplayName ? `cartridges for ${printerDisplayName}` : 'cartridges');
                     this.elements.compatibleTitleText.textContent = forPrinter;
                     this.elements.genuineTitleText.textContent = forPrinter;
+                    this._setSourceJumpLabels(sourceJumpSubject({
+                        // /shop?printer= arrives without brand=; the printer row names its own.
+                        printer: printerDisplayName,
+                        brand: this.brandName(this.state.brand) || (printerData && printerData.brand && printerData.brand.name),
+                    }));
 
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
@@ -4260,6 +4297,11 @@
                         : `${brandDisplay}products for "${titleQuery}"`);
                     this.elements.compatibleTitleText.textContent = searchTitle;
                     this.elements.genuineTitleText.textContent = searchTitle;
+                    const mp = smartData && smartData.matched_printer;
+                    this._setSourceJumpLabels(sourceJumpSubject(
+                        isTypeQuery ? {}
+                            : (mp && mp.name) ? { printer: mp.name, brand: mp.brand_name }
+                            : { code: titleQuery, products: filteredProducts }));
 
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
@@ -4887,9 +4929,22 @@
                 .filter((k) => this.elements[k] && !this.elements[k].hidden).length;
             wrap.classList.toggle('products-sections--split', shown === 2);
             wrap.classList.toggle('products-sections--single', shown !== 2);
-            // The jump button only means something when there is a Compatible
-            // section above Genuine to jump past.
-            if (this.elements.sourceJump) this.elements.sourceJump.hidden = shown !== 2;
+            // The jump buttons only mean something when both sections are there.
+            for (const k of ['sourceJump', 'sourceJumpCompatible']) {
+                if (this.elements[k]) this.elements[k].hidden = shown !== 2;
+            }
+        },
+
+        // ERR-327 — the ONE writer of both jump labels. `subject` comes from
+        // sourceJumpSubject() at the three places the section titles are set.
+        _setSourceJumpLabels(subject) {
+            const s = subject || 'products';
+            const write = (btn, text) => {
+                const t = btn && btn.querySelector('.source-jump__text');
+                if (t) t.textContent = text;
+            };
+            write(this.elements.sourceJump, `View genuine ${s}`);
+            write(this.elements.sourceJumpCompatible, `View compatible ${s}`);
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
@@ -5597,6 +5652,9 @@
 
             this.elements.compatibleTitleText.textContent = sectionTitleText(`${brandName} ${productType}`);
             this.elements.genuineTitleText.textContent = sectionTitleText(`${brandName} ${productType}`);
+            this._setSourceJumpLabels(sourceJumpSubject({
+                code: this.state.code, category: this.state.category, products,
+            }));
         },
 
         updateSEO() {
@@ -5830,36 +5888,7 @@
             link.hidden = false;
         },
 
-        /**
-         * FE master checklist 2026-10-05 item 5: the service row (js/service-row.js)
-         * under the heading on a CODE page and a PRINTER hub — the two pages the ads
-         * land on. Hidden at every other level. Mounted once per page: the facts are
-         * site-wide (/api/site/trust), so a level change only toggles visibility.
-         */
-        _syncServiceRow() {
-            const el = typeof document !== 'undefined' ? document.getElementById('service-row') : null;
-            if (!el) return;
-            const s = this.state;
-            const wanted = (s.level === 'products' && !!s.code) || s.level === 'printer-products';
-            if (!wanted || typeof ServiceRow === 'undefined') {
-                el.hidden = true;
-                return;
-            }
-            if (el.dataset.mounted === '1') {
-                el.hidden = !el.firstChild;
-                return;
-            }
-            el.dataset.mounted = '1';
-            ServiceRow.mount(el).then((r) => {
-                // A level change while the read was in flight wins.
-                const st = this.state;
-                if (!((st.level === 'products' && !!st.code) || st.level === 'printer-products')) el.hidden = true;
-                return r;
-            });
-        },
-
         updateTitle() {
-            this._syncServiceRow();
             // Hide product type label by default
             this.elements.productTypeLabel.hidden = true;
             const _allLink = typeof document !== 'undefined' ? document.getElementById('family-all-link') : null;

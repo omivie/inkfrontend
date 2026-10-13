@@ -193,32 +193,78 @@ test('pages.css — six-up defers to the global ladder below 1100px', () => {
 // 4. The "View Genuine products" jump (ERR-327)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('shop.html — #source-jump sits in the header between the title and the shipping pill', () => {
-    const header = SHOP_HTML.indexOf('class="drilldown-header"');
-    const left = SHOP_HTML.indexOf('class="drilldown-header__left"', header);
-    const btn = SHOP_HTML.indexOf('id="source-jump"', header);
-    const right = SHOP_HTML.indexOf('class="drilldown-header__right-group"', header);
-    assert.ok(header !== -1 && left < btn && btn < right, 'button must be between __left and __right-group');
+test('shop.html — #source-jump sits AFTER the shipping pill, inside the right group', () => {
+    // Owner swap 2026-10-13: pill first, button after it, wrapping together.
+    const group = SHOP_HTML.indexOf('class="drilldown-header__right-group"');
+    const pill = SHOP_HTML.indexOf('data-shipping-info-bar', group);
+    const btn = SHOP_HTML.indexOf('id="source-jump"', group);
+    const title = SHOP_HTML.indexOf('id="drilldown-title"');
+    assert.ok(group !== -1 && pill !== -1 && pill < btn && btn < title, 'button must follow the shipping pill inside the header');
     assert.match(SHOP_HTML, /<button type="button" class="source-jump" id="source-jump" hidden>/,
         'ships hidden: a single-source page must never flash a dead button');
 });
 
-test('shop-page.js — _syncSourceColumns is the ONE writer of the button\'s hidden state', () => {
+test('shop-page.js — _syncSourceColumns is the ONE writer of both buttons\' hidden state', () => {
     const m = SHOP_JS.match(/_syncSourceColumns\(\)\s*\{([\s\S]*?)\n        \},/);
-    assert.match(m[1], /sourceJump\.hidden = shown !== 2/);
-    assert.equal((SHOP_JS.match(/sourceJump\.hidden\s*=/g) || []).length, 1);
+    assert.match(m[1], /\['sourceJump', 'sourceJumpCompatible'\]/);
+    assert.match(m[1], /\.hidden = shown !== 2/);
+    assert.equal((SHOP_JS.match(/\.hidden = shown !== 2/g) || []).length, 1);
+    assert.doesNotMatch(SHOP_JS, /sourceJump(?:Compatible)?\.hidden\s*=/, 'no second writer by name');
 });
 
-test('shop-page.js — the click scrolls to #genuine-section, no URL hash', () => {
-    const i = SHOP_JS.indexOf("sourceJump.addEventListener('click'");
-    assert.ok(i !== -1, 'expected one click binding');
-    const body = SHOP_JS.slice(i, i + 400);
-    assert.match(body, /genuineSection[\s\S]*scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+test('shop.html — yellow "View compatible" sits in Genuine\'s head row, AFTER the <h2>', () => {
+    const sec = SHOP_HTML.indexOf('id="genuine-section"');
+    const head = SHOP_HTML.indexOf('class="products-section__head"', sec);
+    const h2 = SHOP_HTML.indexOf('id="genuine-title"', sec);
+    const h2End = SHOP_HTML.indexOf('</h2>', h2);
+    const btn = SHOP_HTML.indexOf('id="source-jump-compatible"', sec);
+    const grid = SHOP_HTML.indexOf('id="genuine-products"', sec);
+    assert.ok(sec < head && head < h2 && h2End < btn && btn < grid,
+        'outside the <h2> so the heading\'s accessible name stays the heading');
+    assert.match(SHOP_HTML, /class="source-jump source-jump--compatible" id="source-jump-compatible" hidden>/);
+    for (const id of ['source-jump', 'source-jump-compatible']) {
+        const i = SHOP_HTML.indexOf(`id="${id}"`);
+        assert.match(SHOP_HTML.slice(i, i + 200), /<span class="source-jump__text">/,
+            `${id} needs a .source-jump__text span — the label writer must not wipe the arrow`);
+    }
+    const yellow = ruleBody(PAGES_CSS, '.source-jump--compatible {');
+    assert.match(yellow, /background:\s*var\(--yellow-primary\)/, 'the Compatible badge yellow');
+    assert.match(yellow, /color:\s*var\(--black-primary\)/, 'the badge\'s black text — white on yellow fails contrast');
+    assert.match(PAGES_CSS, /#genuine-section,\s*#compatible-section\s*\{\s*scroll-margin-top/);
+});
+
+test('shop-page.js — both jump labels are written ONLY by _setSourceJumpLabels, at all three title sites', () => {
+    assert.equal((SHOP_JS.match(/querySelector\('\.source-jump__text'\)/g) || []).length, 1);
+    // printer level, /search, displayProductInfo (code pages)
+    assert.equal((SHOP_JS.match(/this\._setSourceJumpLabels\(sourceJumpSubject\(/g) || []).length, 3);
+    assert.match(SHOP_JS, /matched_printer[\s\S]{0,200}printer: mp\.name, brand: mp\.brand_name/);
+});
+
+test('sourceJumpSubject — names the code or printer the shopper asked for', () => {
+    const src = SHOP_JS.match(/function sourceJumpSubject\([\s\S]*?\n    \}\n/);
+    assert.ok(src, 'expected the sourceJumpSubject function');
+    const f = new Function(`${src[0]}; return sourceJumpSubject;`)();
+    const ink = [{ product_type: 'ink_cartridge' }, { product_type: 'ink_bottle' }];
+    assert.equal(f({ code: 'lc436', products: ink }), 'LC436 ink');
+    assert.equal(f({ code: 'tn258', products: [{ product_type: 'toner_cartridge' }] }), 'TN258 toner');
+    assert.equal(f({ code: 'tn258', products: [{ product_type: 'toner_cartridge' }, { product_type: 'drum_unit' }] }), 'TN258 cartridges');
+    assert.equal(f({ code: 'LC3317', category: 'ink' }), 'LC3317 ink');
+    assert.equal(f({ printer: 'Brother MFC 970', brand: 'Brother', code: 'mfc 970' }), 'MFC 970 cartridges');
+    assert.equal(f({ printer: 'HL-L2375DW', brand: 'Brother' }), 'HL-L2375DW cartridges');
+    assert.equal(f({}), 'products');
+    assert.equal(f({ code: '  ' }), 'products');
+});
+
+test('shop-page.js — the clicks scroll to their sections, no URL hash', () => {
+    const i = SHOP_JS.indexOf("[['sourceJump', 'genuineSection'], ['sourceJumpCompatible', 'compatibleSection']]");
+    assert.ok(i !== -1, 'expected ONE binding loop over [button, section] pairs');
+    const body = SHOP_JS.slice(i, i + 600);
+    assert.match(body, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
     assert.doesNotMatch(body, /location\.hash/, 'the route lives in the query string');
 });
 
 test('pages.css — Genuine lands with a gap, button uses the Genuine badge cyan', () => {
-    assert.match(ruleBody(PAGES_CSS, '#genuine-section {') || '', /scroll-margin-top:/);
+    assert.match(ruleBody(PAGES_CSS, '#genuine-section,') || '', /scroll-margin-top:/);
     const btn = ruleBody(PAGES_CSS, '.source-jump {');
     assert.ok(btn, 'expected the .source-jump rule');
     assert.match(btn, /background:\s*var\(--cyan-primary\)/);

@@ -6,17 +6,18 @@
  *   §1 /shop series + printer pages at 1280x551, 1366x599, 1536x695, 1920x911
  *      (and 1366x768), consent banner OPEN: elementFromPoint at the first card's
  *      Add returns the button (item 7); the corner card sits bottom-right and
- *      never overlaps Google's badge; the service row is on the first screen
- *      and the first card's Add still is too (item 5).
- *   §2 phone 390x664: the service row on the first screen of a series page.
+ *      never overlaps Google's badge; the first card's Add is on the first
+ *      screen. The service row (item 5) was REMOVED by the owner on
+ *      2026-10-13 (ERR-329): every page check now asserts it is ABSENT
+ *      (no .service-row element, no "ship same day · most of NZ" text).
+ *   §2 phone 390x664: service row absent; first card measured.
  *   §3 PDP: the consent card stays bottom-LEFT and Add is clickable (Part 2
- *      invariant); the PDP service row — mounted by feink-61 — is reported as
- *      SKIPPED, never passed, while it is absent.
+ *      invariant); the PDP service row is absent.
  *   §4 copy: no "2–4" / "1–4" business/working days on /faq, /about, /shipping;
  *      /faq's visible South Island line equals the FAQPage JSON-LD (item 8).
  *   §5 NEGATIVE CONTROLS: forcing the card back to the left on /shop must turn
- *      the first-card check RED; hiding the service row must turn the row
- *      check RED. A probe that cannot fail proves nothing (ERR-258).
+ *      the first-card check RED; injecting the old row's text into the page
+ *      must turn the absence check RED. A probe that cannot fail proves nothing (ERR-258).
  *
  * MODE: READ-ONLY. Public GETs only: nothing is added to a cart, nothing is
  * typed into a search box (no /api/search/* ⇒ no search_analytics row,
@@ -72,7 +73,7 @@ console.log(`BASE ${BASE}  pace ${PACE_MS}ms`);
 const browser = await chromium.launch();
 let lastOpen = 0;
 
-async function openPage(viewport, path, { css = null } = {}) {
+async function openPage(viewport, path, { css = null, inject = null } = {}) {
     const wait = lastOpen + PACE_MS - Date.now();
     if (wait > 0) await new Promise((res) => setTimeout(res, wait));
     lastOpen = Date.now();
@@ -84,6 +85,7 @@ async function openPage(viewport, path, { css = null } = {}) {
     page.on('response', (r) => { if (r.status() === 429) limited.push(r.url()); });
     await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     if (css) await page.addStyleTag({ content: css });
+    if (inject) await page.evaluate(inject);
     await page.waitForFunction(() => document.querySelector('.consent-banner.is-open'), null, { timeout: 15000 }).catch(() => {});
     // Google's badge settles after ~3 s on production (ERR-301 probe note).
     await page.waitForFunction(() => {
@@ -112,7 +114,6 @@ function MEASURE_SHOP() {
         const h = (y >= 0 && y < innerHeight) ? document.elementFromPoint(x, y) : null;
         hit = h && (h === btn || btn.contains(h)) ? 'add' : hitName(h);
     }
-    const row = document.getElementById('service-row');
     return {
         vh: innerHeight, vw: innerWidth,
         sku: first ? first.dataset.sku : null,
@@ -120,16 +121,15 @@ function MEASURE_SHOP() {
         add: a, hit,
         banner: r(document.querySelector('.consent-banner.is-open')),
         badge: r(document.getElementById('google-reviews-badge')),
-        row: row && !row.hidden ? r(row) : null,
-        rowFacts: row && !row.hidden ? [...row.querySelectorAll('.service-row__item')].map((li) => li.textContent.trim()) : [],
-        tel: row ? (row.querySelector('a[href^="tel:"]') || {}).href || null : null,
+        // Same test as ROW_GONE_SRC below (MEASURE_SHOP runs in the page, so it is spelled out).
+        rowGone: !document.querySelector('.service-row, #service-row, #product-service-row')
+            && !/ship same day · most of NZ/.test(document.body.textContent),
     };
 }
 
 async function shop(vp, path, opts) {
     const { ctx, page, limited } = await openPage(vp, path, opts);
     const loaded = await page.waitForFunction(() => document.querySelector('.product-card:not(.product-card--skeleton) .product-card__price'), null, { timeout: 30000 }).then(() => true, () => false);
-    await page.waitForFunction(() => { const s = document.getElementById('service-row'); return s && !s.hidden; }, null, { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(1500);
     const m = await page.evaluate(MEASURE_SHOP);
     await ctx.close();
@@ -139,7 +139,9 @@ async function shop(vp, path, opts) {
 }
 
 const firstCardClear = (m) => !!m.add && m.add.bottom <= m.vh && m.hit === 'add' && !intersects(m.add, m.banner) && !intersects(m.price, m.banner);
-const rowOnScreen = (m) => !!m.row && m.row.top >= 0 && m.row.top < m.vh && m.rowFacts.length >= 3;
+// The removed service row (ERR-329): no element AND none of its text. Runs in the page.
+const ROW_GONE_SRC = `!document.querySelector('.service-row, #service-row, #product-service-row')
+    && !/ship same day · most of NZ/.test(document.body.textContent)`;
 
 try {
     /* §1 ── /shop series + printer pages, laptops ─────────────────────────── */
@@ -153,14 +155,12 @@ try {
                 console.log(`    first ${m.sku}: Add ${m.add ? `${Math.round(m.add.top)}–${Math.round(m.add.bottom)} x${Math.round(m.add.left)}–${Math.round(m.add.right)}` : 'none'}`
                     + `  banner ${m.banner ? `${Math.round(m.banner.top)}–${Math.round(m.banner.bottom)} x${Math.round(m.banner.left)}–${Math.round(m.banner.right)}` : 'none'}`
                     + `  badge ${m.badge ? `${Math.round(m.badge.top)}–${Math.round(m.badge.bottom)} x${Math.round(m.badge.left)}` : 'none'}`
-                    + `  row ${m.row ? `${Math.round(m.row.top)}–${Math.round(m.row.bottom)}` : 'hidden'}`);
+                    + `  service row ${m.rowGone ? 'absent' : 'PRESENT'}`);
                 if (!m.banner) { bad(`${t}: consent banner open (first visit)`, 'not open — the item 7 check needs it open'); continue; }
                 check(`${t}: elementFromPoint at the first card's Add returns the button, banner open`, firstCardClear(m), `hit ${m.hit}`);
                 check(`${t}: consent card is bottom-RIGHT (right edge within 24px of the viewport)`, m.vw - m.banner.right <= 24, `x${Math.round(m.banner.left)}–${Math.round(m.banner.right)} of ${m.vw}`);
                 check(`${t}: consent card does not overlap Google's badge`, !intersects(m.banner, m.badge));
-                check(`${t}: service row on the first screen with ≥ 3 facts`, rowOnScreen(m), m.rowFacts.join(' | ') || 'hidden');
-                check(`${t}: service row has no Afterpay and no unscoped same-day`,
-                    !m.rowFacts.some((f) => /afterpay/i.test(f)) && m.rowFacts.every((f) => !/same day|same-day/i.test(f) || /Auckland metro/.test(f)));
+                check(`${t}: service row absent (owner removed it, ERR-329)`, m.rowGone === true);
             }
         }
     }
@@ -170,9 +170,7 @@ try {
         head(`§2 /shop series — phone ${vpName(PHONE)}`);
         const { m, measured } = await shop(PHONE, SERIES);
         if (measured) {
-            check('phone: service row on the first screen with ≥ 3 facts', rowOnScreen(m), m.row ? `top ${Math.round(m.row.top)}, ${m.rowFacts.length} facts` : 'hidden');
-            check('phone: service row is ONE line (≤ 28px tall)', !!m.row && m.row.bottom - m.row.top <= 28, m.row ? `${Math.round(m.row.bottom - m.row.top)}px` : 'hidden');
-            check('phone: call link uses tel:', /^tel:\+?\d+$/.test(m.tel || ''), String(m.tel));
+            check('phone: service row absent (ERR-329)', m.rowGone === true);
         }
     }
 
@@ -188,19 +186,17 @@ try {
                 const add = document.getElementById('add-to-cart-btn');
                 const a = r(add);
                 const h = a ? document.elementFromPoint((a.left + a.right) / 2, (a.top + a.bottom) / 2) : null;
-                const row = document.getElementById('product-service-row');
                 return {
                     vh: innerHeight, add: a, hit: h && (h === add || add.contains(h)),
                     banner: r(document.querySelector('.consent-banner.is-open')),
-                    row: row && !row.hidden ? r(row) : null, rowExists: !!row,
                 };
             });
+            const rowGone = await page.evaluate(ROW_GONE_SRC);
             await ctx.close();
             if (!loaded || limited.length) { bad(`${vpName(vp)} PDP: NOT MEASURED`, `${limited.length} × 429`); continue; }
             check(`${vpName(vp)} PDP: Add on screen and elementFromPoint returns it`, !!m.add && m.add.bottom <= m.vh && m.hit);
             check(`${vpName(vp)} PDP: consent card stays bottom-LEFT`, !!m.banner && m.banner.left <= 24, m.banner ? `x${Math.round(m.banner.left)}` : 'not open');
-            if (!m.rowExists) skip(`${vpName(vp)} PDP service row`, '#product-service-row not in the page yet (feink-61 mounts it)');
-            else check(`${vpName(vp)} PDP: service row on the first screen`, !!m.row && m.row.bottom <= m.vh, m.row ? `${Math.round(m.row.top)}–${Math.round(m.row.bottom)}` : 'hidden');
+            check(`${vpName(vp)} PDP: service row absent (ERR-329)`, rowGone === true);
         }
     }
 
@@ -235,8 +231,12 @@ try {
             if (measured) check('card forced back to the left ⇒ the first-card check FAILS', !!m.banner && !firstCardClear(m), `hit ${m.hit}`);
         }
         {
-            const { m, measured } = await shop(vp, SERIES, { css: '#service-row{ display:none!important }' });
-            if (measured) check('service row hidden ⇒ the row check FAILS', !rowOnScreen({ ...m, row: m.row && m.row.bottom > m.row.top ? m.row : null }));
+            // Re-insert the old row's markup + text: the absence check must go RED.
+            const inject = `(() => { const d = document.createElement('div'); d.className = 'service-row';
+                d.textContent = 'Auckland metro orders by 12pm ship same day · most of NZ in 1–3 business days';
+                document.querySelector('main').prepend(d); })()`;
+            const { m, measured } = await shop(vp, SERIES, { inject });
+            if (measured) check('old row injected ⇒ the absence check FAILS', m.rowGone === false);
         }
     }
 } finally {

@@ -8497,18 +8497,21 @@ a.account-review-card__product:focus-visible {
 
 /* The jump lands the Genuine header at the top of the screen with a small gap.
    Desktop header is not sticky; phones pin it (layout.css), so clear it there. */
-#genuine-section {
+#genuine-section,
+#compatible-section {
     scroll-margin-top: 24px;
 }
 @media (max-width: 1024px) {
-    #genuine-section {
+    #genuine-section,
+    #compatible-section {
         scroll-margin-top: calc(var(--header-h, 56px) + 16px);
     }
 }
 
 /* "View Genuine products" — same cyan as the Genuine badge, white text.
-   Sits in .drilldown-header between the title and the shipping pill; shown
-   by _syncSourceColumns only when BOTH sections have rows. */
+   Last child of .drilldown-header__right-group, AFTER the shipping pill (owner
+   swap 2026-10-13), so it wraps with the pill; shown by _syncSourceColumns
+   only when BOTH sections have rows. */
 .source-jump {
     display: inline-flex;
     align-items: center;
@@ -8524,9 +8527,6 @@ a.account-review-card__product:focus-visible {
     font-weight: var(--font-weight-bold);
     cursor: pointer;
     transition: filter var(--transition-fast);
-    /* With __right-group's own margin-left:auto, the free space splits either
-       side: the button sits midway between the title and the shipping pill. */
-    margin-left: auto;
 }
 .source-jump:hover {
     filter: brightness(0.9);
@@ -8538,12 +8538,47 @@ a.account-review-card__product:focus-visible {
 .source-jump[hidden] {
     display: none;
 }
-/* <=480px .drilldown-header is a COLUMN (flex-direction: column, below), so
-   flex-basis here would be the HEIGHT (ERR-224) and margin-left:auto would push
-   the button to the right edge. Stretch on the cross axis instead. */
+/* <=480px __right-group is a COLUMN (flex-direction: column, below), so
+   flex-basis here would be the HEIGHT (ERR-224). It already stretches its
+   children; this keeps the button full width if that ever changes. */
 @media (max-width: 480px) {
     .source-jump {
         align-self: stretch;
+    }
+}
+
+/* "View compatible …" — the Compatible badge's yellow AND its black text
+   (white on #F4C430 fails contrast). Right of the Genuine heading. */
+.source-jump--compatible {
+    background: var(--yellow-primary);
+    color: var(--black-primary);
+    margin-left: auto;
+}
+.source-jump--compatible:focus-visible {
+    outline-color: var(--yellow-primary);
+}
+
+/* Genuine's head row: heading left, jump right. The row owns the rule line
+   the bare <h2> draws everywhere else, so the line runs under both. */
+.products-section__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin: 0 0 var(--spacing-sm) 0;
+    padding-bottom: var(--spacing-xs);
+    border-bottom: 2px solid var(--color-border);
+}
+.products-section__head .products-section__title {
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+/* The head is a ROW, so a flex-basis is a WIDTH here (unlike the header
+   column above): the button takes its own full-width line on a phone. */
+@media (max-width: 480px) {
+    .products-section__head .source-jump--compatible {
+        flex: 1 0 100%;
         margin-left: 0;
     }
 }

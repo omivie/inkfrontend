@@ -795,7 +795,6 @@
             this.renderPromise(info);
             this.renderCompatibleAlternatives(info);
             this.renderValueLines(info);
-            this.renderServiceRow(info);
 
             this.renderWaitlistProof(info);
             this.renderPrinterPurchaseProof(info);
@@ -1854,20 +1853,6 @@
             // sentence (292px) wrapped under the price, pushing Add down 24px.
             line.textContent = `Earn ${earn.points.toLocaleString('en-NZ')} reward points (${formatPrice(earn.value)})`;
             line.hidden = false;
-        },
-
-        /**
-         * Service row under the Add button (FE master checklist item 5; module
-         * owned by js/service-row.js). The outcome is stamped on the element
-         * (`data-service-row` = ok | no-facts | no-trust-module | missing) so a
-         * hidden row says WHY it is hidden instead of just being absent.
-         */
-        async renderServiceRow(info) {
-            const el = document.getElementById('product-service-row');
-            if (!el) return;
-            if (typeof ServiceRow === 'undefined') { el.hidden = true; el.dataset.serviceRow = 'missing'; return; }
-            const res = await ServiceRow.mount(el, { deliveryEstimate: info && info.delivery_estimate });
-            el.dataset.serviceRow = (res && res.reason) || 'unknown';
         },
 
         /**

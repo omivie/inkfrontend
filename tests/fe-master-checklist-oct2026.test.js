@@ -1,8 +1,8 @@
 /**
  * FE master checklist (backend, 2026-10-05) — feink-dc's items 5, 7, 8, 13 (ERR-306).
  *
- * §5  ServiceRow (js/service-row.js): REQUIRED and EXECUTED — every fact from
- *     /api/site/trust (+ a product's delivery_estimate), none invented.
+ * §5  The service row (js/service-row.js) was REMOVED by the owner on
+ *     2026-10-13 (ERR-329); §5 now guards that it stays gone.
  * §7  consent card bottom-RIGHT on /shop only, lifted above Google's badge.
  * §8  South Island 1–3: no "2–4"/"1–4" delivery-day string left anywhere, and
  *     /faq's visible answer says the same as its FAQPage JSON-LD.
@@ -26,8 +26,6 @@ const Security = {
     escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     escapeAttr: (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'),
 };
-global.Security = Security;
-const ServiceRow = require(path.join(ROOT, 'js', 'service-row.js'));
 
 /** Brace-matched `head(...) { ... }` from shipped source (same as turnaround-fixes). */
 function lift(src, head) {
@@ -47,168 +45,24 @@ function lift(src, head) {
     throw new Error(`unbalanced ${head}`);
 }
 
-// The live GET /api/site/trust `data`, trimmed to what the row reads.
-// Re-measured 2026-10-06 after BF-101: `tax_invoice` and
-// `shipping_promise.delivery_label` / min_days / max_days are new.
-const TRUST = () => ({
-    returns: { days: 30, label: '30-day returns', change_of_mind_days: 30, url_path: '/returns' },
-    shipping_promise: { dispatch_cutoff_nzt: '14:00', label: 'Same-day dispatch before 2pm', delivery_label: '1–3 business days NZ-wide', min_days: 1, max_days: 3 },
-    tax_invoice: { emailed_with_every_order: true, label: 'GST tax invoice emailed with every order' },
-    organization: { gst_number: '94-509-459', trading_name: 'InkCartridges.co.nz' },
-    contact: { phone_display: '027 474 0115', phone_tel_href: '+64274740115', support_email: 'support@inkcartridges.co.nz' },
-    compatibility_promise: { label: 'Not sure it fits? 30-day returns on unopened items' },
-});
-const DELIVERY = () => ({ label: '1–3 business days NZ-wide', dispatch_cutoff_human: '2pm', dispatch_cutoff_nzt: '14:00' });
-const texts = (facts) => facts.map((f) => f.text);
-
 // ─────────────────────────────────────────────────────────────────────────────
-// §5 ServiceRow
+// §5 service row — removed (ERR-329)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§5 series page (site trust only): four facts, exact words, in checklist order', () => {
-    // The days half now comes from shipping_promise.delivery_label (BF-101).
-    assert.deepEqual(texts(ServiceRow.facts(TRUST())), [
-        'Auckland metro orders by 2pm ship same day · most of NZ in 1–3 business days',
-        'Questions? Call 027 474 0115 or email support@inkcartridges.co.nz',
-        'GST tax invoice emailed with every order',
-        '30-day returns on unopened items',
-    ]);
-});
-
-test('§5 PDP (with delivery_estimate): the speed fact carries the days from the label', () => {
-    const f = ServiceRow.facts(TRUST(), { deliveryEstimate: DELIVERY() });
-    assert.equal(f[0].text, 'Auckland metro orders by 2pm ship same day · most of NZ in 1–3 business days');
-});
-
-test('§5 each absent field drops ONLY its own fact — nothing is defaulted', () => {
-    const drop = (mut, gone) => {
-        const t = TRUST(); mut(t);
-        const keys = ServiceRow.facts(t).map((f) => f.key);
-        assert.ok(!keys.includes(gone), `${gone} must be absent`);
-        assert.equal(keys.length, 3, `only ${gone} went: ${keys}`);
-    };
-    drop((t) => { delete t.shipping_promise; }, 'speed');
-    drop((t) => { delete t.contact; }, 'people');
-    drop((t) => { t.tax_invoice = { emailed_with_every_order: false, label: null }; }, 'paperwork');
-    drop((t) => { delete t.tax_invoice; }, 'paperwork');
-    drop((t) => { delete t.returns; delete t.compatibility_promise; }, 'returns');
-    assert.deepEqual(ServiceRow.facts({}), [], 'empty trust ⇒ no facts (row stays hidden)');
-    assert.deepEqual(ServiceRow.facts(null), []);
-});
-
-test('§5 BF-101: the tax-invoice fact reads tax_invoice, NOT the GST number; days fall back to the site promise', () => {
-    const t = TRUST(); delete t.organization;
-    assert.ok(ServiceRow.facts(t).some((f) => f.key === 'paperwork'), 'no gst_number needed when tax_invoice says so');
-    const g = TRUST(); delete g.tax_invoice;
-    assert.ok(!ServiceRow.facts(g).some((f) => f.key === 'paperwork'), 'a GST number alone no longer makes the claim');
-    const l = TRUST(); l.tax_invoice.label = 'Tax invoice with every order';
-    assert.equal(ServiceRow.facts(l).find((f) => f.key === 'paperwork').text, 'Tax invoice with every order', 'the label is printed verbatim');
-    const m = TRUST(); m.tax_invoice.emailed_with_every_order = 'yes';
-    assert.ok(!ServiceRow.facts(m).some((f) => f.key === 'paperwork'), 'only a literal true makes the claim');
-    // The product's own label wins on a PDP; the site's label is the fallback.
-    const p = ServiceRow.facts(TRUST(), { deliveryEstimate: { ...DELIVERY(), label: '2–5 business days NZ-wide' } });
-    assert.match(p[0].text, /most of NZ in 2–5 business days$/);
-    const n = TRUST(); delete n.shipping_promise.delivery_label;
-    assert.equal(ServiceRow.facts(n)[0].text, 'Auckland metro orders by 2pm ship same day', 'no label anywhere ⇒ cutoff half alone');
-});
-
-test('§5 returns falls back to compatibility_promise; phone-only / email-only contact read right', () => {
-    const t = TRUST(); delete t.returns;
-    assert.equal(ServiceRow.facts(t).find((f) => f.key === 'returns').text, '30-day returns on unopened items');
-    const p = TRUST(); delete p.contact.support_email;
-    assert.equal(ServiceRow.facts(p).find((f) => f.key === 'people').text, 'Questions? Call 027 474 0115');
-    const e = TRUST(); delete e.contact.phone_display;
-    assert.equal(ServiceRow.facts(e).find((f) => f.key === 'people').text, 'Questions? Email support@inkcartridges.co.nz');
-});
-
-test('§5 never an unscoped same-day, never Afterpay (owner 2026-10-05), in data or in source', () => {
-    for (const opts of [undefined, { deliveryEstimate: DELIVERY() }]) {
-        for (const t of texts(ServiceRow.facts(TRUST(), opts))) {
-            if (/same day|same-day/i.test(t)) assert.match(t, /Auckland metro/);
-            assert.doesNotMatch(t, /afterpay/i);
-        }
+test('§5 the service row is GONE everywhere (owner 2026-10-13, ERR-329) — never re-add', () => {
+    assert.equal(fs.existsSync(path.join(ROOT, 'js', 'service-row.js')), false, 'module deleted, not just unloaded');
+    for (const rel of ['html/shop.html', 'html/product/index.html']) {
+        const html = read(rel).replace(/<!--[\s\S]*?-->/g, '');
+        assert.doesNotMatch(html, /service-row/, `${rel}: no container, no script tag (a hidden div still fails a DOM check)`);
     }
-    assert.doesNotMatch(stripComments(read('js/service-row.js')), /afterpay/i);
-});
-
-test('§5 formatCutoff: 24h NZT to shopper words; junk ⇒ null', () => {
-    assert.equal(ServiceRow.formatCutoff('14:00'), '2pm');
-    assert.equal(ServiceRow.formatCutoff('09:30'), '9:30am');
-    assert.equal(ServiceRow.formatCutoff('00:00'), '12am');
-    assert.equal(ServiceRow.formatCutoff('12:00'), '12pm');
-    for (const bad of ['25:00', '14:60', '2pm', '', null, undefined, 1400]) assert.equal(ServiceRow.formatCutoff(bad), null, String(bad));
-});
-
-test('§5 render: tel: from phone_tel_href, mailto:, everything escaped; empty ⇒ hidden', () => {
-    const el = { hidden: true, innerHTML: '' };
-    const t = TRUST();
-    t.contact.support_email = 'a"<b>@x.nz';
-    assert.equal(ServiceRow.render(el, ServiceRow.facts(t)), true);
-    assert.equal(el.hidden, false);
-    assert.match(el.innerHTML, /<a href="tel:\+64274740115" class="service-row__link">027 474 0115<\/a>/);
-    assert.match(el.innerHTML, /href="mailto:a&quot;<b>@x.nz"/, 'attribute escaped');
-    assert.doesNotMatch(el.innerHTML, /<b>@x\.nz<\/a>/, 'link text escaped');
-    assert.equal(ServiceRow.render(el, []), false);
-    assert.equal(el.hidden, true);
-    assert.equal(el.innerHTML, '');
-});
-
-test('§5 mount: empty trust read ⇒ hidden AND logged (fail-soft is loud)', async () => {
-    const warns = [];
-    global.TrustStats = { raw: async () => ({}) };
-    global.DebugLog = { warn: (m) => warns.push(m) };
-    try {
-        const el = { hidden: false, innerHTML: 'x' };
-        const r = await ServiceRow.mount(el);
-        assert.deepEqual(r, { shown: false, facts: [], reason: 'no-facts' });
-        assert.equal(el.hidden, true);
-        assert.equal(warns.length, 1);
-        assert.match(warns[0], /\/api\/site\/trust returned nothing/);
-        global.TrustStats = { raw: async () => TRUST() };
-        const ok = await ServiceRow.mount(el);
-        assert.equal(ok.shown, true);
-        assert.equal(ok.facts.length, 4);
-    } finally {
-        delete global.TrustStats;
-        delete global.DebugLog;
+    for (const rel of ['js/shop-page.js', 'js/product-detail-page.js', 'css/components.css']) {
+        assert.doesNotMatch(stripComments(read(rel)), /service-row|ServiceRow/, `${rel}: no caller, no style`);
     }
-});
-
-test('§5 wiring: shop.html container + script after utils.js; shop-page shows it on code pages and printer hubs only', () => {
-    const html = read('html/shop.html');
-    assert.match(html, /<div class="service-row" id="service-row"[^>]*hidden><\/div>/);
-    const utils = html.indexOf('/js/utils.js?v=');
-    const row = html.indexOf('/js/service-row.js?v=');
-    assert.ok(utils > 0 && row > utils, 'service-row.js loads after utils.js (TrustStats, Security)');
-
-    const SHOP = read('js/shop-page.js');
-    const body = lift(SHOP, '_syncServiceRow()');
-    const run = (state) => {
-        const el = { hidden: true, dataset: {}, firstChild: null };
-        let mounted = 0;
-        const obj = vm.runInNewContext(`({ ${body} })`, {
-            document: { getElementById: (id) => (id === 'service-row' ? el : null) },
-            ServiceRow: { mount: () => { mounted++; return Promise.resolve({}); } },
-        });
-        obj.state = state;
-        obj._syncServiceRow();
-        return { el, mounted };
-    };
-    assert.equal(run({ level: 'products', code: '288' }).mounted, 1, 'code page mounts');
-    assert.equal(run({ level: 'printer-products' }).mounted, 1, 'printer hub mounts');
-    for (const s of [{ level: 'products', code: '' }, { level: 'brands' }, { level: 'search-results' }, { level: 'codes' }]) {
-        const r = run(s);
-        assert.equal(r.mounted, 0, JSON.stringify(s));
-        assert.equal(r.el.hidden, true, JSON.stringify(s));
+    // The line itself, wherever it might be rebuilt from. (The PDP's separate
+    // "Questions? Call … · NZ company since …" value line is NOT this row and stays.)
+    for (const rel of ['js/shop-page.js', 'js/product-detail-page.js']) {
+        assert.doesNotMatch(stripComments(read(rel)), /ship same day · most of NZ|Questions\? Call \$\{phone\} or email/, rel);
     }
-    assert.match(lift(SHOP, 'updateTitle()'), /this\._syncServiceRow\(\);/);
-});
-
-test('§5 CSS: one clipped 18px line with NO margin on laptops (the 1280x551 fold budget), scrolls on phones', () => {
-    const css = stripComments(read('css/components.css'));
-    assert.match(css, /\.service-row \{[^}]*margin: 0;[^}]*line-height: 18px;/);
-    assert.match(css, /\.service-row__list \{[^}]*flex-wrap: wrap;[^}]*max-height: 18px;[^}]*overflow: hidden;/);
-    assert.match(css, /@media \(max-width: 768px\) \{\s*\.service-row__list \{[^}]*max-height: none;[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto;/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

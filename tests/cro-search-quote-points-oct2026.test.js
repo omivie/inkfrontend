@@ -317,34 +317,6 @@ test('§4 delivery: the backend label verbatim; ABSENT ⇒ the row (dt + dd) is 
     assert.equal(warnings.length, 1, 'the gap is logged, not silent');
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §5 PDP service row mount (FE master checklist item 5; module is feink-dc's
-// js/service-row.js — this file owns only where and how the PDP mounts it)
-// ─────────────────────────────────────────────────────────────────────────────
-
-test('§5 the service row sits directly UNDER Add (zero fold cost at 1280x551), loads after utils.js', () => {
-    const html = read('html/product/index.html');
-    const actions = html.indexOf('<div class="product-info__actions">');
-    const row = html.indexOf('id="product-service-row"');
-    // The confirmation strip it used to precede is gone: the cart drawer
-    // confirms an add now (ERR-316), so the row is simply after the Add row.
-    assert.ok(actions > 0 && row > actions, 'after the Add row');
-    assert.doesNotMatch(html, /id="atc-confirmation"/, 'the in-flow strip is retired, not hidden');
-    assert.match(html, /<div class="service-row" id="product-service-row"[^>]*hidden><\/div>/, 'ships hidden');
-    assert.ok(html.indexOf('/js/utils.js?v=') < html.indexOf('/js/service-row.js?v='), 'needs TrustStats + Security from utils.js');
-});
-
-test('§5 renderServiceRow passes delivery_estimate and stamps WHY on the element', async () => {
-    const el = { hidden: false, dataset: {} };
-    const doc = { getElementById: (id) => (id === 'product-service-row' ? el : null) };
-    let seen = null;
-    const ok = method(PDP_SRC, 'renderServiceRow', {}, { document: doc, ServiceRow: { mount: async (e, o) => { seen = o; return { shown: true, facts: [], reason: 'ok' }; } } });
-    await ok({ delivery_estimate: { label: '1–3 business days NZ-wide' } });
-    assert.equal(JSON.stringify(seen), JSON.stringify({ deliveryEstimate: { label: '1–3 business days NZ-wide' } }));
-    assert.equal(el.dataset.serviceRow, 'ok');
-    const missing = method(PDP_SRC, 'renderServiceRow', {}, { document: doc });
-    await missing({});
-    assert.equal(el.hidden, true);
-    assert.equal(el.dataset.serviceRow, 'missing', 'module absent ⇒ hidden AND says so');
-    assert.match(stripComments(PDP_SRC), /this\.renderServiceRow\(info\);/);
+test('the in-flow ATC confirmation strip stays retired (the cart drawer confirms an add, ERR-316)', () => {
+    assert.doesNotMatch(read('html/product/index.html'), /id="atc-confirmation"/, 'the in-flow strip is retired, not hidden');
 });

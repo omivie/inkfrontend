@@ -41,6 +41,20 @@ describing the same incident.
 
 ---
 
+## ERR-329 — Service row ("Auckland metro orders by 2pm ship same day · most of NZ in 1–3 business days · Questions? Call …") removed from every page (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner screenshot of `/shop?brand=brother&category=ink&code=LC432`: the grey line under the drilldown header. The owner wants it gone from every page that shows it.
+
+**What it was.** The service row (`js/service-row.js`, FE master checklist item 5, ERR-306/307). Two mounts: `#service-row` on /shop code pages and printer hubs (`ShopPage._syncServiceRow`, called from `updateTitle`), and `#product-service-row` under Add on the PDP (`renderServiceRow`). It held FOUR facts from `/api/site/trust`: speed, phone/email, "GST tax invoice emailed with every order", "30-day returns on unopened items". The last two were clipped off a laptop line, so the owner saw only two. Asked: remove the two visible facts (which would have revealed the other two) or the whole row. Owner chose the whole row.
+
+**Change.** Deleted `js/service-row.js`, both containers and both script tags (markup removed, not hidden: a `hidden` div still fails a DOM check, ERR-290), `_syncServiceRow` + its call, `renderServiceRow` + its call, the `.service-row*` block in components.css. `?v=` restamped for `components.css` (46 HTML) and `product-detail-page.js`. `shop-page.js`'s token in shop.html is left to whichever session commits shop-page.js last (a peer session is editing it at the same time). The PDP's separate "Questions? Call … · NZ company since …" value line is NOT this row and stays.
+
+**Tests and probes.** `fe-master-checklist` §5 is now one removal guard (file gone; no `service-row`/`ServiceRow` in the two pages, two controllers or components.css; the row's sentence nowhere in source). `cro-search-quote-points` PDP mount tests deleted (the atc-confirmation retirement assert kept). `four-replies` lifts `updateTitle` alone. `probe:fe-master` row checks became absence checks, and its negative control now injects the old row's text and must go red. `probe-ad-visitor-dropoff` anchors on Add only. `redproof-backend-response-6oct` lost its two service-row mutations and gained two that re-add the row (9/9 red).
+
+**Measured.** Targeted suites 59/59. Full suite 7107 pass, 1 fail: `no .DS_Store files tracked anywhere` (untracked local `.DS_Store`, not this change). Local browser, 1280x720, live API: `/shop?…code=LC432` 18 cards, no `.service-row`, no row text, no service-row script; the PDP `CLC432XLBK` painted $55.49 with no row and no row text. Console errors on both pages were only 429s from the shared IP limiter, with no JS errors. `probe:fe-master` NOT run (paced, and the limiter was already tripping).
+
+---
+
 ## ERR-328 — "Fits Your Printer" chip removed from every product card (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** Owner screenshot of `/search?q=Brother MFC 970`. Every card carried a blue "FITS YOUR PRINTER" chip at top-left. The owner says there is no need for it. The printer banner above the grid ("Cartridges for Brother MFC 970") already says it.
@@ -65,6 +79,20 @@ describing the same incident.
 - `probe:shop-columns`: 170/170 with `PROBE_BASE=http://localhost:3000 PROBE_SEARCH_PATH='/search?q=tn258'`. Every width shows Compatible above Genuine. The click lands the Genuine header at 18-20px from the top on desktop and 58-80px at ≤1024px (below the sticky header). `?type=genuine` and `?type=compatible` show no button.
 - The probe's 375px row expected two-up. Since ERR-287 the phone row is a one-column LIST (`@media (max-width: 479.98px)`). Before this change the probe failed 12 checks at 375px on that unrelated, intentional layout, so it now expects the list.
 - `tests/shop-source-columns-sep2026.test.js`: 16 pass. Full suite: 3 failures, none in these hunks. They are ERR-326's pages.css:14043 comment tripping the clamp grep, ERR-326 not yet in the memory log, and an untracked `backend-docs/.DS_Store`.
+
+**Same-day follow-up (owner): swap the button and the shipping pill.** `#source-jump` moved INSIDE `.drilldown-header__right-group`, AFTER the shipping pill, so the two wrap as one group. Its `margin-left: auto` is gone. Measured locally: at 1440 and 1280×551 the header is one 52px row, with the pill at x=535 and the button at x=950 (1280). At 1210, 1000 and 768 the pill and button share the second row with the pill on the left. At 375 the button is full width (327px). The shipping pill is hidden there by the existing `layout.css:2632` value-strip rule. Full suite 7115/1; the only failure is the untracked `backend-docs/.DS_Store`.
+
+**Second follow-up (owner): a yellow "View compatible …" button, and labels that name the subject.** `#source-jump-compatible` sits in a new `.products-section__head` row in `#genuine-section`, after the `<h2>` and outside it, so the heading's accessible name stays the heading. The head row now draws the rule line. It uses the Compatible badge's `--yellow-primary` background and `--black-primary` text; white on #F4C430 fails contrast. `_syncSourceColumns` hides or shows both buttons. One binding loop handles both clicks over `[button, section]` pairs. `#compatible-section` gets the same scroll margin as Genuine. The labels come from a pure function, `sourceJumpSubject()`, and one writer, `_setSourceJumpLabels()`, which is called at the three places the section titles are set:
+- printer page: `<printer> cartridges`, brand prefix dropped, falling back to `printerData.brand.name` because `/shop?printer=` carries no `brand=`;
+- `/search`: `matched_printer` first, else the code uppercased plus `ink`/`toner` from `product_type`;
+- code pages: `state.code` plus the category.
+
+Measured locally at 1280×551:
+- `q=lc436` → "View genuine LC436 ink" / "View compatible LC436 ink"; `q=tn258` → "TN258 toner"; `code=LC3317` → "LC3317 ink"; `printer=brother-mfc-l3770cdw` → "MFC-L3770CDW cartridges".
+- `q=mfc 970` builds "MFC 970 cartridges", but that printer has 0 compatible rows, so both buttons stay hidden by design.
+- After a click, the Compatible header lands 24px from the top and the Genuine header 30px.
+- **Cost:** the longer labels no longer fit in the header row at 1280px. Measured for `tn258`: left group 475 + right group 733 > 1192, so the header grows from 52px to 104px and the first card moves down 52px. The printer label is 458px wide.
+- probe:shop-columns 192/192 local. Full suite 7107 pass, 1 fail: the untracked `backend-docs/.DS_Store`.
 
 ---
 

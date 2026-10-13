@@ -26,7 +26,7 @@ G = 'inkcartridges/js/gtag.js'
 ADM = 'inkcartridges/html/admin/index.html'
 U = 'inkcartridges/js/utils.js'
 S = 'inkcartridges/js/shop-page.js'
-SR = 'inkcartridges/js/service-row.js'
+PDP = 'inkcartridges/html/product/index.html'
 
 MUTATIONS = [
  # GA4 + Ads off /admin
@@ -39,9 +39,10 @@ MUTATIONS = [
  # BF-096: one request, honest failure
  (S, "const resp = await API.searchPrinters(q).catch(() => null);", "const resp = await Promise.all([API.searchPrinters(q), API.searchPrinters(q.replace(/-/g, ' '))]).then((a) => a[0]).catch(() => null);"),
  (S, "                if (!answered) {", "                if (false) {"),
- # BF-101: tax_invoice gate, site delivery_label fallback
- (SR, "if (ti.emailed_with_every_order === true && tiLabel) {", "if (tiLabel) {"),
- (SR, "const label = s(d.label) || s(t.shipping_promise && t.shipping_promise.delivery_label);", "const label = s(d.label);"),
+ # BF-101's service row (tax_invoice gate, delivery_label) was REMOVED by the
+ # owner on 2026-10-13 (ERR-329); its mutations now re-add the row instead.
+ (S, "        updateTitle() {\n", "        updateTitle() {\n            if (typeof ServiceRow !== 'undefined') ServiceRow.mount(null);\n"),
+ (PDP, '    <link rel="icon"', '    <script defer src="/js/service-row.js?v=x"></script>\n    <link rel="icon"'),
 ]
 
 def run(tree):

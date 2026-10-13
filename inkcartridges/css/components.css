@@ -4690,52 +4690,6 @@ a.drilldown-box.drilldown-box--ribbon,
     }
 }
 
-/* FE master checklist 2026-10-05 item 5 — the service row (js/service-row.js).
-   ONE LINE, ALWAYS, and it costs exactly that line (18px, no margin):
-   measured 2026-10-05, the series compact card's Add ends at y 531 of 551 at
-   1280x551 without the row, so the budget is 20px. A wrapping row was 38px +
-   8px margin and pushed Add to 577 (below the fold) — probe:fe-master caught it.
-   On a laptop the list is clipped to one line with flex-wrap, so a fact that
-   does not fit drops WHOLE onto the hidden second line (still in the DOM for
-   screen readers) — never cut mid-word. At 1280 the returns fact drops; from
-   ~1366 all four show. On a phone it scrolls sideways instead. */
-.service-row {
-    margin: 0;
-    font-size: 13px;
-    line-height: 18px;
-    color: var(--color-text-light);
-}
-.service-row[hidden] { display: none; }
-.service-row__list {
-    display: flex;
-    flex-wrap: wrap;
-    max-height: 18px;
-    overflow: hidden;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-.service-row__item { white-space: nowrap; }
-.service-row__item + .service-row__item::before {
-    content: "·";
-    padding: 0 8px;
-    color: var(--color-text-muted);
-}
-.service-row__link {
-    color: inherit;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-@media (max-width: 768px) {
-    .service-row__list {
-        max-height: none;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        scrollbar-width: none;
-        -webkit-overflow-scrolling: touch;
-    }
-}
-
 /* FE master checklist 2026-10-05 item 13 — the guest account card shows the
    order's email READ-ONLY. It must not look like a box to type in. */
 .confirmation-account-form .form-input[readonly] {
