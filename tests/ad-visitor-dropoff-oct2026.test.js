@@ -407,11 +407,26 @@ test('§7 every image surface uses the tile for a genuine no-image row and on a 
 
 test('§8 compact card rules live only inside the height-gated media blocks', () => {
     const css = stripComments(PAGES_CSS);
-    const sel = '.shop-page .products-row .product-card .product-card__image-wrapper';
+    const sel = '.shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__image-wrapper';
     let at = -1;
     const blocks = [];
     while ((at = css.indexOf(sel, at + 1)) !== -1) blocks.push(css.slice(css.lastIndexOf('@media', at), at));
     assert.equal(blocks.length, 2, 'two tiers: <= 800 and <= 620 tall');
     assert.match(blocks[0], /^@media \(min-width: 1100px\) and \(max-height: 800px\)/);
     assert.match(blocks[1], /^@media \(min-width: 1100px\) and \(max-height: 620px\)/);
+});
+
+// ERR-326: /search shares this page, but its banner keeps the first row below
+// the first screen, so the 5:2 image there only cost the picture.
+test('§8b compact card never applies to search results; shop-page.js writes the hook', () => {
+    const css = stripComments(PAGES_CSS);
+    for (const h of ['800', '620']) {
+        const start = css.indexOf(`@media (min-width: 1100px) and (max-height: ${h}px) {\n    .shop-page`);
+        assert.notEqual(start, -1, `${h} tier found`);
+        const body = css.slice(start, css.indexOf('\n}', start));
+        const rules = body.match(/^\s*\.shop-page[^{]*\{/gm) || [];
+        assert.ok(rules.length >= 3, `${h} tier has card rules`);
+        for (const r of rules) assert.match(r, /^\s*\.shop-page:not\(\[data-level="search-results"\]\) /, `${h}: ${r.trim()}`);
+    }
+    assert.match(stripComments(SHOP_SRC), /querySelector\('\.shop-page'\)\?\.setAttribute\('data-level', this\.state\.level\)/);
 });

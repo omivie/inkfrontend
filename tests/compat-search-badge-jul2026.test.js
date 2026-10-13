@@ -26,7 +26,7 @@
  *    compat set is a deliberate backend hit, not a miss.
  * 2. BADGE. createProductCard renders a "Fits <model>" chip (teal
  *    `product-card__badge--compat-match`) for compat rows, mirroring the
- *    `_fitsPrinter` → "Fits Your Printer" chip, so the card explains why it
+ *    the (removed, ERR-328) "Fits Your Printer" chip, so the card explains why it
  *    surfaced. matched_token is escaped (escapeHtml text / escapeAttr title).
  *
  * Run: node --test tests/compat-search-badge-jul2026.test.js
@@ -209,14 +209,14 @@ test('createProductCard — matched_token is escaped in both text and attribute'
         'token in the title attribute must go through Security.escapeAttr');
 });
 
-test('createProductCard — chip-stack renders when ANY of fits-printer / compat / suggested badge is present', () => {
-    // search-ux-frontend-jul2026 §1 added a third chip (suggestedBadge); the
-    // stack must include it and appear whenever any of the three exists.
+test('createProductCard — chip-stack renders when compat or suggested badge is present (ERR-328: no Fits Your Printer chip)', () => {
+    // ERR-328 — the Fits Your Printer chip is owner-removed (2026-10-13).
     assert.match(
         SHOP_CODE,
-        /\(fitsPrinterBadge\s*\|\|\s*compatMatchBadge\s*\|\|\s*suggestedBadge\)\s*\?\s*`<div class="product-card__chip-stack">\$\{fitsPrinterBadge\}\$\{compatMatchBadge\}\$\{suggestedBadge\}<\/div>`/,
-        'the chip-stack must emit all three badges and appear whenever any exists'
+        /\(compatMatchBadge\s*\|\|\s*suggestedBadge\)\s*\?\s*`<div class=\"product-card__chip-stack\">\$\{compatMatchBadge\}\$\{suggestedBadge\}<\/div>`/,
+        'the chip-stack must emit both badges and appear whenever either exists'
     );
+    assert.doesNotMatch(SHOP_CODE, /Fits Your Printer/, 'no Fits Your Printer chip');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

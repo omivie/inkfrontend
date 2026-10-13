@@ -600,14 +600,6 @@ mark.smart-ac__mark {
     .printer-hero__cta { width: 100%; text-align: center; }
 }
 
-/* Spec §3.3 — Fits Your Printer badge on product cards. */
-.product-card__badge--fits-printer {
-    background: #2563eb;
-    color: #fff;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-}
-
 /* compat-search-jul2026 — "Fits <model>" badge when /smart matched a product
    via its free-text "for use in" compatibility list (e.g. q=VP6000 → the AP800
    ribbon). Teal, to read as a positive "yes this fits" while staying distinct

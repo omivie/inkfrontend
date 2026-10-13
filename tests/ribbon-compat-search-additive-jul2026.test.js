@@ -694,16 +694,16 @@ test('§6 the dropdown card mirrors the results-page card byte-for-byte', () => 
 
 test('§6 both card renderers gate the chip-stack on the compat badge too', () => {
     assert.match(SHOP_CODE,
-        /\(fitsPrinterBadge\s*\|\|\s*compatMatchBadge\s*\|\|\s*suggestedBadge\)/,
+        /\(compatMatchBadge\s*\|\|\s*suggestedBadge\)/,
         'results-page stack must appear when only the compat chip is present');
     assert.match(PRODUCTS_CODE,
-        /\(discountBadgeHTML\s*\|\|\s*fitsPrinterBadgeHTML\s*\|\|\s*compatMatchBadgeHTML\)/,
+        /\(discountBadgeHTML\s*\|\|\s*compatMatchBadgeHTML\)/,
         'dropdown stack must appear when only the compat chip is present');
 });
 
 test('§6 search.css un-hides ONLY the compat chip inside the dropdown grid', () => {
     assert.match(SEARCH_CSS, /\.smart-ac__grid\s+\.product-card__badge\s*\{[^}]*display:\s*none/,
-        'the blanket hide must remain for Save / Fits Your Printer');
+        'the blanket hide must remain for the Save chip');
     const m = SEARCH_CSS.match(/\.smart-ac__grid\s+\.product-card__badge--compat-match\s*\{([^}]*)\}/);
     assert.ok(m, 'the compat chip needs an explicit exception or the hide wins');
     assert.match(m[1], /display:\s*inline-block/, 'the exception must actually re-show it');

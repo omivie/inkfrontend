@@ -160,13 +160,10 @@ const Products = {
         // chip is retired. Section headings ("Brother Compatible Inkjet
         // Cartridges") + the product name itself ("LC39BK Compatible Ink…"
         // / "Brother Genuine LC39…") already convey source, so the chip was
-        // pure redundancy. The chip-stack lives on for fits-printer +
+        // pure redundancy. The chip-stack lives on for compat-match +
         // save-discount badges, which still want the top-left corner.
         const discountBadgeHTML = (showDiscount && (this._isPack(product) ? discountAmount != null : discountPercent))
             ? `<span class="product-card__badge product-card__badge--discount">${this._isPack(product) ? `Save ${formatPrice(discountAmount)}` : `Save ${discountPercent}%`}</span>`
-            : '';
-        const fitsPrinterBadgeHTML = product._fitsPrinter
-            ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
             : '';
         // ERR-133 — "Fits <model>" when /smart surfaced this row via its
         // free-text "for use in" compatibility list (match_reason:
@@ -184,8 +181,8 @@ const Products = {
         const compatMatchBadgeHTML = (product.match_reason === 'compatibility' && product.matched_token)
             ? `<span class="product-card__badge product-card__badge--compat-match" title="Compatible with ${Security.escapeAttr(product.matched_token)}">Fits ${Security.escapeHtml(product.matched_token)}</span>`
             : '';
-        const chipStackHTML = (discountBadgeHTML || fitsPrinterBadgeHTML || compatMatchBadgeHTML)
-            ? `<div class="product-card__chip-stack">${fitsPrinterBadgeHTML}${compatMatchBadgeHTML}${discountBadgeHTML}</div>`
+        const chipStackHTML = (discountBadgeHTML || compatMatchBadgeHTML)
+            ? `<div class="product-card__chip-stack">${compatMatchBadgeHTML}${discountBadgeHTML}</div>`
             : '';
 
         // Pack cards read as the better buy, not a dearer single (conversion

@@ -141,8 +141,8 @@ test('§1 components.css drops the dead per-card source-chip rules', () => {
     );
 });
 
-test('§1 chip-stack survives for fits-printer + save-discount badges', () => {
-    // The stack container is still useful — fits-printer + save-discount
+test('§1 chip-stack survives for compat-match + save-discount badges', () => {
+    // The stack container is still useful — compat-match + save-discount
     // chips share the top-left and need the flex column to avoid overlap.
     // products.js + shop-page.js still emit the wrapper.
     assert.match(PRODUCTS_CODE, /product-card__chip-stack/,
@@ -279,9 +279,8 @@ test('§1 runtime: genuine product card emits NO source chip', () => {
         'genuine card must not render the GENUINE text label');
 });
 
-test('§1 runtime: chip-stack still appears when fits-printer chip is present', () => {
-    // Regression guard — removing the source chip must not collapse the
-    // stack wrapper when other chips are still active.
+test('§1 runtime: _fitsPrinter no longer paints a Fits Your Printer chip (ERR-328)', () => {
+    // Owner-removed 2026-10-13. A stale _fitsPrinter tag must render nothing.
     const Products = loadProducts();
     const html = Products.renderCard({
         ...BASE_PRODUCT,
@@ -289,10 +288,10 @@ test('§1 runtime: chip-stack still appears when fits-printer chip is present', 
         _fitsPrinter: 'Brother MFC-J6920DW',
     }, 0);
 
-    assert.match(html, /product-card__chip-stack/,
-        'card with fits-printer must wrap the chip in .product-card__chip-stack');
-    assert.match(html, /product-card__badge--fits-printer/,
-        'card with fits-printer must render the fits-printer chip');
+    assert.doesNotMatch(html, /fits-printer|Fits Your Printer/i,
+        'no Fits Your Printer chip on any card');
+    assert.doesNotMatch(html, /product-card__chip-stack/,
+        'no empty chip-stack when the only would-be chip is gone');
 });
 
 test('§1 runtime: chip-stack still appears when discount chip is present', () => {
@@ -313,14 +312,14 @@ test('§1 runtime: chip-stack still appears when discount chip is present', () =
 });
 
 test('§1 runtime: card with no chip-driving fields renders no chip-stack at all', () => {
-    // No source chip, no fits-printer, no discount → no stack wrapper.
+    // No source chip, no compat-match, no discount → no stack wrapper.
     // Regression guard against an empty <div class="product-card__chip-stack"></div>
     // being painted on every card.
     const Products = loadProducts();
     const html = Products.renderCard({ ...BASE_PRODUCT, source: 'genuine' }, 0);
 
     assert.doesNotMatch(html, /product-card__chip-stack/,
-        'card with no fits-printer + no discount must not paint an empty chip-stack');
+        'card with no compat-match + no discount must not paint an empty chip-stack');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

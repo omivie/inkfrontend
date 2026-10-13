@@ -291,11 +291,11 @@ test('createProductCard — suggestedBadge is gated on _suggestedChip', () => {
     assert.match(m[1], /product-card__badge--suggested/, 'chip must carry the suggested CSS class');
 });
 
-test('createProductCard — chip-stack emits all three badges and appears when any exists', () => {
+test('createProductCard — chip-stack emits both badges and appears when either exists (ERR-328)', () => {
     assert.match(
         SHOP_CODE,
-        /\(fitsPrinterBadge\s*\|\|\s*compatMatchBadge\s*\|\|\s*suggestedBadge\)\s*\?\s*`<div class="product-card__chip-stack">\$\{fitsPrinterBadge\}\$\{compatMatchBadge\}\$\{suggestedBadge\}<\/div>`/,
-        'the chip-stack must include suggestedBadge and gate on any of the three'
+        /\(compatMatchBadge\s*\|\|\s*suggestedBadge\)\s*\?\s*`<div class="product-card__chip-stack">\$\{compatMatchBadge\}\$\{suggestedBadge\}<\/div>`/,
+        'the chip-stack must include suggestedBadge; Fits Your Printer is owner-removed (ERR-328)'
     );
 });
 

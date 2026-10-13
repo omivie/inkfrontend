@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * probe-shop-source-columns — do /shop and /search paint two source columns?
- * ==========================================================================
+ * probe-shop-source-columns — Compatible stacked over Genuine, six-up, jump button
+ * ==============================================================================
  *
- * Sep-2026. The shop page used to STACK its two sources: #compatible-section
- * above #genuine-section, each a 7-across flex row, so the Genuine set began a
- * full section down the page and the two prices for the same colour were never
- * on screen together. They sit side by side now — Compatible left, Genuine
- * right, three cards to a row in each — collapsing to one full-width six-up
- * section when only one source has rows.
+ * ERR-327 (2026-10-13, owner). Sep-2026 put the two sources side by side, three
+ * cards a column. They are STACKED again: Compatible on top, Genuine under it,
+ * each full width on the page's global ladder (6 from 1100px, then 6 / 5 / 2).
+ * When both have rows, a cyan "View Genuine products" button (#source-jump) in
+ * the header scrolls the Genuine header to the top of the screen; this probe
+ * clicks it and measures where the header lands.
  *
  * /search is a Vercel rewrite onto the same shell (/html/shop), as are
  * /ink-cartridges and /toner-cartridges, so this probe drives both URLs
@@ -30,7 +30,9 @@
  *     "Add 100" — a WIDER card producing a SMALLER button.
  *   - CARD_FLOOR 150px. Below it the Add CTA clips its own widest label.
  *
- * READ-ONLY. It navigates and measures. It writes nothing.
+ * READ-ONLY on our side: it navigates, clicks #source-jump (a scroll), and
+ * measures. Each /search load makes the backend log a search_analytics row
+ * (ERR-271); the notice below prints that before anything runs.
  *
  *   npm run probe:shop-columns
  *   PROBE_BASE=http://localhost:3000 npm run probe:shop-columns
@@ -48,9 +50,8 @@ const SEARCH_URL = process.env.PROBE_SEARCH_PATH || '/search?q=lc531';
 const CARD_FLOOR = 150;
 const CARD_CEILING = 200;
 
-// Expected cards per row, MEASURED. --split is 2-up by default and 3-up from
-// 1200px, dropping to 1-up under 768px. --single is left on the page's existing
-// global ladder (6 / 5 / 2), which this change deliberately does not touch.
+// Expected cards per row. Both modes now run the page's global ladder
+// (6 / 5 / 2); --split only means "both sources have rows" (ERR-327).
 /* `touch` IS LOAD-BEARING AND ITS ABSENCE HID A SHIPPED DEFECT — ERR-240.
    Every viewport here used to be created as `newContext({ viewport })` and
    nothing else, so the pointer was FINE. The card's buy control is laid out by
@@ -65,21 +66,21 @@ const CARD_CEILING = 200;
    is not a weaker measurement, it is a measurement of something else.
    375px now runs with the same touch emulation as probe:mobile-ux. */
 const VIEWPORTS = [
-    { width: 1440, height: 900, split: 3, single: 6 },
-    { width: 1280, height: 900, split: 3, single: 6 },
-    { width: 1024, height: 900, split: 2, single: 6 },
-    { width: 768,  height: 900, split: 2, single: 5 },
-    /* 2, not 1: below 699px the two source sections STACK (ERR-240), so the row
-       is the full container and carries a pair of ~175px cards instead of one
-       152px card in a half-width column that could not hold its own CTA. */
-    { width: 375,  height: 812, split: 2, single: 2, touch: true },
+    { width: 1440, height: 900, single: 6 },
+    { width: 1280, height: 900, single: 6 },
+    { width: 1024, height: 900, single: 6 },
+    { width: 768,  height: 900, single: 5 },
+    /* Below 480px every .shop-page row is a one-column LIST (pages.css
+       `@media (max-width: 479.98px)`, image left / facts right). That block
+       predates ERR-327 and this probe was never moved to it, so it expected
+       two-up here and failed 12 checks on a layout nobody broke. */
+    { width: 375,  height: 812, single: 1, list: true, touch: true },
 ];
 
 /**
  * WHAT THIS PROBE DOES AND DOES NOT OWN.
  *
- * The card width in --split is set by this change, so its CTA fit is asserted
- * outright. Below 1100px a --single section is sized by the page's ORIGINAL
+ * Since ERR-327 both modes run the global ladder. Below 1100px a section is sized by the page's ORIGINAL
  * global ladder, which this change does not touch — and that ladder has always
  * clipped the Add CTA. Measured on shipped HEAD (aac29c0), stacked full-width:
  *
@@ -201,7 +202,7 @@ async function load(page, url) {
     return false;
 }
 
-console.log('\n\x1b[1mprobe:shop-columns — Compatible left / Genuine right on /shop and /search\x1b[0m');
+console.log('\n\x1b[1mprobe:shop-columns — Compatible over Genuine + jump button on /shop and /search (READ-ONLY layout; /search logs a search_analytics row, see notice)\x1b[0m');
 // THIS PROBE IS A WRITER, AND ITS SOURCE NEVER SPELLS THE ENDPOINT (ERR-271).
 // SEARCH_URL sends the browser to the site's own /search?q= page, so the SPA
 // issues GET /api/search/* and the backend writes a `search_analytics` row. The
@@ -244,47 +245,64 @@ try {
                     + `card ${s.cardWidth}px (basis ${s.basis})`);
             }
 
-            const expected = m.mode === 'split' ? vp.split : vp.single;
+            const expected = vp.single;
 
             if (m.mode === 'split') {
                 const [a, b] = m.sections;
                 check(`${vp.width}px ${label}: both sources are showing`,
                     m.sections.length === 2, `${m.sections.length} section(s)`);
                 if (m.sections.length === 2) {
-                    check(`${vp.width}px ${label}: Compatible LEFT, Genuine RIGHT`,
-                        /compatible/i.test(a.label) && /genuine/i.test(b.label) && a.left < b.left,
-                        `${a.label}@${a.left} then ${b.label}@${b.left}`);
-                    check(`${vp.width}px ${label}: the two sections share a top edge`,
-                        Math.abs(a.top - b.top) <= 1, `tops ${a.top} vs ${b.top}`);
-                    check(`${vp.width}px ${label}: the columns do not overlap`,
-                        a.right <= b.left + 1, `left ends ${a.right}, right starts ${b.left}`);
+                    check(`${vp.width}px ${label}: Compatible ON TOP, Genuine underneath`,
+                        /compatible/i.test(a.label) && /genuine/i.test(b.label) && a.top < b.top,
+                        `${a.label}@top ${a.top} then ${b.label}@top ${b.top}`);
                 }
-            } else {
-                check(`${vp.width}px ${label}: a lone section takes the WHOLE width`,
-                    Math.abs(m.sections[0].width - m.wrapClient) <= 2,
-                    `section ${m.sections[0].width}px vs wrapper ${m.wrapClient}px`);
+                // The jump: visible, then CLICKED, then the Genuine header's
+                // painted top is measured. Scroll only; nothing is written.
+                const btn = await page.evaluate(() => {
+                    const el = document.getElementById('source-jump');
+                    if (!el) return null;
+                    const r = el.getBoundingClientRect();
+                    return { hidden: el.hidden, w: Math.round(r.width), h: Math.round(r.height),
+                        bg: getComputedStyle(el).backgroundColor };
+                });
+                check(`${vp.width}px ${label}: "View Genuine products" button is showing`,
+                    !!btn && !btn.hidden && btn.h > 0, btn ? `${btn.w}x${btn.h} bg ${btn.bg}` : 'no #source-jump');
+                if (btn && !btn.hidden) {
+                    await page.click('#source-jump');
+                    await page.waitForTimeout(1200); // smooth scroll settles
+                    const landed = await page.evaluate(() => Math.round(
+                        document.getElementById('genuine-title').getBoundingClientRect().top));
+                    check(`${vp.width}px ${label}: click lands the Genuine header near the top with a gap`,
+                        landed > 0 && landed <= 120, `header top ${landed}px`);
+                }
+            }
+            if (m.sections.length) {
+                check(`${vp.width}px ${label}: every section takes the WHOLE width`,
+                    m.sections.every((s) => Math.abs(s.width - m.wrapClient) <= 2),
+                    m.sections.map((s) => `${s.width}px`).join(', ') + ` vs wrapper ${m.wrapClient}px`);
             }
 
             for (const s of m.sections) {
                 check(`${vp.width}px ${label}: ${s.label} paints ${expected} card(s) per row`,
                     s.perRow === expected, `${s.perRow}/row (expected ${expected}), basis ${s.basis}`);
+                if (vp.list) {
+                    check(`${vp.width}px ${label}: ${s.label} list cards span the row`,
+                        Math.abs(s.cardWidth - m.wrapClient) <= 2, `card ${s.cardWidth}px vs ${m.wrapClient}px`);
+                    check(`${vp.width}px ${label}: ${s.label} Add CTA is not clipped at its widest label`,
+                        s.ctaClipped === 0, `clipped ${s.ctaClipped}px at "${s.ctaLabel}"`);
+                } else {
                 check(`${vp.width}px ${label}: ${s.label} cards stay under the ${CARD_CEILING}px footer-flip ceiling`,
                     s.widest < CARD_CEILING, `widest ${s.widest}px`);
                 check(`${vp.width}px ${label}: ${s.label} footer stays stacked (container query did not flip)`,
                     s.footerDirection === 'column', `flex-direction: ${s.footerDirection}`);
+                }
                 check(`${vp.width}px ${label}: ${s.label} row does not overflow`,
                     (s.rowOverflow ?? 0) <= 1, `${s.rowOverflow}px`);
 
-                if (m.mode === 'split') {
-                    // This change owns the width here, so the CTA must fit outright.
-                    check(`${vp.width}px ${label}: ${s.label} cards clear the ${CARD_FLOOR}px CTA floor`,
-                        s.narrowest >= CARD_FLOOR, `narrowest ${s.narrowest}px`);
+                if (vp.width >= 1100) {
                     check(`${vp.width}px ${label}: ${s.label} Add CTA is not clipped at its widest label`,
                         s.ctaClipped === 0, `clipped ${s.ctaClipped}px at "${s.ctaLabel}"`);
-                } else if (vp.width >= 1100) {
-                    check(`${vp.width}px ${label}: ${s.label} Add CTA is not clipped at its widest label`,
-                        s.ctaClipped === 0, `clipped ${s.ctaClipped}px at "${s.ctaLabel}"`);
-                } else if (SINGLE_BASELINE[vp.width]) {
+                } else if (!vp.list && SINGLE_BASELINE[vp.width]) {
                     console.log(`     ↳ NOT ASSERTED (pre-existing, see SINGLE_BASELINE): `
                         + `single-mode CTA clips ${s.ctaClipped}px at "${s.ctaLabel}" on the untouched global ladder`);
                     check(`${vp.width}px ${label}: ${s.label} single-mode width unchanged from shipped baseline`,
@@ -326,6 +344,12 @@ try {
                 expectBadge.test(s.label), s.label);
             check(`?type=${type}: the wrapper is marked --single`,
                 m.mode === 'single', `mode=${m.mode}`);
+            const jumpHidden = await page.evaluate(() => {
+                const el = document.getElementById('source-jump');
+                return !el || el.hidden;
+            });
+            check(`?type=${type}: no "View Genuine products" button on a one-source page`,
+                jumpHidden, jumpHidden ? 'hidden' : 'VISIBLE');
             check(`?type=${type}: it takes the WHOLE width, not half a split grid`,
                 Math.abs(s.width - m.wrapClient) <= 2,
                 `section ${s.width}px vs wrapper ${m.wrapClient}px`);
@@ -349,4 +373,4 @@ if (failed.length) {
     failed.forEach((f) => console.log(`  - ${f.name}${f.detail ? ` (${f.detail})` : ''}`));
     process.exit(1);
 }
-console.log('\x1b[32mTwo source columns of three, measured in a browser.\x1b[0m\n');
+console.log('\x1b[32mStacked six-up sources and the Genuine jump, measured in a browser.\x1b[0m\n');

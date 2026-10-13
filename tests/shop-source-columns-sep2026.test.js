@@ -1,12 +1,12 @@
 /**
- * Shop / search results — Compatible LEFT, Genuine RIGHT
- * ======================================================
+ * Shop / search results — Compatible ON TOP, Genuine underneath, six-up
+ * ======================================================================
  *
- * Sep-2026. #compatible-section used to sit ABOVE #genuine-section, each a
- * 7-across flex row, so the Genuine set began a full section down the page and
- * the two prices for the same colour were never on screen together. They are
- * columns now — three cards to a row in each, six across — collapsing to one
- * full-width six-up section when only one source has rows.
+ * Sep-2026 put the two sources side by side (three cards a column). The owner
+ * reversed it on 2026-10-13 (ERR-327): each section is full width again, six
+ * cards to a row from 1100px, Compatible first, and a cyan "View Genuine
+ * products" button (#source-jump) in the header scrolls to Genuine. The button
+ * shows only when BOTH sources have rows.
  *
  * /search, /ink-cartridges and /toner-cartridges are Vercel rewrites onto this
  * same shell (vercel.json), so these assertions cover every one of them.
@@ -58,14 +58,13 @@ test('shop.html keeps Compatible before Genuine — the click beacon numbers by 
         'compatible-products must precede genuine-products in the DOM');
 });
 
-test('shop.html loading skeleton mirrors the two-column shape it is standing in for', () => {
+test('shop.html loading skeleton mirrors the stacked shape it is standing in for', () => {
     const skel = SHOP_HTML.slice(SHOP_HTML.indexOf('id="skeleton-products"'));
     const end = skel.indexOf('drilldown-empty');
     const block = skel.slice(0, end === -1 ? undefined : end);
     assert.match(block, /class="products-sections products-sections--split"/,
-        'the skeleton must show the split shape, not a stack that jumps on load');
-    // Six per section = two clean rows of three per column. Seven left a 3+3+1
-    // ragged row for the whole of the load.
+        'the skeleton must show both sections, as the loaded page will');
+    // Six per section = one clean six-up row per stacked section.
     const cards = (block.match(/product-card--skeleton/g) || []).length;
     assert.equal(cards, 12, 'six skeleton cards per section, two sections');
 });
@@ -134,15 +133,16 @@ const ruleBody = (css, selector) => {
     return css.slice(open + 1, css.indexOf('}', open));
 };
 
-test('pages.css — --split is two tracks, --single is one', () => {
-    const split = ruleBody(PAGES_CSS, '.products-sections--split {');
-    const single = ruleBody(PAGES_CSS, '.products-sections--single {');
-    assert.ok(split && single, 'both modifiers must be defined');
-    assert.match(split, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/,
-        '--split lays the two sections side by side');
-    assert.match(single, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/,
-        '--single gives the survivor the whole width');
-    assert.match(ruleBody(PAGES_CSS, '.products-sections {'), /display:\s*grid/);
+test('pages.css — the sections STACK: one track, whatever the modifier', () => {
+    const wrap = ruleBody(PAGES_CSS, '.products-sections {');
+    assert.ok(wrap, 'expected the .products-sections rule');
+    assert.match(wrap, /display:\s*grid/);
+    assert.match(wrap, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/,
+        'one track: Compatible above Genuine');
+    assert.doesNotMatch(PAGES_CSS, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/,
+        'no two-track source grid may come back');
+    assert.doesNotMatch(PAGES_CSS, /\.products-sections--(?:split|single)[^{]*\{/,
+        'the modifiers are a JS signal now; a CSS rule on them would re-split the layout');
 });
 
 test('pages.css — .products-section carries no display, or [hidden] stops working', () => {
@@ -159,11 +159,8 @@ test('pages.css — the per-row card rules are SCOPED to .products-row', () => {
     // .product-card is global: its flex-basis is inert in the CSS-Grid parents
     // (ribbons, PDP related, cart, bought-together, favourites, landing) but
     // its max-width/min-width are not. .products-row exists only on shop.html.
-    const scoped = PAGES_CSS.match(/\.products-sections--(?:split|single)[^{]*\.products-row \.product-card\s*\{/g) || [];
-    assert.ok(scoped.length >= 2,
-        `expected the card rules to be scoped through .products-row, found ${scoped.length}`);
-    for (const sel of PAGES_CSS.match(/\.products-sections--[a-z]+ [^{]*\{/g) || []) {
-        if (!/product-card|products-row/.test(sel)) continue;
+    for (const sel of PAGES_CSS.match(/\.products-sections[ .][^{]*\{/g) || []) {
+        if (!/product-card/.test(sel)) continue;
         assert.match(sel, /\.products-row/,
             `a card rule must go through .products-row, not reach .product-card directly: ${sel.trim()}`);
     }
@@ -180,13 +177,52 @@ test('pages.css — the GLOBAL .product-card rule is left alone', () => {
         'the 185px cap is what keeps dropdown-style container-query flips away');
 });
 
-test('pages.css — --single defers to the global ladder below 1100px', () => {
-    // The scoped selectors are (0,3,0) and the ladder's bare .product-card is
-    // (0,1,0), so an unmediated --single rule would win at every width and
-    // freeze a phone at six-up.
-    const i = PAGES_CSS.indexOf('.products-sections--single .products-row .product-card');
-    assert.ok(i !== -1, 'expected the --single card rule');
-    const before = PAGES_CSS.slice(Math.max(0, i - 400), i);
+test('pages.css — six-up defers to the global ladder below 1100px', () => {
+    // The scoped selector is (0,3,0) and the ladder's bare .product-card is
+    // (0,1,0), so an unmediated rule would win at every width and freeze a
+    // phone at six-up.
+    const i = PAGES_CSS.indexOf('.products-sections .products-row .product-card {');
+    assert.ok(i !== -1, 'expected the six-up card rule');
+    assert.match(PAGES_CSS.slice(i, i + 120), /flex:\s*0 0 calc\(16\.666% - var\(--spacing-sm\)\)/);
+    const before = PAGES_CSS.slice(Math.max(0, i - 200), i);
     assert.match(before, /@media \(min-width:\s*1100px\)/,
-        '--single must be guarded by a min-width so the existing 6/5/2 ladder still applies below it');
+        'six-up must be guarded by a min-width so the existing 6/5/2 ladder still applies below it');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. The "View Genuine products" jump (ERR-327)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('shop.html — #source-jump sits in the header between the title and the shipping pill', () => {
+    const header = SHOP_HTML.indexOf('class="drilldown-header"');
+    const left = SHOP_HTML.indexOf('class="drilldown-header__left"', header);
+    const btn = SHOP_HTML.indexOf('id="source-jump"', header);
+    const right = SHOP_HTML.indexOf('class="drilldown-header__right-group"', header);
+    assert.ok(header !== -1 && left < btn && btn < right, 'button must be between __left and __right-group');
+    assert.match(SHOP_HTML, /<button type="button" class="source-jump" id="source-jump" hidden>/,
+        'ships hidden: a single-source page must never flash a dead button');
+});
+
+test('shop-page.js — _syncSourceColumns is the ONE writer of the button\'s hidden state', () => {
+    const m = SHOP_JS.match(/_syncSourceColumns\(\)\s*\{([\s\S]*?)\n        \},/);
+    assert.match(m[1], /sourceJump\.hidden = shown !== 2/);
+    assert.equal((SHOP_JS.match(/sourceJump\.hidden\s*=/g) || []).length, 1);
+});
+
+test('shop-page.js — the click scrolls to #genuine-section, no URL hash', () => {
+    const i = SHOP_JS.indexOf("sourceJump.addEventListener('click'");
+    assert.ok(i !== -1, 'expected one click binding');
+    const body = SHOP_JS.slice(i, i + 400);
+    assert.match(body, /genuineSection[\s\S]*scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+    assert.doesNotMatch(body, /location\.hash/, 'the route lives in the query string');
+});
+
+test('pages.css — Genuine lands with a gap, button uses the Genuine badge cyan', () => {
+    assert.match(ruleBody(PAGES_CSS, '#genuine-section {') || '', /scroll-margin-top:/);
+    const btn = ruleBody(PAGES_CSS, '.source-jump {');
+    assert.ok(btn, 'expected the .source-jump rule');
+    assert.match(btn, /background:\s*var\(--cyan-primary\)/);
+    assert.match(btn, /color:\s*var\(--white-primary\)/);
+    assert.match(ruleBody(PAGES_CSS, '.source-jump[hidden] {') || '', /display:\s*none/,
+        '.source-jump declares display, so [hidden] needs its own rule');
 });

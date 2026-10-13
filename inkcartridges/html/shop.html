@@ -43,7 +43,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=7dc86c33">
     <link rel="stylesheet" href="/css/components.css?v=651ae835">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=6b0ec116">
+    <link rel="stylesheet" href="/css/pages.css?v=00e0737f">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
 
     <script type="application/ld+json" id="shop-schema">
@@ -213,6 +213,10 @@
                              no price wording on this page (backend invariant 13). -->
                         <button type="button" class="drilldown-header__chip" id="source-filter-chip" hidden></button>
                     </div>
+                    <!-- 2026-10-13: Compatible is stacked above Genuine; this scrolls to
+                         #genuine-section. Shown by shop-page.js _syncSourceColumns only
+                         when BOTH sections have rows. -->
+                    <button type="button" class="source-jump" id="source-jump" hidden>View Genuine products <span aria-hidden="true">&darr;</span></button>
                     <div class="drilldown-header__right-group">
                         <div class="drilldown-header__right" id="yield-banner" hidden>
                             <strong>Page Yield:</strong>
@@ -317,13 +321,12 @@
                         <!-- "For Use In:" aggregation lives on the PDP only —
                              see category-page-contract-may2026.md §2. -->
 
-                        <!-- The two sources sit SIDE BY SIDE: Compatible left,
-                             Genuine right, three cards to a row in each. The
-                             modifier class (products-sections--split /
-                             --single) is written by shop-page.js from the two
-                             sections' hidden state, so when only one source has
-                             rows the survivor takes the whole width and runs
-                             six-up. Compatible stays FIRST in the DOM:
+                        <!-- Compatible on TOP, Genuine underneath, each full
+                             width and six-up (2026-10-13). The modifier class
+                             (products-sections--split = both sources have rows,
+                             --single = one) is written by shop-page.js and shows
+                             #source-jump; it no longer changes the grid.
+                             Compatible stays FIRST in the DOM:
                              search-click-beacon.js numbers a click's position
                              across both grids in document order. -->
                         <div class="products-sections" id="source-sections">
@@ -381,8 +384,8 @@
                             </div>
                         </div>
                         <div class="drilldown-skeleton drilldown-skeleton--products" id="skeleton-products" hidden>
-                            <!-- Statically --split: the loading state shows the two-column
-                                 shape the loaded state will have. -->
+                            <!-- Statically --split: the loading state shows the stacked
+                                 Compatible-over-Genuine shape the loaded state will have. -->
                             <div class="products-sections products-sections--split">
                                 <div class="products-section">
                                     <div class="skeleton skeleton--section-title"></div>
@@ -497,7 +500,7 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=7d6fb930"></script>
+    <script defer src="/js/shop-page.js?v=51dd03ff"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 

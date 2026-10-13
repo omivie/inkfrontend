@@ -578,6 +578,7 @@
             genuineSection: document.getElementById('genuine-section'),
             compatibleSection: document.getElementById('compatible-section'),
             sourceSections: document.getElementById('source-sections'),
+            sourceJump: document.getElementById('source-jump'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
             // category-page-contract-may2026.md §2 — the page-level
@@ -608,6 +609,19 @@
         // INITIALIZATION
         // =========================================
         async init() {
+            // "View Genuine products" — Compatible is stacked above Genuine
+            // (2026-10-13); this lands the Genuine header at the top of the
+            // screen (#genuine-section scroll-margin-top in pages.css). Shown
+            // only by _syncSourceColumns. No hash: the route lives in the query.
+            if (this.elements.sourceJump) {
+                this.elements.sourceJump.addEventListener('click', () => {
+                    const target = this.elements.genuineSection;
+                    if (target && target.scrollIntoView) {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                });
+            }
+
             // Re-run the current level once admin preview turns on (ERR-234).
             //
             // Admin preview resolves over the network and is deliberately never
@@ -1329,6 +1343,8 @@
 
             // Hide all levels first
             this.hideAllLevels();
+            // CSS hook: the short-laptop compact card skips search results (ERR-326).
+            document.querySelector('.shop-page')?.setAttribute('data-level', this.state.level);
 
             // search-click-tracking-aug2026 — the click beacon is armed-OFF by
             // default. /search is a Vercel rewrite to this same shop HTML, so
@@ -4157,13 +4173,8 @@
                 }
                 this.renderSearchBanners(bannerData, searchQuery);
 
-                // Spec §3.3 Case A — when /smart matched a printer, every
-                // product in the pool is fits-the-printer. Tag for the card
-                // renderer (mutates the array we render, not the API cache).
-                if (smartData?.matched_printer?.name) {
-                    const printerName = smartData.matched_printer.name;
-                    for (const p of products) p._fitsPrinter = printerName;
-                }
+                // ERR-328 — the "Fits Your Printer" chip (Spec §3.3 Case A) is
+                // owner-removed (2026-10-13); the printer banner already says it.
 
                 // search-ux-frontend-jul2026 §1 — when only SOME rows are semantic
                 // best-guesses, tag those rows for the per-card "Suggested" chip.
@@ -4171,7 +4182,7 @@
                 // your search" section notice instead (renderSearchBanners), so we
                 // deliberately DON'T tag chips in that case. Tags the live objects
                 // by reference so brand-narrowing/filtering below preserves them —
-                // same pattern as _fitsPrinter above. When reconciliation swapped
+                // same pattern as the old _fitsPrinter tag. When reconciliation swapped
                 // to literal results (smartData nulled) these rows carry no
                 // match_reason, so the summary is empty and nothing is tagged.
                 const reasonSummary = summarizeMatchReasons(products);
@@ -4858,17 +4869,12 @@
         },
 
         /**
-         * Compatible LEFT, Genuine RIGHT — and which of the two layouts is in
-         * force is decided HERE, in one place, rather than inferred in CSS with
-         * a :has(). One function counts how many sources actually have rows, so
-         * a test and a probe can both read the answer off the DOM.
-         *
-         * It has to be a decision rather than a side effect of the grid: the
-         * wrapper is a two-track grid, and `renderProducts` hides an empty
-         * section with the `hidden` ATTRIBUTE. A hidden grid item is removed
-         * from flow but its TRACK is not — so without this the surviving
-         * section would paint at half width beside an empty column instead of
-         * taking the whole row.
+         * Compatible on TOP, Genuine underneath (2026-10-13; was side by side).
+         * Whether BOTH sources have rows is decided HERE, in one place, from the
+         * sections' `hidden` state. It writes --split (both) / --single (one)
+         * on the wrapper, which tests and probes read off the DOM, and shows
+         * the #source-jump button only when there is a Compatible section to
+         * jump past. Neither modifier changes the grid any more.
          *
          * Called after every `section.hidden = …` assignment, which means twice
          * per paint (once per section). Both calls are synchronous in the same
@@ -4881,6 +4887,9 @@
                 .filter((k) => this.elements[k] && !this.elements[k].hidden).length;
             wrap.classList.toggle('products-sections--split', shown === 2);
             wrap.classList.toggle('products-sections--single', shown !== 2);
+            // The jump button only means something when there is a Compatible
+            // section above Genuine to jump past.
+            if (this.elements.sourceJump) this.elements.sourceJump.hidden = shown !== 2;
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
@@ -5105,17 +5114,12 @@
             // Check if product is already a favourite
             const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(product.id);
 
-            // Spec §3.3 — "Fits Your Printer" badge when /smart matched a printer.
-            const fitsPrinterBadge = product._fitsPrinter
-                ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
-                : '';
-
             // compat-search-jul2026 — "Fits <model>" badge when /smart surfaced
             // this product via its free-text "for use in" compatibility list.
             // Backend tags such rows match_reason:"compatibility" +
             // matched_token:"<the machine the user searched>" (e.g. q=VP6000 →
             // the AP800 ribbon 307.11). The badge answers "why is this here when
-            // I searched VP6000?" and mirrors the fits-printer chip; the tooltip
+            // I searched VP6000?"; the tooltip
             // carries the full "Compatible with <model>" phrase.
             const compatMatchBadge = (product.match_reason === 'compatibility' && product.matched_token)
                 ? `<span class="product-card__badge product-card__badge--compat-match" title="Compatible with ${Security.escapeAttr(product.matched_token)}">Fits ${Security.escapeHtml(product.matched_token)}</span>`
@@ -5134,8 +5138,8 @@
             // COMPATIBLE/GENUINE chip is retired. The section heading above
             // each grid (e.g. "Brother Compatible Inkjet Cartridges") and
             // the product name itself already declare source; the per-card
-            // chip was redundant. The fits-printer chip keeps the top-left
-            // chip-stack alive on its own.
+            // chip was redundant. The compat-match + suggested chips keep the
+            // top-left chip-stack alive.
 
             // Spec §4 — bundle-pack visual differentiation.
             const packTypeRibbon = (() => {
@@ -5216,7 +5220,7 @@
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
-                        ${(fitsPrinterBadge || compatMatchBadge || suggestedBadge) ? `<div class="product-card__chip-stack">${fitsPrinterBadge}${compatMatchBadge}${suggestedBadge}</div>` : ''}
+                        ${(compatMatchBadge || suggestedBadge) ? `<div class="product-card__chip-stack">${compatMatchBadge}${suggestedBadge}</div>` : ''}
                         ${packTypeRibbon}
                     </div>
                     <div class="product-card__content">

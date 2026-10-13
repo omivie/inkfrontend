@@ -41,6 +41,45 @@ describing the same incident.
 
 ---
 
+## ERR-328 — "Fits Your Printer" chip removed from every product card (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner screenshot of `/search?q=Brother MFC 970`. Every card carried a blue "FITS YOUR PRINTER" chip at top-left. The owner says there is no need for it. The printer banner above the grid ("Cartridges for Brother MFC 970") already says it.
+
+**Change.** `js/shop-page.js`: the Spec §3.3 Case A loop that tagged every row with `_fitsPrinter` when `/smart` returned `matched_printer` is deleted, and so is `fitsPrinterBadge` in `createProductCard`. The chip-stack now gates on `compatMatchBadge || suggestedBadge`. `js/products.js`: `fitsPrinterBadgeHTML` deleted (the dropdown grid hid it with CSS anyway). `css/search.css`: `.product-card__badge--fits-printer` deleted. The teal "Fits <model>" compat-match chip (ERR-133) is a different chip and stays. It explains why a for-use-in row appears at all.
+
+**Measured.** Four tests updated to the new shape; `category-page-contract-may2026` now asserts a card with a stale `_fitsPrinter` renders no chip and no empty chip-stack. Targeted suites 65/65 + 23/23. Full suite: 1 failure, `no-ghost-files` on an untracked local `.DS_Store` (not in this change). Not checked in a browser.
+
+---
+
+## ERR-327 — Shop and search results: Compatible stacked over Genuine, six to a row, with a "View Genuine products" button — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** Owner request with a screenshot of `/search?q=tn258`. The September layout put Compatible and Genuine side by side, three cards per column. The owner wants each source full width, six cards per row, Compatible on top and Genuine underneath, both keeping their badge headers. A large button in the Genuine cyan with white text goes between the "Search Results for …" label and the free-shipping pill. It scrolls to the Genuine header, which should land at the top of the screen with a small gap.
+
+**Change.** `css/pages.css`: `.products-sections` is always one grid track. The two-track `--split` rule and every split card-width rule (50%, 33.333% at 1200px, the 700-767px one-up block, the 480px 195px cap) are deleted. The 1100px six-up rule now targets `.products-sections .products-row .product-card` for both modes. Below 1100px the global ladder runs unchanged (6 / 5 / list). `shop.html`: `<button id="source-jump" hidden>` between `.drilldown-header__left` and `__right-group`. `shop-page.js`: `_syncSourceColumns()` stays the one place that counts visible sources, and it is the only writer of `sourceJump.hidden` (`shown !== 2`). One click binding in `init` calls `genuineSection.scrollIntoView({ behavior: 'smooth', block: 'start' })`. It writes no hash, because the route lives in the query string. `#genuine-section` has `scroll-margin-top: 24px`, and at ≤1024px it is `--header-h + 16px` because the header is sticky there. The `--split`/`--single` classes are still written as the "both sources have rows" signal, but no CSS reads them now.
+
+**Trap caught during the build.** The first phone rule was `flex: 1 0 100%`. At ≤480px `.drilldown-header` is `flex-direction: column`, so that basis applies to HEIGHT (the ERR-224 trap again), and `margin-left: auto` pushed the button to the right edge. The rule is now `align-self: stretch; margin-left: 0` at ≤480px. Measured: 327px wide in a 327px header at 375px.
+
+**Measured** (local Playwright, `/search?q=tn258`):
+- 1280×551: header row 52px before (prod) and after. The button sits inside the existing row, so it costs **0px**.
+- Phone and tablet: the button is a row of its own and costs first-screen height. At 375×664 the first card moves from top 301 to 349 (**+48px**). At 768×900 it moves from 348 to 400 (**+52px**).
+- `probe:shop-columns`: 170/170 with `PROBE_BASE=http://localhost:3000 PROBE_SEARCH_PATH='/search?q=tn258'`. Every width shows Compatible above Genuine. The click lands the Genuine header at 18-20px from the top on desktop and 58-80px at ≤1024px (below the sticky header). `?type=genuine` and `?type=compatible` show no button.
+- The probe's 375px row expected two-up. Since ERR-287 the phone row is a one-column LIST (`@media (max-width: 479.98px)`). Before this change the probe failed 12 checks at 375px on that unrelated, intentional layout, so it now expects the list.
+- `tests/shop-source-columns-sep2026.test.js`: 16 pass. Full suite: 3 failures, none in these hunks. They are ERR-326's pages.css:14043 comment tripping the clamp grep, ERR-326 not yet in the memory log, and an untracked `backend-docs/.DS_Store`.
+
+---
+
+## ERR-326 — Search result card images shrank to a thin 5:2 strip on short laptop windows — **RESOLVED (frontend)** (2026-10-13)
+
+**Reported.** The owner sent two screenshots of `/search?q=Brother MFC L3760CDW`. At browser zoom (about 1210×662 CSS px) the card images were much smaller than at 100%, and the badges covered them. Everything else still fit on the screen.
+
+**Cause.** The ERR-301 compact card. `css/pages.css` has two height tiers, `(min-width: 1100px) and (max-height: 800px)` (5:2 image) and `max-height: 620px` (3:1). They target `.shop-page .products-row`. /search is a rewrite to the same shop.html, so search results got the compact card too. On search the printer banner keeps the first row below the first screen anyway, so the flat image bought no first-screen gain. ERR-301 measured only `/shop?...code=` pages.
+
+**Fix.** `shop-page.js#loadCurrentLevel` writes `data-level` on `.shop-page`. Both tiers now use the prefix `.shop-page:not([data-level="search-results"])`. Both tiers must change together: `:not()` adds specificity, so prefixing only the 800 tier would let its 5:2 beat the 620 tier's 3:1 on code pages. /shop code pages keep the compact card (owner chose "search pages only").
+
+**Measured.** Local Playwright, first card image-wrapper: search at 1210×662 = 183×137 (1.33); search at 1512×827 = 1.33; `/shop?brand=epson&category=ink&code=288` at 1210×662 = 183×73 (2.5, still compact). `tests/ad-visitor-dropoff-oct2026.test.js` 29 pass; new §8b red-proofed (one prefix reverted ⇒ fail). `probe:ad-visitor-dropoff` NOT run.
+
+---
+
 ## ERR-325 — Admin product Pricing tab did not say which prices include GST (Supplier Price is excl. GST, Retail Price is incl. GST) — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** The owner sent a screenshot of the admin product drawer, Pricing tab. They asked that Supplier Price show it is entered excl. GST, and Retail Price show it is incl. GST.

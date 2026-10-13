@@ -147,7 +147,9 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
             // yield) and the h3's title attribute carries the full name. The
             // exception is pinned to that selector inside its height-gated
             // media block, so a clamp anywhere else still fails here.
-            if (/^(?:\/\*[\s\S]*?\*\/\s*)*\.shop-page \.products-row \.product-card \.product-card__title$/.test(selector)) {
+            // ERR-326: search results are excluded (data-level), so the
+            // selector carries that :not().
+            if (/^(?:\/\*[\s\S]*?\*\/\s*)*\.shop-page:not\(\[data-level="search-results"\]\) \.products-row \.product-card \.product-card__title$/.test(selector)) {
                 const at = css.lastIndexOf('@media', m.index);
                 assert.match(css.slice(at, m.index), /^@media \(min-width: 1100px\) and \(max-height: (800|620)px\)/,
                     `${file}: the short-laptop title clamp must stay inside its height-gated media block`);

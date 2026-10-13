@@ -8477,61 +8477,74 @@ a.account-review-card__product:focus-visible {
     margin-bottom: var(--spacing-lg);
 }
 
-/* THE TWO SOURCES SIT SIDE BY SIDE — Compatible left, Genuine right, three
-   cards to a row in each (six across the page). Stacked, the Genuine section
-   started a full section down the page, so the two prices for the same colour
-   were never on screen together.
+/* COMPATIBLE ON TOP, GENUINE UNDERNEATH — each section full width, six cards
+   to a row (owner, 2026-10-13; replaces the Sep side-by-side split). The
+   #source-jump button in the header scrolls to Genuine, so Genuine is one
+   click away instead of one column away.
 
-   The modifier is written by shop-page.js _syncSourceColumns() from the two
-   sections' `hidden` state, not inferred here with :has(). That is load-bearing
-   rather than stylistic: a hidden grid ITEM leaves flow but its TRACK does not,
-   so a single-source result set would otherwise paint at half width beside an
-   empty column. --single collapses the grid to one track and the survivor takes
-   the whole width at six-up.
+   shop-page.js _syncSourceColumns() still writes --split (both sources have
+   rows) / --single (one does) — it is the signal that shows #source-jump and
+   that tests/probes read. Neither modifier changes the grid any more.
 
    Do NOT give .products-section a `display` — renderProducts hides an empty
    section with the `hidden` ATTRIBUTE, and any display declaration here would
-   override [hidden]'s display:none and paint an empty section in its column. */
+   override [hidden]'s display:none and paint an empty section. */
 .products-sections {
     display: grid;
-}
-.products-sections--single {
     grid-template-columns: minmax(0, 1fr);
-}
-.products-sections--split {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: var(--spacing-lg);
+    row-gap: var(--spacing-xl);
 }
 
-/* PHONES GET ONE COLUMN — ERR-240, and the split's own measurement is what says so.
-   The two-column split was chosen with a stated CTA floor for this surface:
-   "the card floor here is ~165px (a shop card's buy row is the card minus 22px,
-   and its stepper eats 80 of what is left)". A half-width column on a phone is
-   nowhere near it — measured on production:
+/* The jump lands the Genuine header at the top of the screen with a small gap.
+   Desktop header is not sticky; phones pin it (layout.css), so clear it there. */
+#genuine-section {
+    scroll-margin-top: 24px;
+}
+@media (max-width: 1024px) {
+    #genuine-section {
+        scroll-margin-top: calc(var(--header-h, 56px) + 16px);
+    }
+}
 
-       viewport  320   375   390   430
-       card      124   152   159   179     (against a 165px floor)
-
-   So the split is invalid at phone widths by the criterion it was designed
-   against. Every one of those cards is a column too narrow to hold its own buy
-   control, which is why the CTA was the first thing to break there.
-
-   This is NOT the ERR-222 "Genuine gets buried" hazard. That was about the
-   search dropdown, where a 40-row window that never paginates pushed value
-   packs to position 239-367 and they became unreachable. This is a full results
-   PAGE: both sections keep their own badge heading, both are complete, both
-   paginate, and stacking them is what this page did before the split shipped.
-   Genuine is one scroll away with its name on it, not hidden.
-
-   Stacked, the row is the full container, so the card ladder below gives two
-   ~175px cards per row instead of one 159px card per column — more product on
-   screen AND a card that clears its own floor. 699px matches the boundary
-   search.css already measured for the dropdown, so the two surfaces step
-   together instead of at two invented numbers. */
-@media (max-width: 699px) {
-    .products-sections--split {
-        grid-template-columns: minmax(0, 1fr);
-        row-gap: var(--spacing-xl);
+/* "View Genuine products" — same cyan as the Genuine badge, white text.
+   Sits in .drilldown-header between the title and the shipping pill; shown
+   by _syncSourceColumns only when BOTH sections have rows. */
+.source-jump {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    min-height: 44px;
+    padding: var(--spacing-xs) var(--spacing-lg);
+    background: var(--cyan-primary);
+    color: var(--white-primary);
+    border: 0;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-bold);
+    cursor: pointer;
+    transition: filter var(--transition-fast);
+    /* With __right-group's own margin-left:auto, the free space splits either
+       side: the button sits midway between the title and the shipping pill. */
+    margin-left: auto;
+}
+.source-jump:hover {
+    filter: brightness(0.9);
+}
+.source-jump:focus-visible {
+    outline: 2px solid var(--cyan-primary);
+    outline-offset: 2px;
+}
+.source-jump[hidden] {
+    display: none;
+}
+/* <=480px .drilldown-header is a COLUMN (flex-direction: column, below), so
+   flex-basis here would be the HEIGHT (ERR-224) and margin-left:auto would push
+   the button to the right edge. Stretch on the cross axis instead. */
+@media (max-width: 480px) {
+    .source-jump {
+        align-self: stretch;
+        margin-left: 0;
     }
 }
 
@@ -8622,49 +8635,16 @@ a.account-review-card__product:focus-visible {
 }
 
 
-/* CARDS PER ROW IN THE TWO SOURCE COLUMNS.
-   SCOPED TO .products-row ON PURPOSE. The .product-card rule above is GLOBAL:
-   its flex-basis is inert in the CSS-Grid parents (ribbons, PDP related, cart,
-   bought-together, favourites, landing) but its max-width/min-width are not.
-   .products-row exists only on shop.html, so scoping here is the entire blast
-   radius — editing the base rule would resize cards on six other surfaces.
-
-   body.page-shop gives 1192px of content (1240 max-width, 24px padding below),
-   so a split column is (1192 - 24) / 2 = 584px and three cards at 33.333%
-   compute to 186.7px — the base rule's max-width: 185px binds and every card
-   lands at 185px. That cap is deliberately kept rather than raised: the card
-   carries a container query at 200px (components.css) that flips its footer
-   from price-above-button to price-BESIDE-button, and on the search dropdown a
-   card that crossed it handed the stepper a 107px row and clipped "Add 100" —
-   a wider card producing a smaller button. Staying under 185px means every
-   container query on the card resolves exactly as it does today; only the
-   number of cards in a row changes. */
-/* --single only has something to say where the base rule would paint SEVEN.
-   Below 1100px the global ladder below already steps 6 -> 5 -> 2, and a
-   full-width single section has no reason to differ from it. The min-width
-   guard is what lets that ladder keep working: these selectors are (0,3,0) and
-   the ladder's bare .product-card is (0,1,0), so an unmediated rule here would
-   win at every width and freeze a phone at six-up. */
+/* SIX CARDS PER ROW in each stacked source section from 1100px. The base
+   .product-card rule would paint SEVEN; below 1100px the global ladder below
+   steps 6 -> 5 -> 2 on its own. SCOPED TO .products-row ON PURPOSE: the
+   .product-card rule above is GLOBAL (ribbons, PDP related, cart, favourites)
+   and editing it would resize cards on six other surfaces. The base
+   max-width: 185px still binds (1192px content / 6 = 190.7px), which keeps the
+   card under its 200px `@container pcard` threshold. */
 @media (min-width: 1100px) {
-    .products-sections--single .products-row .product-card {
+    .products-sections .products-row .product-card {
         flex: 0 0 calc(16.666% - var(--spacing-sm));
-    }
-}
-/* TWO per column is the BASE, three is the reward for a wide enough page.
-   Written this way round because the measurement says so: the card floor here
-   is ~165px (a shop card's buy row is the card minus 22px, and its stepper eats
-   80 of what is left, so the CTA gets card − 102), and three cards in a
-   half-width column only clear that from about a 1200px viewport. Below it,
-   two cards sit at the 185px cap with room to spare. Ordering it "3-up by
-   default, step down" put the fragile case first and left 1024px painting
-   150.7px cards. npm run probe:shop-columns measures every band. */
-.products-sections--split .products-row .product-card {
-    flex: 0 0 calc(50% - var(--spacing-sm) / 2);
-}
-
-@media (min-width: 1200px) {
-    .products-sections--split .products-row .product-card {
-        flex: 0 0 calc(33.333% - var(--spacing-sm));
     }
 }
 
@@ -8674,76 +8654,6 @@ a.account-review-card__product:focus-visible {
     .product-card {
         flex: 0 0 calc(16.666% - var(--spacing-sm));
     }
-}
-
-/* Two cards in a half-width column hold their width down to about a 768px
-   viewport (170px there, against the 170px cap the <=768px block imposes).
-   Below that a column is too narrow for a pair, so it carries one. */
-/* 700-767px: still two columns (the stack starts at 699), and a half-width
-   column there is too narrow for a pair, so it carries one. Below 700 the block
-   above has made the row full width and the two-up rule takes over. */
-@media (min-width: 700px) and (max-width: 767px) {
-    .products-sections--split .products-row .product-card {
-        flex: 0 0 100%;
-    }
-    /* A lone card against its 170px cap in a ~300px column would sit hard left
-       with the slack dangling right. */
-    .products-sections--split .products-row {
-        justify-content: center;
-    }
-}
-
-/* At phone widths the width cap comes off (the <=480px block below sets
-   max-width: none), so the card is its column — ~151px at 375px. That is under
-   the ~165px the CTA needs beside a 44px-target stepper, so give the button its
-   own line rather than let it ellipsise. The shipped stacked layout clips here
-   too (159.5px card, 1px); wrapping means this one does not. */
-@media (max-width: 480px) {
-    /* The sections are STACKED below 699px now (see the block up at
-       .products-sections--split), so this row is the full container, not a
-       half-width column. Two-up is therefore the same layout the --single
-       sections get here, which is the point: one phone grid, not two.
-
-       Measured at 390px: a 358px row gives 175px cards. That clears the ~165px
-       CTA floor this surface was designed against AND stays under the 200px
-       `@container pcard` threshold that flips the card footer to
-       price-beside-button — the trap that cost the search dropdown a clipped
-       CTA at 214.9px. The 195px cap keeps that true up to 430px. */
-    .products-sections--split .products-row .product-card {
-        flex: 0 0 calc(50% - var(--spacing-sm) / 2);
-        max-width: 195px;
-    }
-    /* THESE TWO DECLARATIONS USED TO LIVE HERE AND THEY BROKE THE BUTTON — ERR-240.
-       They were:
-           .product-card__buy   { flex-wrap: wrap; }
-           .product-card__cart-btn { flex: 1 0 100%; }
-       and they are ROW thinking. `flex-wrap: wrap` + `flex-basis: 100%` is the
-       idiom for "push this item onto its own line" in a ROW. This box is not a
-       row here: components.css `@container pcard (max-width: 260px)` inside
-       `@media (pointer: coarse)` makes .product-card__buy a COLUMN, and a split
-       phone card is ~159px, comfortably inside that query.
-
-       In a column, flex-basis is the HEIGHT (ERR-224, the identical sentence,
-       three weeks earlier and two files away). So `flex: 1 0 100%` sized the
-       button to the full height of the buy box, and `flex-wrap: wrap` then put
-       it on a flex LINE of its own whose cross-size is the item's own
-       max-content width. `align-items: stretch` stretches to the LINE, not the
-       container, so the button stopped at the width of the word "Add".
-
-       Measured on production before the fix — and note it is a CONSTANT, which
-       is the tell that no percentage was resolving against the viewport:
-
-           viewport   320   375   390   430
-           card       124   152   159   179
-           Add button  38x96 at every single one
-
-       A 38px-wide, 96px-tall button with "Add" broken across three lines, on
-       the buy control of every card on /search and /shop at every phone width.
-
-       The container query already does this correctly on its own: it stacks the
-       column, sets the qty row to width:100% and the button to width:100% with
-       min-height:44px. It needed no help. Removing the help is the fix — the
-       card keeps its own line for the CTA because the column gives it one. */
 }
 
 /* Shop / search / brand / printer pages: trim outer gutters so 7 cards fit
@@ -13575,9 +13485,8 @@ body.page-shop {
         flex-direction: column;
         align-items: stretch;
     }
-    /* Beat the split-grid's two-up basis + 195px cap (.products-sections--split
-       .products-row .product-card, specificity 0,3,0) — without this the list
-       card was squeezed to 195px and its Add button to 12px wide. */
+    /* Beat any (0,3,0) .products-sections card rule (the old split grid's
+       two-up basis + 195px cap squeezed the list card's Add button to 12px). */
     .shop-page .product-card,
     .shop-page .products-sections .products-row .product-card {
         flex: 0 0 auto;
@@ -14122,26 +14031,33 @@ body.page-shop {
     }
 }
 
+/* Compact card on short laptop windows (ERR-301), /shop browse levels only.
+   /search shares this page, but its printer banner keeps the first row below
+   the first screen anyway, so the 5:2 image there cost the picture and bought
+   nothing (ERR-326). The search level is excluded from BOTH tiers: the
+   :not() adds specificity, so prefixing one tier alone would let the 800 tier
+   beat the 620 tier's 3:1 on code pages. data-level is written by
+   shop-page.js#loadCurrentLevel. */
 @media (min-width: 1100px) and (max-height: 800px) {
-    .shop-page .products-row .product-card .product-card__image-wrapper { aspect-ratio: 5 / 2; }
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__image-wrapper { aspect-ratio: 5 / 2; }
     /* 3 lines, not 4: the colour is restated in the footer row below, and
        the h3's title attribute still carries the full name. */
-    .shop-page .products-row .product-card .product-card__title {
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__title {
         -webkit-line-clamp: 3;
         line-clamp: 3;
         min-height: calc(var(--font-size-xs) * 1.3 * 3);
     }
     /* Price and "Incl. GST" share a line; the volume rung keeps its own. */
-    .shop-page .products-row .product-card .product-card__pricing {
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__pricing {
         flex-direction: row;
         flex-wrap: wrap;
         align-items: baseline;
         column-gap: 6px;
         row-gap: 0;
     }
-    .shop-page .products-row .product-card .product-card__fits { order: 9; margin: 4px 0 0; }
-    .shop-page .products-row .product-card .product-card__footer { margin-top: 0; }
-    .shop-page .products-row .product-card .product-card__biz-price {
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__fits { order: 9; margin: 4px 0 0; }
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__footer { margin-top: 0; }
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__biz-price {
         flex-direction: row;
         align-items: baseline;
         gap: 4px;
@@ -14150,16 +14066,16 @@ body.page-shop {
         margin-top: 2px;
         padding-top: 2px;
     }
-    .shop-page .products-row .product-card .product-card__biz-save { display: none; }
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__biz-save { display: none; }
 }
 /* Shorter still (1280x551 = a 720px screen under browser chrome): a flatter
    image, and the "Free Shipping" / "Save $X" pills go — both are restated
    right there (the struck-through Was price beside the price, and "Free
    shipping on orders over $100" in the bar above the grid). */
 @media (min-width: 1100px) and (max-height: 620px) {
-    .shop-page .products-row .product-card .product-card__image-wrapper { aspect-ratio: 3 / 1; }
-    .shop-page .products-row .product-card .product-card__info-row { display: none; }
-    .shop-page .products-row .product-card .product-card__title {
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__image-wrapper { aspect-ratio: 3 / 1; }
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__info-row { display: none; }
+    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__title {
         -webkit-line-clamp: 2;
         line-clamp: 2;
         min-height: calc(var(--font-size-xs) * 1.3 * 2);
