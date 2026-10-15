@@ -41,6 +41,140 @@ describing the same incident.
 
 ---
 
+## ERR-338 — Admin centre on an iPhone: the right-hand table columns could not be reached, and the floating menu button covered the filter bar on every page (owner, 2026-10-15) — **RESOLVED (frontend)**
+
+**Reported.** The owner's screenshot was taken on an iPhone SE (375x667) at `#analytics?tab=pricing`. The Tier Price Multipliers table was cut off at the right edge with no way to scroll it, and the hamburger button sat on top of the page. The owner asked for every admin page to work on an iPhone.
+
+**Measured.** The new `npm run probe:admin-mobile` is READ-ONLY. It visits all 46 routes and sub-tabs plus the in-page tabs at 375x667 and 390x664, and opens the order and product detail views. The baseline run found **248 findings**:
+- The hamburger covered the filter bar on every route. It was `position:fixed`, and the 52px offset sat on `.admin-main`, which is below `#filter-bar`.
+- About 20 raw `<table>`s outside `.admin-table-wrap` were cut off. `.admin-card` has no overflow.
+- Tab strips did not scroll: `.admin-analytics-tabs` and `#adn-status-tabs`.
+- Action rows did not wrap: page header actions, pack controls and pagination.
+- Some `auto-fit` grids had `minmax(380px|320px, 1fr)` columns, wider than the 343px content box.
+- `cc-profit` and `cc-market-intel` inputs used inline `font-size:13px`. iOS zooms the page on focus when an input is under 16px.
+
+**Fix.** Every change is a shared rule in one `@media (max-width: 768px)` block in `css/admin.css`, so pages written later get them too:
+- The menu button is now a full-width bar (z 798, under the backdrop and sidebar). `.admin-content-wrapper` gets the top padding instead of `.admin-main`.
+- `.admin-main table:not(.admin-table-wrap > table)` scrolls sideways.
+- Tab strips scroll and action rows wrap.
+- Inputs are 16px.
+- The grids use `minmax(min(Npx, 100%), 1fr)`.
+- The Segments header wraps.
+
+**Probe traps found on the way, now in the probe.**
+- Playwright's `iPhone SE` device is the 320x568 model, so the probe sets 375x667 explicitly.
+- `overflow:hidden` counts as unreachable, not as scrollable.
+- The admin uses `scroll-behavior:smooth`, so a plain `scrollTo(0,0)` was measured mid-animation. The probe now uses `behavior:'instant'`.
+- `.admin-product-modal` mounts on `<body>`, and Escape does not close it. The probe reloads after the detail check.
+- Shapes inside an SVG sit under the SVG's own `overflow:hidden`, so the probe measures the SVG box instead.
+
+**Guard.** `tests/admin-mobile-iphone-oct2026.test.js`.
+
+## ERR-337 — /shop product-code tiles said a different number of products than they opened (Brother toner DR2415 "5 products" opened 4; DR2530 "2" opened an empty page); drums now show with their toners and toners with their drums (owner, 2026-10-15) — **RESOLVED (frontend); backend ask BF-102 OPEN**
+
+**Reported.** `/shop?brand=brother&category=toner`: the DR2415 tile said "5 products", the click showed 4. The owner asked for every code tile to be checked, and for one algorithm behind the number and the products.
+
+**Cause (measured live 2026-10-15, READ-ONLY GETs).** The tile number is the backend's `/api/shop?brand&category` `series[].count`, shown verbatim. The click is `/api/shop?brand&category&code=X`. The backend builds the two with different rules for rows of the OTHER category. Toners carry their drum's code in `series_codes` and drums carry their toners' codes, so `series` counts some cross-type rows but the `?code=` listing filters all of them out:
+
+| page | tile | backend count | click |
+|---|---|---|---|
+| Brother toner | DR2415 | 5 | 4 |
+| Brother toner | DR2530 | 2 | **0** (empty page) |
+| Brother toner | DR3605 | 7 | 5 |
+| Brother drums | TN2415 | 4 | 1 |
+| Brother drums | TN2445 | 2 | **0** |
+| Brother drums | TN2449 | 4 | 1 |
+
+The backend count is not even a consistent "include the other type" rule: DR2415 counted the compatible drum (it carries TN codes) but not the genuine drum (it carries only `DR2415`). FE arithmetic was not involved: the yield collapse (604 + 604XL) measured 0 mismatches on Epson, HP and Canon ink.
+
+**Owner decision.** A drum that pairs with a toner shows with that toner, and the toner with the drum.
+
+**Fix (`shop-page.js`).**
+- `RELATED_CATEGORY = { toner: 'consumable', consumable: 'toner' }` is the ONE owner of which categories a code tile spans. `_listingApiCategories()` is read by both the count and the click.
+- **Count.** `_recountChipsFromListing` runs for toner and drums only. It walks the listing rows of both categories (`/api/shop?brand&category&limit=200&page=N`; the response has no pagination object, so a short page is the last). Each tile's count is the number of distinct rows whose yield-collapsed `series_codes` (or either half of a pair chip) contain the tile code. That is the same predicate the `?code=` listing applies. The tile LIST stays the backend's. A tile with 0 rows is dropped, because it would open an empty page.
+- **Click.** `loadProducts` asks for each alias in each spanned category; the existing id de-dupe merges the answers.
+- **Fail-soft, loud.** A failed walk keeps the backend counts, sets `Shop._chipCountsFrom = 'backend-series'` (success = `'listing-rows'`), logs a warning, and is never cached. Every tile whose count moved is logged (`DR2415 series=5 rows=6`), so the backend drift stays visible.
+- Ink, label, paper and ribbons are unchanged. A row recount there would bypass the Canon pair-chip and truncated-code repairs in `api.js`. `probe:chip-counts` watches those categories instead.
+
+**Measured after the fix.** Local Playwright on `/shop?brand=brother&category=toner`: DR2415 tile 6 → 6 cards (genuine and compatible drum, 4 toners). DR2530: 2 → 2 drums. TN2449: 5 → 5. `npm run probe:chip-counts` (READ-ONLY, paced, exit 2 on RATE_LIMITED): all 36 brand × category pairs (9 brands × ink/toner/drums/label) were measured, and 0 tiles show a number different from what they open. The first full run found 10 wrong tiles on Lexmark and OKI toner; see below. Ink and label tiles were already correct.
+
+**Second cause, found by the full probe.** On the drums listing the backend folds codes into families: `?code=C544` returns the C540 drum and waste toner, tagged only `["C540"]`. The recount cannot see a fold, so Lexmark C544 said 6 and opened 8 (also C780, E360, E450, E460, X264, X463, X950, OKI B401, B411). Fix: `_rowCarriesCode` is the one membership rule. The count uses it, and the click keeps a related-category row only if it carries the code. Own-category rows are untouched, because retired-code stem adoption relies on them. The C540 drum now shows under C540 only. BF-102 item 3 asks the backend to tag folded rows so they can show under C544 again.
+
+**Hazard.** My first ad-hoc sweep at 150 ms pacing hit the shared `RATE_LIMITED` limiter after Brother label. A rate-limited "mismatch" is a skip, not data. The probe now stops on the first one.
+
+**Backend ask.** `backend-docs/outbox/backend-asks-2026-10-15.md` §1 (BF-102): make `series[].count` use the listing's predicate and the toner ⇄ drums span. Once that ships, the recount logs nothing and can be deleted.
+
+**Tests.** `tests/shop-chip-counts-related-oct2026.test.js` (real methods lifted, real `SeriesCodes`): DR2415 = 6; a tile with 0 rows is dropped; a walk failure keeps backend counts with the flag set and returns not-ok; the spans; paging; the click fan-out shape. The `series-base-merge` fan-out regex and the `catalogue-error-vs-empty` harness were updated for the new shape.
+
+---
+
+## ERR-336 — Admin Pricing page: one place to see and change every price; Site Health → Pricing tab moved into it (owner, 2026-10-15) — **PHASE 1 SHIPPED (frontend); backend asks OPEN**
+
+**Reported.** The owner wants to control every price from the admin instead of the backend. They want to see each product's current price, filter by brand, genuine/compatible, type and so on, select products in bulk, and change them: exact price, %/$ adjust, margin %, clear manual. Each change is either locked (a manual price) or not locked (a saved rule for that filter). Precedence is manual > most specific rule > broad rule. Margin is typed as GROSS on the price ex GST. Rules may now LOWER prices. Every change shows a preview and then one confirm.
+
+**What already existed.** The tier-multiplier rules engine was the Site Health → Pricing tab (`cc2-pricing.js`, ERR-281). `manual_retail_price` already survives repricing (`skipped_frozen`). The gaps all need the backend:
+- The admin API strips `manual_retail_price` from every read, so manual status cannot be shown.
+- There is no bulk price endpoint.
+- Rules cannot be set by type or category.
+- The never-down ratchet stops rules from lowering prices.
+
+**FE change.**
+- New `#pricing` page in Catalog (owner-only), `pages/pricing.js`:
+  - Price grid: cost, price, gross `margin_pct`, net margin, and "Price set by" (reads "unknown" until the backend sends `has_manual_price`).
+  - Filters: search, brand, source, type, active.
+  - "Select all N matching".
+  - Bulk **Set exact price (locks)** and **Clear manual price**: one `PUT manual_retail_price` per product, one at a time, capped at 200 per run, with progress and Stop. The result table stays on screen and lists failures, rows not attempted, and rows whose returned `retail_price` differs from the price set. It offers Retry failed, and Run reprice after a clear.
+  - Adjust %/$ and "Set margin for this filter" are visible but DISABLED, with "Needs backend".
+- The rules engine is mounted unchanged under "Margin rules", with a Margin % input next to every multiplier (`1/(1−m)`, display only). The propose and approve dialogs now show the margin next to each multiplier.
+- Control Center: `MOVED_TABS` forwards `tab=pricing` (old bookmarks, the Overview card, the top-bar tile) to `#pricing`. `cc-profit` links point at `#pricing`.
+- `AdminAPI.listProductsStrict` throws on a refusal. `getProducts` returns null, which the page would show as "no products".
+- The list params moved into one `productListParams` builder.
+
+**Measured (READ-ONLY Playwright, localhost:3000, writes aborted at the network layer; 0 attempted).**
+- The grid loads 100 rows of 4,119 active products. With Genuine selected it shows 3,212.
+- Select-all reads "Select all 3,212 matching".
+- The exact-price dialog opens with the replace warning. It was cancelled; nothing was sent.
+- Ladder band `<=5`: multiplier 1.87 shows as 46.5%. Typing 50% sets the multiplier to 2.
+- `#control-center?tab=pricing` lands on `#pricing`.
+- The only console error is the Cloudflare Turnstile 400 on the login page.
+- Backend `margin_pct` does NOT match `(price/1.15 − cost)/(price/1.15)` on C02BK ($9.99/$5.41: formula 37.7%, returned 35.1%) or G-OKI-720-RIB-BK (22.2% vs 19.5%). This is asked in the spec, and the column header carries the caveat.
+
+**Not done (backend).** `backend-docs/outbox/backend-asks-2026-10-15.md (§3)`: `has_manual_price`/`price_source`, range/has_manual/ids_only params, `POST /pricing/bulk` (backend does the maths, lock or rule), filter-rule CRUD with precedence, `allow_decrease`, simulate for filter rules, reprice-on-clear, packs.
+
+**Tests.** `tests/admin-pricing-page-oct2026.test.js` (11). `admin-products-fallback-filters-sep2026` §1 now reads the shared builder.
+
+**Files.** `js/admin/pages/pricing.js` (new) · `js/admin/utils/pricing-page.js` (new) · `js/admin/app.js` · `js/admin/api.js` · `js/admin/pages/{cc2-pricing,control-center,cc-profit}.js` · `css/admin.css` · `html/admin/*.html` (`?v=` only) · the two tests · outbox spec + `STATUS.md` · `errors.md`.
+
+---
+
+## ERR-335 — Pack names: "4-Pack" / "3-Pack" read as four or three of the same cartridge; now "KCMY-Pack" / "CMY-Pack" (owner, 2026-10-15) — **FE BRIDGE SHIPPED; backend rename OPEN**
+
+**Reported.** Owner: customers misunderstood pack names. 4-colour packs should be named `KCMY-Pack`, 3-colour packs `CMY-Pack`, and every other multi-item pack should say what it contains.
+
+**Root cause.** Names are backend data (`product.name`, written by supplier importers, editable in the admin). The FE never owned them, so the real fix is a backend rename: see `backend-docs/outbox/backend-asks-2026-10-15.md §2`.
+
+**FE change (display-only bridge).** `ProductName.clean` (`js/utils.js`) is the only display formatter, so it now ends in `packRename`. `<KCMY|CMYK|BCMY> 4-Pack` becomes `KCMY-Pack`, `CMY 3-Pack` becomes `CMY-Pack`, and a leading "Value Pack" word is dropped. A bare `4-Pack`/`3-Pack` is rewritten ONLY when the stored colour code is KCMY/CMY: the colour decides, never the count. 2-Pack, 5-Pack, Black/Colour and `Value Pack`-colour rows stay verbatim, because the display cannot know what they contain. The rename runs on every return path of the old de-doubler, which returns `raw` early for most names. `ProductColors.packLabel` (the ribbon) now says `KCMY‑Pack` / `CMY‑Pack` (U+2011). The family-key fallback strips `\d*[- ]?pack`, so a renamed `kcmy-pack` stays in its family. The stored name, slug, feed, emails and admin are unchanged until the backend ships.
+
+**Measured.** `probe:pack-names` (READ-ONLY), 2026-10-15: 4,117/4,117 products read; 826 packs renamed by the rule; 46 NEEDS OWNER (e.g. `PG640/CL641 2-Pack`, `HP 67 4-Pack` with colour `Value Pack`, `711 Yellow 3-Pack`, `LC133 Photo Value Pack`, plus some paper and label rows that may not be packs).
+
+**Tests.** `product-name-clean-jul2026` (3 expectations moved to the new wording, plus 2 new pack-wording tests incl. idempotency and verbatim guards) · `value-pack-ribbon-oct2026` §1.
+
+**Files.** `inkcartridges/js/utils.js` · 45 HTML (`utils.js?v=` only) · `scripts/probe-pack-names.mjs` · `package.json` · the two tests · backend outbox doc + `STATUS.md` · `errors.md`.
+
+---
+
+## ERR-334 — Admin sidebar: Catalog section moved above Analytics (owner, 2026-10-15) — **RESOLVED (frontend)** (2026-10-15)
+
+**Reported.** Owner screenshot of `/admin#analytics`: asked for the CATALOG group in the left sidebar to sit above the ANALYTICS group.
+
+**Change.** `NAV_ITEMS` in `inkcartridges/js/admin/app.js` now reads Overview, Sales, Catalog, Analytics, Data Operations, Finance, Marketing, … The Catalog block (Products, Ribbon Brands, Product Codes, Supplier Prices) moved as a unit; no route key was renamed and no item changed section, so deep links, `?tab=` state and owner gating are untouched.
+
+**Why tests moved too.** Section membership is asserted by source-text index between a section marker and the NEXT section marker. The section after Analytics is now Data Operations (re-pointed in `admin-analytics-section-sep2026` §1/§2, `demand-ranking-jul2026`, `catalog-engagement-sep2026`), and the section after Catalog is now Analytics (`admin-analytics-section-sep2026` §2b, `admin-product-codes-page`). Leaving §2b at Catalog..Data Operations would fail outright, because every Analytics row now falls inside that range.
+
+**Files.** `inkcartridges/js/admin/app.js` · `inkcartridges/html/admin/index.html` (`?v=` only) · the four tests above · `errors.md`.
+
+---
+
 ## ERR-333 — Cart loyalty chip: text wrapped onto its own line under the ★; same chip now also at the top of the cart drawer (owner, 2026-10-13) — **RESOLVED (frontend)** (2026-10-13)
 
 **Reported.** Owner screenshot of /cart: the green chip showed "★" alone on the first line and "You have 205 points — that's $2.05 off. Redeem at checkout." on the next. Owner asked for the text straight after the star, and for the same green chip at the top of the cart drawer.

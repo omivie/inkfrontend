@@ -169,7 +169,7 @@ export default {
     _container = container;
     container.innerHTML = `
       <div class="admin-page-content">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--spacing-4)">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:var(--spacing-4)">
           <div>
             <h1 style="margin:0">Segments &amp; Campaigns</h1>
             <p style="margin:4px 0 0 0;color:var(--text-muted);font-size:13px">Customer segments for pricing tiers and email campaigns</p>

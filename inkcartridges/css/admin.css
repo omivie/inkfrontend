@@ -1602,7 +1602,7 @@
   .admin-sidebar { transform: translateX(-100%); width: 280px; }
   .admin-sidebar.open { transform: translateX(0); }
   .admin-mobile-menu { display: inline-flex; }
-  .admin-main { padding-top: 52px; }
+  .admin-content-wrapper { padding-top: 48px; } /* clears the fixed menu bar (iPhone audit below) */
   .admin-content { padding: 16px; }
   .admin-kpi-grid { grid-template-columns: 1fr 1fr; }
   .admin-grid-2, .admin-grid-3 { grid-template-columns: 1fr; }
@@ -1610,6 +1610,43 @@
   .admin-filters { padding: 8px 16px; overflow-x: auto; flex-wrap: nowrap; }
   .admin-page-header { flex-direction: column; align-items: flex-start; }
   .admin-queue-grid { grid-template-columns: 1fr 1fr; }
+}
+/* ---- iPhone audit (owner 2026-10-15, probe:admin-mobile) ----
+   One rule per CAUSE, so every page — and every future page — gets it:
+   - the floating hamburger covered the filter bar on every route; it is now a
+     full-width bar and .admin-content-wrapper starts below it (above). z 798
+     keeps it under the backdrop (799) and sidebar (800) when the menu is open.
+   - ~20 pages build a raw <table> outside .admin-table-wrap; on a phone the
+     right-hand columns were cut off with no way to scroll to them.
+   - tab strips and header/action rows did not wrap or scroll.
+   - inputs under 16px make iOS Safari zoom the page on focus. */
+@media (max-width: 768px) {
+  .admin-mobile-menu {
+    top: 4px; left: 0; right: 0; width: 100%; height: 44px; z-index: 798;
+    justify-content: flex-start; gap: 8px; padding: 0 16px;
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none;
+  }
+  .admin-mobile-menu::after { content: 'Menu'; font-size: 14px; font-weight: 600; }
+  .admin-main table:not(.admin-table-wrap > table) {
+    display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .admin-tabs, .admin-analytics-tabs, .cc-heatmap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .admin-tab, .admin-analytics-tab { flex-shrink: 0; }
+  .admin-page-header__actions, .cc2-pack-controls__actions, .admin-pagination { flex-wrap: wrap; }
+  .cc2-pack-controls__actions { margin-left: 0; }
+  .admin-pagination { gap: 8px; }
+  .admin-sp-import__step { min-width: 0; max-width: 100%; }
+  .admin-sp-import__step input[type="file"] { max-width: 100%; }
+  .admin-pc-code { max-width: 100%; }
+  .admin-pc-code__toggle { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
+  .cc2-infra-card dd { min-width: 0; overflow-wrap: anywhere; }
+  .om-header-btns { max-width: none; }
+  .admin-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .admin-shell select, .admin-shell textarea,
+  #drawer-root input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  #drawer-root select, #drawer-root textarea,
+  #modal-root input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  #modal-root select, #modal-root textarea { font-size: 16px; }
 }
 @media (max-width: 480px) {
   .admin-kpi-grid { grid-template-columns: 1fr; }
@@ -5034,7 +5071,7 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .cc2-constituent__stock { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-muted); min-width: 32px; text-align: right; }
 
 /* Integrity ----------------------------------------------------------- */
-.cc2-orphan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.cc2-orphan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; }
 .cc2-orphan-card { padding: 14px 16px; }
 .cc2-orphan-card__header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .cc2-orphan-card__header h3 { margin: 0; font-size: 14px; font-weight: 700; }
@@ -5080,7 +5117,7 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .cc2-slug-rename__redirects ul { margin: 6px 0 0 0; padding-left: 18px; font-size: 11px; }
 
 /* Links (broken-link audit) ------------------------------------------- */
-.cc2-links-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.cc2-links-grid { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 .cc2-links-card { display: block; width: 100%; text-align: left; cursor: pointer; background: var(--surface, #fff); border: 1px solid var(--border); }
 .cc2-links-card:hover { border-color: var(--border-strong); }
 .cc2-links-card--active { outline: 2px solid var(--accent, var(--yellow)); outline-offset: -1px; }
@@ -5113,7 +5150,7 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .cc2-links-sources li .admin-btn { align-self: flex-start; margin-top: 2px; }
 
 /* Infra --------------------------------------------------------------- */
-.cc2-infra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; }
+.cc2-infra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 12px; }
 .cc2-infra-card { padding: 14px 16px; }
 .cc2-infra-card--ok { border-left: 3px solid var(--success); }
 .cc2-infra-card--warn { border-left: 3px solid var(--yellow); }
@@ -7418,3 +7455,19 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   .stock-adjust__controls { gap: 6px; }
   .stock-adjust__qty { width: 72px; }
 }
+
+/* ---- Pricing page (pages/pricing.js, ERR-336) ---- */
+.pricing-section { margin: 16px 0; padding: 16px; }
+.pricing-h2 { font-size: 16px; margin: 0 0 10px; }
+.pricing-lede { margin: 0 0 10px; font-size: 13px; }
+.pricing-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.pricing-filters > .admin-input, .pricing-filters > .admin-select { width: auto; flex: 0 1 auto; }
+.pricing-filters > .admin-input[type="search"] { flex: 1 1 220px; min-width: 0; }
+.pricing-gated { display: inline-flex; gap: 6px; align-items: center; opacity: .7; }
+.pricing-range { width: 110px; }
+.pricing-selection { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--border); }
+.pricing-selection__count { font-size: 13px; }
+.pricing-selection__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.pricing-chip { display: inline-block; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.pricing-chip--lock { border-color: var(--yellow); color: var(--text); }
+.cc2-tiers__num.is-invalid { border-color: var(--danger); }

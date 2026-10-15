@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.10.13-pricing-gst-labels-err325';
+const APP_VERSION = '2026.10.15-pricing-page-err336';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -74,7 +74,7 @@ function icon(name, w = 18, h = 18) {
 // ---- Navigation config ----
 // Sidebar is grouped into business-workflow sections (July 2026 IA overhaul —
 // see ADMIN_CENTRE_AUDIT.md). Sections read the way an ecommerce operation is
-// run — Sales, Analytics, Catalog, Data Operations, Finance, Marketing — rather
+// run — Sales, Catalog, Analytics, Data Operations, Finance, Marketing — rather
 // than the order the codebase was built. A section with no item this role may see renders
 // nothing at all, header included (see renderSidebar), so all-owner groups don't
 // leave orphaned labels for staff.
@@ -115,6 +115,19 @@ const NAV_ITEMS = [
   // stays visible as a fulfilment queue.
   { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
 
+  { section: 'Catalog' },
+  { key: 'products', label: 'Products', icon: 'products' },
+  // Every price in one place: the grid, bulk exact/clear-manual, and the margin
+  // rules (cc2-pricing.js, moved here from Site Health → Pricing). Owner-only:
+  // it shows supplier cost and every write behind it is super_admin. ERR-336.
+  { key: 'pricing', label: 'Pricing', icon: 'finance', ownerOnly: true },
+  { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
+  { key: 'product-codes', label: 'Product Codes', icon: 'products', ownerOnly: true },
+  // What we PAY, next to what competitors CHARGE. Owner-only because it renders
+  // supplier cost on every row, and the endpoints behind it are super_admin. Stays in
+  // Catalog (unlike Price Monitor): its day job is mapping supplier lines to products.
+  { key: 'supplier-prices', label: 'Supplier Prices', icon: 'suppliers', ownerOnly: true },
+
   // Everything you READ rather than write. Before Sep 2026 these four were spread
   // across three sections — the hub under "Finance", Demand Ranking / Catalogue
   // Engagement / Price Monitor under "Catalog" — so there was no one place to go
@@ -125,7 +138,9 @@ const NAV_ITEMS = [
   // queue daily and reads analytics periodically, so Sales now sits above Analytics
   // at their request. This is the CURRENT order and it is deliberate — do not
   // "restore" the Analytics-first layout because an old comment or commit implies it.
-  // The upper bound of this section is `Catalog`, and three suites hard-code that:
+  // Oct 2026: the owner asked for Catalog ABOVE Analytics too (they maintain products
+  // far more often than they read reports), so Analytics now sits below Catalog.
+  // The upper bound of this section is `Data Operations`, and three suites hard-code that:
   // tests/admin-analytics-section-sep2026.test.js §1/§2, demand-ranking-jul2026.test.js
   // and catalog-engagement-sep2026.test.js. Move this block and they must move with it.
   { section: 'Analytics' },
@@ -143,15 +158,6 @@ const NAV_ITEMS = [
   // which is why it sat under Catalog until Sep 2026 — but the owner reads it far more
   // often than they reprice from it, and it belongs beside the margin analysis it feeds.
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
-
-  { section: 'Catalog' },
-  { key: 'products', label: 'Products', icon: 'products' },
-  { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
-  { key: 'product-codes', label: 'Product Codes', icon: 'products', ownerOnly: true },
-  // What we PAY, next to what competitors CHARGE. Owner-only because it renders
-  // supplier cost on every row, and the endpoints behind it are super_admin. Stays in
-  // Catalog (unlike Price Monitor): its day job is mapping supplier lines to products.
-  { key: 'supplier-prices', label: 'Supplier Prices', icon: 'suppliers', ownerOnly: true },
 
   { section: 'Data Operations' },
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', ownerOnly: true },

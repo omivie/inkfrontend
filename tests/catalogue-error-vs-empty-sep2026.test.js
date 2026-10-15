@@ -666,6 +666,7 @@ function makeCodeNav(opts = {}) {
         state: { brand: 'brother', category: 'ink', type: null, code: 'LC431' },
         cache: { products: opts.cache || {} },
         categories: [{ id: 'ink', name: 'Ink Cartridges', apiCategory: 'ink' }],
+        RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' }, // ERR-337 (ink spans only ink)
         elements: {
             levelCodes: { hidden: true, children: [] },
             levelProducts: { hidden: true },

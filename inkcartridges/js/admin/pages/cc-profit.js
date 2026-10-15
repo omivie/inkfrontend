@@ -29,10 +29,10 @@ let _sliderTimer = null;
  * The global offset and the tier ladder are both approval-gated since
  * migration 187 (ERR-281). A PUT here FILES A PROPOSAL: it moves no price and
  * starts no reprice. Review, approval and reprice tracking live in
- * Site Health → Pricing (cc2-pricing.js). This tab only proposes the offset
+ * the Pricing page (#pricing, cc2-pricing.js mounted there — ERR-336). This tab only proposes the offset
  * and says, in words, that nothing has changed yet.
  */
-const REVIEW_HASH = '#control-center?tab=pricing';
+const REVIEW_HASH = '#pricing';
 
 function heatColor(margin) {
   if (margin < 5) return 'rgba(220,53,69,0.85)';
@@ -211,7 +211,7 @@ function renderTierMultipliers(data) {
     html += `<p class="admin-text-muted" style="font-size:13px;margin:4px 0">Brands with their own ladder (bands they do not set inherit the table above): ${brandLadders.map(b => esc(b.name || b.slug || '?')).join(', ')}.</p>`;
   }
   html += `<p class="admin-text-muted" style="font-size:13px;margin:4px 0 0">
-    Propose changes in <a href="${REVIEW_HASH}"><strong>Site Health → Pricing</strong></a>. Every change needs approval there before any price moves, and the impact is shown before it is filed.</p>`;
+    Propose changes in <a href="${REVIEW_HASH}"><strong>Pricing</strong></a>. Every change needs approval there before any price moves, and the impact is shown before it is filed.</p>`;
   wrap.innerHTML = html;
 }
 
@@ -220,7 +220,7 @@ function pendingBannerHtml() {
   if (!p) return '';
   return `<div class="cc-pending-banner" role="status">
     <strong>A pricing proposal is awaiting approval</strong>. It was filed ${esc(new Date(p.created_at).toLocaleString('en-NZ'))}${p.notes ? ` (“${esc(p.notes)}”)` : ''}.
-    No price has moved. <a href="${REVIEW_HASH}">Review it in Site Health → Pricing</a>.</div>`;
+    No price has moved. <a href="${REVIEW_HASH}">Review it on the Pricing page</a>.</div>`;
 }
 
 function showOffsetConfirm(offset) {
@@ -229,7 +229,7 @@ function showOffsetConfirm(offset) {
   const pending = _tierData && _tierData.pending_proposal;
   const bodyHtml = `
     <p>Propose a global price offset of <strong>${pct > 0 ? '+' : ''}${pct}%</strong>?</p>
-    <p style="font-size:13px;color:var(--text-muted);margin:8px 0">This files a <strong>proposal</strong>. No price moves until it is approved in Site Health → Pricing, and approval reprices the whole catalogue.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin:8px 0">This files a <strong>proposal</strong>. No price moves until it is approved on the Pricing page, and approval reprices the whole catalogue.</p>
     ${pending ? '<p style="font-size:13px;color:var(--yellow-text);margin:8px 0">It <strong>supersedes</strong> the proposal already awaiting approval.</p>' : ''}
     <div class="admin-form-group">
       <label for="cc-offset-notes">Why (shown to the approver)</label>
@@ -256,7 +256,7 @@ function showOffsetConfirm(offset) {
     try {
       await AdminAPI.updateGlobalOffset(offset, notes);
       if (!_el) return;
-      Toast.success('Offset proposed. It is awaiting approval in Site Health → Pricing, and no price has moved.');
+      Toast.success('Offset proposed. It is awaiting approval on the Pricing page, and no price has moved.');
       m.close();
       await Promise.all([loadTierMultipliers(), loadOffset()]);
     } catch (e) {
@@ -317,7 +317,7 @@ export default {
           </div>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)">
             Min gap
-            <select class="admin-input" id="cc-margin-min-gap" style="padding:4px 8px;font-size:13px;width:auto">
+            <select class="admin-input" id="cc-margin-min-gap" style="padding:4px 8px;width:auto">
               <option value="0">All</option>
               <option value="1">≥ 1pp</option>
               <option value="3">≥ 3pp</option>

@@ -1,38 +1,26 @@
 # `backend-docs/` — correspondence with the backend dev
 
-**The rule: every backend-facing markdown file is written to `backend-docs/outbox/`,
-never to the repo root.** Move it to `sent/` when a backend document answers it.
+**The rule: everything we still need from the backend is in ONE file in `backend-docs/outbox/`**
+(today `backend-asks-2026-10-15.md`), never in the repo root. That one file is what gets sent.
 
 ```
 backend-docs/
-  STATUS.md   the index — every doc, its direction, its status, the evidence
-  outbox/     ours, written for the backend. No reply on record.
-  sent/       ours, PROVEN received — a backend doc answers, names, or cites it.
+  STATUS.md   the index: one row per open section, with its evidence
+  outbox/     ONE file: every open ask, one numbered section each
   inbox/      theirs, copied out of ~/Downloads.
 ```
 
-## What "sent" means here, and what it does not
+## Lifecycle
 
-There is **no delivery record**. Outgoing docs are handed over out-of-band; incoming
-ones arrive in `~/Downloads`. So `sent/` is not "we posted it" — it is the far stronger
-and far rarer claim that **the backend demonstrably read it**:
+- **New ask:** add a numbered section to the outbox file, and a row in `STATUS.md`.
+- **Answered:** check the answer against live code and the live API first. Then delete the section and its row.
+- **Nothing left:** delete the file.
 
-- a backend-authored doc that postdates ours **names it**, or
-- that doc cites a `BF-` / `ERR-` number that **originates in ours**.
+Answered documents are deleted, not archived. `sent/` and `bundles/` were removed on 2026-10-15 (owner).
+Their text is in git history: see the commit hash in `STATUS.md`.
 
-`outbox/` therefore means *no reply on record* — it does **not** mean undelivered.
-**The backend dev can read this repo**: `security-hardening-sep2026-round2-FE-handoff.md`
-cites `tests/security-hardening-sep2026.test.js:234`, a file that is not web-published.
-Anything committed and pushed is available to them whether or not it was handed over.
-
-## Before deleting anything in here
-
-**A doc with no reply is not a stale doc.** Every unanswered doc audited on 2026-09-09
-still carried at least one open ask that exists in no other document — `page-copy-editor-backend-brief.md`
-is still the only spec for an endpoint that 404s today (`page-copy.js:926` still renders
-*"Publishing is not available"*); `orders-supplier-origin-backend-brief.md` is still the
-live contract for the `origin` field that `sourcing.js:18` points at. Check the ask
-against live code first.
+**A doc with no reply is not a stale doc.** Before you delete a section, check its ask against live code.
+**The backend dev can read this repo**, so anything committed and pushed is available to them.
 
 ## What is NOT in here, deliberately
 

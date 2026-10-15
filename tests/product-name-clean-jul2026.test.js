@@ -72,7 +72,7 @@ test('CMY 3-Pack (colour not trailing) de-doubles via type-last fallback', () =>
     // not fire; the compact token is still dropped.
     assert.equal(
         ProductName.clean({ name: 'HP Genuine 70CMY Ink Cartridge 70 CMY 3-Pack', color: 'CMY' }),
-        'HP Genuine 70 CMY 3-Pack Ink Cartridge'
+        'HP Genuine 70 CMY-Pack Ink Cartridge'
     );
 });
 
@@ -93,8 +93,9 @@ test('Gloss Enhancer (single occurrence) is preserved', () => {
 });
 
 test('compatible "…for HP 126A…" name is preserved', () => {
+    // Not de-doubled; only the pack wording changes (owner, 2026-10-15).
     const n = 'Compatible Toner Cartridge for HP 126A CMY 3-Pack';
-    assert.equal(ProductName.clean({ name: n, color: 'CMY' }), n);
+    assert.equal(ProductName.clean({ name: n, color: 'CMY' }), 'Compatible Toner Cartridge for HP 126A CMY-Pack');
 });
 
 test('Brother belt unit (no product-type phrase) is preserved', () => {
@@ -191,7 +192,7 @@ test('a pack name with a page tail keeps the pack label before the type', () => 
             name: 'Brother Genuine LC133CMY Ink Cartridge LC133 CMY 3-Pack (600 pages)',
             color: 'CMY'
         }),
-        'Brother Genuine LC133 CMY 3-Pack Ink Cartridge (600 pages)');
+        'Brother Genuine LC133 CMY-Pack Ink Cartridge (600 pages)');
 });
 
 test('cleaning an already-cleaned name is idempotent (no drift on re-render)', () => {
@@ -210,4 +211,38 @@ test('a name that is ONLY a parenthetical after the type is returned verbatim', 
     // Guard against emitting a title with the readable half amputated.
     const name = 'HP Genuine 123 Ink Cartridge (500 pages)';
     assert.equal(ProductName.clean({ name, color: 'Black' }), name);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pack wording (owner, 2026-10-15): "4-Pack" read as four of the same
+// cartridge. 4-colour packs show "KCMY-Pack", 3-colour packs "CMY-Pack".
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('pack wording: colour-code packs replace the count', () => {
+    const cases = [
+        [{ name: 'Canon CART069H Value Pack KCMY 4-Pack', color: 'KCMY' }, 'Canon CART069H KCMY-Pack'],
+        [{ name: 'OKI Genuine MC853KCMY Toner Cartridge MC853 KCMY 4-Pack (7,000 pages)', color: 'KCMY' },
+            'OKI Genuine MC853 KCMY-Pack Toner Cartridge (7,000 pages)'],
+        [{ name: 'Compatible Ink Cartridge for Epson 702XL CMYK 4 Pack', color: 'CMYK' }, 'Compatible Ink Cartridge for Epson 702XL KCMY-Pack'],
+        [{ name: 'Brother Genuine DR233CL Drum Unit CMY 3-Pack', color: 'CMY' }, 'Brother Genuine DR233CL Drum Unit CMY-Pack'],
+        // bare count, no colour token: the stored colour code decides
+        [{ name: 'Brother Genuine DR233CL Drum Unit 4-Pack', color: 'KCMY' }, 'Brother Genuine DR233CL Drum Unit KCMY-Pack'],
+        [{ name: 'Brother Genuine DR233CL Drum Unit 3-Pack', color: 'CMY' }, 'Brother Genuine DR233CL Drum Unit CMY-Pack'],
+    ];
+    for (const [product, want] of cases) {
+        assert.equal(ProductName.clean(product), want, product.name);
+        assert.equal(ProductName.clean({ ...product, name: want }), want, 'idempotent: ' + want);
+    }
+});
+
+test('pack wording: packs whose contents the display cannot know stay verbatim', () => {
+    for (const product of [
+        { name: 'Brother Genuine DR233CL Drum Unit 4-Pack', color: 'Black' },   // colour code is not KCMY
+        { name: 'Brother Genuine DR233CL Drum Unit 4-Pack' },                   // no colour code
+        { name: 'Canon PG640/CL641 Ink Cartridge 2-Pack', color: 'Black/Colour' },
+        { name: 'Brother LC3313 KCMY 5-Pack', color: 'KCMY' },                  // KCMY + spare black
+        { name: 'Canon CART069H Value Pack', color: 'Value Pack' },
+    ]) {
+        assert.equal(ProductName.clean(product), product.name, product.name);
+    }
 });

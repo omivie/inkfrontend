@@ -434,19 +434,19 @@ const ProductColors = {
     // from this list hides real packs just as surely as a bogus value shows none.
     PACK_VALUES: ['CMY', 'KCMY', 'CMYK', 'Black/Colour', 'Value Pack', 'Multipack'],
 
-    // Value-pack card ribbon label, counted from the stored colour code:
-    // CMY → "Three-colour value pack", KCMY/CMYK/BCMY → "Four-colour value
-    // pack" (B and K are the same black). Never counted from the name — a
-    // "5-Pack" of KCMY plus a spare black is still four colours. Any other
+    // Value-pack card ribbon label, from the stored colour code (owner,
+    // 2026-10-15 — matches the pack names): CMY → "CMY-Pack", KCMY/CMYK/BCMY
+    // → "KCMY-Pack" (B and K are the same black). Never from the name — a
+    // "5-Pack" of KCMY plus a spare black is still a KCMY pack. Any other
     // colour ('Value Pack', 'Black/Colour', missing) says "Value pack".
     packLabel(product) {
         const code = String((product && product.color) || '').trim().toUpperCase();
         if (/^[BKCMY]+$/.test(code)) {
-            const n = new Set(code.replace(/B/g, 'K')).size;
-            const word = ['', '', 'Two', 'Three', 'Four'][n];
-            // U+2011 non-breaking hyphen: a plain one broke "Three-/colour" across
+            const set = new Set(code.replace(/B/g, 'K'));
+            const label = set.size === 4 ? 'KCMY' : (set.size === 3 && !set.has('K') ? 'CMY' : '');
+            // U+2011 non-breaking hyphen: a plain one broke the label across
             // lines on the 96px phone thumbnail.
-            if (word) return `${word}\u2011colour value pack`;
+            if (label) return `${label}\u2011Pack`;
         }
         return 'Value pack';
     }
@@ -1436,7 +1436,7 @@ const ProductSort = (function() {
         } else {
             // Fallback: color-stripped, yield-stripped name
             base = name.toLowerCase()
-                .replace(/\b(photo black|matte black|light cyan|light magenta|tri[- ]?colou?r|black|cyan|magenta|yellow|red|blue|green|gray|grey|cmyk|kcmy|bcmy|cmy|value pack|\d+[- ]?pack)\b/gi, '')
+                .replace(/\b(photo black|matte black|light cyan|light magenta|tri[- ]?colou?r|black|cyan|magenta|yellow|red|blue|green|gray|grey|cmyk|kcmy|bcmy|cmy|value pack|\d*[- ]?pack)\b/gi, '')
                 .replace(/\b(xxl|xl|high yield|super high yield)\b/gi, '')
                 .replace(/\s+/g, ' ')
                 .trim();
@@ -1774,7 +1774,32 @@ const ProductName = (function () {
     // anchored to the end.
     const TRAILING_PARENS_RE = /(\s*\([^()]*\))+\s*$/;
 
+    // Pack wording (owner, 2026-10-15): customers read "4-Pack" as four of the
+    // same cartridge. 4-colour packs show "KCMY-Pack", 3-colour packs
+    // "CMY-Pack"; the count and "Value Pack" words go. A bare "4-Pack" with no
+    // colour token is rewritten ONLY when the stored colour code says KCMY/CMY;
+    // every other pack (2-Pack, 5-Pack, Black/Colour) stays verbatim because
+    // the display cannot know its contents. BRIDGE: the backend rename makes
+    // this a no-op; delete it once stored names carry the new grammar.
+    const PACK4_RE = /\b(?:Value\s+Pack\s+)?(?:KCMY|CMYK|BCMY)\s+4\s*-?\s*Pack\b/gi;
+    const PACK3_RE = /\b(?:Value\s+Pack\s+)?CMY\s+3\s*-?\s*Pack\b/gi;
+    const BARE4_RE = /\b(?:Value\s+Pack\s+)?4\s*-?\s*Pack\b/i;
+    const BARE3_RE = /\b(?:Value\s+Pack\s+)?3\s*-?\s*Pack\b/i;
+
+    function packRename(title, product) {
+        if (!title) return title;
+        let out = title.replace(PACK4_RE, 'KCMY-Pack').replace(PACK3_RE, 'CMY-Pack');
+        const code = String((product && product.color) || '').trim().toUpperCase();
+        if (/^(KCMY|CMYK|BCMY)$/.test(code)) out = out.replace(BARE4_RE, 'KCMY-Pack');
+        else if (code === 'CMY') out = out.replace(BARE3_RE, 'CMY-Pack');
+        return out;
+    }
+
     function clean(product) {
+        return packRename(dedouble(product), product);
+    }
+
+    function dedouble(product) {
         const raw = (product && product.name != null ? String(product.name) : '').trim();
         if (!raw) return raw;
 

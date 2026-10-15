@@ -20,7 +20,8 @@ multiple which would hold all the analytics sections we have neatly organised an
 **What changed**
 
 1. **A dedicated `Analytics` section**, between Overview and Sales (it was moved BELOW Sales
-   later in Sep 2026 — see the end of this section), holding every read-only
+   later in Sep 2026 — see the end of this section — and below Catalog on 2026-10-15,
+   ERR-334: order is now Overview, Sales, Catalog, Analytics, Data Operations), holding every read-only
    reporting surface: the hub (`#analytics`), Demand Ranking, Catalogue Engagement and Price
    Monitor. They previously sat in three different sections (§3 below).
 2. **Every section is now a collapsible group** — the deferred §8 item 9, below, is done.

@@ -147,7 +147,7 @@ export default {
       <div class="cc-section">
         <div class="cc-section__title">Overpriced Products</div>
         <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center">
-          <select class="admin-select" id="mi-brand-filter" style="min-width:140px;padding:5px 10px;font-size:13px">
+          <select class="admin-select" id="mi-brand-filter" style="min-width:140px;padding:5px 10px">
             <option value="">All Brands</option>
           </select>
         </div>
@@ -157,7 +157,7 @@ export default {
         <div class="cc-section__title">Price Discrepancies</div>
         <div style="margin-bottom:10px;display:flex;gap:10px;align-items:center">
           <label style="font-size:13px;color:var(--text-muted)">Min variance:</label>
-          <input type="number" class="admin-input" id="mi-variance-input" value="${_minVariance}" min="1" max="100" step="1" style="width:70px;padding:4px 8px;font-size:13px">
+          <input type="number" class="admin-input" id="mi-variance-input" value="${_minVariance}" min="1" max="100" step="1" style="width:70px;padding:4px 8px">
           <span style="font-size:13px;color:var(--text-muted)">%</span>
         </div>
         <div id="mi-discrepancy-table"></div>

@@ -41,11 +41,12 @@ test('nav registers an owner-only Product Codes item under Catalog', () => {
   assert.match(appJs, /key:\s*'product-codes'[^}]*ownerOnly:\s*true/,
     'NAV_ITEMS must have an owner-only product-codes entry');
 
-  // July 2026 IA overhaul: product-codes lives in the "Catalog" section (before "Data Operations").
+  // July 2026 IA overhaul: product-codes lives in the "Catalog" section. Upper bound is the
+  // section that immediately follows Catalog — "Analytics" since the Oct 2026 reorder.
   const catalogIdx = appJs.indexOf("section: 'Catalog'");
-  const dataOpsIdx = appJs.indexOf("section: 'Data Operations'");
+  const nextIdx = appJs.indexOf("section: 'Analytics'");
   const pageIdx = appJs.indexOf("key: 'product-codes'");
-  assert.ok(catalogIdx > 0 && pageIdx > catalogIdx && pageIdx < dataOpsIdx,
+  assert.ok(catalogIdx > 0 && nextIdx > catalogIdx && pageIdx > catalogIdx && pageIdx < nextIdx,
     'product-codes belongs to the Catalog section');
 });
 

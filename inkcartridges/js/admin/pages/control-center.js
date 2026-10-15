@@ -1,11 +1,13 @@
 /**
  * Control Center — May 2026 spec (readfirst/control-center-may2026.md)
  *
- * Six tabs from the backend's adminControlCenter route file:
- *   Overview · Pricing · Packs · Integrity · SEO · Infra
+ * Tabs from the backend's adminControlCenter route file:
+ *   Overview · Packs · Integrity · SEO · Links · Infra
+ * Pricing moved out to its own page, #pricing (ERR-336). MOVED_TABS below
+ * forwards #control-center?tab=pricing and the Overview/top-bar pricing tiles.
  *
  * Each tab is a lazy ES module loaded on demand. The active tab persists
- * to the URL hash query (#control-center?tab=pricing) so deep links and
+ * to the URL hash query (#control-center?tab=packs) so deep links and
  * browser back/forward work, and the keyboard quick-nav (g h/p/k/i/s/f)
  * routes through hashchange just like top-level page navigation.
  *
@@ -18,7 +20,6 @@ import { Charts } from '../components/charts.js';
 
 const TABS = [
   { id: 'overview',   label: 'Overview',  shortcut: 'h', module: './cc2-overview.js' },
-  { id: 'pricing',    label: 'Pricing',   shortcut: 'p', module: './cc2-pricing.js' },
   { id: 'packs',      label: 'Packs',     shortcut: 'k', module: './cc2-packs.js' },
   { id: 'integrity',  label: 'Integrity', shortcut: 'i', module: './cc2-integrity.js' },
   { id: 'seo',        label: 'SEO',       shortcut: 's', module: './cc2-seo-slug.js' },
@@ -28,7 +29,7 @@ const TABS = [
 
 const COPY = {
   title: 'Control Center',
-  subtitle: 'Health, pricing, packs, integrity, SEO & links',
+  subtitle: 'Health, packs, integrity, SEO & links',
   keyboard_hint: 'Press ⌘K for commands · g + letter to navigate tabs',
 };
 
@@ -41,6 +42,9 @@ let _hashHandler = null;
 let _topBarRefreshTimer = null;
 
 const TAB_IDS = TABS.map(t => t.id);
+// Tabs that became their own page. Old bookmarks, the Overview card and the
+// top-bar tile still name them, so they forward instead of falling to Overview.
+const MOVED_TABS = { pricing: '#pricing' };
 
 function readTabFromHash() {
   const hash = (window.location.hash || '').replace(/^#/, '');
@@ -48,7 +52,7 @@ function readTabFromHash() {
   if (qIdx < 0) return null;
   const params = new URLSearchParams(hash.slice(qIdx + 1));
   const t = params.get('tab');
-  return TAB_IDS.includes(t) ? t : null;
+  return TAB_IDS.includes(t) || MOVED_TABS[t] ? t : null;
 }
 
 function writeTabToHash(tabId) {
@@ -126,6 +130,7 @@ async function mountTopBar() {
 }
 
 async function switchTab(tabId) {
+  if (MOVED_TABS[tabId]) { window.location.replace(MOVED_TABS[tabId]); return; }
   if (!TAB_IDS.includes(tabId)) tabId = 'overview';
   _activeTab = tabId;
   writeTabToHash(tabId);

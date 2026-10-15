@@ -822,6 +822,32 @@ function catalogQueryString(opts = {}) {
  */
 const RIBBON_PRODUCT_COLS = 'id, sku, brand_id, name, manufacturer_part_number, retail_price, compare_price, stock_quantity, low_stock_threshold, stock_status, color, color_hex, page_yield, barcode, category, weight_kg, image_url, product_type, is_active, is_featured, is_reviewed, reviewed_at, reviewed_by_email, import_locked, source, pack_type, supplier, supplier_sku, description, description_html, related_product_skus, slug, meta_title, meta_description, meta_keywords, tags, internal_notes, ribbon_brand_id, created_at, updated_at';
 
+function productListParams(filters, page, limit) {
+  const params = new URLSearchParams();
+  params.set('page', page);
+  params.set('limit', limit);
+  if (filters.brand) params.set('brand', filters.brand);
+  if (filters.search) params.set('search', filters.search);
+  if (filters.active !== undefined && filters.active !== '') params.set('is_active', filters.active);
+  if (filters.sort) params.set('sort', filters.sort);
+  if (filters.order) params.set('order', filters.order);
+  if (filters.source) params.set('source', filters.source);
+  if (filters.product_type) params.set('product_type', filters.product_type);
+  if (filters.category) params.set('category', filters.category);
+  if (filters.has_images !== undefined && filters.has_images !== '') params.set('has_images', filters.has_images);
+  if (filters.stock_status) params.set('stock_status', filters.stock_status);
+  if (filters.is_reviewed !== undefined && filters.is_reviewed !== '') params.set('is_reviewed', filters.is_reviewed);
+  // Added by the backend 2026-09-21 (BF-044a / ERR-286). The endpoint is
+  // strictQuery since that deploy: an unknown param or out-of-enum value is
+  // a 400, which this method turns into `null` — an empty table. Values are
+  // the backend's enums, not ours: pack_type = single|value_pack|multipack|packs.
+  if (filters.pack_type) params.set('pack_type', filters.pack_type);
+  if (filters.supplier) params.set('supplier', filters.supplier);
+  if (filters.product_type_group) params.set('product_type_group', filters.product_type_group);
+  if (filters.color) params.set('color', filters.color);
+  return params;
+}
+
 const AdminAPI = {
   // ---- Orders ----
   async getOrders(filters = {}, page = 1, limit = 20, signal = null) {
@@ -1636,34 +1662,23 @@ const AdminAPI = {
   // ---- Products ----
   async getProducts(filters = {}, page = 1, limit = 200) {
     try {
-      const params = new URLSearchParams();
-      params.set('page', page);
-      params.set('limit', limit);
-      if (filters.brand) params.set('brand', filters.brand);
-      if (filters.search) params.set('search', filters.search);
-      if (filters.active !== undefined && filters.active !== '') params.set('is_active', filters.active);
-      if (filters.sort) params.set('sort', filters.sort);
-      if (filters.order) params.set('order', filters.order);
-      if (filters.source) params.set('source', filters.source);
-      if (filters.product_type) params.set('product_type', filters.product_type);
-      if (filters.category) params.set('category', filters.category);
-      if (filters.has_images !== undefined && filters.has_images !== '') params.set('has_images', filters.has_images);
-      if (filters.stock_status) params.set('stock_status', filters.stock_status);
-      if (filters.is_reviewed !== undefined && filters.is_reviewed !== '') params.set('is_reviewed', filters.is_reviewed);
-      // Added by the backend 2026-09-21 (BF-044a / ERR-286). The endpoint is
-      // strictQuery since that deploy: an unknown param or out-of-enum value is
-      // a 400, which this method turns into `null` — an empty table. Values are
-      // the backend's enums, not ours: pack_type = single|value_pack|multipack|packs.
-      if (filters.pack_type) params.set('pack_type', filters.pack_type);
-      if (filters.supplier) params.set('supplier', filters.supplier);
-      if (filters.product_type_group) params.set('product_type_group', filters.product_type_group);
-      if (filters.color) params.set('color', filters.color);
+      const params = productListParams(filters, page, limit);
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
       adminApiWarn('Failed to load products', e);
       return null;
     }
+  },
+
+  // Same list, but a refusal THROWS. getProducts() turns a strictQuery 400 into
+  // null, which a page renders as "no products" — on the Pricing page (ERR-336)
+  // an empty grid would read as "nothing matches this filter" and a bulk action
+  // could be judged against it. Callers show the message instead.
+  async listProductsStrict(filters = {}, page = 1, limit = 100) {
+    const resp = await window.API.get(`/api/admin/products?${productListParams(filters, page, limit)}`);
+    if (!resp || resp.ok === false) throw invoiceError(resp, 'The product list request was refused');
+    return resp.data ?? null;
   },
 
   // ---- Product Review ----

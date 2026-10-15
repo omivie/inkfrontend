@@ -134,8 +134,10 @@ const NOT_ON_THIS_PAGE = {
 };
 
 test('every filter AdminAPI.getProducts forwards is produced by the ONE builder', async () => {
-  const getProducts = API.slice(API.indexOf('async getProducts('));
-  const supported = [...getProducts.slice(0, getProducts.indexOf('window.API.get'))
+  // getProducts and listProductsStrict (Pricing page, ERR-336) share one param
+  // builder, so the filters it reads ARE what getProducts forwards.
+  const builder = API.slice(API.indexOf('function productListParams('));
+  const supported = [...builder.slice(0, builder.indexOf('return params'))
     .matchAll(/filters\.([a-z_]+)/g)].map((m) => m[1]);
   assert.ok(supported.length >= 8, `expected to find the filter reads in api.js, found ${supported.length}`);
 

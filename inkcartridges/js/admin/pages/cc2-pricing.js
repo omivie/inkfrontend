@@ -1,5 +1,9 @@
 /**
- * Control Center — Pricing tab: margin tier multipliers, approval-gated.
+ * Margin rules: tier multipliers, approval-gated. Mounted by the Pricing page
+ * (pages/pricing.js, #pricing — ERR-336); it was the Control Center Pricing tab.
+ * Each multiplier has a Margin % input beside it (utils/pricing-page.js): typing
+ * a margin writes the matching multiplier into the same draft cell, so the
+ * propose body is still built only from multipliers.
  *
  * Backend contract: backend-docs/inbox/tier-multiplier-approval-backend-contract-sep2026.md
  * (migration 187). Errors log: ERR-281. Pure logic: utils/tierProposal.js.
@@ -39,6 +43,7 @@ import {
   attribute, shelfFigure, ratchetSummary, rowOutcome, diffLadders,
   errorMessage, pollDecision,
 } from '../utils/tierProposal.js';
+import { multFromMargin, marginFromMult } from '../utils/pricing-page.js';
 
 const SOURCE_LABEL = { genuine: 'Genuine', compatible: 'Compatible' };
 const STATUS_LABEL = { pending: 'Awaiting approval', approved: 'Approved', rejected: 'Rejected', superseded: 'Superseded' };
@@ -57,6 +62,8 @@ const pct = (v, dp = 2) => (v == null || !Number.isFinite(Number(v)) ? '—' : `
 const signedPct = (v, dp = 2) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(dp)}%`);
 const signedInt = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v) >= 0 ? '+' : '−'}${int(Math.abs(Number(v)))}`);
 const mult = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(3).replace(/0$/, ''));
+// Multiplier with its gross margin beside it — the owner reads margin (ERR-336).
+const multM = (v) => { const m = marginFromMult(v); return m == null ? mult(v) : `${mult(v)} (${m}%)`; };
 const offsetPct = (v) => `${Number(v) >= 0 ? '+' : ''}${(Number(v) * 100).toFixed(1)}%`;
 const when = (iso) => {
   if (!iso) return '—';
@@ -324,6 +331,7 @@ function renderLadder() {
   const head = `<thead><tr>
       <th>Band</th><th>Cost range${gstSub(GST_EXCL)}</th>
       <th class="num">${brand ? `${esc(brand.name)} multiplier` : 'Multiplier'}</th>
+      <th class="num" title="Gross margin on the price ex GST, before price endings and floors: 1 − 1/multiplier. Typing one sets the multiplier.">Margin %</th>
       <th class="num">${bandsMode ? 'Upper bound' : brand ? 'Catalogue' : 'Default'}</th>
       <th class="num">Products</th>
       <th class="num" title="Mean net margin after Stripe fees, now → at the table's price">Net margin now → after</th>
@@ -366,6 +374,7 @@ function renderLadder() {
       <td class="cell-mono" data-key-cell="${i}">${esc(key)}</td>
       <td class="cc2-tiers__muted" data-range-cell="${i}">${esc(range)}</td>
       <td class="num">${multCell}</td>
+      <td class="num">${marginCell(multCell)}</td>
       <td class="num">${refCell}</td>
       <td class="num" data-stat="products">—</td>
       <td class="num" data-stat="margin">—</td>
@@ -588,9 +597,43 @@ async function runSimulate() {
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────
+// Margin % twin of a multiplier input, built from the multiplier cell's own
+// markup so it can never disagree with it about value, placeholder or disabled.
+function marginCell(multCell) {
+  const val = (multCell.match(/ value="([^"]*)"/) || [])[1] || '';
+  const ph = (multCell.match(/ placeholder="([\d.]+)/) || [])[1];
+  const m = marginFromMult(val);
+  const phm = marginFromMult(ph);
+  return `<input class="admin-input cc2-tiers__num" type="number" step="0.1" min="0" max="99" data-margin-for value="${m == null ? '' : esc(m)}"${phm != null ? ` placeholder="${esc(phm)} inherited"` : ''}${/ disabled/.test(multCell) ? ' disabled' : ''} aria-label="Margin %">`;
+}
+
+function onMarginInput(t) {
+  const multIn = t.closest('tr') && t.closest('tr').querySelector('[data-tier], [data-brand-key], [data-band-mult]');
+  if (!multIn || multIn.disabled) return;
+  if (t.value === '') {
+    if (!multIn.dataset.brandKey) return; // a catalogue band cannot be blank
+    multIn.value = '';
+  } else {
+    const m = multFromMargin(t.value);
+    t.classList.toggle('is-invalid', m == null);
+    if (m == null) return;
+    multIn.value = m;
+  }
+  multIn.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function onInput(e) {
   const t = e.target;
   const s = _state.source;
+  if (t.dataset.marginFor != null) { onMarginInput(t); return; }
+  if (t.dataset.tier || t.dataset.brandKey || t.dataset.bandMult != null) {
+    const twin = t.closest('tr') && t.closest('tr').querySelector('[data-margin-for]');
+    if (twin && document.activeElement !== twin) {
+      const m = marginFromMult(t.value);
+      twin.value = m == null ? '' : m;
+      twin.classList.remove('is-invalid');
+    }
+  }
   if (t.dataset.tier) {
     const v = parseFloat(t.value);
     if (Number.isFinite(v)) _state.draft.catalogue[s][t.dataset.tier] = v;
@@ -747,7 +790,7 @@ function changeSummaryHtml(body) {
   for (const src of EDITABLE_SOURCES) {
     if (body[src]) for (const [k, v] of Object.entries(body[src])) {
       const live = (_state.live.effective[src] || {})[k];
-      items.push(`<tr><td>${esc(SOURCE_LABEL[src])}</td><td class="cell-mono">${esc(k)}</td><td class="num cell-mono">${esc(mult(live))}</td><td class="num cell-mono"><strong>${esc(mult(v))}</strong></td></tr>`);
+      items.push(`<tr><td>${esc(SOURCE_LABEL[src])}</td><td class="cell-mono">${esc(k)}</td><td class="num cell-mono">${esc(multM(live))}</td><td class="num cell-mono"><strong>${esc(multM(v))}</strong></td></tr>`);
     }
   }
   if (body.bands) for (const [src, rows] of Object.entries(body.bands)) {
@@ -757,7 +800,7 @@ function changeSummaryHtml(body) {
     const name = (_state.brands.find((x) => x.id === b.brand_id) || {}).name || b.brand_id;
     if (b.clear) { items.push(`<tr><td>${esc(name)}</td><td colspan="3">Remove its own ladder</td></tr>`); continue; }
     for (const src of EDITABLE_SOURCES) if (b[src]) for (const [k, v] of Object.entries(b[src])) {
-      items.push(`<tr><td>${esc(name)} · ${esc(SOURCE_LABEL[src])}</td><td class="cell-mono">${esc(k)}</td><td class="num cell-mono">—</td><td class="num cell-mono"><strong>${esc(mult(v))}</strong></td></tr>`);
+      items.push(`<tr><td>${esc(name)} · ${esc(SOURCE_LABEL[src])}</td><td class="cell-mono">${esc(k)}</td><td class="num cell-mono">—</td><td class="num cell-mono"><strong>${esc(multM(v))}</strong></td></tr>`);
     }
   }
   if (body.global_offset != null) {
@@ -873,8 +916,8 @@ function diffTableHtml(diff) {
     if (r.scope === 'offset') return `<tr><td>Global offset</td><td></td><td class="num cell-mono">${r.live == null ? '—' : esc(offsetPct(r.live))}</td><td class="num cell-mono"><strong>${esc(offsetPct(r.proposed))}</strong></td></tr>`;
     const label = r.scope === 'brand' ? `${esc(r.brand)} · ${esc(SOURCE_LABEL[r.source] || r.source)}` : esc(SOURCE_LABEL[r.source] || r.source);
     const lower = r.live != null && r.proposed < r.live;
-    return `<tr><td>${label}</td><td class="cell-mono">${esc(r.key)}</td><td class="num cell-mono">${esc(mult(r.live))}</td>
-      <td class="num cell-mono"><strong>${esc(mult(r.proposed))}</strong>${lower ? ' <span class="cc2-tiers__warntext" title="A lower multiplier does not lower live prices">↓ ratchet</span>' : ''}</td></tr>`;
+    return `<tr><td>${label}</td><td class="cell-mono">${esc(r.key)}</td><td class="num cell-mono">${esc(multM(r.live))}</td>
+      <td class="num cell-mono"><strong>${esc(multM(r.proposed))}</strong>${lower ? ' <span class="cc2-tiers__warntext" title="A lower multiplier does not lower live prices">↓ ratchet</span>' : ''}</td></tr>`;
   }).join('');
   return `<div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Table</th><th>Band</th><th class="num">Live</th><th class="num">Proposed</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }

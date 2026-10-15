@@ -560,6 +560,15 @@
             { id: 'ribbons',      name: 'Printer Ribbons',  icon: 'file-text', apiCategory: 'ribbons' }
         ],
 
+        // ERR-337 — a drum that pairs with a toner shows on the toner's code
+        // tile, and the toner on the drum's (owner, 2026-10-15). The backend
+        // already tags them into each other's series_codes, but its
+        // `series[].count` and its `?code=` listing disagree about whether the
+        // other category's rows belong (Brother toner DR2415: tile 5, click 4;
+        // DR2530: tile 2, click 0). ONE owner of "which categories a chip
+        // spans": the tile count and the click both read `_listingApiCategories`.
+        RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' },
+
         // URL-boundary translation between the backend's canonical category
         // slugs (ink, toner, ribbon, drums, label, paper — IA reorg Jul 2026)
         // and this controller's internal tab ids. Internal ids stay untouched
@@ -2514,12 +2523,22 @@
                     codes = window.SeriesCodes.collapseChipList(codes);
                 }
 
+                // ERR-337 — tile count from the SAME rows the click shows.
+                let countsPartial = false;
+                if (this._chipsDerivedFrom === 'backend' && this.RELATED_CATEGORY[this.state.category]) {
+                    const recount = await this._recountChipsFromListing(codes);
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    codes = recount.codes;
+                    countsPartial = !recount.ok;
+                }
+
                 // Cache the final codes with counts — but ONLY when they describe
                 // an answer the backend actually gave (ERR-264). `codesCacheKey` is
                 // consulted at the top of this function on every later visit (:2029),
                 // so memoising an outage-derived [] is precisely what makes a
                 // transient 500 look permanent for the rest of the session.
-                if (!productsUnavailable) {
+                // ERR-337: a failed recount walk is not memoised either.
+                if (!productsUnavailable && !countsPartial) {
                     this.cache.products[codesCacheKey] = codes;
                 }
 
@@ -2620,6 +2639,83 @@
             }
 
             this.showLoading(false);
+        },
+
+        // ERR-337 — the API categories a code tile spans: its own, plus the
+        // related one (toner ⇄ drums). Read by the tile count AND the click.
+        _listingApiCategories() {
+            const ids = [this.state.category, this.RELATED_CATEGORY[this.state.category]].filter(Boolean);
+            return ids.map(id => this.categories.find(c => c.id === id)?.apiCategory || id);
+        },
+
+        // ERR-337 — does this row's series_codes (yield-collapsed) contain the
+        // code, or either half of a pair code? The ONE membership rule shared by
+        // the tile count (_recountChipsFromListing) and the related-category click.
+        _rowCarriesCode(row, code) {
+            const S = window.SeriesCodes;
+            const have = new Set((row && row.series_codes || []).map(S.collapseYieldSuffix).filter(Boolean));
+            return [code, ...S.pairHalves(code)].some(c => have.has(S.collapseYieldSuffix(c)));
+        },
+
+        // Every listing row of one category, paged. The response carries no
+        // pagination object, so a short page is the last one. null = the walk
+        // did not complete (never a partial array — a partial count is a lie).
+        async _walkListing(apiCategory) {
+            const PAGE = 200;
+            const rows = [];
+            for (let page = 1; page <= 20; page++) {
+                const r = await API.getShopData({
+                    brand: this.state.brand,
+                    category: apiCategory,
+                    page,
+                    limit: PAGE,
+                    ...(this.state.type === 'genuine' || this.state.type === 'compatible'
+                        ? { source: this.state.type } : {})
+                });
+                if (!r || r.ok !== true || !Array.isArray(r.data?.products)) return null;
+                rows.push(...r.data.products);
+                if (r.data.products.length < PAGE) return rows;
+            }
+            return null; // ponytail: 20×200 rows cap; no brand/category is near it (Brother toner = 268)
+        },
+
+        /**
+         * ERR-337 — recount each chip as the number of distinct listing rows,
+         * across `_listingApiCategories()`, whose series_codes (yield-collapsed,
+         * or a half of a pair chip) contain the chip code: the predicate the
+         * `?code=` listing applies, so tile number = cards on click. Chip LIST
+         * stays the backend's; a chip whose count is 0 is dropped (it opens
+         * empty). Walk failure ⇒ backend counts kept and said so (fail-soft LOUD).
+         * @returns {Promise<{codes: Array, ok: boolean}>}
+         */
+        async _recountChipsFromListing(codes) {
+            const S = window.SeriesCodes;
+            const walks = await Promise.all(
+                this._listingApiCategories().map(c => this._walkListing(c).catch(() => null)));
+            if (!S || walks.some(w => w === null)) {
+                this._chipCountsFrom = 'backend-series';
+                DebugLog.warn(
+                    `[Shop._recountChipsFromListing] listing walk failed (brand=${this.state.brand}, ` +
+                    `category=${this.state.category}) — tiles show the backend series count, which can ` +
+                    'disagree with the products a tile opens (ERR-337). Not cached.');
+                return { codes, ok: false };
+            }
+            const rows = new Map();
+            for (const p of walks.flat()) {
+                const key = p && (p.id || p.sku);
+                if (key && !rows.has(key)) rows.set(key, p);
+            }
+            const out = [];
+            for (const chip of codes) {
+                const ids = new Set();
+                for (const [key, p] of rows) if (this._rowCarriesCode(p, chip.code)) ids.add(key);
+                if (ids.size !== Number(chip.count)) {
+                    DebugLog.warn(`[Shop._recountChipsFromListing] ${chip.code} series=${chip.count} rows=${ids.size}`);
+                }
+                if (ids.size > 0) out.push({ ...chip, count: ids.size });
+            }
+            this._chipCountsFrom = 'listing-rows';
+            return { codes: out, ok: true };
         },
 
         extractProductCodes(products) {
@@ -3242,10 +3338,16 @@
                         // cold deep link the chip cache is empty and only the
                         // collapsed code used to be sent.
                         if (intent && intent.requested && !aliases.includes(intent.requested)) aliases.unshift(intent.requested);
-                        const responses = await Promise.all(aliases.map(alias =>
+                        // ERR-337 — each alias × each category the tile spans
+                        // (toner ⇄ drums), so the click shows what the tile counted.
+                        const listingCategories = this.RELATED_CATEGORY[this.state.category]
+                            ? this._listingApiCategories() : [loadApiCategory];
+                        const requests = aliases.flatMap(alias =>
+                            listingCategories.map(category => ({ alias, category })));
+                        const responses = await Promise.all(requests.map(({ alias, category }) =>
                             API.getShopData({
                                 brand: this.state.brand,
-                                category: loadApiCategory,
+                                category,
                                 code: alias,
                                 limit: 200,
                                 ...(packFilter ? { pack: packFilter } : {}),
@@ -3267,11 +3369,20 @@
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                         const seenIds = new Set();
-                        for (const response of responses) {
+                        for (const [i, response] of responses.entries()) {
                             if (response && response.ok && response.data?.products) {
+                                // ERR-337 — a related-category row joins only when it
+                                // CARRIES the code. The backend folds codes into
+                                // families per category (Lexmark drums: ?code=C544
+                                // returns the C540 drum, tagged only ["C540"]); the
+                                // tile count cannot see that fold, so neither does
+                                // the click. Own-category rows are untouched (the
+                                // retired-code stem adoption below relies on them).
+                                const related = requests[i].category !== listingCategories[0];
                                 for (const p of response.data.products) {
                                     const key = (p && (p.id || p.sku)) || null;
                                     if (key == null || seenIds.has(key)) continue;
+                                    if (related && !this._rowCarriesCode(p, requests[i].alias)) continue;
                                     seenIds.add(key);
                                     mergedProducts.push(p);
                                 }

@@ -48,11 +48,14 @@ const ProductColors = loadProductColors();
 
 test('§1 label counts colours from the stored colour code', () => {
     const cases = [
-        ['CMY', 'Three-colour value pack'],
-        ['KCMY', 'Four-colour value pack'],
-        ['CMYK', 'Four-colour value pack'],
-        ['BCMY', 'Four-colour value pack'],
-        ['kcmy', 'Four-colour value pack'],
+        // Owner, 2026-10-15: label = colour-code pack, matching the names.
+        ['CMY', 'CMY-Pack'],
+        ['KCMY', 'KCMY-Pack'],
+        ['CMYK', 'KCMY-Pack'],
+        ['BCMY', 'KCMY-Pack'],
+        ['kcmy', 'KCMY-Pack'],
+        ['KC', 'Value pack'],
+        ['KCM', 'Value pack'],
         ['Value Pack', 'Value pack'],
         ['Black/Colour', 'Value pack'],
         ['Black', 'Value pack'],
@@ -60,7 +63,7 @@ test('§1 label counts colours from the stored colour code', () => {
         ['', 'Value pack'],
     ];
     for (const [color, want] of cases) {
-        // Labels use U+2011 (non-breaking hyphen) so "Three-colour" never splits.
+        // Labels use U+2011 (non-breaking hyphen) so "KCMY-Pack" never splits.
         assert.equal(ProductColors.packLabel({ color, name: 'X 5-Pack' }), want.replace('-', '\u2011'), `color=${JSON.stringify(color)}`);
     }
     assert.equal(ProductColors.packLabel(null), 'Value pack');

@@ -48,6 +48,7 @@
     "verify:remember-me": "node scripts/verify-remember-me.mjs",
     "probe:qty-breaks": "node scripts/probe-qty-breaks.mjs",
     "probe:admin-products": "node scripts/probe-admin-products-filters.mjs",
+    "probe:admin-mobile": "node scripts/probe-admin-mobile.mjs",
     "probe:add-to-cart": "node scripts/probe-add-to-cart-tracking.mjs",
     "probe:public-surface": "node scripts/probe-public-surface.mjs",
     "probe:payment-csp": "node scripts/probe-payment-csp.mjs",
@@ -58,6 +59,7 @@
     "probe:qty-typing": "node scripts/probe-qty-typing.mjs",
     "probe:shop-columns": "node scripts/probe-shop-source-columns.mjs",
     "probe:popular-rows-removed": "node scripts/probe-popular-rows-removed.mjs",
+    "probe:pack-names": "node scripts/probe-pack-names.mjs",
     "probe:checkout-delivery": "node scripts/probe-checkout-delivery.mjs",
     "probe:admin-only": "node scripts/probe-admin-only-product.mjs",
     "probe:mobile-ux": "node scripts/probe-mobile-ux.mjs",
@@ -65,7 +67,6 @@
     "probe:for-use-in": "node scripts/probe-for-use-in.mjs",
     "probe:mig132-admin": "node scripts/probe-mig132-admin.mjs",
     "probe:product-stock": "node scripts/probe-product-stock.mjs",
-    "bundle:backend": "node scripts/bundle-backend-outbox.mjs",
     "probe:orders-delivery-type": "node scripts/probe-orders-delivery-type.mjs",
     "probe:ga4-events": "node scripts/probe-ga4-ecommerce.mjs",
     "probe:uet-tag": "node scripts/probe-uet-tag.mjs",
@@ -95,7 +96,8 @@
     "probe:fe-master": "node scripts/probe-fe-master-checklist-oct2026.mjs",
     "probe:fe-master-6oct": "node scripts/probe-fe-master-6oct-2026.mjs",
     "probe:cart-wallet-paint": "node scripts/probe-cart-wallet-paint.mjs",
-    "probe:series-source": "node scripts/probe-series-source-filter.mjs"
+    "probe:series-source": "node scripts/probe-series-source-filter.mjs",
+    "probe:chip-counts": "node scripts/probe-chip-counts.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

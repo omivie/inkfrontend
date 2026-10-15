@@ -74,7 +74,7 @@ const ANALYTICS_KEYS = ['analytics', 'demand-ranking', 'catalog-engagement', 'pr
 // §1–§4 — the section
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§1 NAV_ITEMS has an Analytics section, between Sales and Catalog', () => {
+test('§1 NAV_ITEMS has an Analytics section, between Catalog and Data Operations', () => {
   assert.ok(sectionIdx('Analytics') !== -1,
     'NAV_ITEMS is missing { section: \'Analytics\' } — the dedicated reporting home.');
   assert.ok(sectionIdx('Overview') < sectionIdx('Sales'),
@@ -87,17 +87,21 @@ test('§1 NAV_ITEMS has an Analytics section, between Sales and Catalog', () => 
   assert.ok(sectionIdx('Sales') < sectionIdx('Analytics'),
     'Sales must come before Analytics — the owner works orders daily and reads reports ' +
     'periodically, so the queue they use every day sits nearer the top.');
-  assert.ok(sectionIdx('Analytics') < sectionIdx('Catalog'),
-    'Analytics must come before Catalog. It is also the upper bound §2 measures section ' +
+  // Oct 2026: the owner asked for Catalog above Analytics as well — they maintain the
+  // catalogue far more often than they read reports. Same rule: flipped, not deleted.
+  assert.ok(sectionIdx('Sales') < sectionIdx('Catalog') && sectionIdx('Catalog') < sectionIdx('Analytics'),
+    'Catalog must sit between Sales and Analytics — the owner asked for it above the reports.');
+  assert.ok(sectionIdx('Analytics') < sectionIdx('Data Operations'),
+    'Analytics must come before Data Operations. It is also the upper bound §2 measures section ' +
     'membership against, so a section inserted between them silently loosens that check.');
 });
 
 test('§2 every analytics surface lives in it', () => {
   for (const key of ANALYTICS_KEYS) {
-    // Upper bound is Catalog, the section that FOLLOWS Analytics (Sep 2026 it was Sales;
-    // the two swapped). It must always name the immediate next section — a bound pointing
+    // Upper bound is Data Operations, the section that FOLLOWS Analytics (Sep 2026 it was
+    // Sales, then Catalog until the Oct 2026 reorder put Catalog above Analytics). It must always name the immediate next section — a bound pointing
     // further down the array still passes while an analytics row drifts into Catalog.
-    assert.ok(inSection(key, 'Analytics', 'Catalog'),
+    assert.ok(inSection(key, 'Analytics', 'Data Operations'),
       `"${key}" is not in the Analytics section. The whole point of this pass is that ` +
       'there is exactly ONE place to go and look at how the business is doing; a reporting ' +
       'surface filed anywhere else recreates the sprawl.');
@@ -106,12 +110,12 @@ test('§2 every analytics surface lives in it', () => {
 
 test('§2b none of them was left behind in Catalog', () => {
   for (const key of ['demand-ranking', 'catalog-engagement', 'price-monitor']) {
-    assert.ok(!inSection(key, 'Catalog', 'Data Operations'),
+    assert.ok(!inSection(key, 'Catalog', 'Analytics'),
       `"${key}" is still listed under Catalog as well. NAV_ITEMS renders every entry, so a ` +
       'duplicated key means two sidebar rows pointing at the same page.');
   }
   // Supplier Prices deliberately stayed: its day job is mapping supplier lines to products.
-  assert.ok(inSection('supplier-prices', 'Catalog', 'Data Operations'),
+  assert.ok(inSection('supplier-prices', 'Catalog', 'Analytics'),
     'supplier-prices was moved out of Catalog. It reports, but it is a catalogue-maintenance ' +
     'tool first — this pass deliberately left it where it was.');
   // Expenses deliberately stayed: its other two tabs are data entry.
