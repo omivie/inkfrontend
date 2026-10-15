@@ -1,8 +1,8 @@
 'use strict';
 /**
- * PDP layout, owner 12 Oct 2026 (ERR-318):
- *   - "For use in your printer" sits at the top of the gallery column, the
- *     image directly under it at 80% of the column ("20% smaller");
+ * PDP layout, owner 12 Oct 2026 (ERR-318), revised 15 Oct (ERR-339):
+ *   - the image sits at the top of the gallery column at 64% of its width,
+ *     "For use in your printer" directly UNDER it; click/tap enlarges it;
  *   - phones keep the list BELOW the buy box (Add to Cart stays high);
  *   - Delivery / Returns sit under Add AND under the buy-more chips;
  *   - Colour / Page yield render as chips under the title;
@@ -36,12 +36,13 @@ function method(src, name) {
     throw new Error(`unbalanced ${name}`);
 }
 
-test('the compat slot is the FIRST child of the gallery, before the image', () => {
+test('the compat slot comes right AFTER the image, inside the gallery', () => {
     const gallery = HTML.indexOf('<div class="product-gallery">');
     const slot = HTML.indexOf('<div class="product-gallery__compat" id="product-compat-slot">');
     const image = HTML.indexOf('id="product-image"');
-    assert.ok(gallery > 0 && gallery < slot && slot < image);
-    assert.doesNotMatch(HTML.slice(gallery + 30, slot), /<div|<section/, 'nothing between the gallery and the slot');
+    const info = HTML.indexOf('<div class="product-info">');
+    assert.ok(gallery > 0 && gallery < image && image < slot && slot < info);
+    assert.match(HTML.slice(gallery, slot), /<div class="product-gallery">\s*<div class="product-gallery__main" id="product-image">/, 'image is the first child');
 });
 
 test('grouped, flat and legacy renders all go through _mountCompat; none targets .related-products', () => {
@@ -67,9 +68,9 @@ test('_mountCompat fills the slot, and says false when there is no slot', () => 
     assert.equal(run({ getElementById: () => null })('<b>x</b>'), false);
 });
 
-test('desktop: image is 80% of the column, top-anchored under the list; empty slot takes no space', () => {
+test('desktop: image is 64% of the column (80% less 20%), top-anchored; empty slot takes no space', () => {
     assert.match(CSS, /\.product-detail__layout \.product-gallery \{\s*display: flex;\s*flex-direction: column;[^}]*align-self: start;/);
-    assert.match(CSS, /\.product-detail__layout \.product-gallery__main \{\s*width: 80%;/);
+    assert.match(CSS, /\.product-detail__layout \.product-gallery__main \{\s*width: 64%;/);
     assert.match(CSS, /\.product-gallery__compat:empty \{ display: none; \}/);
     assert.doesNotMatch(CSS, /\.product-detail__layout \.product-gallery__main \{\s*position: absolute;/, 'no longer stretched to the info column');
 });
@@ -110,4 +111,48 @@ test('"Search your printer model" appears in no storefront JS, and renderPromise
         assert.doesNotMatch(stripComments(fs.readFileSync(path.join(dir, f), 'utf8')), /Search your printer model/, f);
     }
     assert.doesNotMatch(method(JS, 'renderPromise').body, /how_to_check/);
+});
+
+test('click-to-enlarge: real photo opens a modal <dialog> with the zoom source; fallback never does', () => {
+    const start = JS.indexOf('function initProductImageLightbox(');
+    assert.ok(start > 0, 'initProductImageLightbox exists');
+    const end = JS.indexOf('\n    }\n', start);
+    const src = JS.slice(start, end + 6);
+    // Called for the main photo right after the hover zoom, and NOT behind the
+    // hover-only media query (it must work on touch).
+    assert.match(JS, /initProductImageZoom\(productImageEl\);\s*initProductImageLightbox\(productImageEl\);/);
+    assert.doesNotMatch(src, /matchMedia/);
+    assert.match(JS, /productImageEl\.removeAttribute\('data-enlarge'\)/, 'image error path disables enlarge');
+
+    const el = (tag) => {
+        const attrs = {}; const listeners = {}; const kids = [];
+        return { tagName: tag, dataset: {}, attrs, listeners, kids, open: false, src: '', alt: '',
+            setAttribute(k, v) { attrs[k] = v; }, hasAttribute(k) { return k in attrs; }, removeAttribute(k) { delete attrs[k]; },
+            addEventListener(t, f) { (listeners[t] = listeners[t] || []).push(f); },
+            querySelector(q) { return q.startsWith('img') ? this.img || null : null; },
+            set innerHTML(_) { this.img = el('img'); }, showModal() { this.open = true; }, close() { this.open = false; } };
+    };
+    let dlg = null;
+    const doc = { body: { appendChild(d) { dlg = d; } }, getElementById: () => dlg, createElement: el };
+    const run = (c) => vm.runInNewContext(`${src}; initProductImageLightbox(c)`, { document: doc, HTMLDialogElement: function () {}, c });
+
+    const photo = el('div');
+    photo.img = Object.assign(el('img'), { dataset: { zoomSrc: 'https://img/big.jpg', fallback: 'placeholder' }, src: 'small.jpg', alt: 'HP 62' });
+    run(photo); run(photo); // re-render binds once
+    assert.ok(photo.hasAttribute('data-enlarge'));
+    assert.equal(photo.listeners.click.length, 1);
+    photo.listeners.click[0]();
+    assert.equal(dlg.open, true);
+    assert.equal(dlg.img.src, 'https://img/big.jpg');
+    assert.equal(dlg.img.alt, 'HP 62');
+    dlg.listeners.click[0]();
+    assert.equal(dlg.open, false);
+
+    photo.removeAttribute('data-enlarge'); // image failed to load
+    photo.listeners.click[0]();
+    assert.equal(dlg.open, false, 'a fallback tile is never enlarged');
+
+    const noPhoto = el('div');
+    run(noPhoto);
+    assert.equal(noPhoto.hasAttribute('data-enlarge'), false);
 });

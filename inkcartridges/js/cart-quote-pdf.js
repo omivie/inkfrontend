@@ -151,23 +151,33 @@ const QuotePdf = {
         return { region: val('region'), postal_code: val('postcode'), delivery_type: type ? type.value : '' };
     },
 
+    /**
+     * The button opens a native <dialog> asking for the optional company /
+     * attention / PO fields (owner 2026-10-15, ERR-342 — replaced the "Add
+     * company or PO number" disclosure). "Download quote" submits and starts
+     * the download; Cancel, Esc and a backdrop click close it with no request.
+     */
     markup(location) {
         const id = (name) => `quote-pdf-${location}-${name}`;
         const fields = this.HEADER_FIELDS.map(({ name, label }) => `
-                <div class="form-group">
-                    <label class="form-label" for="${id(name)}">${label}</label>
-                    <input class="form-input" type="text" id="${id(name)}" name="${name}" maxlength="${this.MAX_FIELD}" autocomplete="${name === 'company' ? 'organization' : 'off'}">
-                </div>`).join('');
+                    <div class="form-group">
+                        <label class="form-label" for="${id(name)}">${label}</label>
+                        <input class="form-input" type="text" id="${id(name)}" name="${name}" maxlength="${this.MAX_FIELD}" autocomplete="${name === 'company' ? 'organization' : 'off'}">
+                    </div>`).join('');
         return `
             <button type="button" class="btn btn--outline btn--full-width quote-pdf__button" data-testid="quote-pdf-button"
-                data-track="cta_click" data-track-cta="Download PDF quote" data-track-location="${location}_summary">Download PDF quote</button>
-            <details class="quote-pdf__details">
-                <summary><span class="quote-pdf__summary-text">Add company or PO number</span><span class="quote-pdf__summary-hint">Optional</span></summary>
-                <div class="quote-pdf__fields">
-                    <p class="quote-pdf__fields-hint">Printed on the quote.</p>
+                aria-haspopup="dialog" data-track="cta_click" data-track-cta="Download PDF quote" data-track-location="${location}_summary">Download PDF quote</button>
+            <dialog class="quote-pdf__dialog" aria-labelledby="${id('title')}" data-testid="quote-pdf-dialog">
+                <form method="dialog" class="quote-pdf__form">
+                    <h2 class="quote-pdf__dialog-title" id="${id('title')}">Download PDF quote</h2>
+                    <p class="quote-pdf__fields-hint">Optional — printed on the quote.</p>
                     ${fields}
-                </div>
-            </details>
+                    <div class="quote-pdf__dialog-actions">
+                        <button type="button" class="btn btn--outline quote-pdf__cancel" data-testid="quote-pdf-cancel">Cancel</button>
+                        <button type="submit" class="btn btn--primary quote-pdf__submit" data-testid="quote-pdf-submit">Download quote</button>
+                    </div>
+                </form>
+            </dialog>
             <p class="form-hint quote-pdf__status" role="status" aria-live="polite" data-testid="quote-pdf-status" hidden></p>`;
     },
 
@@ -177,11 +187,21 @@ const QuotePdf = {
         const location = el.getAttribute('data-quote-pdf') === 'checkout' ? 'checkout' : 'cart';
         el.innerHTML = this.markup(location);
         const btn = el.querySelector('.quote-pdf__button');
+        const dialog = el.querySelector('.quote-pdf__dialog');
+        const form = el.querySelector('.quote-pdf__form');
         const status = el.querySelector('.quote-pdf__status');
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
+            if (!dialog.open) dialog.showModal();
+        });
+        el.querySelector('.quote-pdf__cancel').addEventListener('click', () => dialog.close());
+        // A click on the backdrop targets the <dialog> itself.
+        dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            dialog.close();
             const header = {};
             this.HEADER_FIELDS.forEach(({ name }) => {
-                const input = el.querySelector(`input[name="${name}"]`);
+                const input = form.querySelector(`input[name="${name}"]`);
                 header[name] = input ? input.value : '';
             });
             const zone = location === 'checkout' ? this.readCheckoutZone() : null;

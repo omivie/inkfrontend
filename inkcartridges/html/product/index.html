@@ -64,7 +64,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
     <link rel="stylesheet" href="/css/components.css?v=9e9d2fd7">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=798de610">
+    <link rel="stylesheet" href="/css/pages.css?v=9f6360a3">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
 </head>
 <body>
@@ -213,10 +213,6 @@
             <div class="container">
                 <div class="product-detail__layout">
                     <div class="product-gallery">
-                        <!-- "For use in your printer", above the image (owner, 12 Oct 2026).
-                             Filled by renderCompatiblePrinters() → _mountCompat(). Phones
-                             move it below the buy box with CSS order (pages.css). -->
-                        <div class="product-gallery__compat" id="product-compat-slot"></div>
                         <div class="product-gallery__main" id="product-image">
                             <div class="product-gallery__image-placeholder">
                                 <svg width="200" height="200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -225,6 +221,16 @@
                                 </svg>
                             </div>
                         </div>
+                        <!-- "For use in your printer", directly UNDER the image (owner,
+                             15 Oct 2026; was above it, 12 Oct). Filled by
+                             renderCompatiblePrinters() → _mountCompat(). Phones move it
+                             below the buy box with CSS order (pages.css). -->
+                        <div class="product-gallery__compat" id="product-compat-slot"></div>
+                        <!-- "Pack contents & page yields", under the printer list (owner,
+                             15 Oct 2026). ONE writer: renderPackContents(); its own slot so
+                             _mountCompat('') never wipes it. data-pack-contents says why it
+                             is hidden or partial. -->
+                        <div class="product-gallery__contents" id="product-contents-slot" hidden></div>
                     </div>
 
                     <div class="product-info">
@@ -550,7 +556,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/api.js?v=ae9d0845"></script>
+    <script defer src="/js/api.js?v=19ce4730"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=f1a86a05"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
@@ -568,7 +574,7 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/product-detail-page.js?v=28aa44c7"></script>
+    <script defer src="/js/product-detail-page.js?v=b7c9a80f"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

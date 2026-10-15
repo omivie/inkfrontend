@@ -98,13 +98,11 @@ test('coupon codes and loyalty points are entered at checkout only; the cart kee
     assert.match(stripComments(read('js/cart-page.js')), /if \(!det && !input\) \{\s*if \(typeof showToast === 'function'\) showToast\('You can enter ' \+ code \+ ' at checkout\.'/);
 });
 
-test('cart summary starts level with the "Cart" title on desktop; the PO control is a full 48px row', () => {
+test('cart summary starts level with the "Cart" title on desktop (ERR-342: summary from row 2, guarantees in row 1)', () => {
     const css = read('css/cart-checkout.css');
     const block = css.slice(css.indexOf('/* ── No dead band beside "Cart"'));
     assert.match(block, /@media \(min-width: 1025px\)/);
     assert.match(block, /grid-template-rows: auto 1fr;/);
     assert.match(block, /section\.cart-page #cart-layout:not\(\[hidden\]\) \{ display: contents; \}/);
-    assert.match(block, /\.cart-summary \{ grid-column: 2; grid-row: 1 \/ span 2; \}/);
-    assert.match(css, /\.quote-pdf__details > summary \{[^}]*min-height: 48px;/);
-    assert.match(read('js/cart-quote-pdf.js'), /<span class="quote-pdf__summary-text">Add company or PO number<\/span>/);
+    assert.match(block, /\.cart-summary \{ grid-column: 2; grid-row: 2; \}/);
 });

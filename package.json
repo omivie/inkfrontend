@@ -60,6 +60,7 @@
     "probe:shop-columns": "node scripts/probe-shop-source-columns.mjs",
     "probe:popular-rows-removed": "node scripts/probe-popular-rows-removed.mjs",
     "probe:pack-names": "node scripts/probe-pack-names.mjs",
+    "probe:product-titles": "node scripts/probe-product-titles.mjs",
     "probe:checkout-delivery": "node scripts/probe-checkout-delivery.mjs",
     "probe:admin-only": "node scripts/probe-admin-only-product.mjs",
     "probe:mobile-ux": "node scripts/probe-mobile-ux.mjs",

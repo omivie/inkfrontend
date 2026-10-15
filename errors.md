@@ -40,6 +40,160 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-345 — Loyalty points: redeem up to the whole order, shipping included (owner, 2026-10-15) — **OPEN (backend); frontend copy shipped**
+
+**Ask:** points redemption stops at the goods subtotal, so a customer can never use points on shipping. The owner wants customers to redeem as many points as they like, up to the full order total including shipping, and a fully covered order should go through at $0 with no card or PayPal step.
+
+**Where the cap lives (measured in code, not assumed):** the frontend sets no limit of its own. The input max and the Max button read `loyalty.max_redeemable_points` from the cart response verbatim (`js/cart-page.js` `renderCartLoyaltyControl`, `js/checkout-page.js` `setupLoyaltyHandler`), and `POST /api/cart/loyalty` re-validates and refuses with `EXCEEDS_CART_SUBTOTAL`. The frontend never computes prices, so this cannot be fixed frontend-side.
+
+**Frontend change (shipped now, harmless before the backend moves):** both loyalty error mappers handle a new code `EXCEEDS_ORDER_TOTAL` ("That’s more than your order total."); `EXCEEDS_CART_SUBTOTAL` is kept. `tests/loyalty-points-jun2026.test.js` requires the new code. Once the backend raises `max_redeemable_points`, the input max and Max button follow with no further frontend change.
+
+**Backend ask (filed 2026-10-16 as §8 of `backend-docs/outbox/backend-asks-2026-10-15.md`; original text kept here):**
+1. Compute `max_redeemable_points` against the order total INCLUDING shipping (after coupon and B2B discounts), divided by `redemption_rate`, rounded down to the 100-point step, capped at the balance.
+2. Validate `POST /api/cart/loyalty` against the same total. Return `EXCEEDS_ORDER_TOTAL` for over-limit requests (the frontend accepts both codes).
+3. Free-shipping threshold: judge it on the goods subtotal BEFORE points, so applying points can never add a shipping charge. Please confirm the current basis.
+4. $0 orders (owner decision: allow, skip payment): Stripe and PayPal cannot charge $0. Add a no-payment place-order path (a new endpoint or `payment_method: "points"`) that succeeds only when the server total is exactly 0 and refuses otherwise. Please send the endpoint name and response shape.
+5. Earning: confirm whether the points-paid portion earns points (earn basis today is goods excluding shipping).
+
+**Frontend follow-up, blocked on item 4:** when `summary.total === 0`, Pay now (`collectCheckoutData` then `PaymentPage.payNow`) must call the no-payment path and hide the wallet and card UI. Do not build it before the contract exists.
+
+---
+## ERR-344 — /cart: "Points to be earned" made more prominent (owner, 2026-10-15) — **SHIPPED (frontend)**
+
+**Ask:** the plain 15px line "Points to be earned: 314 points" under Checkout read like a footnote; make it more prominent and professional.
+
+**Change (CSS only, `css/pages.css` `.cart-points-earn*`):** boxed row (1px border, `--color-background-alt`, `--radius-md`), label left / value right (flex space-between), value 17px bold in `--color-primary`, 8px gap above the green loyalty chip. Markup, ids, `data-points` and the writer `Cart.renderPointsEarn` are unchanged, so absent/zero still hides the box (ERR-063).
+
+**Measured (local, box forced visible with a fake 314 value, chip filled):** 1440 box 340x48, 320 box 288x48, no box or page horizontal overflow, value colour rgb(38, 127, 181). `pages.css?v=` restamped on all 41 pages. Tests: checkout-funnel, cart-summary-layout, fe-master-checklist-6oct, asset-cache-tokens = 50 pass, 1 skipped (asset-cache-tokens, nothing staged).
+
+---
+## ERR-343 — Compatible PDP: same column and image ratios as a genuine PDP (owner, 2026-10-15) — **SHIPPED (frontend)**
+
+**Ask (owner, with screenshot):** compatible product pages should use the same ratios as genuine ones. The compatible
+photo sat in a ~190px column with the printer list squeezed under it, while the buy box took the rest.
+
+**Cause:** `css/pages.css` had a compatible-only desktop override, `.product-detail__layout--compatible
+{ grid-template-columns: minmax(180px, 300px) 1fr; align-items: start }`, plus `object-fit: cover` on its image.
+Genuine pages use the base `1fr 1fr` grid with the image at 64% of the gallery column.
+
+**Fix:** deleted the three desktop `--compatible` rules. `js/product-detail-page.js` still adds the class (harmless
+hook); the <=768 phone block still names it with `align-items: stretch` (comment reworded).
+
+**Measured (localhost, live API, GLC3317BK vs CLC3317BK):** gallery 552x561 and image 353x353 on BOTH at 1478 and
+1280 wide; at 390 both 229x153 image, 0px horizontal overflow. 1280x551: compatible Add to Cart bottom 522px (fits).
+
+**Test:** `tests/pdp-compatible-ratios-oct2026.test.js` (negative control: re-adding the old grid rule fails it).
+
+## ERR-342 — /cart summary: not sticky, guarantees above Subtotal, PDF quote fields in a popup, points balance under points earned (owner, 2026-10-15) — **SHIPPED (frontend)**
+
+**Ask (owner, with screenshots):** the right-hand summary should scroll with the page, not stay pinned;
+Subtotal should line up with the top of the products, with the guarantees (delivery line + trust pills)
+above it; the "Add company or PO number" dropdown should go, with "Download PDF quote" asking for those
+details in a popup; "You have N points … Redeem at checkout." should sit under "Points to be earned".
+
+**Changes:**
+- `css/cart-checkout.css`: `.cart-page .cart-summary { position: static }` (overrides the pages.css sticky base, /cart only).
+- `html/cart.html`: `#cart-delivery`, `#cart-dispatch-countdown` (still adjacent — negative-margin pair) and `#cart-trust-signals`
+  moved out of the aside into `<div class="cart-assurance">`, a sibling AFTER the aside. Same ids, so the cart.js writers are unchanged.
+  ≥1025 grid: assurance = col 2 row 1 (`align-self: end`), summary = col 2 **row 2** (was `1 / span 2`). ≤1024: assurance `order: -1`,
+  so phones read summary ⇒ guarantees ⇒ lines.
+- `#cart-loyalty-chip` moved to directly after `#cart-points-earn` (one writer `Cart._fillLoyaltyChip`, unchanged).
+- `js/cart-quote-pdf.js` (shared by /cart AND /checkout): the `<details>` disclosure is gone; the button opens a native `<dialog>` with
+  the same three optional fields. Only the form submit downloads; Cancel / Esc / backdrop close with no request. Download, status line
+  and every failure message unchanged. The checkout `.quote-pdf .btn` rule was narrowed to `.quote-pdf > .btn` so it no longer restyles
+  the dialog's buttons.
+
+**Measured (localhost, fresh guest context, 2 lines):** 1440×900 — `.cart-summary__totals` top 474 = `.cart-main` top 474 (first line 475);
+after `scrollTo(400)` the summary moved 400px (not pinned). Dialog 420px wide, centred; Cancel ⇒ 0 quote requests; submit ⇒ one
+`GET /api/cart/quote.pdf?company=Acme+Ltd&reference=PO-7`, status "Quote downloaded (…)". 320 wide: summary 339 ⇒ assurance 1103 ⇒
+lines 1373, scrollWidth 310 (no overflow).
+
+**Follow-up (owner, same day):** the three trust pills moved out of `.cart-assurance` into the summary, directly under
+`#cart-loyalty-chip` (before the quote button); only the delivery line + dispatch countdown stay beside the title. That also removed
+the ~130px empty band the first cut opened above the first line: measured 1440×900, assurance 268–367, Subtotal top 367, first line
+368; chip 672–738, pills 746–853, quote 869. 320 wide: scrollWidth 310.
+
+**Tests:** `tests/cart-summary-layout-oct2026.test.js` (new; fake-DOM check that opening and Cancel never download and submit sends the
+fields); `tests/cart-totals-sense-oct2026.test.js` re-pointed to `grid-row: 2`.
+
+---
+## ERR-341 — Product titles: descriptive Smart Ink style title built from fields; supersedes the KCMY-Pack display wording (owner, 2026-10-15) — **SHIPPED (frontend bridge); backend rename OPEN**
+
+**Asked.** The owner showed Smart Ink's product page ("Brother LC432XL Compatible Ink Cartridges – 4 Colour Set BK, C, M, Y – High Yield") and asked for titles that explain the whole product, with page count. The owner chose this format over the ERR-335 `KCMY-Pack` / `CMY-Pack` display wording, and chose both a frontend bridge and a backend rename.
+
+**Format.** `<Brand> <Code> <Genuine|Compatible> <Type>[s] – <Colour | 4 Colour Set BK, C, M, Y | 3 Colour Set C, M, Y> – <High Yield | Extra High Yield>` plus ` (~N pages)` on singles only. A pack's single `page_yield` hides the per-colour yields, so packs never show pages.
+
+**Fix (`js/utils.js` `ProductName`).**
+- New `build(p)` composes the title from `brand`, `source`, `product_type` (ink_cartridge, ink_bottle, toner_cartridge, drum_unit), `color`, `pack_type`, `yield_tier` (XL ⇒ High Yield, XXL ⇒ Extra High Yield, STD ⇒ none) and `page_yield` (floor 50, the same floor as the PDP). The family code is read from the stored name: the word after "for <Brand>" on compatible rows, the word after the type phrase on genuine rows, and it must contain a digit. `series_codes` cannot supply it because it drops the tier ("125" for 125A).
+- `clean(p)` = the composed title, else `legacy(p)` (the old `packRename(dedouble(p))`). Every caller (cards, shop, PDP, cart, drawer, admin demand ranking) changes at once.
+- Fail-soft is loud: `composeMiss(p)` returns the reason (`type_<x>`, `no_code`, `color_mismatch`, `pack_contents_unknown`, `no_source`, …), and `probe:product-titles` counts them.
+- `ProductIdentity.cardKey` now calls `legacy`, so look-alike grouping does not move with the display.
+- `favourites.js`: server favourites use `ProductName.clean(fav.product)` (was the raw name).
+- `product-detail-page.js`: the `document.title` fallback no longer prefixes "Genuine " when the title already says Genuine. The old genuine names also contain "Genuine", so this also fixes a pre-existing "Genuine HP Genuine …".
+
+**Measured** (`npm run probe:product-titles`, READ-ONLY, 4,117/4,117 live rows): 3,345 COMPOSED. Kept with the old name: label_tape 258, no_code 179 (HP ml-volume inks such as "70 130ml", "Photo Value Pack", imaging kits), printer_ribbon 81, fuser_kit 58, photo_paper 55, waste_toner 42, pack_contents_unknown 28, typewriter_ribbon 22, color_mismatch 16 (e.g. "67XXL … Tri-Colour" stored with color "Red"; data bug), belt_unit 11, maintenance_box 9, correction_tape 6, fax_film 5, fax_film_refill 2.
+Playwright at 1280x551, local vs live: C126AC h1 31px vs 31px, Add bottom 490 vs 490. CLC432XLKCMY h1 63px vs 63px (2 lines, clamped per ERR-313), Add bottom 522 vs 522. 320 wide: no horizontal overflow.
+
+**Known limits.**
+- `<title>`, og/JSON-LD, Merchant Center, slugs and emails still use the stored name or `seo.title` (backend). The gain on Google Shopping needs the backend rename below.
+- /shop six-up cards clamp the title to 2 lines, so the colour and tier fall into the ellipsis. The card's own colour line and pack ribbon still show them.
+- OEM part numbers in compatible names ("(CE311A)") are not in the new title.
+
+**Backend ask (filed 2026-10-16 as §2 of `backend-docs/outbox/backend-asks-2026-10-15.md`, rebuilt with §1–§8 from this log and git).** Ask: rename stored `products.name` to the format above, using the CSV from `npm run probe:product-titles` as the spec (`shown_title` where status = COMPOSED). Owner names are needed for the KEPT rows. Add 301s for slug changes, update the supplier importers so new rows arrive in this format, and set `seo.title` to match. This supersedes ERR-335 §2 (KCMY-Pack). When it ships, delete `ProductName.build` and `packRename`.
+
+**Tests.** `tests/product-name-clean-jul2026.test.js`: compose cases (KCMY/CMY pack, single with pages, toner, genuine, drum, implausible yield, XXL), miss reasons with fallback = legacy, and cardKey pinned to `legacy`. The older de-double and pack-wording tests still pin the fallback path.
+
+---
+
+
+## ERR-340 — Product page: "Pack contents & page yields" under the printer list, for singles and every pack (owner, 2026-10-15) — **SHIPPED (frontend); yields PARTIAL until backend data lands**
+
+**Asked.** Under "For use in", tell the customer what is in the box and how many pages each cartridge prints, for singles, 2-packs, CMY and KCMY packs: `1 x Black (LC432XLBK): up to 3,000 pages`, plus a genuine/compatible note.
+
+**Measured on the live API first (read-only GETs).**
+- Pack rows carry no contents. `page_yield` on a pack is null or free text ("2 x 500 A4", "300 x 2").
+- `GET /api/products/:sku/constituents` (public) returns `{ pack_sku, pack_type, constituents:[{sku,name,color,is_active,in_stock}], is_complete }`. It has **no yield and no quantity**. Twin packs list ONE constituent (G45BK-2PK lists G45BK). Some value packs return `[]` with `is_complete:true` (GPG645VPVP, G804VPVP).
+- Single `page_yield` is patchy: every LC432XL and T273 single is blank. Others read "up to 550", "250 ISO/IEC 24711", "1,600", "Up to 600".
+
+**Fix.**
+- `html/product/index.html`: new `#product-contents-slot` after `#product-compat-slot`, so `_mountCompat('')` never wipes it. Phone: `.product-gallery__contents { order: 1; }`, below the printer list.
+- `js/api.js`: `getProductConstituents(sku)`.
+- `js/product-detail-page.js`: `renderPackContents(info)` (ONE writer, called after `renderCompatiblePrinters`). Pure helpers: `yieldPhrase` (leading count, `plausibleYield` threshold; anything else gives no yield), `displaySku` (drops only our G/C marker for the product's source), `packContentsLines`, `packContentsHtml`. A single is one line of itself. A pack is one line per constituent; each yield comes from that constituent's own product row (one `getProduct` per constituent, a marked bridge). A twin pack's count comes from `pack_savings_vs_singles.cartridge_count`, else the "N-Pack" name (bridge).
+- No published yield: the line drops the colon and the yield. Never invented, never guessed from the colour code.
+- Fail-soft LOUD: `data-pack-contents` = `ok` | `partial` (a line has no yield) | `absent` (contents unknown, block hidden) | `error` (constituents fetch failed, block hidden).
+
+**Measured** (local, READ-ONLY Playwright, guest context):
+- 1280x551: GLC432XLKCMY `partial`, 4 lines with no yields (singles blank in the DB). CLC432XLCMY `partial`, 3 lines + compatible note. G45BK-2PK `ok`, "2 x Black (45BK): up to 833 pages". GPG645VPVP `absent`, hidden. GLC3317BK `ok`, "up to 550 pages". G17ABK `ok`, "up to 1,600 pages". The block is in the gallery column below the fold; the Add button is in the other column and does not move.
+- 375x812: GLC432XLKCMY block renders below the buy box (slot top 1897, info bottom 1750).
+- The probe itself tripped the API limiter (`RATE_LIMITED`) after about 25 direct GETs plus 7 page loads. A pack PDP now costs 1 + N extra reads; this is why the bridge must go when the backend adds the fields.
+
+**Backend ask (filed 2026-10-16 as §4 of `backend-docs/outbox/backend-asks-2026-10-15.md`).** Ask text:
+1. Add `quantity` and `page_yield` to each `constituents[]` row. FE then drops the per-constituent `getProduct` reads and the twin-pack count bridge.
+2. `constituents: []` with `is_complete: true` on GPG645VPVP and G804VPVP (and any like them) contradicts itself. Fill the rows or return `is_complete: false`.
+3. Fill blank `page_yield` on singles (all LC432XL and T273 seen), as one number.
+
+**Tests.** `tests/pdp-pack-contents-oct2026.test.js` (vm-runs the pure helpers on every live yield shape, KCMY/twin/empty/single cases, escaping, wiring, phone order).
+
+---
+
+## ERR-339 — Product page: "For use in your printer" moved under the photo, photo 20% smaller again, click/tap opens it large (owner, 2026-10-15) — **RESOLVED (frontend)**
+
+**Reported.** The owner's screenshot of `/products/…/G62CLR` (1920 wide) showed the ERR-318 layout: the printer list sat above the photo. The owner asked for the list directly under the photo, the photo 20% smaller, and a way to click it to see it larger. Hover magnify already existed (`initProductImageZoom`) and is unchanged.
+
+**Fix.**
+- `html/product/index.html`: `#product-compat-slot` now comes after `#product-image` inside `.product-gallery`. Phones are unchanged: the gallery is `display: contents` and the slot keeps `order: 1`, so the list still sits below the buy box.
+- `css/pages.css`: `.product-detail__layout .product-gallery__main` width 80% to 64% (80% less 20%). The phone `max-height: 176px` is unchanged; the request was about the desktop view.
+- `js/product-detail-page.js`: new `initProductImageLightbox(container)`, called right after the hover zoom. It runs on every pointer type (the hover zoom skips touch). Click, tap, Enter or Space opens one native `<dialog id="pdp-lightbox">` with the high-res `data-zoom-src`. Esc, the × button, the image or the backdrop close it. The image error handler removes `data-enlarge`, so a fallback tile is never enlarged. Listeners bind once per container, and the image is read at click time, so a bfcache re-render does not stack handlers or show a stale image.
+- The global reset zeroes margins, so a modal `<dialog>` first rendered at the top-left. `.pdp-lightbox { margin: auto }` centres it.
+
+**Measured** (local, `npx serve`, READ-ONLY Playwright, G62CLR):
+- 1920x1080: image 353x353 in a 552px column (64%). List at y 624 = image bottom 608 + 16px gap. Dialog 832x832, centred. Esc closes it.
+- 1280x551: Add bottom at y 499 (info column unchanged). Dialog 507x507.
+- 390x844 (touch): list y 1641, below Add (y 759). Tap opens a 359x359 dialog.
+
+**Tests.** `tests/pdp-layout-compat-left-oct2026.test.js`: the order assertion is flipped (image, then slot), the width is 64%, and a new vm test drives the lightbox (opens with the zoom source, binds once, never opens after `data-enlarge` is removed, never arms without a photo).
+
+---
 
 ## ERR-338 — Admin centre on an iPhone: the right-hand table columns could not be reached, and the floating menu button covered the filter bar on every page (owner, 2026-10-15) — **RESOLVED (frontend)**
 

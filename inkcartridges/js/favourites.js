@@ -133,7 +133,8 @@ const Favourites = {
             this.items = favourites.map(fav => ({
                 id: fav.product_id,
                 sku: fav.product_sku,
-                name: fav.product?.name || '',
+                // Same display title as cards and the PDP (ERR-341).
+                name: (fav.product && typeof ProductName !== 'undefined') ? ProductName.clean(fav.product) : (fav.product?.name || ''),
                 price: fav.product?.retail_price || 0,
                 image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
                 brand: fav.product?.brand?.name || '',

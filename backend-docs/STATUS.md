@@ -13,14 +13,19 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 and `git show ac61717a:backend-docs/outbox/<file>`. The `sent/` evidence tables and the old outbox rows are
 in `git show ac61717a:backend-docs/STATUS.md`.
 
-| § | Ask | Written | Status (2026-10-15) |
+| § | Ask | Written | Status (2026-10-16) |
 |---|---|---|---|
 | 1 | BF-102 `/api/shop` series count vs `?code=` listing (ERR-337) | 2026-10-15 | open |
-| 2 | Pack names `KCMY-Pack` / `CMY-Pack` (ERR-335) | 2026-10-15 | open |
+| 2 | Stored product names to the descriptive title format (ERR-341; supersedes ERR-335 KCMY-Pack) | 2026-10-15 | open |
 | 3 | Admin Pricing page asks 1–8 (ERR-336) | 2026-10-15 | open; `pricing.js` `SPEC` cites this file, and `tests/admin-pricing-page-oct2026.test.js` requires it to exist |
-| 4 | Admin net-margin sort keys (ERR-311) | 2026-10-07 | open. **Not measured:** the admin GET needs a login. FE still ships `GROSS_SORT_NOTE` |
-| 5 | Quote PDF defects + design (ERR-316) | 2026-10-13 | open. **Not measured:** a download needs a guest cart write |
-| 6 | Notes on the 7 Oct response (ERR-312/313) | 2026-10-08 | 2 confirmations open (`evidence.spend` units; `stock_quantity` on cart items) |
+| 4 | Pack contents: `quantity` + `page_yield` per constituent (ERR-340) | 2026-10-15 | open; `api.js` cites §4 |
+| 5 | Admin net-margin sort keys (ERR-311) | 2026-10-07 | open. **Not measured:** the admin GET needs a login. FE still ships `GROSS_SORT_NOTE` |
+| 6 | Quote PDF defects + design (ERR-316) | 2026-10-13 | open. **Not measured:** a download needs a guest cart write |
+| 7 | Confirmations from the 7 Oct round + email 12pm cutoff (ERR-312/313/319) | 2026-10-08 | 3 confirmations open |
+| 8 | Loyalty points up to whole order incl. shipping; $0 no-payment path (ERR-345) | 2026-10-15 | open; FE $0 Pay-now blocked on item 4 |
+
+**2026-10-16:** the file was never committed on 10-15 (998e114e deleted the old outbox docs but not this one's
+predecessor text). Rebuilt from `errors.md` ERR-311/316/335–345 and `git show 998e114e^:backend-docs/outbox/`.
 
 **Closed and deleted 2026-10-15:**
 - `dispatch-cutoff-12pm-FE-handoff-oct2026.md` (ERR-319). Measured 12:16 NZDT: trust, PDP `delivery_estimate`, `/api/cart` and prerender meta all say 12:00/12pm. Email templates were NOT checked; the combined file asks the backend to confirm them.

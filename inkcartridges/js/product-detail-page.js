@@ -585,7 +585,8 @@
             // says so — never from `!isCompatible`, which is also true for
             // ribbons and unknown-source items (a false "Genuine …" claim in
             // the indexed <title>). MC audit, Jul 2026.
-            const genuinePrefix = info.source === 'genuine' ? 'Genuine ' : '';
+            // The descriptive title (ERR-341) already says "Genuine"; never twice.
+            const genuinePrefix = info.source === 'genuine' && !/\bGenuine\b/i.test(info.displayName) ? 'Genuine ' : '';
             const computedTitle = `${genuinePrefix}${info.displayName} NZ | InkCartridges.co.nz`;
             document.title = seo.title || computedTitle;
 
@@ -995,12 +996,15 @@
                         // A failed image must not stay hover-zoomable — the
                         // fallback tile/placeholder is not a photo to magnify.
                         productImageEl.classList.remove('product-gallery__main--zoomable');
+                        productImageEl.removeAttribute('data-enlarge');
                         this.style.transform = '';
                     }, { once: true });
                 });
 
                 // Hover-to-magnify: cursor-follow inner zoom on the main photo.
                 initProductImageZoom(productImageEl);
+                // Click/tap to see it large — every pointer type, not just hover.
+                initProductImageLightbox(productImageEl);
             } else {
                 // No image (or stale swatch image stripped above). Genuine-no-
                 // color-tile invariant: only compatible products may show a
@@ -1051,6 +1055,9 @@
 
             // Compatible devices: printers/typewriters
             this.renderCompatiblePrinters(info);
+
+            // What's in the box + page yields, under the printer list.
+            this.renderPackContents(info);
 
             // Frequently bought together
             this.renderBoughtTogether(info);
@@ -2152,6 +2159,123 @@
                     <strong class="product-printers-banner__label">For use in your printer</strong>
                     <ul class="compat-groups">${rows}</ul>
                 </div>`);
+        },
+
+        /**
+         * PURE: "up to 3,000 pages" from a `page_yield` value ("3000", "3,000",
+         * "up to 550", "250 ISO/IEC 24711", 1600); '' when it carries no
+         * plausible leading count ("2 x 500 A4", "", null). Never invents one.
+         */
+        yieldPhrase(raw) {
+            if (raw == null) return '';
+            const m = String(raw).trim().replace(/^up\s+to\s+/i, '').match(/^\d[\d,]*/);
+            const n = m ? this.plausibleYield(m[0]) : null;
+            return n ? `up to ${n.toLocaleString('en-NZ')} pages` : '';
+        },
+
+        /** PURE: the printed code, without our genuine/compatible SKU marker (GLC432XLBK → LC432XLBK). */
+        displaySku(sku, source) {
+            const s = String(sku || '').toUpperCase();
+            const marker = source === 'genuine' ? 'G' : source === 'compatible' ? 'C' : '';
+            return marker && s.startsWith(marker) && s.length > 1 ? s.slice(1) : s;
+        },
+
+        /**
+         * PURE: one line per cartridge in the box — `[{ qty, color, code, yieldText }]`.
+         * A single is itself; a pack is its constituents (each yield from that
+         * constituent's own row in `yieldsBySku`). [] when the contents are not
+         * known — never guessed from the pack's colour code.
+         */
+        packContentsLines(info, constituents, yieldsBySku) {
+            if (!info) return [];
+            if (!info.pack_type || info.pack_type === 'single') {
+                if (!info.color) return [];
+                return [{ qty: 1, color: String(info.color), code: this.displaySku(info.sku, info.source), yieldText: this.yieldPhrase(info.pageYield) }];
+            }
+            const rows = Array.isArray(constituents) ? constituents.filter(c => c && c.sku) : [];
+            // ponytail: twin packs list ONE constituent with no quantity; the
+            // count comes from pack savings, else the "2-Pack" name. Delete when
+            // the backend sends `quantity` per constituent (outbox §4).
+            let soleQty = 1;
+            if (rows.length === 1) {
+                const n = Number(info.pack_savings_vs_singles && info.pack_savings_vs_singles.cartridge_count);
+                const m = String(info.name || '').match(/(\d+)\s*-?\s*Pack\b/i);
+                soleQty = n > 1 ? n : (m && Number(m[1]) > 1 ? Number(m[1]) : 1);
+            }
+            return rows.map(c => ({
+                qty: rows.length === 1 ? soleQty : 1,
+                color: String(c.color || ''),
+                code: this.displaySku(c.sku, info.source),
+                yieldText: this.yieldPhrase(yieldsBySku && yieldsBySku[c.sku]),
+            }));
+        },
+
+        /** PURE: the block's HTML; '' for no lines. */
+        packContentsHtml(info, lines) {
+            if (!lines.length) return '';
+            const esc = s => Security.escapeHtml(String(s));
+            const items = lines.map(l => {
+                const label = `${l.qty} x ${l.color ? `${l.color} ` : ''}(${l.code})`;
+                return l.yieldText
+                    ? `<li><strong>${esc(label)}:</strong> ${esc(l.yieldText)}</li>`
+                    : `<li><strong>${esc(label)}</strong></li>`;
+            }).join('');
+            const count = lines.reduce((sum, l) => sum + l.qty, 0);
+            const noun = count > 1 ? 'cartridges' : 'cartridge';
+            const brand = info.brandName && info.brandName !== 'Unknown' ? info.brandName : '';
+            const code = Array.isArray(info.series_codes) && info.series_codes[0] ? info.series_codes[0] : '';
+            let note = '';
+            if (info.source === 'genuine') {
+                note = `Genuine ${brand ? `${brand} ` : ''}${noun}.`;
+            } else if (info.source === 'compatible') {
+                note = `Compatible ${noun}, made to replace ${brand ? `genuine ${brand}${code ? ` ${code}` : ''}` : 'the genuine original'}.`;
+            }
+            return `<h2 class="pack-contents__title">Pack contents &amp; page yields</h2>`
+                + `<ul class="pack-contents__list">${items}</ul>`
+                + (note ? `<p class="pack-contents__note">${esc(note)}</p>` : '');
+        },
+
+        /**
+         * "Pack contents & page yields" under the printer list. ONE writer of
+         * #product-contents-slot. Fail-soft but LOUD: `data-pack-contents` is
+         * ok | partial (a line has no published yield) | absent (contents not
+         * known — e.g. constituents [] on GPG645VPVP) | error (fetch failed).
+         */
+        async renderPackContents(info) {
+            const slot = document.getElementById('product-contents-slot');
+            if (!slot) return;
+            const token = this._packContentsToken = {};
+            const paint = (state, html) => {
+                if (token !== this._packContentsToken) return;
+                slot.dataset.packContents = state;
+                slot.innerHTML = html;
+                slot.hidden = !html;
+            };
+            paint('absent', '');
+            if (!info || info.category === 'ribbon') return;
+
+            let constituents = null;
+            const yieldsBySku = {};
+            if (info.pack_type && info.pack_type !== 'single') {
+                try {
+                    const res = await API.getProductConstituents(info.sku);
+                    constituents = (res && res.ok && res.data && res.data.constituents) || null;
+                    if (!constituents) return paint('error', '');
+                    // ponytail: one product read per constituent for its yield
+                    // (≤4 usually). Drop when constituents carry page_yield (outbox §4).
+                    await Promise.all(constituents.filter(c => c && c.sku).map(async c => {
+                        try {
+                            const r = await API.getProduct(c.sku);
+                            yieldsBySku[c.sku] = r && r.ok && r.data ? r.data.page_yield : null;
+                        } catch (_) { yieldsBySku[c.sku] = null; }
+                    }));
+                } catch (_) {
+                    return paint('error', '');
+                }
+            }
+            const lines = this.packContentsLines(info, constituents, yieldsBySku);
+            if (!lines.length) return paint('absent', '');
+            paint(lines.every(l => l.yieldText) ? 'ok' : 'partial', this.packContentsHtml(info, lines));
         },
 
         /**
@@ -3575,6 +3699,51 @@
         container.addEventListener('mouseleave', () => {
             img.style.transform = '';
             img.style.transformOrigin = '';
+        });
+    }
+
+    // ============================================
+    // CLICK-TO-ENLARGE (native <dialog> lightbox)
+    // ============================================
+    // Owner, 15 Oct 2026: the photo is smaller now, so clicking (or tapping)
+    // it opens it large. Unlike the hover zoom this runs on touch too. The
+    // image error handler removes `data-enlarge`, so a fallback tile is never
+    // enlarged. Esc closes natively; so do a backdrop click and the × button.
+    function initProductImageLightbox(container) {
+        if (!container || typeof HTMLDialogElement === 'undefined') return;
+        if (!container.querySelector('img[data-fallback]')) return; // only real photos, never fallbacks
+
+        container.setAttribute('data-enlarge', '');
+        container.setAttribute('role', 'button');
+        container.setAttribute('tabindex', '0');
+        container.setAttribute('aria-label', 'Enlarge image');
+
+        const open = () => {
+            // Read the image at click time: a re-render (bfcache restore)
+            // replaces it, while the listeners below are bound only once.
+            const img = container.querySelector('img');
+            if (!img || !container.hasAttribute('data-enlarge')) return;
+            let dlg = document.getElementById('pdp-lightbox');
+            if (!dlg) {
+                dlg = document.createElement('dialog');
+                dlg.id = 'pdp-lightbox';
+                dlg.className = 'pdp-lightbox';
+                dlg.innerHTML = '<button type="button" class="pdp-lightbox__close" aria-label="Close">&times;</button><img alt="">';
+                // Any click closes: the ×, the image, or the backdrop (a
+                // backdrop click targets the <dialog> itself).
+                dlg.addEventListener('click', () => dlg.close());
+                document.body.appendChild(dlg);
+            }
+            const big = dlg.querySelector('img');
+            big.src = img.dataset.zoomSrc || img.currentSrc || img.src;
+            big.alt = img.alt;
+            if (!dlg.open) dlg.showModal();
+        };
+        if (container.dataset.enlargeBound) return;
+        container.dataset.enlargeBound = '1';
+        container.addEventListener('click', open);
+        container.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
         });
     }
 

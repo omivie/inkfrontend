@@ -2137,6 +2137,18 @@ const API = {
         return this.getPublic(`/api/products/${encodeURIComponent(sku)}/for-use-in`);
     },
 
+    /**
+     * What a pack is made of. Answers `{ ok:true, data:{ pack_sku, pack_type,
+     * constituents:[{ sku, name, color, is_active, in_stock }], is_complete } }`.
+     * No per-cartridge yield or quantity yet (outbox backend-asks-2026-10-15 §4),
+     * and some value packs answer `[]` with is_complete:true (GPG645VPVP).
+     *
+     * @param {string} sku - Pack SKU
+     */
+    async getProductConstituents(sku) {
+        return this.getPublic(`/api/products/${encodeURIComponent(sku)}/constituents`);
+    },
+
     // =========================================================================
     // RIBBONS
     // =========================================================================

@@ -299,7 +299,8 @@ test('favourites.loadFromServer sources name from fav.product.name (live, not ca
     const idx = favSrc.indexOf('loadFromServer');
     assert.ok(idx !== -1);
     const slice = favSrc.slice(idx, idx + 4000);
-    assert.match(slice, /name\s*:\s*fav\.product\?\.name/,
+    // ERR-341: the live row goes through ProductName.clean (same title as cards).
+    assert.match(slice, /name\s*:\s*\(fav\.product && typeof ProductName !== 'undefined'\) \? ProductName\.clean\(fav\.product\) : \(fav\.product\?\.name/,
         'loadFromServer must map name from fav.product?.name (live API field)');
 });
 

@@ -58,7 +58,8 @@ test('compatModel leaves clean and cross-brand labels untouched', () => {
 const PDP = read('js/product-detail-page.js');
 
 test('PDP <title> prefix "Genuine" is gated on an explicit source', () => {
-    assert.ok(PDP.includes("info.source === 'genuine' ? 'Genuine '"),
+    // ERR-341: also skipped when the descriptive title already says Genuine.
+    assert.match(PDP, /const genuinePrefix = info\.source === 'genuine' (\?|&&)/,
         'genuinePrefix must key off info.source === "genuine", not !isCompatible');
     assert.ok(!/genuinePrefix\s*=\s*\([^)]*!info\.isCompatible/.test(PDP),
         'genuinePrefix must not derive "Genuine" from !info.isCompatible');

@@ -1795,8 +1795,82 @@ const ProductName = (function () {
         return out;
     }
 
-    function clean(product) {
+    // ── Descriptive title (owner, 2026-10-15, ERR-341) ──────────────────────
+    // Smart Ink style: every fact a buyer needs is in the title.
+    //   "Brother LC432XL Compatible Ink Cartridges – 4 Colour Set BK, C, M, Y – High Yield"
+    //   "HP 126A Compatible Toner Cartridge – Cyan (~1,000 pages)"
+    // Built from fields (brand, source, product_type, color, pack_type,
+    // yield_tier, page_yield) plus the family code read from the stored name.
+    // `series_codes` cannot supply the code: it drops the tier ("125" for 125A).
+    // Supersedes the KCMY-Pack display grammar (packRename) for every row it
+    // can compose. Any row it cannot compose keeps the old display name, and
+    // composeMiss() names the reason so probe:product-titles counts it.
+    // BRIDGE: names are backend data; delete once stored names carry this
+    // format (outbox backend-asks-2026-10-15.md).
+    const TYPE_WORDS = {
+        ink_cartridge: 'Ink Cartridge',
+        ink_bottle: 'Ink Bottle',
+        toner_cartridge: 'Toner Cartridge',
+        drum_unit: 'Drum Unit',
+    };
+    const SETS = { KCMY: '4 Colour Set BK, C, M, Y', CMYK: '4 Colour Set BK, C, M, Y', BCMY: '4 Colour Set BK, C, M, Y', CMY: '3 Colour Set C, M, Y' };
+    const TIERS = { XL: 'High Yield', XXL: 'Extra High Yield' };
+    const MIN_YIELD = 50;   // same floor as ProductDetailPage.MIN_PLAUSIBLE_YIELD
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Returns { title } or { miss: reason }. Never throws, never guesses.
+    function build(p) {
+        if (!p || !p.name) return { miss: 'no_name' };
+        const name = collapseWs(String(p.name));
+        const brand = String((p.brand && p.brand.name) || p.brand || '').trim();
+        if (!brand) return { miss: 'no_brand' };
+        const source = p.source === 'genuine' ? 'Genuine' : p.source === 'compatible' ? 'Compatible' : '';
+        if (!source) return { miss: 'no_source' };
+        const typeWord = TYPE_WORDS[p.product_type];
+        if (!typeWord) return { miss: 'type_' + (p.product_type || 'none') };
+
+        // Family code: compatible = word after "for <Brand>"; genuine = word
+        // after the type phrase. Must carry a digit.
+        const m = source === 'Compatible'
+            ? name.match(new RegExp('\\bfor\\s+' + esc(brand) + '\\s+(\\S+)', 'i'))
+            : name.match(new RegExp('^' + esc(brand) + '\\s+Genuine\\s+\\S+\\s+' + esc(typeWord) + '\\s+(\\S+)', 'i'));
+        const code = m && m[1].replace(/[(),]/g, '');
+        if (!code || !/\d/.test(code)) return { miss: 'no_code' };
+
+        const color = String(p.color || '').trim();
+        const isPack = p.pack_type && p.pack_type !== 'single';
+        let colourPart;
+        if (isPack) {
+            colourPart = SETS[color.toUpperCase()];
+            if (!colourPart) return { miss: 'pack_contents_unknown' };
+        } else {
+            if (!color) return { miss: 'no_color' };
+            // The stored name must agree with the colour field; a mismatch is
+            // a data bug (e.g. "67XXL … Tri-Colour" with color "Red").
+            if (!new RegExp('\\b' + esc(color) + '\\b', 'i').test(name)) return { miss: 'color_mismatch' };
+            colourPart = color;
+        }
+
+        const parts = [`${brand} ${code} ${source} ${typeWord}${isPack ? 's' : ''}`, colourPart];
+        const tier = TIERS[String(p.yield_tier || '').toUpperCase()];
+        if (tier) parts.push(tier);
+        let title = parts.join(' – ');
+        // Pages on singles only: a pack's one number hides per-colour yields.
+        const n = parseInt(String(p.page_yield == null ? '' : p.page_yield).replace(/[,\s]/g, ''), 10);
+        if (!isPack && Number.isFinite(n) && n >= MIN_YIELD) title += ` (~${n.toLocaleString('en-NZ')} pages)`;
+        return { title };
+    }
+
+    function legacy(product) {
         return packRename(dedouble(product), product);
+    }
+
+    function clean(product) {
+        return build(product).title || legacy(product);
+    }
+
+    function composeMiss(product) {
+        return build(product).miss || null;
     }
 
     function dedouble(product) {
@@ -1892,7 +1966,7 @@ const ProductName = (function () {
         return s.replace(/\s+/g, ' ').trim();
     }
 
-    return { clean, compatModel };
+    return { clean, legacy, composeMiss, compatModel };
 })();
 if (typeof window !== 'undefined') window.ProductName = ProductName;
 
@@ -3846,8 +3920,10 @@ const ProductIdentity = (function () {
      */
     function cardKey(product) {
         if (!product) return '';
-        const title = (typeof ProductName !== 'undefined' && ProductName.clean)
-            ? ProductName.clean(product)
+        // legacy, not clean: the descriptive title (ERR-341) must not move
+        // look-alike grouping.
+        const title = (typeof ProductName !== 'undefined' && ProductName.legacy)
+            ? ProductName.legacy(product)
             : (product.name || '');
         const t = norm(title);
         if (!t) return '';                       // no title ⇒ nothing to compare

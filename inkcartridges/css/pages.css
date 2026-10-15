@@ -1828,14 +1828,22 @@
     align-self: start;
 }
 
-/* "For use in your printer" sits above the image, and the image follows
-   directly under it at 80% of the column (owner, 12 Oct 2026: "20% smaller",
-   no longer stretched to the info column's height and centred in it). */
+/* The image sits at the top of the gallery column at 64% of its width, and
+   "For use in your printer" follows directly UNDER it (owner, 15 Oct 2026:
+   list moved below the photo, photo another 20% smaller — 80% on 12 Oct). */
 .product-gallery__compat:empty { display: none; }
 .product-gallery__compat .product-printers-banner { margin-bottom: 0; }
 
+/* "Pack contents & page yields" (owner, 15 Oct 2026), under the printer list.
+   ONE writer: renderPackContents(); hidden when contents are not known. */
+.product-gallery__contents { font-size: var(--font-size-sm); line-height: 1.6; }
+.pack-contents__title { font-size: var(--font-size-lg, 1.125rem); font-weight: 700; margin: 0 0 var(--spacing-xs, 4px); }
+.pack-contents__list { margin: 0; padding-left: 1.25em; list-style: disc; }
+.pack-contents__list strong { font-weight: 600; }
+.pack-contents__note { margin: var(--spacing-xs, 4px) 0 0; color: var(--color-text-muted, #555); }
+
 .product-detail__layout .product-gallery__main {
-    width: 80%;
+    width: 64%;
     margin: 0 auto;
     background-color: var(--product-image-bg);
 }
@@ -1884,24 +1892,49 @@
     will-change: transform;
 }
 
+/* Click/tap the photo to see it large (owner, 15 Oct 2026). Native <dialog>,
+   built by initProductImageLightbox in js/product-detail-page.js. */
+.product-gallery__main[data-enlarge] { cursor: zoom-in; }
+.pdp-lightbox {
+    /* The global reset zeroes margins; a modal <dialog> centres via auto. */
+    margin: auto;
+    max-width: 92vw;
+    max-height: 92vh;
+    padding: var(--spacing-md);
+    border: 0;
+    border-radius: var(--radius-xl);
+    background: #fff;
+}
+.pdp-lightbox::backdrop { background: rgba(0, 0, 0, 0.75); }
+.pdp-lightbox img {
+    display: block;
+    max-width: calc(92vw - 2 * var(--spacing-md));
+    max-height: calc(92vh - 2 * var(--spacing-md));
+    object-fit: contain;
+    cursor: zoom-out;
+}
+.pdp-lightbox__close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+
 .product-detail__layout--color-only {
     grid-template-columns: auto 1fr;
     gap: var(--spacing-xl);
 }
 
-.product-detail__layout--compatible {
-    grid-template-columns: minmax(180px, 300px) 1fr;
-    align-items: start;
-}
-
-.product-detail__layout--compatible .product-gallery__main {
-    position: relative;
-    aspect-ratio: 1;
-}
-
-.product-detail__layout--compatible .product-gallery__main img {
-    object-fit: cover;
-}
+/* No `--compatible` desktop override: a compatible PDP uses the same 1fr/1fr
+   grid and 64% image as a genuine one (owner, 15 Oct 2026, ERR-343). */
 
 .product-gallery__main--color-only {
     aspect-ratio: auto;
@@ -2867,14 +2900,14 @@
     .product-detail__layout--compatible {
         display: flex;
         flex-direction: column;
-        /* --compatible sets align-items: start for the grid; in a flex column
-           that sizes every child to max-content (measured: a 1421px-wide page
-           on a 390px phone). */
+        /* align-items: start in a flex column sizes every child to
+           max-content (measured: a 1421px-wide page on a 390px phone). */
         align-items: stretch;
     }
     .product-detail__layout .product-gallery { display: contents; }
     .product-gallery__main--color-only { align-self: center; }
     .product-gallery__compat { order: 1; }
+    .product-gallery__contents { order: 1; }
 }
 
 
@@ -13763,10 +13796,33 @@ body.page-shop {
 .cart-actions__continue:hover { color: var(--color-primary, var(--color-text)); }
 /* The checkout button answers the click at once (§8.1: a dead-looking button). */
 #checkout-btn.is-busy, .cart-summary__checkout-btn.is-busy { cursor: progress; opacity: 0.85; }
-/* "Points to be earned: N points" under the checkout button. */
-.cart-points-earn { margin-top: 10px; }
+/* "Points to be earned: N points" under the checkout button. A boxed row in
+   the summary's label/value rhythm, value in brand blue, so it reads as part
+   of the order rather than a footnote (owner 2026-10-15, ERR-344). */
+.cart-points-earn {
+    margin: 12px 0 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-background-alt);
+}
 .cart-points-earn[hidden] { display: none; }
-.cart-points-earn__line { margin: 0; font-size: 0.9375rem; color: var(--color-text); }
+.cart-points-earn__line {
+    margin: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--color-text);
+}
+.cart-points-earn__line strong {
+    font-size: 1.0625rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    white-space: nowrap;
+}
 /* Desktop /cart: toasts at the TOP right. The checkout button now sits in the
    bottom-right of a 1366x768 screen (y 665–710), exactly where the bottom-right
    toast stack lands — measured covering it for ~6s after an add. Phones already

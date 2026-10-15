@@ -34,9 +34,9 @@
     <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
     <link rel="stylesheet" href="/css/components.css?v=9e9d2fd7">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=798de610">
+    <link rel="stylesheet" href="/css/pages.css?v=9f6360a3">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=833e4ff9">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=705728f2">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
     <meta name="twitter:description" content="Review your shopping cart - InkCartridges.co.nz">
@@ -338,6 +338,12 @@
                         <div class="cart-points-earn" id="cart-points-earn" data-testid="cart-points-earn" data-points="absent" hidden>
                             <p class="cart-points-earn__line">Points to be earned: <strong id="cart-points-earn-value"></strong></p>
                         </div>
+                        <!-- Balance + "Redeem at checkout" sits directly under the points line
+                             (owner 2026-10-15, ERR-342). ONE writer Cart._fillLoyaltyChip. -->
+                        <div class="cart-summary__loyalty-chip" id="cart-loyalty-chip" hidden></div>
+                        <!-- Trust pills directly under the points balance (owner 2026-10-15,
+                             ERR-342 follow-up). Filled by cart.js renderCartSignals. -->
+                        <div class="cart-trust-signals" id="cart-trust-signals" hidden></div>
 
                         <!-- PDF quote for a buyer's internal approval (CRO handoff 2026-10-04 §2).
                              js/cart-quote-pdf.js fills it; GET /api/cart/quote.pdf. -->
@@ -376,26 +382,11 @@
                         <!-- Coupon codes and loyalty points are applied at CHECKOUT only
                              (owner, 2026-10-13, ERR-316 phase 6): /checkout carries both
                              controls. The summary rows above still report any discount
-                             already applied, and #cart-loyalty-chip says "Redeem at
-                             checkout". The ?coupon= recovery link still auto-applies
+                             already applied, and #cart-loyalty-chip (under "Points to be
+                             earned") says "Redeem at checkout". The ?coupon= recovery link still auto-applies
                              (cart-page.js, API only — it never needed this form). -->
 
-                        <div class="cart-summary__loyalty-chip" id="cart-loyalty-chip" hidden></div>
-
-                        <!-- Keep #cart-delivery immediately before #cart-dispatch-countdown:
-                             .cart-dispatch pulls itself up with a negative top margin that
-                             assumes .cart-delivery's margin-bottom is the gap it cancels. -->
-                        <div class="cart-delivery" id="cart-delivery" hidden></div>
-                        <!-- Same-day dispatch countdown (traffic-conversion-jul2026 §4).
-                             Ticks client-side from delivery_estimate.cutoff_remaining_seconds;
-                             hidden whenever same_day_eligible is false (incl. weekends).
-                             role="timer" + aria-live="off" — a per-second polite live
-                             region would be read aloud on every tick. -->
-                        <p class="cart-dispatch" id="cart-dispatch-countdown"
-                           data-testid="cart-dispatch-countdown" role="timer" aria-live="off" hidden></p>
                         <div class="cart-saved-until" id="cart-saved-until" hidden></div>
-
-                        <div class="cart-trust-signals" id="cart-trust-signals" hidden></div>
 
                         <!-- Merchant Center readiness: all seven methods must stay on
                              this page (tests/merchant-center-readiness.test.js). -->
@@ -439,6 +430,26 @@
                             </svg>
                             </div>
                     </aside>
+
+                    <!-- Delivery estimate + dispatch countdown sit ABOVE the summary on
+                         desktop, beside the "Cart" title, so the Subtotal row starts level
+                         with the first cart line (owner 2026-10-15, ERR-342; the trust pills
+                         moved under the points balance). Placed by the ≥1025 grid in
+                         cart-checkout.css; on phones it follows the summary (order -1, DOM
+                         order). Same ids, so cart.js writers are unchanged. -->
+                    <div class="cart-assurance" data-testid="cart-assurance">
+                        <!-- Keep #cart-delivery immediately before #cart-dispatch-countdown:
+                             .cart-dispatch pulls itself up with a negative top margin that
+                             assumes .cart-delivery's margin-bottom is the gap it cancels. -->
+                        <div class="cart-delivery" id="cart-delivery" hidden></div>
+                        <!-- Same-day dispatch countdown (traffic-conversion-jul2026 §4).
+                             Ticks client-side from delivery_estimate.cutoff_remaining_seconds;
+                             hidden whenever same_day_eligible is false (incl. weekends).
+                             role="timer" + aria-live="off" — a per-second polite live
+                             region would be read aloud on every tick. -->
+                        <p class="cart-dispatch" id="cart-dispatch-countdown"
+                           data-testid="cart-dispatch-countdown" role="timer" aria-live="off" hidden></p>
+                    </div>
                 </div>
 
                 <div class="cart-empty" id="cart-empty">
@@ -489,7 +500,7 @@
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/shipping.js?v=d9f0ced7"></script>
     <script defer src="/js/utils.js?v=f1a86a05"></script>
-    <script defer src="/js/api.js?v=ae9d0845"></script>
+    <script defer src="/js/api.js?v=19ce4730"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
@@ -506,7 +517,7 @@
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/cart-page.js?v=38240ff9"></script>
     <script defer src="/js/cart-deep-link.js?v=4f6612d5"></script>
-    <script defer src="/js/cart-quote-pdf.js?v=2cf94b58"></script>
+    <script defer src="/js/cart-quote-pdf.js?v=4c494f9e"></script>
     <script defer src="/js/cart-wallet.js?v=bc377241"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>

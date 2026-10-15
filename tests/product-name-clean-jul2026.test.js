@@ -246,3 +246,58 @@ test('pack wording: packs whose contents the display cannot know stay verbatim',
         assert.equal(ProductName.clean(product), product.name, product.name);
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Descriptive title (owner, 2026-10-15, ERR-341): Smart Ink style, built from
+// fields. Rows it cannot build keep the old display (pinned above) and
+// composeMiss() names why, so probe:product-titles can count them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const row = (o) => ({ brand: { name: 'Brother' }, source: 'compatible', product_type: 'ink_cartridge', pack_type: 'single', yield_tier: 'STD', ...o });
+
+test('descriptive title: singles, packs, genuine, toner, drum', () => {
+    const cases = [
+        [row({ name: 'LC432XLKCMY Compatible Ink Cartridge for Brother LC432XL KCMY-Pack', color: 'KCMY', pack_type: 'value_pack', yield_tier: 'XL' }),
+            'Brother LC432XL Compatible Ink Cartridges – 4 Colour Set BK, C, M, Y – High Yield'],
+        [row({ name: 'LC432XLCMY Compatible Ink Cartridge for Brother LC432XL CMY-Pack', color: 'CMY', pack_type: 'value_pack', yield_tier: 'XL', page_yield: '1,500' }),
+            'Brother LC432XL Compatible Ink Cartridges – 3 Colour Set C, M, Y – High Yield'],   // no pages on packs
+        [row({ name: 'LC432XLBK Compatible Ink Cartridge for Brother LC432XL Black', color: 'Black', yield_tier: 'XL', page_yield: '3,000' }),
+            'Brother LC432XL Compatible Ink Cartridge – Black – High Yield (~3,000 pages)'],
+        [row({ brand: { name: 'HP' }, name: '126AC Compatible Toner Cartridge for HP 126A (CE311A) Cyan', color: 'Cyan', product_type: 'toner_cartridge', page_yield: '1,000' }),
+            'HP 126A Compatible Toner Cartridge – Cyan (~1,000 pages)'],
+        [row({ brand: 'Epson', source: 'genuine', name: 'Epson Genuine 288XLC Ink Cartridge 288XL Cyan (450 pages)', color: 'Cyan', yield_tier: 'XL', page_yield: '450' }),
+            'Epson 288XL Genuine Ink Cartridge – Cyan – High Yield (~450 pages)'],
+        [row({ source: 'genuine', name: 'Brother Genuine DR1170BK Drum Unit DR1170 Black (10,000 pages)', color: 'Black', product_type: 'drum_unit', page_yield: '10,000' }),
+            'Brother DR1170 Genuine Drum Unit – Black (~10,000 pages)'],
+        [row({ brand: 'Canon', source: 'genuine', name: 'Canon Genuine CLI42M Ink Cartridge CLI42 Magenta (48 pages)', color: 'Magenta', page_yield: '48 A3+' }),
+            'Canon CLI42 Genuine Ink Cartridge – Magenta'],   // implausible yield dropped
+        [row({ brand: 'HP', name: '67XXLBK Compatible Ink Cartridge for HP 67XXL Black', color: 'Black', yield_tier: 'XXL' }),
+            'HP 67XXL Compatible Ink Cartridge – Black – Extra High Yield'],
+    ];
+    for (const [product, want] of cases) {
+        assert.equal(ProductName.composeMiss(product), null, product.name);
+        assert.equal(ProductName.clean(product), want, product.name);
+    }
+});
+
+test('descriptive title: rows it cannot build keep the old display and say why', () => {
+    const cases = [
+        [row({ name: 'Brother Genuine TZe231 Label Tape', color: 'Black', product_type: 'label_tape', source: 'genuine' }), 'type_label_tape'],
+        [row({ brand: 'HP', source: 'genuine', name: 'HP Genuine 70 130mlRD Ink Cartridge 70 130ml Red', color: 'Red' }), 'no_code'],
+        [row({ name: 'Canon PG640/CL641 Ink Cartridge 2-Pack', brand: 'Canon', source: 'genuine', color: 'Black/Colour', pack_type: 'multipack' }), 'no_code'],
+        [row({ brand: 'HP', name: '67XXLRD Compatible Ink Cartridge for HP 67XXL Tri-Colour', color: 'Red' }), 'color_mismatch'],
+        [row({ name: 'LC3313 Compatible Ink Cartridge for Brother LC3313 5-Pack', color: 'Value Pack', pack_type: 'value_pack' }), 'pack_contents_unknown'],
+        [row({ name: 'LC38BK Compatible Ink Cartridge for Brother LC38 Black', color: 'Black', source: 'local' }), 'no_source'],
+    ];
+    for (const [product, reason] of cases) {
+        assert.equal(ProductName.composeMiss(product), reason, product.name);
+        assert.equal(ProductName.clean(product), ProductName.legacy(product), 'fallback = old display: ' + product.name);
+    }
+});
+
+test('look-alike grouping keys on the OLD display, not the descriptive title', () => {
+    const src = stripComments(READ(JS('utils.js')));
+    const body = src.slice(src.indexOf('function cardKey('), src.indexOf('function cardKey(') + 600);
+    assert.match(body, /ProductName\.legacy\(product\)/);
+    assert.doesNotMatch(body, /ProductName\.clean\(/);
+});

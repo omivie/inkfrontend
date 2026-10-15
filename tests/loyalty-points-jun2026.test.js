@@ -97,7 +97,7 @@ test('cart-page.js: loyalty control wired (init/render, Max, error codes)', () =
     assert.match(src, /max_redeemable_points/, 'Max button must use max_redeemable_points');
     assert.match(src, /applyLoyaltyPoints/, 'must call API.applyLoyaltyPoints');
     assert.match(src, /removeLoyaltyPoints/, 'must call API.removeLoyaltyPoints');
-    for (const code of ['CONFLICTS_WITH_COUPON', 'BELOW_MIN_POINTS', 'EXCEEDS_AVAILABLE_BALANCE', 'EXCEEDS_CART_SUBTOTAL', 'NOT_MULTIPLE_OF_100', 'RATE_LIMITED', 'EMAIL_NOT_VERIFIED', 'LOYALTY_DISABLED']) {
+    for (const code of ['CONFLICTS_WITH_COUPON', 'BELOW_MIN_POINTS', 'EXCEEDS_AVAILABLE_BALANCE', 'EXCEEDS_CART_SUBTOTAL', 'EXCEEDS_ORDER_TOTAL', 'NOT_MULTIPLE_OF_100', 'RATE_LIMITED', 'EMAIL_NOT_VERIFIED', 'LOYALTY_DISABLED']) {
         assert.match(src, new RegExp(code), `must handle ${code}`);
     }
 });

@@ -2113,6 +2113,7 @@
                     case 'CONFLICTS_WITH_COUPON': return 'Remove your coupon to use points.';
                     case 'EXCEEDS_AVAILABLE_BALANCE': return 'You don’t have that many points.';
                     case 'EXCEEDS_CART_SUBTOTAL': return 'That’s more than your cart total.';
+                    case 'EXCEEDS_ORDER_TOTAL': return 'That’s more than your order total.'; // ERR-345: points cover shipping too
                     case 'LOYALTY_DISABLED': return 'Loyalty points are unavailable right now.';
                     case 'RATE_LIMITED': return 'Too many tries — wait a minute and retry.';
                     default: return API.extractErrorMessage(fb, 'Couldn’t apply your points right now.');
