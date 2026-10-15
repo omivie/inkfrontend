@@ -7463,11 +7463,13 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .pricing-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .pricing-filters > .admin-input, .pricing-filters > .admin-select { width: auto; flex: 0 1 auto; }
 .pricing-filters > .admin-input[type="search"] { flex: 1 1 220px; min-width: 0; }
-.pricing-gated { display: inline-flex; gap: 6px; align-items: center; opacity: .7; }
+.pricing-ranges { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .pricing-range { width: 110px; }
 .pricing-selection { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--border); }
 .pricing-selection__count { font-size: 13px; }
 .pricing-selection__actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .pricing-chip { display: inline-block; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .pricing-chip--lock { border-color: var(--yellow); color: var(--text); }
+.pricing-chip--btn { background: none; cursor: pointer; font: inherit; font-size: 11px; }
+.pricing-chip--btn:hover, .pricing-chip--btn:focus-visible { border-color: var(--text); color: var(--text); }
 .cc2-tiers__num.is-invalid { border-color: var(--danger); }

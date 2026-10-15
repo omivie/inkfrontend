@@ -845,6 +845,10 @@ function productListParams(filters, page, limit) {
   if (filters.supplier) params.set('supplier', filters.supplier);
   if (filters.product_type_group) params.set('product_type_group', filters.product_type_group);
   if (filters.color) params.set('color', filters.color);
+  // Live since 2026-10-16 (measured, ERR-336 Pricing page).
+  for (const k of ['has_manual', 'cost_min', 'cost_max', 'price_min', 'price_max']) {
+    if (filters[k] !== undefined && filters[k] !== '') params.set(k, filters[k]);
+  }
   return params;
 }
 

@@ -1,7 +1,8 @@
 # `backend-docs/` — correspondence with the backend dev
 
 **The rule: everything we still need from the backend is in ONE file in `backend-docs/outbox/`**
-(today `backend-asks-2026-10-15.md`), never in the repo root. That one file is what gets sent.
+(empty since 2026-10-16: `backend-asks-2026-10-15.md` was sent and deleted; text in git `2f88c13f`), never in the
+repo root. That one file is what gets sent.
 
 ```
 backend-docs/

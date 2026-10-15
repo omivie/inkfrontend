@@ -6,6 +6,7 @@
  *   §3 margin % ↔ multiplier is display conversion, and refuses impossible margins
  *   §4 the bulk runner: one write at a time, every outcome reported, cap enforced
  *   §5 guards: no FE price maths, no manual_retail_price read, gated controls visible
+ *   §6 lock / unlock + "Price set by" filter + cost/price ranges (live 2026-10-16)
  *
  * Run with: node --test tests/admin-pricing-page-oct2026.test.js
  */
@@ -139,15 +140,57 @@ test('§5 the page computes no price and never reads manual_retail_price', () =>
 
 test('§5b gated controls are visible, disabled and say why', () => {
   assert.match(PAGE, /const NEEDS_BACKEND = `Needs backend — asked in \$\{SPEC\}`/);
-  assert.match(PAGE, /SPEC = 'backend-docs\/outbox\/backend-asks-2026-10-15\.md'/);
+  assert.match(PAGE, /SPEC = 'the backend asks sent 2026-10-16 \(§3\)'/);
   assert.match(PAGE, /<button class="admin-btn admin-btn--sm" disabled title="\$\{esc\(NEEDS_BACKEND\)\}">Adjust by % \/ \$/);
   assert.match(PAGE, /disabled title="\$\{esc\(NEEDS_BACKEND\)\}">Set margin for this filter/);
   // Unknown manual status is printed as unknown, never as "Rule".
-  assert.match(PAGE, /: `<span class="pricing-chip" title="\$\{esc\(NEEDS_BACKEND\)\}">unknown<\/span>`/);
-  assert.ok(fs.existsSync(path.resolve(__dirname, '..', 'backend-docs', 'outbox', 'backend-asks-2026-10-15.md')), 'the spec the chips cite must exist');
+  assert.match(PAGE, /: '<span class="pricing-chip" title="The server did not say whether this price is manual">unknown<\/span>'/);
+  // The asks file was sent and deleted 2026-10-16 (owner); the page must not cite a repo path.
+  assert.doesNotMatch(PAGE, /backend-docs\/outbox\//);
 });
 
 test('§5c the exact-price confirm warns that existing manual prices are replaced', () => {
   assert.match(PAGE, /Existing manual prices on these products are replaced/);
   assert.match(PAGE, /A reprice never lowers a price today/);
+});
+
+// §6 ─────────────────────────────────────────────────────────────────────────
+test('§6a filters send has_manual and the four ranges under the exact backend names', async () => {
+  const { filtersToParams } = await loadUtil();
+  assert.deepEqual(filtersToParams({ active: 'true', manual: 'true', cost_min: '5', cost_max: '20.5', price_min: '0', price_max: '99' }),
+    { active: 'true', has_manual: 'true', cost_min: '5', cost_max: '20.5', price_min: '0', price_max: '99' });
+  assert.deepEqual(filtersToParams({ active: 'true', manual: 'false' }), { active: 'true', has_manual: 'false' });
+  // empty, junk and negative are omitted, never sent as NaN
+  assert.deepEqual(filtersToParams({ active: 'true', manual: '', cost_min: '', cost_max: 'abc', price_min: '-1', price_max: null }), { active: 'true' });
+  const API = read('api.js');
+  const fn = API.slice(API.indexOf('function productListParams('), API.indexOf('const AdminAPI'));
+  assert.match(fn, /\['has_manual', 'cost_min', 'cost_max', 'price_min', 'price_max'\]/);
+  assert.doesNotMatch(fn, /min_price|max_price|has_manual_price/, '400s at the backend (measured 2026-10-16)');
+});
+
+test('§6b lockPlan copies the row price verbatim, skips locked, refuses unknown', async () => {
+  const { lockPlan } = await loadUtil();
+  const rows = new Map([
+    ['a', { id: 'a', retail_price: 29.99, has_manual_price: false }],
+    ['b', { id: 'b', retail_price: 10, has_manual_price: true }],
+    ['c', { id: 'c', retail_price: null, has_manual_price: false }],
+    ['d', { id: 'd', retail_price: '8.49' }],
+  ]);
+  const p = lockPlan(['a', 'b', 'c', 'd', 'zz'], rows);
+  assert.deepEqual(p.send, [{ id: 'a', price: 29.99 }, { id: 'd', price: 8.49 }]);
+  assert.deepEqual(p.already, ['b']);
+  assert.deepEqual(p.noPrice, ['c', 'zz']);
+});
+
+test('§6c page: filter select, live ranges, lock + unlock buttons and per-row chip', () => {
+  assert.match(PAGE, /data-f="manual"/);
+  for (const k of ['cost_min', 'cost_max', 'price_min', 'price_max']) assert.match(PAGE, new RegExp(`data-f="${k}"`));
+  assert.doesNotMatch(PAGE, /pricing-gated|disabled aria-label="(Cost|Price)/);
+  assert.doesNotMatch(PAGE, /cannot yet show which products have a manual/);
+  assert.match(PAGE, /data-act="lock"/);
+  assert.match(PAGE, /Unlock \(clear manual price\)/);
+  assert.match(PAGE, /data-act="lock-one"/);
+  assert.match(PAGE, /data-act="unlock-one"/);
+  assert.match(PAGE, /manual_retail_price: price\.get\(String\(id\)\)/);
+  assert.match(PAGE, /#pricing-table'\)\.addEventListener\('click', onClick\)/);
 });

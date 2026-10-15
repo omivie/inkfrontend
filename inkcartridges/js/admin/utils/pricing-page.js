@@ -37,8 +37,31 @@ export function filtersToParams(f = {}) {
   if (f.source) out.source = f.source;
   if (f.type === 'ribbons') out.product_type_group = 'ribbons';
   else if (f.type) out.product_type = f.type;
+  // Live since 2026-10-16 (measured): has_manual=true|false, and ranges on
+  // cost (ex GST) and retail (incl GST). Exact names — min_price etc. are 400s.
+  if (f.manual === 'true' || f.manual === 'false') out.has_manual = f.manual;
+  for (const k of ['cost_min', 'cost_max', 'price_min', 'price_max']) {
+    const v = f[k];
+    if (v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0) out[k] = String(Number(v));
+  }
   if (f.sort) { out.sort = f.sort; out.order = f.order || 'asc'; }
   return out;
+}
+
+// Lock-at-current-price plan. Copies the backend's own retail_price verbatim
+// (no FE price maths). Already-locked rows are skipped, rows with no known
+// price are refused — never sent as a guess.
+export function lockPlan(ids, rowsById) {
+  const send = [];
+  const already = [];
+  const noPrice = [];
+  for (const id of ids) {
+    const r = rowsById.get(String(id));
+    if (r && r.has_manual_price === true) already.push(id);
+    else if (!r || r.retail_price == null || !Number.isFinite(Number(r.retail_price)) || Number(r.retail_price) <= 0) noPrice.push(id);
+    else send.push({ id, price: Number(r.retail_price) });
+  }
+  return { send, already, noPrice };
 }
 
 /**

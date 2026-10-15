@@ -40,6 +40,40 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-351 — /admin#pricing: no way to filter to locked prices, or to lock / unlock a price (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**What the owner saw.** The Pricing grid showed "Manual (locked)" and "Rule" badges, but there was no filter for
+them, and no way to lock a product at its current price or unlock it from that page. The banner still said the
+page "cannot yet show which products have a manual (locked) price", and the cost / price range inputs were
+disabled "needs backend".
+
+**Cause.** The page was written while outbox §3 asks 1+2 were open. The backend has since shipped them; nobody
+re-measured. Measured 2026-10-16, READ-ONLY GETs on `GET /api/admin/products` as admin (`is_active=true`):
+no filter = 4119; `has_manual=true` = 575 (all manual); `has_manual=false` = 3544 (all rule; 575 + 3544 = 4119);
+`cost_min` / `cost_max` / `price_min` / `price_max` filter correctly (price = retail incl GST, cost = ex GST).
+`has_manual_price`, `price_source`, `min_price`, `max_price`, `min_cost`, `max_cost` are 400 "not a recognised
+query parameter" (strictQuery).
+
+**Fix.**
+- `productListParams` (admin api.js) and `filtersToParams` (utils/pricing-page.js) forward `has_manual` and the
+  four ranges under those exact names; empty, non-numeric and negative range values are omitted.
+- New "Price set by" select (Locked + rule / Locked only / Rule only); four enabled range inputs labelled with
+  their GST basis.
+- **Lock at current price** (bulk) and per-row: the "Price set by" chip is a button — Rule ⇒ lock, Manual ⇒ unlock.
+  Lock writes `manual_retail_price` = the row's own `retail_price`, copied verbatim (`lockPlan`); already-locked
+  rows are skipped and counted; a row with no known price is refused, never guessed. Same sequential runner,
+  200 cap, Stop and result modal as Set exact price.
+- "Clear manual price" relabelled **Unlock (clear manual price)**; its warnings stay (shelf price moves only on a
+  reprice, and a reprice never lowers).
+- Banner no longer claims the flag is missing. Set-exact confirm now says how many selected rows are locked.
+
+**Still open (outbox §3 asks 3–8):** bulk endpoint, adjust by % / $, margin for a filter, allow_decrease,
+simulate, reprice on clear, packs. Those controls stay disabled.
+
+**Verified.** `tests/admin-pricing-page-oct2026.test.js` 14/14 (§6a–c new); 68 admin-related suites, 1890/1890.
+Playwright (local, admin login, READ-ONLY — modal cancelled, 0 write requests): Locked only ⇒ 100/100 rows Manual;
+Rule only ⇒ 100/100 Rule; Cost from 50 ⇒ min cost $53.37; per-row chip opens "Lock C126ACMY at $140.79?".
+
 ## ERR-350 — /checkout sticky summary taller than a laptop screen; its bottom never showed (owner, 2026-10-16) — **SHIPPED (frontend)**
 
 **Symptom:** the desktop right column is `position: sticky; top: 38px`. With 4 items, the loyalty

@@ -6,18 +6,21 @@
  *      the source of truth; this page computes no price).
  *   2. Bulk actions on a selection, or on everything a filter matches:
  *        - Set exact price  → writes manual_retail_price (LOCKED: rules skip it)
- *        - Clear manual price → product follows the rules again
+ *        - Lock at current price → writes the row's own retail_price as the
+ *          manual price (copied verbatim, never computed); also per row from
+ *          the "Price set by" chip
+ *        - Unlock (clear manual price) → product follows the rules again
  *        - Adjust by % / $, and "margin for this filter" rules → need backend
- *          (backend-docs/outbox/backend-asks-2026-10-15.md). Shown DISABLED
+ *          (backend asks sent 2026-10-16, §3; text in git 2f88c13f). Shown DISABLED
  *          with that reason, never hidden.
  *   3. The margin rules: the source × cost-band × brand ladder from the
  *      approval-gated engine (pages/cc2-pricing.js, mounted as-is; it used to
  *      be the Site Health → Pricing tab).
  *
- * What this page cannot see yet, and says so on screen: which products carry a
- * manual price. The admin API strips manual_retail_price from every read
- * (security hardening round 2), so the "Price set by" column reads "unknown"
- * until the backend returns a has_manual_price flag.
+ * Since 2026-10-16 (measured) rows carry has_manual_price and the list takes
+ * has_manual=true|false plus cost_min/cost_max/price_min/price_max, so the
+ * "Price set by" filter and the ranges are live. A row without the flag still
+ * reads "unknown", never "Rule".
  */
 import { AdminAPI, FilterState, esc, icon } from '../app.js';
 import { DataTable } from '../components/table.js';
@@ -26,10 +29,10 @@ import { Modal } from '../components/modal.js';
 import { marginBadge } from '../utils/profitability.js';
 import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
 import { typeFilterOptions, productTypeLabel } from '../utils/product-types.js';
-import { BULK_CAP, filtersToParams, runSequential } from '../utils/pricing-page.js';
+import { BULK_CAP, filtersToParams, runSequential, lockPlan } from '../utils/pricing-page.js';
 
 const LIMIT = 100;
-const SPEC = 'backend-docs/outbox/backend-asks-2026-10-15.md';
+const SPEC = 'the backend asks sent 2026-10-16 (§3)';
 const NEEDS_BACKEND = `Needs backend — asked in ${SPEC}`;
 const MISSING = '—';
 const SORTABLE = ['name', 'sku', 'retail_price', 'cost_price', 'margin_pct', 'source', 'product_type'];
@@ -45,6 +48,9 @@ let _total = null;
 let _pageFull = false;
 let _stop = false;
 let _searchTimer = null;
+// Every row this page has read (list pages + select-all), by id. Lock reads the
+// current price from here; a selected id not in it is refused, never guessed.
+let _rowsById = new Map();
 
 function renderShell(brands) {
   _container.innerHTML = `
@@ -55,9 +61,9 @@ function renderShell(brands) {
       </div>
     </div>
     <div class="cc2-tiers__banner cc2-tiers__banner--warn pricing-gaps" role="note"><div>
-      <strong>Not everything works yet.</strong> This page cannot yet show which products have a manual (locked) price,
+      <strong>Not everything works yet.</strong> This page cannot yet
       adjust prices by % or $, set a margin for a brand + type filter, or lower prices through a rule.
-      Those need the backend changes in <code>${esc(SPEC)}</code>. Their controls are visible but disabled.
+      Those need backend changes, asked in ${esc(SPEC)}. Their controls are visible but disabled.
     </div></div>
 
     <section class="admin-card pricing-section" aria-labelledby="pricing-grid-title">
@@ -71,10 +77,13 @@ function renderShell(brands) {
         <select class="admin-select" data-f="type" aria-label="Product type">${typeFilterOptions('')}</select>
         <select class="admin-select" data-f="active" aria-label="Active">
           <option value="true">Active only</option><option value="">Active + inactive</option><option value="false">Inactive only</option></select>
-        <span class="pricing-gated" title="${esc(NEEDS_BACKEND)}">
-          <input class="admin-input pricing-range" type="number" placeholder="Cost from" disabled aria-label="Cost from (needs backend)">
-          <input class="admin-input pricing-range" type="number" placeholder="Price to" disabled aria-label="Price to (needs backend)">
-          <span class="pricing-chip">needs backend</span>
+        <select class="admin-select" data-f="manual" aria-label="Price set by">
+          <option value="">Locked + rule</option><option value="true">Locked (manual) only</option><option value="false">Rule only</option></select>
+        <span class="pricing-ranges">
+          <input class="admin-input pricing-range" type="number" min="0" step="0.01" data-f="cost_min" placeholder="Cost from" aria-label="Cost from (${esc(GST_EXCL)})" title="${esc(GST_EXCL)}">
+          <input class="admin-input pricing-range" type="number" min="0" step="0.01" data-f="cost_max" placeholder="Cost to" aria-label="Cost to (${esc(GST_EXCL)})" title="${esc(GST_EXCL)}">
+          <input class="admin-input pricing-range" type="number" min="0" step="0.01" data-f="price_min" placeholder="Price from" aria-label="Price from (${esc(GST_INCL)})" title="${esc(GST_INCL)}">
+          <input class="admin-input pricing-range" type="number" min="0" step="0.01" data-f="price_max" placeholder="Price to" aria-label="Price to (${esc(GST_INCL)})" title="${esc(GST_INCL)}">
         </span>
       </div>
       <div class="pricing-selection" id="pricing-selection"></div>
@@ -112,9 +121,11 @@ function columns() {
     },
     {
       key: 'price_source', label: 'Price set by',
-      render: (r) => (r.has_manual_price === true ? '<span class="pricing-chip pricing-chip--lock">Manual (locked)</span>'
-        : r.has_manual_price === false ? '<span class="pricing-chip">Rule</span>'
-          : `<span class="pricing-chip" title="${esc(NEEDS_BACKEND)}">unknown</span>`),
+      render: (r) => (r.has_manual_price === true
+        ? `<button type="button" class="pricing-chip pricing-chip--lock pricing-chip--btn" data-act="unlock-one" data-id="${esc(r.id)}" title="Click to unlock: the rules price this product again">Manual (locked)</button>`
+        : r.has_manual_price === false
+          ? `<button type="button" class="pricing-chip pricing-chip--btn" data-act="lock-one" data-id="${esc(r.id)}" title="Click to lock at the current price">Rule</button>`
+          : '<span class="pricing-chip" title="The server did not say whether this price is manual">unknown</span>'),
     },
   ];
 }
@@ -125,6 +136,7 @@ async function load() {
     const data = await AdminAPI.listProductsStrict(filtersToParams(_filters), _page, LIMIT);
     if (!_table) return;
     const rows = Array.isArray(data) ? data : (data && (data.products || data.data)) || [];
+    rows.forEach((r) => r && r.id && _rowsById.set(String(r.id), r));
     // /api/admin/products may send no pagination block. An unknown total is
     // unknown — never rows.length (ERR-220) — so Next is decided by hasMore.
     const p = (data && data.pagination) || {};
@@ -159,7 +171,8 @@ function renderSelection() {
       ${n ? '<button class="admin-btn admin-btn--sm admin-btn--ghost" data-act="clear-sel">Clear</button>' : ''}</span>
     <span class="pricing-selection__actions">
       <button class="admin-btn admin-btn--sm admin-btn--primary" data-act="set-exact" ${n ? '' : 'disabled'}>Set exact price (locks)</button>
-      <button class="admin-btn admin-btn--sm" data-act="clear-manual" ${n ? '' : 'disabled'}>Clear manual price</button>
+      <button class="admin-btn admin-btn--sm" data-act="lock" ${n ? '' : 'disabled'}>Lock at current price</button>
+      <button class="admin-btn admin-btn--sm" data-act="clear-manual" ${n ? '' : 'disabled'}>Unlock (clear manual price)</button>
       <button class="admin-btn admin-btn--sm" disabled title="${esc(NEEDS_BACKEND)}">Adjust by % / $ <span class="pricing-chip">needs backend</span></button>
       <button class="admin-btn admin-btn--sm" disabled title="${esc(NEEDS_BACKEND)}">Set margin for this filter <span class="pricing-chip">needs backend</span></button>
     </span>`;
@@ -178,7 +191,7 @@ async function selectAllMatching(btn) {
       btn.textContent = `Selecting… ${ids.length}`;
       const data = await AdminAPI.listProductsStrict(filtersToParams(_filters), page, 200);
       const rows = Array.isArray(data) ? data : (data && (data.products || data.data)) || [];
-      rows.forEach((r) => r && r.id && ids.push(String(r.id)));
+      rows.forEach((r) => { if (r && r.id) { ids.push(String(r.id)); _rowsById.set(String(r.id), r); } });
       if (rows.length < 200 || (_total != null && ids.length >= _total)) break;
     }
   } catch (e) {
@@ -194,6 +207,12 @@ async function selectAllMatching(btn) {
   renderSelection();
 }
 
+function lockedCount(ids) {
+  const known = ids.filter((id) => _rowsById.has(String(id)));
+  const locked = known.filter((id) => _rowsById.get(String(id)).has_manual_price === true).length;
+  return known.length === ids.length ? `${locked}` : `at least ${locked}`;
+}
+
 function openSetExact() {
   const ids = selectedIds();
   if (ids.length > BULK_CAP) { Toast.warning(`${ids.length} selected — a run is capped at ${BULK_CAP} until the backend bulk endpoint exists. Narrow the filter.`); return; }
@@ -204,7 +223,7 @@ function openSetExact() {
       <ul class="cc2-tiers__facts">
         <li>Every selected product gets <strong>this exact price</strong>, sent as typed (no rounding).</li>
         <li>The price is <strong>locked</strong>: margin rule changes will not move it until you clear it.</li>
-        <li class="cc2-tiers__warntext">Existing manual prices on these products are replaced — this page cannot yet see which ones have one.</li>
+        <li class="cc2-tiers__warntext">Existing manual prices on these products are replaced (${esc(lockedCount(ids))} of them are locked now).</li>
       </ul>`,
     footer: `<button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
       <button class="admin-btn admin-btn--primary" data-action="confirm">Set price</button>`,
@@ -219,11 +238,35 @@ function openSetExact() {
   });
 }
 
-function openClearManual() {
-  const ids = selectedIds();
+function openLock(ids = selectedIds()) {
+  if (ids.length > BULK_CAP) { Toast.warning(`${ids.length} selected — a run is capped at ${BULK_CAP} until the backend bulk endpoint exists. Narrow the filter.`); return; }
+  const plan = lockPlan(ids, _rowsById);
+  const one = ids.length === 1 && plan.send.length === 1;
+  const row = one ? _rowsById.get(String(plan.send[0].id)) : null;
+  const m = Modal.open({
+    title: one ? `Lock ${row.sku || 'this product'} at ${money(plan.send[0].price)}?`
+      : `Lock ${plan.send.length} product${plan.send.length === 1 ? '' : 's'} at their current price?`,
+    body: `<ul class="cc2-tiers__facts">
+        <li>Each product keeps the price it shows now (${esc(GST_INCL)}). Margin rule changes will not move it until you unlock it.</li>
+        ${plan.already.length ? `<li>${plan.already.length} already locked — left as they are.</li>` : ''}
+        ${plan.noPrice.length ? `<li class="cc2-tiers__warntext">${plan.noPrice.length} have no current price on this page and will not be locked.</li>` : ''}
+      </ul>`,
+    footer: `<button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+      <button class="admin-btn admin-btn--primary" data-action="confirm" ${plan.send.length ? '' : 'disabled'}>Lock</button>`,
+  });
+  if (!m) return;
+  m.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => m.close());
+  m.footer.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+    m.close();
+    const price = new Map(plan.send.map((x) => [String(x.id), x.price]));
+    runBulk(plan.send.map((x) => x.id), (id) => AdminAPI.updateProduct(id, { manual_retail_price: price.get(String(id)) }), { label: 'Lock at current price' });
+  });
+}
+
+function openClearManual(ids = selectedIds()) {
   if (ids.length > BULK_CAP) { Toast.warning(`${ids.length} selected — a run is capped at ${BULK_CAP} until the backend bulk endpoint exists. Narrow the filter.`); return; }
   const m = Modal.open({
-    title: `Clear the manual price on ${ids.length} product${ids.length === 1 ? '' : 's'}?`,
+    title: `Unlock ${ids.length} product${ids.length === 1 ? '' : 's'} (clear the manual price)?`,
     body: `<ul class="cc2-tiers__facts">
         <li>These products go back to following the margin rules.</li>
         <li class="cc2-tiers__warntext">The shelf price does <strong>not</strong> change until a reprice runs.</li>
@@ -236,7 +279,7 @@ function openClearManual() {
   m.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => m.close());
   m.footer.querySelector('[data-action="confirm"]').addEventListener('click', () => {
     m.close();
-    runBulk(ids, (id) => AdminAPI.updateProduct(id, { manual_retail_price: null }), { label: 'Clear manual price', offerReprice: true });
+    runBulk(ids, (id) => AdminAPI.updateProduct(id, { manual_retail_price: null }), { label: 'Unlock', offerReprice: true });
   });
 }
 
@@ -298,7 +341,7 @@ function onFilter(e) {
   _page = 1;
   if (_table) _table.clearSelection();
   clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(load, f === 'search' ? 300 : 0);
+  _searchTimer = setTimeout(load, e.target.tagName === 'INPUT' ? 300 : 0);
 }
 
 function onClick(e) {
@@ -307,7 +350,10 @@ function onClick(e) {
   if (b.dataset.act === 'select-all') selectAllMatching(b);
   else if (b.dataset.act === 'clear-sel') { _table.clearSelection(); renderSelection(); }
   else if (b.dataset.act === 'set-exact') openSetExact();
+  else if (b.dataset.act === 'lock') openLock();
   else if (b.dataset.act === 'clear-manual') openClearManual();
+  else if (b.dataset.act === 'lock-one') openLock([b.dataset.id]);
+  else if (b.dataset.act === 'unlock-one') openClearManual([b.dataset.id]);
 }
 
 export default {
@@ -315,7 +361,8 @@ export default {
   async init(container) {
     _container = container;
     FilterState.showBar(false); // the global date/brand bar does not drive this page
-    _filters = { search: '', brand: '', source: '', type: '', active: 'true', sort: '', order: 'asc' };
+    _filters = { search: '', brand: '', source: '', type: '', active: 'true', manual: '', cost_min: '', cost_max: '', price_min: '', price_max: '', sort: '', order: 'asc' };
+    _rowsById = new Map();
     _page = 1;
     const brands = (await AdminAPI.getBrands() || []).filter((b) => b && b.id && b.name).sort((a, b) => a.name.localeCompare(b.name));
     if (_container !== container) return;
@@ -323,6 +370,7 @@ export default {
     _container.querySelector('.pricing-filters').addEventListener('input', onFilter);
     _container.querySelector('.pricing-filters').addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') onFilter(e); });
     _container.querySelector('#pricing-selection').addEventListener('click', onClick);
+    _container.querySelector('#pricing-table').addEventListener('click', onClick);
     _table = new DataTable(_container.querySelector('#pricing-table'), {
       columns: columns(),
       rowKey: 'id',
@@ -349,5 +397,6 @@ export default {
     _rules = null;
     _table = null;
     _container = null;
+    _rowsById = new Map();
   },
 };

@@ -8,7 +8,8 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 ## `outbox/` — the ONE outgoing file
 
 **2026-10-15, owner instruction:** everything still open for the backend lives in ONE file,
-`outbox/backend-asks-2026-10-15.md`. Answered documents are deleted, not archived. `sent/` and
+`outbox/backend-asks-2026-10-15.md`. **2026-10-16, owner: sent, so deleted** — text in git:
+`git show 2f88c13f:backend-docs/outbox/backend-asks-2026-10-15.md`. Answered documents are deleted, not archived. `sent/` and
 `bundles/` were removed the same day. Their text is in git: `git show ac61717a:backend-docs/sent/<file>`
 and `git show ac61717a:backend-docs/outbox/<file>`. The `sent/` evidence tables and the old outbox rows are
 in `git show ac61717a:backend-docs/STATUS.md`.
