@@ -162,7 +162,7 @@ const QuotePdf = {
         const fields = this.HEADER_FIELDS.map(({ name, label }) => `
                     <div class="form-group">
                         <label class="form-label" for="${id(name)}">${label}</label>
-                        <input class="form-input" type="text" id="${id(name)}" name="${name}" maxlength="${this.MAX_FIELD}" autocomplete="${name === 'company' ? 'organization' : 'off'}">
+                        <input class="form-input" type="text" id="${id(name)}" name="${name}" placeholder="Optional" maxlength="${this.MAX_FIELD}" autocomplete="${name === 'company' ? 'organization' : 'off'}">
                     </div>`).join('');
         return `
             <button type="button" class="btn btn--outline btn--full-width quote-pdf__button" data-testid="quote-pdf-button"

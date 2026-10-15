@@ -4832,13 +4832,6 @@ body.filter-sort-open { overflow: hidden; }
     color: var(--color-text-muted);
 }
 
-.checkout-summary__edit {
-    display: block;
-    text-align: right;
-    font-size: var(--font-size-sm);
-    margin-bottom: var(--spacing-lg);
-}
-
 .checkout-summary__coupon {
     padding: var(--spacing-lg) 0;
     border-top: 1px solid var(--color-border);

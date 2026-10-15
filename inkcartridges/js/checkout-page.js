@@ -73,6 +73,7 @@
 
             // Mobile order-summary disclosure (ERR-224).
             this.setupSummaryDisclosure();
+            this.pinSummary();
 
             // Check email verification status
             await this.checkEmailVerification();
@@ -1563,6 +1564,25 @@
          *    than printing a placeholder $0.00 beside a real basket
          *    (ERR-063/068, absence is not zero).
          */
+        /**
+         * Desktop sticky summary that is taller than the window pins by its
+         * BOTTOM instead of its top (owner 2026-10-16, ERR-350): the page
+         * scrolls from either column, the summary moves with it until its last
+         * line is in view, then holds. CSS can't know the column's height, so
+         * this writes --summary-top = min(10px, window − column − 6px); 10 keeps
+         * the first row's qty badges (8px overhang) on screen when pinned. Phone
+         * ignores the var (summary is not sticky there).
+         */
+        pinSummary() {
+            const summary = document.querySelector('.checkout-sidebar .checkout-summary');
+            if (!summary) return;
+            const update = () => summary.style.setProperty('--summary-top',
+                `${Math.min(10, window.innerHeight - summary.offsetHeight - 6)}px`);
+            update();
+            if (typeof ResizeObserver !== 'undefined') new ResizeObserver(update).observe(summary);
+            window.addEventListener('resize', update, { passive: true });
+        },
+
         setupSummaryDisclosure() {
             const summary = document.querySelector('.checkout-summary');
             const toggle = document.getElementById('checkout-summary-toggle');

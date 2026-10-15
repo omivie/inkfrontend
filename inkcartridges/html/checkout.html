@@ -26,10 +26,10 @@
     <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
     <link rel="stylesheet" href="/css/components.css?v=9e9d2fd7">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=9f6360a3">
+    <link rel="stylesheet" href="/css/pages.css?v=84f9c744">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=e9988e95">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=0e99f829">
 
     <script defer src="https://js.stripe.com/v3/"></script>
     <script defer src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD&disable-funding=card"></script>
@@ -50,8 +50,10 @@
                 </a>
 
                 <!-- Shopify/smartink header (ERR-316 phase 4): the wordmark and a bag
-                     icon back to the cart. Nothing else competes with checkout. -->
-                <a href="/cart" class="checkout-header__bag" aria-label="Back to cart">
+                     icon back to the cart. Nothing else competes with checkout.
+                     "Edit cart" moved here from under the summary items (owner 2026-10-16, ERR-347). -->
+                <a href="/cart" class="checkout-header__bag">
+                    <span class="checkout-header__bag-label">Edit cart</span>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 7h12l1 13H5L6 7z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>
                 </a>
             </div>
@@ -454,8 +456,6 @@
                             <ul class="checkout-summary__items" id="checkout-items">
                             </ul>
 
-                            <a href="/cart" class="checkout-summary__edit">Edit cart</a>
-
                             <!-- Coupon and points sit side by side on desktop (owner
                                  2026-10-16, ERR-346). Hidden #cart-loyalty ⇒ coupon fills the row. -->
                             <div class="checkout-summary__discounts">
@@ -593,9 +593,9 @@
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
     <script defer src="/js/payment-page.js?v=ed2897ad"></script>
-    <script defer src="/js/checkout-page.js?v=d5163660"></script>
+    <script defer src="/js/checkout-page.js?v=b15c11d9"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
-    <script defer src="/js/cart-quote-pdf.js?v=4c494f9e"></script>
+    <script defer src="/js/cart-quote-pdf.js?v=057da012"></script>
     <script defer src="/js/cart-wallet.js?v=bc377241"></script>
 
     <style>

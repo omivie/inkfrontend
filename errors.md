@@ -40,6 +40,92 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-350 — /checkout sticky summary taller than a laptop screen; its bottom never showed (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**Symptom:** the desktop right column is `position: sticky; top: 38px`. With 4 items, the loyalty
+card, points and ETA lines it measured **862px**, so on a ~780–830px Chrome window the PDF quote
+button and trust lines were pinned below the fold for the whole scroll.
+
+**Fix (ERR-346 block, cart-checkout.css):** sticky `top` 38 ⇒ 16, sidebar padding-top 38 ⇒ 24;
+item cell = grid `52px | details` with the price directly under the details (`grid-template-areas`,
+thumb 64 ⇒ 52, row gap 18 ⇒ 12); `#checkout-items` `align-items: start` (a stretched cell pushed its
+price down to the taller neighbour's height — 26px gap measured); brand label line-height 1.3;
+discounts/totals/quote paddings trimmed; trust lines one wrapping flex row. Safety net:
+`max-height: calc(100vh - 32px); overflow-y: auto` — a bigger cart scrolls inside the column
+instead of hiding its bottom. Nothing removed; no copy or JS change.
+
+**Measured (Playwright, injected 4 items + loyalty + points/ETA/discount rows, checkout-page.js
+blocked):** natural height 862 ⇒ **749px**. 1440×800 scrolled 1200: summary 16–765, no inner
+scroll. 1440×700: capped 668, scrolls inside (scrollHeight 749).
+
+**Regression, same day (owner screenshot):** the safety net's `overflow-y: auto` clips at the
+padding box, and the qty badges sit at `top: -8px` above their thumbnails — the first row's badges
+were cut in half. Fix: the sticky box gets `padding: 10px 4px 4px` + `margin: -10px -4px 0`
+(content stays where it was), `top` 16 ⇒ 6 (content still lands at 16), `max-height:
+calc(100vh - 12px)`, `max-width` 640 ⇒ 648 (item grid still 610 wide). Measured: badge top 9 vs box
+top 6 when pinned, inside at 1440×800 and ×700. The test now asserts padding-top ≥ the 8px overhang.
+
+**Second regression, same day (owner):** "I should be able to scroll on the right side to move
+the left side down too." The inner scroller (`overflow-y: auto` + `overscroll-behavior: contain`)
+caught the wheel over the right column. Safety net REPLACED: no overflow at all; a column taller
+than the window pins by its BOTTOM — `top: var(--summary-top, 10px)`, written by
+`CheckoutPage.pinSummary()` as `min(10, innerHeight − height − 6)` px (ResizeObserver + resize).
+Padding/negative-margin badge hack removed (no clipping without overflow); `max-width` back to 640.
+Floor 10 not 6: pinned at 6 the first badge sat at −1px. Measured (wheel at x 1100, 4×400px):
+1440×800 4 items — scrollY 400→1600, box top 10, badge 3, trust bottom 759; 1440×700 — top −55,
+trust bottom 694; 1440×800 8 items — top −225, trust bottom 794. Page scrolls from the right side
+in every case; last line always on screen.
+
+**Test:** `tests/checkout-summary-two-up-oct2026.test.js` (sixth case).
+
+---
+## ERR-349 — PDF quote dialog buttons were bunched on the right (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**Ask:** Cancel and Download quote sat right-aligned; owner wanted one left and one right, or both
+centred.
+
+**Fix:** `.quote-pdf__dialog-actions` drops `justify-content: flex-end`; each `.btn` is
+`flex: 1 1 140px` + `nowrap` with `flex-wrap: wrap` on the row ⇒ two equal halves whose outer
+edges line up with the inputs; at ~320 wide the pair no longer fits on one line so they stack full
+width (first cut, `flex: 1 1 0`, wrapped "Download quote" onto two lines at 320 — 72px tall).
+
+**Measured (Playwright, local):** 1440 — input 530–910, Cancel 530–714, Download 726–910;
+390 — 36–189 / 201–354, 50px; 320 — both 36–284, stacked, 50px each.
+
+**Test:** `tests/checkout-summary-two-up-oct2026.test.js` (fifth case).
+
+---
+## ERR-348 — PDF quote dialog boxes show a grey "Optional" placeholder (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**Ask:** in the "Download PDF quote" popup (cart and checkout), every empty box should say
+"Optional" in grey before the shopper fills it.
+
+**Fix:** `js/cart-quote-pdf.js` renders `placeholder="Optional"` on all `HEADER_FIELDS` inputs
+(Company, Attention, Reference/PO); `css/cart-checkout.css` greys it (`#9ca3af`, opacity 1). The
+placeholder is deliberately NOT hidden on `:focus`: `showModal()` focuses Company on open, so a
+focus rule blanked that box the moment the dialog appeared (measured: Company placeholder
+`rgba(0,0,0,0)` with the rule, `rgb(156,163,175)` without). It disappears when the shopper types.
+
+**Test:** `tests/checkout-summary-two-up-oct2026.test.js` (fourth case).
+
+---
+## ERR-347 — /checkout "Edit cart" moved into the header beside the bag (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**Ask:** remove the "Edit cart" link under the summary items and put it next to the shopping bag
+in the checkout header, styled like the bag.
+
+**Fix:** `.checkout-summary__edit` deleted from `checkout.html`; the header bag link (`/cart`)
+now carries a visible `<span class="checkout-header__bag-label">Edit cart</span>` before the
+icon. Its `aria-label="Back to cart"` was dropped: the visible text names the link (a differing
+aria-label fails WCAG 2.5.3 label-in-name). Label = `--shop-blue` (same as the icon), 15px/400
+shop font, underline on hover.
+
+**Measured (Playwright, local):** link 87×22 at 1440 (x 1107) and 390 (x 287); no horizontal
+scroll at 390; no `.checkout-summary__edit` in the DOM.
+
+**Test:** `tests/checkout-summary-two-up-oct2026.test.js` (third case).
+
+---
 ## ERR-346 — /checkout summary: items two-up, coupon beside points (owner, 2026-10-16) — **SHIPPED (frontend)**
 
 **Ask:** on desktop the checkout's right-hand summary listed one item per row and stacked the
