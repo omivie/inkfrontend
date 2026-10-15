@@ -40,6 +40,30 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-356 — PDP: "Buy the full set" under the printer list; dispatch countdown under free shipping (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**What the owner asked.** On a single (C955XLBK screenshot) the "Buy the full set" card sat at the foot of the buy column,
+under Delivery / Returns, and the "Order within … for same-day dispatch" countdown sat under Delivery / Returns too. The
+owner wants the card in the left column under "For use in your printer" and above "Pack contents & page yields", and
+the countdown directly under "Free shipping on orders over $100".
+
+**Fix.** Markup moves only; both writers find their element by id, so no JS changed.
+- `#pack-upsell` moved into `.product-gallery` between `#product-compat-slot` and `#product-contents-slot`.
+  `.product-gallery > .pack-upsell { margin-top: 0 }` because the gallery's flex gap already spaces it.
+  Phones: `.product-gallery > #pack-upsell { order: 1 }`, so it stays below the buy box with the printer list.
+  The dead `.product-info > #pack-upsell` selector was removed from the order-1 rule.
+- `#product-dispatch-countdown` moved out of `#product-terms` to directly after `#product-free-ship`. It is still outside
+  both buy-box `<dl>`s (prerender copy lock) and keeps `hidden`, `role="timer"`, `aria-live="off"`.
+
+**Measured** (local, 1280x800, C955XLBK): compat 624-762, card 778-936, Pack contents 952-1034 (x=72, left column);
+free-ship 584-622, countdown 630-651, promise 657. At 390 wide: Add 855, countdown 964, terms 1309, compat 1505,
+card 1704, contents 1922.
+
+**Tests.** New `tests/pdp-full-set-left-oct2026.test.js` (red 3/3 against HEAD's HTML+CSS, green after). Order regexes
+updated in `ad-visitor-dropoff-oct2026`, `pdp-layout-compat-left-oct2026`, `post-deploy-fixes-sep2026`,
+`pdp-pack-contents-oct2026`. `pages.css` restamped.
+
+---
 ## ERR-355 — /shop jump buttons: fixed "Click here for compatible / genuine products" (owner, 2026-10-16) — **SHIPPED (frontend)**
 
 **What the owner asked.** The jump buttons said "Click here for genuine DR1070 toner" (the ERR-327 subject wording). The

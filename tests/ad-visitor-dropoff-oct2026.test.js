@@ -119,10 +119,8 @@ test('§1 PDP: Price + Availability, then Add, then promise, then the terms bloc
         'id="product-buybox-terms"',
         'id="product-delivery"',
         'id="product-returns"',
-        'id="product-dispatch-countdown"',
         'id="product-pack-savings"',
         'id="product-printer-proof"',
-        'id="pack-upsell"',
     ].map((n) => [n, at(n)]);
     for (let k = 1; k < order.length; k++) {
         assert.ok(order[k - 1][1] < order[k][1], `${order[k - 1][0]} must come before ${order[k][0]}`);

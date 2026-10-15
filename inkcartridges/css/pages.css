@@ -1837,6 +1837,11 @@
 /* "Pack contents & page yields" (owner, 15 Oct 2026), under the printer list.
    ONE writer: renderPackContents(); hidden when contents are not known. */
 .product-gallery__contents { font-size: var(--font-size-sm); line-height: 1.6; }
+
+/* "Buy the full set" between the printer list and Pack contents (owner,
+   16 Oct 2026, ERR-356). The gallery's flex gap spaces it; its own
+   margin-top would double the gap. */
+.product-gallery > .pack-upsell { margin-top: 0; }
 .pack-contents__title { font-size: var(--font-size-lg, 1.125rem); font-weight: 700; margin: 0 0 var(--spacing-xs, 4px); }
 .pack-contents__list { margin: 0; padding-left: 1.25em; list-style: disc; }
 .pack-contents__list strong { font-weight: 600; }
@@ -2907,6 +2912,7 @@
     .product-detail__layout .product-gallery { display: contents; }
     .product-gallery__main--color-only { align-self: center; }
     .product-gallery__compat { order: 1; }
+    .product-gallery > #pack-upsell { order: 1; }
     .product-gallery__contents { order: 1; }
 }
 
@@ -13894,8 +13900,7 @@ body.page-shop {
     flex-direction: column;
 }
 .product-info > #volume-pricing,
-.product-info > #product-terms,
-.product-info > #pack-upsell {
+.product-info > #product-terms {
     order: 1;   /* every price break, then Delivery / Returns, below Add */
 }
 .product-info > #product-value-lines {

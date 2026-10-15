@@ -64,7 +64,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
     <link rel="stylesheet" href="/css/components.css?v=9e9d2fd7">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=84f9c744">
+    <link rel="stylesheet" href="/css/pages.css?v=6d038a29">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
 </head>
 <body>
@@ -226,6 +226,11 @@
                              renderCompatiblePrinters() → _mountCompat(). Phones move it
                              below the buy box with CSS order (pages.css). -->
                         <div class="product-gallery__compat" id="product-compat-slot"></div>
+                        <!-- Value-pack upsell ("Buy the full set"), rendered from the
+                             backend's pack_suggestion field (IA reorg Jul 2026). Under the
+                             printer list, above Pack contents (owner, 16 Oct 2026, ERR-356;
+                             was at the foot of the buy column). Phones: CSS order 1. -->
+                        <section class="pack-upsell" id="pack-upsell" hidden data-testid="pack-upsell" aria-label="Value pack offer"></section>
                         <!-- "Pack contents & page yields", under the printer list (owner,
                              15 Oct 2026). ONE writer: renderPackContents(); its own slot so
                              _mountCompat('') never wipes it. data-pack-contents says why it
@@ -387,6 +392,24 @@
                         <p class="product-free-ship" id="product-free-ship" data-testid="product-free-ship" hidden></p>
 
                         <!--
+                          Same-day dispatch countdown (traffic-conversion-jul2026 §4),
+                          directly under the free-shipping line (owner, 16 Oct 2026,
+                          ERR-356; was under Delivery / Returns in #product-terms).
+                          Deliberately OUTSIDE both buy-box <dl>s — their copy is locked
+                          to mirror the backend prerender, and a client-only ticking timer
+                          inside them would put the SPA and the prerender out of sync.
+                          Rendered by renderBuyBoxDeliveryAndReturns() from
+                          delivery_estimate.{same_day_eligible,cutoff_remaining_seconds};
+                          stays hidden when not eligible (incl. weekends), where the
+                          locked "Order before 12pm NZT" row is the fallback framing.
+
+                          role="timer" + aria-live="off": the text changes every second
+                          and a polite live region would read it aloud each time.
+                        -->
+                        <p class="buy-box__dispatch" id="product-dispatch-countdown"
+                           data-testid="dispatch-countdown" role="timer" aria-live="off" hidden></p>
+
+                        <!--
                           ERR-301 (ad-clicks-to-orders handoff, 2026-10-02 §1-§2): on a
                           laptop the buyer has to SEE the price, the stock and the Add
                           button on the first screen, so everything that is reassurance
@@ -397,8 +420,8 @@
                             2. #product-terms — Delivery + Returns (the second half of
                                the prerender-mirrored buy box; copy still locked, row
                                order still Price, Availability, Delivery, Returns across
-                               the two <dl>s), the dispatch countdown, pack savings and
-                               printer proof.
+                               the two <dl>s), pack savings and printer proof. The
+                               dispatch countdown sits under #product-free-ship (ERR-356).
                         -->
                         <div class="product-promise" id="product-promise" data-testid="product-promise" hidden></div>
 
@@ -424,27 +447,11 @@
                             </dl>
 
                             <!--
-                              Same-day dispatch countdown (traffic-conversion-jul2026 §4).
-                              Deliberately OUTSIDE the buy-box <dl> — that element's copy is
-                              locked to mirror the backend prerender, and a client-only
-                              ticking timer inside it would put the SPA and the prerender
-                              out of sync. Rendered by renderBuyBoxDeliveryAndReturns() from
-                              delivery_estimate.{same_day_eligible,cutoff_remaining_seconds};
-                              stays hidden when not eligible (incl. weekends), where the
-                              locked "Order before 12pm NZT" row is the fallback framing.
-
-                              role="timer" + aria-live="off": the text changes every second
-                              and a polite live region would read it aloud each time.
-                            -->
-                            <p class="buy-box__dispatch" id="product-dispatch-countdown"
-                               data-testid="dispatch-countdown" role="timer" aria-live="off" hidden></p>
-
-                            <!--
                               Pack-vs-singles savings (traffic-conversion-jul2026 §3), from
                               the optional pack_savings_vs_singles object. Dollars only —
                               value_pack/multipack surfaces never append "(N%)"
                               (value-pack-savings-no-percent.test.js). Distinct from
-                              #pack-upsell below, which is the inverse: shown on a SINGLE to
+                              #pack-upsell (gallery column), which is the inverse: shown on a SINGLE to
                               upsell the pack. The two never fire on the same product.
                             -->
                             <p class="product-info__pack-savings" id="product-pack-savings"
@@ -459,10 +466,6 @@
                             <p class="product-info__printer-proof" id="product-printer-proof"
                                data-testid="printer-proof" hidden></p>
                         </div>
-
-                        <!-- Value-pack upsell — rendered from the backend's
-                             pack_suggestion field when present (IA reorg Jul 2026) -->
-                        <section class="pack-upsell" id="pack-upsell" hidden data-testid="pack-upsell" aria-label="Value pack offer"></section>
 
                     </div>
                 </div>

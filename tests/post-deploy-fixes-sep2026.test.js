@@ -229,7 +229,7 @@ test('§2 markup: the compliance strip still sits under the title and ships hidd
 test('§2 CSS: headline desktop-only; chips + terms order 1 at every width; compliance panel order 1 on desktop only', () => {
     const css = stripComments(read('css/pages.css'));
     assert.match(css, /\.product-headline\s*\{\s*display:\s*none;\s*\}/, 'hidden below 1100px');
-    assert.match(css, /\.product-info > #volume-pricing,\s*\.product-info > #product-terms,\s*\.product-info > #pack-upsell\s*\{\s*order:\s*1;/);
+    assert.match(css, /\.product-info > #volume-pricing,\s*\.product-info > #product-terms\s*\{\s*order:\s*1;/);
     const i = css.indexOf('@media (min-width: 1100px) {\n    .product-info > #compat-disclaimer {');
     assert.ok(i > 0, 'the compliance panel moves below Add on desktop only (phones have no headline line standing in)');
     const block = css.slice(i, css.indexOf('\n}', i));

@@ -89,7 +89,7 @@ test('Delivery / Returns: after the chips in the DOM and in the same order group
     const add = HTML.indexOf('id="add-to-cart-btn"');
     const terms = HTML.indexOf('id="product-terms"');
     assert.ok(chips > 0 && add > 0 && chips < terms && add < terms);
-    assert.match(CSS, /\n\.product-info > #volume-pricing,\s*\.product-info > #product-terms,\s*\.product-info > #pack-upsell\s*\{\s*order:\s*1;/);
+    assert.match(CSS, /\n\.product-info > #volume-pricing,\s*\.product-info > #product-terms\s*\{\s*order:\s*1;/);
 });
 
 test('spec chips: under the title, before the price box; label kept for screen readers, colour dot from the palette', () => {

@@ -115,5 +115,5 @@ test('wiring: own slot after the compat slot, one writer, loud state, API wrappe
     assert.match(render, /API\.getProductConstituents\(info\.sku\)/);
     assert.match(JS, /this\.renderCompatiblePrinters\(info\);\s*this\.renderPackContents\(info\);/);
     assert.match(API_JS, /getProductConstituents\(sku\)\s*\{\s*return this\.getPublic\(`\/api\/products\/\$\{encodeURIComponent\(sku\)\}\/constituents`\)/);
-    assert.match(CSS, /\.product-gallery__compat \{ order: 1; \}\s*\.product-gallery__contents \{ order: 1; \}/);
+    assert.match(CSS, /\.product-gallery__compat \{ order: 1; \}\s*(?:\.product-gallery > #pack-upsell \{ order: 1; \}\s*)?\.product-gallery__contents \{ order: 1; \}/);
 });
