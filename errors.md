@@ -40,6 +40,28 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-346 — /checkout summary: items two-up, coupon beside points (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**Ask:** on desktop the checkout's right-hand summary listed one item per row and stacked the
+coupon over the loyalty-points card. Owner wanted items in two columns (left, right, next row)
+and the coupon and points side by side.
+
+**Fix:** one `@media (min-width: 1000px)` block at the end of `css/cart-checkout.css`. Summary
+`max-width` 400 → 640px (at 400 a cell is ~190px and titles wrap 4+ lines); `#checkout-items`
+is a 2-column grid; the price drops under the title inside a cell. `checkout.html` wraps
+`.checkout-summary__coupon` + `#cart-loyalty` in `.checkout-summary__discounts` (flex row,
+children `flex: 1 1 260px`). A hidden `#cart-loyalty` (guest / no points) is display:none, so the
+coupon fills the row. Below ~1300 wide the sidebar is too narrow for two forms at 260px, so the
+cards stack instead of crushing the inputs (measured at 1100: input + Apply overlapped before
+the wrap). Phone (<1000, collapsible summary) unchanged.
+
+**Measured (Playwright, injected 5-item list, checkout-page.js blocked):** 1440 — cells 295px
+two-up, coupon 297 / points 297 on one row; guest — coupon 610 full row; 1100 — cells 210px
+two-up, coupon + points stacked 440 wide; 390 — one column, unchanged. No horizontal scroll.
+
+**Test:** `tests/checkout-summary-two-up-oct2026.test.js`.
+
+---
 ## ERR-345 — Loyalty points: redeem up to the whole order, shipping included (owner, 2026-10-15) — **OPEN (backend); frontend copy shipped**
 
 **Ask:** points redemption stops at the goods subtotal, so a customer can never use points on shipping. The owner wants customers to redeem as many points as they like, up to the full order total including shipping, and a fully covered order should go through at $0 with no card or PayPal step.

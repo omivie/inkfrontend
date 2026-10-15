@@ -1071,3 +1071,32 @@ body:has(section.checkout-page) .site-main { padding-bottom: 0; margin-bottom: 0
     section.cart-page #cart-layout > .cart-assurance { order: -1; }
 }
 @keyframes cart-sync-slide { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* Checkout summary on desktop: items two-up (left, right, next row) and the
+   coupon beside the points card (owner 2026-10-16, ERR-346). Phone keeps one
+   column. A hidden #cart-loyalty is display:none, so the coupon fills the row. */
+@media (min-width: 1000px) {
+    section.checkout-page .checkout-sidebar .checkout-summary { max-width: 640px; }
+    section.checkout-page .checkout-summary__items {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px 20px;
+    }
+    /* A cell is ~300px: the price drops under the title instead of squeezing it. */
+    section.checkout-page .checkout-summary__item { flex-wrap: wrap; align-items: flex-start; row-gap: 4px; margin: 0; padding: 0; }
+    section.checkout-page .checkout-summary__item-details { flex: 1 1 0; min-width: 0; }
+    section.checkout-page .checkout-summary__item-price { flex-basis: 100%; padding-left: 78px; font-weight: 600; }
+    section.checkout-page .checkout-summary__discounts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: stretch;
+        padding: 0 0 var(--spacing-lg, 24px);
+        border-bottom: 1px solid var(--shop-line);
+        margin-bottom: 8px;
+    }
+    /* 260px = narrowest width the input + Apply rows fit; a narrower sidebar
+       (≈1000–1300 wide) stacks the two cards instead of crushing them. */
+    section.checkout-page .checkout-summary__discounts > * { flex: 1 1 260px; min-width: 0; margin: 0; }
+    section.checkout-page .checkout-summary__discounts > .checkout-summary__coupon { padding: 0; border: 0; }
+}
