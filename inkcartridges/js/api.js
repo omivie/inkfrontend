@@ -1088,9 +1088,13 @@ const API = {
         catch (e) { return data; }
     },
 
-    async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false } = {}) {
+    async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false, fresh = false } = {}) {
         const now = Date.now();
-        const cached = this._swrCache.get(endpoint);
+        // ERR-353 — `fresh` skips the memo (and any in-flight read that started
+        // before the caller's write) but still stores the answer. The admin
+        // Product Codes page re-reads after a write; a cached body showed the
+        // pre-save codes and the toast's "saved" looked like a lie.
+        const cached = fresh ? null : this._swrCache.get(endpoint);
         // Public reads skip auth entirely (ERR-124). Resolved once here so every
         // branch below — fresh, stale-revalidate, miss — uses the same fetcher;
         // a background revalidation that quietly re-attached the token would
@@ -1147,7 +1151,7 @@ const API = {
         }
 
         // Miss — dedupe concurrent misses too.
-        let inflight = this._swrInflight.get(endpoint);
+        let inflight = fresh ? null : this._swrInflight.get(endpoint);
         if (!inflight) {
             inflight = fetcher(endpoint)
                 .then(data => {
@@ -1224,7 +1228,7 @@ const API = {
      *
      * @param {Object} params - Query parameters
      */
-    async getShopData(params = {}) {
+    async getShopData(params = {}, { fresh = false } = {}) {
         // Canonical serialization (ERR-124) — CATALOG_PARAM_ORDER preserves the
         // exact sequence this method used to hand-roll, so the storefront's
         // hottest URLs keep the edge-cache entries they already hold.
@@ -1252,7 +1256,7 @@ const API = {
         const shopRoute = this._catalogRoute(shopEndpoint);
         // ERR-264 — a failing mirror degrades to the public route, once.
         const primaryPromise = this._catalogReadWithPublicFallback(shopRoute, shopEndpoint,
-            (endpoint, anonymous) => this.getWithSWR(endpoint, { anonymous }));
+            (endpoint, anonymous) => this.getWithSWR(endpoint, { anonymous, fresh }));
         let sidecarPromise = null;
         if (eligibleForRecovery) {
             const fbEndpoint = this.catalogEndpoint('/api/products', {
@@ -1323,7 +1327,7 @@ const API = {
             //
             // .catch absorbs sidecar failure so it can never reject the
             // top-level Promise.all below.
-            sidecarPromise = this.getWithSWR(fbEndpoint, { anonymous: true }).catch(() => null);
+            sidecarPromise = this.getWithSWR(fbEndpoint, { anonymous: true, fresh }).catch(() => null);
         }
 
         // Await both. The primary may still throw (no try/catch around

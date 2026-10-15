@@ -180,7 +180,9 @@ test('_walkShopProducts returns EFFECTIVE codes — the override trap', () => {
   const end = ADMIN_API.indexOf('async listProductsForCode(', start);
   assert.ok(start !== -1 && end > start, '_walkShopProducts span found');
   const fn = ADMIN_API.slice(start, end);
-  assert.match(fn, /window\.API\.getShopData\(q\)/);
+  // ERR-353 — fresh past the SWR memo, after AdminPreview settles (admin mirror).
+  assert.match(fn, /window\.API\.getShopData\(q, \{ fresh: true \}\)/);
+  assert.match(fn, /await this\._awaitAdminCatalog\(\);[\s\S]*for \(let page = 1/);
   assert.match(fn, /p\.series_codes/, 'reads the effective code list off the product');
   assert.match(fn, /codes,/, 'and returns it with each product');
   assert.match(fn, /page <= 30/, 'pages the drilldown rather than taking page 1');
@@ -197,7 +199,8 @@ test('_walkShopProducts THROWS on a resolved { ok:false } — a failure is not a
   const run = (shop) => {
     const ctx = { window: { API: { getShopData: shop } } };
     vm.createContext(ctx);
-    const obj = vm.runInContext(`({ normalizeProductCode: (c) => String(c).toUpperCase(), ${body} })`, ctx);
+    const obj = vm.runInContext(`({ normalizeProductCode: (c) => String(c).toUpperCase(),
+      async _awaitAdminCatalog() { return true; }, ${body} })`, ctx);
     return obj._walkShopProducts({ brandSlug: 'brother', category: 'drums' });
   };
   await assert.rejects(run(async () => ({ ok: false, code: 'RATE_LIMITED' })), /RATE_LIMITED/);
@@ -767,20 +770,37 @@ test('_CATEGORY_PRODUCT_TYPES maps each /shop category to its product_types', ()
 
 // setProductCodes is a delete-then-insert: whatever it doesn't carry forward is
 // lost. Run the SHIPPING method against a fake Supabase client.
-function loadSetProductCodes({ prev = [], prevErr = null } = {}) {
+function loadSetProductCodes({ prev = [], prevErr = null, rlsDropsDelete = false } = {}) {
   const start = ADMIN_API.indexOf('async setProductCodes(');
   const end = ADMIN_API.indexOf('async getCodeCatalogue(', start);
   let body = ADMIN_API.slice(start, end).trim();
   body = body.slice(0, body.lastIndexOf('/**')).trim().replace(/,\s*$/, '');
   const log = [];
+  // The table's rows for this product. The visitor read (`.not(...)`) answers
+  // `prev`; the ERR-353 read-back (no `.not`) answers what is really stored.
+  let stored = prev.map(r => ({ code: r.code }));
   const chain = (result) => {
-    const c = { eq: () => c, not: () => c, then: (r, j) => Promise.resolve(result).then(r, j) };
+    const c = { eq: () => c, not: () => c, then: (r, j) => Promise.resolve(result()).then(r, j) };
     return c;
   };
   const sb = { from: () => ({
-    select: () => chain({ data: prevErr ? null : prev, error: prevErr }),
-    delete: () => { log.push(['delete']); return chain({ error: null }); },
-    insert: (rows) => { log.push(['insert', rows]); return Promise.resolve({ error: null }); },
+    select: () => {
+      let visitorRead = false;
+      const c = chain(() => (visitorRead
+        ? { data: prevErr ? null : prev, error: prevErr }
+        : { data: stored, error: null }));
+      c.not = () => { visitorRead = true; return c; };
+      return c;
+    },
+    // rlsDropsDelete: PostgREST answers 200 with zero rows when RLS hides them.
+    delete: () => { log.push(['delete']); if (!rlsDropsDelete) stored = []; return chain(() => ({ error: null })); },
+    insert: (rows) => {
+      log.push(['insert', rows]);
+      const dup = rows.some(r => stored.some(x => x.code === r.code));
+      if (dup) return Promise.resolve({ error: { code: '23505' } });
+      stored = stored.concat(rows.map(r => ({ code: r.code })));
+      return Promise.resolve({ error: null });
+    },
   }) };
   const ctx = { DebugLog: { warn() {} } };
   vm.createContext(ctx);
@@ -789,6 +809,17 @@ function loadSetProductCodes({ prev = [], prevErr = null } = {}) {
   obj._sb = () => sb;
   return { obj, log };
 }
+
+// ERR-353 — "it says it saved but doesn't actually save". An RLS-hidden delete
+// answers 200 with zero rows and the duplicate insert after it is swallowed as
+// 23505, so a refused write used to look exactly like a kept one.
+test('setProductCodes READS BACK and throws when the database did not keep the codes', async () => {
+  const bad = loadSetProductCodes({ prev: [{ code: 'TN1070', chip_category: null }], rlsDropsDelete: true });
+  await assert.rejects(bad.obj.setProductCodes('p1', ['DR1070']), /did not keep the change \(saved codes: TN1070, DR1070\)/);
+  // Positive control: the same write on a table that honours the delete passes.
+  const ok = loadSetProductCodes({ prev: [{ code: 'TN1070', chip_category: null }] });
+  assert.deepEqual(plain(await ok.obj.setProductCodes('p1', ['DR1070'])), ['DR1070']);
+});
 
 test('setProductCodes keeps a visitor row’s chip_category when the codes are rewritten', async () => {
   const { obj, log } = loadSetProductCodes({ prev: [{ code: 'TN155', chip_category: 'toner' }] });

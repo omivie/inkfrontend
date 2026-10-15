@@ -40,6 +40,80 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-355 — /shop jump buttons: fixed "Click here for compatible / genuine products" (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**What the owner asked.** The jump buttons said "Click here for genuine DR1070 toner" (the ERR-327 subject wording). The
+owner wants "Click here for compatible products" and "Click here for genuine products" on every page.
+
+**Fix.** `shop.html` already shipped that exact text. JS overwrote it, so the fix deletes JS:
+- `sourceJumpSubject()` is deleted.
+- `_setSourceJumpLabels()` is deleted, with its 3 call sites (the printer page, /search and the code/category page).
+- The pulse wrapper `.source-jump__label` (ERR-332) is unchanged.
+
+**Tests.** `tests/shop-source-columns-sep2026.test.js` pins the static text and checks that no JS writes `.source-jump__text`.
+`probe:shop-columns` now expects the fixed text.
+
+---
+## ERR-354 — /shop Brother TN1070 click showed no DR1070 drum; owner wants toner and drum together (owner, 2026-10-16) — **SHIPPED (frontend stop-gap; backend OPEN)**
+
+**What the owner saw.** `/shop?brand=brother&category=toner&code=TN1070` showed only the toners. The owner expects the
+TN1070 toner and the DR1070 drum together ("the toner code has the same code as the drum"). The DCP-1610W printer page
+showed a drum and no toner.
+
+**Cause (measured, READ-ONLY GETs including a cache-busted MISS).** `?code=TN1070` returns only the two toners, in
+BOTH `category=toner` and `category=drums`. Both DR1070 drums are tagged `['DR1070','TN1070']`, so the backend filter
+is asymmetric: `?code=DR1070` returns all four rows. ERR-337's fan-out (alias × toner/drums) only keeps rows the
+backend returns, so it never received a drum. Separately, `/api/products/printer/brother-dcp-1610w` returns only the
+two drums: there is no toner compatibility row for that printer. That is backend data.
+
+**Fix.**
+- `ShopPage._pairedCode(code)` (Brother only): TN#### ⇄ DR####.
+- `loadProducts` adds one extra request: the RELATED category by the paired code.
+- Each request carries `match`, and a related row joins only when it carries the CLICKED code (`_rowCarriesCode(p,
+  match)`). The ERR-337 join rule is unchanged.
+- The tile count needed no change, because `_recountChipsFromListing` already counts the drums: they carry TN1070.
+
+**Known limit.** Brother pairs with different numbers (TN2450/DR2425, TN660/DR630) are not caught (`ponytail:` comment).
+Backend asks: `backend-docs/outbox/backend-asks-2026-10-16.md` §1 (`?code=` symmetric, extends BF-102) and §2 (DCP-1610W
+toner compatibility).
+
+**Tests.** `tests/shop-chip-counts-related-oct2026.test.js` (Brother-only swap with an HP negative control; the paired
+request; the join on the clicked code).
+
+---
+## ERR-353 — Admin Product Codes: "saved" toast, but the list still showed the old codes (owner, 2026-10-16) — **SHIPPED (frontend)**
+
+**What the owner saw.** On `/admin#product-codes`, editing a code's products said it saved, but the list did not change.
+
+**Cause (code read; no real save was made from a probe).** The write goes straight to Supabase `product_codes`. Every
+read after it was served from a cache:
+- `loadCodes({force:true})` only skipped the localStorage snapshot.
+- The rebuild went through `API.getShopData` → `getWithSWR`, which answers from its in-memory memo. Even after the
+  60s TTL, it answers stale first.
+- Until `AdminPreview` settled, reads took the public `/api/shop` route, which Cloudflare holds for 300s plus a
+  600s stale window.
+- The write path's own re-walk (`setCodeMembership`, `applyBrandCodeChange`) read the same stale memo. So a second
+  edit could write the first edit's old codes back over it.
+- The toast said "now on N" even when 0 products changed.
+- An RLS-hidden delete answers 200 with zero rows, and the following duplicate insert is swallowed as 23505. So a
+  refused write looked identical to a kept one.
+
+**Fix.**
+- `getWithSWR(…, { fresh })` and `getShopData(params, { fresh })` skip the memo and any in-flight read, then store
+  the fresh answer.
+- `AdminAPI._walkShopProducts` awaits `_awaitAdminCatalog()` (AdminPreview settles, capped at 6s, so reads use the
+  uncached admin mirror) and always reads `{ fresh: true }`.
+- Written scopes go into `_dirtyScopes`. The universe rebuild reads those scopes fresh.
+- `setProductCodes` reads the product's rows back and throws "the database did not keep the change" on a mismatch.
+- Toasts:
+  - 0 changed ⇒ "no change", never "saved".
+  - Success reports the real changed count.
+  - When admin preview is off, the toast says the list can take up to 15 minutes.
+
+**Tests.** `tests/product-codes.test.js` (read-back with an RLS-drop simulation and a positive control; the walk is
+fresh after the preview wait), `tests/admin-code-universe.test.js`, `tests/catalogue-error-vs-empty-sep2026.test.js`.
+
+---
 ## ERR-351 — /admin#pricing: no way to filter to locked prices, or to lock / unlock a price (owner, 2026-10-16) — **SHIPPED (frontend)**
 
 **What the owner saw.** The Pricing grid showed "Manual (locked)" and "Rule" badges, but there was no filter for

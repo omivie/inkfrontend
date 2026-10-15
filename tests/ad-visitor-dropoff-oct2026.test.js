@@ -306,7 +306,7 @@ test('§5 loadProducts sends the requested code UNCHANGED beside the family, and
 });
 
 test('§5 getShopData: no compatible sidecar when a pack is requested (it would merge singles back)', () => {
-    const fn = stripComments(liftMethod(API_SRC, 'async getShopData(params = {})'));
+    const fn = stripComments(liftMethod(API_SRC, 'async getShopData(params = {}, { fresh = false } = {})'));
     assert.match(fn, /&& !params\.search\s*&& !params\.pack\);/);
 });
 

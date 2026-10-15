@@ -226,33 +226,6 @@
             .replace(/^(compatible|genuine|original)\s+/i, '');
     }
 
-    // ERR-327 — what the two jump buttons name: "Click here for genuine LC436 ink",
-    // "Click here for compatible MFC 970 cartridges". A printer wins (brand prefix
-    // dropped, "Brother MFC 970" reads "MFC 970"); else the code + ink/toner
-    // from the category or, on /search, from the rows' product_type; else
-    // "products". ponytail: a multi-word query keeps the shopper's casing,
-    // only a single token (a code) is uppercased.
-    function sourceJumpSubject({ code, printer, brand, products, category } = {}) {
-        const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
-        let name = clean(printer);
-        if (name) {
-            const b = clean(brand);
-            if (b && name.toLowerCase().startsWith(b.toLowerCase() + ' ')) name = name.slice(b.length + 1);
-            return `${name} cartridges`;
-        }
-        const c = clean(code);
-        if (!c) return 'products';
-        let word = 'cartridges';
-        if (category === 'ink' || category === 'toner') {
-            word = category;
-        } else if (Array.isArray(products) && products.length) {
-            const types = products.map((p) => String((p && p.product_type) || '').toLowerCase());
-            if (types.every((t) => t === 'ink_cartridge' || t === 'ink_bottle')) word = 'ink';
-            else if (types.every((t) => t === 'toner_cartridge')) word = 'toner';
-        }
-        return `${/\s/.test(c) ? c : c.toUpperCase()} ${word}`;
-    }
-
     function mergeLiteralResults(suggestList, fallbackProducts) {
         const fallback = Array.isArray(fallbackProducts) ? fallbackProducts : [];
         const suggest = Array.isArray(suggestList) ? suggestList : [];
@@ -506,7 +479,7 @@
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
             partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn, identityIndex,
-            reattachCompatProvenance, searchAlias, sectionTitleText, sourceJumpSubject,
+            reattachCompatProvenance, searchAlias, sectionTitleText,
             finderSearchWithoutPrinter, finderHelpHtml,
         };
     }
@@ -2657,6 +2630,17 @@
             return [code, ...S.pairHalves(code)].some(c => have.has(S.collapseYieldSuffix(c)));
         },
 
+        // ERR-354 — Brother sells a toner and its drum under the same number
+        // (TN1070 / DR1070). Returns the other half, or null.
+        // ponytail: same-number swap only; Brother pairs with different numbers
+        // (TN2450/DR2425, TN660/DR630) need the backend ?code= fix (outbox 10-16 §1).
+        _pairedCode(code) {
+            if (this.state.brand !== 'brother') return null;
+            const m = /^(TN|DR)(.+)$/i.exec(String(code || '').trim());
+            if (!m) return null;
+            return (m[1].toUpperCase() === 'TN' ? 'DR' : 'TN') + m[2].toUpperCase();
+        },
+
         // Every listing row of one category, paged. The response carries no
         // pagination object, so a short page is the last one. null = the walk
         // did not complete (never a partial array — a partial count is a lie).
@@ -3342,8 +3326,15 @@
                         // (toner ⇄ drums), so the click shows what the tile counted.
                         const listingCategories = this.RELATED_CATEGORY[this.state.category]
                             ? this._listingApiCategories() : [loadApiCategory];
+                        // ERR-354 — Brother TN1070 ⇄ DR1070. The backend's ?code=TN1070
+                        // does not return the drums even though they are tagged
+                        // TN1070; ?code=DR1070 does. So the related category is also
+                        // asked by the paired code, and a row still joins only when it
+                        // carries the CLICKED code (`match`; the join rule is unchanged).
+                        const paired = listingCategories.length > 1 ? this._pairedCode(code) : null;
                         const requests = aliases.flatMap(alias =>
-                            listingCategories.map(category => ({ alias, category })));
+                            listingCategories.map(category => ({ alias, category, match: alias })))
+                            .concat(paired ? [{ alias: paired, category: listingCategories[1], match: code }] : []);
                         const responses = await Promise.all(requests.map(({ alias, category }) =>
                             API.getShopData({
                                 brand: this.state.brand,
@@ -3382,7 +3373,7 @@
                                 for (const p of response.data.products) {
                                     const key = (p && (p.id || p.sku)) || null;
                                     if (key == null || seenIds.has(key)) continue;
-                                    if (related && !this._rowCarriesCode(p, requests[i].alias)) continue;
+                                    if (related && !this._rowCarriesCode(p, requests[i].match)) continue;
                                     seenIds.add(key);
                                     mergedProducts.push(p);
                                 }
@@ -3645,11 +3636,6 @@
                     const forPrinter = sectionTitleText(printerDisplayName ? `cartridges for ${printerDisplayName}` : 'cartridges');
                     this.elements.compatibleTitleText.textContent = forPrinter;
                     this.elements.genuineTitleText.textContent = forPrinter;
-                    this._setSourceJumpLabels(sourceJumpSubject({
-                        // /shop?printer= arrives without brand=; the printer row names its own.
-                        printer: printerDisplayName,
-                        brand: this.brandName(this.state.brand) || (printerData && printerData.brand && printerData.brand.name),
-                    }));
 
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
@@ -4410,11 +4396,6 @@
                         : `${brandDisplay}products for "${titleQuery}"`);
                     this.elements.compatibleTitleText.textContent = searchTitle;
                     this.elements.genuineTitleText.textContent = searchTitle;
-                    const mp = smartData && smartData.matched_printer;
-                    this._setSourceJumpLabels(sourceJumpSubject(
-                        isTypeQuery ? {}
-                            : (mp && mp.name) ? { printer: mp.name, brand: mp.brand_name }
-                            : { code: titleQuery, products: filteredProducts }));
 
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
@@ -5046,18 +5027,6 @@
             for (const k of ['sourceJump', 'sourceJumpCompatible']) {
                 if (this.elements[k]) this.elements[k].hidden = shown !== 2;
             }
-        },
-
-        // ERR-327 — the ONE writer of both jump labels. `subject` comes from
-        // sourceJumpSubject() at the three places the section titles are set.
-        _setSourceJumpLabels(subject) {
-            const s = subject || 'products';
-            const write = (btn, text) => {
-                const t = btn && btn.querySelector('.source-jump__text');
-                if (t) t.textContent = text;
-            };
-            write(this.elements.sourceJump, `Click here for genuine ${s}`);
-            write(this.elements.sourceJumpCompatible, `Click here for compatible ${s}`);
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
@@ -5765,9 +5734,6 @@
 
             this.elements.compatibleTitleText.textContent = sectionTitleText(`${brandName} ${productType}`);
             this.elements.genuineTitleText.textContent = sectionTitleText(`${brandName} ${productType}`);
-            this._setSourceJumpLabels(sourceJumpSubject({
-                code: this.state.code, category: this.state.category, products,
-            }));
         },
 
         updateSEO() {

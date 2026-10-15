@@ -86,7 +86,7 @@ function makeShop({ category = 'toner', failCategory = null } = {}) {
         DebugLog: { warn: (m) => warnings.push(m), error() {}, log() {} },
     };
     vm.createContext(sandbox);
-    const body = ['_listingApiCategories', '_rowCarriesCode', '_walkListing', '_recountChipsFromListing'].map(methodSource).join(',\n');
+    const body = ['_listingApiCategories', '_rowCarriesCode', '_pairedCode', '_walkListing', '_recountChipsFromListing'].map(methodSource).join(',\n');
     const shop = vm.runInContext(`({
         RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' },
         categories: [
@@ -148,7 +148,7 @@ test('loadProductCodes recounts only RELATED categories and never caches a faile
 });
 
 test('loadProducts fans out each alias over every category the tile spans', () => {
-    assert.match(SHOP_CODE, /aliases\.flatMap\(alias =>\s*listingCategories\.map\(category => \(\{ alias, category \}\)\)\)/);
+    assert.match(SHOP_CODE, /aliases\.flatMap\(alias =>\s*listingCategories\.map\(category => \(\{ alias, category, match: alias \}\)\)\)/);
     assert.match(SHOP_CODE, /listingCategories = this\.RELATED_CATEGORY\[this\.state\.category\]\s*\?\s*this\._listingApiCategories\(\)\s*:\s*\[loadApiCategory\]/);
 });
 
@@ -159,5 +159,26 @@ test('a related-category row joins the click ONLY when it carries the code (Lexm
     assert.equal(shop._rowCarriesCode(row('X', 'ink_cartridge', ['604XL']), '604'), true, 'yield tier collapses');
     assert.equal(shop._rowCarriesCode(row('Y', 'ink_cartridge', ['CL511']), 'PG510/CL511'), true, 'pair half counts');
     assert.match(SHOP_CODE, /const related = requests\[i\]\.category !== listingCategories\[0\];/);
-    assert.match(SHOP_CODE, /if \(related && !this\._rowCarriesCode\(p, requests\[i\]\.alias\)\) continue;/);
+    assert.match(SHOP_CODE, /if \(related && !this\._rowCarriesCode\(p, requests\[i\]\.match\)\) continue;/);
+});
+
+// ERR-354 — owner 10-16: Brother TN1070 toner and DR1070 drum show together.
+// Measured: ?code=TN1070 returns NO drums (both categories) although the drums
+// are tagged ['DR1070','TN1070']; ?code=DR1070 returns all four rows.
+test('Brother TN/DR pairing: _pairedCode swaps the prefix, Brother only', () => {
+    const { shop } = makeShop();
+    shop.state.brand = 'brother';
+    assert.equal(shop._pairedCode('TN1070'), 'DR1070');
+    assert.equal(shop._pairedCode('dr2425'), 'TN2425');
+    assert.equal(shop._pairedCode('LC3317'), null, 'ink is not a toner/drum pair');
+    shop.state.brand = 'hp';
+    assert.equal(shop._pairedCode('TN1070'), null, 'negative control: other brands untouched');
+});
+
+test('Brother TN1070 click also asks the related category by DR1070, joined on the CLICKED code', () => {
+    assert.match(SHOP_CODE, /const paired = listingCategories\.length > 1 \? this\._pairedCode\(code\) : null;/);
+    assert.match(SHOP_CODE, /\.concat\(paired \? \[\{ alias: paired, category: listingCategories\[1\], match: code \}\] : \[\]\)/);
+    // The drum the paired request returns joins because it carries TN1070.
+    const { shop } = makeShop();
+    assert.equal(shop._rowCarriesCode(row('CDR1070BK', 'drum_unit', ['DR1070', 'TN1070']), 'TN1070'), true);
 });

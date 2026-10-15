@@ -6,8 +6,8 @@
  * reversed it on 2026-10-13 (ERR-327): each section is full width again, six
  * cards to a row from 1100px, Compatible first. Each section's head row
  * carries a jump to the other one, on the right: cyan "Click here for genuine
- * …" (#source-jump) beside the Compatible heading, yellow "Click here for
- * compatible …" (#source-jump-compatible) beside the Genuine heading. Both
+ * products" (#source-jump) beside the Compatible heading, yellow "Click here for
+ * compatible products" (#source-jump-compatible) beside the Genuine heading. Both
  * show only when BOTH sources have rows.
  *
  * /search, /ink-cartridges and /toner-cartridges are Vercel rewrites onto this
@@ -240,30 +240,13 @@ test('shop.html — yellow "Click here for compatible" sits in Genuine\'s head r
     assert.match(PAGES_CSS, /#genuine-section,\s*#compatible-section\s*\{\s*scroll-margin-top/);
 });
 
-test('shop-page.js — both jump labels are written ONLY by _setSourceJumpLabels, at all three title sites', () => {
-    assert.equal((SHOP_JS.match(/querySelector\('\.source-jump__text'\)/g) || []).length, 1);
-    // Owner wording 2026-10-13: "Click here for genuine LC431 ink".
-    assert.match(SHOP_JS, /`Click here for genuine \$\{s\}`/);
-    assert.match(SHOP_JS, /`Click here for compatible \$\{s\}`/);
-    assert.doesNotMatch(SHOP_HTML, />View (?:genuine|compatible) products</i);
-    // printer level, /search, displayProductInfo (code pages)
-    assert.equal((SHOP_JS.match(/this\._setSourceJumpLabels\(sourceJumpSubject\(/g) || []).length, 3);
-    assert.match(SHOP_JS, /matched_printer[\s\S]{0,200}printer: mp\.name, brand: mp\.brand_name/);
-});
-
-test('sourceJumpSubject — names the code or printer the shopper asked for', () => {
-    const src = SHOP_JS.match(/function sourceJumpSubject\([\s\S]*?\n    \}\n/);
-    assert.ok(src, 'expected the sourceJumpSubject function');
-    const f = new Function(`${src[0]}; return sourceJumpSubject;`)();
-    const ink = [{ product_type: 'ink_cartridge' }, { product_type: 'ink_bottle' }];
-    assert.equal(f({ code: 'lc436', products: ink }), 'LC436 ink');
-    assert.equal(f({ code: 'tn258', products: [{ product_type: 'toner_cartridge' }] }), 'TN258 toner');
-    assert.equal(f({ code: 'tn258', products: [{ product_type: 'toner_cartridge' }, { product_type: 'drum_unit' }] }), 'TN258 cartridges');
-    assert.equal(f({ code: 'LC3317', category: 'ink' }), 'LC3317 ink');
-    assert.equal(f({ printer: 'Brother MFC 970', brand: 'Brother', code: 'mfc 970' }), 'MFC 970 cartridges');
-    assert.equal(f({ printer: 'HL-L2375DW', brand: 'Brother' }), 'HL-L2375DW cartridges');
-    assert.equal(f({}), 'products');
-    assert.equal(f({ code: '  ' }), 'products');
+// ERR-355 — owner 2026-10-16 reversed the ERR-327 subject wording ("Click here for
+// genuine DR1070 toner"). The labels are FIXED static text in shop.html; no JS writes them.
+test('jump labels are fixed: "Click here for genuine/compatible products", never JS-written', () => {
+    assert.match(SHOP_HTML, /<span class="source-jump__text">Click here for genuine products<\/span>/);
+    assert.match(SHOP_HTML, /<span class="source-jump__text">Click here for compatible products<\/span>/);
+    assert.doesNotMatch(SHOP_JS, /source-jump__text/);
+    assert.doesNotMatch(SHOP_JS, /_setSourceJumpLabels|sourceJumpSubject/);
 });
 
 test('shop-page.js — the clicks scroll to their sections, no URL hash', () => {

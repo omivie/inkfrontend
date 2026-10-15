@@ -2648,6 +2648,17 @@ const AdminAPI = {
         // contract an already-present code is a no-op, not a failure.
         if (insErr && insErr.code !== '23505') throw insErr;
       }
+      // ERR-353 — read it back. An RLS-filtered delete answers 200 with zero
+      // rows, and the duplicate insert after it is swallowed above, so a write
+      // the database refused looked exactly like one it kept.
+      const { data: kept, error: keptErr } = await sb.from('product_codes')
+        .select('code').eq('product_id', productId);
+      if (keptErr) throw keptErr;
+      const keptSet = new Set((kept || []).map(r => r.code));
+      if (keptSet.size !== clean.length || !clean.every(c => keptSet.has(c))) {
+        throw new Error('the database did not keep the change (saved codes: '
+          + ([...keptSet].join(', ') || 'none') + ')');
+      }
       // Every code write funnels through here — including the product drawer's
       // Save, which reaches setProductCodes directly. Invalidate at the choke
       // point so no caller can forget to.
@@ -2722,6 +2733,7 @@ const AdminAPI = {
       if (cached) return cached;
     }
     try {
+      if (this._dirtyScopes.size) await this._awaitAdminCatalog();
       const pairs = await this._codeUniverseScopes();
       if (!pairs.length) return null;
 
@@ -2750,7 +2762,11 @@ const AdminAPI = {
         // key nothing else uses, so it always misses CF, and for Canon+ink it
         // answered 504 every single time. The storefront's own shape is the one
         // that is already warm and actually works.
-        const resp = await window.API.getShopData({ brand: brandSlug, category });
+        // ERR-353 — a scope this tab just wrote to is read past the SWR memo.
+        const key = `${brandSlug}|${category}`;
+        const fresh = this._dirtyScopes.has(key);
+        const resp = await window.API.getShopData({ brand: brandSlug, category }, { fresh });
+        if (fresh && resp && resp.ok) this._dirtyScopes.delete(key);
         return (resp && resp.ok && resp.data && Array.isArray(resp.data.series))
           ? resp.data.series : null;
       };
@@ -2892,12 +2908,16 @@ const AdminAPI = {
     }
     const want = code ? this.normalizeProductCode(code) : null;
     const out = new Map();
+    // ERR-353 — every write starts from this walk, so it reads the origin: the
+    // uncached admin mirror (once AdminPreview has settled) and never the SWR
+    // memo. A stale walk wrote the previous edit's codes back over it.
+    await this._awaitAdminCatalog();
     for (let page = 1; page <= 30; page++) {
       let resp;
       try {
         const q = { brand: brandSlug, category, page, limit: 200 };
         if (want) q.code = want;
-        resp = await window.API.getShopData(q);
+        resp = await window.API.getShopData(q, { fresh: true });
       } catch (e) {
         throw new Error('Couldn’t load the affected products: ' + e.message);
       }
@@ -2952,6 +2972,29 @@ const AdminAPI = {
     this._clearCodeUniverseCache();
   },
 
+  /** brand|category scopes written this session — re-read fresh (ERR-353). */
+  _dirtyScopes: new Set(),
+
+  /**
+   * Wait (≤6s) for AdminPreview to decide, so catalogue reads go to the
+   * uncached /api/admin/catalog/* mirror instead of the public route, which
+   * Cloudflare holds for up to 15 min. Returns true when the mirror is in use;
+   * false means the page must SAY its view can lag (ERR-353).
+   */
+  async _awaitAdminCatalog() {
+    const P = typeof window !== 'undefined' ? window.AdminPreview : null;
+    if (!P || typeof P.ensure !== 'function') return false;
+    P.ensure();
+    if (P.state === 'unknown') {
+      await new Promise(resolve => {
+        const done = () => { clearTimeout(t); window.removeEventListener('admin-preview:change', done); resolve(); };
+        const t = setTimeout(done, 6000);
+        window.addEventListener('admin-preview:change', done);
+      });
+    }
+    return P.isGranted();
+  },
+
   /**
    * Add/remove a single code across specific products, leaving each product's
    * OTHER codes intact. Backs both the membership editor and "+ Add code" (an
@@ -2996,6 +3039,8 @@ const AdminAPI = {
         DebugLog.warn('[AdminAPI] setCodeMembership row failed:', id, e.message);
       }
     }
+    this._dirtyScopes.add(`${brandSlug}|${category}`);
+    if (chipCategory) this._dirtyScopes.add(`${brandSlug}|${chipCategory}`);
     this._clearStorefrontCodeCache();
     return { changed, failed, error };
   },
@@ -3036,6 +3081,7 @@ const AdminAPI = {
         DebugLog.warn('[AdminAPI] applyBrandCodeChange row failed:', id, e.message);
       }
     }
+    this._dirtyScopes.add(`${brandSlug}|${category}`);
     this._clearStorefrontCodeCache();
     return { changed, failed, products: affected.size };
   },

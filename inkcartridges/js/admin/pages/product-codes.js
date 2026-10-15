@@ -236,6 +236,14 @@ function renderTally(shownCount) {
  * scopes the current view doesn't show. Editing only the visible scope would
  * leave the same chip alive elsewhere under its old name.
  */
+// ERR-353 — the re-read after a save is only fresh on the admin mirror. Off
+// it (preview not granted), the public route lags up to 15 min: say so.
+function lagNote() {
+  const P = window.AdminPreview;
+  return P && typeof P.isGranted === 'function' && P.isGranted()
+    ? '' : ' The list can take up to 15 minutes to show it (admin preview is off).';
+}
+
 async function applyCodeChange(entry, toCode) {
   const fromCode = entry.code;
   const scopes = entry.scopes || [];
@@ -260,9 +268,9 @@ async function applyCodeChange(entry, toCode) {
     } else if (failed) {
       Toast.warning(`${label}: ${changed} of ${products} products updated, ${failed} failed.`);
     } else {
-      Toast.success(toCode
+      Toast.success((toCode
         ? `Renamed ${fromCode} → ${toCode} across ${plural(changed)}.`
-        : `Deleted ${fromCode} from ${plural(changed)}.`);
+        : `Deleted ${fromCode} from ${plural(changed)}.`) + lagNote());
     }
   } catch (e) {
     if (!_alive) return;
@@ -461,8 +469,11 @@ async function openMembership(entry, { isNew = false } = {}) {
       if (!_alive) return;
       if (failed) {
         Toast.warning(`${code}: ${plural(changed)} updated, ${failed} failed${error ? ` — ${error}` : ''}.`);
+      } else if (!changed) {
+        // ERR-353 — nothing was written; never call that "saved".
+        Toast.info(`${code}: no change — those products were already in that state.`);
       } else {
-        Toast.success(`${code} now on ${plural(ticked.size)}.`);
+        Toast.success(`${code}: ${plural(changed)} updated, now on ${plural(ticked.size)}.` + lagNote());
       }
       Drawer.close();
       await loadCodes({ force: true });

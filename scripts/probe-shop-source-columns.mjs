@@ -278,8 +278,9 @@ try {
                     const labels = await page.evaluate(() => ['source-jump', 'source-jump-compatible']
                         .map((id) => { const el = document.getElementById(id); return el && !el.hidden ? el.textContent.trim() : null; }));
                     console.log(`     labels: ${JSON.stringify(labels)}`);
-                    check(`${vp.width}px ${label}: both labels name the subject, not "products"`,
-                        /^Click here for genuine (?!products)/.test(labels[0] || '') && /^Click here for compatible (?!products)/.test(labels[1] || ''),
+                    // ERR-355 — fixed wording, owner 2026-10-16.
+                    check(`${vp.width}px ${label}: both labels read the fixed "… products" text`,
+                        /^Click here for genuine products\b/.test(labels[0] || '') && /^Click here for compatible products\b/.test(labels[1] || ''),
                         JSON.stringify(labels));
                     if (labels[1]) {
                         await page.click('#source-jump-compatible');

@@ -540,7 +540,7 @@ const EP = '/api/products?brand=epson&page=1&limit=100';
 
 /** A lifted getWithSWR with a controllable fetcher and a real cache. */
 function makeSWR(responses) {
-    const API = liftInto(API_SRC, ['async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false } = {})'],
+    const API = liftInto(API_SRC, ['async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false, fresh = false } = {})'],
         { DebugLog: QUIET, window: { dispatchEvent() {} } });
     let n = 0;
     const calls = [];
@@ -612,7 +612,7 @@ test('§5 a failed revalidation stays quiet — it must not repaint a working pa
     // `swr:update` listeners re-render from the payload, so announcing a
     // failure here would paint an error over a page that is working.
     const events = [];
-    const API = liftInto(API_SRC, ['async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false } = {})'],
+    const API = liftInto(API_SRC, ['async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false, fresh = false } = {})'],
         { DebugLog: QUIET, window: { dispatchEvent: (e) => events.push(e) }, CustomEvent: class { constructor(t, i) { this.type = t; this.detail = i && i.detail; } } });
     let n = 0;
     API.SWR_TTL_MS = 60000;

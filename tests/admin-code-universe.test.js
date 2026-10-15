@@ -69,7 +69,8 @@ test('AdminAPI exposes getCodeUniverse()', () => {
 
 test('the universe is built from getShopData series, NOT from a /api/products walk', () => {
   const body = method(API, 'getCodeUniverse');
-  assert.match(body, /window\.API\.getShopData\(\s*\{\s*brand:\s*brandSlug,\s*category\s*\}\s*\)/,
+  // ERR-353 — a scope written this session is read with { fresh } past the SWR memo.
+  assert.match(body, /window\.API\.getShopData\(\s*\{\s*brand:\s*brandSlug,\s*category\s*\}\s*,\s*\{\s*fresh\s*\}\s*\)/,
     'the universe must fan out getShopData({brand, category}) — that is the only source of the merged pair chips');
   assert.match(body, /data\.series/,
     'it must read data.series — the aggregate, not the products');
