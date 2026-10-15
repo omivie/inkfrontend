@@ -5572,6 +5572,15 @@ const AdminAPI = {
     // undefined and every mapped error branch in the panel was dead.
     // `invoiceError()` handles both shapes; every write below goes through it.
 
+    // POST /api/admin/pricing/bulk (ERR-352). One body, dry_run true for the
+    // preview and false for the apply. Throws on refusal so the modal shows
+    // the server's field messages.
+    async pricingBulk(body, dryRun) {
+      const resp = await window.API.post('/api/admin/pricing/bulk', { ...body, dry_run: !!dryRun });
+      if (!resp || resp.ok === false) throw invoiceError(resp, dryRun ? 'Preview refused' : 'Bulk price change refused');
+      return resp.data ?? null;
+    },
+
     // Read-only on the server; throws so the panel can show WHY a preview is
     // missing instead of keeping the last one on screen as if it were current.
     async simulatePricing(payload) {

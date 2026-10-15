@@ -99,3 +99,57 @@ export async function runSequential(ids, put, { expect = null, onProgress, shoul
   }
   return { refused: false, ok, failed, notAttempted: ids.slice(i) };
 }
+
+// ── POST /api/admin/pricing/bulk (live 2026-10-16, ERR-352) ──────────────────
+// Contract MEASURED from the endpoint's own validation messages:
+//   { target: { product_ids } | { filter }, action, value, lock, allow_decrease, dry_run }
+//   action ∈ set | adjust_pct | adjust_abs | set_margin | clear_manual
+//   filter must narrow the catalogue (is_active alone or an empty search is refused)
+// dry_run answers { affected, unchanged, blocked_by_floor, blocked_by_no_decrease,
+// sample[], packs, failed[] }. The backend does all price maths.
+export const BULK_ACTIONS = ['set', 'adjust_pct', 'adjust_abs', 'set_margin', 'clear_manual'];
+
+// Page filters → the bulk endpoint's target.filter. Only keys it validated by
+// name; the ribbons group has no bulk equivalent, so it is REFUSED, never dropped
+// (dropping it would widen the change to every product type).
+export function bulkFilter(f = {}) {
+  if (f.type === 'ribbons') return { error: 'The Ribbons group cannot be used for a bulk change yet. Pick a single product type.' };
+  const out = {};
+  if (f.search && f.search.trim()) out.search = f.search.trim();
+  if (f.brand) out.brand = f.brand;
+  if (f.source) out.source = f.source;
+  if (f.type) out.product_type = f.type;
+  if (f.manual === 'true' || f.manual === 'false') out.has_manual = f.manual === 'true';
+  for (const k of ['cost_min', 'cost_max', 'price_min', 'price_max']) {
+    const v = f[k];
+    if (v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0) out[k] = Number(v);
+  }
+  if (!Object.keys(out).length) return { error: 'Narrow the filter first: the backend refuses a bulk change on the whole catalogue.' };
+  if (f.active === 'true' || f.active === 'false') out.is_active = f.active === 'true';
+  return { filter: out };
+}
+
+// One body for both the preview and the apply — they must never differ.
+export function bulkBody({ action, value, lock = true, allowDecrease = false, ids = null, filters = null }) {
+  if (!BULK_ACTIONS.includes(action)) return { error: `Unknown action ${action}` };
+  let target;
+  if (ids && ids.length) target = { product_ids: ids.map(String) };
+  else {
+    const bf = bulkFilter(filters || {});
+    if (bf.error) return { error: bf.error };
+    target = { filter: bf.filter };
+  }
+  const body = { target, action, lock: !!lock, allow_decrease: !!allowDecrease };
+  if (action === 'clear_manual') {
+    body.value = 0;
+    body.lock = false;
+  } else {
+    const v = Number(value);
+    if (value === '' || value == null || !Number.isFinite(v)) return { error: 'Enter a number.' };
+    if (action === 'set' && v <= 0) return { error: 'Enter a price above $0.' };
+    if (action === 'set_margin' && (v < 0 || v >= 100)) return { error: 'Margin must be at least 0% and below 100%.' };
+    if (action === 'adjust_pct' && v <= -100) return { error: 'A cut of 100% or more would price at $0 or below.' };
+    body.value = v;
+  }
+  return { body };
+}
