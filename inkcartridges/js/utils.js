@@ -1786,12 +1786,20 @@ const ProductName = (function () {
     const BARE4_RE = /\b(?:Value\s+Pack\s+)?4\s*-?\s*Pack\b/i;
     const BARE3_RE = /\b(?:Value\s+Pack\s+)?3\s*-?\s*Pack\b/i;
 
+    // A value pack whose colour code is the bare "Value Pack" has unknown
+    // contents, and its stored count can be wrong: "HP 67 4-Pack" is black +
+    // tri-colour, 2 cartridges (owner, 2026-10-16, ERR-357). No count beats a
+    // wrong count, so "N-Pack" becomes "Value Pack". composeMiss still says
+    // pack_contents_unknown. BRIDGE: backend sets the real code (outbox 10-16 §3).
+    const COUNT_PACK_RE = /\b(?:Value\s+Pack\s+)?\d+\s*-?\s*Pack\b/i;
+
     function packRename(title, product) {
         if (!title) return title;
         let out = title.replace(PACK4_RE, 'KCMY-Pack').replace(PACK3_RE, 'CMY-Pack');
         const code = String((product && product.color) || '').trim().toUpperCase();
         if (/^(KCMY|CMYK|BCMY)$/.test(code)) out = out.replace(BARE4_RE, 'KCMY-Pack');
         else if (code === 'CMY') out = out.replace(BARE3_RE, 'CMY-Pack');
+        else if (code === 'VALUE PACK' && product.pack_type === 'value_pack') out = out.replace(COUNT_PACK_RE, 'Value Pack');
         return out;
     }
 
@@ -1813,7 +1821,7 @@ const ProductName = (function () {
         toner_cartridge: 'Toner Cartridge',
         drum_unit: 'Drum Unit',
     };
-    const SETS = { KCMY: '4 Colour Set BK, C, M, Y', CMYK: '4 Colour Set BK, C, M, Y', BCMY: '4 Colour Set BK, C, M, Y', CMY: '3 Colour Set C, M, Y' };
+    const SETS = { KCMY: '4 Colour Set BK, C, M, Y', CMYK: '4 Colour Set BK, C, M, Y', BCMY: '4 Colour Set BK, C, M, Y', CMY: '3 Colour Set C, M, Y', 'BLACK/COLOUR': 'Black + Tri-Colour Combo Pack' };
     const TIERS = { XL: 'High Yield', XXL: 'Extra High Yield' };
     const MIN_YIELD = 50;   // same floor as ProductDetailPage.MIN_PLAUSIBLE_YIELD
     const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

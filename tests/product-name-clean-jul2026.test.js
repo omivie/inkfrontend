@@ -295,6 +295,22 @@ test('descriptive title: rows it cannot build keep the old display and say why',
     }
 });
 
+test('black + tri-colour combo packs say so; unknown value packs drop the count (owner 2026-10-16, ERR-357)', () => {
+    // HP 67 "4-Pack" is black + tri-colour, 2 cartridges: a customer bought it as four.
+    const combo = row({ brand: { name: 'HP' }, source: 'genuine', name: 'HP Genuine 60BKCLR Ink Cartridge 60 Black/Colour Combo Pack (200 pages)', color: 'Black/Colour', pack_type: 'value_pack' });
+    assert.equal(ProductName.composeMiss(combo), null);
+    assert.equal(ProductName.clean(combo), 'HP 60 Genuine Ink Cartridges – Black + Tri-Colour Combo Pack');
+
+    const hp67 = row({ brand: { name: 'HP' }, source: 'genuine', name: 'HP Genuine 67 Ink Cartridge 4-Pack', color: 'Value Pack', pack_type: 'value_pack' });
+    assert.equal(ProductName.composeMiss(hp67), 'pack_contents_unknown', 'still counted loudly');
+    assert.equal(ProductName.clean(hp67), 'HP Genuine 67 Ink Cartridge Value Pack');
+    assert.doesNotMatch(ProductName.clean(row({ name: 'Epson Genuine 200 Ink Cartridge HY Value Pack 4-Pack', brand: 'Epson', source: 'genuine', color: 'Value Pack', pack_type: 'value_pack' })), /Value Pack Value Pack|4-Pack/);
+
+    // Known codes keep their own grammar; multipacks of one colour keep their true count.
+    assert.equal(ProductName.legacy(row({ name: 'Epson Genuine 604 Ink Cartridge 4-Pack', color: 'KCMY', pack_type: 'value_pack' })), 'Epson Genuine 604 Ink Cartridge KCMY-Pack');
+    assert.match(ProductName.clean(row({ brand: 'HP', source: 'genuine', name: 'HP Genuine 45BK Ink Cartridge 45 Black 2-Pack (833 pages)', color: 'Black', pack_type: 'multipack' })), /2-Pack/);
+});
+
 test('look-alike grouping keys on the OLD display, not the descriptive title', () => {
     const src = stripComments(READ(JS('utils.js')));
     const body = src.slice(src.indexOf('function cardKey('), src.indexOf('function cardKey(') + 600);

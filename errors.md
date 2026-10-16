@@ -40,6 +40,32 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-357 — HP 67XXL Tri-Colour showed "Red"; HP 67 "4-Pack" read as four cartridges (owner, 2026-10-16) — **SHIPPED (frontend stop-gap); backend data OPEN**
+
+**What the owner reported.** C67XXLRD (compatible HP 67XXL Tri-Colour) shows a "Red" colour chip and "1 x Red" under
+Pack contents. The genuine HP 67 pack card reads "HP Genuine 67 Ink Cartridge 4-Pack", and a customer bought it
+expecting four cartridges.
+
+**Measured (READ-ONLY, live API, 2026-10-16).** Both are backend data. C67XXLRD stores `color: "Red"` and
+`color_hex: ["#f44336"]`, and its description and keywords also say Red. G67VPVP stores `color: "Value Pack"` with
+`/constituents` = `[]`. Its MPN 6ZD26AA is HP's black + tri-colour combo, which is 2 cartridges, so "4-Pack" is
+wrong as well as ambiguous. A sweep of all 4,119 rows (`probe:product-titles`) found 16 `color_mismatch` and
+28 `pack_contents_unknown`. The rows that mislead customers are in outbox `backend-asks-2026-10-16.md` §3. The
+13 `CDR*BK` drums and the Lexmark drum miss only because their names carry no colour word, which is harmless.
+
+**Fix (frontend, `utils.js` ProductName).**
+- `SETS['BLACK/COLOUR']` = "Black + Tri-Colour Combo Pack" (owner's wording). G60BKCLRVP and G3YP09AABKCLRVP compose now.
+  G67VPVP, G804VPVP and Canon PG640/PG645 compose once the backend stores `Black/Colour`.
+- `packRename`: when `pack_type` is `value_pack` and `color` is "Value Pack", a bare "N-Pack" becomes "Value Pack".
+  No count is better than a wrong one. `composeMiss` still returns `pack_contents_unknown`, so the probe keeps
+  counting these rows. Known cost: GPGI650XL/670XL twin-black packs lose their correct "2-Pack" until the backend
+  fixes their data.
+- The "Red" chip on C67XXLRD is **not fixed**. The FE does not second-guess `color`, so the chip stays until the
+  backend corrects the row (outbox §3A).
+
+**Pinned by** `tests/product-name-clean-jul2026.test.js` (combo pack, Value Pack count drop, KCMY and multipack unchanged).
+
+---
 ## ERR-356 — PDP: "Buy the full set" under the printer list; dispatch countdown under free shipping (owner, 2026-10-16) — **SHIPPED (frontend)**
 
 **What the owner asked.** On a single (C955XLBK screenshot) the "Buy the full set" card sat at the foot of the buy column,
