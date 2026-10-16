@@ -8,6 +8,10 @@
  * tile). Owner decision: a drum that pairs with a toner shows WITH that toner,
  * and the toner with the drum.
  *
+ * ERR-358 (owner 2026-10-16) REPLACED the code-based join: the related category
+ * joins by PRINTER — partner-type rows (toner ⇄ drum only) sharing ≥1
+ * `compatible_printers` slug with the tile's own-type rows (_printerPartners).
+ *
  * The real methods are lifted out of shop-page.js and run against a stubbed
  * API.getShopData, wired to the real SeriesCodes from utils.js.
  *
@@ -54,19 +58,25 @@ function loadSeriesCodes() {
     return sandbox.__SC;
 }
 
-const row = (id, product_type, series_codes) => ({ id, product_type, series_codes });
-// Live shape, measured 2026-10-15 (Brother).
+const row = (id, product_type, series_codes, printers = []) =>
+    ({ id, product_type, series_codes, compatible_printers: printers.map(slug => ({ slug })) });
+// Live code shape, measured 2026-10-15 (Brother); printers = the listing's 2-slug sample.
+const L23 = ['brother-hl-l2350dw', 'brother-hl-l2375dw'];
+const L51 = ['brother-hl-l5100dn'];
 const TONER_ROWS = [
-    row('GTN2415BK', 'toner_cartridge', ['TN2415', 'DR2415']),
-    row('GTN2445BK', 'toner_cartridge', ['TN2445', 'TN2415', 'TN2449', 'DR2415']),
-    row('CTN2445BK', 'toner_cartridge', ['TN2445', 'TN2415', 'TN2449', 'DR2415']),
-    row('CTN2449BK', 'toner_cartridge', ['TN2449', 'DR2415']),
+    row('GTN2415BK', 'toner_cartridge', ['TN2415', 'DR2415'], L23),
+    row('GTN2445BK', 'toner_cartridge', ['TN2445', 'TN2415', 'TN2449', 'DR2415'], L23),
+    row('CTN2445BK', 'toner_cartridge', ['TN2445', 'TN2415', 'TN2449', 'DR2415'], L23),
+    row('CTN2449BK', 'toner_cartridge', ['TN2449', 'DR2415'], L23),
+    row('GTN2530BK', 'toner_cartridge', ['TN2530'], L51),
 ];
 const DRUM_ROWS = [
-    row('GDR2415BK', 'drum_unit', ['DR2415']),
-    row('CDR2415BK', 'drum_unit', ['DR2415', 'TN2415', 'TN2449']),
-    row('GDR2530BK', 'drum_unit', ['DR2530', 'TN2530']),
-    row('CDR2530BK', 'drum_unit', ['DR2530', 'TN2530']),
+    // Untagged with any TN code: joins by printer alone (the old rule missed it).
+    row('GDR2425BK', 'drum_unit', ['DR2425'], ['brother-hl-l2375dw']),
+    row('CDR2425BK', 'drum_unit', ['DR2425'], ['brother-hl-l2375dw']),
+    row('GDR2530BK', 'drum_unit', ['DR2530', 'TN2530'], L51),
+    // Shares a printer but is not a drum: never a partner.
+    row('GWT223CL', 'waste_toner', ['WT223CL'], L23),
 ];
 
 function makeShop({ category = 'toner', failCategory = null } = {}) {
@@ -86,9 +96,10 @@ function makeShop({ category = 'toner', failCategory = null } = {}) {
         DebugLog: { warn: (m) => warnings.push(m), error() {}, log() {} },
     };
     vm.createContext(sandbox);
-    const body = ['_listingApiCategories', '_rowCarriesCode', '_pairedCode', '_walkListing', '_recountChipsFromListing'].map(methodSource).join(',\n');
+    const body = ['_listingApiCategories', '_rowCarriesCode', '_printerPartners', '_walkListing', '_recountChipsFromListing'].map(methodSource).join(',\n');
     const shop = vm.runInContext(`({
         RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' },
+        PRINTER_PAIR: { toner: ['toner_cartridge', 'drum_unit'], consumable: ['drum_unit', 'toner_cartridge'] },
         categories: [
             { id: 'toner', apiCategory: 'toner' },
             { id: 'consumable', apiCategory: 'drums' },
@@ -104,20 +115,38 @@ test('RELATED_CATEGORY in shop-page.js pairs toner and drums both ways', () => {
     assert.match(SHOP_CODE, /RELATED_CATEGORY:\s*\{\s*toner:\s*'consumable',\s*consumable:\s*'toner'\s*\}/);
 });
 
-test('toner tile DR2415 counts the 4 toners AND the 2 drums (6); TN2449 counts its drum', async () => {
+test('toner tiles count own rows by code PLUS drums sharing a printer (ERR-358)', async () => {
     const { shop, warnings } = makeShop();
-    const chips = [{ code: 'DR2415', count: 5 }, { code: 'TN2449', count: 4 }, { code: 'TN2530', count: 9 }];
+    const chips = [{ code: 'TN2415', count: 3 }, { code: 'TN2449', count: 3 }, { code: 'TN2530', count: 2 }];
     const r = await shop._recountChipsFromListing(chips);
     assert.equal(r.ok, true);
-    assert.deepEqual(JSON.parse(JSON.stringify(r.codes.map(c => [c.code, c.count]))), [['DR2415', 6], ['TN2449', 3 + 1], ['TN2530', 2]]);
+    // TN2415: 3 toners + the 2 DR2425 drums (shared hl-l2375dw); the waste box shares too but is not a drum.
+    // TN2530: 1 toner + its drum; the DR2425 drums share no printer with it.
+    assert.deepEqual(JSON.parse(JSON.stringify(r.codes.map(c => [c.code, c.count]))), [['TN2415', 5], ['TN2449', 5], ['TN2530', 2]]);
     assert.equal(shop._chipCountsFrom, 'listing-rows');
-    assert.ok(warnings.some(w => /DR2415 series=5 rows=6/.test(w)), 'backend drift is logged per chip');
+    assert.ok(warnings.some(w => /TN2415 series=3 rows=5/.test(w)), 'backend drift is logged per chip');
 });
 
-test('a chip no listing row carries is dropped (it would open empty)', async () => {
+test('a chip no own row carries is dropped (it would open empty) — drums alone never keep it', async () => {
     const { shop } = makeShop();
-    const r = await shop._recountChipsFromListing([{ code: 'DR9999', count: 2 }, { code: 'DR2530', count: 2 }]);
-    assert.deepEqual([...r.codes.map(c => c.code)], ['DR2530']);
+    const r = await shop._recountChipsFromListing([{ code: 'DR2530', count: 2 }, { code: 'TN2530', count: 2 }]);
+    assert.deepEqual([...r.codes.map(c => c.code)], ['TN2530']);
+});
+
+test('drum page: drum tiles pull toners sharing a printer; a waste-box tile pulls none', async () => {
+    const { shop } = makeShop({ category: 'consumable' });
+    const r = await shop._recountChipsFromListing([{ code: 'DR2425', count: 2 }, { code: 'WT223CL', count: 1 }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(r.codes.map(c => [c.code, c.count]))), [['DR2425', 2 + 4], ['WT223CL', 1]]);
+});
+
+test('_printerPartners: shared slug joins, partner type only, no slugs ⇒ nothing', () => {
+    const { shop } = makeShop();
+    const ids = (rows) => JSON.parse(JSON.stringify(rows.map(p => p.id)));
+    assert.deepEqual(ids(shop._printerPartners([TONER_ROWS[0]], DRUM_ROWS)), ['GDR2425BK', 'CDR2425BK']);
+    assert.deepEqual(ids(shop._printerPartners([TONER_ROWS[4]], DRUM_ROWS)), ['GDR2530BK']);
+    assert.deepEqual(ids(shop._printerPartners([row('X', 'toner_cartridge', ['TN1'])], DRUM_ROWS)), [], 'no printers ⇒ no partners');
+    shop.state.category = 'ink';
+    assert.deepEqual(ids(shop._printerPartners(TONER_ROWS, DRUM_ROWS)), [], 'negative control: ink pairs with nothing');
 });
 
 test('walk failure keeps backend counts, flags it, and reports not-ok (caller must not cache)', async () => {
@@ -138,7 +167,7 @@ test('drums page spans drums + toner; ink spans only ink', () => {
 test('walk pages until a short page', async () => {
     const { shop, calls } = makeShop();
     const rows = await shop._walkListing('toner');
-    assert.equal(rows.length, 4);
+    assert.equal(rows.length, 5);
     assert.deepEqual(calls.map(c => c.page), [1]);
 });
 
@@ -147,38 +176,18 @@ test('loadProductCodes recounts only RELATED categories and never caches a faile
     assert.match(SHOP_CODE, /if \(!productsUnavailable && !countsPartial\) \{\s*this\.cache\.products\[codesCacheKey\] = codes;/);
 });
 
-test('loadProducts fans out each alias over every category the tile spans', () => {
-    assert.match(SHOP_CODE, /aliases\.flatMap\(alias =>\s*listingCategories\.map\(category => \(\{ alias, category, match: alias \}\)\)\)/);
-    assert.match(SHOP_CODE, /listingCategories = this\.RELATED_CATEGORY\[this\.state\.category\]\s*\?\s*this\._listingApiCategories\(\)\s*:\s*\[loadApiCategory\]/);
+test('click: ?code= asks the OWN category only; the related category joins by printer (ERR-358)', () => {
+    assert.match(SHOP_CODE, /const requests = aliases\.map\(alias => \(\{ alias, category: loadApiCategory \}\)\);/);
+    assert.match(SHOP_CODE, /const relatedRows = await this\._walkListing\(relatedCategory\)\.catch\(\(\) => null\);/);
+    assert.match(SHOP_CODE, /if \(relatedRows === null\) \{\s*productsUnavailable = true;/, 'a failed walk is PARTIAL, never cached');
+    assert.match(SHOP_CODE, /for \(const p of this\._printerPartners\(mergedProducts, relatedRows\)\)/);
+    // ERR-354's TN/DR swap and the code-carrying join are gone.
+    assert.doesNotMatch(SHOP_CODE, /_pairedCode|requests\[i\]\.match|listingCategories/);
 });
 
-test('a related-category row joins the click ONLY when it carries the code (Lexmark C544 ⇒ C540 drum)', () => {
+test('_rowCarriesCode still decides OWN membership (yield tier, pair halves)', () => {
     const { shop } = makeShop();
     assert.equal(shop._rowCarriesCode(row('GC540X35GBK', 'drum_unit', ['C540']), 'C544'), false);
-    assert.equal(shop._rowCarriesCode(row('CDR2415BK', 'drum_unit', ['DR2415', 'TN2415']), 'TN2415'), true);
     assert.equal(shop._rowCarriesCode(row('X', 'ink_cartridge', ['604XL']), '604'), true, 'yield tier collapses');
     assert.equal(shop._rowCarriesCode(row('Y', 'ink_cartridge', ['CL511']), 'PG510/CL511'), true, 'pair half counts');
-    assert.match(SHOP_CODE, /const related = requests\[i\]\.category !== listingCategories\[0\];/);
-    assert.match(SHOP_CODE, /if \(related && !this\._rowCarriesCode\(p, requests\[i\]\.match\)\) continue;/);
-});
-
-// ERR-354 — owner 10-16: Brother TN1070 toner and DR1070 drum show together.
-// Measured: ?code=TN1070 returns NO drums (both categories) although the drums
-// are tagged ['DR1070','TN1070']; ?code=DR1070 returns all four rows.
-test('Brother TN/DR pairing: _pairedCode swaps the prefix, Brother only', () => {
-    const { shop } = makeShop();
-    shop.state.brand = 'brother';
-    assert.equal(shop._pairedCode('TN1070'), 'DR1070');
-    assert.equal(shop._pairedCode('dr2425'), 'TN2425');
-    assert.equal(shop._pairedCode('LC3317'), null, 'ink is not a toner/drum pair');
-    shop.state.brand = 'hp';
-    assert.equal(shop._pairedCode('TN1070'), null, 'negative control: other brands untouched');
-});
-
-test('Brother TN1070 click also asks the related category by DR1070, joined on the CLICKED code', () => {
-    assert.match(SHOP_CODE, /const paired = listingCategories\.length > 1 \? this\._pairedCode\(code\) : null;/);
-    assert.match(SHOP_CODE, /\.concat\(paired \? \[\{ alias: paired, category: listingCategories\[1\], match: code \}\] : \[\]\)/);
-    // The drum the paired request returns joins because it carries TN1070.
-    const { shop } = makeShop();
-    assert.equal(shop._rowCarriesCode(row('CDR1070BK', 'drum_unit', ['DR1070', 'TN1070']), 'TN1070'), true);
 });

@@ -298,8 +298,8 @@ test('shop-page.js loadProducts fans out across chip aliases', () => {
     assert.match(SHOP_CODE, /_codeAliasesFor\s*\(/,
         'shop-page.js must define _codeAliasesFor for click-time alias lookup');
     // Promise.all over alias map → one /api/shop call per yield variant
-    // ERR-337: each alias × each category the tile spans (toner ⇄ drums).
-    assert.match(SHOP_CODE, /aliases\.flatMap\(alias\s*=>[\s\S]{0,400}requests\.map\([\s\S]{0,80}API\.getShopData\(/,
+    // ERR-358: one request per alias, own category only (related joins by printer).
+    assert.match(SHOP_CODE, /aliases\.map\(alias\s*=>[\s\S]{0,400}requests\.map\([\s\S]{0,80}API\.getShopData\(/,
         'loadProducts must Promise.all across alias→API.getShopData for fan-out');
     // De-dupe by id/sku across alias responses
     assert.match(SHOP_CODE, /seenIds\.has\(key\)[\s\S]{0,40}continue/,

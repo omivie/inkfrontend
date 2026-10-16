@@ -40,6 +40,45 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-358 — /shop toner ⇄ drum now match by PRINTER, every brand (owner, 2026-10-16) — **SHIPPED (frontend; backend §1 for exact)**
+
+**What the owner asked.** "Match products universally by the printer model": a toner code page shows the drums that
+fit the same printers, and a drum code page shows the toners. Owner choices:
+- Match when they share at least 1 printer.
+- Toner ⇄ drum only.
+- REPLACE the code-based rules (ERR-354 TN/DR swap, ERR-337 related row carries the code).
+
+**Fix (`shop-page.js`).**
+- One rule, `_printerPartners(ownRows, relatedRows)`. It returns partner-type rows (`PRINTER_PAIR`: toner_cartridge ⇄
+  drum_unit) that share ≥1 `compatible_printers[].slug` with the own-type rows. A waste-box tile has no drum rows, so it
+  gets no printers and no partners.
+- Tile count (`_recountChipsFromListing`) = own rows carrying the code + `_printerPartners`.
+- Click (`loadProducts`): `?code=` asks the OWN category only. The related category comes from `_walkListing`, which is
+  already SWR-warm from the tile count, and is joined by `_printerPartners`. If that walk fails, the result is PARTIAL
+  (rendered, never cached).
+- `_pairedCode` and the `match` request field are deleted.
+
+**Measured (headless, local, READ-ONLY):**
+
+| Code | Tile count | Cards on click |
+|---|---|---|
+| TN1070 | 4 | 4, incl. the DR1070 drums |
+| DR1070 | 4 | 4 |
+| TN2445 | 4 | 4, incl. DR2415 (different number) |
+| TN2345 | 4 | 4, incl. DR2315 (different number) |
+| HP CE25 (control) | 5 | 5 toners, no drums |
+
+**Limit.** Listing rows carry a 2-printer sample. The exact match needs the full slug list: outbox 10-16 §1 (`ponytail:` comment).
+The cache-busted `?code=TN1070` GET now returns the drums, so the old outbox §1 was withdrawn.
+
+**Tests.** `tests/shop-chip-counts-related-oct2026.test.js` was rewritten for the printer rule:
+- a shared slug joins;
+- partner type only (a waste box sharing a slug is excluded);
+- a waste-box tile pulls nothing;
+- ink pairs with nothing;
+- the click wiring.
+
+---
 ## ERR-357 — HP 67XXL Tri-Colour showed "Red"; HP 67 "4-Pack" read as four cartridges (owner, 2026-10-16) — **SHIPPED (frontend stop-gap); backend data OPEN**
 
 **What the owner reported.** C67XXLRD (compatible HP 67XXL Tri-Colour) shows a "Red" colour chip and "1 x Red" under

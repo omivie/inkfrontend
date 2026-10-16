@@ -2630,15 +2630,24 @@
             return [code, ...S.pairHalves(code)].some(c => have.has(S.collapseYieldSuffix(c)));
         },
 
-        // ERR-354 — Brother sells a toner and its drum under the same number
-        // (TN1070 / DR1070). Returns the other half, or null.
-        // ponytail: same-number swap only; Brother pairs with different numbers
-        // (TN2450/DR2425, TN660/DR630) need the backend ?code= fix (outbox 10-16 §1).
-        _pairedCode(code) {
-            if (this.state.brand !== 'brother') return null;
-            const m = /^(TN|DR)(.+)$/i.exec(String(code || '').trim());
-            if (!m) return null;
-            return (m[1].toUpperCase() === 'TN' ? 'DR' : 'TN') + m[2].toUpperCase();
+        // ERR-358 — toner ⇄ drum by PRINTER (owner 10-16: "match products
+        // universally by using the printer model"). [own type, partner type]
+        // per category; anything else on the page pairs with nothing.
+        PRINTER_PAIR: { toner: ['toner_cartridge', 'drum_unit'], consumable: ['drum_unit', 'toner_cartridge'] },
+
+        // The ONE related-category rule, shared by the tile count and the click:
+        // partner-type rows that share ≥1 printer with the own-type rows. A
+        // waste-box chip has no drum rows ⇒ no printers ⇒ no toners.
+        // ponytail: matches on the listing's 2-printer SAMPLE (`compatible_printers`
+        // is capped at 2); exact needs the full slug list (outbox 10-16 §3).
+        _printerPartners(ownRows, relatedRows) {
+            const pair = this.PRINTER_PAIR[this.state.category];
+            if (!pair || !Array.isArray(relatedRows)) return [];
+            const slugsOf = (p) => (p && Array.isArray(p.compatible_printers) ? p.compatible_printers : [])
+                .map(c => c && c.slug).filter(Boolean);
+            const slugs = new Set((ownRows || []).filter(p => p && p.product_type === pair[0]).flatMap(slugsOf));
+            if (!slugs.size) return [];
+            return relatedRows.filter(p => p && p.product_type === pair[1] && slugsOf(p).some(s => slugs.has(s)));
         },
 
         // Every listing row of one category, paged. The response carries no
@@ -2684,15 +2693,13 @@
                     'disagree with the products a tile opens (ERR-337). Not cached.');
                 return { codes, ok: false };
             }
-            const rows = new Map();
-            for (const p of walks.flat()) {
-                const key = p && (p.id || p.sku);
-                if (key && !rows.has(key)) rows.set(key, p);
-            }
+            // ERR-358 — own rows by code, related rows by shared printer.
+            const [ownRows, relatedRows = []] = walks;
+            const keyOf = (p) => p && (p.id || p.sku);
             const out = [];
             for (const chip of codes) {
-                const ids = new Set();
-                for (const [key, p] of rows) if (this._rowCarriesCode(p, chip.code)) ids.add(key);
+                const own = ownRows.filter(p => this._rowCarriesCode(p, chip.code));
+                const ids = new Set([...own, ...this._printerPartners(own, relatedRows)].map(keyOf).filter(Boolean));
                 if (ids.size !== Number(chip.count)) {
                     DebugLog.warn(`[Shop._recountChipsFromListing] ${chip.code} series=${chip.count} rows=${ids.size}`);
                 }
@@ -3322,19 +3329,11 @@
                         // cold deep link the chip cache is empty and only the
                         // collapsed code used to be sent.
                         if (intent && intent.requested && !aliases.includes(intent.requested)) aliases.unshift(intent.requested);
-                        // ERR-337 — each alias × each category the tile spans
-                        // (toner ⇄ drums), so the click shows what the tile counted.
-                        const listingCategories = this.RELATED_CATEGORY[this.state.category]
-                            ? this._listingApiCategories() : [loadApiCategory];
-                        // ERR-354 — Brother TN1070 ⇄ DR1070. The backend's ?code=TN1070
-                        // does not return the drums even though they are tagged
-                        // TN1070; ?code=DR1070 does. So the related category is also
-                        // asked by the paired code, and a row still joins only when it
-                        // carries the CLICKED code (`match`; the join rule is unchanged).
-                        const paired = listingCategories.length > 1 ? this._pairedCode(code) : null;
-                        const requests = aliases.flatMap(alias =>
-                            listingCategories.map(category => ({ alias, category, match: alias })))
-                            .concat(paired ? [{ alias: paired, category: listingCategories[1], match: code }] : []);
+                        // ERR-358 — ?code= asks the OWN category only; the related
+                        // category joins by shared printer below (_printerPartners).
+                        const relatedCategory = this.RELATED_CATEGORY[this.state.category]
+                            ? this._listingApiCategories()[1] : null;
+                        const requests = aliases.map(alias => ({ alias, category: loadApiCategory }));
                         const responses = await Promise.all(requests.map(({ alias, category }) =>
                             API.getShopData({
                                 brand: this.state.brand,
@@ -3360,20 +3359,11 @@
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                         const seenIds = new Set();
-                        for (const [i, response] of responses.entries()) {
+                        for (const response of responses) {
                             if (response && response.ok && response.data?.products) {
-                                // ERR-337 — a related-category row joins only when it
-                                // CARRIES the code. The backend folds codes into
-                                // families per category (Lexmark drums: ?code=C544
-                                // returns the C540 drum, tagged only ["C540"]); the
-                                // tile count cannot see that fold, so neither does
-                                // the click. Own-category rows are untouched (the
-                                // retired-code stem adoption below relies on them).
-                                const related = requests[i].category !== listingCategories[0];
                                 for (const p of response.data.products) {
                                     const key = (p && (p.id || p.sku)) || null;
                                     if (key == null || seenIds.has(key)) continue;
-                                    if (related && !this._rowCarriesCode(p, requests[i].match)) continue;
                                     seenIds.add(key);
                                     mergedProducts.push(p);
                                 }
@@ -3384,6 +3374,24 @@
                                 // commonest backend failure of all became "no products".
                                 productsUnavailable = true;
                                 if (!unavailableCode) unavailableCode = response && response.code;
+                            }
+                        }
+
+                        // ERR-358 — the related category by shared printer. The walk
+                        // is SWR-warm from the tile count; a failed walk is a PARTIAL
+                        // answer (rendered, never cached), not "no drums".
+                        if (relatedCategory && mergedProducts.length) {
+                            const relatedRows = await this._walkListing(relatedCategory).catch(() => null);
+                            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                            if (relatedRows === null) {
+                                productsUnavailable = true;
+                                if (!unavailableCode) unavailableCode = 'RELATED_WALK_FAILED';
+                            }
+                            for (const p of this._printerPartners(mergedProducts, relatedRows)) {
+                                const key = p.id || p.sku;
+                                if (key == null || seenIds.has(key)) continue;
+                                seenIds.add(key);
+                                mergedProducts.push(p);
                             }
                         }
                     }
