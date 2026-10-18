@@ -105,6 +105,7 @@ async function withState(overrides) {
   const state = { ...DEFAULT_STATE, ...overrides };
   const { typeFilterGroup } = await import(path.join(SITE, 'js/admin/utils/product-types.js'));
   const src = [
+    PRODUCTS.match(/const NET_SORT_KEY = \{[^}]*\};/)[0],
     extractFunction(PRODUCTS, 'backendProductFilters'),
     extractFunction(PRODUCTS, 'backendCanSort'),
     extractFunction(PRODUCTS, 'filtersLostToBackend'),
@@ -262,8 +263,12 @@ test('a sort the backend has no key for is left OFF and NAMED, never sent', asyn
   }
   // Positive control: a supported sort is still sent, and nothing is "lost".
   const ok = await withState({ _sort: 'margin_pct', _sortDir: 'desc' });
-  assert.equal(ok.backendProductFilters().sort, 'margin_pct');
+  assert.equal(ok.backendProductFilters().sort, 'net_margin_incl_fixed_pct', 'the Margin % column sorts by the net key in its cell (ERR-364)');
   assert.equal(ok.backendProductFilters().order, 'desc');
+  const profit = await withState({ _sort: 'profit_ex_gst', _sortDir: 'asc' });
+  assert.equal(profit.backendProductFilters().sort, 'profit_incl_fixed_ex_gst', 'Profit $ sorts by its net cell key');
+  const plain = await withState({ _sort: 'retail_price', _sortDir: 'asc' });
+  assert.equal(plain.backendProductFilters().sort, 'retail_price', 'other columns pass through unchanged');
   assert.deepEqual(ok.filtersLostToBackend(), []);
 
   const none = await withState({ _sourceFilter: 'genuine', _stockFilter: 'in_stock', _packFilter: 'packs' });

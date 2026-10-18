@@ -3,9 +3,9 @@
  * PDP "Pack contents & page yields" (owner, 15 Oct 2026), under the printer
  * list: "1 x Black (LC432XLBK): up to 3,000 pages" per cartridge in the box.
  *   - singles = themselves; packs = /api/products/:sku/constituents, each
- *     yield from that constituent's own product row;
+ *     row's own `quantity` + integer `page_yield` (backend 2026-10-17, ERR-360);
  *   - no published yield => the line has no yield part (never invented);
- *   - contents unknown => block hidden, `data-pack-contents` says why
+ *   - `contents_known: false` => block hidden, `data-pack-contents` says why
  *     (fail-soft LOUD), never guessed from the pack's colour code;
  *   - own slot, so _mountCompat('') cannot wipe it.
  */
@@ -61,35 +61,52 @@ test('displaySku drops only OUR marker for the product source', () => {
     assert.equal(page.displaySku('CLI681BK', 'genuine'), 'CLI681BK', 'no G marker => unchanged');
 });
 
-test('single = one line of itself; no colour => nothing', () => {
-    const lines = page.packContentsLines({ sku: 'GLC3317BK', source: 'genuine', pack_type: 'single', color: 'Black', pageYield: 'up to 550' }, null, {});
-    assert.deepEqual(JSON.parse(JSON.stringify(lines)), [{ qty: 1, color: 'Black', code: 'LC3317BK', yieldText: 'up to 550 pages' }]);
-    assert.equal(page.packContentsLines({ sku: 'X', pack_type: 'single', color: null }, null, {}).length, 0);
+test('single = one line of itself (page_yield_pages first, text fallback); no colour => nothing', () => {
+    const base = { sku: 'GLC3317BK', source: 'genuine', pack_type: 'single', color: 'Black' };
+    const text = page.packContentsLines({ ...base, pageYield: 'up to 550' }, null);
+    assert.deepEqual(JSON.parse(JSON.stringify(text)), [{ qty: 1, color: 'Black', code: 'LC3317BK', yieldText: 'up to 550 pages' }]);
+    assert.equal(page.packContentsLines({ ...base, page_yield_pages: 600, pageYield: 'bk 1,500 cl 1,000' }, null)[0].yieldText,
+        'up to 600 pages', 'the backend integer wins over the text');
+    assert.equal(page.packContentsLines({ ...base, page_yield_pages: null, pageYield: '' }, null)[0].yieldText, '');
+    assert.equal(page.packContentsLines({ sku: 'X', pack_type: 'single', color: null }, null).length, 0);
 });
 
-test('KCMY pack = one line per constituent, yields from each constituent; missing yield stays empty', () => {
-    const info = { sku: 'GLC432XLKCMY', source: 'genuine', pack_type: 'value_pack', color: 'KCMY', name: 'Brother Genuine LC432XL KCMY-Pack' };
-    const cons = ['BK', 'C', 'M', 'Y'].map((c, i) => ({ sku: `GLC432XL${c}`, color: ['Black', 'Cyan', 'Magenta', 'Yellow'][i] }));
-    const lines = page.packContentsLines(info, cons, { GLC432XLBK: '3,000', GLC432XLC: '1500', GLC432XLM: '', GLC432XLY: null });
-    assert.deepEqual(lines.map(l => `${l.qty} ${l.color} ${l.code} ${l.yieldText}`), [
+// Live shape, GET /api/products/GLC432XLKCMY/constituents (2026-10-18).
+const LC432XL = {
+    pack_sku: 'GLC432XLKCMY', pack_type: 'value_pack', is_complete: true, contents_known: true,
+    constituents: [
+        { sku: 'GLC432XLBK', color: 'Black', quantity: 1, page_yield: 3000 },
+        { sku: 'GLC432XLC', color: 'Cyan', quantity: 1, page_yield: 1500 },
+        { sku: 'GLC432XLM', color: 'Magenta', quantity: 1, page_yield: null },
+        { sku: 'GLC432XLY', color: 'Yellow', quantity: 1, page_yield: 1500 },
+    ],
+};
+
+test('KCMY pack = the backend box list, each row its own yield; null yield stays empty', () => {
+    const info = { sku: 'GLC432XLKCMY', source: 'genuine', pack_type: 'value_pack', color: 'KCMY' };
+    assert.deepEqual(page.packContentsLines(info, LC432XL).map(l => `${l.qty} ${l.color} ${l.code} ${l.yieldText}`), [
         '1 Black LC432XLBK up to 3,000 pages',
         '1 Cyan LC432XLC up to 1,500 pages',
         '1 Magenta LC432XLM ',
-        '1 Yellow LC432XLY ',
+        '1 Yellow LC432XLY up to 1,500 pages',
     ]);
 });
 
-test('twin pack (ONE constituent) takes its count from savings, else the N-Pack name', () => {
-    const cons = [{ sku: 'G45BK', color: 'Black' }];
-    const byName = page.packContentsLines({ sku: 'G45BK-2PK', source: 'genuine', pack_type: 'multipack', name: 'HP Genuine 45BK Ink Cartridge 45 Black 2-Pack (833 pages)' }, cons, { G45BK: '833' });
-    assert.equal(byName[0].qty, 2);
-    const bySavings = page.packContentsLines({ sku: 'X-3PK', source: 'genuine', pack_type: 'multipack', name: 'no count', pack_savings_vs_singles: { cartridge_count: 3 } }, cons, {});
-    assert.equal(bySavings[0].qty, 3);
+test('twin pack = the row quantity (G45BK-2PK ⇒ G45BK × 2), never the name or savings count', () => {
+    const contents = { contents_known: true, constituents: [{ sku: 'G45BK', color: 'Black', quantity: 2, page_yield: 833 }] };
+    const info = { sku: 'G45BK-2PK', source: 'genuine', pack_type: 'multipack', name: 'HP Genuine 45BK 3-Pack', pack_savings_vs_singles: { cartridge_count: 1 } };
+    const [line] = page.packContentsLines(info, contents);
+    assert.equal(line.qty, 2);
+    assert.equal(line.yieldText, 'up to 833 pages');
+    assert.match(page.packContentsHtml(info, [line]), /2 x Black \(45BK\)[\s\S]*cartridges\./);
 });
 
-test('pack with constituents [] => no lines (never guessed from colour code)', () => {
-    assert.equal(page.packContentsLines({ sku: 'GPG645VPVP', pack_type: 'value_pack', color: 'Value Pack' }, [], {}).length, 0);
-    assert.equal(page.packContentsLines({ sku: 'GLC432XLKCMY', pack_type: 'value_pack', color: 'KCMY' }, null, {}).length, 0);
+test('contents_known false / missing / no list => no lines (never guessed from colour code)', () => {
+    const info = { sku: 'GPG645VPVP', pack_type: 'value_pack', color: 'Value Pack' };
+    assert.equal(page.packContentsLines(info, { contents_known: false, is_complete: true, constituents: [] }).length, 0);
+    assert.equal(page.packContentsLines(info, { ...LC432XL, contents_known: false }).length, 0, 'a list the backend disowns is not shown');
+    assert.equal(page.packContentsLines(info, { constituents: LC432XL.constituents }).length, 0, 'absent flag = not known');
+    assert.equal(page.packContentsLines(info, null).length, 0);
 });
 
 test('HTML: colon only with a yield, escaped, genuine/compatible note', () => {
@@ -113,6 +130,7 @@ test('wiring: own slot after the compat slot, one writer, loud state, API wrappe
     const render = method(JS, 'renderPackContents');
     for (const state of ["'ok'", "'partial'", "'absent'", "'error'"]) assert.ok(render.includes(state), `state ${state}`);
     assert.match(render, /API\.getProductConstituents\(info\.sku\)/);
+    assert.doesNotMatch(render, /API\.getProduct\(/, 'no per-constituent product read (ERR-360)');
     assert.match(JS, /this\.renderCompatiblePrinters\(info\);\s*this\.renderPackContents\(info\);/);
     assert.match(API_JS, /getProductConstituents\(sku\)\s*\{\s*return this\.getPublic\(`\/api\/products\/\$\{encodeURIComponent\(sku\)\}\/constituents`\)/);
     assert.match(CSS, /\.product-gallery__compat \{ order: 1; \}\s*(?:\.product-gallery > #pack-upsell \{ order: 1; \}\s*)?\.product-gallery__contents \{ order: 1; \}/);

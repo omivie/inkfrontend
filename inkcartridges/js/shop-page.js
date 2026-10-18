@@ -2614,6 +2614,19 @@
             this.showLoading(false);
         },
 
+        // ERR-361 — the backend's real printer slug replaces a retired one in
+        // state and in the address bar (`printer_slug`, the canonical param;
+        // a legacy `printer` param is dropped). No navigation, no history entry.
+        _adoptPrinterSlug(slug) {
+            if (typeof slug !== 'string' || !slug || slug === this.state.printer) return false;
+            this.state.printer = slug;
+            const params = new URLSearchParams(window.location.search);
+            params.delete('printer');
+            params.set('printer_slug', slug);
+            history.replaceState(history.state, '', `${window.location.pathname}?${params.toString()}`);
+            return true;
+        },
+
         // ERR-337 — the API categories a code tile spans: its own, plus the
         // related one (toner ⇄ drums). Read by the tile count AND the click.
         _listingApiCategories() {
@@ -2638,13 +2651,16 @@
         // The ONE related-category rule, shared by the tile count and the click:
         // partner-type rows that share ≥1 printer with the own-type rows. A
         // waste-box chip has no drum rows ⇒ no printers ⇒ no toners.
-        // ponytail: matches on the listing's 2-printer SAMPLE (`compatible_printers`
-        // is capped at 2); exact needs the full slug list (outbox 10-16 §3).
+        // Printers = the row's full `compatible_printer_slugs` (backend
+        // 2026-10-17, ERR-361; `[]` = fits no printer). Absent = the backend's
+        // lookup failed ⇒ the 2-printer `compatible_printers` sample, as told.
         _printerPartners(ownRows, relatedRows) {
             const pair = this.PRINTER_PAIR[this.state.category];
             if (!pair || !Array.isArray(relatedRows)) return [];
-            const slugsOf = (p) => (p && Array.isArray(p.compatible_printers) ? p.compatible_printers : [])
-                .map(c => c && c.slug).filter(Boolean);
+            const slugsOf = (p) => (p && Array.isArray(p.compatible_printer_slugs)
+                ? p.compatible_printer_slugs
+                : (p && Array.isArray(p.compatible_printers) ? p.compatible_printers : []).map(c => c && c.slug))
+                .filter(s => typeof s === 'string' && s);
             const slugs = new Set((ownRows || []).filter(p => p && p.product_type === pair[0]).flatMap(slugsOf));
             if (!slugs.size) return [];
             return relatedRows.filter(p => p && p.product_type === pair[1] && slugsOf(p).some(s => slugs.has(s)));
@@ -3611,6 +3627,11 @@
 
                 if (response.ok && response.data) {
                     const printerData = response.data.printer;
+                    // ERR-361 — a retired duplicate slug (brother-dpc-1510) 301s
+                    // to its real row and the fetch follows it silently; the
+                    // body names the real slug. Adopt it BEFORE the breadcrumb,
+                    // title and canonical read state.printer, and fix the bar.
+                    this._adoptPrinterSlug(printerData && printerData.slug);
                     // API returns 'products' array (per product_pages.md documentation)
                     const products = response.data.products || response.data.compatible_products || [];
 

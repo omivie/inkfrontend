@@ -517,8 +517,10 @@
                 var products = Array.isArray(data.products) ? data.products
                     : (Array.isArray(data.suggestions) ? data.suggestions : []);
                 return products.slice(0, 6).map(function (p) {
+                    // ERR-359 — label = the shown title; value stays the stored name.
                     var name = p.name || p.display_name || '';
-                    return { value: name, label: name, meta: p.sku ? ('SKU ' + p.sku) : '' };
+                    var label = (typeof ProductName !== 'undefined' ? ProductName.clean(p) : '') || name;
+                    return { value: name, label: label, meta: p.sku ? ('SKU ' + p.sku) : '' };
                 }).filter(function (item) { return item.value; });
             });
         });

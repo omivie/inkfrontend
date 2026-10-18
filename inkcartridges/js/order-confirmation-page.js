@@ -20,6 +20,10 @@
             if (paymentIntentId) {
                 this.detectedPaymentMethod = 'stripe';
             }
+            // ERR-362 — a $0 order paid entirely by points (PaymentPage.createPointsOrder)
+            // arrives already `paid`, with no Stripe redirect params.
+            const paidByPoints = urlParams.get('paid') === 'points';
+            if (paidByPoints) this.detectedPaymentMethod = 'points';
 
             if (redirectStatus && redirectStatus !== 'succeeded') {
                 // Payment failed or is pending after Stripe redirect
@@ -34,7 +38,7 @@
             // If redirected from Stripe with a successful payment, clear cart
             // Preserve guest session ID — clearCart() removes it, but we need it
             // for the order API call below
-            if (redirectStatus === 'succeeded') {
+            if (redirectStatus === 'succeeded' || paidByPoints) {
                 const guestSessionId = typeof API !== 'undefined' ? API.getGuestSessionId() : null;
                 try {
                     if (typeof API !== 'undefined') await API.clearCart();
@@ -135,7 +139,13 @@
             // the conversion carries them for reporting, and the label-less
             // `purchase` below is what fills the "Past buyers" audience.
             const adsItems = typeof AdsRemarketing !== 'undefined' ? AdsRemarketing.items(order.items) : [];
-            if (typeof gtag === 'function') {
+            // ERR-362 — a $0 points-paid order is an order, not a sale: no money
+            // changed hands, so no ad platform hears "purchase" (the backend
+            // skips the GA4 purchase and the Ads upload for it too). The
+            // first-party funnel below still records the completed order.
+            const paidNothing = Number(order.total) === 0
+                || (order.paymentMethod || this.detectedPaymentMethod) === 'points';
+            if (!paidNothing && typeof gtag === 'function') {
                 const conversion = {
                     send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
                     value: order.total,
@@ -145,7 +155,7 @@
                 if (adsItems.length) conversion.items = adsItems;
                 gtag('event', 'conversion', conversion);
             }
-            if (typeof AdsRemarketing !== 'undefined') AdsRemarketing.event('purchase', order.items);
+            if (!paidNothing && typeof AdsRemarketing !== 'undefined') AdsRemarketing.event('purchase', order.items);
 
             // Microsoft Advertising purchase conversion (UET).
             //
@@ -162,7 +172,7 @@
             // Microsoft server-side. This is the only path revenue has to that
             // account. See the UET block in gtag.js for why that is not a
             // loophole in the double-count rule.
-            if (typeof UetTag !== 'undefined') {
+            if (!paidNothing && typeof UetTag !== 'undefined') {
                 UetTag.purchase({
                     total: order.total,
                     orderNumber: order.orderNumber
@@ -436,14 +446,16 @@
                     'stripe': 'Credit/Debit Card',
                     'card': 'Credit/Debit Card',
                     'paypal': 'PayPal',
-                    'net30': 'Net 30 Invoice'
+                    'net30': 'Net 30 Invoice',
+                    'points': 'Loyalty points'
                 };
                 paymentEl.textContent = paymentLabels[paymentMethod] || paymentMethod;
             }
 
             // Order total
             const totalEl = document.getElementById('order-total');
-            if (totalEl && order.total) {
+            // `!= null`, not truthiness: a points-paid order totals $0.00 (ERR-362).
+            if (totalEl && order.total != null && Number.isFinite(parseFloat(order.total))) {
                 totalEl.textContent = `$${parseFloat(order.total).toFixed(2)} NZD`;
             }
 

@@ -590,6 +590,30 @@
             }
         },
 
+        /**
+         * ERR-362 — points pay the WHOLE order (backend 2026-10-17). On when the
+         * SERVER cart total is exactly $0 with points applied, for a signed-in
+         * customer — never from a total added up here. The server decides again
+         * at POST /api/orders; a POINTS_TOTAL_NOT_ZERO refusal (the real address
+         * costs more than the cart's estimate) sets PaymentPage.pointsRefused,
+         * which keeps the card form until the points change.
+         */
+        _syncPointsOrder(summary, loyalty) {
+            const authed = typeof Auth !== 'undefined' && Auth.isAuthenticated && Auth.isAuthenticated();
+            const applied = Number((loyalty && loyalty.points_applied) || (summary && summary.loyalty_points_applied) || 0);
+            const refused = typeof PaymentPage !== 'undefined' && PaymentPage.pointsRefused === true;
+            const on = !!(authed && summary && summary.total === 0 && applied > 0 && !refused);
+            this.pointsOrder = on;
+            const note = document.getElementById('checkout-total-note');
+            if (note) {
+                const estimated = on && loyalty && loyalty.shipping_estimated === true;
+                note.hidden = !estimated;
+                note.textContent = estimated ? 'Shipping estimated' : '';
+            }
+            if (typeof PaymentPage !== 'undefined' && typeof PaymentPage.setPointsMode === 'function') PaymentPage.setPointsMode(on);
+            return on;
+        },
+
         /** Recompute the display total from the parts and repaint through ONE renderer. */
         _repaintShippingAndTotal() {
             this.totals.total = Number.isFinite(this.totals.shipping)
@@ -816,7 +840,7 @@
                     </div>
                     <div class="checkout-summary__item-details">
                         ${BrandSource.badgeHTML(item)}
-                        <h3 class="checkout-summary__item-title">${Security.escapeHtml(item.name || '')}</h3>
+                        <h3 class="checkout-summary__item-title">${Security.escapeHtml(((typeof ProductName !== 'undefined') ? ProductName.clean(item) : item.name) || '')}</h3>
                         <p class="checkout-summary__item-variant">${Security.escapeHtml(item.brand || item.sku || '')}</p>
                     </div>
                     <span class="checkout-summary__item-price">$${(item.price * item.quantity).toFixed(2)}</span>
@@ -2125,6 +2149,10 @@
                 else if (kind === 'err') feedback.classList.add('cart-loyalty__feedback--err');
             };
 
+            // ERR-362 (backend 2026-10-17): points cap at the ORDER total, shipping
+            // included; EXCEEDS_ORDER_TOTAL replaced EXCEEDS_CART_SUBTOTAL (no
+            // longer sent). LEAVES_UNPAYABLE_BALANCE = 1c–49c would be left, which
+            // nothing can charge; its own message names both valid amounts.
             const errText = (code, fb, minPts) => {
                 switch (code) {
                     case 'EMAIL_NOT_VERIFIED': return 'Verify your email to use points.';
@@ -2132,12 +2160,26 @@
                     case 'BELOW_MIN_POINTS': return minPts ? `Minimum redemption is ${minPts} points.` : 'That’s below the minimum redemption.';
                     case 'CONFLICTS_WITH_COUPON': return 'Remove your coupon to use points.';
                     case 'EXCEEDS_AVAILABLE_BALANCE': return 'You don’t have that many points.';
-                    case 'EXCEEDS_CART_SUBTOTAL': return 'That’s more than your cart total.';
-                    case 'EXCEEDS_ORDER_TOTAL': return 'That’s more than your order total.'; // ERR-345: points cover shipping too
+                    case 'EXCEEDS_ORDER_TOTAL': return 'That’s more than your order total.';
+                    case 'LEAVES_UNPAYABLE_BALANCE': return API.extractErrorMessage(fb, 'That would leave less than $0.50 to pay by card. Use points for the whole order, or leave at least $0.50.');
+                    case 'TEST_CART_NO_DISCOUNTS': return typeof AdminOnlyRefusal !== 'undefined' ? AdminOnlyRefusal.DISCOUNT_HINT : 'Points can’t be used on this cart.';
                     case 'LOYALTY_DISABLED': return 'Loyalty points are unavailable right now.';
                     case 'RATE_LIMITED': return 'Too many tries — wait a minute and retry.';
                     default: return API.extractErrorMessage(fb, 'Couldn’t apply your points right now.');
                 }
+            };
+
+            // The two valid amounts a refusal carries (`details`, both 400s): one
+            // button each, so the shopper never has to work the numbers out.
+            const offerChoices = (details) => {
+                if (!feedback || !details) return;
+                const full = Number(details.full_cover_points);
+                const partial = Number(details.max_partial_points);
+                const btn = (pts, label) => `<button type="button" class="cart-loyalty__choice" data-points="${pts}">${Security.escapeHtml(label)}</button>`;
+                const choices = [];
+                if (Number.isInteger(full) && full > 0 && (!lastLoyalty || full <= (lastLoyalty.points_balance || 0))) choices.push(btn(full, `Use ${full.toLocaleString('en-NZ')} pts — pay nothing`));
+                if (Number.isInteger(partial) && partial > 0) choices.push(btn(partial, `Use ${partial.toLocaleString('en-NZ')} pts, pay the rest by card`));
+                if (choices.length) feedback.insertAdjacentHTML('beforeend', ` <span class="cart-loyalty__choices">${choices.join(' ')}</span>`);
             };
 
             const render = (lo) => {
@@ -2167,7 +2209,10 @@
                     const money = (typeof formatPrice === 'function') ? ` (${formatPrice(balance / rate)})` : '';
                     balanceEl.textContent = `${balance.toLocaleString('en-NZ')} pts${money}`;
                 }
-                if (input) { input.min = String(minPts || 0); input.max = String(maxPts || 0); input.step = '100'; }
+                // step 1: the exact full cover is a cent figure, never a multiple
+                // of 100 (backend 2026-10-17: live redemption_increment = 1). A
+                // step of 100 made the browser refuse to submit it.
+                if (input) { input.min = String(minPts || 0); input.max = String(maxPts || 0); input.step = '1'; }
 
                 const couponApplied = !!self.appliedCoupon;
                 // ERR-246 — the same rule as the coupon field. Folded into
@@ -2209,6 +2254,11 @@
                     }
                     self._repaintShippingAndTotal();
                     render(data.loyalty || null);
+                    // ERR-362 — the wallet and the $0 points path follow the SAME
+                    // server cart this control just changed.
+                    if (summary && typeof Cart !== 'undefined' && typeof Cart._adoptServerSummary === 'function') Cart._adoptServerSummary(summary);
+                    if (typeof CartWallet !== 'undefined' && typeof CartWallet.sync === 'function') CartWallet.sync();
+                    self._syncPointsOrder(summary, data.loyalty || null);
                 } catch (e) {
                     if (typeof DebugLog !== 'undefined') DebugLog.warn('Cart refresh after loyalty change failed:', e && e.message);
                 }
@@ -2218,18 +2268,39 @@
                 setFb('Applying…', null);
                 try {
                     const res = await API.applyLoyaltyPoints(points);
-                    if (res && res.ok) await refreshFromCart();
-                    else setFb(errText(res && res.code, res && res.error, lastLoyalty && lastLoyalty.min_redemption_points), 'err');
+                    if (res && res.ok) {
+                        if (typeof PaymentPage !== 'undefined') PaymentPage.pointsRefused = false; // new points, new answer
+                        await refreshFromCart();
+                    }
+                    else {
+                        setFb(errText(res && res.code, res && res.error, lastLoyalty && lastLoyalty.min_redemption_points), 'err');
+                        offerChoices(res && (res.details || (res.data && res.data.error && res.data.error.details)));
+                    }
                 } catch (err) {
                     setFb(errText(err && err.code, err, lastLoyalty && lastLoyalty.min_redemption_points), 'err');
+                    offerChoices(err && err.details);
                 }
             };
+            if (feedback) {
+                feedback.addEventListener('click', (e) => {
+                    const b = e.target.closest('[data-points]');
+                    if (!b) return;
+                    const pts = parseInt(b.dataset.points, 10);
+                    if (!pts) return;
+                    if (input) input.value = String(pts);
+                    apply(pts);
+                });
+            }
 
             const remove = async () => {
                 setFb('Removing…', null);
                 try {
                     const res = await API.removeLoyaltyPoints();
-                    if (res && res.ok) { await refreshFromCart(); setFb('Points removed.', null); }
+                    if (res && res.ok) {
+                        if (typeof PaymentPage !== 'undefined') PaymentPage.pointsRefused = false;
+                        await refreshFromCart();
+                        setFb('Points removed.', null);
+                    }
                     else setFb(errText(res && res.code, res && res.error), 'err');
                 } catch (err) {
                     setFb(errText(err && err.code, err), 'err');
@@ -2253,6 +2324,9 @@
                 });
             }
             if (removeBtn) removeBtn.addEventListener('click', remove);
+
+            // PaymentPage re-reads through this after a refused points order (ERR-362).
+            this.refreshLoyalty = refreshFromCart;
 
             // Initial state from the authoritative server cart (includes already-applied points)
             refreshFromCart();

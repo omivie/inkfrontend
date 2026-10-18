@@ -149,6 +149,24 @@ test('_printerPartners: shared slug joins, partner type only, no slugs ⇒ nothi
     assert.deepEqual(ids(shop._printerPartners(TONER_ROWS, DRUM_ROWS)), [], 'negative control: ink pairs with nothing');
 });
 
+// ERR-361 — backend 2026-10-17: every /api/shop row carries the FULL
+// `compatible_printer_slugs`; absent = lookup failed ⇒ sample; [] = fits none.
+test('_printerPartners: full compatible_printer_slugs win over the 2-printer sample', () => {
+    const { shop } = makeShop();
+    const ids = (rows) => JSON.parse(JSON.stringify(rows.map(p => p.id)));
+    // CTN1070BK / DR1070 live shape: the shared printer is NOT in either 2-slug sample.
+    const toner = { ...row('CTN1070BK', 'toner_cartridge', ['TN1070'], ['brother-dcp-1510', 'brother-dcp-1610w']),
+        compatible_printer_slugs: ['brother-dcp-1510', 'brother-dcp-1610w', 'brother-hl-1110', 'brother-mfc-1910w'] };
+    const drum = { ...row('GDR1070', 'drum_unit', ['DR1070'], ['brother-hl-1110', 'brother-hl-1210w']),
+        compatible_printer_slugs: ['brother-hl-1110', 'brother-hl-1210w'] };
+    const drumSampleOnly = row('CDR1070', 'drum_unit', ['DR1070'], ['brother-hl-1110']);   // field absent ⇒ sample
+    const drumFitsNone = { ...row('XDR', 'drum_unit', ['DR1070'], ['brother-hl-1110']), compatible_printer_slugs: [] };
+    assert.deepEqual(ids(shop._printerPartners([toner], [drum, drumSampleOnly, drumFitsNone])), ['GDR1070', 'CDR1070'],
+        'full list joins, absent falls back to the sample, [] means no printer (its sample is ignored)');
+    const tonerSampleOnly = row('CTN1070BK', 'toner_cartridge', ['TN1070'], ['brother-dcp-1510', 'brother-dcp-1610w']);
+    assert.deepEqual(ids(shop._printerPartners([tonerSampleOnly], [drum])), [], 'negative control: the samples alone share nothing');
+});
+
 test('walk failure keeps backend counts, flags it, and reports not-ok (caller must not cache)', async () => {
     const { shop, warnings } = makeShop({ failCategory: 'drums' });
     const chips = [{ code: 'DR2415', count: 5 }];

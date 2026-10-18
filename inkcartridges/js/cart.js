@@ -620,7 +620,9 @@ const Cart = {
     // Loyalty points state for this cart (null for guests / when loyalty service is down).
     // Full shape from the backend: { points_balance, points_applied, applied_value_dollars,
     // max_redeemable_points, min_redemption_points, redemption_rate, redeemable_now,
-    // message, stale_notice }.
+    // message, stale_notice } plus, since 2026-10-17 (ERR-362): full_cover_points
+    // (points that make the order exactly $0, shipping included), max_partial_points
+    // (most that still leaves $0.50 for a card) and shipping_estimated.
     loyalty: null,
 
     // Loading state - starts true, set to false after server data is loaded
@@ -1554,6 +1556,8 @@ const Cart = {
             const parsed = {
                 id: item.product.id,
                 name: item.product.name,
+                // ERR-359 — the backend's descriptive title; ProductName.clean shows it.
+                display_name: item.product.display_name || null,
                 price: item.product.retail_price,
                 image: typeof storageUrl === 'function' ? storageUrl(item.product.image_url) : (item.product.image_url || ''),
                 // Backend-optimized thumbnail preferred for the line image
@@ -3491,6 +3495,7 @@ const Cart = {
             this.items.push({
                 id: product.id,
                 name: product.name,
+                display_name: product.display_name || null,
                 price: product.price,
                 image: product.image || '',
                 sku: product.sku || '',
@@ -5042,7 +5047,7 @@ const Cart = {
             const price = (p.retail_price != null) ? formatPrice(parseFloat(p.retail_price)) : '';
             return '<a class="cart-addon" href="' + Security.escapeAttr(href) + '" data-track="cta_click" data-track-cta="free_ship_addon" data-track-location="cart">'
                 + img
-                + '<span class="cart-addon__name">' + Security.escapeHtml(p.name || p.sku || '') + '</span>'
+                + '<span class="cart-addon__name">' + Security.escapeHtml(((typeof ProductName !== 'undefined') ? ProductName.clean(p) : p.name) || p.sku || '') + '</span>'
                 + (price ? '<span class="cart-addon__price">' + Security.escapeHtml(price) + '</span>' : '')
                 + '</a>';
         }).join('');

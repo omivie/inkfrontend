@@ -68,8 +68,12 @@ test('§1 backend 301 on a legacy SKU is passed through as OUR 301 (measured def
     const loc = `${SITE}/products/brother-genuine-lc531bk-ink-cartridge-lc531-black/GLC531BK`;
     const { res, calls } = await run(`${SITE}/products/x/G-BRO-LC531BK-INK-BK`,
         () => new Response(null, { status: 301, headers: { Location: loc } }));
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].init.redirect, 'manual', 'fetch must not follow the backend redirect');
+    // ERR-365 adds a parallel slug-hop lookup on /products/<slug>/<SKU>; it too
+    // must never follow a redirect. Its answer here (another SKU) is ignored.
+    const prerender = calls.filter((c) => c.target.includes('/api/prerender/'));
+    assert.equal(prerender.length, 1);
+    assert.equal(prerender[0].init.redirect, 'manual', 'fetch must not follow the backend redirect');
+    assert.ok(calls.every((c) => c.init && c.init.redirect === 'manual'), 'no fetch follows a redirect');
     assert.equal(res.status, 301);
     assert.equal(res.headers.get('location'), loc);
 });

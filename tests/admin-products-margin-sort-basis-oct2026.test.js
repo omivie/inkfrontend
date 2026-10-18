@@ -10,8 +10,9 @@
  * 13.1%, 13.2% — correctly ordered. The $0.30 is ~7.7 points on a $3.91 ex-GST
  * price, nothing on a $1,746 one.
  *
- * Until the backend can sort by the displayed key, the page must SAY so (header
- * title + a toast on every such backend sort). Separately, the Supabase leg's
+ * ERR-364 (2026-10-18): the backend now sorts by the displayed keys
+ * (`net_margin_incl_fixed_pct`, `profit_incl_fixed_ex_gst`), so the columns map
+ * to them and the warning note was deleted. Separately, the Supabase leg's
  * client-side comparator read snake_case keys computeProfitability never
  * returns, so it compared -Infinity to -Infinity and sorted nothing.
  *
@@ -29,27 +30,21 @@ const RAW = fs.readFileSync(path.join(ROOT, 'inkcartridges/js/admin/pages/produc
 const SRC = stripComments(RAW);
 const TABLE = stripComments(fs.readFileSync(path.join(ROOT, 'inkcartridges/js/admin/components/table.js'), 'utf8'));
 
-test('the note names the gross basis and the fixed fee', () => {
-  const m = SRC.match(/const GROSS_SORT_NOTE = '([^']+)'/);
-  assert.ok(m, 'GROSS_SORT_NOTE must exist');
-  assert.match(m[1], /gross margin before fees/);
-  assert.match(m[1], /\$0\.30/);
+// ERR-364 (backend 2026-10-17, live since 2026-10-12): the backend sorts by the
+// net keys the cells show, so each column sends the key that fills its cell and
+// the "sorts by gross" note is gone.
+test('Margin % / Profit $ sort by the NET key that fills the cell', () => {
+  assert.match(SRC, /const NET_SORT_KEY = \{ margin_pct: 'net_margin_incl_fixed_pct', profit_ex_gst: 'profit_incl_fixed_ex_gst' \};/);
+  assert.match(SRC, /sort: NET_SORT_KEY\[_sort\] \|\| _sort/, 'backendProductFilters maps the column key');
+  assert.match(SRC, /r\.net_margin_incl_fixed_pct != null/, 'Margin % cell = net margin');
+  assert.match(SRC, /r\.profit_incl_fixed_ex_gst != null/, 'Profit $ cell = net profit');
 });
 
-test('Margin % and Profit $ headers carry the note as their title', () => {
-  for (const key of ['margin_pct', 'profit_ex_gst']) {
-    const at = SRC.indexOf(`key: '${key}', label:`);
-    assert.notEqual(at, -1, key);
-    const block = SRC.slice(at, SRC.indexOf('cols.push', at));
-    assert.match(block, /title: GROSS_SORT_NOTE/, `${key} header must explain its sort`);
+test('the gross-sort note and its toast are gone', () => {
+  for (const gone of ['GROSS_SORT_NOTE', 'warnGrossSort', 'Sorts by gross margin']) {
+    assert.ok(!SRC.includes(gone), `${gone} must not come back — the backend sorts by the net keys`);
   }
-  assert.match(TABLE, /col\.title \? ` title="\$\{esc\(col\.title\)\}"`/, 'table.js must render col.title, escaped');
-});
-
-test('the backend leg warns on a margin/profit sort', () => {
-  const leg = SRC.slice(SRC.indexOf('if (needsBackend) {'), SRC.indexOf('AdminAPI.getProducts(backendProductFilters()'));
-  assert.match(leg, /warnGrossSort\(\)/);
-  assert.match(SRC, /function warnGrossSort\(\) \{\s*if \(_sort === 'margin_pct' \|\| _sort === 'profit_ex_gst'\) Toast\.info\(GROSS_SORT_NOTE\)/);
+  assert.match(TABLE, /col\.title \? ` title="\$\{esc\(col\.title\)\}"`/, 'table.js still renders col.title for other headers');
 });
 
 test('client-side comparator reads keys computeProfitability actually returns', async () => {

@@ -10,7 +10,11 @@
  * what the shelf will actually show. This file never produces a retail price.
  */
 
+// "Lock at current price" is the one write that stays a per-row PUT (each row
+// keeps ITS OWN price; the bulk endpoint takes one value). Paced, so capped.
 export const BULK_CAP = 200;
+// POST /api/admin/pricing/bulk takes 1–2,000 ids per call (TARGET_TOO_LARGE above).
+export const BULK_TARGET_CAP = 2000;
 
 // Margin % (e.g. 40) → multiplier (1.6667). null for anything the backend could
 // never accept: m < 0 would price below cost, m ≥ 100 has no finite multiplier.
@@ -100,13 +104,17 @@ export async function runSequential(ids, put, { expect = null, onProgress, shoul
   return { refused: false, ok, failed, notAttempted: ids.slice(i) };
 }
 
-// ── POST /api/admin/pricing/bulk (live 2026-10-16, ERR-352) ──────────────────
-// Contract MEASURED from the endpoint's own validation messages:
-//   { target: { product_ids } | { filter }, action, value, lock, allow_decrease, dry_run }
+// ── POST /api/admin/pricing/bulk (live, ERR-352 → wired ERR-363) ─────────────
+// Contract: backend response 2026-10-17 "Admin Pricing page" §3, dry run
+// re-measured 2026-10-18 (Brother compatible toner +5%: affected 68).
+//   { target: { product_ids } | { filter }, action, value, lock, allow_decrease,
+//     dry_run, confirm }   — dry_run defaults TRUE server-side; confirm:true is
+//   required whenever dry_run is false (else 400 CONFIRM_REQUIRED).
 //   action ∈ set | adjust_pct | adjust_abs | set_margin | clear_manual
 //   filter must narrow the catalogue (is_active alone or an empty search is refused)
 // dry_run answers { affected, unchanged, blocked_by_floor, blocked_by_no_decrease,
-// sample[], packs, failed[] }. The backend does all price maths.
+// sample[], packs, failed[] }; a write { updated, unchanged, failed[], … }.
+// The backend does all price maths; packs are never repriced.
 export const BULK_ACTIONS = ['set', 'adjust_pct', 'adjust_abs', 'set_margin', 'clear_manual'];
 
 // Page filters → the bulk endpoint's target.filter. Only keys it validated by
@@ -133,6 +141,9 @@ export function bulkFilter(f = {}) {
 export function bulkBody({ action, value, lock = true, allowDecrease = false, ids = null, filters = null }) {
   if (!BULK_ACTIONS.includes(action)) return { error: `Unknown action ${action}` };
   let target;
+  if (ids && ids.length > BULK_TARGET_CAP) {
+    return { error: `${ids.length} products — one change covers at most ${BULK_TARGET_CAP.toLocaleString('en-NZ')}. Narrow the filter, or save the margin as a rule.` };
+  }
   if (ids && ids.length) target = { product_ids: ids.map(String) };
   else {
     const bf = bulkFilter(filters || {});
@@ -152,4 +163,81 @@ export function bulkBody({ action, value, lock = true, allowDecrease = false, id
     body.value = v;
   }
   return { body };
+}
+
+// ── Margin rules: GET|POST /api/admin/pricing/rules, PATCH|DELETE /:ruleId ────
+// Contract: backend response 2026-10-17 §4; preview shape re-measured 2026-10-18.
+// A POST/PATCH WITHOUT confirm is a preview (writes nothing). The backend stores
+// multiplier = 1/(1−m); margins outside 4.77–80% are refused (multiplier 1.05–5).
+export const RULE_MARGIN_MIN = 4.77;
+export const RULE_MARGIN_MAX = 80;
+
+// Form → rule body. A filter needs at least one key: a catalogue-wide margin
+// is the tier ladder (EMPTY_RULE_FILTER), so it is refused here too.
+export function ruleBody(form = {}) {
+  const filter = {};
+  if (form.brand) filter.brand = form.brand;
+  if (form.source === 'genuine' || form.source === 'compatible') filter.source = form.source;
+  if (form.product_type === 'ribbons') return { error: 'A rule takes one product type, not the Ribbons group (ribbons have their own ladder).' };
+  if (form.product_type) filter.product_type = form.product_type;
+  if (form.category && String(form.category).trim()) filter.category = String(form.category).trim().toUpperCase();
+  const band = {};
+  for (const [k, out] of [['cost_min', 'min'], ['cost_max', 'max']]) {
+    const v = form[k];
+    if (v === '' || v == null) continue;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return { error: 'Cost band must be a number of dollars (ex GST), 0 or more.' };
+    band[out] = n;
+  }
+  if (band.min != null && band.max != null && band.min > band.max) return { error: 'Cost band: "from" is above "to".' };
+  if (Object.keys(band).length) filter.cost_band = { min: band.min ?? null, max: band.max ?? null };
+  if (!Object.keys(filter).length) return { error: 'Pick at least one of brand, source, type, category or cost band. A margin for the whole catalogue is the ladder below.' };
+  const m = Number(form.margin_pct);
+  if (form.margin_pct === '' || form.margin_pct == null || !Number.isFinite(m) || m < RULE_MARGIN_MIN || m > RULE_MARGIN_MAX) {
+    return { error: `Margin must be between ${RULE_MARGIN_MIN}% and ${RULE_MARGIN_MAX}%.` };
+  }
+  const body = { filter, margin_pct: m, allow_decrease: !!form.allow_decrease };
+  const pr = Number(form.priority);
+  if (form.priority !== '' && form.priority != null && Number.isInteger(pr)) body.priority = pr;
+  if (form.notes && String(form.notes).trim()) body.notes = String(form.notes).trim();
+  return { body };
+}
+
+// One-line description of a stored rule's filter (GET rows carry brand {slug,name}).
+export function ruleSummary(rule = {}, labelType = (t) => t) {
+  const f = rule.filter || rule;
+  const parts = [];
+  const brand = (rule.brand && (rule.brand.name || rule.brand.slug)) || f.brand_name || null;
+  if (brand) parts.push(brand);
+  else if (f.brand_id || f.brand) parts.push('1 brand');
+  if (f.source) parts.push(f.source);
+  if (f.product_type) parts.push(labelType(f.product_type));
+  if (f.category) parts.push(f.category);
+  const band = f.cost_band || { min: f.cost_min, max: f.cost_max };
+  if (band && (band.min != null || band.max != null)) {
+    parts.push(`cost ${band.min != null ? `$${band.min}` : '$0'}–${band.max != null ? `$${band.max}` : 'any'}`);
+  }
+  return parts.length ? parts.join(' · ') : 'every product';
+}
+
+// Where a row's price comes from (`price_source`, backend 2026-10-17 §1).
+// `has_manual_price` true with no manual price = an older freeze: still locked.
+export const PRICE_SOURCE_LABEL = {
+  manual: 'Manual (locked)',
+  filter_rule: 'Margin rule',
+  brand_rule: 'Brand ladder',
+  catalogue: 'Catalogue band',
+  default: 'Default ladder',
+  pack: 'Pack (follows its singles)',
+  ribbon: 'Ribbon ladder',
+};
+export function priceSourceOf(r = {}) {
+  if (r.has_manual_price === true) return { kind: 'manual', label: PRICE_SOURCE_LABEL.manual, lockable: false };
+  const src = r.price_source;
+  if (!src || !PRICE_SOURCE_LABEL[src]) return { kind: 'unknown', label: 'unknown', lockable: false };
+  const label = src === 'filter_rule' && r.price_rule_id
+    ? `${PRICE_SOURCE_LABEL.filter_rule} #${String(r.price_rule_id).slice(0, 8)}`
+    : PRICE_SOURCE_LABEL[src];
+  // Packs follow their singles and the bulk endpoint never prices them.
+  return { kind: src, label, lockable: src !== 'pack' };
 }

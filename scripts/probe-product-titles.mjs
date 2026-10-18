@@ -2,19 +2,26 @@
 /**
  * probe-product-titles.mjs
  * ========================
- * Old vs new product title for every live product (owner, 2026-10-15, ERR-341).
+ * What title each live product SHOWS, now that the backend composes it
+ * (`display_name`, backend response 2026-10-17; ERR-359 supersedes the FE
+ * composer of ERR-341).
  *
- * The storefront now shows a descriptive Smart Ink style title built by
- * ProductName.clean. Rows it cannot build keep the old display name; this probe
- * counts them by reason (ProductName.composeMiss) so the fallback is never silent.
- * The owner reviews the CSV, and it is the spec for the backend rename.
+ * Status per row:
+ *   COMPOSED     backend composed a title; the storefront shows it verbatim.
+ *                A COMPOSED row whose shown title differs from display_name is
+ *                a BUG and fails the run (exit 1).
+ *   KEPT         display_name is the stored name (not composed); the storefront
+ *                shows the legacy display. KEPT:RENAMED = the legacy pack
+ *                grammar still rewrites it (the owner-pending packs).
+ *   MISSING      no display_name at all — the backend contract says it is
+ *                always present; counted loudly, fails the run.
  *
  * READ-ONLY. No credentials, no write verb, no fixture. Public catalogue only.
  * CSV goes to stdout, the summary to stderr:
  *     npm run probe:product-titles > product-titles.csv
  *
- * Columns: sku, source, product_type, pack_type, color, yield_tier, page_yield,
- *          stored name, shown title, status (COMPOSED or KEPT:<reason>)
+ * Columns: sku, source, product_type, pack_type, color, stored name,
+ *          display_name, shown title, status
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,14 +68,23 @@ if (total != null && rows.length < total) {
 }
 
 const csv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-const out = [['sku', 'source', 'product_type', 'pack_type', 'color', 'yield_tier', 'page_yield', 'stored_name', 'shown_title', 'status'].join(',')];
+const out = [['sku', 'source', 'product_type', 'pack_type', 'color', 'stored_name', 'display_name', 'shown_title', 'status'].join(',')];
 const counts = {};
+const bad = [];
 for (const p of rows) {
-    const miss = ProductName.composeMiss(p);
-    const status = miss ? `KEPT:${miss}` : 'COMPOSED';
+    const shown = ProductName.clean(p);
+    let status;
+    if (typeof p.display_name !== 'string' || !p.display_name.trim()) status = 'MISSING';
+    else if (ProductName.composed(p)) status = shown === p.display_name ? 'COMPOSED' : 'COMPOSED:SHOWN_DIFFERS';
+    else status = shown === p.name ? 'KEPT' : 'KEPT:RENAMED';
+    if (status === 'MISSING' || status === 'COMPOSED:SHOWN_DIFFERS') bad.push(`${p.sku} ${status}`);
     counts[status] = (counts[status] || 0) + 1;
-    out.push([p.sku, p.source, p.product_type, p.pack_type, p.color, p.yield_tier, p.page_yield, p.name, ProductName.clean(p), status].map(csv).join(','));
+    out.push([p.sku, p.source, p.product_type, p.pack_type, p.color, p.name, p.display_name, shown, status].map(csv).join(','));
 }
 console.log(out.join('\n'));
 console.error(`read ${rows.length}/${total ?? '?'} products`);
 for (const [k, v] of Object.entries(counts).sort((a, b) => b[1] - a[1])) console.error(`  ${k}: ${v}`);
+if (bad.length) {
+    console.error(`FAIL: ${bad.length} row(s) break the display_name contract:\n  ${bad.slice(0, 40).join('\n  ')}`);
+    process.exitCode = 1;
+}

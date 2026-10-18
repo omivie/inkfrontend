@@ -98,7 +98,8 @@
     "probe:fe-master-6oct": "node scripts/probe-fe-master-6oct-2026.mjs",
     "probe:cart-wallet-paint": "node scripts/probe-cart-wallet-paint.mjs",
     "probe:series-source": "node scripts/probe-series-source-filter.mjs",
-    "probe:chip-counts": "node scripts/probe-chip-counts.mjs"
+    "probe:chip-counts": "node scripts/probe-chip-counts.mjs",
+    "probe:backend-17oct": "node scripts/probe-backend-17oct.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

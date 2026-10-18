@@ -1,36 +1,33 @@
 # Backend correspondence — status index
 
-Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, answered docs deleted.
+Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, answered docs deleted. Last updated **2026-10-18**.
 `outbox/` = what we still need from the backend. `inbox/` = what the backend sent us. See `README.md`.
 
 ---
 
 ## `outbox/` — the ONE outgoing file
 
-**2026-10-15, owner instruction:** everything still open for the backend lives in ONE file,
-`outbox/backend-asks-2026-10-15.md`. **2026-10-16, owner: sent, so deleted** — text in git:
-`git show 2f88c13f:backend-docs/outbox/backend-asks-2026-10-15.md`. Answered documents are deleted, not archived. `sent/` and
-`bundles/` were removed the same day. Their text is in git: `git show ac61717a:backend-docs/sent/<file>`
-and `git show ac61717a:backend-docs/outbox/<file>`. The `sent/` evidence tables and the old outbox rows are
-in `git show ac61717a:backend-docs/STATUS.md`.
+**2026-10-18:** `outbox/backend-asks-2026-10-18.md` — NOT sent yet. It answers `inbox/backend-response-2026-10-17.md`.
+History: `backend-asks-2026-10-15.md` was sent 2026-10-16 (text `git show 2f88c13f:backend-docs/outbox/backend-asks-2026-10-15.md`);
+`backend-asks-2026-10-16.md` (§1 `?code=` symmetric / full printer slugs, §2 DCP-1610W toner, §3 colour + Value Pack rows) was sent
+and is answered by the same 17 Oct response (text `git show 00e4f7b1:backend-docs/outbox/backend-asks-2026-10-16.md`).
+Answered documents are deleted, not archived. `sent/` and `bundles/` were removed 2026-10-15; their text is in
+`git show ac61717a:backend-docs/…`.
 
-| § | Ask | Written | Status (2026-10-16) |
+| § | Ask | Written | Status (2026-10-18) |
 |---|---|---|---|
-| 1 | BF-102 `/api/shop` series count vs `?code=` listing (ERR-337) | 2026-10-15 | open |
-| 2 | Stored product names to the descriptive title format (ERR-341; supersedes ERR-335 KCMY-Pack) | 2026-10-15 | open |
-| 3 | Admin Pricing page asks 1–8 (ERR-336) | 2026-10-15 | open; `pricing.js` `SPEC` cites this file, and `tests/admin-pricing-page-oct2026.test.js` requires it to exist |
-| 4 | Pack contents: `quantity` + `page_yield` per constituent (ERR-340) | 2026-10-15 | open; `api.js` cites §4 |
-| 5 | Admin net-margin sort keys (ERR-311) | 2026-10-07 | open. **Not measured:** the admin GET needs a login. FE still ships `GROSS_SORT_NOTE` |
-| 6 | Quote PDF defects + design (ERR-316) | 2026-10-13 | open. **Not measured:** a download needs a guest cart write |
-| 7 | Confirmations from the 7 Oct round + email 12pm cutoff (ERR-312/313/319) | 2026-10-08 | 3 confirmations open |
-| 8 | Loyalty points up to whole order incl. shipping; $0 no-payment path (ERR-345) | 2026-10-15 | open; FE $0 Pay-now blocked on item 4 |
+| 1 | Option (b): toner ⇄ drum `series.count` + `?code=` by PRINTER (ERR-361; Brother toner 43 / drums 26 tiles drift) | 2026-10-18 | open; FE keeps `_recountChipsFromListing` until it ships |
+| 2 | `GET /products/<current slug>/<SKU>` 301s to `/shop?search=` (claim "passes through" does not hold; ERR-365 guards) | 2026-10-18 | open |
+| 3 | `display_name`: PDP drops "<Brand> Genuine" on uncomposed rows; absent on `compatible_alternatives[]` + `pack_suggestion` (ERR-359) | 2026-10-18 | open |
+| 4 | Colour mismatches: 13 mono drums (not contradictions) + GCLTP407C + G74C0ZV0 to check | 2026-10-18 | open |
+| 5 | CDR233CLKCMY, CDR251CLKCMY still "4-Pack" | 2026-10-18 | open |
+| 6 | Confirm DELETE rule (no confirm? job_id?) and PATCH preview shape — not exercised (live reprice) (ERR-363) | 2026-10-18 | open |
 
-**2026-10-16:** the file was never committed on 10-15 (998e114e deleted the old outbox docs but not this one's
-predecessor text). Rebuilt from `errors.md` ERR-311/316/335–345 and `git show 998e114e^:backend-docs/outbox/`.
-
-**Closed and deleted 2026-10-15:**
-- `dispatch-cutoff-12pm-FE-handoff-oct2026.md` (ERR-319). Measured 12:16 NZDT: trust, PDP `delivery_estimate`, `/api/cart` and prerender meta all say 12:00/12pm. Email templates were NOT checked; the combined file asks the backend to confirm them.
-- `series-source-filter-FE-reply-oct2026.md` (ERR-314). It had no asks.
+**Closed 2026-10-18 by `inbox/backend-response-2026-10-17.md`** (all measured, `npm run probe:backend-17oct` 20/20):
+10-15 §1 BF-102 tile counts · §2 titles (ERR-341 ⇒ ERR-359) · §3 Admin Pricing (ERR-336 ⇒ ERR-363) · §4 pack contents
+(ERR-340 ⇒ ERR-360) · §5 net-margin sort (ERR-311 ⇒ ERR-364) · §6 quote PDF (ERR-316, no change) · §7 confirmations ·
+§8 points whole order (ERR-345 ⇒ ERR-362); 10-16 §1 full printer slugs (ERR-358 ⇒ ERR-361) · §2 DCP-1610W TN1070 (43 links) ·
+§3 C67XXLRD colour fixed (the "Value Pack" rows stay owner-pending).
 
 **When the backend answers a section:** delete that section from the file and its row here. When nothing is left, delete the file.
 New asks go in as a new section of the current file, or in a new dated `backend-asks-YYYY-MM-DD.md` that replaces it. There is never more than one.
@@ -41,6 +38,7 @@ New asks go in as a new section of the current file, or in a new dated `backend-
 
 | Doc | Note |
 |---|---|
+| `backend-response-2026-10-17.md` | **2026-10-17, received 2026-10-18** (from a downloads folder; byte-identical copy). Answers 10-15 §1–8 and 10-16 §1–3 in one file. **Measured 2026-10-18 and holds** (`probe:backend-17oct` 20/20, `probe:product-titles` 3,351 composed / 0 missing, `probe:chip-counts` Brother toner+drums 0 wrong). **Two claims do not hold as written:** the slug endpoint 301s a CURRENT slug to a search page; "show `display_name` verbatim everywhere" drops the brand on the PDP for uncomposed rows. **One instruction declined with the owner:** deleting `_recountChipsFromListing` would revert the 16 Oct printer rule (their count pairs by code). Built as ERR-359..365. Answered by `outbox/backend-asks-2026-10-18.md` |
 | `series-page-source-filter-FE-handoff-oct2026.md` | **2026-10-08, received 2026-10-08** (from a downloads folder; FE master checklist item 21). Ads in the new "Winners"/"Exclusive" groups land on `/shop?brand=…&code=…&source=compatible|genuine`; the series page ignored `source`. Backend claims re-measured 8 Oct and hold (LC3319XL/LC3319 compatible 6, unfiltered 12, HP 965 pack 4; `source=bogus` ⇒ 400). Fixed by ERR-314: `source` sent on every `/api/shop` call, URL speaks `source` (legacy `type` read), removable chip (the old one had been dead since Mar), canonical without `source`. `probe:series-source`. Answered by `outbox/series-source-filter-FE-reply-oct2026.md` |
 | `fe-6oct-combined-reply-backend-response-oct2026.md` | **2026-10-07, received 2026-10-08** (from a downloads folder). Answers `outbox/fe-6oct-combined-FE-reply-oct2026.md` (ERR-308/309) and closes the 6 Oct ERR-307 reply. Built: `compatible_alternatives[].id` (verified live 8 Oct). Confirmed BF-095 with code + test + live 401. Guest-cart cap unchanged (10 new carts / IP / fixed hour; never hit by a shopper in 90 days). **Asked us to fix the compatible PDP fold** — done, ERR-313. Renumbers the admin negative-keyword page as item 18. Answered by `outbox/fe-7oct-backend-response-FE-reply-oct2026.md` (ERR-313) |
 | `fe-replies-oct2026-backend-response.md` | **2026-10-06, received 2026-10-06** (from a downloads folder). Answers our eight replies of 29 Sep – 5 Oct, which proves they were received. Built: BF-094, BF-095 (not the credit reference), BF-096, BF-099, BF-101 (tax_invoice, delivery_label; payment methods not built). No change: BF-097/098/100, guest-session cap, Ads purchase. Asks GA4 + Ads skipped on /admin. Its "still open" list is half stale: 14/15 shipped in `b2d07c0f` before their check; 6 is real. Answered by `outbox/fe-6oct-combined-FE-reply-oct2026.md` (ERR-308) |

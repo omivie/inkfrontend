@@ -354,7 +354,7 @@
                         <span class="checkout-summary__item-qty">${parseInt(item.quantity) || 0}</span>
                     </div>
                     <div class="checkout-summary__item-details">
-                        <span class="checkout-summary__item-name">${esc(item.name)}</span>
+                        <span class="checkout-summary__item-name">${esc(((typeof ProductName !== 'undefined') ? ProductName.clean(item) : item.name) || '')}</span>
                         <span class="checkout-summary__item-variant">${esc(item.sku || '')}</span>
                     </div>
                     <span class="checkout-summary__item-price">$${(parseFloat(item.price) * parseInt(item.quantity)).toFixed(2)}</span>
@@ -399,6 +399,8 @@
                         id: item.product?.id || item.id,
                         sku: item.product?.sku || '',
                         name: item.product?.name || 'Product',
+                        // ERR-359 — the backend's descriptive title, for the summary line.
+                        display_name: item.product?.display_name || null,
                         // Carried, not derived (data-tracking-capture aug2026
                         // §1.2). This projection rebuilds cartItems from scratch
                         // on every calculateTotals(), so a field it does not name
@@ -509,19 +511,19 @@
 
                 setText('checkout-total', `$${this.totals.total.toFixed(2)} NZD`);
                 // Shopify's label on /checkout; the amount is in the summary beside it.
-                document.getElementById('pay-button-text').textContent = this.embedded
-                    ? 'Pay now' : `Pay $${this.totals.total.toFixed(2)} NZD`;
+                document.getElementById('pay-button-text').textContent = this.payLabel();
 
                 // Update Elements amount if already initialized. Keep BOTH the card
                 // and the Express Checkout (wallet) instances in sync so the wallet
                 // sheet always shows the current GST+shipping-inclusive total (this
                 // matters on coupon/points re-apply, where calculateTotals re-runs).
+                // Below Stripe's 50c floor (a $0 points order, ERR-362) there is
+                // nothing to charge: Elements refuses such an amount, and the throw
+                // used to land in the catch below as "Unable to load order total".
                 const amountCents = Math.round(this.totals.total * 100);
-                if (this.elements) {
-                    this.elements.update({ amount: amountCents });
-                }
-                if (this.eceElements) {
-                    this.eceElements.update({ amount: amountCents });
+                if (amountCents >= STRIPE_MIN_NZD_CENTS) {
+                    if (this.elements) this.elements.update({ amount: amountCents });
+                    if (this.eceElements) this.eceElements.update({ amount: amountCents });
                 }
 
             } catch (error) {
@@ -970,7 +972,31 @@
             if (!payBtn) return;
             if (this.isSubmitting) return;
             // A backend-refused email (CheckoutPage._showEmailError) also holds it.
-            payBtn.disabled = !this.paymentElementReady || !!(payBtn.dataset && payBtn.dataset.emailBlocked === 'true');
+            // A points-paid order needs no card (ERR-362).
+            payBtn.disabled = !(this.pointsMode || this.paymentElementReady) || !!(payBtn.dataset && payBtn.dataset.emailBlocked === 'true');
+        },
+
+        /** The Pay button's words: Shopify's "Pay now", or the points order's own. */
+        payLabel() {
+            if (this.pointsMode) return 'Place order — paid with points';
+            return this.embedded || !this.totals ? 'Pay now' : `Pay $${this.totals.total.toFixed(2)} NZD`;
+        },
+
+        /**
+         * ERR-362 — points pay the WHOLE order (backend 2026-10-17): no card, no
+         * PayPal, no wallet. ONE writer of `data-points-order` on <body>; CSS
+         * hides the card form, PayPal and Express checkout from it. Called by
+         * CheckoutPage._syncPointsOrder whenever the server cart is re-read.
+         */
+        setPointsMode(on) {
+            this.pointsMode = !!on;
+            if (typeof document === 'undefined' || !document.body) return;
+            document.body.dataset.pointsOrder = this.pointsMode ? 'on' : 'off';
+            const note = document.getElementById('points-pay-note');
+            if (note) note.hidden = !this.pointsMode;
+            const txt = document.getElementById('pay-button-text');
+            if (txt && !this.isSubmitting) txt.textContent = this.payLabel();
+            this.updatePayButton();
         },
 
         /** The longest a Pay press waits for the guest bot-check token before giving up. */
@@ -1024,6 +1050,7 @@
          */
         async handlePayment() {
             if (this.isSubmitting) return;
+            if (this.pointsMode) return this.handlePointsOrder();
 
             if (!this.paymentElementReady) {
                 showToast('Please complete your payment details.', 'error');
@@ -1137,50 +1164,21 @@
         },
 
         /**
-         * Create a Stripe order on the backend and normalise the response.
-         *
-         * This is the SINGLE source of order creation for BOTH Stripe paths — the
-         * card form (handlePayment) and the Express Checkout wallet buttons
-         * (initExpressCheckout). It performs cart-sync, POST /api/orders, and the
-         * full duplicate/idempotency + error-code triage, then hands the caller a
-         * discriminated result so each caller can confirm on ITS OWN Elements
-         * instance with its own confirmParams:
-         *
-         *   { status: 'confirm', client_secret, order_number }  → caller confirms
-         *   { status: 'navigated' }                             → already redirected (already-paid replay)
-         *   { status: 'handled' }                               → terminal UI shown (email verify / flagged)
-         *   throws Error(message)                               → retryable; caller shows the message
-         *
-         * The order is always payment_method:'stripe'. `idempotencyLabel` only
-         * varies the idempotency HASH so a wallet attempt ('stripe-wallet') never
-         * collides with a card attempt ('stripe') and get routed into the wrong
-         * confirm path. NOTE: this method never calls confirmPayment itself and is
-         * agnostic to which Elements instance/wallet the caller will confirm with.
-         *
-         * @param {string} idempotencyLabel  passed to getIdempotencyKey (e.g. 'stripe' | 'stripe-wallet')
+         * The ONE POST /api/orders body (ERR-362): card, wallet and points
+         * orders differ ONLY in `payment_method` and the idempotency label, so
+         * a points order can never drift from what a card order sends.
          */
-        async createStripeOrder(idempotencyLabel) {
-            // STEP 0.5: Ensure cart items are on the server before validation
-            // Cross-origin cookie issues or rate limits may leave the server cart empty
-            if (this.cartItems.length > 0) {
-                for (const item of this.cartItems) {
-                    try {
-                        await API.addToCart(item.id, item.quantity);
-                    } catch (e) {
-                        DebugLog.warn('Cart sync failed for item:', item.id, e.message);
-                    }
-                }
-            }
-
+        async _orderPayload(paymentMethod, idempotencyLabel) {
             // Build items array from cart
             const items = this.cartItems.map(item => this.withPrinterSlug({
                 product_id: item.id,
                 quantity: item.quantity
             }, item));
 
-            // Backend creates the PaymentIntent and validates all prices server-side
+            // The backend validates all prices server-side (and, for a card,
+            // creates the PaymentIntent).
             const isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
-            const orderResponse = await API.createOrder({
+            return {
                 items: items,
                 shipping_address: {
                     first_name: this.checkoutData.firstName,
@@ -1222,7 +1220,7 @@
                 estimated_shipping: this.checkoutData.estimatedShipping ?? null,
                 save_address: this.checkoutData.saveAddress !== false,
                 customer_notes: this.checkoutData.orderNotes || '',
-                payment_method: 'stripe',
+                payment_method: paymentMethod,
                 ...this.orderLevelPrinterSlug(items),
                 ...this.reminderConsentField(this.checkoutData),
                 idempotency_key: await this.getIdempotencyKey(idempotencyLabel),
@@ -1231,7 +1229,47 @@
                 ...(isGuest && { guest_email: this.checkoutData.email }),
                 ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone }),
                 ...(isGuest && this.turnstileToken && { turnstile_token: this.turnstileToken })
-            });
+            };
+        },
+
+        /**
+         * Create a Stripe order on the backend and normalise the response.
+         *
+         * This is the SINGLE source of order creation for BOTH Stripe paths — the
+         * card form (handlePayment) and the Express Checkout wallet buttons
+         * (initExpressCheckout). It performs cart-sync, POST /api/orders, and the
+         * full duplicate/idempotency + error-code triage, then hands the caller a
+         * discriminated result so each caller can confirm on ITS OWN Elements
+         * instance with its own confirmParams:
+         *
+         *   { status: 'confirm', client_secret, order_number }  → caller confirms
+         *   { status: 'navigated' }                             → already redirected (already-paid replay)
+         *   { status: 'handled' }                               → terminal UI shown (email verify / flagged)
+         *   throws Error(message)                               → retryable; caller shows the message
+         *
+         * The order is always payment_method:'stripe' (a points-paid order is
+         * createPointsOrder, same body). `idempotencyLabel` only
+         * varies the idempotency HASH so a wallet attempt ('stripe-wallet') never
+         * collides with a card attempt ('stripe') and get routed into the wrong
+         * confirm path. NOTE: this method never calls confirmPayment itself and is
+         * agnostic to which Elements instance/wallet the caller will confirm with.
+         *
+         * @param {string} idempotencyLabel  passed to getIdempotencyKey (e.g. 'stripe' | 'stripe-wallet')
+         */
+        async createStripeOrder(idempotencyLabel) {
+            // STEP 0.5: Ensure cart items are on the server before validation
+            // Cross-origin cookie issues or rate limits may leave the server cart empty
+            if (this.cartItems.length > 0) {
+                for (const item of this.cartItems) {
+                    try {
+                        await API.addToCart(item.id, item.quantity);
+                    } catch (e) {
+                        DebugLog.warn('Cart sync failed for item:', item.id, e.message);
+                    }
+                }
+            }
+
+            const orderResponse = await API.createOrder(await this._orderPayload('stripe', idempotencyLabel));
 
             // Handle duplicate/idempotent replay
             if (orderResponse.ok && orderResponse.data?.is_duplicate) {
@@ -1415,6 +1453,90 @@
             return { status: 'confirm', client_secret, order_number };
         },
 
+
+        /**
+         * ERR-362 — what each points-order refusal means to the shopper
+         * (backend response 2026-10-17, "Loyalty points" ask 4). `retry: 'card'`
+         * = the order is no longer $0: re-read the cart and offer card/PayPal.
+         */
+        POINTS_ORDER_ERRORS: {
+            POINTS_REQUIRE_ACCOUNT: { text: 'Sign in to pay with your points.' },
+            POINTS_NOT_APPLIED: { text: 'No points are applied to this cart any more. If you just placed this order, it is in your account under Orders — check there before trying again.', retry: 'card' },
+            POINTS_TOTAL_NOT_ZERO: { text: 'Your points no longer cover the whole order (shipping to this address can cost more than the cart’s estimate). Pay the rest by card or PayPal below.', retry: 'card' },
+            INSUFFICIENT_POINTS: { text: 'Your points balance changed, so the points discount is no longer valid. Re-apply your points above, then try again.', retry: 'card' },
+            POINTS_ORDER_FAILED: { text: 'We couldn’t complete the order. It has been cancelled and your points are back on the cart — please try again.' },
+            PENDING_PAYMENT_IN_PROGRESS: { text: 'An earlier card or PayPal payment for this cart is still being processed. Wait a minute, then check your orders before trying again.' },
+            DUPLICATE_REQUEST: { text: 'This order is already being placed — wait a moment, then check your orders.' },
+            POINTS_PAYMENT_REQUIRED: { text: 'Your points cover this order — reload the page to place it without a card.' },
+        },
+
+        /**
+         * Place a $0 order paid entirely by points: POST /api/orders with
+         * `payment_method:"points"`, the same body as a card order. The server
+         * places it only when points are applied AND its own total is exactly
+         * $0; it answers 201 with status `paid` and no client_secret.
+         *
+         *   { status: 'navigated' }        → confirmation page
+         *   { status: 'refused', code, text, retry, details } → shown by the caller
+         */
+        async createPointsOrder() {
+            let res;
+            try {
+                res = await API.createOrder(await this._orderPayload('points', 'points'));
+            } catch (err) {
+                // A plain 400 throws (api.js): POINTS_NOT_APPLIED, POINTS_PAYMENT_REQUIRED, field validation.
+                res = { ok: false, code: err && err.code, error: err && err.message, details: err && err.details };
+            }
+            const d = res && res.ok ? res.data : null;
+            if (d && d.order_number && d.status === 'paid' && d.payment_required === false) {
+                const snap = this.buildOrderSnapshot(d.order_number, 'points');
+                snap.total = 0;
+                snap.points_redeemed = d.points_redeemed ?? null;
+                if (typeof d.shipping_cost === 'number') snap.shipping_cost = d.shipping_cost;
+                sessionStorage.setItem('lastOrder', JSON.stringify(snap));
+                sessionStorage.removeItem('checkoutData');
+                window.location.href = `/order-confirmation?order=${encodeURIComponent(d.order_number)}&paid=points`;
+                return { status: 'navigated' };
+            }
+            if (d) {
+                // 2xx that is not a paid $0 order: never treat it as one.
+                return { status: 'refused', code: 'UNEXPECTED_RESPONSE', text: 'The order did not come back as paid. Check your orders before trying again.' };
+            }
+            const code = (res && (res.server_code || res.code)) || '';
+            const details = (res && (res.details || (res.data && res.data.error && res.data.error.details))) || null;
+            const known = this.POINTS_ORDER_ERRORS[code];
+            let text = known ? known.text : ((res && res.error) || 'We couldn’t place your order. Please try again.');
+            if (code === 'PENDING_PAYMENT_IN_PROGRESS' && details && details.order_number) {
+                text += ` (Order ${details.order_number}.)`;
+            }
+            return { status: 'refused', code, text, retry: known && known.retry, details };
+        },
+
+        /** Pay-button handler in points mode: no card, no Turnstile (a points order needs an account). */
+        async handlePointsOrder() {
+            const payBtn = document.getElementById('pay-now-btn');
+            const btnText = document.getElementById('pay-button-text');
+            this.isSubmitting = true;
+            if (payBtn) payBtn.disabled = true;
+            if (btnText) btnText.innerHTML = this.getLoadingHTML('Placing order...');
+            let out;
+            try {
+                out = await this.createPointsOrder();
+            } catch (err) {
+                out = { status: 'refused', code: 'FETCH_FAILED', text: 'We couldn’t reach the server. Check your orders before trying again.' };
+            }
+            if (out.status === 'navigated') return;
+            this.isSubmitting = false;
+            if (out.code === 'POINTS_TOTAL_NOT_ZERO') this.pointsRefused = true;
+            this.showError(out.text);
+            if (out.retry === 'card' && typeof CheckoutPage !== 'undefined' && typeof CheckoutPage.refreshLoyalty === 'function') {
+                // Re-read the server cart: _syncPointsOrder leaves points mode
+                // when the total is no longer $0, and the card form comes back.
+                await CheckoutPage.refreshLoyalty();
+            }
+            if (btnText) btnText.textContent = this.payLabel();
+            this.updatePayButton();
+        },
 
         /**
          * Build a complete order snapshot for sessionStorage.

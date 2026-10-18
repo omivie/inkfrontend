@@ -40,6 +40,177 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-365 — Crawlers on an old pack address got 200 + canonical, not a 301 (backend response 2026-10-17, owner 2026-10-18) — **SHIPPED (frontend)**
+
+**What was asked.** The backend renamed 826 pack names on 15 Oct and wrote a `slug_redirects` hop for each one. On www an old address answered **200** (prerender by SKU, with the new canonical) instead of a hard 301. The backend offered `GET /products/<slug>/<SKU>` for the middleware to ask. The owner chose to build it.
+
+**Measured before building (18 Oct):** for the old CLC3313KCMY slug the endpoint answers 301 to the new slug, as described. **For the CURRENT slug it also answers 301, to `/shop?search=Products%2Flc3313kcmy…`.** The response said it "passes through when none does". That claim does not hold. Following that endpoint blindly would 301 every live product page to a search page.
+
+**Fix (`inkcartridges/middleware.js`).** A new `slugHop()` runs for bots only, on `/products/<slug>/<SKU>`. It starts in parallel with the prerender fetch (`redirect:'manual'`, 2.5 s timeout), so it adds no wait unless it is the slower call. We send our own 301 ONLY when the Location is `/products/<another slug>/<the SAME SKU>` on our host. Anything else falls through to the prerender exactly as before: a search page, another SKU, itself, a foreign host, a 302, no Location, an error or a timeout. Shoppers never trigger the lookup (the PDP resolves by SKU).
+
+**Tests.** New `tests/middleware-slug-hop-oct2026.test.js` runs the real middleware with a fake backend. It covers 13 answers: old slug ⇒ 301; current slug ⇒ search answer ignored; 8 unsafe answers ignored; humans make no lookup; `/p/` and `/html/product` make no lookup. `conversion-fixes-sep2026` §1 now counts prerender calls, and every fetch must be `redirect:'manual'`. Ask: outbox 10-18 §2.
+
+---
+## ERR-364 — Admin Products: Margin % / Profit $ now sort by the net figure in the cell (backend live since 2026-10-12) — **SHIPPED (frontend)**
+
+**Was (ERR-311):** the backend sorted `margin_pct` / `profit_ex_gst` by the stored GROSS columns while the cells showed net figures. So the page showed a `GROSS_SORT_NOTE` header title and a toast on every such sort.
+
+**Backend (response 2026-10-17 §Net-margin sort):** `sort=net_margin_incl_fixed_pct` and `sort=profit_incl_fixed_ex_gst` rank by the same function that fills the cells. Rows with no cost or price sort last, and order is stable across pages. **Measured 18 Oct with the owner login:** both keys are accepted. Ascending: ADMIN-INK-001 −5.77, GCF46CMY 2.38, GCF30CMY 2.38, GC973CMY 2.39.
+
+**Fix (`admin/pages/products.js`).** `NET_SORT_KEY` maps the two column keys in `backendProductFilters`. `GROSS_SORT_NOTE` and `warnGrossSort` are deleted. The column keys stay (`backendCanSort` is unchanged, and so are the column-visibility prefs).
+
+**Tests.** `admin-products-margin-sort-basis-oct2026` (map present, note gone); `admin-products-fallback-filters-sep2026` checks behaviour: margin ⇒ net key, profit ⇒ net key, retail_price unchanged.
+
+---
+## ERR-363 — Admin Pricing: bulk changes, margin rules by filter, gross margin, where each price comes from (backend response 2026-10-17) — **SHIPPED (frontend)**
+
+**Was (ERR-336/351/352):**
+- "Adjust by % / $" and "Set margin for this filter" were disabled with "Needs backend".
+- Set exact / Unlock ran a paced PUT per row, capped at 200.
+- "Gross margin" showed `margin_pct`, which is net of the 2.65% card fee, with a caveat.
+- "Price set by" only knew locked vs "Rule".
+
+**Measured before building (18 Oct, owner login):**
+- The rows carry `gross_margin_pct`, `price_source`, `price_rule_id` and `has_manual_price`.
+- `ids_only=true` answers `{ids,total}`: 89/89 for Brother compatible toner.
+- A bulk **dry run** of +5% on Brother compatible toner previews 68 rows.
+- A rule **preview** (POST without confirm) answers `applied:false`: 13 would change, 32 locked. A re-read shows **0 rules saved** (negative control).
+- The list param is `is_active`, not `active` (400 `VALIDATION_FAILED` on `active`).
+
+**Fix:**
+- **Columns.** "Gross margin" = `gross_margin_pct` with no caveat; it still sorts by `margin_pct`, which ranks the same (constant 2.65-point gap). "Price set by" = `priceSourceOf()`: Manual (locked; an older freeze counts as locked), Margin rule #id, Brand ladder, Catalogue band, Default ladder, Ribbon ladder, or Pack (follows its singles, not lockable). An absent value reads "unknown", never "Rule".
+- **Bulk.** Set exact, Adjust %/$, Set margin and Unlock go through `POST /api/admin/pricing/bulk` (`controlCenter.pricingBulk`):
+  - Every modal is Preview (dry run) first. Apply sends **the exact previewed body** with `dry_run:false, confirm:true`. Any input change voids the preview.
+  - The cap is 2,000 ids per change. "Select all N matching" is one `listProductIds` (`ids_only`) call instead of paging.
+  - Unlock is bulk `clear_manual`, because a PUT `null` cannot clear an older freeze.
+  - "Lock at current price" stays the paced per-row PUT: each row keeps its own price, and the bulk call takes one value.
+  - The result modal lists updated, unchanged, failed (code + message), floor/no-decrease counts and packs.
+- **Margin rules by filter** (new section above the ladder):
+  - List: GET.
+  - New rule: brand / source / type / category / cost band, margin 4.77–80%, allow decrease, priority, notes. Preview first (POST without confirm), then Save (`confirm:true`). The reprice job is polled and its progress shown in words.
+  - Turn on/off: PATCH preview, then confirm.
+  - Delete: confirm dialog.
+  - A failed rule read is loud, never "No filter rules yet".
+- **Copy.** The "Not everything works yet" banner, `NEEDS_BACKEND`/`SPEC` and `offerReprice` are deleted. `admin/app.js APP_VERSION` was bumped.
+- **Helpers (`utils/pricing-page.js`).** `BULK_TARGET_CAP`, `ruleBody` (validates and builds `filter.cost_band`, refuses an empty filter and the Ribbons group), `ruleSummary`, `priceSourceOf`.
+- **Admin API.** `listPricingRules`, `savePricingRule(body, confirm)`, `patchPricingRule`, `deletePricingRule`, `listProductIds`. `confirm:true` is sent only with an apply.
+
+**Verified in the browser** (local, owner login): the list renders, rules read "No filter rules yet", and an Adjust +5% preview on C02BK reads $9.99 ⇒ $10.49 (37.7% ⇒ 40.7%) with "Apply to 1 product". The only non-GET requests were the ladder's read-only simulate and the bulk `dry_run:true`. Apply was never pressed.
+
+**Not exercised (would reprice live products):** saving, toggling or deleting a rule. Asked in outbox 10-18 §6.
+
+**Tests.** `admin-pricing-page-oct2026` §5–§7 rewritten/added (19 tests).
+
+---
+## ERR-362 — Points pay the whole order, $0 orders skip payment (owner 2026-10-16; backend live 2026-10-16 23:18 UTC) — **SHIPPED (frontend)**; unblocks ERR-345
+
+**Backend contract (response 2026-10-17 "Loyalty points"):**
+- `max_redeemable_points` covers goods + shipping; new `full_cover_points`, `max_partial_points` and `shipping_estimated`.
+- `EXCEEDS_ORDER_TOTAL` replaces `EXCEEDS_CART_SUBTOTAL`; new `LEAVES_UNPAYABLE_BALANCE` (1c–49c left), with both amounts in `details`.
+- A $0 order = `POST /api/orders` with `payment_method:"points"` ⇒ 201 `paid`, no client_secret.
+- New order codes: POINTS_REQUIRE_ACCOUNT, POINTS_NOT_APPLIED, POINTS_TOTAL_NOT_ZERO, INSUFFICIENT_POINTS, POINTS_ORDER_FAILED, PENDING_PAYMENT_IN_PROGRESS, DUPLICATE_REQUEST, POINTS_PAYMENT_REQUIRED.
+- Hide wallets at $0. No GA4/Ads purchase for a $0 order.
+
+**Measured:** the owner cart's `loyalty` carries the three new fields (`full_cover_points` 110748, `shipping_estimated` false). **No real order was placed** (owner decision 2026-10-18: unit tests + read-only probe only).
+
+**Fix:**
+- **$0 mode.** `CheckoutPage._syncPointsOrder` (ONE writer of `#checkout-total-note`) switches it on only when the SERVER cart `summary.total === 0`, with points applied, for a signed-in customer, and not after a refusal. It shows "Shipping estimated" beside the total when `loyalty.shipping_estimated`.
+- **Pay button.** `PaymentPage.setPointsMode` is the ONE writer of `body[data-points-order]` and `#points-pay-note`. CSS hides the card form, PayPal and Express checkout. The button reads "Place order — paid with points" and enables without a card.
+- **The order.** `_orderPayload(paymentMethod, label)` is now the ONE POST /api/orders body; `createStripeOrder` and the new `createPointsOrder` both use it. On 201 `paid` + `payment_required:false`: `lastOrder` snapshot at $0 ⇒ `/order-confirmation?order=N&paid=points`. Any other 2xx is never treated as paid.
+- **Refusals.** `POINTS_ORDER_ERRORS` gives each code its own wording.
+  - `POINTS_TOTAL_NOT_ZERO` sets `PaymentPage.pointsRefused`, re-reads the cart through `CheckoutPage.refreshLoyalty` and brings the card back until the points change.
+  - `PENDING_PAYMENT_IN_PROGRESS` names the order number.
+  - `api.js` 401 keeps the backend reason as `server_code` (additive, like the 404 branch).
+- **Loyalty control.**
+  - `EXCEEDS_CART_SUBTOTAL` is gone (checkout and the dead cart-page copy); `LEAVES_UNPAYABLE_BALANCE` and `TEST_CART_NO_DISCOUNTS` are mapped.
+  - A refusal offers two buttons from `details`: "Use N pts — pay nothing" and "Use M pts, pay the rest by card".
+  - **Input `step` 100 ⇒ 1.** A cent-exact full cover (e.g. 4523) failed the browser's own step validation, so Max could not be typed and submitted.
+  - After apply/remove: `Cart._adoptServerSummary` + `CartWallet.sync()`.
+- **Elements amount.** Elements are updated only when the amount is ≥ 50c. At $0 `elements.update({amount:0})` threw inside `calculateTotals` and painted "Unable to load order total".
+- **Wallet.** `CartWallet._eligibleCents` is NaN when `summary.total === 0`.
+  - *Caught during the work:* a first cut also subtracted `loyalty_discount_amount` from the wallet amount. That was wrong: loyalty is already inside `summary.discount` (`computeDiscountBreakdown` contract). It was reverted before it shipped.
+- **Confirmation.** `?paid=points` clears the cart like a Stripe success, labels "Loyalty points" and shows $0.00 (was hidden by a truthiness check). `markConversion` sends no Ads conversion, remarketing purchase or UET purchase for a $0 / points order; the first-party funnel still records it.
+
+**Verified in the browser** (guest context, no order): points mode hides the card, PayPal and Express rows, shows the green note, and the button enables. Back to card mode restores all of them.
+
+**Tests.** New `tests/points-whole-order-oct2026.test.js` (16, executed in a vm: mode rule + 4 negatives, pay button, the order call with every api.js shape, one body, latch, Elements floor, choices, wallet + positive control, conversion skip + positive control, single writers, 401 server_code). `loyalty-points-jun2026` and `fe-master-checklist-8oct-2026` §19 updated. Probe: `probe:backend-17oct` §5.
+
+---
+## ERR-361 — Toner ⇄ drum match on the FULL printer list; retired printer URLs show the real slug (backend response 2026-10-17) — **SHIPPED (frontend)**
+
+**Backend:** every `/api/shop` row carries `compatible_printer_slugs` (all active printers, folded across duplicate printer rows). An absent field means the lookup failed, so fall back to the sample. `[]` means the row fits no printer. 13 duplicate Brother printer rows are retired and 301 to the real row; the body names `printer.slug`.
+
+**Not done, with the owner (2026-10-18):** the backend says to delete `_recountChipsFromListing`. Its `series.count` and `?code=` listing pair toner and drum by **code**; the owner's 16 Oct rule (ERR-358) pairs them by **printer**. **Measured:** Brother toner 53 tiles / drums 44 tiles, storefront tile = click on all of them, while `series.count` ≠ click on 43 and 26. Deleting the recount would make 69 tiles lie. It stays until the backend builds option (b) (outbox 10-18 §1).
+
+**Drums parameter:** the FE already sends `category=drums` (`apiCategory`, shop-page.js:530). The response's `category=consumable` remark is about our internal id; nothing changed.
+
+**Fix (`shop-page.js`):**
+- `_printerPartners` reads `compatible_printer_slugs` when it is an array (`[]` ⇒ none), else the `compatible_printers[].slug` sample. The 2-printer-sample `ponytail` note is gone.
+- `_adoptPrinterSlug(printer.slug)` runs in `loadPrinterProducts` before the breadcrumb, title and canonical read `state.printer`. It replaceStates `printer_slug=<real>` and drops a legacy `printer` param. No navigation and no history entry.
+- `probe:chip-counts` is rewritten to the printer rule. It reports BACKEND-DRIFT separately, plus the count of rows that fell back to the sample (0).
+
+**Verified in the browser:** `/shop?brand=brother&category=toner&code=TN1070` shows TN1070 compatible + genuine and the DR1070 drums. `/shop?printer=brother-dpc-1510` lands on `?printer_slug=brother-dcp-1510`, H1 "Brother DCP-1510".
+
+**Tests.** `shop-chip-counts-related-oct2026` (full list wins, absent ⇒ sample, `[]` ⇒ none, samples alone share nothing); `printer-not-found-redirect` (adopt before breadcrumb, vm run of `_adoptPrinterSlug` + 5 no-op inputs, still exactly 3 `location.replace`).
+
+---
+## ERR-360 — PDP pack contents read the backend box list: quantity, page_yield, contents_known (backend response 2026-10-17) — **SHIPPED (frontend)**
+
+**Was (ERR-340):**
+- One `getProduct` per constituent for its yield.
+- Twin quantity guessed from `pack_savings_vs_singles.cartridge_count`, else the name's "N-Pack". That is wrong for a twin: `cartridge_count` counts distinct SKUs, so it is 1.
+- No way to tell an incomplete list.
+
+**Backend:** each constituent row carries integer `quantity` and integer `page_yield` (null = no published yield, never estimated). New `contents_known` (false ⇒ empty list). Products carry `page_yield_pages`. The rows are now the box, not the series (62 packs used to list cartridges they do not hold).
+
+**Fix (`product-detail-page.js`).** `packContentsLines(info, contents)`:
+- `contents_known !== true` ⇒ no lines (`absent`).
+- Otherwise each row's own `quantity` and `page_yield`.
+- A single uses `page_yield_pages`, else the text.
+- The N+1 loop and the twin bridge are deleted. The `api.js` JSDoc states the new shape.
+
+**Verified in the browser:**
+- GLC432XLKCMY: 4 lines, 3,000 / 1,500 / 1,500 / 1,500, `ok`.
+- G45BK-2PK: "2 x Black (45BK): up to 833 pages".
+- GPG645VPVP: `absent`, hidden.
+- CLC3313KCMY: 4 × 400.
+
+**Tests.** `pdp-pack-contents-oct2026` rewritten on the live shapes, plus a wiring assertion that there is no per-constituent `API.getProduct`.
+
+---
+## ERR-359 — Product titles = backend `display_name`; the FE title composer is deleted (backend response 2026-10-17) — **SHIPPED (frontend)**
+
+**Backend:**
+- Every product response carries `display_name`: the ERR-341 descriptive title where it can be composed (3,350 of 4,121), else the stored name.
+- Stored names, slugs and URLs are unchanged (owner, 17 Oct).
+- It asked us to delete `ProductName.build` and `packRename`, and to show `display_name` verbatim.
+
+**Measured before trusting "verbatim everywhere":** listings send the stored name for uncomposed rows. **`/api/products/:sku` sends the stored name MINUS "<Brand> Genuine"** ("74C0ZV0 Drum Unit (150,000 pages)" for "Lexmark Genuine 74C0ZV0 …"). Verbatim would print brand-less PDP titles; 623 of the 768 uncomposed rows are genuine "<Brand> Genuine …" names (outbox 10-18 §3).
+
+**Fix (`utils.js` ProductName):**
+- `composed(p)` = `display_name` unless it is a suffix of `name` (stored name or its prefix-less tail). A composed title never is a suffix.
+- `clean(p) = composed(p) || legacy(p)`.
+- `legacy` (dedouble + packRename) still serves rows that are not composed: HP DesignJet doubling, and the owner-pending packs (ERR-357 "Value Pack"). That is why `packRename` stays, against the literal ask: the backend says `clean` now changes only those rows, and it must keep doing so until the owner names them.
+- Deleted: `build`, `composeMiss`, `TYPE_WORDS`, `SETS`, `TIERS`, `MIN_YIELD`. `cardKey` still groups on `legacy(p)` of the stored name.
+
+**`display_name` carried where it was dropped:**
+- Cart parse (`_parseServerCart`) and the local cart row.
+- Free-shipping suggestion chip.
+- Checkout and payment summary lines (they printed the stored name; found in the browser check).
+- Favourites (server rows + newly added).
+- PDP compatible alternatives + pack upsell: through `clean`, so they show `display_name` once the backend sends it (outbox 10-18 §3).
+- Quote autocomplete label (value stays the stored name).
+
+**Measured (`probe:product-titles`, rewritten READ-ONLY):** 4,119/4,119 read.
+- COMPOSED 3,351, all shown verbatim (0 `COMPOSED:SHOWN_DIFFERS`).
+- KEPT 627.
+- KEPT:RENAMED 141 (dedouble + owner packs).
+- MISSING 0.
+- Before deleting the composer, its last run found 15 `color_mismatch` rows (outbox 10-18 §4) and 2 packs the rename missed (CDR233CLKCMY, CDR251CLKCMY; §5).
+
+**Tests.** `product-name-clean-jul2026` rewritten for the contract (composed verbatim, both uncomposed shapes, absent, composer gone, owner packs, every carrying surface); it now uses the shared stripper (ERR-253).
+
+---
 ## ERR-358 — /shop toner ⇄ drum now match by PRINTER, every brand (owner, 2026-10-16) — **SHIPPED (frontend; backend §1 for exact)**
 
 **What the owner asked.** "Match products universally by the printer model": a toner code page shows the drums that
@@ -345,7 +516,7 @@ two-up, coupon + points stacked 440 wide; 390 — one column, unchanged. No hori
 **Test:** `tests/checkout-summary-two-up-oct2026.test.js`.
 
 ---
-## ERR-345 — Loyalty points: redeem up to the whole order, shipping included (owner, 2026-10-15) — **OPEN (backend); frontend copy shipped**
+## ERR-345 — Loyalty points: redeem up to the whole order, shipping included (owner, 2026-10-15) — **SHIPPED: backend live 2026-10-16, frontend in ERR-362**
 
 **Ask:** points redemption stops at the goods subtotal, so a customer can never use points on shipping. The owner wants customers to redeem as many points as they like, up to the full order total including shipping, and a fully covered order should go through at $0 with no card or PayPal step.
 

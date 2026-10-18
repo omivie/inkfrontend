@@ -133,7 +133,7 @@ const Favourites = {
             this.items = favourites.map(fav => ({
                 id: fav.product_id,
                 sku: fav.product_sku,
-                // Same display title as cards and the PDP (ERR-341).
+                // Same display title as cards and the PDP: backend display_name (ERR-359).
                 name: (fav.product && typeof ProductName !== 'undefined') ? ProductName.clean(fav.product) : (fav.product?.name || ''),
                 price: fav.product?.retail_price || 0,
                 image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
@@ -218,7 +218,8 @@ const Favourites = {
                     id: product.id,
                     sku: product.sku,
                     slug: product.slug || '',
-                    name: product.name,
+                    // Same display title as the server-loaded rows above (ERR-359).
+                    name: (typeof ProductName !== 'undefined') ? ProductName.clean(product) : product.name,
                     price: product.price,
                     image: product.image || '',
                     brand: product.brand || '',

@@ -1080,6 +1080,16 @@ body:has(section.checkout-page) .site-main { padding-bottom: 0; margin-bottom: 0
 }
 @keyframes cart-sync-slide { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 
+/* Points pay the whole order (ERR-362): no card form, no PayPal, no wallet.
+   ONE writer of the attribute: PaymentPage.setPointsMode. */
+body[data-points-order="on"] section.checkout-page .payment-element-wrapper,
+body[data-points-order="on"] section.checkout-page .payment-col-alt,
+body[data-points-order="on"] section.checkout-page .checkout-express { display: none; }
+section.checkout-page .points-pay-note { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: #ecfdf5; color: #047857; font-weight: 600; font-size: 14px; }
+section.checkout-page .checkout-summary__total-note { margin: 2px 0 0; text-align: right; font-size: 12px; color: var(--shop-muted); }
+section.checkout-page .cart-loyalty__choices { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+section.checkout-page .cart-loyalty__choice { border: 1px solid var(--shop-blue); background: #fff; color: var(--shop-blue); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px; cursor: pointer; }
+
 /* Checkout summary on desktop: items two-up (left, right, next row) and the
    coupon beside the points card (owner 2026-10-16, ERR-346). Phone keeps one
    column. A hidden #cart-loyalty is display:none, so the coupon fills the row. */

@@ -392,8 +392,12 @@ function loyaltyErrorMessage(code, fallbackMsg, minPts) {
         case 'BELOW_MIN_POINTS': return minPts ? `Minimum redemption is ${minPts} points.` : 'That’s below the minimum redemption.';
         case 'CONFLICTS_WITH_COUPON': return 'Remove your coupon to use points.';
         case 'EXCEEDS_AVAILABLE_BALANCE': return 'You don’t have that many points.';
-        case 'EXCEEDS_CART_SUBTOTAL': return 'That’s more than your cart total.';
-        case 'EXCEEDS_ORDER_TOTAL': return 'That’s more than your order total.'; // ERR-345: points cover shipping too
+        // ERR-362: EXCEEDS_ORDER_TOTAL replaced EXCEEDS_CART_SUBTOTAL (backend 2026-10-17).
+        case 'EXCEEDS_ORDER_TOTAL': return 'That’s more than your order total.';
+        case 'LEAVES_UNPAYABLE_BALANCE':
+            return (typeof API !== 'undefined' && API.extractErrorMessage)
+                ? API.extractErrorMessage(fallbackMsg, 'That would leave less than $0.50 to pay by card.')
+                : (fallbackMsg || 'That would leave less than $0.50 to pay by card.');
         case 'LOYALTY_DISABLED': return 'Loyalty points are unavailable right now.';
         case 'RATE_LIMITED': return 'Too many tries — wait a minute and retry.';
         default:

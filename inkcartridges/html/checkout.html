@@ -29,7 +29,7 @@
     <link rel="stylesheet" href="/css/pages.css?v=6d038a29">
     <link rel="stylesheet" href="/css/search.css?v=813db780">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=26c3d09e">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=0e99f829">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=a596e316">
 
     <script defer src="https://js.stripe.com/v3/"></script>
     <script defer src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD&disable-funding=card"></script>
@@ -372,6 +372,9 @@
                                     <div class="payment-section__body">
                                         <!-- Main column: Stripe + pay button -->
                                         <div class="payment-col-main">
+                                            <!-- ERR-362: shown when points pay the whole order; the card
+                                                 form, PayPal and Express checkout hide (body[data-points-order="on"]). -->
+                                            <p class="points-pay-note" id="points-pay-note" hidden>Your points cover this order — no card needed.</p>
                                             <div class="payment-element-wrapper">
                                                 <div id="payment-element">
                                                 </div>
@@ -516,6 +519,10 @@
                                     <span>Total</span>
                                     <span><small class="checkout-summary__currency">NZD</small> <span id="checkout-total">Calculating…</span></span>
                                 </div>
+                                <!-- ERR-362: points cover the whole order and the cart priced
+                                     shipping for a North Island urban address (loyalty.shipping_estimated).
+                                     Written ONLY by CheckoutPage._syncPointsOrder. -->
+                                <p class="checkout-summary__total-note" id="checkout-total-note" hidden></p>
                                 <!-- Prices are GST-inclusive. No dollar figure here: the
                                      frontend never computes tax, and the cart's server GST
                                      figure is priced on its own shipping estimate, not the
@@ -575,14 +582,14 @@
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/shipping.js?v=d9f0ced7"></script>
-    <script defer src="/js/api.js?v=cba02c18"></script>
+    <script defer src="/js/api.js?v=0b750926"></script>
     <script defer src="/js/address-autocomplete.js?v=80cdcf13"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=f5ba4d66"></script>
+    <script defer src="/js/utils.js?v=7f6f213e"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=81c3ae21"></script>
+    <script defer src="/js/cart.js?v=8d2d2202"></script>
     <script defer src="/js/cart-drawer.js?v=63a9d5cc"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/products.js?v=a0cb9ec7"></script>
@@ -592,11 +599,11 @@
     <script defer src="/js/footer.js?v=26fe2dd9"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
 
-    <script defer src="/js/payment-page.js?v=ed2897ad"></script>
-    <script defer src="/js/checkout-page.js?v=b15c11d9"></script>
+    <script defer src="/js/payment-page.js?v=7de43392"></script>
+    <script defer src="/js/checkout-page.js?v=b2108679"></script>
     <script defer src="/js/checkout-compact.js?v=a8a2aeeb"></script>
     <script defer src="/js/cart-quote-pdf.js?v=057da012"></script>
-    <script defer src="/js/cart-wallet.js?v=bc377241"></script>
+    <script defer src="/js/cart-wallet.js?v=5c291cf9"></script>
 
     <style>
     .animate-spin {

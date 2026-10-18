@@ -371,3 +371,31 @@ function mockResponse({ status = 200, body = {}, ok }) {
         async text() { return JSON.stringify(body); },
     };
 }
+
+// ERR-361 (backend response 2026-10-17) — 13 retired duplicate Brother printer
+// rows 301 to their real row; the fetch follows silently and the body's
+// `printer.slug` names the real one. The page adopts it before anything reads it.
+test('shop-page.js — a retired printer slug is replaced by the real printer.slug (state + address bar)', () => {
+    const vm = require('node:vm');
+    const fn = extractFunction(SHOP_PAGE_JS, 'loadPrinterProducts');
+    const adopt = fn.indexOf('this._adoptPrinterSlug(printerData && printerData.slug)');
+    assert.ok(adopt > 0, 'loadPrinterProducts must adopt printer.slug');
+    assert.ok(adopt < fn.indexOf('this.updateBreadcrumb()'), 'adopt BEFORE breadcrumb/title read state.printer');
+
+    const m = /\n        _adoptPrinterSlug\(slug\) \{[\s\S]*?\n        \},/.exec(SHOP_PAGE_JS);
+    assert.ok(m, '_adoptPrinterSlug must exist');
+    const calls = [];
+    const ctx = {
+        URLSearchParams,
+        window: { location: { pathname: '/shop', search: '?printer=brother-dpc-1510&type=genuine' } },
+        history: { state: null, replaceState: (...a) => calls.push(a[2]) },
+    };
+    const page = vm.runInNewContext(`({ state: { printer: 'brother-dpc-1510' }, ${m[0].trim().replace(/,$/, '')} })`, ctx);
+    assert.equal(page._adoptPrinterSlug('brother-dcp-1510'), true);
+    assert.equal(page.state.printer, 'brother-dcp-1510');
+    assert.deepEqual(calls, ['/shop?type=genuine&printer_slug=brother-dcp-1510'], 'canonical param, legacy one dropped');
+    for (const same of ['brother-dcp-1510', '', null, undefined, 42]) {
+        assert.equal(page._adoptPrinterSlug(same), false, `no-op for ${JSON.stringify(same)}`);
+    }
+    assert.equal(calls.length, 1, 'no history write when nothing changed');
+});

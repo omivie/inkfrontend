@@ -447,9 +447,14 @@ const API = {
                     return withRid({ ok: false, error: errorMsg, code: errorCode || 'FORBIDDEN' });
                 }
 
-                // Unauthorized — caller redirects to login
+                // Unauthorized — caller redirects to login. `code` stays the generic
+                // literal its callers compare against; the backend's own reason
+                // (e.g. POINTS_REQUIRE_ACCOUNT, ERR-362) rides along as
+                // `server_code`, the same additive shape as the 404 branch below.
                 if (response.status === 401 || errorCode === 'UNAUTHORIZED') {
-                    return withRid({ ok: false, error: errorMsg, code: 'UNAUTHORIZED' });
+                    const env = { ok: false, error: errorMsg, code: 'UNAUTHORIZED' };
+                    if (errorCode && errorCode !== 'UNAUTHORIZED') env.server_code = errorCode;
+                    return withRid(env);
                 }
 
                 // Not found — caller may show "Couldn't find that product/order"
@@ -2142,10 +2147,12 @@ const API = {
     },
 
     /**
-     * What a pack is made of. Answers `{ ok:true, data:{ pack_sku, pack_type,
-     * constituents:[{ sku, name, color, is_active, in_stock }], is_complete } }`.
-     * No per-cartridge yield or quantity yet (outbox backend-asks-2026-10-15 §4),
-     * and some value packs answer `[]` with is_complete:true (GPG645VPVP).
+     * What is in a pack's box (backend 2026-10-17, ERR-360). Answers
+     * `{ ok:true, data:{ pack_sku, pack_type, constituents:[{ sku, name, color,
+     * quantity, page_yield, is_active, in_stock }], is_complete, contents_known } }`.
+     * `quantity` = integer per row (G45BK-2PK ⇒ G45BK × 2); `page_yield` =
+     * integer pages or null (never estimated). `contents_known:false` ⇒ the
+     * list is not the full box (empty). `is_complete` = Add to Cart allowed.
      *
      * @param {string} sku - Pack SKU
      */

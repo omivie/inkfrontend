@@ -1626,7 +1626,8 @@
             const note = warranty && typeof warranty.compatible_label === 'string' ? warranty.compatible_label.trim() : '';
             const cards = rows.map((a) => {
                 const href = `/products/${encodeURIComponent(a.slug)}/${encodeURIComponent(a.sku)}`;
-                const name = a.name || a.sku;
+                // ERR-359 — no `display_name` on alternatives yet (outbox 10-18 §3); clean() falls back.
+                const name = (typeof ProductName !== 'undefined' ? ProductName.clean(a) : a.name) || a.sku;
                 const imgSrc = a.image_url
                     ? Security.sanitizeUrl(typeof storageUrl === 'function' ? storageUrl(a.image_url) : a.image_url)
                     : null;
@@ -1914,7 +1915,7 @@
                 + `<a href="${Security.escapeAttr(href)}" class="pack-upsell__body" data-track="cta_click" data-track-cta="pack_upsell" data-track-location="product_page">`
                 +     imgHtml
                 +     `<span class="pack-upsell__copy">`
-                +         `<span class="pack-upsell__name">${Security.escapeHtml(ps.name || ps.sku)}</span>`
+                +         `<span class="pack-upsell__name">${Security.escapeHtml((typeof ProductName !== 'undefined' ? ProductName.clean(ps) : ps.name) || ps.sku)}</span>`
                 +         `<span class="pack-upsell__price">${Security.escapeHtml(formatPrice(price))}${compareHtml}</span>`
                 +         `<span class="pack-upsell__savings">Saves ${Security.escapeHtml(formatPrice(savings))} ${vs}</span>`
                 +     `</span>`
@@ -2182,31 +2183,26 @@
 
         /**
          * PURE: one line per cartridge in the box — `[{ qty, color, code, yieldText }]`.
-         * A single is itself; a pack is its constituents (each yield from that
-         * constituent's own row in `yieldsBySku`). [] when the contents are not
-         * known — never guessed from the pack's colour code.
+         * A single is itself (yield = backend `page_yield_pages`, else the text
+         * `page_yield`). A pack is the backend's box list (ERR-360): each row's
+         * own `quantity` and integer `page_yield` (null = no published yield).
+         * [] when the backend says the list is not the full contents
+         * (`contents_known: false`) — never guessed from the colour code.
          */
-        packContentsLines(info, constituents, yieldsBySku) {
+        packContentsLines(info, contents) {
             if (!info) return [];
             if (!info.pack_type || info.pack_type === 'single') {
                 if (!info.color) return [];
-                return [{ qty: 1, color: String(info.color), code: this.displaySku(info.sku, info.source), yieldText: this.yieldPhrase(info.pageYield) }];
+                const pages = Number.isInteger(info.page_yield_pages) ? info.page_yield_pages : info.pageYield;
+                return [{ qty: 1, color: String(info.color), code: this.displaySku(info.sku, info.source), yieldText: this.yieldPhrase(pages) }];
             }
-            const rows = Array.isArray(constituents) ? constituents.filter(c => c && c.sku) : [];
-            // ponytail: twin packs list ONE constituent with no quantity; the
-            // count comes from pack savings, else the "2-Pack" name. Delete when
-            // the backend sends `quantity` per constituent (outbox §4).
-            let soleQty = 1;
-            if (rows.length === 1) {
-                const n = Number(info.pack_savings_vs_singles && info.pack_savings_vs_singles.cartridge_count);
-                const m = String(info.name || '').match(/(\d+)\s*-?\s*Pack\b/i);
-                soleQty = n > 1 ? n : (m && Number(m[1]) > 1 ? Number(m[1]) : 1);
-            }
+            if (!contents || contents.contents_known !== true) return [];
+            const rows = Array.isArray(contents.constituents) ? contents.constituents.filter(c => c && c.sku) : [];
             return rows.map(c => ({
-                qty: rows.length === 1 ? soleQty : 1,
+                qty: Number.isInteger(c.quantity) && c.quantity > 0 ? c.quantity : 1,
                 color: String(c.color || ''),
                 code: this.displaySku(c.sku, info.source),
-                yieldText: this.yieldPhrase(yieldsBySku && yieldsBySku[c.sku]),
+                yieldText: this.yieldPhrase(c.page_yield),
             }));
         },
 
@@ -2238,8 +2234,8 @@
         /**
          * "Pack contents & page yields" under the printer list. ONE writer of
          * #product-contents-slot. Fail-soft but LOUD: `data-pack-contents` is
-         * ok | partial (a line has no published yield) | absent (contents not
-         * known — e.g. constituents [] on GPG645VPVP) | error (fetch failed).
+         * ok | partial (a line has no published yield) | absent (backend
+         * `contents_known: false`, e.g. GPG645VPVP) | error (fetch failed).
          */
         async renderPackContents(info) {
             const slot = document.getElementById('product-contents-slot');
@@ -2254,26 +2250,15 @@
             paint('absent', '');
             if (!info || info.category === 'ribbon') return;
 
-            let constituents = null;
-            const yieldsBySku = {};
+            let contents = null;
             if (info.pack_type && info.pack_type !== 'single') {
                 try {
                     const res = await API.getProductConstituents(info.sku);
-                    constituents = (res && res.ok && res.data && res.data.constituents) || null;
-                    if (!constituents) return paint('error', '');
-                    // ponytail: one product read per constituent for its yield
-                    // (≤4 usually). Drop when constituents carry page_yield (outbox §4).
-                    await Promise.all(constituents.filter(c => c && c.sku).map(async c => {
-                        try {
-                            const r = await API.getProduct(c.sku);
-                            yieldsBySku[c.sku] = r && r.ok && r.data ? r.data.page_yield : null;
-                        } catch (_) { yieldsBySku[c.sku] = null; }
-                    }));
-                } catch (_) {
-                    return paint('error', '');
-                }
+                    contents = (res && res.ok && res.data && Array.isArray(res.data.constituents)) ? res.data : null;
+                } catch (_) { /* contents stays null */ }
+                if (!contents) return paint('error', '');
             }
-            const lines = this.packContentsLines(info, constituents, yieldsBySku);
+            const lines = this.packContentsLines(info, contents);
             if (!lines.length) return paint('absent', '');
             paint(lines.every(l => l.yieldText) ? 'ok' : 'partial', this.packContentsHtml(info, lines));
         },

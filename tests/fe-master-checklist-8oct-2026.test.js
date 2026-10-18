@@ -127,8 +127,10 @@ test('§19 only a literal true becomes `reminder_consent: true`; otherwise the k
 
 test('§19 BOTH order rails send it (Stripe and PayPal), from the one helper', () => {
     const src = stripComments(read('js/payment-page.js'));
-    const stripe = extractMethod(read('js/payment-page.js'), 'createStripeOrder').body;
-    has(stripe, /\.\.\.this\.reminderConsentField\(this\.checkoutData\),/, 'Stripe (card, /payment wallet, cart wallet)');
+    // ERR-362: the Stripe (and points) body is built by the ONE _orderPayload.
+    const stripe = extractMethod(read('js/payment-page.js'), '_orderPayload').body;
+    has(stripe, /\.\.\.this\.reminderConsentField\(this\.checkoutData\),/, 'Stripe (card, /payment wallet, cart wallet) + points');
+    has(extractMethod(read('js/payment-page.js'), 'createStripeOrder').body, /this\._orderPayload\('stripe', idempotencyLabel\)/, 'Stripe uses it');
     has(src, /payment_method: 'paypal',[\s\S]{0,200}\.\.\.self\.reminderConsentField\(self\.checkoutData\),/, 'PayPal');
     assert.equal((src.match(/reminderConsentField\(/g) || []).length, 3, 'one definition + two call sites');
     hasNot(src, /reminder_consent:\s*false/, 'never sends false');

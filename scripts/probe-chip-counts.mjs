@@ -6,15 +6,15 @@
  * it opens? (ERR-337, owner 2026-10-15: Brother toner DR2415 said 5, opened 4.)
  *
  * For every brand × category it reads the tile list (/api/shop?brand&category),
- * then for every tile fetches what the click fetches — /api/shop?code=X over
- * each category the tile spans (toner ⇄ drums, same RELATED_CATEGORY rule as
- * shop-page.js) — and compares three numbers:
+ * then for every tile computes what the click shows, by the storefront's rules
+ * (shop-page.js, ERR-358/361): `?code=X` over the OWN category, plus — toner ⇄
+ * drums only — partner-type rows of the related category that share ≥1 printer
+ * (`compatible_printer_slugs`, else the 2-printer sample). Three numbers:
  *
- *   backend  `series[].count` as the API ships it
- *   tile     what the storefront now shows: the backend count for categories
- *            outside RELATED_CATEGORY, the listing-row recount inside it
- *   click    distinct rows the click shows (a related-category row only when
- *            its series_codes carry the code — same filter as shop-page.js)
+ *   backend  `series[].count` as the API ships it (pairs by CODE, BF-102)
+ *   tile     what the storefront shows: the backend count outside toner/drums,
+ *            else own walk rows carrying the code + their printer partners
+ *   click    distinct rows the click shows
  *
  * FAIL = tile ≠ click (the storefront lies). BACKEND-DRIFT = backend ≠ click
  * (reported separately — the negative control; expected non-zero for toner/drums
@@ -33,6 +33,7 @@ const PACE = Number(process.env.PROBE_PACE_MS || 700);
 const BRANDS = ['brother', 'canon', 'epson', 'hp', 'samsung', 'lexmark', 'oki', 'fuji-xerox', 'kyocera'];
 const CATEGORIES = ['ink', 'toner', 'drums', 'label'];
 const RELATED = { toner: 'drums', drums: 'toner' }; // apiCategory form of shop-page.js RELATED_CATEGORY
+const PAIR = { toner: ['toner_cartridge', 'drum_unit'], drums: ['drum_unit', 'toner_cartridge'] }; // shop-page.js PRINTER_PAIR
 const PAGE = 200;
 
 console.error(`probe:chip-counts — READ-ONLY (GET only) against ${API}, paced ${PACE}ms`);
@@ -65,6 +66,17 @@ const carries = (p, code) => {
     return [code, ...halves(code)].some(c => have.has(base(c)));
 };
 
+// shop-page.js _printerPartners, verbatim rule.
+const slugsOf = (p) => (Array.isArray(p.compatible_printer_slugs) ? p.compatible_printer_slugs
+    : (Array.isArray(p.compatible_printers) ? p.compatible_printers : []).map(c => c && c.slug)).filter(Boolean);
+let sampleFallbacks = 0;
+function partners(category, ownRows, relatedRows) {
+    const [own, partner] = PAIR[category];
+    const slugs = new Set(ownRows.filter(p => p.product_type === own).flatMap(slugsOf));
+    if (!slugs.size) return [];
+    return relatedRows.filter(p => p.product_type === partner && slugsOf(p).some(s => slugs.has(s)));
+}
+
 async function walk(brand, category) {
     const rows = [];
     for (let page = 1; ; page++) {
@@ -79,44 +91,28 @@ const drift = [];
 const summary = [];
 
 async function probe(brand, category) {
-    const spans = [category, RELATED[category]].filter(Boolean);
     const series = (await shop({ brand, category })).series || [];
-
-    let rowsByCode = null;
+    let ownRows = null;
+    let relatedRows = null;
     if (RELATED[category]) {
-        rowsByCode = new Map();
-        const seen = new Set();
-        for (const c of spans) {
-            for (const p of await walk(brand, c)) {
-                if (seen.has(p.id)) continue;
-                seen.add(p.id);
-                for (const code of new Set((p.series_codes || []).map(base).filter(Boolean))) {
-                    if (!rowsByCode.has(code)) rowsByCode.set(code, new Set());
-                    rowsByCode.get(code).add(p.id);
-                }
-            }
-        }
+        ownRows = await walk(brand, category);
+        relatedRows = await walk(brand, RELATED[category]);
+        sampleFallbacks += [...ownRows, ...relatedRows].filter(p => !Array.isArray(p.compatible_printer_slugs)).length;
     }
 
     let bad = 0;
     let shown = 0;
     for (const chip of series) {
         let tile = chip.count;
-        if (rowsByCode) {
-            const ids = new Set();
-            for (const c of [chip.code, ...halves(chip.code)]) for (const id of rowsByCode.get(base(c)) || []) ids.add(id);
-            tile = ids.size;
+        if (ownRows) {
+            const own = ownRows.filter(p => carries(p, chip.code));
+            tile = new Set([...own, ...partners(category, own, relatedRows)].map(p => p.id)).size;
             if (tile === 0) continue; // storefront drops it — opens nothing, shows nothing
         }
         shown++;
-        const ids = new Set();
-        for (const c of spans) {
-            for (const p of (await shop({ brand, category: c, code: chip.code, limit: PAGE })).products) {
-                // Same as shop-page.js loadProducts: a related-category row joins only if it carries the code.
-                if (c !== category && !carries(p, chip.code)) continue;
-                ids.add(p.id);
-            }
-        }
+        const clickRows = (await shop({ brand, category, code: chip.code, limit: PAGE })).products;
+        const ids = new Set(clickRows.map(p => p.id));
+        if (relatedRows) for (const p of partners(category, clickRows, relatedRows)) ids.add(p.id);
         const click = ids.size;
         const row = `${brand}\t${category}\t${chip.code}\tbackend=${chip.count}\ttile=${tile}\tclick=${click}`;
         if (tile !== click) { bad++; fails.push(row); console.log(`FAIL\t${row}`); }
@@ -129,7 +125,8 @@ async function probe(brand, category) {
 function report() {
     console.log(`\n# ${summary.length} brand/category pairs measured, ${calls} GETs`);
     for (const s of summary) console.log(`#   ${s}`);
-    console.log(`# BACKEND-DRIFT (series count ≠ click; negative control): ${drift.length}`);
+    console.log(`# toner/drum rows WITHOUT compatible_printer_slugs (sample fallback, loud): ${sampleFallbacks}`);
+    console.log(`# BACKEND-DRIFT (series count ≠ click; negative control — backend pairs by code until option (b)): ${drift.length}`);
     for (const d of drift) console.log(`#   ${d}`);
     console.log(`# FAIL (tile ≠ click): ${fails.length}`);
 }

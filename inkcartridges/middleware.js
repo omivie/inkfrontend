@@ -8,6 +8,9 @@ const BACKEND = 'https://ink-backend-sg.onrender.com';
 // crawler gets 503 + Retry-After instead of the SPA shell.
 const PRERENDER_TIMEOUT_MS = 8000;
 const PRERENDER_RETRY_AFTER_S = 120;
+// ERR-365 — the slug-hop lookup runs IN PARALLEL with the prerender, so it adds
+// no wait unless it is the slower of the two; past this it is skipped.
+const SLUG_HOP_TIMEOUT_MS = 2500;
 
 // `adsbot-google` and `storebot-google` are intentionally listed even though
 // `googlebot` is already present — the AdsBot ("AdsBot-Google", "AdsBot-Google-
@@ -131,6 +134,7 @@ export default async function middleware(request) {
   if (!BOT_PATTERN.test(ua)) return;
 
   let prerenderPath = null;
+  let slugHopFor = null;
 
   // / → home
   if (path === '/' || path === '') {
@@ -141,6 +145,7 @@ export default async function middleware(request) {
     const segments = path.split('/').filter(Boolean);
     const sku = segments[segments.length - 1];
     if (sku) prerenderPath = `/api/prerender/product/${encodeURIComponent(sku)}`;
+    if (segments.length === 3 && sku) slugHopFor = { path, sku };
   }
   // /product/:slug → legacy product (redirects to by-slug prerender)
   else if (path.startsWith('/product/')) {
@@ -281,6 +286,9 @@ export default async function middleware(request) {
 
   if (!prerenderPath) return;
 
+  // Started before the prerender and awaited after it: see slugHop().
+  const hopPromise = slugHopFor ? slugHop(slugHopFor, url) : null;
+
   try {
     // `redirect: 'manual'` — the backend 301s legacy-grammar SKUs
     // (G-BRO-LC531BK-INK-BK → GLC531BK), deactivated products and renamed
@@ -300,6 +308,11 @@ export default async function middleware(request) {
       // then it got the SPA shell (ERR-296). See prerenderUnavailable().
       signal: AbortSignal.timeout(PRERENDER_TIMEOUT_MS),
     });
+
+    // ERR-365 — an old pack slug (the 826 renamed 2026-10-15) gets a hard 301
+    // to its new address instead of a 200 whose canonical points there.
+    const hop = hopPromise ? await hopPromise : null;
+    if (hop) return hop;
 
     // Pass a backend redirect through as OUR 301 so the crawler moves to the
     // canonical URL. The backend answers with an absolute www location; a
@@ -352,6 +365,50 @@ export default async function middleware(request) {
   } catch {
     // Timeout (AbortSignal.timeout → TimeoutError) or a network failure.
     return prerenderUnavailable();
+  }
+}
+
+/**
+ * ERR-365 — does this /products/<slug>/<SKU> address have a newer one?
+ * (backend response 2026-10-17, "Pack names" ask 2.) The backend's
+ * `GET /products/<slug>/<SKU>` answers 301 to the new address when a
+ * `slug_redirects` hop exists — 826 pack renames, and every older hop.
+ *
+ * GUARDED, because that endpoint does not only answer hops. Measured
+ * 2026-10-18: the CURRENT slug of CLC3313KCMY 301s to `/shop?search=…`, the
+ * opposite of the "passes through when none does" the response describes. So
+ * a 301 is followed ONLY when it lands on `/products/<another slug>/<SAME SKU>`.
+ * A search page, another SKU, a non-redirect, an error or a timeout ⇒ null, and
+ * the prerender answers exactly as before. Bots only: shoppers already get the
+ * right page (the PDP resolves by SKU) and never pay for this lookup.
+ *
+ * @returns {Promise<Response|null>}
+ */
+async function slugHop({ path, sku }, requestUrl) {
+  try {
+    const res = await fetch(`${BACKEND}${path}`, {
+      headers: { 'Accept': 'text/html' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(SLUG_HOP_TIMEOUT_MS),
+    });
+    if (res.status !== 301 && res.status !== 308) return null;
+    const location = res.headers.get('location');
+    if (!location) return null;
+    const target = new URL(location, requestUrl);
+    const seg = target.pathname.split('/').filter(Boolean);
+    if (seg.length !== 3 || seg[0] !== 'products' || seg[2] !== sku) return null;
+    if (target.pathname === path) return null;
+    if (target.hostname !== requestUrl.hostname && target.hostname !== 'www.inkcartridges.co.nz') return null;
+    return new Response(null, {
+      status: 301,
+      headers: {
+        'Location': target.toString(),
+        'Cache-Control': 'public, s-maxage=3600, max-age=3600',
+        'X-Slug-Redirect': 'true',
+      },
+    });
+  } catch {
+    return null;
   }
 }
 

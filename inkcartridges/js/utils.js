@@ -1779,8 +1779,8 @@ const ProductName = (function () {
     // "CMY-Pack"; the count and "Value Pack" words go. A bare "4-Pack" with no
     // colour token is rewritten ONLY when the stored colour code says KCMY/CMY;
     // every other pack (2-Pack, 5-Pack, Black/Colour) stays verbatim because
-    // the display cannot know its contents. BRIDGE: the backend rename makes
-    // this a no-op; delete it once stored names carry the new grammar.
+    // the display cannot know its contents. The backend renamed 826 stored
+    // names on 2026-10-15, so this now changes only the owner-pending packs.
     const PACK4_RE = /\b(?:Value\s+Pack\s+)?(?:KCMY|CMYK|BCMY)\s+4\s*-?\s*Pack\b/gi;
     const PACK3_RE = /\b(?:Value\s+Pack\s+)?CMY\s+3\s*-?\s*Pack\b/gi;
     const BARE4_RE = /\b(?:Value\s+Pack\s+)?4\s*-?\s*Pack\b/i;
@@ -1789,8 +1789,8 @@ const ProductName = (function () {
     // A value pack whose colour code is the bare "Value Pack" has unknown
     // contents, and its stored count can be wrong: "HP 67 4-Pack" is black +
     // tri-colour, 2 cartridges (owner, 2026-10-16, ERR-357). No count beats a
-    // wrong count, so "N-Pack" becomes "Value Pack". composeMiss still says
-    // pack_contents_unknown. BRIDGE: backend sets the real code (outbox 10-16 §3).
+    // wrong count, so "N-Pack" becomes "Value Pack". BRIDGE: the backend left
+    // these for the owner to name (backend response 2026-10-17).
     const COUNT_PACK_RE = /\b(?:Value\s+Pack\s+)?\d+\s*-?\s*Pack\b/i;
 
     function packRename(title, product) {
@@ -1803,70 +1803,23 @@ const ProductName = (function () {
         return out;
     }
 
-    // ── Descriptive title (owner, 2026-10-15, ERR-341) ──────────────────────
-    // Smart Ink style: every fact a buyer needs is in the title.
+    // ── Descriptive title = backend `display_name` (ERR-359, 2026-10-18) ───
+    // The backend composes the Smart Ink style title (ERR-341) and sends it as
+    // `display_name` on every product response:
     //   "Brother LC432XL Compatible Ink Cartridges – 4 Colour Set BK, C, M, Y – High Yield"
-    //   "HP 126A Compatible Toner Cartridge – Cyan (~1,000 pages)"
-    // Built from fields (brand, source, product_type, color, pack_type,
-    // yield_tier, page_yield) plus the family code read from the stored name.
-    // `series_codes` cannot supply the code: it drops the tier ("125" for 125A).
-    // Supersedes the KCMY-Pack display grammar (packRename) for every row it
-    // can compose. Any row it cannot compose keeps the old display name, and
-    // composeMiss() names the reason so probe:product-titles counts it.
-    // BRIDGE: names are backend data; delete once stored names carry this
-    // format (outbox backend-asks-2026-10-15.md).
-    const TYPE_WORDS = {
-        ink_cartridge: 'Ink Cartridge',
-        ink_bottle: 'Ink Bottle',
-        toner_cartridge: 'Toner Cartridge',
-        drum_unit: 'Drum Unit',
-    };
-    const SETS = { KCMY: '4 Colour Set BK, C, M, Y', CMYK: '4 Colour Set BK, C, M, Y', BCMY: '4 Colour Set BK, C, M, Y', CMY: '3 Colour Set C, M, Y', 'BLACK/COLOUR': 'Black + Tri-Colour Combo Pack' };
-    const TIERS = { XL: 'High Yield', XXL: 'Extra High Yield' };
-    const MIN_YIELD = 50;   // same floor as ProductDetailPage.MIN_PLAUSIBLE_YIELD
-    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // Returns { title } or { miss: reason }. Never throws, never guesses.
-    function build(p) {
-        if (!p || !p.name) return { miss: 'no_name' };
-        const name = collapseWs(String(p.name));
-        const brand = String((p.brand && p.brand.name) || p.brand || '').trim();
-        if (!brand) return { miss: 'no_brand' };
-        const source = p.source === 'genuine' ? 'Genuine' : p.source === 'compatible' ? 'Compatible' : '';
-        if (!source) return { miss: 'no_source' };
-        const typeWord = TYPE_WORDS[p.product_type];
-        if (!typeWord) return { miss: 'type_' + (p.product_type || 'none') };
-
-        // Family code: compatible = word after "for <Brand>"; genuine = word
-        // after the type phrase. Must carry a digit.
-        const m = source === 'Compatible'
-            ? name.match(new RegExp('\\bfor\\s+' + esc(brand) + '\\s+(\\S+)', 'i'))
-            : name.match(new RegExp('^' + esc(brand) + '\\s+Genuine\\s+\\S+\\s+' + esc(typeWord) + '\\s+(\\S+)', 'i'));
-        const code = m && m[1].replace(/[(),]/g, '');
-        if (!code || !/\d/.test(code)) return { miss: 'no_code' };
-
-        const color = String(p.color || '').trim();
-        const isPack = p.pack_type && p.pack_type !== 'single';
-        let colourPart;
-        if (isPack) {
-            colourPart = SETS[color.toUpperCase()];
-            if (!colourPart) return { miss: 'pack_contents_unknown' };
-        } else {
-            if (!color) return { miss: 'no_color' };
-            // The stored name must agree with the colour field; a mismatch is
-            // a data bug (e.g. "67XXL … Tri-Colour" with color "Red").
-            if (!new RegExp('\\b' + esc(color) + '\\b', 'i').test(name)) return { miss: 'color_mismatch' };
-            colourPart = color;
-        }
-
-        const parts = [`${brand} ${code} ${source} ${typeWord}${isPack ? 's' : ''}`, colourPart];
-        const tier = TIERS[String(p.yield_tier || '').toUpperCase()];
-        if (tier) parts.push(tier);
-        let title = parts.join(' – ');
-        // Pages on singles only: a pack's one number hides per-colour yields.
-        const n = parseInt(String(p.page_yield == null ? '' : p.page_yield).replace(/[,\s]/g, ''), 10);
-        if (!isPack && Number.isFinite(n) && n >= MIN_YIELD) title += ` (~${n.toLocaleString('en-NZ')} pages)`;
-        return { title };
+    // Shown VERBATIM. A row the backend could not compose carries its stored
+    // name instead — or, on /api/products/:sku only, the stored name minus its
+    // "<Brand> Genuine" prefix ("74C0ZV0 Drum Unit …", brand lost). Both are a
+    // SUFFIX of `name`, which a composed title never is, so a suffix means "not
+    // composed" and the row keeps the legacy display (dedouble + packRename: the
+    // HP DesignJet doubling and the 46 owner-pending packs, ERR-357).
+    // ponytail: delete packRename once the owner names the 46 packs
+    // (backend response 2026-10-17, "Pack names" ask 5).
+    function composed(p) {
+        const dn = p && typeof p.display_name === 'string' ? collapseWs(p.display_name) : '';
+        if (!dn) return '';
+        const name = collapseWs(String((p && p.name) || ''));
+        return name.endsWith(dn) ? '' : dn;
     }
 
     function legacy(product) {
@@ -1874,11 +1827,7 @@ const ProductName = (function () {
     }
 
     function clean(product) {
-        return build(product).title || legacy(product);
-    }
-
-    function composeMiss(product) {
-        return build(product).miss || null;
+        return composed(product) || legacy(product);
     }
 
     function dedouble(product) {
@@ -1974,7 +1923,7 @@ const ProductName = (function () {
         return s.replace(/\s+/g, ' ').trim();
     }
 
-    return { clean, legacy, composeMiss, compatModel };
+    return { clean, legacy, composed, compatModel };
 })();
 if (typeof window !== 'undefined') window.ProductName = ProductName;
 

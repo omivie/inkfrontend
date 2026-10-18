@@ -1685,6 +1685,20 @@ const AdminAPI = {
     return resp.data ?? null;
   },
 
+  // Every id the filter matches, in ONE call (`ids_only=true`, backend
+  // 2026-10-17 §2; measured 2026-10-18: Brother compatible toner ⇒ 89 ids,
+  // total 89). Up to 10,000. Throws on refusal — e.g. 400 UNSUPPORTED_FILTER
+  // for stock_status=low_stock — so a half selection never looks complete.
+  async listProductIds(filters = {}) {
+    const params = productListParams(filters, 1, 100);
+    params.set('ids_only', 'true');
+    const resp = await window.API.get(`/api/admin/products?${params}`);
+    if (!resp || resp.ok === false) throw invoiceError(resp, 'The id list request was refused');
+    const d = resp.data || {};
+    if (!Array.isArray(d.ids)) throw new Error('The server sent no id list');
+    return { ids: d.ids.map(String), total: Number.isFinite(Number(d.total)) ? Number(d.total) : null };
+  },
+
   // ---- Product Review ----
   async getUnreviewedProducts(filters = {}, page = 1, limit = 20) {
     try {
@@ -5618,12 +5632,47 @@ const AdminAPI = {
     // undefined and every mapped error branch in the panel was dead.
     // `invoiceError()` handles both shapes; every write below goes through it.
 
-    // POST /api/admin/pricing/bulk (ERR-352). One body, dry_run true for the
-    // preview and false for the apply. Throws on refusal so the modal shows
-    // the server's field messages.
+    // POST /api/admin/pricing/bulk (ERR-352/363). One body, dry_run true for
+    // the preview and false for the apply; `confirm:true` is sent ONLY with an
+    // apply (the server refuses an apply without it, CONFIRM_REQUIRED). Throws
+    // on refusal so the modal shows the server's field messages.
     async pricingBulk(body, dryRun) {
-      const resp = await window.API.post('/api/admin/pricing/bulk', { ...body, dry_run: !!dryRun });
+      const payload = dryRun ? { ...body, dry_run: true } : { ...body, dry_run: false, confirm: true };
+      const resp = await window.API.post('/api/admin/pricing/bulk', payload);
       if (!resp || resp.ok === false) throw invoiceError(resp, dryRun ? 'Preview refused' : 'Bulk price change refused');
+      return resp.data ?? null;
+    },
+
+    // ── Margin rules by filter (ERR-363; backend response 2026-10-17 §4) ────
+    // GET → { rules: [...], count }, newest first. Throws: "no rules" and
+    // "could not read the rules" must not look the same.
+    async listPricingRules() {
+      const resp = await window.API.get('/api/admin/pricing/rules');
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'Could not load the margin rules');
+      const d = resp.data || {};
+      return Array.isArray(d.rules) ? d.rules : [];
+    },
+
+    // POST without confirm = PREVIEW (writes nothing): { applied:false, rule,
+    // affected, unchanged, locked, blocked_by_*, sample, packs }. With
+    // confirm = SAVE + background reprice: { applied:true, …, job_id }.
+    async savePricingRule(body, confirm) {
+      const resp = await window.API.post('/api/admin/pricing/rules', confirm ? { ...body, confirm: true } : body);
+      if (!resp || resp.ok === false) throw invoiceError(resp, confirm ? 'The rule was not saved' : 'Rule preview refused');
+      return resp.data ?? null;
+    },
+
+    // PATCH = send only the changed fields; same preview/confirm split as POST.
+    async patchPricingRule(ruleId, patch, confirm) {
+      const resp = await window.API.patch(`/api/admin/pricing/rules/${encodeURIComponent(ruleId)}`, confirm ? { ...patch, confirm: true } : patch);
+      if (!resp || resp.ok === false) throw invoiceError(resp, confirm ? 'The rule was not changed' : 'Rule preview refused');
+      return resp.data ?? null;
+    },
+
+    // DELETE: the rule's rows fall back to the next rule or the ladder.
+    async deletePricingRule(ruleId) {
+      const resp = await window.API.delete(`/api/admin/pricing/rules/${encodeURIComponent(ruleId)}`);
+      if (!resp || resp.ok === false) throw invoiceError(resp, 'The rule was not deleted');
       return resp.data ?? null;
     },
 

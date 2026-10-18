@@ -268,8 +268,14 @@ const CartWallet = {
         return ((typeof Cart !== 'undefined' && Cart.items) || []).map((i) => ({ product_id: i.id, quantity: i.quantity }));
     },
 
-    /** The server total in cents when the cart can be paid by wallet, else NaN. */
+    /**
+     * The server total in cents when the cart can be paid by wallet, else NaN.
+     * A $0 total (points pay the whole order, ERR-362) is never a wallet order:
+     * Stripe cannot charge it and the backend refuses it (POINTS_PAYMENT_REQUIRED).
+     */
     _eligibleCents() {
+        const s = this._summary() || {};
+        if (s.total === 0) return NaN;
         const rate = this._initialRate();
         const cents = rate ? this._amountCents(rate.amount / 100) : NaN;
         return this._items().length > 0 && cents >= this.STRIPE_MIN_NZD_CENTS ? cents : NaN;

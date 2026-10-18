@@ -36,9 +36,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const JS = (rel) => path.join(ROOT, 'inkcartridges', 'js', rel);
 const READ = (p) => fs.readFileSync(p, 'utf8');
-const stripComments = (src) => src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^\n]*/g, '');
+const stripComments = require('./helpers/strip-comments');
 
 const { ProductName } = require(JS('utils.js'));
 
@@ -248,67 +246,83 @@ test('pack wording: packs whose contents the display cannot know stay verbatim',
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Descriptive title (owner, 2026-10-15, ERR-341): Smart Ink style, built from
-// fields. Rows it cannot build keep the old display (pinned above) and
-// composeMiss() names why, so probe:product-titles can count them.
+// Descriptive title = backend `display_name` (ERR-359; supersedes the FE
+// composer of ERR-341). Shown verbatim when the backend composed it. A row it
+// could not compose carries its stored name (or, on /api/products/:sku, the
+// stored name minus "<Brand> Genuine") — a suffix of `name` — and keeps the
+// legacy display (dedouble + packRename for the owner-pending packs).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const row = (o) => ({ brand: { name: 'Brother' }, source: 'compatible', product_type: 'ink_cartridge', pack_type: 'single', yield_tier: 'STD', ...o });
+const row = (o) => ({ brand: { name: 'Brother' }, source: 'compatible', product_type: 'ink_cartridge', pack_type: 'single', ...o });
 
-test('descriptive title: singles, packs, genuine, toner, drum', () => {
+test('composed display_name is shown verbatim (live examples, 2026-10-18)', () => {
     const cases = [
-        [row({ name: 'LC432XLKCMY Compatible Ink Cartridge for Brother LC432XL KCMY-Pack', color: 'KCMY', pack_type: 'value_pack', yield_tier: 'XL' }),
-            'Brother LC432XL Compatible Ink Cartridges – 4 Colour Set BK, C, M, Y – High Yield'],
-        [row({ name: 'LC432XLCMY Compatible Ink Cartridge for Brother LC432XL CMY-Pack', color: 'CMY', pack_type: 'value_pack', yield_tier: 'XL', page_yield: '1,500' }),
-            'Brother LC432XL Compatible Ink Cartridges – 3 Colour Set C, M, Y – High Yield'],   // no pages on packs
-        [row({ name: 'LC432XLBK Compatible Ink Cartridge for Brother LC432XL Black', color: 'Black', yield_tier: 'XL', page_yield: '3,000' }),
-            'Brother LC432XL Compatible Ink Cartridge – Black – High Yield (~3,000 pages)'],
-        [row({ brand: { name: 'HP' }, name: '126AC Compatible Toner Cartridge for HP 126A (CE311A) Cyan', color: 'Cyan', product_type: 'toner_cartridge', page_yield: '1,000' }),
-            'HP 126A Compatible Toner Cartridge – Cyan (~1,000 pages)'],
-        [row({ brand: 'Epson', source: 'genuine', name: 'Epson Genuine 288XLC Ink Cartridge 288XL Cyan (450 pages)', color: 'Cyan', yield_tier: 'XL', page_yield: '450' }),
-            'Epson 288XL Genuine Ink Cartridge – Cyan – High Yield (~450 pages)'],
-        [row({ source: 'genuine', name: 'Brother Genuine DR1170BK Drum Unit DR1170 Black (10,000 pages)', color: 'Black', product_type: 'drum_unit', page_yield: '10,000' }),
-            'Brother DR1170 Genuine Drum Unit – Black (~10,000 pages)'],
-        [row({ brand: 'Canon', source: 'genuine', name: 'Canon Genuine CLI42M Ink Cartridge CLI42 Magenta (48 pages)', color: 'Magenta', page_yield: '48 A3+' }),
-            'Canon CLI42 Genuine Ink Cartridge – Magenta'],   // implausible yield dropped
-        [row({ brand: 'HP', name: '67XXLBK Compatible Ink Cartridge for HP 67XXL Black', color: 'Black', yield_tier: 'XXL' }),
-            'HP 67XXL Compatible Ink Cartridge – Black – Extra High Yield'],
+        row({ name: 'LC3313KCMY Compatible Ink Cartridge for Brother LC3313 KCMY-Pack', color: 'KCMY', pack_type: 'value_pack',
+            display_name: 'Brother LC3313 Compatible Ink Cartridges – 4 Colour Set BK, C, M, Y' }),
+        row({ source: 'genuine', name: 'Brother Genuine TN1070BK Toner Cartridge TN1070 Black (1,000 pages)', color: 'Black',
+            display_name: 'Brother TN1070 Genuine Toner Cartridge – Black (~1,000 pages)' }),
+        row({ brand: { name: 'HP' }, name: '126AC Compatible Toner Cartridge for HP 126A (CE311A) Cyan', color: 'Cyan',
+            display_name: 'HP 126A Compatible Toner Cartridge – Cyan (~1,000 pages)' }),
+        // A composed title is never rewritten by the legacy pack grammar.
+        row({ brand: { name: 'HP' }, source: 'genuine', name: 'HP Genuine 60BKCLR Ink Cartridge 60 Black/Colour Combo Pack (200 pages)',
+            color: 'Black/Colour', pack_type: 'value_pack', display_name: 'HP 60 Genuine Ink Cartridges – Black + Tri-Colour Combo Pack' }),
     ];
-    for (const [product, want] of cases) {
-        assert.equal(ProductName.composeMiss(product), null, product.name);
-        assert.equal(ProductName.clean(product), want, product.name);
+    for (const p of cases) {
+        assert.equal(ProductName.clean(p), p.display_name, p.name);
+        assert.equal(ProductName.composed(p), p.display_name);
     }
 });
 
-test('descriptive title: rows it cannot build keep the old display and say why', () => {
-    const cases = [
-        [row({ name: 'Brother Genuine TZe231 Label Tape', color: 'Black', product_type: 'label_tape', source: 'genuine' }), 'type_label_tape'],
-        [row({ brand: 'HP', source: 'genuine', name: 'HP Genuine 70 130mlRD Ink Cartridge 70 130ml Red', color: 'Red' }), 'no_code'],
-        [row({ name: 'Canon PG640/CL641 Ink Cartridge 2-Pack', brand: 'Canon', source: 'genuine', color: 'Black/Colour', pack_type: 'multipack' }), 'no_code'],
-        [row({ brand: 'HP', name: '67XXLRD Compatible Ink Cartridge for HP 67XXL Tri-Colour', color: 'Red' }), 'color_mismatch'],
-        [row({ name: 'LC3313 Compatible Ink Cartridge for Brother LC3313 5-Pack', color: 'Value Pack', pack_type: 'value_pack' }), 'pack_contents_unknown'],
-        [row({ name: 'LC38BK Compatible Ink Cartridge for Brother LC38 Black', color: 'Black', source: 'local' }), 'no_source'],
-    ];
-    for (const [product, reason] of cases) {
-        assert.equal(ProductName.composeMiss(product), reason, product.name);
-        assert.equal(ProductName.clean(product), ProductName.legacy(product), 'fallback = old display: ' + product.name);
+test('uncomposed rows (display_name = stored name, or its prefix-less tail) keep the legacy display', () => {
+    const designjet = { name: 'HP Genuine 711 80mlBK Ink Cartridge 711 80ml Black', color: 'Black' };
+    // /api/shop sends the stored name; /api/products/:sku strips "<Brand> Genuine".
+    for (const dn of [designjet.name, '711 80mlBK Ink Cartridge 711 80ml Black']) {
+        const p = { ...designjet, display_name: dn };
+        assert.equal(ProductName.composed(p), '', dn);
+        assert.equal(ProductName.clean(p), 'HP Genuine 711 80ml Ink Cartridge Black', 'brand kept, de-doubled: ' + dn);
+    }
+    const lexmark = { name: 'Lexmark Genuine 74C0ZV0 Drum Unit (150,000 pages)', display_name: '74C0ZV0 Drum Unit (150,000 pages)' };
+    assert.equal(ProductName.clean(lexmark), lexmark.name, 'never shows the brand-less PDP tail');
+});
+
+test('no display_name (old payloads, local rows) ⇒ legacy display, never blank', () => {
+    const p = { name: 'Brother Genuine DR233CL Drum Unit 4-Pack', color: 'KCMY' };
+    assert.equal(ProductName.clean(p), 'Brother Genuine DR233CL Drum Unit KCMY-Pack');
+    assert.equal(ProductName.clean({ ...p, display_name: '' }), ProductName.legacy(p));
+    assert.equal(ProductName.clean({ ...p, display_name: null }), ProductName.legacy(p));
+});
+
+test('the FE title composer is gone (ERR-359)', () => {
+    const src = stripComments(READ(JS('utils.js')));
+    for (const gone of ['function build(', 'composeMiss', "'4 Colour Set BK, C, M, Y'", 'TYPE_WORDS']) {
+        assert.ok(!src.includes(gone), `${gone} must not come back — the backend composes display_name`);
     }
 });
 
-test('black + tri-colour combo packs say so; unknown value packs drop the count (owner 2026-10-16, ERR-357)', () => {
+test('owner-pending packs keep the legacy grammar (ERR-357; 46 rows the backend left for the owner)', () => {
     // HP 67 "4-Pack" is black + tri-colour, 2 cartridges: a customer bought it as four.
-    const combo = row({ brand: { name: 'HP' }, source: 'genuine', name: 'HP Genuine 60BKCLR Ink Cartridge 60 Black/Colour Combo Pack (200 pages)', color: 'Black/Colour', pack_type: 'value_pack' });
-    assert.equal(ProductName.composeMiss(combo), null);
-    assert.equal(ProductName.clean(combo), 'HP 60 Genuine Ink Cartridges – Black + Tri-Colour Combo Pack');
-
     const hp67 = row({ brand: { name: 'HP' }, source: 'genuine', name: 'HP Genuine 67 Ink Cartridge 4-Pack', color: 'Value Pack', pack_type: 'value_pack' });
-    assert.equal(ProductName.composeMiss(hp67), 'pack_contents_unknown', 'still counted loudly');
-    assert.equal(ProductName.clean(hp67), 'HP Genuine 67 Ink Cartridge Value Pack');
+    assert.equal(ProductName.clean({ ...hp67, display_name: hp67.name }), 'HP Genuine 67 Ink Cartridge Value Pack');
     assert.doesNotMatch(ProductName.clean(row({ name: 'Epson Genuine 200 Ink Cartridge HY Value Pack 4-Pack', brand: 'Epson', source: 'genuine', color: 'Value Pack', pack_type: 'value_pack' })), /Value Pack Value Pack|4-Pack/);
 
     // Known codes keep their own grammar; multipacks of one colour keep their true count.
     assert.equal(ProductName.legacy(row({ name: 'Epson Genuine 604 Ink Cartridge 4-Pack', color: 'KCMY', pack_type: 'value_pack' })), 'Epson Genuine 604 Ink Cartridge KCMY-Pack');
     assert.match(ProductName.clean(row({ brand: 'HP', source: 'genuine', name: 'HP Genuine 45BK Ink Cartridge 45 Black 2-Pack (833 pages)', color: 'Black', pack_type: 'multipack' })), /2-Pack/);
+});
+
+test('cart lines, favourites, PDP alternatives + pack upsell and the free-shipping chip carry the backend title', () => {
+    const CART = stripComments(READ(JS('cart.js')));
+    assert.match(CART, /display_name:\s*item\.product\.display_name \|\| null/, '_parseServerCart keeps display_name');
+    assert.match(CART, /cart-addon__name[^\n]*ProductName\.clean\(p\)/, 'free-shipping suggestion chip');
+    const PDP = stripComments(READ(JS('product-detail-page.js')));
+    assert.match(PDP, /const name = \(typeof ProductName !== 'undefined' \? ProductName\.clean\(a\) : a\.name\) \|\| a\.sku/, 'compatible alternatives');
+    assert.match(PDP, /pack-upsell__name[^\n]*ProductName\.clean\(ps\)/, 'pack upsell');
+    assert.match(stripComments(READ(JS('checkout-page.js'))), /checkout-summary__item-title">\$\{Security\.escapeHtml\(\(\(typeof ProductName !== 'undefined'\) \? ProductName\.clean\(item\)/, 'checkout summary line');
+    const PAY = stripComments(READ(JS('payment-page.js')));
+    assert.match(PAY, /display_name: item\.product\?\.display_name \|\| null/, 'payment cartItems keep display_name');
+    assert.match(PAY, /checkout-summary__item-name">\$\{esc\(\(\(typeof ProductName !== 'undefined'\) \? ProductName\.clean\(item\)/, 'payment summary line');
+    const FAV = stripComments(READ(JS('favourites.js')));
+    assert.equal((FAV.match(/ProductName\.clean\((fav\.product|product)\)/g) || []).length, 2, 'server rows + newly added row');
 });
 
 test('look-alike grouping keys on the OLD display, not the descriptive title', () => {
