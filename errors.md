@@ -40,6 +40,32 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-366 — Dashboard all-time audit: Out of Stock read 0 (backend 530), Returning % read 0% by construction, Refund Rate tooltip named the wrong basis (owner 2026-10-20) — **SHIPPED (frontend)**
+
+**What was asked.** The owner asked for every calculation on `/admin#dashboard?period=all` to be checked against the API.
+
+**Measured 2026-10-20 (READ-ONLY GETs, admin sign-in).** `kpi-summary` all time: revenue 34,630.55, orders 226, gross 7,859.19, Stripe fees 663.04, opex 6,417.19, supplier freight 1,775.72, net −996.76, invoice_revenue 8,110.16 over 27 invoices.
+
+**Correct, to the cent:**
+- Revenue and orders: the raw `/admin/orders` list (250 rows, 24 cancelled) gives 226 orders summing to 34,630.55.
+- Net profit: 7,859.19 − 663.04 − 6,417.19 − 1,775.72 = −996.76.
+- Invoices: 18 paid (5,782.79) + 9 unpaid (2,327.37) = 8,110.16. One void invoice is excluded.
+- Cash-basis tiles: revenue 32,303.18, gross 5,835.39, net −3,020.56 (ex-GST cut 2,023.80), margins 20.8% / −10.8%, AOV 142.93.
+- Opex: the expense list nets to 6,861.91 ex-GST. The 444.72 gap is exactly the $511.42 "Jiashan Silver Star for Ribbons" inventory row ex-GST, so the backend leaves inventory out of opex.
+- Chart: every bundle series (revenue, orders, gross, net, fees, opex, freight) sums to the KPI. Gross is off by 1c of rounding.
+
+**Wrong:**
+1. **Out of Stock read 0; the backend reports 530.** `/margin/out-of-stock` answers `{data:{out_of_stock:[…5 rows], total_out_of_stock, pagination:{total}}}`. `outOfStockCount` looked for `total` / `items`, found neither, and counted `[]`. Fix: read `total_out_of_stock`, then `pagination.total`, and use the row count only when neither is present.
+2. **Returning % read 0% on All.** `customer-stats` counts a buyer as returning when they ordered BEFORE the range. All time has no earlier period, so it returns 0 of 205 by construction. Bounded windows work: 30d gives 12.5% (7/56) and 90d gives 5.3% (9/171). About 20 buyers have 2+ orders all time. Fix: the tile shows "—" on All and the tooltip says why.
+3. **The Refund Rate tooltip said "value ÷ revenue".** The backend `refund_rate` 0.4 is 1 refunded order out of 226 (a count). By value it would be $14 / $34,630 = 0.04%. Fix: the tooltip now says it is a count.
+
+**Flagged, not changed:**
+- On the Performance chart, Revenue − Total costs (−2,412) ≠ Net profit (−3,021). Revenue is incl-GST and the cost band mixes incl-GST COGS and freight with ex-GST opex and fees. The cost band is deliberately mixed: the fees basis is blocked on the Stripe payout question.
+- The backend counts 205 new customers. Our list rows give 185 (by email) or 196 (by user_id or email), so the backend uses an identity key we cannot reproduce.
+- The refund fallback (used when `refund_rate` is absent) is still value ÷ revenue.
+
+**Test:** `tests/dashboard-kpi-tiles-oct2026.test.js` lifts the shipped `outOfStockCount` and runs it on the live payload shape.
+
 ## ERR-365 — Crawlers on an old pack address got 200 + canonical, not a 301 (backend response 2026-10-17, owner 2026-10-18) — **SHIPPED (frontend)**
 
 **What was asked.** The backend renamed 826 pack names on 15 Oct and wrote a `slug_redirects` hop for each one. On www an old address answered **200** (prerender by SKU, with the new canonical) instead of a hard 301. The backend offered `GET /products/<slug>/<SKU>` for the middleware to ask. The owner chose to build it.

@@ -261,11 +261,16 @@ function rangeLabel() {
   return map[period] || 'selected range';
 }
 
+// /margin/out-of-stock answers `{ok, data:{out_of_stock:[…limit rows], total_out_of_stock, pagination}}`.
+// The old reader looked for `total` / `items` and found neither, so the tile read 0 while the
+// backend reported 530 (ERR-366). The row array is only the requested page (limit 5), so its
+// length is never the count unless no total came back at all.
 function outOfStockCount(data) {
   if (data == null) return null;
-  if (typeof data.total === 'number') return data.total;
-  const items = firstArray(data, ['items', 'products', 'data']);
-  return items.length;
+  const d = data.data && typeof data.data === 'object' && !Array.isArray(data.data) ? data.data : data;
+  const total = numOrNull(d.total_out_of_stock ?? d.pagination?.total ?? d.total);
+  if (total != null) return total;
+  return firstArray(d, ['out_of_stock', 'items', 'products', 'data']).length;
 }
 
 function sumRefundAmounts(refunds) {
@@ -2541,14 +2546,23 @@ function renderKpiStrip(d) {
     { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
       tooltip: 'First-time buyers in the range.' },
     {
-      label: 'Returning %', value: cc.returning_pct != null ? `${cc.returning_pct}%` : null,
-      raw: cc.returning_pct, prev: cp.returning_pct, tooltip: 'Share of buyers who had ordered before. Requires GET /api/admin/analytics/customer-stats.',
+      // The backend counts a buyer as returning when they ordered BEFORE the range. All time
+      // has no "before", so it answers 0 by construction (measured 2026-10-20: 0 of 205, while
+      // ~20 buyers have 2+ orders). Show "—" and say why rather than print that 0 (ERR-366).
+      label: 'Returning %',
+      value: noDelta ? null : (cc.returning_pct != null ? `${cc.returning_pct}%` : null),
+      raw: noDelta ? null : cc.returning_pct, prev: cp.returning_pct,
+      tooltip: noDelta
+        ? 'Share of buyers who had ordered before the range. All time has no earlier period to return from, so pick a bounded range to see it.'
+        : 'Share of buyers who had ordered before the range. Requires GET /api/admin/analytics/customer-stats.',
     },
     {
       // No `gst`: the denominator is incl-GST revenue but no basis is documented
       // anywhere for the refund amounts on top, so the ratio's basis is unknown.
       label: 'Refund Rate', value: refundPct != null ? `${refundPct.toFixed(1)}%` : null,
-      alert: refundPct != null && refundPct > 3, tooltip: 'Refunded value ÷ revenue. Flagged above 3%.',
+      // Backend `refund_rate` is a COUNT ratio: measured 2026-10-20 it read 0.4 for 1 refunded
+      // order of 226, where value ÷ revenue would be $14 / $34,630 = 0.04% (ERR-366).
+      alert: refundPct != null && refundPct > 3, tooltip: 'Refunded orders ÷ orders (a count, not a value). Flagged above 3%.',
     },
     {
       label: 'Out of Stock', value: oosCount != null ? String(oosCount) : null,
