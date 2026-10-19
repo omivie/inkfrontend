@@ -1,13 +1,20 @@
 # Backend correspondence — status index
 
-Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, answered docs deleted. Last updated **2026-10-18**.
+Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, answered docs deleted. Last updated **2026-10-20**.
 `outbox/` = what we still need from the backend. `inbox/` = what the backend sent us. See `README.md`.
 
 ---
 
 ## `outbox/` — the ONE outgoing file
 
-**2026-10-18:** `outbox/backend-asks-2026-10-18.md` — NOT sent yet. It answers `inbox/backend-response-2026-10-17.md`.
+**2026-10-20:** `outbox/backend-asks-2026-10-20.md` — NOT sent yet. §1 low-ticket margins (order 2026101404, ribbon `651.01`); §2 dashboard date-bound timezone (ERR-367).
+
+| § | Ask | Written | Status (2026-10-20) |
+|---|---|---|---|
+| 1 | Low-ticket margins: order 2026101404 net $1.61 (ribbon `651.01` $7.95, `price_source` ribbon); 54 products < $3 gross ex GST. Backend to give its view and apply the best option (min-$ floor / ribbon tier / small-order fee), dry run first, never touch `manual` | 2026-10-20 | open |
+| 2 | `kpi-summary` bounds dates by UTC, `dashboard-bundle` series by NZ: order 2026102001 splits them by $6.10 on `date_to=2026-10-19`; bound both on Pacific/Auckland days (ERR-367, from the dashboard KPI audit) | 2026-10-20 | open |
+
+**2026-10-18:** `backend-asks-2026-10-18.md` was removed from `outbox/` by the owner on 2026-10-18 (`f9915c73`; text `git show 4a5c7355:backend-docs/outbox/backend-asks-2026-10-18.md`). The rows below are its asks; delivery is not recorded here.
 History: `backend-asks-2026-10-15.md` was sent 2026-10-16 (text `git show 2f88c13f:backend-docs/outbox/backend-asks-2026-10-15.md`);
 `backend-asks-2026-10-16.md` (§1 `?code=` symmetric / full printer slugs, §2 DCP-1610W toner, §3 colour + Value Pack rows) was sent
 and is answered by the same 17 Oct response (text `git show 00e4f7b1:backend-docs/outbox/backend-asks-2026-10-16.md`).
