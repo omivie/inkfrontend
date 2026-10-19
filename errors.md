@@ -40,6 +40,24 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-367 — Dashboard "net drift $6.10": the admin filter bar's "today" was the UTC day (owner 2026-10-20) — **SHIPPED (frontend); backend half asked**
+
+**Seen.** At 12:17 NZDT on 2026-10-20, period=all at month grain, the dashboard printed: "These two backend figures disagree. The per-period net profit adds up to −$3,026.66, but the Net Profit tile reads −$3,020.56 (gap $6.10)."
+
+**Measured (READ-ONLY GETs).**
+- `FilterState.getDateRange` set `to` with `new Date().toISOString().slice(0,10)`. That is the UTC day, so at 12:17 NZDT it sent `date_to=2026-10-19`.
+- Order 2026102001 ($32.99) was created at 2026-10-19T19:20Z, which is NZ 20 Oct 08:20.
+- With `date_to=2026-10-19`, `kpi-summary` includes the order (net −996.76). It bounds by UTC day.
+- With the same bound, `dashboard-bundle` `net_profit_series` excludes it (Σ −1,002.86 at month grain, −1,002.87 at week grain). The series bound by NZ day.
+- The gap is $6.10, which is that order's net. With `date_to=2026-10-20`, both read −996.76.
+- The drift guard (`checkNetDrift`) was right. Two defects stacked.
+
+**Fix (FE).** `getDateRange` now uses `nzDay()` (Intl, Pacific/Auckland) for "today". Presets count back with UTC-midnight day arithmetic on that NZ day, so DST cannot shift them. Every filter-bar page goes through this one function. The dashboard's traffic fallback uses the same NZ day.
+
+**Still open (backend).** `kpi-summary` bounds by UTC day and the series by NZ day, so a custom range whose edge falls between 00:00 and 13:00 NZ can still split. This is asked in `backend-docs/outbox/backend-asks-2026-10-20.md` §2. Keep the drift banner: it is how this was found.
+
+**Test:** `tests/admin-filter-nz-date-oct2026.test.js` runs the shipped `getDateRange` with the clock pinned. It covers the screenshot moment, the presets, the DST end and the custom-range passthrough.
+
 ## ERR-366 — Dashboard all-time audit: Out of Stock read 0 (backend 530), Returning % read 0% by construction, Refund Rate tooltip named the wrong basis (owner 2026-10-20) — **SHIPPED (frontend)**
 
 **What was asked.** The owner asked for every calculation on `/admin#dashboard?period=all` to be checked against the API.

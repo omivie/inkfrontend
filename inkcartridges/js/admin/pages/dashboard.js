@@ -1285,7 +1285,7 @@ async function runDashboardLoad(mySeq) {
   // needs an explicit from/to; the all-time view leaves both blank, so pass a wide fallback (the
   // backend clamps to available data and out-of-range rows drop during client-side re-bucketing).
   const trafficFrom = from || '2000-01-01';
-  const trafficTo   = to   || new Date().toISOString().slice(0, 10);
+  const trafficTo   = to   || new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date());   // NZ day (ERR-367)
   // One bundle call covers all 18 graph charts (backend's preferred path — avoids
   // the parallel fan-out that tripped the rate limiter). The KPI band, tables and
   // refund reasons stay on their existing dedicated endpoints. The last three feed the

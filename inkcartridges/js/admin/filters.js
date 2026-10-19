@@ -5,6 +5,12 @@
 
 const esc = (s) => typeof Security !== 'undefined' ? Security.escapeHtml(String(s)) : String(s);
 
+// YYYY-MM-DD as the calendar day in New Zealand. `toISOString()` is the UTC day, which is
+// YESTERDAY for every NZ morning (00:00–13:00 NZDT): the range then dropped NZ-today's orders,
+// and kpi-summary (UTC bounds) and the series (NZ bounds) split on them — the dashboard's
+// $6.10 net drift on 2026-10-20 was one 08:20 order (ERR-367).
+const nzDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(d);
+
 const PERIOD_PRESETS = [
   { key: '24h', label: '24h', days: 1 },
   { key: '72h', label: '72h', days: 3 },
@@ -105,8 +111,7 @@ const FilterState = {
     if (this._state.period === 'custom' && this._state.dateFrom && this._state.dateTo) {
       return { from: this._state.dateFrom, to: this._state.dateTo };
     }
-    const now = new Date();
-    const to = now.toISOString().slice(0, 10);
+    const to = nzDay(new Date());
     if (this._state.period === 'all') {
       // Start at the store's first-data date when known (set at boot) so the chart begins
       // at real activity and the range stays small enough for fine granularities. The
@@ -118,8 +123,9 @@ const FilterState = {
     if (days === 0) {
       return { from: to, to };
     }
-    const fromDate = new Date(now);
-    fromDate.setDate(fromDate.getDate() - days);
+    // Day arithmetic on UTC midnight of the NZ day, so DST can never shift it.
+    const fromDate = new Date(`${to}T00:00:00Z`);
+    fromDate.setUTCDate(fromDate.getUTCDate() - days);
     return { from: fromDate.toISOString().slice(0, 10), to };
   },
 
