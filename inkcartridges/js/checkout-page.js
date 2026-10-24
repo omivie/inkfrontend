@@ -853,6 +853,49 @@
             }
 
             this.updateTotalsDisplay();
+            this.renderReassurance();
+        },
+
+        /**
+         * The facts the cart shows, under the total (checklist item 30,
+         * ERR-371): dispatch/delivery, returns, guarantee, GST invoice. 19
+         * desktop shoppers started checkout in 14 days and 11 finished; none of
+         * these facts was on the first checkout screen (the cart has them at
+         * y 1354–1650).
+         *
+         * Sources, in order: the cart response the page already holds
+         * (Cart.serverCartMeta: delivery_estimate.promise, trust_signals.*),
+         * then GET /api/site/trust (same shapes) for any piece the cart lacks.
+         * Never typed here (copy rule: trust facts come from the API).
+         *
+         * The guarantee line is shown ONLY when the cart holds a compatible
+         * product: the 30-day satisfaction guarantee covers compatibles, and a
+         * genuine-only order must not read as if it were covered (copy rule).
+         * Each piece hides when its source is absent; all absent ⇒ the block
+         * hides (`data-reassure` says which), never an empty box.
+         */
+        async renderReassurance() {
+            const targets = ['checkout-reassure', 'checkout-reassure-pay']
+                .map((id) => document.getElementById(id)).filter(Boolean);
+            if (!targets.length) return;
+            const meta = (typeof Cart !== 'undefined' && Cart.serverCartMeta) || {};
+            const label = (o) => (o && typeof o.label === 'string' && o.label.trim()) ? o.label.trim() : '';
+            let ts = meta.trust_signals || {};
+            const need = !label(ts.returns) || !label(ts.guarantee) || !label(ts.tax_invoice);
+            if (need && typeof TrustStats !== 'undefined') {
+                const site = await TrustStats.raw().catch(() => ({}));
+                ts = Object.assign({}, site || {}, ts);
+            }
+            const de = meta.delivery_estimate || {};
+            const promise = (typeof de.promise === 'string' && de.promise.trim()) ? de.promise.trim() : '';
+            const hasCompatible = (this.cartItems || []).some((it) => typeof BrandSource !== 'undefined' && BrandSource.isCompatible(it));
+            const lines = [promise, label(ts.returns), hasCompatible ? label(ts.guarantee) : '', label(ts.tax_invoice)].filter(Boolean);
+            const html = lines.map((l) => `<li>${Security.escapeHtml(l)}</li>`).join('');
+            for (const el of targets) {
+                el.innerHTML = html;
+                el.hidden = !html;
+                el.dataset.reassure = lines.length === 4 || (!hasCompatible && lines.length === 3) ? 'ok' : (lines.length ? 'partial' : 'absent');
+            }
         },
 
         // Setup shipping option handlers
@@ -1552,7 +1595,10 @@
             }
             if (v && v.state === 'invalid') {
                 this._showEmailError(v.message);
+                // Pay takes the shopper TO the field that blocks it (ERR-371):
+                // scrolled into view and the cursor in it.
                 field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (typeof field.focus === 'function') field.focus({ preventScroll: true });
                 return false;
             }
             return true;
@@ -2550,6 +2596,12 @@
             // Block unverified authenticated users from proceeding to payment
             if (!this.isEmailVerified && typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
                 this.showVerificationRequired();
+                // The message is inserted at the TOP of the form — Pay is at the
+                // bottom, so show the shopper why nothing happened (ERR-371).
+                const msg = document.getElementById('verification-required');
+                if (msg) msg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const resend = document.getElementById('resend-verification-btn');
+                if (resend) resend.focus({ preventScroll: true });
                 return null;
             }
 
@@ -2559,9 +2611,11 @@
             if (!deliveryAlreadySelected) {
                 if (deliverySection) {
                     deliverySection.classList.add('needs-attention');
-                    setTimeout(() => {
-                        deliverySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 300);
+                    // At once, and focus the first choice (ERR-371): the old 300ms
+                    // delayed scroll left keyboard and screen-reader users on Pay.
+                    deliverySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const first = deliverySection.querySelector('input[name="delivery_type"]');
+                    if (first) first.focus({ preventScroll: true });
                 }
                 return null;
             }

@@ -76,7 +76,11 @@ async function markup() {
     check('/checkout has no Terms tick box', !/id="terms"/.test(checkout));
     check('/cart "Continue Shopping" is a text link, not .btn', /class="cart-actions__continue"/.test(cart) && !/class="btn btn--secondary">\s*<svg[^]*?Continue Shopping/.test(cart));
     const iTotals = cart.indexOf('cart-summary__totals'), iCta = cart.indexOf('id="checkout-btn"'), iMsg = cart.indexOf('id="cart-shipping-message"');
-    check('/cart checkout button follows the totals, before the free-shipping message', iTotals > 0 && iTotals < iCta && iCta < iMsg);
+    const iShip = cart.indexOf('id="cart-shipping"'), iTotal = cart.indexOf('id="cart-total-row"');
+    // ERR-371 (item 23b): the free-shipping line is INSIDE the totals, between
+    // Shipping and the total; the button still follows the totals.
+    check('/cart free-shipping line sits between Shipping and the total; the button follows the totals',
+        iTotals > 0 && iShip < iMsg && iMsg < iTotal && iTotal < iCta);
     check('/checkout shipping starts as "Calculating…", not a figure', /id="checkout-shipping" data-shipping-source="pending">Calculating…</.test(checkout));
     check('NZ Post suggest asks for 8', /async nzpostSuggest\(query, max = 8\)/.test(api || ''));
 }

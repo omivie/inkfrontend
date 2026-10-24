@@ -1412,9 +1412,10 @@
             // ladder would hide the negotiated rate on every product whose band
             // has no volume discount.
             this.renderContractPrice();
-            if (!ladder) return;
+            if (!ladder) { this.syncBreakLine(null); return; }
 
             this._volumeLadder = ladder;
+            this.syncBreakLine(ladder);
 
             const qtyInput = document.getElementById('qty-input');
             const maxQty = this._qtyMax();
@@ -1634,6 +1635,12 @@
                 : null;
             let html = '';
             if (label) html += `<p class="product-promise__label">${Security.escapeHtml(label)}</p>`;
+            // Item 27b (ERR-371): on a COMPATIBLE page, the guarantee directly under
+            // the fit line — the backend's words (warranty.compatible_label), never
+            // typed here. Genuine pages carry it inside the item 16 box instead.
+            const guarantee = (info && info.source === 'compatible' && typeof CompatGuarantee !== 'undefined')
+                ? CompatGuarantee.pick(ts) : '';
+            if (guarantee) html += `<p class="product-promise__guarantee">${Security.escapeHtml(guarantee)}</p>`;
             if (reviewsUrl) {
                 html += `<a class="product-promise__reviews" href="${Security.escapeAttr(reviewsUrl)}" target="_blank" rel="noopener">See our reviews on Google</a>`;
             }
@@ -1720,7 +1727,12 @@
                 return Number.isFinite(pageYield) && pageYield > 0 ? `${pageYield.toLocaleString('en-NZ')} pages` : '';
             }
             const t = typeof pageYield === 'string' ? pageYield.trim() : '';
-            return /^\d[\d,]*$/.test(t) && Number(t.replace(/,/g, '')) > 0 ? `${t} pages` : '';
+            if (/^\d[\d,]*$/.test(t) && Number(t.replace(/,/g, '')) > 0) return `${t} pages`;
+            // Item 16 (ERR-371): compatible_alternatives[].page_yield arrives as
+            // "Up to 550" — shown as "Up to 550 pages". Any other free text is
+            // still refused (never a number we cannot stand behind).
+            const upTo = /^up to (\d[\d,]*)$/i.exec(t);
+            return upTo && Number(upTo[1].replace(/,/g, '')) > 0 ? `Up to ${upTo[1]} pages` : '';
         },
 
         /**
@@ -1903,6 +1915,47 @@
          * the unit price this add-to-cart will charge: the ladder rung when
          * one applies, else retail. Figures from `reward_points` only.
          */
+        /**
+         * "3+ $59.28 each · See all prices" beside the price (checklist item 26a,
+         * ERR-371). The figures are the ladder's FIRST rung — the server's
+         * `quantity_breaks[0]` as normalised by Business (min quantity and
+         * business_price); nothing is calculated here. Never "on all orders",
+         * and it never applies to one unit (the label says 3+). Only 4.5% of ad
+         * order lines reached 3+ and the desktop PDP showed this price only at
+         * y 856, below the fold. "See all prices" jumps to the ladder.
+         *
+         * Replaces the "3+ from $X each" line ERR-318 removed (owner, 24 Oct
+         * 2026: re-add it on the price row).
+         */
+        syncBreakLine(ladder) {
+            // WHERE: at the end of the Availability row, directly under the
+            // price. The price row itself is full at 1280–1366px (price, Incl.
+            // GST, reward points): the line wrapped there and pushed Add down
+            // 26px — under the consent bar on CTN2030BK at 1280x551 (measured).
+            // The Availability row ("✓ In Stock") has ~300px free, so this
+            // costs no height. The stock renderer rewrites #product-stock's
+            // innerHTML, so the span is (re)attached here, idempotently.
+            const stock = document.getElementById('product-stock');
+            if (!stock) return;
+            let el = document.getElementById('product-break-line');
+            const entry = ladder && ladder.entry;
+            if (!entry || !Number.isFinite(entry.businessPrice) || !Number.isFinite(entry.minQuantity)
+                || typeof Business === 'undefined') {
+                if (el) el.remove();
+                return;
+            }
+            if (!el || el.parentElement !== stock) {
+                if (el) el.remove();
+                el = document.createElement('span');
+                el.id = 'product-break-line';
+                el.className = 'product-info__break';
+                el.dataset.testid = 'product-break';
+                stock.appendChild(el);
+            }
+            el.innerHTML = `${Security.escapeHtml(Business.breakLabel(entry))} ${Security.escapeHtml(formatPrice(entry.businessPrice))} each`
+                + ` · <a class="product-info__break-link" href="#volume-pricing">See all prices</a>`;
+        },
+
         syncPointsLine() {
             const line = document.getElementById('product-points-line');
             if (!line) return;

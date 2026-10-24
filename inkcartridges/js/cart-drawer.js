@@ -80,6 +80,7 @@ const CartDrawer = {
                 </div>
                 <div class="cart-drawer__foot">
                     <dl class="cart-drawer__totals" id="cart-drawer-totals"></dl>
+                    <div class="cart-drawer__freeship" id="cart-drawer-freeship" hidden></div>
                     <a href="/cart" class="btn btn--outline btn--full-width cart-drawer__view" data-track="cta_click" data-track-cta="drawer_view_cart">View cart</a>
                     <a href="/checkout" class="btn btn--primary btn--full-width cart-drawer__checkout" data-track="cta_click" data-track-cta="drawer_checkout">Checkout</a>
                 </div>
@@ -159,6 +160,13 @@ const CartDrawer = {
             : '<li class="cart-drawer__empty">Your cart is empty.</li>';
         if (typeof Cart.bindImageFallbacks === 'function') Cart.bindImageFallbacks(list);
         this.root.querySelector('#cart-drawer-totals').innerHTML = this._totalsHtml(items);
+        const freeship = this.root.querySelector('#cart-drawer-freeship');
+        if (freeship) {
+            const html = items.length ? this._freeShipHtml() : '';
+            freeship.innerHTML = html;
+            freeship.hidden = !html;
+            if (html && typeof Cart.bindImageFallbacks === 'function') Cart.bindImageFallbacks(freeship);
+        }
         this.root.querySelector('.cart-drawer__foot').hidden = !items.length;
         // Same chip as the cart page, same writer (ERR-333); no message ⇒ hidden.
         const chip = this.root.querySelector('#cart-drawer-loyalty');
@@ -193,6 +201,30 @@ const CartDrawer = {
                     </div>
                 </div>
             </li>`;
+    },
+
+    /**
+     * Under the total (checklist item 23c, ERR-371): the server's
+     * `summary.free_shipping_message`, AS IT IS, whenever
+     * `summary.free_shipping_remaining` is above 0 — and nothing at 0 or while
+     * a change is in flight (no stale gap). Never a gap computed here, never
+     * "save" wording. When `free_shipping_unlock` is present (gap ≤ $25) its
+     * filler tiles go under the line, from the cart page's own builder. A
+     * quantity change repaints this from the PUT's own data.cart (Cart adopts
+     * it, then calls refresh()).
+     */
+    _freeShipHtml: function() {
+        if (typeof Cart._summaryPending === 'function' && Cart._summaryPending()) return '';
+        if (!Cart.hasServerPricing || !Cart.hasServerPricing()) return '';
+        const s = Cart.serverSummary || {};
+        const msg = typeof s.free_shipping_message === 'string' ? s.free_shipping_message.trim() : '';
+        if (!msg || !(Number(s.free_shipping_remaining) > 0)) return '';
+        const unlock = Cart.serverCartMeta && Cart.serverCartMeta.free_shipping_unlock;
+        const tiles = (unlock && !unlock.qualifies && Array.isArray(unlock.suggested_products)
+            && typeof Cart.freeShipChipsHtml === 'function')
+            ? Cart.freeShipChipsHtml(unlock.suggested_products.slice(0, 3), 'drawer') : '';
+        return `<p class="cart-drawer__freeship-msg">${Security.escapeHtml(msg)}</p>`
+            + (tiles ? `<div class="cart-addon-row cart-drawer__freeship-tiles">${tiles}</div>` : '');
     },
 
     /** Server figures only; every other state is said in words. */

@@ -38,7 +38,8 @@ test('delivery + dispatch live outside the summary, in grid row 1 beside the tit
     assert.match(wrap, /id="cart-delivery" hidden><\/div>\s*<!--[\s\S]*?-->\s*<p class="cart-dispatch" id="cart-dispatch-countdown"/);
     assert.ok(!wrap.includes('id="cart-trust-signals"'), 'trust pills moved into the summary');
     assert.match(CSS, /#cart-layout > \.cart-assurance \{ grid-column: 2; grid-row: 1; align-self: end; \}/);
-    assert.match(CSS, /@media \(max-width: 1024px\) \{\s*section\.cart-page #cart-layout > \.cart-assurance \{ order: -1; \}/);
+    // ERR-371 (checklist item 23a): one column is DOM order — line items first.
+    assert.doesNotMatch(CSS, /\.cart-assurance \{ order: -1; \}/);
 });
 
 test('points balance chip under "Points to be earned", trust pills under the chip', () => {

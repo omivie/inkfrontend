@@ -273,7 +273,13 @@ test('§8.2 checkout button directly after the money rows; Continue Shopping is 
     const iBar = cart.indexOf('id="cart-shipping-bar"');
     const iOptin = cart.indexOf('id="cart-guest-email"');
     assert.ok(iTotals > 0 && iTotals < iCta, 'money rows, then the button');
-    assert.ok(iCta < iMsg && iCta < iBar, 'the free-shipping message and bar went below it (they put it at y 829 of 768)');
+    // ERR-371 (checklist item 23b, owner 2026-10-24): the free-shipping line and
+    // bar sit INSIDE the money rows, between Shipping and the total — not above
+    // the button as a banner (ERR-305's y 829 of 768) and not under it. The fold
+    // is re-measured by probe:checkout-funnel.
+    const iShip = cart.indexOf('id="cart-shipping"');
+    const iTotal = cart.indexOf('id="cart-total-row"');
+    assert.ok(iShip < iMsg && iMsg < iBar && iBar < iTotal, 'Shipping row, message, bar, then the total');
     assert.ok(iCta < iOptin, 'ERR-302 order kept');
     assert.match(cart, /<a href="\/shop" class="cart-actions__continue">/);
     assert.doesNotMatch(cart, /<a href="\/shop" class="btn btn--secondary">\s*<svg[\s\S]{0,400}Continue Shopping/);

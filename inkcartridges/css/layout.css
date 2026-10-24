@@ -2349,8 +2349,12 @@
         grid-template-columns: 1fr;
     }
 
-    .checkout-summary,
-    .cart-summary {
+    /* The CHECKOUT summary still leads on one column. The CART summary no
+       longer does (checklist item 23a, ERR-371): at 390x664 the line items —
+       with the stepper, "Save $2.87 — switch to the value pack" and "Add 2 more
+       to reach 3+" — sat at y 1780, three screens down, and #cart-sticky-bar
+       already keeps "Proceed to Checkout" on screen. */
+    .checkout-summary {
         order: -1;
     }
 
@@ -2618,6 +2622,13 @@ summary.footer-column__heading::-webkit-details-marker {
     color: var(--cyan-dark);
     font-weight: 600;
     text-decoration: none;
+}
+/* Item 31 (ERR-371): a 32px-tall hit area inside the 32px strip (it was the
+   16px text). The list clips overflow for its ellipsis, so the list carries the
+   same 7px padding and the strip keeps its reserved 32px. */
+@media (max-width: 768px) {
+    .value-strip__list { padding: 7px 0; }
+    .value-strip__item a { display: inline-block; padding: 7px 0; margin: -7px 0; }
 }
 .value-strip__item a:hover,
 .value-strip__item a:focus-visible { text-decoration: underline; }

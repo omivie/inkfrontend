@@ -45,9 +45,49 @@ describing the same incident.
 Reserved by session feink-fa; full entry follows when shipped.
 
 ---
-## ERR-371 — FE checklist 22 Oct, PDP / cart / checkout: compat yield line, photo top-aligned, 3+ price on the price row, cart lines first on phones, free-shipping bar in the totals and drawer, checkout reassurance, tap targets (items 16, 22, 23, 26, 27b, 28, 29, 30, 31) — **IN PROGRESS** (2026-10-24)
+## ERR-371 — FE checklist 22 Oct, PDP / cart / checkout: compat yield line, photo top-aligned, 3+ price on the price row, cart lines first on phones, free-shipping bar in the totals and drawer, checkout reassurance, tap targets (items 16, 22, 23, 26, 27b, 28, 29, 30, 31) — **SHIPPED (frontend)** (2026-10-25)
 
-Reserved by session feink-fa; full entry follows when shipped.
+**Measured first (live, 2026-10-25).**
+- **22:** already true. On GLC233BK at 1366x768 the image is at y 255–608 (353px on screen), so no code is needed; ERR-356's left-column re-layout fixed it.
+- **26b:** premise broken. It asked to drop DELIVERY/RETURNS because they "repeat the service row under Add" — the owner REMOVED that row (ERR-329), so on desktop these rows are now the PDP's only delivery and returns facts. NOT shipped; told to the backend.
+
+**Fix.**
+- **16:** `pageYieldText` turns "Up to 550" into "Up to 550 pages". Other free text is still refused.
+- **26a:** `syncBreakLine(ladder)` prints "3+ $66.14 each · See all prices" (the first rung of Business' ladder, i.e. the server's `quantity_breaks[0]`; a link to `#volume-pricing`).
+  - It sits at the end of the AVAILABILITY row, 7px under the price (centres 33px apart).
+  - On the price row it wrapped at 1280–1366 and pushed Add down 26px; on CTN2030BK at 1280x551 that put Add under the bar (measured). In the Availability row, Add stays exactly where live has it (499/522/451/474).
+  - The span is re-attached idempotently because the stock renderer rewrites `#product-stock`.
+  - ERR-318's "never re-add" is reversed by the owner (24 Oct).
+- **27b:** a compatible PDP's `renderPromise` adds `CompatGuarantee.pick(trust_signals)` under the fit line. Genuine pages and rolls (`source: null`) never get it here.
+- **23a:** `.cart-summary` / `.cart-assurance` / skeleton `order:-1` are gone, so one column follows DOM order. Phone: the line item starts at y 341 (spec measured 1780). The checkout summary still leads.
+- **23b:**
+  - Message and bar sit inside `.cart-summary__totals` between Shipping and the total.
+  - The server's `free_shipping_message` shows in both states (the old "say nothing once qualified" is reversed by the owner), and the tick SVG shows only with `--success`.
+  - Styled as a quiet row in **cart-checkout.css**: /cart does NOT load checkout-compact.css, so the first attempt was dead CSS and the line was a 57px banner plus a 54px bar block, putting Checkout 127px lower. Now Checkout is at 584–636 at 1366x768 (live 554–606).
+  - The unlock block keeps its tiles and drops its duplicate lead while the totals' line shows.
+- **23c:** `CartDrawer._freeShipHtml` renders the server message only while `free_shipping_remaining > 0` (never while pending, never composed). It adds `free_shipping_unlock` tiles from the ONE builder `Cart.freeShipChipsHtml` (the cart page uses it too). The drawer repaints from the PUT's adopted cart via `refresh()`.
+- **29:** owner choice: the drawer stays. Where it does not run (/cart, /checkout, /payment), `Cart._addedToast` decorates the 6s toast with the next step (Checkout on /cart, View cart elsewhere) plus `free_shipping_message` or "Free shipping unlocked". `showToast` itself is unchanged (main.js is line-capped).
+- **28:** the checkout summary ships `is-collapsed` (its rule is ≤1024 only).
+- **30:** `CheckoutPage.renderReassurance` lists `delivery_estimate.promise` and the returns / guarantee / tax_invoice labels from `Cart.serverCartMeta`, with `/api/site/trust` filling any gap. The GUARANTEE shows only when the cart has a compatible line, because the 30-day guarantee covers compatibles (copy rule). It appears under the total, and once under Pay on ≤1024px. `data-reassure` is ok|partial|absent.
+- **31:**
+  - Phone hit areas: padding plus an equal negative margin (no layout move) on "What's the difference?", "Questions? Call" and the pay line. The value-strip links get 32px inside the 32px strip.
+  - The pay line's number comes from `contact.phone_tel_href`/`phone_display`, with the literal only as a failed-read fallback.
+  - "What's the difference?" and the guarantee lines moved off `--color-text-muted` (< 4.5:1).
+- **Pay → the blocking field:** the email error gets focus; the delivery type scrolls at once and focuses its first choice (was a 300ms delayed scroll, no focus); email-verification-required scrolls to the message and focuses Resend.
+- **Fold follow-up:** the full-width consent bar made CTN258XLKCMY's Add (498–546, also red on live) sit under the bar at 1280x551. The short-laptop PDP tier now uses a smaller title and no price-row gap, giving 479–527 (centre clear).
+
+**Verified.**
+- `tests/fe-checklist-22oct-pdp-cart-2026.test.js`: 21 tests, 20 red against HEAD (the 21st, "genuine never gets the guarantee", already held).
+- Local Playwright: the PDP Add positions above; drawer, toast, reassurance and yield are unit-executed.
+- `probe:fe-master-6oct`: the remaining red is G924CMY (`stock_status: contact_us` in the backend, so it has no Add on live either).
+
+**Not measured (named).**
+- The seeded cart/checkout fold at 1536x695 and the mobile checkout CLS: the guest-session mint was rate-limited ("429 Too many guest sessions", window > 1h). The CLS runs on an empty server cart read 0.82 local / 1.48 live, which is the empty-cart path, not item 28. Re-run `probe:checkout-funnel --seed` after deploy.
+
+**Rule.**
+- A line added near Add must be measured at 1280x551 against the 45px bar.
+- /cart styles go in cart-checkout.css.
+- The compatible guarantee is never shown for a genuine-only order.
 
 ---
 ## ERR-370 — FE checklist 22 Oct, find what fits: printer finder on brand pages, exact-match search redirects, printer pages in-stock compatible first, compatible guarantee under the column head, inline Filter & Sort, one-row consent bar, no first-screen fade-in (items 24, 25, 27a, 32, 37, 46) — **SHIPPED (frontend)** (2026-10-25)

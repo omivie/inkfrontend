@@ -1899,6 +1899,12 @@ a.cart-drawer__name:hover { text-decoration: underline; }
 .cart-drawer__total-row--main[data-pricing="pending"] dd,
 .cart-drawer__total-row--main[data-pricing="unpriced"] dd { font-weight: 600; color: var(--color-text-muted); }
 .cart-drawer__note { margin: 0; font-size: 0.8rem; color: var(--color-text-muted); }
+/* Item 23c (ERR-371): the server's free-shipping line under the total, then the
+   filler tiles (shared .cart-addon styles from the cart page). */
+.cart-drawer__freeship { margin: 6px 0 8px; }
+.cart-drawer__freeship[hidden] { display: none; }
+.cart-drawer__freeship-msg { margin: 0; font-size: 0.85rem; font-weight: 600; color: #b45309; }
+.cart-drawer__freeship-tiles { margin-top: 6px; }
 .cart-drawer__view,
 .cart-drawer__checkout {
     min-height: 48px;
@@ -2492,6 +2498,13 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     font-size: var(--font-size-lg);
     opacity: 0.7;
 }
+
+/* Item 29 (ERR-371): the next step on pages without the cart drawer. */
+.toast:has(.toast__next) { flex-wrap: wrap; }
+.toast__next { flex-basis: 100%; order: 3; }
+.toast__ship { margin: 4px 0 0; font-size: 0.85rem; }
+.toast__actions { margin: 6px 0 0; display: flex; gap: 12px; }
+.toast__action { font-weight: 700; color: inherit; text-decoration: underline; }
 
 .toast__close:hover {
     opacity: 1;

@@ -31,12 +31,12 @@
     <link rel="preload" href="https://js.stripe.com/v3/" as="script">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
-    <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
-    <link rel="stylesheet" href="/css/components.css?v=514aab1c">
+    <link rel="stylesheet" href="/css/layout.css?v=fe436580">
+    <link rel="stylesheet" href="/css/components.css?v=78328ef3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=d08d00b1">
-    <link rel="stylesheet" href="/css/pages.css?v=9311e794">
-    <link rel="stylesheet" href="/css/search.css?v=f33bf0db">
-    <link rel="stylesheet" href="/css/cart-checkout.css?v=a596e316">
+    <link rel="stylesheet" href="/css/pages.css?v=aef42441">
+    <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
+    <link rel="stylesheet" href="/css/cart-checkout.css?v=523c42d7">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
     <meta name="twitter:description" content="Review your shopping cart - InkCartridges.co.nz">
@@ -278,6 +278,21 @@
                                 <span><span id="cart-shipping-label">Shipping</span> <span id="cart-shipping-tier" style="font-size:0.75rem;color:#6b7280;font-weight:400;" hidden></span></span>
                                 <span id="cart-shipping">Calculated at checkout</span>
                             </div>
+                            <!-- Item 23b (ERR-371): free-shipping progress INSIDE the totals,
+                                 between Shipping and the total — it sat under the quote and
+                                 email boxes (y 1203 desktop, 1151 phone). Copy is the server's
+                                 summary.free_shipping_message; the tick shows only when
+                                 summary.qualifies_for_free_shipping (it used to sit beside
+                                 "Add $91.01 more…", which read as done). -->
+                            <div class="cart-summary__shipping-message" id="cart-shipping-message" hidden>
+                                <svg class="cart-summary__shipping-tick" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span></span>
+                            </div>
+                            <div class="cart-summary__shipping-bar" id="cart-shipping-bar" hidden>
+                                <div class="shipping-bar">
+                                    <div class="shipping-bar__fill" id="shipping-bar-fill" style="width: 0%"></div>
+                                </div>
+                            </div>
                             <!-- ONE shipping figure, inside the total (ERR-305, §8.3). When the
                                  server's cart summary carries its own `total` (subtotal + the
                                  urban shipping estimate − discount) the row reads "Estimated
@@ -364,15 +379,6 @@
                             <p class="checkout-optin__status" id="cart-guest-email-status" role="status" aria-live="polite" hidden></p>
                         </div>
 
-                        <div class="cart-summary__shipping-message" id="cart-shipping-message" hidden>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                            <span></span>
-                        </div>
-                        <div class="cart-summary__shipping-bar" id="cart-shipping-bar" hidden>
-                            <div class="shipping-bar">
-                                <div class="shipping-bar__fill" id="shipping-bar-fill" style="width: 0%"></div>
-                            </div>
-                        </div>
 
                         <!-- Conversion signals (mobile-ux-audit-jul2026 §4h/§6).
                              All fail-soft: cart.js#renderCartSignals reveals each
@@ -435,8 +441,8 @@
                          desktop, beside the "Cart" title, so the Subtotal row starts level
                          with the first cart line (owner 2026-10-15, ERR-342; the trust pills
                          moved under the points balance). Placed by the ≥1025 grid in
-                         cart-checkout.css; on phones it follows the summary (order -1, DOM
-                         order). Same ids, so cart.js writers are unchanged. -->
+                         cart-checkout.css; on phones it follows the summary (DOM order, after
+                         the line items since ERR-371). Same ids, so cart.js writers are unchanged. -->
                     <div class="cart-assurance" data-testid="cart-assurance">
                         <!-- Keep #cart-delivery immediately before #cart-dispatch-countdown:
                              .cart-dispatch pulls itself up with a negative top margin that
@@ -512,8 +518,8 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=4abdb378"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=274efa85"></script>
-    <script defer src="/js/cart-drawer.js?v=63a9d5cc"></script>
+    <script defer src="/js/cart.js?v=63d3a5bc"></script>
+    <script defer src="/js/cart-drawer.js?v=b2263e1f"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/cart-page.js?v=744cf695"></script>
     <script defer src="/js/cart-deep-link.js?v=4f6612d5"></script>

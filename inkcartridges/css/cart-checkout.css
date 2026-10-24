@@ -1073,11 +1073,9 @@ body:has(section.checkout-page) .site-main { padding-bottom: 0; margin-bottom: 0
         animation: cart-sync-slide 1.2s linear infinite;
     }
 }
-/* ≤1024 #cart-layout is a one-column grid with the summary at order -1;
-   the guarantees join it (DOM order keeps them right after the summary). */
-@media (max-width: 1024px) {
-    section.cart-page #cart-layout > .cart-assurance { order: -1; }
-}
+/* ≤1024 #cart-layout is one column in DOM order since ERR-371 (item 23a):
+   line items, then the summary, then the guarantees. The old order:-1 here
+   kept the guarantees beside a summary that no longer leads. */
 @keyframes cart-sync-slide { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 
 /* Points pay the whole order (ERR-362): no card form, no PayPal, no wallet.
@@ -1155,4 +1153,39 @@ section.checkout-page .cart-loyalty__choice { border: 1px solid var(--shop-blue)
         padding-top: 12px;
     }
     section.checkout-page .checkout-summary__trust-item { margin: 0; gap: 6px; font-size: 13px; }
+}
+
+/* Item 23b (ERR-371): the free-shipping line + bar sit INSIDE the totals,
+   between Shipping and the total — a quiet row, not the 57px banner (+54px bar
+   block, both with 24px margins) it was as a standalone box under the button:
+   that cost the Checkout button 127px at 1366x768 (measured, probe:checkout-funnel). */
+.cart-summary__totals .cart-summary__shipping-message {
+    margin: 0;
+    padding: 2px 0 0;
+    background: none;
+    border: 0;
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.35;
+}
+.cart-summary__totals .cart-summary__shipping-message svg { width: 16px; height: 16px; }
+.cart-summary__totals .cart-summary__shipping-bar { margin: 4px 0 6px; }
+
+/* Item 30 (ERR-371): the reassurance list under the checkout total. Compact —
+   the desktop summary pins by its bottom and must fit a laptop (ERR-350). */
+.checkout-reassure {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.35;
+    color: var(--color-text-light);
+}
+.checkout-reassure[hidden] { display: none; }
+.checkout-reassure li { position: relative; padding-left: 16px; }
+.checkout-reassure li::before { content: "✓"; position: absolute; left: 0; color: var(--color-success, #15803d); font-weight: 700; }
+.checkout-reassure--pay { margin-top: 10px; }
+@media (min-width: 1025px) {
+    .checkout-reassure--pay { display: none !important; }
 }

@@ -207,15 +207,22 @@
             const el = document.getElementById('pay-reassurance');
             if (!el || typeof TrustStats === 'undefined') return;
             let org = null;
+            let contact = null;
             try {
                 const data = await TrustStats.raw();
                 org = data && data.organization && typeof data.organization === 'object' ? data.organization : null;
+                contact = data && data.contact && typeof data.contact === 'object' ? data.contact : null;
             } catch (_) { org = null; }
             const note = org && typeof org.pricing_footer_note === 'string' ? org.pricing_footer_note.trim() : '';
             const year = org && Number.isInteger(org.founded_year) ? org.founded_year : null;
+            // Item 31 (ERR-371): the number from /api/site/trust `contact`
+            // (phone_tel_href / phone_display); the literal is the fallback only
+            // for when that read failed, so the line is never without a number.
+            const tel = contact && typeof contact.phone_tel_href === 'string' ? contact.phone_tel_href.replace(/[^+\d]/g, '') : '';
+            const shown = contact && typeof contact.phone_display === 'string' ? contact.phone_display.trim() : '';
             const parts = [];
             if (note) parts.push(Security.escapeHtml(note));
-            parts.push('Questions? Call <a href="tel:+64274740115">027 474 0115</a>'
+            parts.push(`Questions? Call <a class="pay-reassurance__tel" href="tel:${Security.escapeAttr(tel || '+64274740115')}">${Security.escapeHtml(shown || '027 474 0115')}</a>`
                 + (year ? ` · NZ company since ${year}` : ''));
             el.innerHTML = parts.join('<br>');
             el.hidden = false;

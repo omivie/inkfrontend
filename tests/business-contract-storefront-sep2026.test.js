@@ -217,7 +217,8 @@ test('the contract line renders even when there is no ladder at all', () => {
   // ladder would hide it on every product whose band has no volume discount.
   const fn = PDP.match(/async renderVolumePricing\(info\)[\s\S]*?this\._volumeLadder = ladder;/)[0];
   const contractIdx = fn.indexOf('this.renderContractPrice()');
-  const bailIdx = fn.indexOf('if (!ladder) return;');
+  // ERR-371: the bail-out also clears the 3+ line (item 26a) on its way out.
+  const bailIdx = fn.indexOf('if (!ladder) { this.syncBreakLine(null); return; }');
   assert.ok(contractIdx > 0 && bailIdx > contractIdx,
     'renderContractPrice() must run BEFORE the no-ladder bail-out');
 });

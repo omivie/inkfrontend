@@ -3647,7 +3647,7 @@ const Cart = {
         // every page it runs on; the toast stays only where it does not
         // (/cart, /checkout, /payment, or a page without the script).
         if (typeof showToast === 'function' && !product.silent && !this.drawerHandlesAdds()) {
-            showToast(product.name + ' added to cart', 'success');
+            this._addedToast(product);
         }
 
         /* THE ADD-TO-CART MOMENT, ANNOUNCED (ERR-276).
@@ -4802,12 +4802,11 @@ const Cart = {
                     // Compose a message ourselves when the backend provides
                     // numbers but no copy — keeps the nudge useful on every
                     // cart state.
-                    // Once the shipping row itself reads "Free", a banner saying the
-                    // same thing is pure duplication — and the two used to read as a
-                    // contradiction ("Calculated at checkout" above "you qualify").
-                    // The "add $X more" nudge is the half worth keeping.
-                    let copy = summary.qualifies_for_free_shipping
-                        ? '' : summary.free_shipping_message;
+                    // Item 23b (ERR-371): the server's message in BOTH states, as it
+                    // is, and the tick only when the cart qualifies. The line now
+                    // sits between the Shipping row and the total, where "you
+                    // qualify" reads as the reason the Shipping row says Free.
+                    let copy = summary.free_shipping_message || '';
                     if (!copy && !summary.qualifies_for_free_shipping
                         && typeof summary.free_shipping_remaining === 'number'
                         && summary.free_shipping_remaining > 0) {
@@ -5028,7 +5027,6 @@ const Cart = {
         const el = document.getElementById('cart-free-ship-unlock');
         if (!el) return;
         const msgEl = document.getElementById('cart-shipping-message');
-        const barEl = document.getElementById('cart-shipping-bar');
 
         const amountShort = unlock ? parseFloat(unlock.amount_short) : NaN;
         const suggestions = (unlock && Array.isArray(unlock.suggested_products))
@@ -5040,27 +5038,77 @@ const Cart = {
             return; // leave the existing plain nudge in place
         }
 
-        // Unlock supersedes the plain free-shipping message to avoid duplication.
-        if (msgEl) msgEl.hidden = true;
-        if (barEl) barEl.hidden = true;
+        // ERR-371 (item 23b): the free-shipping line + bar now live INSIDE the
+        // totals and stay there; this block keeps only its filler tiles. Its
+        // own lead line repeats the totals' message, so it shows only when that
+        // message is not on screen (no server nudge).
+        const leadNeeded = !msgEl || msgEl.hidden;
 
+        const chips = this.freeShipChipsHtml(suggestions, 'cart');
+
+        el.innerHTML =
+            (leadNeeded ? '<p class="cart-free-ship-unlock__lead">Add ' + Security.escapeHtml(formatPrice(amountShort)) + ' more for FREE shipping</p>' : '')
+            + (chips ? '<div class="cart-addon-row">' + chips + '</div>' : '');
+        el.hidden = false;
+        this.bindImageFallbacks(el);
+    },
+
+    /**
+     * The add confirmation where the cart drawer does NOT run — /cart,
+     * /checkout, /payment (checklist item 29, ERR-371; owner 2026-10-24: keep
+     * the drawer everywhere else, it already carries View cart + Checkout).
+     * Adds the next step and one free-shipping line to the plain toast:
+     *   - the actions that lead somewhere from THIS page (Checkout on /cart;
+     *     View cart on /checkout and /payment);
+     *   - `summary.free_shipping_message`, or "Free shipping unlocked" when
+     *     `qualifies_for_free_shipping` — from the cart re-read addItem has
+     *     just done (loadFromServer), never computed here.
+     * 6 seconds, dismissible (the toast's own ×). Placement is components.css's
+     * (top on phones, top-right on /cart: never over an Add).
+     */
+    _addedToast: function(product) {
+        const toast = showToast(product.name + ' added to cart', 'success', 6000);
+        if (!toast || typeof toast.querySelector !== 'function') return toast;
+        const path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '';
+        const onCart = /^\/(html\/)?cart(\/|$|\.html)/.test(path);
+        const actions = onCart
+            ? [{ label: 'Checkout', href: '/checkout' }]
+            : [{ label: 'View cart', href: '/cart' }];
+        const s = this.serverSummary || {};
+        const ship = s.qualifies_for_free_shipping === true
+            ? 'Free shipping unlocked'
+            : (typeof s.free_shipping_message === 'string' ? s.free_shipping_message.trim() : '');
+        const extra = document.createElement('div');
+        extra.className = 'toast__next';
+        extra.innerHTML = (ship ? '<p class="toast__ship">' + Security.escapeHtml(ship) + '</p>' : '')
+            + '<p class="toast__actions">' + actions.map(function(a) {
+                return '<a class="toast__action" href="' + Security.escapeAttr(a.href) + '">' + Security.escapeHtml(a.label) + '</a>';
+            }).join('') + '</p>';
+        const msg = toast.querySelector('.toast__message');
+        if (msg && msg.parentNode) msg.parentNode.insertBefore(extra, msg.nextSibling);
+        else toast.appendChild(extra);
+        return toast;
+    },
+
+    /**
+     * The free-shipping filler tiles (`free_shipping_unlock.suggested_products`,
+     * at most 3), as HTML. ONE builder for the cart page and the cart drawer
+     * (checklist item 23c, ERR-371). Prices are the server's retail_price.
+     * @param {Array} suggestions  already sliced to the 3 shown
+     * @param {string} location    data-track-location ('cart' | 'drawer')
+     */
+    freeShipChipsHtml: function(suggestions, location) {
         const self = this;
-        const chips = suggestions.map(function(p) {
+        return (Array.isArray(suggestions) ? suggestions : []).map(function(p) {
             const href = self._suggestedProductHref(p);
             const img = self._suggestedProductImage(p);
             const price = (p.retail_price != null) ? formatPrice(parseFloat(p.retail_price)) : '';
-            return '<a class="cart-addon" href="' + Security.escapeAttr(href) + '" data-track="cta_click" data-track-cta="free_ship_addon" data-track-location="cart">'
+            return '<a class="cart-addon" href="' + Security.escapeAttr(href) + '" data-track="cta_click" data-track-cta="free_ship_addon" data-track-location="' + Security.escapeAttr(location || 'cart') + '">'
                 + img
                 + '<span class="cart-addon__name">' + Security.escapeHtml(((typeof ProductName !== 'undefined') ? ProductName.clean(p) : p.name) || p.sku || '') + '</span>'
                 + (price ? '<span class="cart-addon__price">' + Security.escapeHtml(price) + '</span>' : '')
                 + '</a>';
         }).join('');
-
-        el.innerHTML =
-            '<p class="cart-free-ship-unlock__lead">Add ' + Security.escapeHtml(formatPrice(amountShort)) + ' more for FREE shipping</p>'
-            + (chips ? '<div class="cart-addon-row">' + chips + '</div>' : '');
-        el.hidden = false;
-        this.bindImageFallbacks(el);
     },
 
     _suggestedProductHref: function(p) {

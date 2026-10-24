@@ -68,8 +68,11 @@ test('the cart never prints a local "you qualify for free shipping" — only the
     const code = stripComments(CART);
     assert.doesNotMatch(code, /You've qualified for FREE shipping!/);
     assert.match(code, /if \(spendMore && spendMore\.qualifies\) \{\s*shippingMsgEl\.hidden = true;/);
-    // The server path still says nothing once the ROW reads "Free".
-    assert.match(code, /let copy = summary\.qualifies_for_free_shipping\s*\? '' : summary\.free_shipping_message;/);
+    // ERR-371 (item 23b, owner 2026-10-24): the server's message shows in BOTH
+    // states, verbatim — "you qualify" is the SERVER's words, never ours — and
+    // the only locally composed copy is the "Add $X more" nudge, never a qualify.
+    assert.match(code, /let copy = summary\.free_shipping_message \|\| '';/);
+    assert.match(code, /if \(!copy && !summary\.qualifies_for_free_shipping/);
 });
 
 test('cart line: unit price moves under the name on desktop; pill and nudge span the full line', () => {
