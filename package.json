@@ -31,6 +31,7 @@
     "probe:supplier-freight": "node scripts/probe-supplier-freight.mjs",
     "probe:supplier-prices": "node scripts/probe-supplier-prices.mjs",
     "probe:ribbon-brands": "node scripts/probe-ribbon-brands.mjs",
+    "probe:listing-phone-sweep": "node scripts/probe-listing-phone-sweep.mjs",
     "verify:business": "node scripts/verify-business-centre.mjs",
     "sweep:b2b": "node scripts/sweep-business-pricing.mjs",
     "sweep:b2b:check": "node scripts/sweep-business-pricing.mjs --check",

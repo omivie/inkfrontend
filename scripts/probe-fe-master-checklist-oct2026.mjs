@@ -1,22 +1,24 @@
 #!/usr/bin/env node
 /**
- * probe:fe-master — FE master checklist (2026-10-05), items 5, 7, 8 (feink-dc's share)
+ * probe:fe-master — FE master checklist, items 5, 7, 8 (2026-10-05) + item 24 (2026-10-22)
  * ===================================================================================
- * Source: the backend's FE-MASTER-CHECKLIST-oct2026.md, Part 4 checks 5, 7, 8.
+ * Source: the backend's FE-MASTER-CHECKLIST-oct2026.md, Part 4 checks 5, 7, 8,
+ * and item 24's done-when (ERR-370: the consent banner is a one-row bottom bar
+ * at every width; the ≥1100 corner card from items 7 / ERR-301 is gone).
  *   §1 /shop series + printer pages at 1280x551, 1366x599, 1536x695, 1920x911
- *      (and 1366x768), consent banner OPEN: elementFromPoint at the first card's
- *      Add returns the button (item 7); the corner card sits bottom-right and
- *      never overlaps Google's badge; the first card's Add is on the first
- *      screen. The service row (item 5) was REMOVED by the owner on
+ *      and 1366x768, consent banner OPEN: elementFromPoint at the centre of
+ *      EVERY first-row Add returns the button (item 24); the banner is a
+ *      full-width bottom bar at most 64px tall that never overlaps Google's
+ *      badge; the first card's Add is on the first screen. The service row (item 5) was REMOVED by the owner on
  *      2026-10-13 (ERR-329): every page check now asserts it is ABSENT
  *      (no .service-row element, no "ship same day · most of NZ" text).
  *   §2 phone 390x664: service row absent; first card measured.
- *   §3 PDP: the consent card stays bottom-LEFT and Add is clickable (Part 2
- *      invariant); the PDP service row is absent.
+ *   §3 PDP: Add is clickable with the bar open (Part 2 invariant; item 24);
+ *      the PDP service row is absent.
  *   §4 copy: no "2–4" / "1–4" business/working days on /faq, /about, /shipping;
  *      /faq's visible South Island line equals the FAQPage JSON-LD (item 8).
- *   §5 NEGATIVE CONTROLS: forcing the card back to the left on /shop must turn
- *      the first-card check RED; injecting the old row's text into the page
+ *   §5 NEGATIVE CONTROLS: forcing the bar to 200px on /shop must turn the
+ *      first-row check RED; injecting the old row's text into the page
  *      must turn the absence check RED. A probe that cannot fail proves nothing (ERR-258).
  *
  * MODE: READ-ONLY. Public GETs only: nothing is added to a cart, nothing is
@@ -55,6 +57,14 @@ const LAPTOPS = [
 const PHONE = { width: 390, height: 664, isMobile: true, hasTouch: true, deviceScaleFactor: 3 };
 const SERIES = '/shop?brand=epson&category=ink&code=288';
 const PRINTER = '/shop?brand=canon&printer_slug=canon-pixma-ts6160';
+// Item 24's own pages (checklist 2026-10-22): the LC233 series page and the
+// MFC-J4620DW printer page, at 1366x768, 1366x599 and 1280x551.
+const ITEM24 = [
+    ['LC233 series', '/shop?brand=brother&category=ink&code=LC233'],
+    ['MFC-J4620DW printer', '/shop?brand=brother&printer_slug=brother-mfc-j4620dw'],
+];
+const ITEM24_SIZES = [{ width: 1366, height: 768 }, { width: 1366, height: 599 }, { width: 1280, height: 551 }];
+const BAR_MAX = 64;
 const PDP = '/p/CPG512BK';
 const OLD_DAYS = /\b[12]\s*(?:–|-|&ndash;|–)\s*4\s+(?:business|working)\s+days/i;
 
@@ -108,13 +118,22 @@ function MEASURE_SHOP() {
     const first = cards[0];
     const btn = first ? first.querySelector('.product-card__cart-btn') : null;
     const a = r(btn);
-    let hit = null;
-    if (a) {
-        const x = (a.left + a.right) / 2, y = (a.top + a.bottom) / 2;
+    const hitOf = (b) => {
+        const box = r(b);
+        if (!box) return 'none';
+        const x = (box.left + box.right) / 2, y = (box.top + box.bottom) / 2;
         const h = (y >= 0 && y < innerHeight) ? document.elementFromPoint(x, y) : null;
-        hit = h && (h === btn || btn.contains(h)) ? 'add' : hitName(h);
-    }
+        return h && (h === b || b.contains(h)) ? 'add' : hitName(h);
+    };
+    const hit = a ? hitOf(btn) : null;
+    // Item 24: EVERY first-row Add (same row = card top within 4px of the first).
+    const top0 = first ? first.getBoundingClientRect().top : 0;
+    const row = cards.filter((c) => Math.abs(c.getBoundingClientRect().top - top0) < 4)
+        .map((c) => ({ sku: c.dataset.sku, btn: c.querySelector('.product-card__cart-btn') }))
+        .filter((x) => x.btn)
+        .map((x) => ({ sku: x.sku, hit: hitOf(x.btn), bottom: r(x.btn) && r(x.btn).bottom }));
     return {
+        row,
         vh: innerHeight, vw: innerWidth,
         sku: first ? first.dataset.sku : null,
         price: r(first && first.querySelector('.product-card__price')),
@@ -139,6 +158,9 @@ async function shop(vp, path, opts) {
 }
 
 const firstCardClear = (m) => !!m.add && m.add.bottom <= m.vh && m.hit === 'add' && !intersects(m.add, m.banner) && !intersects(m.price, m.banner);
+const rowClear = (m) => m.row.length > 0 && m.row.every((x) => x.hit === 'add');
+const barShape = (m) => !!m.banner && m.banner.left <= 1 && m.vw - m.banner.right <= 1 && m.vh - m.banner.bottom <= 1
+    && (m.banner.bottom - m.banner.top) <= BAR_MAX;
 // The removed service row (ERR-329): no element AND none of its text. Runs in the page.
 const ROW_GONE_SRC = `!document.querySelector('.service-row, #service-row, #product-service-row')
     && !/ship same day · most of NZ/.test(document.body.textContent)`;
@@ -158,9 +180,26 @@ try {
                     + `  service row ${m.rowGone ? 'absent' : 'PRESENT'}`);
                 if (!m.banner) { bad(`${t}: consent banner open (first visit)`, 'not open — the item 7 check needs it open'); continue; }
                 check(`${t}: elementFromPoint at the first card's Add returns the button, banner open`, firstCardClear(m), `hit ${m.hit}`);
-                check(`${t}: consent card is bottom-RIGHT (right edge within 24px of the viewport)`, m.vw - m.banner.right <= 24, `x${Math.round(m.banner.left)}–${Math.round(m.banner.right)} of ${m.vw}`);
-                check(`${t}: consent card does not overlap Google's badge`, !intersects(m.banner, m.badge));
+                check(`${t}: banner is a full-width bottom bar ≤${BAR_MAX}px (item 24)`, barShape(m), `x${Math.round(m.banner.left)}–${Math.round(m.banner.right)} of ${m.vw}, ${Math.round(m.banner.bottom - m.banner.top)}px tall`);
+                check(`${t}: consent bar does not overlap Google's badge`, !intersects(m.banner, m.badge));
                 check(`${t}: service row absent (owner removed it, ERR-329)`, m.rowGone === true);
+            }
+        }
+    }
+
+    /* §1b ── item 24's own pages: EVERY first-row Add ──────────────────────── */
+    if (want('shop') || want('item24')) {
+        for (const [label, path] of ITEM24) {
+            for (const vp of ITEM24_SIZES) {
+                head(`§1b item 24 ${label} — ${vpName(vp)}`);
+                const { m, measured } = await shop(vp, path);
+                if (!measured) continue;
+                const t = `${vpName(vp)} ${label}`;
+                console.log(`    first row: ${m.row.map((x) => `${x.sku}:${x.hit}@${Math.round(x.bottom)}`).join('  ')}  banner ${m.banner ? `${Math.round(m.banner.top)}–${Math.round(m.banner.bottom)}` : 'none'}`);
+                if (!m.banner) { bad(`${t}: consent banner open (first visit)`, 'not open'); continue; }
+                check(`${t}: elementFromPoint at EVERY first-row Add returns the button (${m.row.length})`, rowClear(m),
+                    m.row.filter((x) => x.hit !== 'add').map((x) => `${x.sku} → ${x.hit}`).join(', ') || 'all add');
+                check(`${t}: bar ≤${BAR_MAX}px, full width, at the bottom`, barShape(m), `${Math.round(m.banner.bottom - m.banner.top)}px`);
             }
         }
     }
@@ -174,7 +213,7 @@ try {
         }
     }
 
-    /* §3 ── PDP keeps the left card; Add clickable ─────────────────────────── */
+    /* §3 ── PDP: Add clickable with the bar open ──────────────────────────── */
     if (want('pdp')) {
         for (const vp of LAPTOPS.slice(0, 2)) {
             head(`§3 PDP ${PDP} — ${vpName(vp)}`);
@@ -195,7 +234,7 @@ try {
             await ctx.close();
             if (!loaded || limited.length) { bad(`${vpName(vp)} PDP: NOT MEASURED`, `${limited.length} × 429`); continue; }
             check(`${vpName(vp)} PDP: Add on screen and elementFromPoint returns it`, !!m.add && m.add.bottom <= m.vh && m.hit);
-            check(`${vpName(vp)} PDP: consent card stays bottom-LEFT`, !!m.banner && m.banner.left <= 24, m.banner ? `x${Math.round(m.banner.left)}` : 'not open');
+            check(`${vpName(vp)} PDP: consent bar open, ≤${BAR_MAX}px (item 24)`, !!m.banner && (m.banner.bottom - m.banner.top) <= BAR_MAX, m.banner ? `${Math.round(m.banner.bottom - m.banner.top)}px` : 'not open');
             check(`${vpName(vp)} PDP: service row absent (ERR-329)`, rowGone === true);
         }
     }
@@ -227,8 +266,8 @@ try {
         head('§5 NEGATIVE CONTROLS — each must turn its check RED');
         const vp = { width: 1366, height: 599 };
         {
-            const { m, measured } = await shop(vp, SERIES, { css: '@media (min-width:1100px){ body.page-shop .consent-banner{ left:16px!important; right:auto!important; bottom:16px!important } }' });
-            if (measured) check('card forced back to the left ⇒ the first-card check FAILS', !!m.banner && !firstCardClear(m), `hit ${m.hit}`);
+            const { m, measured } = await shop(vp, SERIES, { css: '.consent-banner.is-open{ min-height:200px!important }' });
+            if (measured) check('bar forced to 200px ⇒ the first-row check FAILS', !!m.banner && !rowClear(m) && !barShape(m), `row ${m.row.map((x) => x.hit).join(',')}`);
         }
         {
             // Re-insert the old row's markup + text: the absence check must go RED.

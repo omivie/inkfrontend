@@ -404,19 +404,20 @@ test('§6 each paid landing has its own h1; every other URL keeps the old one', 
     }
 });
 
-test('§6 the printer box is FIRST on the landing, uses /api/printers/search (no search_analytics write)', () => {
+test('§6 the printer box is FIRST under the h1, uses /api/printers/search (no search_analytics write)', () => {
     const html = read('html/shop.html');
-    // FIRST inside #level-brands, directly above the brand picker — nothing
-    // between them since the popular shelf and the "Full colour sets" rail went
-    // (ERR-290).
-    const level = html.indexOf('id="level-brands"'), box = html.indexOf('id="landing-printer-search"'),
-        brands = html.indexOf('id="brands-grid"');
-    assert.ok(level > 0 && box > level && box < brands);
-    assert.doesNotMatch(html.slice(level, brands).replace(/<!--[\s\S]*?-->/g, ''), /<section(?![^>]*landing-printer-search)/,
-        'no section may sit between the printer box and the brand picker');
+    // ERR-370 (checklist item 37): the box moved OUT of #level-brands to sit
+    // directly under the h1, so the same section leads the paid landings AND
+    // every brand / brand + category code grid. Nothing between h1 and box;
+    // the box is before every drilldown level.
+    const h1 = html.indexOf('id="drilldown-title"'), box = html.indexOf('<section class="landing-printer-search"'),
+        content = html.indexOf('class="drilldown-content"');
+    assert.ok(h1 > 0 && box > h1 && box < content, 'h1, then the printer box, then the levels');
+    assert.doesNotMatch(html.slice(h1, box).replace(/<!--[\s\S]*?-->/g, ''), /<(section|div)\b/,
+        'nothing may sit between the h1 and the printer box');
     const fn = extractMethod(stripComments(read('js/shop-page.js')), 'renderLandingPrinterSearch').body;
     // ONE request since BF-096 (the backend matches a separator-free key).
-    assert.match(fn, /await API\.searchPrinters\(q\)/);
+    assert.match(fn, /await API\.searchPrinters\(q, finderBrand\)/);
     assert.equal((fn.match(/API\.searchPrinters\(/g) || []).length, 1);
     assert.doesNotMatch(fn, /smartSearch|\/api\/search\//, 'ERR-254: a typeahead must not file searches');
     assert.match(fn, /PrinterName\.of\(p\)/);   // display_name first (BF-094)
@@ -569,12 +570,13 @@ test('§10 the value strip is in flow, identical on every header page, and never
     assert.match(rule, /min-height:\s*32px/, 'height reserved before JS fills it (CLS)');
 });
 
-test('§10 the phone consent banner is one row with the short wording', () => {
+test('§10 the consent banner is one row with the short wording (every width since ERR-370)', () => {
     const css = stripComments(read('css/components.css'));
-    const i = css.indexOf('@media (max-width: 768px) {\n    .consent-banner {');
+    // The phone rules became the rules at EVERY width (checklist item 24).
+    const i = css.indexOf('\n.consent-banner {\n    gap: var(--spacing-sm, 8px);');
     assert.ok(i > 0);
-    const block = css.slice(i, css.indexOf('\n}', i));
-    assert.doesNotMatch(block, /flex-direction:\s*column/, 'the 148px stack is gone');
+    const block = css.slice(i, css.indexOf('\n@media (min-width: 769px)', i));
+    assert.doesNotMatch(css, /\.consent-banner \{[^}]*flex-direction:\s*column/, 'the 148px stack (and the corner card) are gone');
     assert.match(block, /\.consent-banner__body-long\s*\{\s*display:\s*none/);
     assert.match(read('js/consent-banner.js'), /bodyShort: 'We use analytics cookies\.'/);
 });

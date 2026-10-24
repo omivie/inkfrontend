@@ -368,6 +368,9 @@
 
     function createInstance() {
         const id = _instanceId++;
+        // Warm the compatible-guarantee label (item 27a) so the first results
+        // paint can read it synchronously; one shared, session-cached request.
+        if (typeof CompatGuarantee !== 'undefined') CompatGuarantee.load().catch(() => {});
         const listboxId = `smart-ac-listbox-${id}`;
 
         const state = {
@@ -868,6 +871,8 @@
             // was wrong. A customer could land on (and buy) the wrong cartridge.
             // Fixed 2026-08-04 alongside ERR-144.
             const renderedOrder = [];
+            // Sync read: the label is warmed when the dropdown is first built.
+            const guarantee = (typeof CompatGuarantee !== 'undefined') ? CompatGuarantee.now() : '';
 
             const renderSection = (items, badgeClass, label, source) => {
                 if (!items.length) return '';
@@ -894,7 +899,10 @@
                 state.renderedBySource[source] = renderedOrder.slice(startedAt);
                 return `<div class="smart-ac__section" data-source="${source}" role="tabpanel"`
                     + ` id="smart-ac-panel-${id}-${source}" aria-labelledby="smart-ac-tab-${id}-${source}">`
-                    + `<div class="smart-ac__section-head"><span class="products-section__badge ${badgeClass}">${label}</span></div>`
+                    + `<div class="smart-ac__section-head"><span class="products-section__badge ${badgeClass}">${label}</span>`
+                    // Item 27a (ERR-370): the compatible guarantee, COMPATIBLE column only.
+                    + (source === 'compatible' && guarantee ? `<p class="smart-ac__guarantee">${esc(guarantee)}</p>` : '')
+                    + `</div>`
                     + `<div class="product-grid smart-ac__grid">${cards}</div>`
                     + `</div>`;
             };

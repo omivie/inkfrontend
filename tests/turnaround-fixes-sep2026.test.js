@@ -204,9 +204,10 @@ test('§2 the finder asks ONCE — /api/printers/search is separator-tolerant si
     const H = shopHelpers();
     assert.equal(H.finderSpellings, undefined);
     assert.equal(H.mergePrinterAnswers, undefined);
-    const fn = lift(stripComments(SHOP_SRC), 'renderLandingPrinterSearch(show)');
+    const fn = lift(stripComments(SHOP_SRC), 'renderLandingPrinterSearch(brand)');
     assert.equal((fn.match(/API\.searchPrinters\(/g) || []).length, 1);
-    assert.match(fn, /await API\.searchPrinters\(q\)\.catch\(\(\) => null\)/);
+    // ERR-370: brand pages pass the brand slug (item 37); still ONE request.
+    assert.match(fn, /await API\.searchPrinters\(q, finderBrand\)\.catch\(\(\) => null\)/);
     // A failed lookup is not "no such printer".
     assert.match(fn, /if \(!answered\) \{[\s\S]*?data-finder-state="unavailable"[\s\S]*?\} else if \(!items\.length\)/);
 });
@@ -551,10 +552,14 @@ test('§10 the upsell image is capped (one cross-sell suggestion stretched to 68
     assert.match(ruleBody(CSS.components, '.cart-drawer__thumb img'), /max-width:\s*64px/);
 });
 
-test('§10 phones: toasts at the TOP; Filter & Sort follows the header\'s hide signal', () => {
+test('§10 phones: toasts at the TOP; Filter & Sort is inline (ERR-370)', () => {
     const toast = CSS.components.slice(CSS.components.indexOf('@media (max-width: 767.98px) {\n    .toast-container'));
     assert.match(toast.slice(0, 300), /top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 12px\);\s*bottom:\s*auto;/);
-    assert.match(CSS.pages, /body:has\(\.site-header--hidden\) \.filter-sort-bar:not\(:focus-within\) \{[^}]*transform:[^}]*pointer-events:\s*none;/);
+    // ERR-370 (checklist item 25): Filter & Sort is INLINE above the first card,
+    // so it no longer needs to slide away with the header — it can never cover an Add.
+    const bar = CSS.pages.match(/\n\.filter-sort-bar \{[^}]*\}/);
+    assert.ok(bar, '.filter-sort-bar rule exists');
+    assert.doesNotMatch(bar[0], /position:\s*fixed/, 'the bar must not be a fixed overlay');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -4576,6 +4576,49 @@ const DeliveryArea = {
 if (typeof window !== 'undefined') window.DeliveryArea = DeliveryArea;
 
 /**
+ * COMPATIBLE GUARANTEE LINE (checklist 2026-10-22 item 27, ERR-370)
+ * ===============================================================
+ * "Compatible cartridges are covered by our 30-day satisfaction guarantee." —
+ * `warranty.compatible_label` from GET /api/site/trust, VERBATIM. Never typed
+ * into the page (invariant 9, ERR-078): the guarantee covers compatible products
+ * only, and its wording is the backend's to change. One line under the
+ * COMPATIBLE column head (shop listings, search dropdown) and under the fit line
+ * on a compatible PDP — never per card, never on a genuine column.
+ *
+ * The live payload carries it at `data.warranty`; the checklist names
+ * `trust_signals.warranty` (the cart/PDP envelope's spelling). Both are read.
+ * Absent ⇒ '' and the slot stays hidden (fail-soft; callers record it).
+ */
+const CompatGuarantee = {
+    _label: null,
+
+    /** PURE: the label from a trust payload, or ''. */
+    pick(data) {
+        if (!data || typeof data !== 'object') return '';
+        const w = (data.warranty && typeof data.warranty === 'object') ? data.warranty
+            : (data.trust_signals && data.trust_signals.warranty) || null;
+        const l = w && w.compatible_label;
+        return (typeof l === 'string' && l.trim()) ? l.trim() : '';
+    },
+
+    /** Synchronous best answer: the loaded label, else the session cache, else ''. */
+    now() {
+        if (this._label !== null) return this._label;
+        const cached = (typeof TrustStats !== 'undefined' && TrustStats._readCache) ? TrustStats._readCache() : null;
+        return cached ? this.pick(cached) : '';
+    },
+
+    /** @returns {Promise<string>} the label, or '' when the endpoint has none / failed. */
+    async load() {
+        if (this._label !== null) return this._label;
+        const data = (typeof TrustStats !== 'undefined') ? await TrustStats.raw() : {};
+        this._label = this.pick(data);
+        return this._label;
+    },
+};
+if (typeof window !== 'undefined') window.CompatGuarantee = CompatGuarantee;
+
+/**
  * CLIENT BEACON (checklist 2026-10-22 items 33 + 43, ERR-369)
  * ===========================================================
  * Two first-party beacons the backend reads from `traffic_events`, through the
@@ -4699,6 +4742,7 @@ if (typeof module !== 'undefined' && module.exports) {
         OrderNumber,
         QtyStepper,
         ClientBeacon,
+        CompatGuarantee,
         DeliveryArea
     };
 }

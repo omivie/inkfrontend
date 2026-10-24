@@ -217,26 +217,25 @@ test('§2 the fit checker is gone and nothing promises a fit', () => {
 // §3 consent card
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§3 from 1100px the consent banner is a bottom-left card', () => {
+/* §3 was "a bottom-left card from 1100px; the badge lift only below it"
+ * (ERR-301). Checklist 2026-10-22 item 24 (ERR-370) replaced the card with the
+ * one-row bar at every width; these pin the replacement, so the card cannot
+ * quietly come back. The full item-24 pins live in
+ * tests/fe-checklist-22oct-listing-2026.test.js. */
+test('§3 (ERR-370) there is no corner card at any width', () => {
     const css = stripComments(COMPONENTS_CSS);
-    const i = css.indexOf('@media (min-width: 1100px) {\n    .consent-banner {');
-    assert.ok(i > 0, 'the card block must exist');
-    const block = css.slice(i, css.indexOf('\n}', i));
-    assert.match(block, /left: 16px;/);
-    assert.match(block, /right: auto;/);
-    const w = Number((block.match(/width: (\d+)px;/) || [])[1]);
-    assert.ok(w > 0 && w <= 380, `card width ${w}`);
-    assert.match(block, /flex-direction: column;/);
+    assert.equal(css.indexOf('@media (min-width: 1100px) {\n    .consent-banner {'), -1, 'the ≥1100 card block is gone');
+    assert.doesNotMatch(css, /body\.page-shop \.consent-banner/, 'and so is its /shop variant');
 });
 
-test('§3 the badge lift applies ONLY below 1100px — nothing is raised over the card', () => {
+test('§3 (ERR-370) the badge lift applies at EVERY width — the bar spans its corner again', () => {
     const css = stripComments(COMPONENTS_CSS);
     const rule = 'body.has-consent-banner #google-reviews-badge {\n    bottom: var(--consent-banner-height, 0px) !important;\n}';
     const at = css.indexOf(rule);
     assert.ok(at > 0, 'the ERR-233 lift rule is unchanged inside');
     assert.equal(css.indexOf(rule, at + 1), -1, 'exactly one lift rule');
-    const media = css.lastIndexOf('@media', at);
-    assert.match(css.slice(media, at), /^@media \(max-width: 1099\.98px\) \{\s*$/);
+    const before = css.slice(0, at);
+    assert.ok(before.lastIndexOf('@media') < before.lastIndexOf('}'), 'not inside a media query');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

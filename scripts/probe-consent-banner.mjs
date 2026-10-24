@@ -58,10 +58,10 @@ import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobi
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const DESKTOP = { width: 1512, height: 806 };   // the viewport the bug was measured at
 const NARROW = { width: 1100, height: 800 };    // still desktop, badge still rendered
-/* ERR-301: from 1100px wide the banner is a bottom-LEFT card and no longer
-   shares the badge's corner, so the ERR-233 geometry (a full-width bar with the
-   badge lifted onto it) now exists only BELOW 1100px. §1 measures it there;
-   §1b measures the card at the width the bug was found at. */
+/* ERR-370 (checklist 2026-10-22 item 24): the ≥1100px corner card (ERR-301) is
+   gone — the banner is the one-row full-width bar at EVERY width, with the badge
+   lifted onto it (the ERR-233 geometry) everywhere. §1 measures it at 1024;
+   §1b at the width the bug was found at. */
 const BAR_DESKTOP = { width: 1024, height: 768 };
 /* ERR-280: the phone box comes from playwright's own device registry now.
    Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL
@@ -269,9 +269,15 @@ try {
                reason that has nothing to do with the fix. A stub is not a
                regression and it is not a pass either — it is an unexercised
                run, and it has to say so by name. */
-            const padRight = parseFloat(m.bannerPaddingRight) || 0;
-            const unfixedAcceptRight = accept ? accept.right + (padRight - 16) : 0;
+            /* Since ERR-370 the bar's content is CENTRED from 769px, so the old
+               "padding back to 16px" arithmetic no longer moves Accept. What
+               keeps the badge off the buttons now is the LIFT: unlifted, the
+               badge's box would sit inside the bar's bottom band. So the control
+               is: at bottom:0, would the badge overlap the bar at all? */
             const badgeIsRealSize = m.badge.h >= 32 && m.badge.w >= 32;
+            const unliftedTop = m.viewport.h - m.badge.h;
+            const unliftedOverlaps = !!m.banner && m.badge.x < m.banner.right && m.badge.right > m.banner.x
+                && unliftedTop < m.banner.bottom;
 
             if (!badgeIsRealSize) {
                 soft('positive control: the badge is a stub, not the production badge',
@@ -279,14 +285,12 @@ try {
                     + 'registered merchant domain, so nothing here could have collided. THE OVERLAP '
                     + 'WAS NOT EXERCISED: run this against the live origin to test the real geometry');
             } else {
-                check('positive control: the UNFIXED layout really would collide',
-                    unfixedAcceptRight > m.badge.x,
-                    unfixedAcceptRight > m.badge.x
-                        ? `with the original padding-right:16px Accept would reach x=${Math.round(unfixedAcceptRight)}, `
-                          + `past the badge's left edge at x=${m.badge.x} — the collision is real and this fix prevents it`
-                        : `with the original padding-right:16px Accept would end at x=${Math.round(unfixedAcceptRight)} `
-                          + `and the badge starts at x=${m.badge.x} — they no longer overlap for some other `
-                          + 'reason, so this probe is not measuring the bug it was written for');
+                check('positive control: UNLIFTED, the badge really would sit on the bar',
+                    unliftedOverlaps,
+                    unliftedOverlaps
+                        ? `at bottom:0 the badge would span y${Math.round(unliftedTop)}-${m.viewport.h}, inside the bar `
+                          + `(y${m.banner.y}-${m.banner.bottom}) — the lift is what keeps it off`
+                        : 'the badge would not touch the bar even unlifted — this probe is not measuring the bug it was written for');
             }
         }
 
@@ -318,31 +322,32 @@ try {
         await ctx.close();
     }
 
-    /* ── §1b DESKTOP >= 1100px — the corner card (ERR-301) ─────────────────── */
+    /* ── §1b DESKTOP 1512x806 — the one-row bar (ERR-370, item 24) ─────────── */
     {
-        console.log('\n\x1b[1m§1b Desktop 1512x806 — the bottom-left card; the badge keeps its own corner (ERR-301)\x1b[0m');
+        console.log('\n\x1b[1m§1b Desktop 1512x806 — full-width bar ≤64px, badge lifted onto it (ERR-370)\x1b[0m');
         const ctx = await browser.newContext({ viewport: DESKTOP });
         const page = await load(ctx);
         const m = await page.evaluate(MEASURE);
         const accept = m.buttons.find((b) => b.text === 'Accept');
         const decline = m.buttons.find((b) => b.text === 'Decline');
-        check('the consent card is showing for an undecided visitor', m.bannerPresent,
+        check('the consent bar is showing for an undecided visitor', m.bannerPresent,
             m.bannerPresent ? `${m.banner.w}x${m.banner.h} at x=${m.banner.x} y=${m.banner.y}` : 'no #consent-banner');
         if (m.bannerPresent) {
-            check('it is a bottom-LEFT card, not a full-width bar',
-                m.banner.x <= 24 && m.banner.w <= 400 && m.viewport.h - m.banner.bottom <= 40,
-                `x${m.banner.x}-${m.banner.right} (w ${m.banner.w}), ${m.viewport.h - m.banner.bottom}px off the bottom`);
+            check('it is a full-width bottom bar at most 64px tall (item 24)',
+                m.banner.x <= 1 && m.viewport.w - m.banner.right <= 1 && m.viewport.h - m.banner.bottom <= 1 && m.banner.h <= 64,
+                `x${m.banner.x}-${m.banner.right} of ${m.viewport.w}, ${m.banner.h}px tall, ${m.viewport.h - m.banner.bottom}px off the bottom`);
             check('Accept and Decline answer their own hit-tests',
                 !!accept && accept.hit === 'self' && !!decline && decline.hit === 'self',
                 `Accept "${accept && accept.hit}", Decline "${decline && decline.hit}"`);
+            check('Decline and Accept carry equal weight (same size)',
+                !!accept && !!decline && Math.abs(accept.w - decline.w) <= 2 && Math.abs(accept.h - decline.h) <= 1,
+                `Accept ${accept && accept.w}x${accept && accept.h}, Decline ${decline && decline.w}x${decline && decline.h}`);
         }
         if (!m.badgePresent || !m.badge || m.badge.w === 0) {
-            soft('the Google badge did not render', 'the two-corner separation was not exercised');
+            soft('the Google badge did not render', 'the badge/bar separation was not exercised');
         } else {
-            check('nothing is raised over the banner: the badge is NOT lifted (handoff 2026-10-02 §1)',
-                m.badgeBottom === '0px', `computed bottom ${m.badgeBottom}`);
-            check('the badge and the card do not touch', !intersects(m.badge, m.banner),
-                `badge x${m.badge.x}-${m.badge.right}, card x${m.banner && m.banner.x}-${m.banner && m.banner.right}`);
+            check('the badge is lifted clear of the bar', !intersects(m.badge, m.banner),
+                `badge y${m.badge.y}-${m.badge.bottom}, bar y${m.banner && m.banner.y}-${m.banner && m.banner.bottom}, computed bottom ${m.badgeBottom}`);
         }
         await ctx.close();
     }

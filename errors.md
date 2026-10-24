@@ -50,9 +50,45 @@ Reserved by session feink-fa; full entry follows when shipped.
 Reserved by session feink-fa; full entry follows when shipped.
 
 ---
-## ERR-370 — FE checklist 22 Oct, find what fits: printer finder on brand pages, exact-match search redirects, printer pages in-stock compatible first, compatible guarantee under the column head, inline Filter & Sort, one-row consent bar, no first-screen fade-in (items 24, 25, 27a, 32, 37, 46) — **IN PROGRESS** (2026-10-24)
+## ERR-370 — FE checklist 22 Oct, find what fits: printer finder on brand pages, exact-match search redirects, printer pages in-stock compatible first, compatible guarantee under the column head, inline Filter & Sort, one-row consent bar, no first-screen fade-in (items 24, 25, 27a, 32, 37, 46) — **SHIPPED (frontend)** (2026-10-25)
 
-Reserved by session feink-fa; full entry follows when shipped.
+**Seen (backend, 22 Oct checklist).**
+- **37 (P0).** `/shop?brand=X[&category=Y]` opened on the code grid with NO printer box. Paid visitors who typed their printer bought (8 orders / 108 sessions); code-grid browsers did not (0 / 114). 65 of 137 first clicks on the landings were a brand tile, which opens that grid.
+- **46.** Printer pages converted at ~1.3% (other landings 4.2%) and were ordered by code/colour, not by what a shopper can buy.
+- **27a.** There was no "will it work?" answer on the compatible side of a series page.
+- **25.** The fixed full-width blue Filter & Sort bar sat over the printer page's first Add at 390x664.
+- **24.** The ≥1100px 360x163 consent card stayed open for 85% of paid desktop visitors. It covered the 5th/6th first-row Adds, and it was the LCP element.
+- **32.** `body`/`main` faded in from opacity 0, the brand tiles staggered in, and the levels faded. The landing h1 repainted from "Shop Ink…".
+
+**Fix.**
+- **37:** ONE finder section, moved out of `#level-brands` to directly under the h1. ONE visibility rule, `_printerFinderBrand()`: '' on the paid landings, the brand slug on `/shop?brand=X` and on brand + ink/toner/drums grids, otherwise null. It is called BEFORE the level's await, then again after brand rows load. The label reads "Find your {Brand} printer", the placeholder is a real model per brand (generic otherwise), and suggestions come from `API.searchPrinters(q, brand)`. Measured: canon+TS5360 gives 2 hits, hp+TS5360 gives 0. Brand-page phones keep their breadcrumb; the landings still drop it.
+  - Search: `_exactSearchTarget` opens `exact_product.url` (our `/products/<slug>/<sku>` paths only, never a foreign redirect) or a printer with `matched_printer.exact === true`, page 1 only. Measured 2026-10-25: neither field ships yet ("brother mfc-j4340dw" → matched the XL), so search behaves exactly as before until the backend flag lands.
+- **46:** `_sortProductsBy(…, 'printer_fit')` on the printer page only: buyable (getStockStatus) first, then cartridges before drums/parts (accessoryTier), then cheapest; stable; inside each source section (Compatible renders above Genuine). Out-of-stock cards keep "Contact us" (the owner's contact-button rule) — reported, not changed.
+- **27a:** `CompatGuarantee` (utils.js) reads `warranty.compatible_label` VERBATIM. The live payload has it at `data.warranty`; the checklist's `trust_signals.warranty` spelling is read too. It shows as ONE `<p>` in the COMPATIBLE head row (shop) and in the dropdown's COMPATIBLE head only. `renderCompatGuarantee` writes the text plus `data-guarantee` ok|absent; `_syncSourceColumns` owns visibility and hides it on receipt rolls (ERR-368).
+- **25:** Filter & Sort is an inline outline button in the header's left group, on the trail's row. On phones it is a 44px sliders button with the visually-hidden name "Filter & Sort", and the current crumb gets an ellipsis. It is NOT sticky: any fixed overlay covers some Add at some scroll offset, which the spec's 300px sweep rejects. The consent lift and the scroll-hide rule for it are gone.
+- **24:** the compact one-row bar applies at every width: short copy, no heading, and Decline/Accept with identical styling and size. It is 45px on a mouse (36px buttons; touch keeps 44). The ≥1100 card and its /shop variant are deleted; the badge lift applies at every width; the cart sticky bar rides on the shared lift. The chrome above the first card gives back space at ≥1100 × ≤620 (pointer: fine): breadcrumb 52→28px, printer h1, jump button 44→32px, and the guarantee kept to one line.
+- **32 fix 1:** the body/main animations, brand/ribbon tile stagger and level fade are deleted, and the scroll reveal never hides an element already in the viewport. **Fix 2:** the render-blocking gtag.js marks `<html data-landing=ink|toner>` (CSS shows the matching h1 span) and `<html data-finder=brand>` (CSS reserves the finder, `!important` to beat base.css `[hidden]`). `_dropFirstPaintHints()` removes both after the first render so SPA navigation never inherits them.
+- **CLS follow-up the fade had been hiding:** a 0-count brand tile was hidden when counts arrived, shifting every later tile. Category pickers now show the grid once, after counts (capped at `BRAND_COUNTS_WAIT_MS` 1200).
+
+**Measured (local, READ-ONLY).**
+- `probe:fe-master` 49/49, including the new §1b, which checks EVERY first-row Add on the LC233 series and MFC-J4620DW printer pages at 1366x768/1366x599/1280x551. The negative control (bar forced to 200px) goes red.
+- Printer 1280x551 Add went 490–526 → 468–504 under a bar from 506. Printer 1366x599 went 580–616 → 490–526.
+- New `probe:listing-phone-sweep` (item 25's done-when): 4/4 local; live 3/4 FAIL; the control re-adds a fixed bar and goes red.
+- Phone first Add centres: HP 65 588, printer 602, LC233 599, all under the bar top at 607 (live: under `#filter-sort-open`).
+- CLS at 390x664: /ink-cartridges and /toner-cartridges 0 (live 0.035 / 0), brand pages 0.0077.
+- Finder: input 293–341 at 390x664 and 299–347 at 1280x551; choosing "Canon PIXMA (Home) TS 5360" opens its printer page with 6 cards.
+- `probe:consent-banner` 18/0. The badge only renders on the merchant domain, so it is re-run after deploy.
+- Tests: `tests/fe-checklist-22oct-listing-2026.test.js` (17; all red against HEAD). Updated tests: the corner card, the finder position, the filter bar, the fold pins and the reveal.
+
+**Not done here (named).**
+- The search-dropdown guarantee was NOT checked in a browser: typing into search writes search_analytics (ERR-254). It is unit-pinned.
+- The backend prerender must follow item 46's order (outbox).
+- Out-of-stock printer cards stay "Contact us".
+
+**Rule.**
+- Finder visibility comes from ONE function, and its first-paint twin in gtag.js is pinned equal.
+- Nothing on the first screen starts at opacity 0.
+- A fixed bottom bar must leave the first-row Adds clear at 1280x551 — measure before adding a row above the grid.
 
 ---
 ## ERR-369 — FE checklist 22 Oct, tracking + compliance: privacy names the ad tags, GA4 on the owner's property, iPhone click ids, two-slip email hint, client_error / grid_ready / grid add_to_cart beacons (items 33, 34, 35, 43, 45, 47) — **SHIPPED (frontend)** (2026-10-24)

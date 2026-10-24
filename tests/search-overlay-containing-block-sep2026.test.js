@@ -42,7 +42,7 @@ const HTML_404 = path.join(ROOT, 'inkcartridges', '404.html');
 
 // ─── A stub DOM, just wide enough for initScrollAnimations ─────────────────
 
-function makeEl({ tag = 'section', classes = [], contains = [], parentHero = false }) {
+function makeEl({ tag = 'section', classes = [], contains = [], parentHero = false, rect = { top: 0, bottom: 100 } }) {
     const set = new Set(classes);
     return {
         tag,
@@ -56,7 +56,7 @@ function makeEl({ tag = 'section', classes = [], contains = [], parentHero = fal
         },
         closest: (sel) => (parentHero && sel === '.hero' ? {} : null),
         querySelector: (sel) => (contains.includes(sel) ? {} : null),
-        getBoundingClientRect: () => ({ top: 0, bottom: 100 }),
+        getBoundingClientRect: () => rect,
     };
 }
 
@@ -111,14 +111,23 @@ test('§1 a section hosting a search form is never given the reveal transform', 
     assert.equal(observed.length, 0, 'and it must not be observed, or .in-view re-adds it');
 });
 
-test('§1 an ordinary section still animates — the exemption is narrow', () => {
-    const plain = makeEl({ classes: ['trust-bar'], contains: [] });
+test('§1 an ordinary section BELOW THE FOLD still animates — the exemption is narrow', () => {
+    // Below the fold: window.innerHeight is 800 in the harness.
+    const plain = makeEl({ classes: ['trust-bar'], contains: [], rect: { top: 1200, bottom: 1500 } });
     const { observed } = runInitScrollAnimations([plain]);
 
     assert.equal(plain.classList.contains('will-animate'), true,
         'sections without a search form keep the scroll reveal');
     assert.equal(observed.length, 1, 'and are still observed');
     assert.equal(plain.style.transform, undefined, 'and are not pinned');
+});
+
+test('§1 (ERR-370, item 32 fix 1) a section ON THE FIRST SCREEN is never hidden', () => {
+    const first = makeEl({ classes: ['drilldown-content'], contains: [], rect: { top: 300, bottom: 1400 } });
+    const { observed } = runInitScrollAnimations([first]);
+    assert.equal(first.classList.contains('will-animate'), false,
+        '.will-animate is opacity 0 — a first-screen element must paint at once');
+    assert.equal(observed.length, 0);
 });
 
 test('§1 the hero exemption that came first still holds', () => {

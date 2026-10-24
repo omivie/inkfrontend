@@ -588,6 +588,7 @@
             compatibleSection: document.getElementById('compatible-section'),
             sourceSections: document.getElementById('source-sections'),
             sourceJump: document.getElementById('source-jump'),
+            compatibleGuarantee: document.getElementById('compatible-guarantee'),
             sourceJumpCompatible: document.getElementById('source-jump-compatible'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
@@ -619,6 +620,9 @@
         // INITIALIZATION
         // =========================================
         async init() {
+            // Item 27a — fetch once, early; the line shows with the section.
+            this.renderCompatGuarantee();
+
             // ERR-327 jump buttons — Compatible is stacked above Genuine and
             // each section's head row carries a button to the OTHER one: cyan
             // (beside the Compatible heading) goes down to Genuine, yellow
@@ -966,6 +970,66 @@
             chip.onclick = () => this.removeFilter('type');
             chip.hidden = false;
         },
+
+        /**
+         * The compatible guarantee under the COMPATIBLE column head (item 27a,
+         * ERR-370): `warranty.compatible_label` from /api/site/trust, verbatim,
+         * as text. ONE text writer (visibility: _syncSourceColumns). The
+         * `data-guarantee` attribute records ok | absent, so a missing label is
+         * visible in the DOM rather than a silent gap.
+         */
+        async renderCompatGuarantee() {
+            const el = document.getElementById('compatible-guarantee');
+            if (!el || typeof CompatGuarantee === 'undefined') return;
+            const label = await CompatGuarantee.load().catch(() => '');
+            el.textContent = label;
+            el.dataset.guarantee = label ? 'ok' : 'absent';
+            this._syncSourceColumns();
+        },
+
+        /**
+         * Where an exact search match should go instead of the results list
+         * (item 37), or null. PURE.
+         *   {kind:'product', href:'/products/…'}  from `exact_product.url`
+         *   {kind:'printer'}                      from `matched_printer.exact === true`
+         * Page 1 only (a pager click is a shopper browsing results on purpose).
+         * The product URL must be one of OUR product paths — a relative
+         * `/products/…` or the same path on inkcartridges.co.nz — never an
+         * arbitrary redirect target taken from a payload.
+         */
+        _exactSearchTarget(data, page) {
+            if (!data || typeof data !== 'object' || (page && page !== 1)) return null;
+            const ep = data.exact_product;
+            if (ep && typeof ep.url === 'string') {
+                let path = null;
+                try {
+                    const u = new URL(ep.url, 'https://www.inkcartridges.co.nz');
+                    if (/(^|\.)inkcartridges\.co\.nz$/.test(u.hostname)) path = u.pathname;
+                } catch (_) { path = null; }
+                if (path && /^\/products\/[^/]+\/[^/]+\/?$/.test(path)) return { kind: 'product', href: path };
+            }
+            const mp = data.matched_printer;
+            if (mp && mp.exact === true && typeof mp.slug === 'string' && mp.slug) return { kind: 'printer' };
+            return null;
+        },
+
+        /**
+         * gtag.js (render-blocking) sets <html data-landing> / <html data-finder>
+         * so the first paint already has the final h1 and the finder's space
+         * (ERR-370). They describe the URL the page LOADED with; once this
+         * controller has rendered (h1 text written, finder shown or hidden by
+         * renderLandingPrinterSearch) they would only be stale, and a pushState
+         * navigation away from a landing would keep their CSS. Dropped here.
+         */
+        _dropFirstPaintHints() {
+            const root = (typeof document !== 'undefined') ? document.documentElement : null;
+            if (!root) return;
+            root.removeAttribute('data-landing');
+            root.removeAttribute('data-finder');
+        },
+
+        /** Longest a category picker waits for brand counts before showing tiles (ERR-370). */
+        BRAND_COUNTS_WAIT_MS: 1200,
 
         /** True on /ink-cartridges and /toner-cartridges — the paid Search landings. */
         _isPaidLanding() {
@@ -1381,6 +1445,9 @@
             this.hideAllLevels();
             // CSS hook: the short-laptop compact card skips search results (ERR-326).
             document.querySelector('.shop-page')?.setAttribute('data-level', this.state.level);
+            // Before the level's own await: the finder's visibility is a fact of
+            // the URL, so it paints with the skeleton instead of shifting the grid.
+            this.renderLandingPrinterSearch(this._printerFinderBrand());
 
             // search-click-tracking-aug2026 — the click beacon is armed-OFF by
             // default. /search is a Vercel rewrite to this same shop HTML, so
@@ -1416,8 +1483,12 @@
 
             // Only update UI if this is still the current navigation
             if (this.navigationVersion === expectedVersion) {
+                // Again, now that brand rows are loaded: the label names the brand
+                // properly ("HP", not a slug-cased fallback).
+                this.renderLandingPrinterSearch(this._printerFinderBrand());
                 this.updateBreadcrumb();
                 this.updateTitle();
+                this._dropFirstPaintHints();
                 this.updateSEO();
                 this.updateFilterSortBar();
             }
@@ -1648,6 +1719,20 @@
 
                 this.renderBrands(brands);
                 await this.renderRibbonBrands();
+                // ERR-370: on a category picker (/ink-cartridges, /toner-cartridges)
+                // a brand with 0 products in that category is HIDDEN when counts
+                // land — and every tile after it jumped a slot (0.044 CLS on
+                // /toner-cartridges once the entrance fade stopped masking it).
+                // Show the grid once, after counts: the skeleton holds the space
+                // meanwhile, and a slow or failed count read never holds it
+                // longer than BRAND_COUNTS_WAIT_MS (tiles then stay, unmeasured).
+                if (this.state.category && !this.state.brand && this._brandCountsReady) {
+                    await Promise.race([
+                        this._brandCountsReady.catch(() => {}),
+                        new Promise((r) => setTimeout(r, this.BRAND_COUNTS_WAIT_MS)),
+                    ]);
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                }
                 this.elements.levelBrands.hidden = false;
             } catch (error) {
                 DebugLog.error('Failed to load brands:', error);
@@ -1790,20 +1875,78 @@
         },
 
         /**
-         * "Enter your printer model" on the paid landing pages (conversion
-         * handoff 2026-09-27 §8.1). Typeahead over GET /api/printers/search
-         * (NOT /api/search/* — no search_analytics row is written, ERR-254);
-         * each suggestion links to that printer's hub. Enter / Find submits the
-         * native form to /shop?q=…, which is the site's smart search.
+         * Example printer per brand for the finder placeholder (item 37). Real,
+         * current models; a brand not listed gets the generic wording.
          */
-        renderLandingPrinterSearch(show) {
+        PRINTER_FINDER_EXAMPLES: {
+            brother: 'Brother MFC-J4340DW',
+            canon: 'Canon PIXMA TS5360',
+            hp: 'HP OfficeJet Pro 9010',
+            epson: 'Epson WorkForce WF-2850',
+            samsung: 'Samsung Xpress M2020W',
+            kyocera: 'Kyocera ECOSYS M2540dn',
+            lexmark: 'Lexmark MS312dn',
+            oki: 'OKI C332dn',
+            'fuji-xerox': 'Fuji Xerox DocuPrint CP225w',
+            fujifilm: 'Fujifilm ApeosPort C2410SD',
+        },
+
+        /** Categories whose buyers know a PRINTER model (not ribbons, labels, rolls). */
+        PRINTER_FINDER_CATEGORIES: ['ink', 'toner', 'consumable'],
+
+        /**
+         * Where the printer finder shows, and for which brand (checklist item 37,
+         * owner 2026-10-13, P0). Returns:
+         *   ''      the paid landings /ink-cartridges, /toner-cartridges (all brands)
+         *   '<slug>' a brand page (/shop?brand=X) or a brand + printer-category
+         *           code grid (/shop?brand=X&category=ink|toner|drums)
+         *   null    everywhere else (hidden)
+         * Measured 2–16 Oct: paid visitors who TYPED their printer placed 8 orders
+         * from 108 sessions; those who only browsed the code grid placed 0 from
+         * 114. 65 of 137 first clicks on the landings were a brand tile, which
+         * opens the code grid — so the finder now leads that page too.
+         */
+        _printerFinderBrand() {
+            const level = this.state.level;
+            if (level === 'brands') return this._isPaidLanding() ? '' : null;
+            const brand = this.state.brand;
+            if (!brand) return null;
+            if (level === 'categories') return brand;
+            if (level === 'codes' && this.PRINTER_FINDER_CATEGORIES.includes(this.state.category)) return brand;
+            return null;
+        },
+
+        /**
+         * "Find your printer" (conversion handoff 2026-09-27 §8.1; item 37).
+         * Typeahead over GET /api/printers/search?q=&brand= (NOT /api/search/* —
+         * no search_analytics row is written, ERR-254); each suggestion links to
+         * that printer's page. Enter / Find submits the native form to /shop?q=…,
+         * the site's smart search.
+         *
+         * ONE section, ONE writer: it sits under the h1, outside every level, and
+         * this method is the only thing that shows, hides or relabels it.
+         * @param {string|null} brand  '' = all brands, slug = that brand, null = hide
+         */
+        renderLandingPrinterSearch(brand) {
             const section = document.getElementById('landing-printer-search');
             if (!section) return;
+            const show = brand !== null && brand !== undefined && brand !== false;
             section.hidden = !show;
-            if (!show || section.dataset.bound === '1') return;
-            section.dataset.bound = '1';
+            if (!show) return;
+            const label = document.getElementById('landing-printer-search-label');
             const input = document.getElementById('landing-printer-search-input');
             const list = document.getElementById('landing-printer-search-results');
+            const name = brand ? this.brandName(brand) : '';
+            if (label) label.textContent = brand ? `Find your ${name} printer` : 'Enter your printer model';
+            if (input) {
+                input.placeholder = 'e.g. ' + (brand
+                    ? (this.PRINTER_FINDER_EXAMPLES[brand] || `${name} model number`)
+                    : 'Brother MFC-J5930DW');
+            }
+            if (section.dataset.brand !== String(brand) && list) { list.hidden = true; list.innerHTML = ''; }
+            section.dataset.brand = String(brand);
+            if (section.dataset.bound === '1') return;
+            section.dataset.bound = '1';
             if (!input || !list || typeof API === 'undefined') return;
             let seq = 0;
             const clear = () => { list.hidden = true; list.innerHTML = ''; };
@@ -1815,7 +1958,9 @@
                 // key since BF-096 (backend 2026-10-06; measured "Brother
                 // MFC-J5930DW", "MFC J5930DW" and "MFCJ5930DW" → the same one
                 // printer), so the two-spelling fan-out is gone.
-                const resp = await API.searchPrinters(q).catch(() => null);
+                // Brand pages filter by the brand slug (live backend filter).
+                const finderBrand = section.dataset.brand || null;
+                const resp = await API.searchPrinters(q, finderBrand).catch(() => null);
                 const answered = !!(resp && resp.ok && Array.isArray(resp.data));
                 const printers = answered ? resp.data : [];
                 if (mine !== seq) return;
@@ -1871,12 +2016,10 @@
                 // anywhere (owner, 2026-09-28, ERR-290): a best-seller shows
                 // cartridges for printers the visitor does not own. The printer
                 // search and the brand picker are the whole landing.
-                this.renderLandingPrinterSearch(this._isPaidLanding());
             } else {
                 if (sectionTitle) sectionTitle.textContent = 'Select your ink cartridge or toner brand';
                 if (ribbonsSection) ribbonsSection.hidden = false;
                 if (receiptSection) receiptSection.hidden = false;
-                this.renderLandingPrinterSearch(false);
             }
 
             // WHICH BRANDS APPEAR IS DATA, NOT A LIST IN THIS FILE — and the rule
@@ -1903,10 +2046,6 @@
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--brand';
                 box.dataset.brand = brandId;
-                // Stagger inline, unbounded — the :nth-child rules this replaced
-                // stopped at 9 while the grid rendered 10, and a data-driven grid
-                // has no fixed length to enumerate. Matches renderRibbonBrands().
-                box.style.animationDelay = `${i * 30}ms`;
                 // sanitizeUrl with an EMPTY fallback, not the default '#': `logo_url`
                 // is admin-writable, and a rejected URL has to fall through to the
                 // text tile rather than emit <img src="#">, which re-requests /shop.
@@ -1932,8 +2071,10 @@
                 grid.appendChild(box);
             });
 
-            // Lazy-load product counts per brand (non-blocking, graceful on failure)
-            this._loadBrandCounts(inkBrands);
+            // Lazy-load product counts per brand (non-blocking, graceful on failure).
+            // The promise is kept so loadBrands can wait for it on a category
+            // picker, where a 0 count HIDES a tile (see below).
+            this._brandCountsReady = this._loadBrandCounts(inkBrands);
         },
 
         /**
@@ -2050,7 +2191,6 @@
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
                 box.href = `/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
-                box.style.animationDelay = `${60 + i * 30}ms`;
                 box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 grid.appendChild(box);
             });
@@ -4075,7 +4215,19 @@
                     // Hand off to the dedicated printer-products page so they
                     // get the strict view (which can fall back to brand-level
                     // recovery) instead of an ambiguous mixed result set.
-                    if (products.length === 0 && smartData?.matched_printer?.slug) {
+                    // ── Exact match ⇒ straight to it (checklist item 37 part 2) ──
+                    // The shopper named one product or one printer: open it rather
+                    // than a results list. ONLY on the backend's explicit word
+                    // (`exact_product`, `matched_printer.exact === true`) — today's
+                    // matched_printer is a best guess ("brother mfc-j4340dw" →
+                    // the MFC-J4340DW XL; "canon g7060" once → GX7060, different
+                    // ink), so without the flag nothing changes.
+                    const exactTarget = this._exactSearchTarget(smartData, requestedPage);
+                    if (exactTarget && exactTarget.kind === 'product') {
+                        window.location.replace(exactTarget.href);
+                        return;
+                    }
+                    if ((products.length === 0 || exactTarget) && smartData?.matched_printer?.slug) {
                         const p2 = smartData.matched_printer;
                         // Canonical printer URL per brand-canonical audit (May 2026):
                         // /shop?brand=<brand_slug>&printer_slug=<slug>. /smart's
@@ -5123,6 +5275,26 @@
                 case 'price_desc': arr.sort(byPrice(-1)); break;
                 case 'name_asc':   arr.sort((a, b) => nameOf(a).localeCompare(nameOf(b))); break;
                 case 'name_desc':  arr.sort((a, b) => nameOf(b).localeCompare(nameOf(a))); break;
+                case 'printer_fit': {
+                    // Item 46. Stock rank from getStockStatus (the ONE stock
+                    // reader, ERR-263): buyable 0, unknown 1, contact-us 2. Then
+                    // accessoryTier (cartridges 0, drums 1, parts 2, other 3),
+                    // then price ascending (nulls last). Where two compatibles
+                    // replace the same OEM part the cheaper one therefore leads.
+                    // Ties keep the server's order (index), so this is stable on
+                    // every engine.
+                    const stockRank = (p) => {
+                        const st = (typeof getStockStatus === 'function') ? getStockStatus(p) : null;
+                        if (!st || st.known === false) return 1;
+                        return st.class === 'in-stock' ? 0 : 2;
+                    };
+                    const tier = (p) => ((typeof ProductSort !== 'undefined' && ProductSort.accessoryTier)
+                        ? ProductSort.accessoryTier(p) : 0);
+                    const price = byPrice(1);
+                    const keyed = arr.map((p, i) => ({ p, i, s: stockRank(p), t: tier(p) }));
+                    keyed.sort((a, b) => (a.s - b.s) || (a.t - b.t) || price(a.p, b.p) || (a.i - b.i));
+                    return keyed.map((k) => k.p);
+                }
             }
             return arr;
         },
@@ -5154,6 +5326,10 @@
             // keeps the heading but drops the COMPATIBLE badge. ONE writer.
             const badge = wrap.querySelector('.products-section__badge--compatible');
             if (badge) badge.hidden = this._isReceiptListing();
+            // …and no cartridge guarantee under it (item 27a). Text is written
+            // by renderCompatGuarantee; whether it SHOWS is decided here only.
+            const guarantee = this.elements.compatibleGuarantee;
+            if (guarantee) guarantee.hidden = !guarantee.textContent || this._isReceiptListing();
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
@@ -5219,6 +5395,14 @@
             if (sortMode !== 'recommended') {
                 sortedProducts = compatLast(this._sortProductsBy(products, sortMode));
                 breaks = new Set(); // flat sorted run — no yield-group row breaks
+            } else if (this.state.level === 'printer-products') {
+                // Item 46 (checklist 2026-10-22): a printer page sells what fits.
+                // Buyable first, cartridges before drums/parts, then cheapest —
+                // inside each source section, and the Compatible section already
+                // renders above Genuine (ERR-327). Printer pages convert ~1.3%
+                // against 4.2% for other landings. Flat run, no yield-group breaks.
+                sortedProducts = compatLast(this._sortProductsBy(products, 'printer_fit'));
+                breaks = new Set();
             } else if (products.every((p) => p && p.product_type === 'receipt_roll')) {
                 // ERR-368 — the API already orders rolls by paper (bond,
                 // carbonless, thermal) then size; byCodeThenColor would regroup

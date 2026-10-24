@@ -30,7 +30,7 @@
     <title>Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz</title>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-YJXTSGLM28"></script>
-    <script src="/js/gtag.js?v=e974b7a3"></script>
+    <script src="/js/gtag.js?v=95648ec4"></script>
     <script defer src="/js/consent-banner.js?v=dbc6e734"></script>
 
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
@@ -41,10 +41,10 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
     <link rel="stylesheet" href="/css/base.css?v=86eced2a">
     <link rel="stylesheet" href="/css/layout.css?v=86f100e3">
-    <link rel="stylesheet" href="/css/components.css?v=9e9d2fd7">
-    <link rel="stylesheet" href="/css/modern-effects.css?v=e8056d82">
-    <link rel="stylesheet" href="/css/pages.css?v=6d038a29">
-    <link rel="stylesheet" href="/css/search.css?v=813db780">
+    <link rel="stylesheet" href="/css/components.css?v=514aab1c">
+    <link rel="stylesheet" href="/css/modern-effects.css?v=d08d00b1">
+    <link rel="stylesheet" href="/css/pages.css?v=9311e794">
+    <link rel="stylesheet" href="/css/search.css?v=f33bf0db">
 
     <script type="application/ld+json" id="shop-schema">
     {
@@ -212,6 +212,18 @@
                              breadcrumb row so it adds no row to the first screen. Product type only:
                              no price wording on this page (backend invariant 13). -->
                         <button type="button" class="drilldown-header__chip" id="source-filter-chip" hidden></button>
+                        <!-- Item 25 (ERR-370): Filter & Sort is INLINE beside the product line on
+                             phones (a compact outline button), not a fixed bar. Fixed at y 540-607
+                             on 390x664 it sat over the printer page's first Add and competed with
+                             it in the same blue; a row of its own pushed the first Add under the
+                             consent bar. Desktop never shows it. -->
+                        <div class="filter-sort-bar" id="filter-sort-bar" hidden>
+                            <button type="button" class="filter-sort-bar__btn btn btn--outline" id="filter-sort-open" aria-haspopup="dialog" aria-controls="filter-sort-sheet">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                                <span class="filter-sort-bar__label">Filter &amp; Sort</span>
+                                <span class="filter-sort-bar__count" id="filter-sort-count" aria-hidden="true" hidden></span>
+                            </button>
+                        </div>
                     </div>
                     <div class="drilldown-header__right-group">
                         <div class="drilldown-header__right" id="yield-banner" hidden>
@@ -222,7 +234,33 @@
                 </div>
 
 
-                <h1 class="drilldown-title" id="drilldown-title">Shop Ink Cartridges &amp; Toner NZ</h1>
+                <!-- Item 32 fix 2 (ERR-370): the FINAL h1 at first paint on the two paid
+                     landings. gtag.js (the one render-blocking script) marks
+                     <html data-landing="ink|toner"> and CSS shows the matching span, so
+                     the h1 never repaints from "Shop Ink…" when shop-page.js runs. Texts
+                     must equal shop-page.js#landingH1() (pinned by a test). -->
+                <h1 class="drilldown-title" id="drilldown-title"><span class="drilldown-title__default">Shop Ink Cartridges &amp; Toner NZ</span><span class="drilldown-title__landing drilldown-title__landing--ink">Ink Cartridges NZ — Genuine &amp; Compatible</span><span class="drilldown-title__landing drilldown-title__landing--toner">Toner Cartridges NZ — Genuine &amp; Compatible</span></h1>
+
+                <!-- "Find your printer" — the FIRST thing under the h1 on the paid
+                     landings (/ink-cartridges, /toner-cartridges) AND on every brand
+                     and brand + ink/toner/drums code-grid page (checklist item 37,
+                     owner 2026-10-13): the buyer knows their printer, not the code.
+                     Outside every level so one section serves them all; ONE writer,
+                     shop-page.js#renderLandingPrinterSearch. Suggestions come from
+                     GET /api/printers/search (brand-filtered on brand pages). -->
+                <section class="landing-printer-search" id="landing-printer-search" hidden aria-labelledby="landing-printer-search-label">
+                    <form class="landing-printer-search__form" id="landing-printer-search-form" role="search" action="/shop" method="get">
+                        <label class="landing-printer-search__label" id="landing-printer-search-label" for="landing-printer-search-input">Enter your printer model</label>
+                        <div class="landing-printer-search__row">
+                            <input class="landing-printer-search__input" id="landing-printer-search-input" name="q" type="search"
+                                   placeholder="e.g. Brother MFC-J5930DW" autocomplete="off" enterkeyhint="search"
+                                   aria-controls="landing-printer-search-results" aria-autocomplete="list">
+                            <input type="hidden" name="from" value="finder">
+                            <button class="btn btn--primary landing-printer-search__btn" type="submit">Find</button>
+                        </div>
+                        <ul class="landing-printer-search__results" id="landing-printer-search-results" hidden></ul>
+                    </form>
+                </section>
 
                 <section class="drilldown-content">
                     <!-- WITHOUT JAVASCRIPT THERE IS NO LOADING, SO THERE MUST BE NO
@@ -247,25 +285,6 @@
                         </style>
                     </noscript>
                     <div class="drilldown-level" id="level-brands" hidden>
-                        <!-- "Enter your printer model" — the FIRST thing on the paid
-                             landing pages (conversion handoff 2026-09-27 §8.1): the
-                             typical buyer owns one printer and wants one cartridge that
-                             fits it. Shown only on /ink-cartridges and /toner-cartridges
-                             (shop-page.js#renderLandingPrinterSearch); bare /shop is
-                             unchanged. Suggestions come from GET /api/printers/search. -->
-                        <section class="landing-printer-search" id="landing-printer-search" hidden aria-labelledby="landing-printer-search-label">
-                            <form class="landing-printer-search__form" id="landing-printer-search-form" role="search" action="/shop" method="get">
-                                <label class="landing-printer-search__label" id="landing-printer-search-label" for="landing-printer-search-input">Enter your printer model</label>
-                                <div class="landing-printer-search__row">
-                                    <input class="landing-printer-search__input" id="landing-printer-search-input" name="q" type="search"
-                                           placeholder="e.g. Brother MFC-J5930DW" autocomplete="off" enterkeyhint="search"
-                                           aria-controls="landing-printer-search-results" aria-autocomplete="list">
-                                    <input type="hidden" name="from" value="finder">
-                                    <button class="btn btn--primary landing-printer-search__btn" type="submit">Find</button>
-                                </div>
-                                <ul class="landing-printer-search__results" id="landing-printer-search-results" hidden></ul>
-                            </form>
-                        </section>
 
                         <div class="shop-section-card">
                             <div class="shop-section-card__header">
@@ -343,6 +362,13 @@
                                         <span class="products-section__badge products-section__badge--compatible">Compatible</span>
                                         <span id="compatible-title-text">Compatible Inkjet Cartridges</span>
                                     </h2>
+                                    <!-- Item 27a (ERR-370): ONE line for the COMPATIBLE column, the
+                                         backend's warranty.compatible_label verbatim (never typed here).
+                                         In the head row, after the heading: it wraps UNDER the heading on
+                                         a phone and sits beside it on a laptop, where a line of its own
+                                         pushed the first Add under the consent bar at 1366x599.
+                                         Text: shop-page.js#renderCompatGuarantee; shown by _syncSourceColumns. -->
+                                    <p class="products-section__guarantee" id="compatible-guarantee" hidden></p>
                                     <button type="button" class="source-jump" id="source-jump" hidden><span class="source-jump__label"><span class="source-jump__text">Click here for genuine products</span> <span aria-hidden="true">&darr;</span></span></button>
                                 </div>
                                 <p class="products-section__partial" id="receipt-rolls-partial" role="status" hidden></p>
@@ -472,13 +498,6 @@
              shop-page.js reveals the bar on product-list levels only and the
              CSS shows it inside the mobile breakpoint. Sort is client-side,
              Source is ?source= (legacy ?type= still read), In-stock is a client-side toggle. -->
-        <div class="filter-sort-bar" id="filter-sort-bar" hidden>
-            <button type="button" class="filter-sort-bar__btn btn btn--primary" id="filter-sort-open" aria-haspopup="dialog" aria-controls="filter-sort-sheet">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-                Filter &amp; Sort
-                <span class="filter-sort-bar__count" id="filter-sort-count" aria-hidden="true" hidden></span>
-            </button>
-        </div>
 
         <div class="filter-sort-sheet" id="filter-sort-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="filter-sort-heading">
             <div class="filter-sort-sheet__backdrop" data-filter-sort-close></div>
@@ -517,7 +536,7 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=bc206fbe"></script>
+    <script defer src="/js/shop-page.js?v=fbe82e00"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
@@ -527,7 +546,7 @@
     <script defer src="/js/api.js?v=5e38c906"></script>
     <script defer src="/js/seo-meta.js?v=c04a7fc4"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=94df22de"></script>
+    <script defer src="/js/utils.js?v=52270e49"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
@@ -537,7 +556,7 @@
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=e934d05a"></script>
     <script defer src="/js/products.js?v=e6591a9f"></script>
-    <script defer src="/js/search.js?v=9fded1f0"></script>
+    <script defer src="/js/search.js?v=5495ca2e"></script>
     <!-- search-click-tracking-aug2026 — POST /api/search/click for results-page
          card clicks. THIS PAGE ONLY: /search is a rewrite to this HTML, so the
          results grid lives here and nowhere else. Never add it to a page that
@@ -547,7 +566,7 @@
     <script defer src="/js/legal-config.js?v=52167958"></script>
     <script defer src="/js/footer.js?v=8f4eb2c0"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
-    <script defer src="/js/modern-effects.js?v=2c634821"></script>
+    <script defer src="/js/modern-effects.js?v=4abdb378"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

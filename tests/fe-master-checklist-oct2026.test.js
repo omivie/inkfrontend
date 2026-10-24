@@ -69,26 +69,14 @@ test('§5 the service row is GONE everywhere (owner 2026-10-13, ERR-329) — nev
 // §7 consent card
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§7 /shop (body.page-shop) moves the corner card bottom-RIGHT, lifted by the badge clip box', () => {
+/* §7 (item 7: the corner card bottom-RIGHT on /shop, bottom-LEFT elsewhere)
+ * was RETIRED by ERR-370: checklist 2026-10-22 item 24 replaced the card with
+ * the one-row bar at every width ("This replaces the per-page left/right
+ * placement from item 7"). Pinned in tests/fe-checklist-22oct-listing-2026.test.js. */
+test('§7 retired: no per-page left/right consent placement remains', () => {
     const css = stripComments(read('css/components.css'));
-    const m = /@media \(min-width: 1100px\) \{\s*body\.page-shop \.consent-banner \{([^}]*)\}/.exec(css);
-    assert.ok(m, 'scoped ≥1100 rule exists');
-    assert.match(m[1], /left: auto;/);
-    assert.match(m[1], /right: 16px;/);
-    assert.match(m[1], /bottom: calc\(16px \+ var\(--google-badge-max, 100px\) \+ 8px/,
-        'lifted by OUR clip box, not the late-settling measured height');
-    assert.match(css, /--google-badge-max: 100px;/);
-    assert.match(css, /#google-reviews-badge \{[^}]*max-width: var\(--google-badge-max\);[^}]*max-height: var\(--google-badge-max\);/,
-        'the lift and the clip are the same number');
-    assert.match(read('html/shop.html'), /<body class="page-shop">/);
-});
-
-test('§7 everywhere else (PDP, cart, checkout) keeps the bottom-LEFT card', () => {
-    const css = stripComments(read('css/components.css'));
-    assert.match(css, /@media \(min-width: 1100px\) \{\s*\.consent-banner \{\s*left: 16px;\s*right: auto;/);
-    for (const page of ['html/product/index.html', 'html/cart.html', 'html/checkout.html', 'html/payment.html']) {
-        assert.doesNotMatch(read(page), /<body[^>]*page-shop/, `${page} must not opt into the right card`);
-    }
+    assert.doesNotMatch(css, /body\.page-shop \.consent-banner/);
+    assert.match(css, /--google-badge-max: 100px;/, 'the badge clip box itself is unrelated and stays');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

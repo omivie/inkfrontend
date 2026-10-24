@@ -77,19 +77,18 @@ const ModernEffects = {
                     el.style.transform = 'none';
                     return;
                 }
+                // NOTHING ON THE FIRST SCREEN IS HIDDEN (checklist item 32 fix 1,
+                // ERR-370). `.will-animate` is opacity 0 until revealed, and an
+                // element already in view was only revealed on the next frame —
+                // or by the 2s safety net — so the first visible frame on a
+                // phone came at 1.6–3.2s even unthrottled. Elements in the
+                // viewport now never get the class; only what is below the fold
+                // reveals as it scrolls in.
+                const rect = el.getBoundingClientRect();
+                if (rect.top < window.innerHeight && rect.bottom > 0) return;
                 // Add class to enable animation (CSS handles the initial state)
                 el.classList.add('will-animate');
                 observer.observe(el);
-            });
-        });
-
-        // Mark elements that are already in view immediately
-        requestAnimationFrame(() => {
-            document.querySelectorAll('.will-animate').forEach(el => {
-                const rect = el.getBoundingClientRect();
-                if (rect.top < window.innerHeight && rect.bottom > 0) {
-                    el.classList.add('in-view', 'visible');
-                }
             });
         });
 

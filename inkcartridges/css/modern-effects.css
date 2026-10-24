@@ -129,24 +129,12 @@ body::after {
    SMOOTH PAGE TRANSITIONS
    ============================================= */
 
-/* Fade in on page load */
-@keyframes pageLoad {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-body {
-    animation: pageLoad 0.4s ease-out;
-}
-
-/* Main content fade in */
-main {
-    animation: slideUp 0.5s ease-out;
-}
+/* NO ENTRANCE ANIMATION ON THE PAGE ITSELF (checklist item 32 fix 1, ERR-370).
+   `body` faded in from opacity 0 over 0.4s and `main` slid up from opacity 0
+   over 0.5s, on every page load: nothing was visible until both finished, so
+   Lighthouse's first frame and LCP waited on decoration. Deleted, not shortened.
+   The scroll reveal below still animates content that arrives from below the
+   fold (modern-effects.js skips anything on the first screen). */
 
 @keyframes slideUp {
     from {

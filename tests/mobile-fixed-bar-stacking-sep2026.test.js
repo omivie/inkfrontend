@@ -30,11 +30,13 @@ const codeOnly = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
 
 // ─── §1 ERR-238: the consent banner must clear every fixed bottom bar ───────
 
-test('§1 the consent-banner lift covers all three sticky bars, not just the badge', () => {
+test('§1 the consent-banner lift covers both fixed bottom bars, not just the badge', () => {
     const css = codeOnly(COMPONENTS);
     const m = css.match(/body\.has-consent-banner[^{]*\{[^}]*bottom:\s*var\(--consent-banner-height[^}]*\}/g) || [];
     const joined = m.join('\n');
-    for (const sel of ['.cart-sticky-bar', '.sticky-atc', '.filter-sort-bar']) {
+    // .filter-sort-bar left this list in ERR-370 (checklist item 25): it is
+    // INLINE now, so there is nothing for the banner to paint over.
+    for (const sel of ['.cart-sticky-bar', '.sticky-atc']) {
         assert.ok(joined.includes(sel) || css.includes(`body.has-consent-banner ${sel}`),
             `${sel} must be lifted clear of the consent banner. It is position:fixed;bottom:0 at `
             + `--z-sticky (200) and the banner is --z-popover (600), so the banner paints over it. `

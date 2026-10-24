@@ -4154,16 +4154,11 @@ body.has-consent-banner {
     max-height: none;
 }
 
-/* ERR-301: below 1100px only. From 1100px the banner is a bottom-LEFT card
-   (see the end of the consent rules), so it no longer shares the badge's
-   corner and there is nothing to lift clear of — and the ad-clicks-to-orders
-   handoff (2026-10-02 §1) asks that nothing be raised over the banner's
-   legal text. Below 1100px the full-width bar still spans the corner, and
-   this lift is still what keeps Accept clickable (ERR-233). */
-@media (max-width: 1099.98px) {
+/* The full-width bar spans the badge's corner at EVERY width again (ERR-370:
+   the ≥1100px corner card is gone), so the badge is lifted clear of it at
+   every width — this lift is what keeps Accept clickable (ERR-233). */
 body.has-consent-banner #google-reviews-badge {
     bottom: var(--consent-banner-height, 0px) !important;
-}
 }
 
 /* ERR-238 — THE SAME DEFECT, THREE MORE TIMES, AND THESE THREE ARE OURS.
@@ -4174,7 +4169,7 @@ body.has-consent-banner #google-reviews-badge {
      .consent-banner   --z-popover  600   every page, every first visit
      .cart-sticky-bar  --z-sticky   200   /cart — the Checkout button
      .sticky-atc       --z-sticky   200   the PDP — the Add to Cart button
-     .filter-sort-bar  --z-sticky   200   /shop at <=768px
+     .filter-sort-bar  --z-sticky   200   /shop at <=768px (INLINE since ERR-370)
 
    Measured on production at 390x844, with the banner showing — which is the
    state EVERY first-time visitor is in, and every ad click is a first visit:
@@ -4206,8 +4201,7 @@ body.has-consent-banner #google-reviews-badge {
    second source of truth. Measured by `npm run probe:mobile-ux` (invariant F +
    the CTA hit-test), pinned by tests/mobile-fixed-bar-stacking-sep2026.test.js. */
 body.has-consent-banner .cart-sticky-bar,
-body.has-consent-banner .sticky-atc,
-body.has-consent-banner .filter-sort-bar {
+body.has-consent-banner .sticky-atc {
     bottom: var(--consent-banner-height, 0px);
 }
 
@@ -4599,102 +4593,72 @@ a.drilldown-box.drilldown-box--ribbon,
     min-height: 44px;
 }
 
-/* ≥769px shows the long wording; the short line is for phones only. */
-.consent-banner__body-short { display: none; }
+/* ONE ROW AT EVERY WIDTH — a one-line summary + privacy link beside inline
+   Decline/Accept.
 
-/* Below the tablet breakpoint: ONE ROW — a one-line summary + privacy link
-   beside inline Decline/Accept (conversion handoff 2026-09-23 D-P0-2).
+   Phones first (conversion handoff 2026-09-23 D-P0-2): the stacked bar was
+   148px on a 390x664 iPhone, 22% of the screen. The fix was the copy, not the
+   layout: heading and long body hidden, a one-sentence summary shown.
 
-   This used to stack text over a full-width button row, 148px tall on a
-   390x664 iPhone: 22% of the screen, the band the Add button scrolls through.
-   The stack existed because the LONG body left a ~120px column beside the
-   buttons (ERR-218). The fix is the copy, not the layout: the heading and long
-   body hide here and a one-sentence summary shows, which fits two short lines
-   beside two 44px buttons — measured by `npm run probe:consent-banner`.
-   The long wording is still the policy; /privacy is one tap away. */
-@media (max-width: 768px) {
-    .consent-banner {
-        gap: var(--spacing-sm, 8px);
-        padding-top: 6px;
-        padding-bottom: calc(6px + var(--safe-bottom, 0px));
-        padding-left: 12px;
-        /* padding-right keeps the base rule's badge-aware calc(). */
-    }
-
-    .consent-banner__heading,
-    .consent-banner__body-long {
-        display: none;
-    }
-
-    .consent-banner__body-short { display: inline; }
-
-    .consent-banner__body {
-        margin: 0;
-        font-size: 0.875rem;
-        line-height: 1.3;
-        color: var(--steel-800, #1e293b);
-    }
-
-    .consent-banner__btn {
-        padding: 0 12px;
-    }
+   Desktop since 2026-10-24 (checklist item 24, ERR-370): the ≥1100px 360x163
+   CORNER CARD (ERR-301, item 7) stayed open for 85% of paid desktop visitors
+   and covered the 5th/6th first-row Add on series and printer pages, the
+   search dropdown's first Add and the cart's "Add 2 more" pill — and it was
+   the LCP element on /ink-cartridges, series and printer pages. Every width now
+   gets this bar: ≤64px tall, full width at the bottom, Decline and Accept
+   EQUAL weight (same size, same style — neither is the "default" choice).
+   The long wording is still the policy; /privacy is one tap away. Measured by
+   `npm run probe:consent-banner` and `npm run probe:fe-master`. */
+.consent-banner {
+    gap: var(--spacing-sm, 8px);
+    padding-top: 6px;
+    padding-bottom: calc(6px + var(--safe-bottom, 0px));
+    padding-left: 12px;
+    /* padding-right keeps the base rule's badge-aware calc(). */
 }
 
-/* ERR-301 — DESKTOP: a corner card, bottom-LEFT, never a full-width bar.
-   ad-clicks-to-orders handoff (2026-10-02 §1): the 61px bar plus Google's
-   badge lifted onto it covered the PDP Add to Cart at 1366x768 and pushed it
-   off the first screen at 1366x599 (measured: badge 643-707, bar 707-768, Add
-   703). At >= 1100px wide the PDP buy box sits right of x 380 and the
-   gallery owns the bottom-left corner. On /shop the card does sit over the
-   lower part of grid column 1 until the visitor answers it — the trade the
-   owner accepted (2026-10-02); the probe reports those columns separately. The badge keeps bottom-right, so
-   the two never share a corner (the ERR-233 collision cannot recur) and
-   nothing is raised over the banner's text, which stays in full: heading,
-   long wording, privacy link. body padding-bottom still reserves the card's
-   MEASURED height (consent-banner.js ResizeObserver), so the end of every
-   page can scroll clear of it. Measured by `npm run probe:ad-visitor-dropoff`
-   and `npm run probe:consent-banner`. */
-@media (min-width: 1100px) {
-    .consent-banner {
-        left: 16px;
-        right: auto;
-        bottom: calc(16px + var(--safe-bottom, 0px));
-        width: 360px;
-        max-width: calc(100vw - 32px);
-        flex-direction: column;
-        align-items: stretch;
-        gap: 10px;
-        padding: 14px 16px;
-        border: 1px solid var(--color-border, #e5e7eb);
-        border-radius: var(--radius-lg, 12px);
-        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
-        transform: translateY(calc(100% + 24px));
-    }
-    .consent-banner.is-open { transform: translateY(0); }
-    .consent-banner__actions { justify-content: flex-end; }
+.consent-banner__heading,
+.consent-banner__body-long {
+    display: none;
 }
 
-/* FE master checklist 2026-10-05 item 7 — on /shop (series pages and printer
-   hubs: body.page-shop) the corner card moves bottom-RIGHT. Ads land there and
-   the first cards sit in grid column 1, where the bottom-left card covered the
-   first card's price and Add at 1280x551, 1366x599, 1536x695 and 1920x911.
-   Google's reviews badge owns the bottom-right corner at z-index 2^31-1, so
-   the card sits ABOVE it, never under it: the ERR-233 collision cannot recur
-   and Accept (bottom-right of the card) is never covered. The lift is the
-   badge's CLIP BOX (--google-badge-max, our own max-width/height), NOT
-   footer.js's measured --google-badge-height: that is published only once
-   the badge settles (~6.5s), and probe:fe-master caught the card sitting
-   under the 100x100 transient box at 1280x551 before it did.
-   SCOPED TO /shop ON PURPOSE: on a PDP the buy box (Add to Cart) is the right
-   column, so a right card would cover Add — the PDP keeps the left corner
-   (ERR-301). Measured by `npm run probe:fe-master`. */
-@media (min-width: 1100px) {
-    body.page-shop .consent-banner {
-        left: auto;
-        right: 16px;
-        bottom: calc(16px + var(--google-badge-max, 100px) + 8px + var(--safe-bottom, 0px));
-    }
+.consent-banner__body-short { display: inline; }
+
+.consent-banner__body {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.3;
+    color: var(--steel-800, #1e293b);
 }
+
+.consent-banner__btn {
+    padding: 0 12px;
+    min-width: 88px;
+}
+
+/* EQUAL WEIGHT (item 24): Decline is not a ghost beside a filled Accept. */
+.consent-banner__btn--accept,
+.consent-banner__btn--decline {
+    background: var(--white-primary, #fff);
+    border: 1px solid var(--cyan-primary, #267FB5);
+    color: var(--cyan-primary, #267FB5);
+}
+
+@media (min-width: 769px) {
+    .consent-banner { justify-content: center; padding-left: 24px; }
+    .consent-banner__text { flex: 0 1 auto; }
+}
+/* A mouse needs no 44px finger target (WCAG 2.5.8 asks 24px): 36px buttons
+   make the bar 45px, which is what keeps the first-row Add clear of it on a
+   1280x551 laptop. Touch screens of any width keep 44px. */
+@media (min-width: 769px) and (pointer: fine) {
+    .consent-banner { padding-top: 4px; padding-bottom: calc(4px + var(--safe-bottom, 0px)); }
+    .consent-banner__btn { min-height: 36px; }
+}
+
+/* The ≥1100px bottom-left corner card (ERR-301) and its /shop bottom-right
+   variant (FE master checklist 2026-10-05 item 7) were DELETED by ERR-370:
+   checklist item 24 replaced both with the one-row bar above. */
 
 /* FE master checklist 2026-10-05 item 13 — the guest account card shows the
    order's email READ-ONLY. It must not look like a box to type in. */

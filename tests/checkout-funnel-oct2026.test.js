@@ -282,10 +282,11 @@ test('§8.2 checkout button directly after the money rows; Continue Shopping is 
     assert.match(css, /body:has\(#cart-layout\) \.toast-container \{ top: var\(--spacing-6\); bottom: auto; \}/,
         'a desktop toast landed on the moved button for ~6s');
     // 1280x551 / 1366x599 / 1536x695: the money rows alone end below the fold,
-    // so the sticky bar serves laptops too — right-aligned, clear of the
-    // bottom-LEFT consent card, and not lifted over it.
+    // so the sticky bar serves laptops too — right-aligned. Since ERR-370 the
+    // consent banner is the full-width bar at every width (no corner card), so
+    // the sticky bar rides ABOVE it via the shared lift; the ≥1100 cancel is gone.
     assert.match(css, /@media \(min-width: 769px\) \{\s*\.cart-sticky-bar \{ display: block; \}\s*\.cart-sticky-bar__inner \{ justify-content: flex-end; \}/);
-    assert.match(css, /@media \(min-width: 1100px\) \{\s*body\.has-consent-banner \.cart-sticky-bar \{ bottom: 0; \}/);
+    assert.doesNotMatch(css, /body\.has-consent-banner \.cart-sticky-bar \{ bottom: 0; \}/);
 });
 
 // ═══ §8.5 / item 11 — polish ═══════════════════════════════════════════════════
