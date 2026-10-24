@@ -21,14 +21,14 @@
  * arrives weeks later as a decision made on a bad figure.
  *
  *   1. AN UNSCOPED EVENT REACHES THE GOOGLE ADS ACCOUNT. gtag.js configures
- *      TWO destinations — G-SDQELG0FGD and AW-18032498762 — and an event
- *      with no `send_to` goes to both. (Until 2026-09-20 there were three: a
- *      second GA4 property G-YJXTSGLM28 that appeared nowhere else in the repo
- *      was configured and never fed, so it silently received a duplicate of
- *      every unscoped custom event while costing ~187KB of bundle on every page
- *      load. Removed on the owner's confirmation — ERR-276. §2 now pins the
- *      destination list as an EXACT SET so it cannot drift back, and so that a
- *      swap of one id for another cannot pass a count.) Every custom event on
+ *      TWO destinations — G-YJXTSGLM28 and AW-18032498762 — and an event
+ *      with no `send_to` goes to both. (ERR-276 removed a second GA4 property
+ *      for costing ~187KB of bundle per page and duplicating every unscoped
+ *      event; on 2026-10-24 (ERR-369) the ONE GA4 property moved from
+ *      G-SDQELG0FGD to G-YJXTSGLM28, the owner's, which the server already
+ *      feeds with `purchase`. §2 pins the destination list as an EXACT SET so
+ *      it cannot drift back, and so that a swap of one id for another cannot
+ *      pass a count.) Every custom event on
  *      this site (contact_form_submit, faq_open, quote_started) omits it. For an
  *      ecommerce-shaped event that would put add-to-cart hits into the account
  *      the owner bids from, against the backend's own acceptance criterion that
@@ -86,11 +86,16 @@ const JS = (rel) => fs.readFileSync(path.join(INK, 'js', rel), 'utf8');
 const GTAG_SRC = JS('gtag.js');
 const GTAG_CODE = stripComments(GTAG_SRC);
 
-const PROPERTY = 'G-SDQELG0FGD';
+const PROPERTY = 'G-YJXTSGLM28';
 const ADS_TAG = 'AW-18032498762';
-/** Removed 2026-09-20 (ERR-276). Kept named so the guards below can say WHICH
+/** Kept named so the guards below can say WHICH
  *  id must never come back, rather than asserting against an anonymous regex. */
-const REMOVED_PROPERTY = 'G-YJXTSGLM28';
+/* RE-POINTED 2026-10-24 (ERR-369, checklist item 45). G-YJXTSGLM28 — removed
+ * by ERR-276 as "never fed" — is the property the owner can open and the one the
+ * server feeds with `purchase`, so it is now the ONE property above. The old
+ * browser property G-SDQELG0FGD sits in an account the owner cannot see; it is
+ * the id that must never come back (two GA4 bundles = the ERR-276 cost). */
+const REMOVED_PROPERTY = 'G-SDQELG0FGD';
 
 /** Every .html in the deployed tree. */
 function htmlFiles(dir = INK, out = []) {
@@ -263,8 +268,8 @@ test('§2 the removed second GA4 property is gone from the whole repo', () => {
      * existed. Prose is allowed to name it (this test does); a `config` call or
      * a `send_to` is not. */
     assert.doesNotMatch(GTAG_CODE, new RegExp(REMOVED_PROPERTY),
-        `${REMOVED_PROPERTY} must not appear in gtag.js executable code — it was `
-        + 'removed 2026-09-20 (ERR-276) because it was configured and never fed.');
+        `${REMOVED_PROPERTY} must not appear in gtag.js executable code — the browser `
+        + 'tag moved to the owner\'s property on 2026-10-24 (ERR-369); two GA4 configs = two bundles (ERR-276).');
 
     for (const file of htmlFiles()) {
         assert.ok(!fs.readFileSync(file, 'utf8').includes(REMOVED_PROPERTY),
@@ -299,7 +304,7 @@ test('§2 no event can reach the Ads account or the orphan second property', () 
     for (const [, name, params] of calls) {
         const to = String(params.send_to);
         assert.ok(!to.includes('AW-'), `${name} must never route to an Ads tag (got ${to})`);
-        assert.ok(!to.includes(REMOVED_PROPERTY), `${name} must not feed the removed second property (ERR-276)`);
+        assert.ok(!to.includes(REMOVED_PROPERTY), `${name} must not feed the retired browser property (ERR-369)`);
     }
 });
 

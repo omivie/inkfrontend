@@ -1430,28 +1430,37 @@
         },
 
         /**
-         * "Did you mean name@gmail.com?" for a domain one slip away from a
-         * common one (item 15's recommended typo hint). A HINT only: it never
-         * blocks, because only the backend decides an address is invalid.
+         * "Did you mean name@gmail.com?" for a domain a slip or two away from a
+         * provider our customers use (item 15; widened by item 47, ERR-369). A
+         * HINT only: it never blocks, because only the backend decides an
+         * address is invalid.
          *
-         * A domain matches when it is one edit away (substitution, insertion,
-         * deletion or a swap of two neighbours: gmail.con, gmail.cmo,
-         * gmail.comm, gmial.com, gmai.com, hotmial.com) or is a dot-boundary
-         * prefix of a known one (xtra.co, gmail). An exact match gets nothing.
+         * The backend's version (checklist 2026-10-22 item 47), verbatim:
+         *  - TWO slips allowed when the provider name is 5+ letters (gial.com ->
+         *    gmail.com is a dropped m plus a swap, which one slip missed — the
+         *    owner typed it and got no hint); ONE for xtra and live, where two
+         *    would flag real business domains (astra.co.nz, ultra.co.nz).
+         *  - The NEAREST provider wins, not the first listed (hotmal.co.nz ->
+         *    hotmail.co.nz, not hotmail.com); a tie goes to the more common one.
+         *  - A dot-boundary prefix (gmail, xtra.co) still completes.
+         * Run by the backend over all 92 domains in orders, accounts and the
+         * suppression list: it hints on exactly one, `gmail.ocm` (a real typo).
          *
          * PURE. @returns {string|null} the suggested full address
          */
         suggestEmailDomain(email) {
-            const DOMAINS = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'icloud.com', 'xtra.co.nz'];
+            // Most-used first: a tie goes to the more common provider.
+            const DOMAINS = ['gmail.com', 'xtra.co.nz', 'hotmail.com', 'yahoo.com', 'yahoo.co.nz', 'outlook.com',
+                'icloud.com', 'live.com', 'hotmail.co.nz', 'outlook.co.nz'];
             if (typeof email !== 'string') return null;
             const at = email.lastIndexOf('@');
             if (at < 1) return null;
             const local = email.slice(0, at).trim();
             const domain = email.slice(at + 1).trim().toLowerCase();
             if (!local || !domain || DOMAINS.includes(domain)) return null;
-            // Optimal string alignment distance, capped: we only care about ≤ 1.
-            const within1 = (a, b) => {
-                if (Math.abs(a.length - b.length) > 1) return false;
+            // Optimal string alignment distance (one edit = substitution, insertion,
+            // deletion or a swap of two neighbours).
+            const osa = (a, b) => {
                 const d = [];
                 for (let i = 0; i <= a.length; i++) {
                     d[i] = [i];
@@ -1464,11 +1473,19 @@
                         }
                     }
                 }
-                return d[a.length][b.length] <= 1;
+                return d[a.length][b.length];
             };
-            const hit = DOMAINS.find(k => within1(domain, k))
-                || DOMAINS.find(k => k.startsWith(domain + '.'));
-            return hit ? local + '@' + hit : null;
+            // Two slips allowed when the provider's name is 5+ letters (gial.com ->
+            // gmail.com is a dropped m plus a swap); one for xtra and live, where two
+            // would catch real business domains (astra.co.nz, ultra.co.nz).
+            let best = null, bestDist = Infinity;
+            for (const k of DOMAINS) {
+                const max = k.indexOf('.') >= 5 ? 2 : 1;
+                const dist = osa(domain, k);
+                if (dist <= max && dist < bestDist) { best = k; bestDist = dist; }
+            }
+            best = best || DOMAINS.find(k => k.startsWith(domain + '.'));
+            return best ? local + '@' + best : null;
         },
 
         /** Paint or hide the typo hint under the email field. */

@@ -1,361 +1,144 @@
-# FE master checklist: finish and verify (October 2026)
+# FE checklist: what to build next (updated 22 October 2026)
 
-**This is the one file to work from.** It replaces the October storefront handoffs, which are kept for history only:
+**This is the one file to work from.** It has every open item with its full spec, the status of every item so far, the backend changes you need to know about, and the copy rules. The backend side of every item is already live on `api.inkcartridges.co.nz`.
 
-- `ad-clicks-to-orders-FE-handoff-oct2026.md`
-- `ad-visitor-dropoff-FE-handoff-oct2026.md`
-- `paid-traffic-conversion-FE-handoff-oct2026.md`
-- `conversion-patch-ready-to-paste-oct2026.md`
-- `cro-search-quote-points-FE-handoff-oct2026.md`
-- `backend-audit-fe-handoff-oct2026.md`
-- `google-reviews-link-FE-handoff-sep2026.md`
-- `fe-recheck-open-items-oct2026.md`
+Screenshots for items 22–32 are in the repo folder `docs/storefront/ad-landing-cro-oct2026-09/`. Ask for them if you do not have repo access. The file names are quoted in each item.
 
-Everything needed is copied in below, so you should not need to open them.
+**Goal (owner):** a shopper who clicks an ad lands on the exact product they searched for, and gets from there to a paid order with no friction.
 
-**Goal (owner):** a shopper who clicks an ad lands on the exact product they searched for, and gets from there to a paid order with no friction. We do not win on price, so we win on service, speed and an effortless checkout.
+### 22 October audit: what to ship first
 
-**State on 5 October 2026** (live check of the www build of 4 Oct, 19:20 UTC): most of the earlier work is live; Part 2 lists what to keep working. Part 1 is what is left. The backend side of every item is already live on `api.inkcartridges.co.nz`.
+The owner approved a four-week plan on 22 Oct after a full audit of ads, site, SEO and competitors. The site converts non-ad visitors well (6.2% of sessions since 5 Oct; Stripe 40 of 40), so the FE work that matters most is the work that helps paid and printer-page visitors find a product they can buy. In order:
 
-**When you deploy:** tell the backend the deploy time. We re-run the checks in Part 4 the same day.
+- **Week 1:** item 37 (printer finder first on brand pages: paid visitors who type their printer buy 8.3% of the time, those who only browse the brand grid 2.9%); item 35 (privacy page names the ad tags; compliance); items 43 and 33 (the `grid_ready`, grid `add_to_cart` and `client_error` beacons, without which the 17 Nov landing-test read is blind).
+- **Week 2:** item 38 (one-click "Remind me": 2 of 223 orders have reminder consent today); item 45 (GA4 `G-YJXTSGLM28`); item 34 (`gbraid` / `wbraid` on orders); item 46 below (printer pages).
+- **Weeks 2–3:** item 32 fix 1 (no first-screen fade-ins), item 25, item 23, and checkout "Continue" scrolling to the field that blocks it.
+
+### Item 46 (P1, new 22 Oct): printer pages sell what fits
+
+Printer pages are where printer searches, and most of the growth in free Google clicks, now land, and they convert about 1.3% against 4.2% for other landings. On the printer page (`/shop?brand=…&printer_slug=…`):
+
+1. List in-stock compatible cartridges first (cheapest first), then genuine. Where two compatibles replace the same OEM part, show the cheaper one first.
+2. Every card carries its price and an Add to cart button.
+3. Tell us when it ships: the backend bot prerender (`/api/prerender/printer/…`) must list the products in the same order, because the page bots see and the page people see must match.
 
 ---
 
-## Status after the live check on 6 October 2026
+## Start here: the order of work
+
+1. **Item 38 (P1, small, owner 15 Oct: repeat customers):** a one-click "Remind me" button on the order confirmation page. Item 19's checkout box works, but 0 of 20 paid orders since 7 October ticked it, and a first-time buyer can only get a reorder reminder after saying yes.
+2. **Item 37 (P0, owner 13 Oct):** "Find your printer" first on every brand and category page, and site search goes straight to the printer or product the shopper named. Do this first.
+   **Item 35 (P1, small, compliance):** the privacy page must disclose the Google Ads and Microsoft Advertising tags. Do this first: it is copy only.
+   **Item 33 (P1, small):** report the shop drilldown's error state. An ad visitor hit it on 10 October and nothing recorded why.
+   **Item 34 (P1, small):** send the iPhone click ID (`gbraid` / `wbraid`) with the order. The backend accepts it now.
+   **Item 45 (P1, one line, owner 17 Oct):** send the site's GA4 data to `G-YJXTSGLM28`, the property the owner can open and the one that already receives every purchase.
+3. **Items 22–27 (P1):** make ad landings convert. **Item 32 fixes 1–2 (P1, small):** the first screen is invisible until the entrance animations finish.
+4. **Item 16 (remaining part) and item 20.**
+5. **Items 28–31 and the rest of 32 (P2).**
+6. **Item 18** (admin page).
+7. **Item 13:** built. It needs one real guest order from the owner, and FE work only if that order shows a problem.
+
+## Status of every item (live check of 9 October)
+
+| Item | What | Status |
+|---|---|---|
+| 1 | Remove the "I authorize this payment" tick | Done |
+| 2 | Apple Pay / Google Pay from the cart | Done (`cartWallet: true`) |
+| 3 | Cart: Proceed to Checkout on the first screen | Done |
+| 4 | One shipping figure, inside the total | Done |
+| 5 | Service row next to Add to Cart | Done |
+| 6 | Reward points next to the price | Done |
+| 7 | Consent card off the first series card | Partly done. The card still covers the 5th and 6th first-row Adds at 1366×768. **Replaced by item 24.** |
+| 8 | Delivery times, South Island 1–3 business days | Done (holds) |
+| 9 | Proceed to Checkout in under 1 second | Done (113 ms desktop) |
+| 10 | "Download PDF quote" | Done |
+| 11 | Polish (address search, region label) | Done |
+| 12 | `/cart?add=` fills the cart | Done |
+| 13 | One-step account on the order confirmation page | Built; needs one real guest order (owner) |
+| 14 | Cart unit price follows the volume price | Done (FE measured 7 Oct) |
+| 15 | Catch a bad email at checkout, not at Pay | Done (FE measured 7 Oct) |
+| 16 | Our compatible version on genuine product pages | Live. **Open: the page-yield line** (see item 16 below) |
+| 17 | Cart quantity stops at stock | Done (FE measured 7 Oct) |
+| 18 | Admin: "Negative keyword suggestions" page | **Open** |
+| 19 | Reorder-reminder box on `/checkout` | Done (checked in code 15 Oct: card and PayPal both send `reminder_consent: true`). 0 of 20 orders ticked it, so item 38 asks again after payment |
+| 20 | Cart wallet button appears with the page | Live on mobile; timing not measurable without a real wallet. **Open** |
+| 21 | Series page honours `&source=` | Done |
+| 22–32 | Ad-landing CRO | **Open** (full specs below; 32 re-specified 18 Oct, fixes 1–2 now P1) |
+| 33 | Shop drilldown error state sends `client_error` | **New, open** (12 Oct) |
+| 34 | Checkout sends `gbraid` / `wbraid` beside `gclid` | **New, open** (12 Oct); backend live |
+| 35 | Privacy page discloses the Google Ads + Microsoft Advertising tags | **New, open** (13 Oct); backend prerender done |
+| 36 | Series pages: Google rates their landing experience below average | **New, open** (13 Oct) |
+| 37 | "Find your printer" first on brand/category pages; search goes straight to the exact printer/product | **New, open, P0** (13 Oct) |
+| 38 | Order confirmation page: one-click "Remind me when it's time to reorder" | **New, open, P1** (15 Oct); backend live |
+| 39 | Admin: Retention panel (do customers come back?) | **New, open** (15 Oct); backend live |
+| 40 | Reorder reminders for signed-in customers (product page + account page) | **New, open, P2** (15 Oct); backend live once deployed |
+| 41 | How-to guides (`/guides/...`) | **New, open, P2** (15 Oct); content plan ready |
+| 42 | SEO housekeeping: permanent apex redirect, noindex private and search pages, printer-page description | **New, open, P2** (15 Oct) |
+| 43 | Tracking: `grid_ready`, Add on listing grids, session id on cart requests, test browsers skip the beacon | **New, open, P1** (17 Oct) |
+| 44 | Regression check: series/product pages, 27 vs 29 Sep builds | **New, open, P1** (17 Oct) |
+| 45 | GA4: configure `G-YJXTSGLM28` instead of `G-SDQELG0FGD` (one property for visits and purchases, owned by the owner) | **New, open, P1** (17 Oct); no backend change |
+| 46 | Printer pages: in-stock compatibles first, price and Add on every card | **New, open, P1** (22 Oct); backend prerender follows the FE order |
+| 47 | Checkout email hint misses two-slip typos (`gial.com`) | **New, open, P1, small** (22 Oct); no backend change |
+
+---
+
+## Why this matters now
+
+- Since 9 October, Google Ads bids on **profit only**: it pays for a click only what the order behind that click keeps. More orders from ads now have to come from the **page converting better**, not from higher bids.
+- Search ad clicks convert at **5.8%**. Ads break even at about **12.4%**. **54%** of ad visitors leave after one page.
+- Ad buyers are almost all first-time customers (71 of 77). Most decide in one sitting: 59 of 71 order within an hour of the click. Orders cluster just above the **$100 free-shipping line** (median $111). Baskets of **$200+** keep $53 each; no order under $100 kept more than $26.
+- Ad clicks land on:
+  - `/ink-cartridges` and `/toner-cartridges`;
+  - series pages `/shop?brand=…&category=…&code=…`, including `&source=compatible|genuine` and `&pack=value_pack`;
+  - printer pages and product pages.
+
+  On 9 October the cartridge-code searches were switched back on: HP 63, 955 and 564, Brother TN2530 and 72 more families. These were the best-converting searches in September, and they land on **series pages**, so those pages now carry more of the paid traffic.
+
+## What changed on the backend on 16 October
+
+Nothing here needs FE work unless it says so.
+
+1. **Order email:** one reminder ask only ("Remind me when it's time to reorder"). The "Reorder on a schedule" block is gone; old emails' links still work.
+2. **"Remind me" after an unsubscribe:** pressing it switches the customer's reorder reminders back on, and tells them plainly when something else (a bounced address, an unsubscribe from all our emails) still stops reminders. **FE:** item 38 shows the matching line (new response fields).
+3. **Reorder links in emails** now open a short confirm page before anything goes in the cart, so an email scanner cannot fill a cart. **FE:** item 40, point 4.
+4. **Product titles:** "High Yield" / "High Capacity" now come from the part number only. Standard toners and drums no longer carry them (154 titles changed). No FE change.
+
+## What changed on the backend on 15 October
+
+Nothing here needs FE work unless it says so.
+
+1. **Prices (14 Oct):** 175 single prices were cut to just under the cheapest comparable NZ price, never below a 25% gross margin, and 67 value packs were re-priced to match. No FE change.
+2. **Shipping email:** it now carries the same "Remind me when it's time to reorder" button as the order and day-1 emails.
+3. **Refill reminder and follow-up emails:** rewritten to one product list at the customer's own price and one reorder button, with a plain subject such as "Running low on Brother LC233?".
+4. **Order email:** the scheduled-reorder block no longer says "get this order again automatically" (nothing orders by itself). It now reads "Reorder on a schedule … Nothing is ordered or charged until you check out".
+5. **Product page titles and descriptions (search results):** titles now carry the code people search ("HP 62 Ink Cartridge Black", not "HP 62BK …"), titles cut mid-word by an old generator are replaced, and printer-page descriptions name only the sources listed and end on a whole sentence. Built in the backend; nothing to do unless the SPA writes its own printer description (item 42).
+6. **New:** items 38 (confirmation page), 39 (admin Retention panel), 40 (reorder reminders), 41 (guides) and 42 (SEO housekeeping) below.
+
+## What changed on the backend on 9 October
+
+Nothing here needs FE work unless it says so.
+
+1. **Cart trust chip:** `trust_signals.shipping_promise.label` now reads "Dispatched same day in Auckland metro (order by 2pm)". It used to read "Same-day dispatch before 2pm", which claimed same-day dispatch everywhere. **FE check:** the text is longer than before, so make sure the cart chip wraps cleanly at 390 px.
+2. **Value packs GCART069HCMY and GCART069HKCMY:** their `compare_price` is cleared, so no "Save $X" shows on them any more. The old figure was false: these packs cost more than buying the singles.
+3. **Prices:** 247 single prices were put back to their pre-cut levels, and 92 value packs were re-priced to match. No FE change; cached responses expire within 5 minutes.
+4. **Day-1 email:** it now asks "Remind me when it's time to reorder", using the same signed link as the order email. The checkout box (item 19) is still the main way a first-time buyer can say yes.
+5. **Refill follow-up emails:** these now go only to repeat buyers or to customers who said yes. Before, they reached one-order buyers who never agreed.
+
+## Copy rules for every new piece of text
 
-Checked in a fresh browser session (first-time visitor, consent banner open) at 1366×768, 1366×599 and 390×664, plus the live JS.
+- **No price comparisons or superlatives:** no "cheapest", "lowest", "best price", "price match", "save vs …", percentages against rivals, rival names, star ratings or review counts (invariant 13; the account was suspended over this in May 2026).
+- **Same-day dispatch:** always say **Auckland metro**, and take the cutoff from `GET /api/site/trust` (`shipping_promise`): it has been **12pm (noon) NZT on a business day since 12 October**, not 2pm. Never type the time into the page.
+- **Free shipping:** always say **over $100**.
+- **Fit and guarantees:** never say "guaranteed fit". The 30-day satisfaction guarantee covers **compatible** products only. Genuine products carry the manufacturer's warranty.
+- **Trust facts** (returns, guarantee, dispatch, founded year, GST invoice) come from `GET /api/site/trust`. Never type the numbers into the page.
 
-**Done:** 1 (no authorize tick), 4 (cart "Estimated total" includes shipping; checkout shows a single estimate), 11 (address search asks for 8; region label), 12 (`/cart?add=` filled CLI681XXLC ×2 + CLI681XXLBK ×1, cleaned the URL, no double on reload), the cart half of 6 ("Points to be earned: 89 points"), and the desktop half of 3 (Proceed to Checkout on the first screen, Continue Shopping is a text link).
+---
 
-**Code shipped, needs a real-device test:** 2 (`cart-wallet.js` mounts the Express Checkout Element on the cart; Apple Pay cannot render in a test browser) and 13 (the sign-up box is in `order-confirmation-page.js`, but nothing reads `next_order_offer` yet).
+## Open items: full specs
 
-**Still open:**
-- **3, phones:** at 390×664 "Proceed to Checkout" sits at 718 px, below the screen, with no sticky bar after the banner is answered.
-- **5:** no service row next to Add to Cart on the PDP, and none under the H1 on series pages.
-- **6, PDP:** no "Earn N reward points" near the price.
-- **7:** the consent card is still bottom-LEFT (left 16 px) and covers the first series card's Add at 1366×599 (`elementFromPoint` misses it).
-- **8:** `/shipping` still shows South Island "2–4 working days" (`js/legal-config.js` line 149). `/faq` changed the visible answer but NOT its FAQPage JSON-LD, which still says 2–4: the two must match word for word (Google treats a mismatch as cloaking), so this is now worse than before. `SPEC_DELIVERY_LABEL = '1–4 business days NZ-wide'` is still in `js/product-detail-page.js`.
-- **9:** the click reaches `/checkout` in 1.29 s (was 3.0 s; target under 1 s).
-- **10:** no "Download PDF quote" in the cart or on checkout.
-- **13:** show `next_order_offer` from `GET /api/orders/:orderNumber` when present.
-- **14 (new, owner report 6 Oct):** the cart's unit price stays at retail when a volume rung is reached, and the summary mixes two quantities for about 1.5 s after each + or −.
-- **15 (new, P0, 6 Oct):** checkout lets an email the backend has already rejected through to Pay, where the order is refused and Pay appears to do nothing. It nearly lost a $486.81 order.
+### 16. P1: the remaining part of "our compatible version" on genuine product pages
 
-## Status after the live check of the FE deploy (6 Oct, afternoon)
-
-Checked on www after the FE deploy of ~23:15 UTC 5 Oct, first-time visitor, consent banner open. Backend answers to the FE replies: `fe-replies-oct2026-backend-response.md`.
-
-**Done:** 1, 3 (1366×768: button at y 665–710; 390×664: sticky bar at y 527–599, clickable), 4, 5 (PDP row under Add; series row under the H1 at y 263), 7 (first series Add clickable at 1366×599 with the card at the right), 8 (no 2–4 / 1–4 on any page; all 6 `/faq` answers match the JSON-LD), 9 (click → `/checkout` commits in 117 ms), 10 (on the cart), 11, 12.
-
-**Built, needs the owner's real test:** 13 (a real guest order).
-
-**2: SHIP IT NOW (owner, 6 Oct).** The owner has waived the real-device test order and wants the cart wallet live for every shopper. In `js/config.js` set `DARK_FEATURES.cartWallet: true` and deploy. Nothing else is needed: Stripe has `www.inkcartridges.co.nz` active for Apple Pay and Google Pay, the CSP carries every Stripe/Link entry, and BF-100 needs no change. The backend has no lever for this flag (`/api/settings` only fills `Config.settings`). After the deploy, tell the backend; we will watch the first wallet charges in Stripe (there have been none, ever, on any page) and report any `cart-wallet` failure states.
-
-**Still open:**
-- **6, PDP:** "Earn 58 reward points ($0.58) on this order" is at y 1183 on 1366×599 (price y 418, Add y 497). Move it next to the price.
-- **14:** not started (unit price still retail; `PUT` cart not adopted).
-- **15:** not started (`test@gmail.con` passes checkout). P0.
-- **16 (new, 6 Oct):** show our compatible version under Add to Cart on genuine product pages (`compatible_alternatives`, live).
-
-## Status after the FE deploy of 6 Oct (evening), checked 7 Oct
-
-Answer to the FE's reply: `fe-6oct-combined-reply-backend-response-oct2026.md`.
-
-**Done:** 2, 6, 14, 15, 16, 17. These are the FE's measurements. On 7 Oct we re-measured 6 and 16 in a browser, and checked 2 (`cartWallet: true`) and 17 in the live JS.
-
-**Still open:**
-- **PDP fold on compatible pages:** CTN2030BK at 1280×551 has Add at y 548–596, below the screen. The Part 2 rule covers every PDP.
-- **13:** needs one real guest order (owner).
-- **18 (new, admin):** the "Negative keyword suggestions" review page.
-- **19 (new, 7 Oct, P1):** an unticked "Email me when it's time to reorder" box on `/checkout`, sending `reminder_consent: true` (backend live).
-- **20 (new, 8 Oct, P1):** the cart's wallet button appears 2–3 s after the page; hold its space at first paint and start Stripe while the cart loads.
-
-## Part 1: open work, in order
-
-### 1. P0: remove the "I authorize this payment" tick
-
-Pay stays disabled until it is ticked. Pressing Pay is the authorisation, and Stripe does not need the tick.
-
-- Remove the `#payment-authorization` box.
-- In `payment-page.js` `updatePayButton()` (~line 870), change `canPay = this.paymentElementReady && this.paymentAuthorized && turnstileOk` to drop `this.paymentAuthorized`.
-- In `handlePayment()` (~line 889), remove the early return that shows "Please authorize the payment before proceeding."
-- Also delete the reset in `hideAuthorizationBox()`.
-
-**Done when:** "Pay $X NZD" enables as soon as the card details are complete.
-
-### 2. P0: Apple Pay / Google Pay from the cart
-
-Today the wallet button appears only on the payment step, after the shopper has typed their name, email, phone and address. Stripe already has `www.inkcartridges.co.nz` registered and active for Apple Pay, Google Pay and Link (checked 5 Oct), and the payment page already mounts the Express Checkout Element (`initExpressCheckout`).
-
-- Mount the Express Checkout Element on the **cart** (and under Add to Cart on the PDP if it fits).
-- Configure it with `emailRequired`, `phoneNumberRequired` and `shippingAddressRequired`.
-- On `shippingaddresschange`, call `POST /api/shipping/options` so the sheet shows the real fee. Shipping fees are unchanged (owner).
-- On confirm, build the same `POST /api/orders` payload checkout builds, from the wallet's contact details and address.
-- Guest orders still need the Turnstile token. Run Turnstile invisibly before enabling the button.
-
-**Done when:** on an iPhone with Apple Pay, cart → paid order takes no typing.
-
-**Go-live (6 Oct):** owner approved shipping without the test order. Flip `DARK_FEATURES.cartWallet` to `true` in `js/config.js` and deploy.
-
-### 3. P1: cart, Proceed to Checkout on the first screen
-
-- At 1366×768, "Proceed to Checkout" starts at 829 px, below the fold.
-- On an iPhone 13 (390×664) it sits at 883 px, with no sticky bar even after the consent banner is answered.
-- "Continue Shopping" is the loudest button on the page.
-
-Paste at the end of the site stylesheet:
-
-```css
-@media (min-width: 769px) {
-  /* Cart: checkout button directly under the totals */
-  .cart-summary { display: flex; flex-direction: column; }
-  .cart-summary > * { order: 3; }
-  .cart-summary__heading { order: 0; }
-  .cart-summary__totals { order: 1; }
-  .cart-summary__actions { order: 2; margin: 12px 0 4px; }
-}
-
-/* Cart: "Continue Shopping" becomes a text link, not the loudest button */
-.cart-actions .btn--secondary { background: none; border: 0; box-shadow: none; color: inherit; text-decoration: underline; padding-left: 0; padding-right: 0; }
-
-@media (max-width: 768px) {
-  /* Cart on phones: checkout button fixed to the bottom once the consent
-     banner has been answered (it never covers the banner's own text) */
-  body:not(:has(#consent-banner.is-open)) .cart-summary__actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 900; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fff; box-shadow: 0 -2px 10px rgba(0,0,0,.12); }
-  body:not(:has(#consent-banner.is-open)) .cart-page,
-  body:not(:has(#consent-banner.is-open)) main { padding-bottom: 76px; }
-}
-```
-
-**Done when:** at 1366×768 and 390×664, `document.elementFromPoint()` at the centre of "Proceed to Checkout" returns the button without scrolling, and "Continue Shopping" renders as a text link.
-
-### 4. P1: one shipping figure, inside the total
-
-- The cart shows "Total before shipping $24.99", with shipping as "From $7.00 · free over $100".
-- Checkout then shows "North Island Shipping (est.) $12.00" and changes it to "$7.00" about 4 s later. The first figure comes from the local fallback `Shipping.calculate(...)` in `checkout-page.js` `updateShippingInfo()`.
-
-**Fix:**
-- On the cart, show the urban estimate and an "Estimated total" that includes it.
-- On checkout, show "Calculating…" until the estimate arrives.
-
-**Done when:** the cart total includes shipping, and checkout never shows a figure that then changes.
-
-### 5. P1: service row next to Add to Cart
-
-The ads now lead with service, so the page has to show it. Add a compact row next to the price and Add to Cart on the PDP, and under the H1 on series (`/shop?brand=…&code=…`) and printer pages:
-
-- **Speed:** "Auckland orders by 2pm ship same day · most of NZ in 1–3 business days", from `delivery_estimate` / `trust_signals.shipping_promise`. Never an unscoped "same-day dispatch".
-- **People:** "Questions? Call 027 474 0115 or email support@inkcartridges.co.nz", with a `tel:` link on mobile. Use `contact` from `GET /api/site/trust` (added 5 Oct; it is also in every `trust_signals` block).
-- **Paperwork:** "GST tax invoice emailed with every order".
-- **Safety net:** "30-day returns on unopened items" (`trust_signals.returns` / `compatibility_promise`).
-- **Payment:** "Pay later with Afterpay".
-
-Read every fact from `GET /api/site/trust` and `GET /api/site/value-props`; never hard-code one.
-
-**Done when:** at 1366×599 and 390×664 the row is visible on the first screen next to Add to Cart on a PDP, and under the H1 on a series page.
-
-### 6. P1: reward points next to the price
-
-- `GET /api/products/:sku` returns `reward_points: { points, points_per_dollar, multiplier, redemption_rate }` for one unit. C43XBK returns 228 points.
-- For a quantity rung, the points are `floor(business_price × min_quantity) × points_per_dollar × multiplier`.
-- The cart already receives `loyalty.earn_on_this_order` for members and guests. For a guest (`loyalty.guest === true`), `loyalty.message` explains how to collect the points.
-
-**Done when:** the PDP shows "Earn N reward points" near the price, and the cart summary shows "Points to be earned: N points".
-
-### 7. P1: consent card off the first series card
-
-The corner consent card sits bottom-**left** (left 16 px, 360 px wide). On a series page it covers the first card's price and Add at 1280×551, 1366×599, 1536×695 and 1920×911. Ads land on series pages, and the first cards sit on the left. Move it bottom-right:
-
-```css
-@media (min-width: 769px) {
-  #consent-banner.consent-banner { left: auto; right: 16px; bottom: 16px; }
-}
-```
-
-**Done when:** at those sizes, `elementFromPoint` at the first card's Add returns the button with the banner open.
-
-### 8. P1: delivery times, South Island is now 1–3 business days
-
-Owner decision, 5 Oct: everywhere outside Auckland is 1–3 business days, and Auckland stays 1–2. The backend already says so everywhere. The storefront still says otherwise in four places:
-
-- `/faq`: the FAQPage JSON-LD answer to "How fast do you ship within New Zealand?" and the visible `<li>South Island: 2–4 working days.</li>`. **Change both in one edit**, because Google checks the visible answer matches the JSON-LD.
-- `js/legal-config.js` (~line 149): shipping table `eta: '2–4 working days'` → `'1–3 working days'`.
-- `js/shipping.js` (~line 69): `'south-island': '2–4 business days'` → `'1–3 business days'`.
-- `js/product-detail-page.js` (~line 1110): `SPEC_DELIVERY_LABEL = '1–4 business days NZ-wide'` → read `delivery_estimate.label` instead (it now returns "1–3 business days NZ-wide").
-
-**Done when:** no page shows "2–4" or "1–4" business/working days.
-
-### 9. P2: Proceed to Checkout in under 1 second
-
-`cart.js` caps the Turnstile wait at 1.5 s (`TURNSTILE_CLICK_WAIT_MS`). In our run `/api/cart/validate` fired at 1,543 ms and `/checkout` loaded at 3.0 s. `/api/cart/validate` does not check the token (`cartLimiter` + `fastOptionalAuth` only). Navigate first, and get the token on the payment page, where `POST /api/orders` needs it.
-
-**Done when:** the click reaches `/checkout` in under 1 second.
-
-### 10. P2: "Download PDF quote" in the cart drawer and on checkout
-
-`GET /api/cart/quote.pdf` returns the current cart as a branded quote for purchase approval: seller details, GST number, lines, quantity discount, shipping, and total incl. GST.
-
-- Optional params: `company`, `attention`, `reference` (≤ 80 chars); `region`, `postal_code`, `delivery_type`.
-- `Content-Disposition` is exposed for the file name.
-- Errors: `400 CART_EMPTY`; `429` after 10 a minute.
-- **Label:** "Download PDF quote". Never "Official": it is a quote, not a tax invoice.
-
-```js
-const res = await fetch(`${API}/api/cart/quote.pdf?company=${encodeURIComponent(company)}`, {
-  headers: { ...authHeaders(), 'X-Guest-Session': guestSessionId }
-});
-if (res.ok) {
-  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'inkcartridges-quote.pdf';
-  const url = URL.createObjectURL(await res.blob());
-  Object.assign(document.createElement('a'), { href: url, download: name }).click();
-  URL.revokeObjectURL(url);
-}
-```
-
-**Done when:** the button downloads a PDF that matches the cart.
-
-### 11. P3: polish
-
-- The payment summary prints the internal region value, "Auckland, auckland 1010" (`payment-page.js` `displayShippingSummary()`). Show the region label.
-- `API.nzpostSuggest` asks for 5 address suggestions; ask for 8.
-- Optional: Stripe's Payment Method Messaging element ("or 4 payments of $X with Afterpay") under the price and the cart total.
-
-### 12. P1: `/cart?add=` opens a cart already filled with the customer's last order
-
-**Why:** of 71 customers whose first order came from an ad, 1 has ordered again. The reorder and refill emails send a guest to ONE product page, so a customer who bought four colours has to find and add the other three. One click should land them on a cart that already holds their order. Today `/cart?add=…` loads the cart and drops the parameter; nothing is added (checked 5 Oct).
-
-**Contract** (the backend builds these links in `src/utils/emailLinks.js` `cartAddUrl`):
-- `/cart?add=SKU:QTY,SKU:QTY,…` — comma-separated, URL-encoded, at most 12 lines, quantity 1–20.
-- SKUs are catalogue SKUs, matching `^[A-Za-z0-9][A-Za-z0-9.-]{0,39}$` (ribbons include a dot, e.g. `81051.02`).
-- The link can also carry `utm_source` / `utm_medium` / `utm_campaign`. Keep them for analytics.
-
-**Behaviour:**
-- For each line, resolve the SKU with `GET /api/products/:sku` (gives `id`), then `POST /api/cart/items` `{ product_id, quantity }`. This works for guests and for signed-in shoppers.
-- ADD to whatever is already in the cart; never empty it first.
-- A SKU that is unknown, inactive or out of stock is skipped. Show one line, for example "1 item from your last order is no longer available". Never show an error page.
-- When finished, remove `add` from the address bar with `history.replaceState`, so a refresh does not add the items again.
-
-**Done when:** `/cart?add=CCLI681XXLBK:1,CCLI681XXLC:2` opens the cart with those two lines at those quantities, and a refresh does not double them. **Ship this one first:** the backend already sends these links in every guest reorder and refill email (`GUEST_CART_ADD_LINKS=true`, kept on by the owner on 5 Oct), so until it is live those customers land on an empty cart. Tell the backend the deploy time.
-
-### 13. P1: one-step account on the order confirmation page
-
-**Why:** 88% of buyers check out as guests, and a guest earns no points and gets no one-click reorder. Baymard's research: ask for the account AFTER the purchase, on the confirmation page, with a single password field and concrete benefits (https://baymard.com/blog/delayed-account-creation).
-
-**What:**
-- On the confirmation page of a GUEST order, show one box: "Save your order and collect your points". It has a single password field, prefilled with nothing, and the email shown read-only (the order's email). One button: "Create my account".
-- On submit, call `supabase.auth.signUp({ email: <order email>, password })`. Supabase emails a confirmation link. After the customer confirms and signs in, the existing `POST /api/account/sync` adds the 200 welcome points and claims this order and its points. No new backend call is needed.
-- Benefits line, from live data only: "You get {N} points for this order plus 200 welcome points." N = `floor(total − shipping)` (1 point per $1).
-- `GET /api/orders/:orderNumber` now returns `next_order_offer` (`{ points, dollars, by, guest }` or `null`). When present, add: "Your next order by {by, as a date} earns {points} bonus points (${dollars})." Never show it when the field is null.
-- Do NOT build a one-click "create account" from this page using the backend's signed link. That link is only for the order email, because whoever typed the email at checkout may not own that address.
-
-**Backend already live:** the order-confirmation email and the day-1 email carry a signed one-step link (`/api/orders/:id/create-account?t=…`). It opens a backend page that creates a confirmed account for the order's email.
-
-**Done when:** a guest order's confirmation page shows the box; signing up, confirming and signing in shows the order and its points in the account.
-
-### 14. P1: cart unit price follows the quantity (volume price)
-
-**Owner report (6 Oct):** GLC3313BK in the cart. At quantity 3 the price should read $66.14, and it stays at $67.49.
-
-**What is wrong (two separate problems, `js/cart.js`):**
-
-1. **The unit price cell never shows the volume price.** `.cart-item__price` and `.cart-item__price-mobile` always render `item.price`, which is retail. The surgical update (~line 2783) repaints `.cart-item__price-mobile` but never `.cart-item__price`. Even after the server re-prices the line, the shopper sees $67.49 in the price column. The $66.14 appears only as small text ("$66.14 each · volume price") under the line total.
-2. **For about 1.5 s after each + or −, the cart shows a mix of old and new figures.** `updateQuantity` sends `PUT /api/cart/items/:id`, then `GET /api/cart`. Each takes about 0.7 s (Render log of the owner's session, 5 Oct 19:57 UTC). Until the GET lands, `lineTotalFigures()` correctly drops the stale server figures, so the line shows retail × qty. But the summary keeps the previous quantity's server rows next to the new local subtotal. The owner's two screenshots were both taken inside this window:
-   - qty 1 shown with "Volume discount −$4.05", "Shipping Free", "Total $63.44", "198 points" (all from qty 3);
-   - qty 3 shown with "Shipping (est.) $7.00 · free over $100" on a $202.47 subtotal, "Incl. GST $9.72", "Add $32.51 more…" and "67 points" (all from qty 1).
-
-**The backend is correct.** After the GET, a guest replay of the same cart showed ~~$202.47~~ $198.42, "$66.14 each", volume discount −$4.05, free shipping, total $198.42.
-
-**Backend change (live after the 6 Oct deploy):** `PUT /api/cart/items/:productId` now returns the whole re-priced cart as `data.cart`, the same shape as `GET /api/cart` `data`, beside its old keys (`message`, `id`, `product_id`, `quantity`). In `updateQuantity`, adopt `response.data.cart` through the same path `loadFromServer` uses (`_parseServerCart`, the pending-removal filter, the empty-cart guard) and skip the follow-up `GET /api/cart`. Epoch guard: take `_beginSnapshot()` right after the local `_mutationEpoch++`, and adopt the PUT's cart only if the epoch is unchanged when it returns. If the shopper clicked again meanwhile, drop it: the later PUT's own `cart` describes the newer quantity. Only when `data.cart` is missing (the backend omits it if its re-read fails) fall back to `loadFromServer()`. This halves the wait (one ~0.7 s request instead of two).
-
-**Fix:**
-- **Unit price = the line's rung price.** Each cart line already carries `quantity_breaks` (built by the server for this line, contract price included). Find the highest rung with `min_quantity <= quantity`; its `business_price` is the unit price, otherwise use `item.price`. When `volume_figures.quantity === item.quantity`, use `volume_figures.unit_price` instead. This is a lookup of server figures, not FE price maths. Show it in BOTH `.cart-item__price` and `.cart-item__price-mobile`, with retail struck through beside it when lower (for example ~~$67.49~~ $66.14, and the ex-GST figure from the same number). Repaint both cells in the surgical path as well as the full render.
-- **Line total while the change is in flight:** rung price × quantity, from the same lookup, instead of retail × quantity.
-- **Summary while `pricingState === PRICING.PENDING`:** do not show the previous quantity's server-only rows (volume discount, shipping, total, GST, points, the free-shipping message) beside the new subtotal. Either show "Updating…" in those rows until the GET lands, or hide them. Never show a mix of two quantities.
-
-**Done when:** on `/cart` with GLC3313BK, pressing + from 1 to 3 shows ~~$67.49~~ $66.14 in the price column at once. The line total reads $198.42. The summary goes straight from the qty-1 figures to: volume discount −$4.05, shipping Free, total $198.42, never through a mixed state. Pressing − back to 1 shows $67.49 and no volume discount row.
-
-### 15. P0: catch a bad email on the checkout page, not at Pay
-
-**Owner report (6 Oct):** order 2026100602 ($486.81). The shopper pressed Pay twice and nothing happened. They had to work out for themselves that the email was the problem, go back to checkout and retype it. We nearly lost the order.
-
-**What happened** (Render log, 5 Oct, UTC):
-- **20:20:03** The shopper typed their email on `/checkout`. `POST /api/checkout/guest-prefill` and `POST /api/cart/guest-contact` both answered `400 VALIDATION_FAILED` on the `email` field. The page ignored both answers and let "Continue to payment" through.
-- **20:21:40 and 20:22:13** Pay now → `POST /api/orders` → `400 VALIDATION_FAILED`, field `guest_email`, "Please enter a valid email address so we can send your receipt". No order was created and Stripe was never called.
-- **20:22:29** The shopper went back to `/checkout`, retyped the email (accepted at 20:22:59), re-entered the address, and paid at 20:24:58.
-
-**Why the browser accepted it:** the backend checks the email with Joi `.email()`, which also requires a real top-level domain. So `name@gmail.con` and `name@gmail` are refused, while `<input type="email">` and a simple `x@y.z` pattern accept them. We do not log email addresses, so the exact typo is unknown. Keep the backend as the judge; do not copy its rules into the FE.
-
-**The backend's answer** (same shape on all three endpoints):
-
-```json
-{ "ok": false, "error": { "code": "VALIDATION_FAILED", "message": "Validation failed",
-  "details": [{ "field": "email", "message": "Please enter a valid email address" }] } }
-```
-
-On `POST /api/orders` the field is `guest_email`.
-
-**Fix:**
-- **Check on blur and on "Continue to payment".** The page already sends `POST /api/checkout/guest-prefill { email }` when the field is filled. Treat its `400` with `error.code === 'VALIDATION_FAILED'` as "this email is invalid": show `error.details[0].message` under the email field, mark the field invalid (`aria-invalid="true"`, message linked with `aria-describedby`), focus it, and keep "Continue to payment" disabled until a later check passes.
-- **Fail open on anything else.** A `429` (the endpoint allows 5 a minute per IP), a `5xx` or a network error must NOT block checkout. `POST /api/orders` still checks the email.
-- **Typo hint (recommended):** when the domain is one letter off a common one, offer a one-tap fix under the field, for example "Did you mean name@gmail.com?". Domains: `gmail.com`, `hotmail.com`, `outlook.com`, `yahoo.com`, `icloud.com`, `xtra.co.nz`. Typical misses: `.con`, `.cmo`, `.comm`, `gmial`, `gmai`, `hotmial`, `xtra.co`.
-- **Backstop on `/payment`.** If `POST /api/orders` still returns `400` with a `guest_email` detail, show that message next to the Pay button with a "Change email" link back to the checkout email field. Never a generic error, and never a Pay button that silently does nothing.
-
-**Done when:** on `/checkout` as a guest, typing `test@gmail.con` and leaving the field shows "Please enter a valid email address" under it and "Continue to payment" stays disabled. Correcting it to `test@gmail.com` clears the message and enables the button. Over the next week, Render logs show no `validation_failed` on `/orders` for `guest_email`.
-
-### 16. P1: show our compatible version on every genuine product page
-
-**Why (owner, 6 Oct):** in 60 days, 101 paid visits landed on GENUINE product pages and bought nothing; 80% left after one page. Genuine is where we cannot win on price, and the page never shows the compatible cartridge we can. Example: genuine TN-2030 is $113.99; our compatible TN-2030 is $24.49 and is not mentioned.
-
-**Backend (live):** `GET /api/products/:sku` on a genuine row now carries `compatible_alternatives` (absent when there is none, and always absent on compatible rows). Up to 3, same capacity first:
-
-```json
-"compatible_alternatives": [
-  { "sku": "C604XLBK", "slug": "604xlbk-compatible-…", "name": "604XLBK Compatible Ink Cartridge for Epson 604XL Black",
-    "retail_price": 25.49, "page_yield": null, "yield_tier": "XL", "same_capacity": false,
-    "image_url": "https://…", "in_stock": true }
-]
-```
-
-A match is the same brand, type, colour and single-vs-pack, sharing the series code. About 30% of genuine products have one (825 of 2,779), and so do 21 of the 40 genuine pages ads landed on.
-
-**What to build:**
-- On a genuine PDP, directly UNDER Add to Cart and the fit line (never above them: genuine stays the main choice), a small box per alternative: name, price, a "View" link to `/products/{slug}/{sku}`, and an Add button (`POST /api/cart/items`).
-- Heading: "Our compatible version". Under each: `page_yield` when present ("1,000 pages"). When `same_capacity` is false, say so plainly with the tier: "XL — higher capacity" (owner: a dearer higher-capacity cartridge is still worth offering, it lasts longer).
-- One line from `trust_signals.warranty.compatible_label` ("Compatible cartridges are covered by our 30-day satisfaction guarantee.").
-- **Wording rules (invariant 13):** prices and page yields only. No "save", "save up to", "same quality", "as good as genuine" or percentages. No OEM logo on the compatible card.
-- Keep Add to Cart on the first screen at 1280×551 and 1366×599: the box goes below the fold if it must.
-
-**Done when:** `/products/…/GTN2030BK` shows "Our compatible version" with CTN2030BK at $24.49 under Add to Cart; `/products/…/G604BK` shows C604XLBK labelled "XL — higher capacity"; a compatible PDP and a genuine PDP without alternatives (G924CMY) show no box; Add to Cart stays clickable on the first screen.
-
-### 17. P1: the cart quantity stops at stock
-
-**Owner report (6 Oct):** GDK11203WH has 8 in stock. In the cart, + kept going (to 28), then the quantity jumped back to 8.
-
-**Reproduced with Playwright on the live site (guest, 6 Oct):**
-- 12 clicks of + walked the line from 1 to 13. The debounced `PUT /api/cart/items/:id {quantity: 13}` got `400 Insufficient stock, details.available: 8`, and the line snapped back to 1.
-- Typing 28 in the box left 28 on screen while the server still held the old quantity.
-- Both showed the toast "Network error. Quantity may have reverted." No network error happened: the server said no.
-
-**Why (`js/cart.js`):** every cap uses the global `MAX_QUANTITY: 100`. `_parseServerCart` is a whitelist and drops `items[].product.stock_quantity`, so the cart never knows the stock. The server has always refused a quantity above stock.
-
-**Backend change (live after the next deploy):** every cart quantity refusal (`POST /api/cart/items`, `PUT /api/cart/items/:productId`) now has `error.code: 'STOCK_INSUFFICIENT'`, the code `api.js` already passes through with its `details`. The message is readable: "Only 8 in stock." on a PUT, or "Only 8 in stock, and 8 are already in your cart." on an add (`details: { available, current_in_cart }`). Under the old `BAD_REQUEST` the response threw, which is where the "Network error" toast came from. The same throw made an over-stock Add to Cart say "Item saved locally. It will sync when connection is restored." and keep the line. With the new code, `addItem` takes its server-rejected branch: it rolls back and shows the message. `volume_next_break` is now `null` when the next rung is above the line's stock, so the cart never says "add 2 more and save" on a line that cannot grow.
-
-**Fix (`js/cart.js`; we tested this patch against the live site by serving a patched copy):**
-- Keep the stock in `_parseServerCart`: `stock_quantity: item.product.stock_quantity != null ? Number(item.product.stock_quantity) : null`.
-- Add one per-line cap and use it everywhere `MAX_QUANTITY` or the literal `100` caps a cart line:
-  ```js
-  maxQuantityFor: function(item) {
-      const stock = item && item.stock_quantity != null ? Number(item.stock_quantity) : NaN;
-      if (!Number.isFinite(stock) || stock < 0) return this.MAX_QUANTITY;
-      return Math.max(1, Math.min(this.MAX_QUANTITY, Math.floor(stock)));
-  },
-  ```
-  The sites: the + click handler, the typed-quantity `change` handler, `_debouncedQuantityUpdate`'s clamp, `updateQuantity`'s clamp, `_updateCartItemDOM` (`input.max` and the + `disabled` state, both now hard-coded to 100), and the full render (`max="…"` and the `disabled` test on +). Unknown stock (a local line the server has not described yet) keeps `MAX_QUANTITY`. Stock 0 caps at 1, so + stays disabled on an out-of-stock line.
-- When a click or a typed value hits the cap, show an info toast: "Only 8 in stock — that is the most you can order."
-- In `_executeQuantityUpdate`'s failure branch, when `response.code === 'STOCK_INSUFFICIENT'`, show the same toast with `response.details.available` instead of "Failed to update quantity. Please try again." That covers stock that fell after the page loaded.
-- Recommended, same rule: `QtyStepper` (utils.js) also caps at `Cart.MAX_QUANTITY` on product cards and the PDP. Pass the product's `stock_quantity` (it is on every product response) as the stepper's ceiling.
-
-**Done when** (guest on `/cart` with GDK11203WH): + stops at 8 and is disabled there; typing 28 changes the box to 8; the toast reads "Only 8 in stock"; and no `PUT /api/cart/items` returns 400. The patched copy did exactly this on 6 Oct: 12 clicks ended at 8 with + disabled, typing 28 became 8, and both PUTs sent `{quantity: 8}` and got 200.
+The box is live on GLC233BK: CLC233BK at $8.99, with View, Add and the guarantee line. The page-yield line from the spec is still missing. `compatible_alternatives[0].page_yield` is "Up to 550"; show it as **"Up to 550 pages"** under the price.
 
 ### 18. P2 (admin): "Negative keyword suggestions" review page
 
@@ -379,6 +162,8 @@ A match is the same brand, type, colour and single-vs-pack, sharing the series c
 **What to build:** one checkbox on `/checkout`, near the email field, **unticked by default** (a pre-ticked box is not consent): "Email me when my cartridges are likely running low, so I can reorder in time." Send `reminder_consent: true` only when ticked. Same for guests and signed-in customers.
 
 **Done when:** placing an order with the box ticked sends `reminder_consent: true` in the `POST /api/orders` body; unticked sends nothing or `false`; the box starts unticked on every visit.
+
+**Still to confirm (9 Oct):** the box is live. Please confirm that a ticked box sends `reminder_consent: true`. No order has recorded consent yet, from either the box or the order email's button.
 
 ### 20. P1: the cart's Apple Pay / Google Pay button appears with the page
 
@@ -404,9 +189,550 @@ The box is `hidden` until `ready`, so the whole wait shows as a button that pops
 
 **Done when:** on `/cart` with one item, the "or pay instantly" area is visible at first paint, and the wallet button is live by about 2 s with an empty cache (3.3 s today). Measure: `MutationObserver` on `#cart-wallet` `data-wallet` against `performance.now()`.
 
+### 22. P1: PDP, the product photo is below the first screen on desktop
+
+**What is wrong:** on GLC233BK at 1366×768, the left half of the first screen is blank. The photo starts at **y 627** (the H1 is at y 290), and that strip is half covered by the consent card (`ad-landing-cro-oct2026-09/d5-pdp-GLC233BK.jpg`, `ad-landing-cro-oct2026-09/pdp_crop.jpg`).
+
+**Cause:** `#product-image.product-gallery__main.product-gallery__main--zoomable` is `position:absolute; top:0; display:flex; align-items:center`. It stretches to the height of `.product-detail__layout` (1297 px), so a 552 px image is centred 370 px down. This most likely hits every PDP with a real (zoomable) photo, so nearly every genuine PDP. The compatible PDP checked (CTN2030BK, "COMPATIBLE" tile) is already top-aligned.
+
+**Fix:**
+
+```css
+@media (min-width: 769px) {
+  .product-gallery__main--zoomable { align-items: flex-start; }
+}
+```
+
+Optional: also make `.product-gallery` `position: sticky; top: 16px`, so the photo stays beside the buy box while the shopper scrolls.
+
+**Done when:**
+- On GLC233BK at 1366×768 and 1280×551, the image top is within 40 px of the GENUINE badge (y ≈ 255), and at least 300 px of the image is on the first screen.
+- The LCP element is the product image, with LCP under 1.5 s on desktop. Today it is 2.64 s, because the image paints late and low.
+- CTN2030BK is unchanged.
+
+**Why it matters:** a Shopping click is a click on the product photo. Landing on a page that doesn't show it breaks the match between ad and page. Ad landings on PDPs: 94 sessions in 30 days, 66% left without a click, **0 orders**. 78 of them were genuine PDPs, the pages this bug hits. **Measure:** the share of desktop PDP landings that leave without a click (65% today).
+
+### 23. P1: Cart, put the basket-building prompts on the first screen
+
+**Part a, mobile (under 769 px): line items before the order summary.** In the HTML, the line items come first, but CSS draws the summary first. On 390×664 with one item:
+- the Order Summary is at y 459;
+- the item card is at **y 1780–2003**, three screens down;
+- the item card holds the stepper, "Save $2.87 — switch to the value pack" and "Add 2 more to reach 3+ — $8.63 each, saving $1.08 on this line." (`ad-landing-cro-oct2026-09/mcart.jpg`).
+
+The sticky bar `#cart-sticky-bar` already keeps "Proceed to Checkout" on screen, so the summary no longer has to come first. Remove the mobile rule that reorders `.cart-summary` (an `order` or `grid-area` value) so the items render first. Do not change the sticky bar.
+
+**Part b, all widths: free-shipping progress inside the totals.** Move the free-shipping block (`summary.free_shipping_message` plus the bar) directly under the "Shipping (est.)" row, above "Estimated total". Today it sits under "Download PDF quote" and the cart-email box: y 1203 on desktop, y 1151 on mobile.
+- Show the tick icon only when `summary.qualifies_for_free_shipping` is true. Today a ✓ sits beside "Add $91.01 more…", which reads as done.
+- The text comes from the backend as it is. Copy rule: free shipping is always "over $100".
+
+**Part c, the cart drawer (mini-cart):** under the drawer's total, show the same `summary.free_shipping_message` whenever `summary.free_shipping_remaining` is above 0, and nothing at 0. Use the backend text as it is: never compute the gap in the page, and no "save" wording. When `free_shipping_unlock` is present (the gap is $25 or less), its filler tiles go under that line. A quantity change repaints the line from the `data.cart` that `PUT /api/cart/items/:productId` already returns.
+
+**Done when:**
+- With one CLC233BK at 390×664, the line item, with both prompts, starts above y 700.
+- At 1366×768 and 390×664, "Add $91.01 more to qualify for free shipping." and its bar render between "Shipping (est.)" and "Estimated total".
+- The cart drawer with one $44.49 cartridge shows "Add $55.51 more to qualify for free shipping."; a quantity change repaints it from the PUT response; at $100 or more the line is gone.
+- The sticky checkout bar still passes item 3.
+
+**Why it matters:**
+- Mobile ad orders have a median basket of $81.49, against $123.63 on desktop, and 58% of them pay shipping (33% on desktop).
+- On mobile today, every prompt that grows the basket sits below the summary.
+- Shoppers who get close to $100 top up (3 orders at $80–100 against 17 at $100–120).
+- An order moving from under $60 to $60–100 keeps $18.36 instead of $6.08.
+
+**Measure:** median mobile ad-order basket ($81.49) and the share of mobile orders under $100 (58%).
+
+### 24. P1: Desktop consent banner, use the compact bottom bar mobile already has
+
+**What is wrong:** on desktop the banner is a 360×163 card that stays open for 85% of paid visitors. At 1366×768 it covers:
+- the 5th and 6th first-row "Add" on series and printer pages (`elementFromPoint` returns `.consent-banner__body-long` and `.consent-banner__btn--decline`; see `ad-landing-cro-oct2026-09/d3-series-lc233.jpg`);
+- the first result's Add in the search dropdown (`ad-landing-cro-oct2026-09/d4a-search-dropdown.jpg`);
+- half of the cart line's "Add 2 more to reach 3+" prompt (`ad-landing-cro-oct2026-09/d6-cart.jpg`).
+
+It is also the largest thing painted on the first screen: the LCP element on `/ink-cartridges`, series and printer pages is `p.consent-banner__body`.
+
+**Fix:** from 769 px up, render the mobile layout. That is a full-width bar at the bottom, at most 64 px tall, with "We use analytics cookies." + "Privacy policy" + Decline + Accept on one line, and Decline and Accept given equal weight. Sketch (adjust to your markup):
+
+```css
+@media (min-width: 769px) {
+  #consent-banner.consent-banner { left: 0; right: 0; bottom: 0; width: auto; max-width: none; border-radius: 0;
+    display: flex; align-items: center; justify-content: center; gap: 16px; padding: 10px 24px; }
+  #consent-banner .consent-banner__body-long { display: none; }
+}
+```
+
+This replaces the per-page left/right placement from item 7.
+
+**Done when:** at 1366×768, 1366×599 and 1280×551 with the banner open, `elementFromPoint` at the centre of each of these returns the control itself:
+- every first-row "Add" on `/shop?brand=brother&category=ink&code=LC233` and on the MFC-J4620DW printer page;
+- the cart's "Save $2.87…" pill;
+- the PDP's Add to Cart.
+
+The banner is at most 64 px tall.
+
+**Why it matters:** this is part of the first impression for 85% of desktop ad visitors, and 54% of ad sessions see only one page.
+
+### 25. P1: Mobile listing pages, "Filter & Sort" must not cover the first Add
+
+**What is wrong:** `#filter-sort-bar` is fixed at y 540–607 (67 px), directly above the consent bar, on 390×664.
+- On the printer page `/shop?brand=brother&printer_slug=brother-mfc-j4620dw`, the first card's **Add (y 528–574) is under it**: `elementFromPoint` returns `#filter-sort-open`.
+- On the series page it covers the bottom edge of the first Add.
+- It is styled like the main button (same blue, full width), so it competes with Add.
+- With the header (128 px), the value strip (32 px), this bar and the consent bar, **43% of the first screen is fixed chrome** (`ad-landing-cro-oct2026-09/mobile_strip.jpg`).
+
+**Fix:** render "Filter & Sort" inline above the first card, as a compact outline button no taller than 40 px. Make it sticky only after the shopper has scrolled past the first row of products, and never place it over an Add.
+
+**Done when:** at 390×664, both with the consent bar open and after it is answered, scroll from 0 to 2000 px in 300 px steps. At each step, every Add in view on the series and printer pages passes `elementFromPoint`, except an Add lying under the consent bar itself. On the printer page, the first card's Add passes at scroll 0.
+
+**Why it matters:** mobile converts at half the desktop rate (3.3% against 6.6%) and loses more visitors after one page (46% against 34%). The first card's Add is the first thing a mobile ad visitor can tap.
+
+### 26. P1: PDP, show the 3+ price next to the price and move the pack offers up
+
+**Part a: the 3+ price on the price row (no extra height).** After "Incl. GST · Earn 60 reward points ($0.60)", add "· 3+ $59.28 each". The figures are `quantity_breaks[0].min_quantity` and `.business_price`, read from the server, not calculated by the FE. "See all prices" jumps to the ladder.
+- Series cards already do this ("3+ PRICE $8.63 ea"). The desktop PDP shows "3+ from $59.28 each" only at y 856, below the 768 fold, and the "Buy more, save more" ladder at about y 1210.
+- Copy rule: the 3+ price never applies to one unit, and never say "on all orders".
+
+**Part b, desktop only: remove the "DELIVERY" and "RETURNS" rows under the compatible box.** They repeat the service row that sits directly under Add to Cart. "Order within 12h 23m…" then becomes the only extra delivery line, and "Buy the full set" (now at y ~1040) and "Buy more, save more" both move up about 130 px.
+
+**Done when:**
+- On GLC233BK at 1366×768, "3+ $59.28 each" is within 30 px (vertically) of "$60.49".
+- Add to Cart is still at y 513 ± 5 (and at y 471–519 on CTN2030BK at 1280×551).
+- The top of "Buy the full set" moves up at least 100 px.
+
+**Why it matters:** only 4.5% of ad-order lines reach 3+. A shopper can't respond to a price they never see. **Measure:** the share of ad-order lines with quantity ≥ 3 (5 of 112 today).
+
+### 27. P1: Compatible guarantee where the shopper chooses between compatible and genuine
+
+**What to show:** `trust_signals.warranty.compatible_label` ("Compatible cartridges are covered by our 30-day satisfaction guarantee."), read from `GET /api/site/trust`. Never hard-code it (invariant 9). Show it:
+- **(a)** as a one-line subtitle under the "COMPATIBLE" column heading on series, printer and brand listing pages, and in the search dropdown's COMPATIBLE column;
+- **(b)** on compatible PDPs, directly under the "Not sure it fits?…" line in the buy box. Today it appears only at y 2335 on CTN2030BK. On genuine pages it is already inside the item 16 box.
+
+One line per column, not one on every card: a line under the heading says the same thing as a line on each card, with less clutter. Nothing comparative next to it (no "save", "same quality", percentages or rival names; invariant 13), and never "guaranteed fit".
+
+**Done when:**
+- On `/shop?brand=brother&category=ink&code=LC233`, the line is visible above the first compatible card at 1366×768, and under the COMPATIBLE heading at 390×664.
+- It also shows in the search dropdown's COMPATIBLE column for "MFC-J4620DW", and in no genuine column.
+- On CTN2030BK, it sits within 120 px below the service row.
+- The text equals `warranty.compatible_label` from `/api/site/trust` exactly.
+
+**Why it matters:** the owner wants compatible offered first. Compatible has the higher margin, and 10 of the last 13 ad buyers bought compatible only. The series page puts an $8.99 compatible next to a $60.49 genuine with nothing on the compatible side that answers "will it work?". The guarantee is that answer, and it is already in the API. Copy checked with `complianceClaims` (no match).
+
+### 28. P2: Mobile checkout, the form jumps when the page finishes loading
+
+**What is wrong:** on 390×664 under Lighthouse mobile throttling, `.checkout-form-wrapper` moves by roughly 270 px at 6.3 s (estimated from the shift score). Layout shift (CLS) is **0.371**, against 0.03 on desktop. The title, the step bar and the collapsed "Order summary $15.99 NZD" bar appear late and push the form down.
+
+**Fix:** reserve their space from the first paint. Give the collapsed summary bar a fixed-height placeholder, and give the header block a min-height.
+
+**Done when:** CLS on `/checkout` with one cart item, at 390×664 with Lighthouse mobile throttling, is under 0.1.
+
+**Why it matters:** a form that moves while the shopper taps the email field causes mis-taps at the step where the money is.
+
+### 29. P2: After Add, show the next step
+
+**What is wrong:** after an add (tested from the compatible box), the only feedback is the header badge "1" and a text-only toast ("…added to cart"). The toast disappears after a few seconds. At 1366×768 the toast also covered the compatible box's Add button.
+
+**Fix:** after any successful `POST /api/cart/items` (series card, PDP, compatible box or search dropdown):
+- show a non-blocking toast with **View cart** and **Checkout**;
+- add one line from the cart re-read the page already does: `summary.free_shipping_message`, or "Free shipping unlocked" when `qualifies_for_free_shipping` is true;
+- keep it on screen for 6 s, make it dismissible, and never let it cover an Add (bottom-right on desktop; above the sticky bar on mobile).
+
+**Done when:** adding CLC233BK shows both actions and "Add $91.01 more to qualify for free shipping.", and Checkout opens `/checkout`.
+
+**Why it matters:** `link:/cart` is the 8th most clicked element on the site (128 clicks across 80 sessions in 30 days). Shoppers go looking for the cart.
+
+### 30. P2: Checkout, put the reassurance under the total
+
+**What is wrong:** the first checkout screen states none of the facts the cart shows (dispatch, returns, guarantee, tax invoice). On the cart they sit at y 1354–1650.
+
+**Fix:** under "Estimated Total" on `/checkout` and `/payment`, add one compact block built from the cart response:
+- `delivery_estimate.promise` ("Order by 2pm for same-day dispatch (Auckland metro) — 1–3 business days NZ-wide");
+- `trust_signals.returns.label`;
+- `trust_signals.guarantee.label`;
+- `trust_signals.tax_invoice.label`.
+
+**Done when:**
+- At 1366×768, the block is visible next to the total without scrolling the summary.
+- At 390×664, it is inside the expanded summary and repeated once under "Continue".
+
+**Why it matters:** over the last 14 days, 19 desktop shoppers started checkout and 11 finished. Delivery time and returns at the point of paying are classic reasons people abandon.
+
+### 31. P2: Mobile tap targets for the phone and links
+
+**What is wrong:** on every mobile landing there are 4–7 tap targets under 24 px:
+- `.service-row__link` phone (81×16) and email (178×16);
+- the value-strip links (151×16, 71×16);
+- "What's the difference?" (127×15).
+
+**Fix:** give each a tap area at least 44 px tall (padding or `min-height`). Make the phone link `tel:{contact.phone_tel_href}`.
+
+**Done when:** every link and button on the first screen at 390×664 has a hit area of at least 44×44, or at least 24 px with 8 px spacing (WCAG 2.2, 2.5.8).
+
+**Why it matters:** "Questions? Call 027 474 0115" is the service promise the ads now lead with, and on a phone it is a 16 px target.
+
+### 32. P1 (fixes 1–2) / P2 (rest): Mobile speed, show the first screen at once
+
+**Full spec: `docs/storefront/mobile-speed-FE-handoff-oct2026.md`** (18 Oct). It replaces the notes this item carried; two of them were wrong: the Merchant badge is already deferred, and the hero is not hidden by its own CSS.
+
+In short:
+- Lighthouse mobile scores 58–60, with LCP 11.8–15.0 s.
+- With no throttling at all, the first visible frame still comes at 1.6–3.2 s. The reason: `body` and `main` fade in from opacity 0, and every `<section>` waits for the scroll reveal or its 2 s safety net.
+
+The fixes, in order:
+1. No entrance animation on the first screen.
+2. Ship the final h1 on `/ink-cartridges` and `/toner-cartridges`.
+3. Start product-page related products near the viewport, and retire the compat-recovery sidecar if `probe:lookalike` finds nothing.
+4. Fonts, CSS, `gtag.js` `defer`, minify.
+5. Images.
+6. Accessibility.
+
+**Done when:** with Lighthouse mobile settings, the series page and GLC233BK have LCP under 4.0 s and CLS under 0.1, and a cold desktop load of `/ink-cartridges` has CLS under 0.05. Also, the first visible frame shows the header and the h1.
+
+### 33. P1: Shop drilldown, report the error state when it shows "Retry"
+
+**What we see:** shoppers clicked `#drilldown-retry-btn` 3 times in 5 days, so the drilldown failed to load for them:
+
+| When (UTC) | Page |
+|---|---|
+| 10 Oct 23:17 | `/shop?brand=hp&printer_slug=hp-deskjet-2820e`, landing from a paid ad click |
+| 7 Oct 00:46 | `/search?q=Ax250`, then `/shop?brand=brother&category=ink` (same session) |
+
+The backend calls behind those pages answer 200 today: `/api/shop?brand=hp&printer_slug=hp-deskjet-2820e` in 0.5 s, `/api/shop?brand=brother&category=ink` in 1.0 s and `/api/search/smart?q=Ax250` in 2.7 s. So the failure was either brief or in the browser. Nothing tells us which request failed or why. `traffic_events` holds **zero** `client_error` events ever, so the BF-053 error beacon was never wired.
+
+**Fix:** whenever the drilldown shows its error or Retry state, send one beacon to the existing traffic endpoint:
+- `event_type: 'client_error'`;
+- `element`: the surface name, then the failing request's method, path and status, or `timeout` / `network` when there is no status. Example: `shop-drilldown GET /api/shop?brand=hp&printer_slug=hp-deskjet-2820e 429`. The field takes up to 512 characters.
+
+Use the same beacon for every other catalogue read that shows an error state (search, PDP, cart).
+
+**Done when:**
+- Forcing the request to fail (DevTools: block `/api/shop`) puts one `client_error` row in `traffic_events`.
+- That row's `element` names the request and its status.
+
+**Why it matters:** this shopper paid for the click and got an error instead of cartridges. We cannot fix a failure nobody records.
+
+**Update (17 Oct):** all 8 human Retry clicks since 18 September came from **Safari 15.6 and iOS 15.8**. Reproduce on those first. Report the product page's "Try Again" state the same way, and send the `grid_ready` event from item 43 as well.
+
+### 34. P1: Checkout, send the iPhone click ID (`gbraid` / `wbraid`) with the order
+
+**What is wrong:** an ad click from an iPhone can land with `gbraid` or `wbraid` in the URL and **no** `gclid`. Checkout sends only `gclid`, so those orders reach us with no click ID. Google never learns the ad sold something, and our profit numbers count the order as not coming from an ad. In the last 90 days, about 6% of ad landings carried only `gbraid` or `wbraid` (91 of 1,463 click IDs in `traffic_events`), and 0 of 77 orders stored one.
+
+**Backend (live 12 October):** `POST /api/orders` accepts `gbraid` and `wbraid` beside `gclid`: strings, up to 255 characters, trimmed. Before this, the server dropped both fields without an error.
+
+**Fix:**
+- Read `gbraid` and `wbraid` from the landing URL wherever `gclid` is read now. Keep them in the same storage, for the same time, as `gclid`.
+- Send every one that is present on `POST /api/orders`. When a URL carries `gclid` and `gbraid` together (common), send both. The backend chooses which one Google gets.
+- A new ad click **replaces all three**. Do not keep an old `gclid` next to a new `gbraid`, or the order is credited to the old click.
+
+**Done when:** you land on `/shop?brand=hp&gbraid=FE_TEST_1` in a fresh browser and place an order for the admin test product (`TEST-` SKU, $0.50). That order's row then holds `gbraid = 'FE_TEST_1'` and no `gclid`. Test orders are never sent to Google.
+
+**Why it matters:** Google bids on the profit we report for each click. Orders it never hears about make iPhone clicks look worthless, so it bids them down.
+
+### 35. P1: Privacy page, disclose the advertising tags
+
+**What is wrong:** `js/gtag.js` loads the Google Ads tag (`AW-18032498762`) and Microsoft UET (`bat.bing.com`). Both set advertising cookies, with no consent gate (only `analytics_storage` is declared). Google's tag also builds visitor audiences: "All visitors" (about 1,600) and the 3-day exclusion list (220). But `/privacy` names Google only for "Analytics (GA4), Customer Reviews, Tag Manager" (`legal-config.js` `dataProcessors`), and its cookie list names no ad tag. The backend's prerendered privacy page went further and said "We do not use third-party advertising or retargeting cookies". Google's ad policies require this use to be disclosed, and this account was suspended in May 2026.
+
+**Backend (live 13 October, commit `54e6dce`):** the prerendered privacy page now says the sentence below and lists both platforms.
+
+**Fix (owner approved 13 Oct):** use the same words on the human page, so the bot page and the human page match.
+- `dataProcessors`, add: `{ name: 'Google Ads / Microsoft Advertising', purpose: 'Advertising measurement: ad-click identifiers, the value of orders that followed an ad click, and cookie-based audiences of site visitors', region: 'United States' }`.
+- Cookie list (§6), add a row: category "Advertising", examples "Google Ads tag, Microsoft Advertising (UET) tag".
+- Cookies paragraph, add this sentence: "Google Ads and Microsoft Advertising tags set cookies that tell us which ads led to an order, and let those platforms build audiences of our site's visitors, which we can use to decide who sees our ads."
+
+**Done when:** `/privacy` names Google Ads and Microsoft Advertising, and no page says the site uses no advertising cookies.
+
+**Not yet (owner decision):** if the owner switches on enhanced conversions (hashed email and phone sent to Google for ad orders), the privacy page needs more text first. The wording and the steps are in `docs/google-ads/enhanced-conversions-turn-on-oct2026.md`. Do not add it until the owner asks.
+
+### 36. P1: Series pages, Google rates their landing experience below average
+
+**What is wrong:** since 12 October every product search ad lands on a series page (`/shop?brand=…&code=…`). Google's keyword quality data (13 Oct) rates the landing page experience of 107 of the 149 rated keywords landing there as **below average**, and none as above average. 38 of the 41 keywords with Quality Score 1–3 land there. `/ink-cartridges` rates above average on 6 of 6. A low rating raises the price of every click and keeps 1,110 of 2,291 keywords under the first-page bid.
+
+**Fix:** on the series page, at 1280×551 and 390×664:
+- the first product card, with its price and Add, is on the first screen (no hero or filter block above it);
+- Add works from the grid, without opening the product page;
+- the page is interactive in under 2.5 s on mobile (measure LCP and INP; series pages share the listing bundle, so check what loads before the grid).
+
+**Done when:** the first card and its Add are visible without scrolling on both sizes, and mobile LCP is under 2.5 s. We re-read Google's rating around 27 October, since 754 keyword URLs changed on 12 October and Google needs time to re-rate them.
+
+### 37. P0: "Find your printer" first on every brand and category page; search goes straight to the exact match
+
+**Owner (13 Oct):** "make sure the 'Find your printer' search box is placed at the top of generic ink landing pages, and visitors should be directed directly to the exact product page they are looking for as much as possible."
+
+**What we measured (13 Oct):**
+- `/ink-cartridges` and `/toner-cartridges` already open with "Enter your printer model": at 390×664 its input sits at y 276–324, right under the H1. Keep it.
+- But 25 ad visitors on 13 Oct made 0 add-to-carts. Most clicked a brand on `/ink-cartridges` and landed on `/shop?brand=canon&category=ink`. That page opens on "Select a Product Code" (CI3, CI6, CL38…) with **no printer box**. A shopper knows their printer, not the cartridge code, so they typed the printer into site search (TS5360, Ts9600, G7060, TS9565, MFC-J4340) and left.
+
+**Fix:**
+1. **Brand and category pages** (`/shop?brand=X` and `/shop?brand=X&category=Y`, the code-grid level): put the same printer box first, under the H1, before the code grid, on mobile and desktop.
+   - Label "Find your {Brand} printer", placeholder from that brand (e.g. "e.g. Canon PIXMA TS5360").
+   - Suggestions from `GET /api/printers/search?q=…&brand=X` (brand slug filter, live).
+   - Choosing a printer opens `/shop?brand=X&printer_slug=<slug>`: the cartridges that fit it.
+2. **Site search goes straight to an exact match.**
+   - When `GET /api/search/smart` returns `matched_printer` with `exact: true`, open that printer's page (`/shop?brand=<brand_slug>&printer_slug=<slug>`) instead of the results list.
+   - When it returns `exact_product: { sku, slug, url }`, open that product page.
+   - Both fields ship from the backend this week; until they exist, change nothing in search.
+   - Never redirect on a match without `exact: true`. "Canon G7060" currently suggests the GX7060, a different printer with different ink.
+
+**Update (17 Oct), measured on 2–16 Oct paid sessions:**
+- Visitors who TYPED their printer or a search (finder, site search, or reached a printer page) placed 8 orders from 108 sessions. Visitors who only browsed the code grid placed 0 from 114 (counting sessions with more than one page: 7 of 87 vs 0 of 82).
+- On `/ink-cartridges` and `/toner-cartridges`, 65 of 137 first clicks were a **brand tile**, which opens the code grid; only 29 were the finder or search.
+- **So also:** a brand tile on `/ink-cartridges` and `/toner-cartridges` should open that brand's page with the printer finder at the top, before the code grid.
+- Backend (live 17 Oct): `GET /api/printers/search` now finds a printer when the text as a whole matches nothing: a brand typo ("bother mfc-l3770"), shopping words around the model ("Hp 3110 printer cartridges") or a trailing letter stored differently ("Hp m605m" → M605DN). Three of the six printers ad visitors typed returned nothing before.
+
+**Done when:**
+- At 390×664 and 1280×551, the printer input on `/shop?brand=canon&category=ink` is fully visible without scrolling.
+- Choosing "Canon PIXMA TS5360" opens its printer page.
+- Searching "brother mfc-j4340dw" opens the MFC-J4340DW printer page once the backend's `exact` flag is live.
+
+### 38. P1: Order confirmation page, one-click "Remind me when it's time to reorder"
+
+**Why (owner, 15 Oct: "place a strong focus on increasing customer retention"):** a one-time buyer may only get a reorder reminder after saying yes (NZ spam law: one purchase is not consent). The checkout box (item 19) works, but none of the 20 paid orders since 7 October ticked it, and the same button in the order and day-1 emails has never been pressed. Customers who came back placed orders averaging about $341, against about $123 for a first order (90 days). The confirmation page is the one page every buyer reads right after paying.
+
+**Backend (live once deployed):**
+- `GET /api/orders/:orderNumber` now returns `reminder_consent_at`: `null`, or the time the buyer said yes (checkout box or an email button).
+- `POST /api/orders/:orderNumber/reminder-consent`, no body. It uses the same authority as that GET: the `Authorization: Bearer` token for a signed-in buyer, or the `X-Guest-Session` header the page already sends for a guest. Responses:
+  - `200 {ok:true, data:{reminder_consent:true, reminders_resumed, delivery_blocked}}`. It is idempotent: pressing twice keeps the first time.
+  - `reminders_resumed: true` means the customer had unsubscribed from reorder reminders and pressing the button switched them back on.
+  - `delivery_blocked` is `null`, or why no reminder can reach them: `'bounced'` (emails to the address bounce), `'unsubscribed'` (they unsubscribed from all our emails) or `'recommendations_off'` (a signed-in customer switched off recommendation emails, which reminders follow).
+  - `401` (no token or session), `404` (not this buyer's order), `429` (rate limit, with `Retry-After`), `500`.
+
+**What to build:** one card on the confirmation page, shown only when `reminder_consent_at` is `null` and the order is not cancelled. Use the same words as the email button:
+- Heading: "Want a reminder before you run out?"
+- Text: "We'll email you when these cartridges are likely running low, so you can reorder in time. Unsubscribe from any reminder in one click."
+- Button: "Remind me when it's time to reorder". Disable it while the request is in flight.
+- After a 200, replace the card with the line that matches the response:
+  - `delivery_blocked: null`, `reminders_resumed: false`: "Done — we'll email you before you run out."
+  - `delivery_blocked: null`, `reminders_resumed: true`: "Done — reorder reminders are back on. We'll email you before you run out."
+  - `'bounced'`: "We've noted your request, but emails to this address have been bouncing, so reminders can't reach you. Contact us at {support email} to update your email address."
+  - `'unsubscribed'`: "We've noted your request, but this address is unsubscribed from our emails, so we can't send reminders. To get them, contact us at {support email} and we'll switch emails back on."
+  - `'recommendations_off'`: "We've noted your request, but product recommendation emails are switched off in your account, and reorder reminders follow that setting. Turn them back on under email preferences in your account."
+  - `{support email}` is `contact.support_email` from `GET /api/site/trust`.
+- On an error: "Sorry, that didn't save. Please try again."
+
+Rules:
+- Record consent only when the shopper presses the button. Never press it for them, and never show it pre-selected.
+- Guests and signed-in buyers get the same card.
+- Show no other reminder or subscription offer on this page: one ask only.
+- Place it under the order summary, above the account and business-account offers.
+
+**Done when:** pressing the button sends one POST and shows the "Done" line; reloading the page shows no card; an order placed with the checkout box ticked never shows the card.
+
+### 39. P2 (admin, owner only): Retention panel
+
+**Why:** shows whether customers come back, split by how they first arrived. Measured 15 Oct: 4.4% of customers placed a 2nd order within 30 days (5 of 113). Customers who first came from a Google ad repeated less than other web customers (1 of 41 against 3 of 63 at 30 days).
+
+**Endpoint:** `GET /api/admin/analytics/retention`. Call it once when the panel opens. Admins without the owner role get `403`, so hide the panel for them.
+- It takes no query parameters. An unknown parameter returns `400`, except the always-ignored keys: `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `utm_id`, `gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `srsltid`, `ttclid`, `dclid`, `_` and `_t`. A cache-buster passes, but it does not bypass the server's 10-minute cache (`meta.cache_ttl_seconds` 600; `meta.generated_at` is when the report was built). Rate limit: 30 per minute.
+
+**Response:**
+- `data.cohorts[]`, oldest first: `{cohort:'YYYY-MM', month_complete, all, ad_acquired, other, invoice_or_quick_order}`. `data.totals` has the same four groups.
+- Each group carries:
+  - `customers`;
+  - `second_order_within.{d30,d60,d90,d180}`, each `null` or `{repeat_customers, observed_customers, rate_pct}`;
+  - `median_days_to_second_order` (number or `null`) and `customers_with_second_order` (how many customers that median is based on);
+  - `revenue_per_customer_incl_gst.{d30,d90,d180}` (NZD, or `null`).
+- `meta`: `as_of` (NZ date), `generated_at`, `orders_counted`, `excluded{test_orders, non_positive_total, staff_orders, orders_without_customer}`, `cache_ttl_seconds`, and `definitions` (one string per key).
+
+**Layout:**
+- Rows: the cohort months plus a totals row. Columns: customers; 2nd order within 30/60/90/180 days; median days; revenue per customer at 30/90/180 days.
+- Above the table, a segment toggle: All / Google Ads (`ad_acquired`) / Other web (`other`) / Invoice & quick order (`invoice_or_quick_order`).
+- Beside the toggle, always visible: "Other web is the comparison for Google Ads, but not a clean control: it includes customers from the old order book and ad clicks that arrived without a Google click id."
+- Tooltips come from `meta.definitions.<key>`. Never hard-code that copy.
+- Show `null` as "—", never 0. A real 0 arrives as `{repeat_customers:0, …}`.
+- Show the counts beside every rate ("4 of 43 · 9.3%").
+- Grey out and label "small sample":
+  - any rate cell with `observed_customers` under 20;
+  - any median with `customers_with_second_order` under 20.
+- Revenue at dN averages over `second_order_within.dN.observed_customers`, so mute it by that same count.
+- `month_complete:false`: put an "in progress" badge on that row.
+- Footer: `as_of` and the excluded counts.
+- Customers and the counts add up across the three segments to `all`; rates and medians do not, so always read them from the response.
+- **Do not show `GET /api/admin/analytics/cohorts` beside this panel.** That older endpoint counts every guest as one customer, uses UTC months and reports 0% for windows that have not ended, so its figures contradict this one.
+
+### 40. P2: Reorder reminders for signed-in customers
+
+**Why:** a customer who buys the same toner every few months can ask for a reminder email that loads their reorder into the cart in one click. Nothing is ordered or charged automatically. Only one reminder has ever been set up (by the owner, as a test), because nothing on the site offers it. The only entry point today is a link in signed-in customers' order emails.
+
+**Backend (done 15 Oct):** the refill, predictive and business reorder emails skip any product a customer's reorder reminder (active or paused) already covers, so nobody gets two emails about one cartridge.
+
+**Name it** "Reorder reminder(s)". Never "Auto-reorder", "Subscribe & Save", "subscription", "save", "%", "never run out", or any price or saving claim.
+
+**API** (Bearer token; JSON). Errors are `{ok:false, error:{code, message, details}}`.
+- `GET /api/account/subscriptions`: `200 {ok:true, data:{subscriptions:[{id, items:[{sku, quantity}], interval_days, next_due:'YYYY-MM-DD', status:'active'|'paused'|'cancelled', last_sent_at, source_order_id, created_at, updated_at, email}]}}`, newest first, at most 50. Never show `email`: it is a copy from sign-up, and reminders go to the current account email.
+- `POST /api/account/subscriptions` with `{items:[{sku, quantity 1-20}] (1-12 lines), interval_days 14-365 (weeks × 7)}`:
+  - `201 {subscription, existing:false, merged:false, rejected_items:[{sku, reason}]}`: a new reminder.
+  - `200 {subscription, existing:true, merged:true, rejected_items}`: the items were added to the customer's ACTIVE reminder on the same interval, so one schedule sends one email that loads every item. That reminder's `next_due` is unchanged; read it from the response. A paused reminder is never added to; a new one is made instead.
+  - `400 NO_ORDERABLE_ITEMS` with `details.rejected[{sku, reason}]` (`missing_sku`, `duplicate_sku`, `invalid_quantity`, `unknown_or_inactive`, `not_orderable`). Other `400` = validation. `401` when signed out.
+- `PATCH /api/account/subscriptions/:id` with any of `{interval_days, status:'active'|'paused'|'cancelled', items, next_due:'YYYY-MM-DD'}` → `200 {subscription}`; `404` if not found. Changing `interval_days` keeps `next_due`: the new interval applies after the next reminder. `items` needs at least one line; to remove the last item, set `status:'cancelled'`.
+- Product names and links: `GET /api/products/:sku` (follows SKU renames with a 301).
+
+**1. Product page** (`product_type` `ink_cartridge`, `ink_bottle` or `toner_cartridge`), signed in:
+- Under Add to Cart: "Email me a reminder to reorder this every [N] weeks", button "Set reminder".
+- Interval options 4 / 6 / 8 / 10 / 12 / 16 / 26 weeks, the same list everywhere. Default: the interval of the customer's existing active reminder, if they have one (so all their cartridges land on one schedule and one email); otherwise 6 weeks for ink cartridges and 8 for toner and ink bottles.
+- Quantity comes from the page's quantity selector.
+- GET the list once per visit. If an active reminder already has this SKU: "Reminder set: every N weeks. Next email around {next_due}." and a "Manage reminders" link. If only a paused one has it: "Your reminder for this item is paused." and "Manage reminders". Do not offer a second reminder in either case.
+- Create a reminder only on an explicit click; never pre-select it. Disable the button while the POST is in flight.
+- On `201`: "Reminder set. We'll email you around {next_due}, then every N weeks, with this item ready to add to your cart in one click. Nothing is ordered or charged until you check out. You can pause or change it any time in your account." (Drop the last sentence until the account section is live.)
+- On `200` with `merged:true`: "Added to your reorder reminder. We'll email you around {next_due}, then every N weeks, with all its items ready to add to your cart in one click. Nothing is ordered or charged until you check out."
+- On `NO_ORDERABLE_ITEMS`: "Reminders aren't available for this item." Other errors: "We couldn't set the reminder just now. Please try again."
+- Guests: no reminder control and no email capture. One link, "Sign in to get a reorder reminder for this item.", returning to the same product page after sign-in.
+
+**2. Account page, "Reorder reminders" section** (every reminder except cancelled ones):
+- Item names, quantities, "Every N weeks" ("Every N days" when `interval_days` is not a multiple of 7), and for active reminders "Next reminder: {next_due}, then every N weeks."
+- "Change how often": PATCH `{interval_days}`, then show `next_due` from the response.
+- "Remove item": PATCH `{items: the remaining items}`; for the last item use "Delete reminder".
+- "Pause reminders": PATCH `{status:'paused'}`. "Turn reminders back on": PATCH `{status:'active'}`, then "Turned back on. If the next reminder date has passed, we'll send it within a day."
+- "Delete reminder": PATCH `{status:'cancelled'}`.
+- Paused: "Paused. No reminder emails are sent. We also pause a reminder ourselves when none of its items can be ordered any more."
+- Empty: "No reorder reminders yet. You can set one on any ink or toner product page."
+- Footnote: "Reminders go to your account email address. Nothing is ordered or charged until you check out."
+
+**3. Fix existing copy now:** the `?subscription=` toasts in `account.js` still say "scheduled reorder", which reads as if an order will be placed. Replace them:
+- `created`: "Your reorder reminder is set up. We'll email you every 60 days. Nothing is ordered or charged until you check out."
+- `exists`: "You already have a reorder reminder for this order."
+- `unavailable`: "Reorder reminders aren't available for this order. Contact us and we'll help."
+- `error`: "We couldn't set up your reorder reminder. Please try the link in your email again, or contact us."
+
+**4. The reminder email's reorder link** (and "Load My Reorder" in refill and business emails) first shows a backend confirm page, "Add your reorder to your cart?" (owner, 16 Oct: so an email scanner opening the link cannot fill the cart). The shopper's click fills the ACCOUNT cart and opens `/cart?reorder=loaded` (or `?reorder=unavailable`). When either arrives and the shopper is signed out, show "Sign in to see the items we added to your cart." and return to `/cart` after sign-in, instead of the empty guest cart.
+
+**Done when:** setting a reminder on the black and then the cyan of one cartridge family shows "Added to your reorder reminder" the second time and the account page lists one reminder holding both; pausing and turning it back on work; a guest sees only the sign-in link.
+
+### 41. P2: How-to guides
+
+**Why:** in the 90 days to 12 October, 284 how-to searches ("how to replace toner brother", "what ink does my printer use") reached the site 539 times and brought 0 clicks: the site has no page that answers them. A guide ranks for the question and links to printer and product pages that carry real demand.
+
+**The brief:** `docs/seo/guides-content-plan-oct2026.md` ranks 9 guides by NZ search demand (Keyword Planner, 15 Oct). Each guide has its URL (`/guides/<slug>`), target queries, outline, the live products and printer pages it links to, and the copy rules. Start with guide 1 (replace the toner in a Brother laser printer) and guide 4 (change the ink in an HP printer).
+
+**Rules:** the pages are hand-authored static HTML on www, as `/about` and `/returns` are. Trust facts (returns, guarantee, dispatch, free shipping) come from `/api/site/trust` and `/api/site/value-props`, never typed in. No price comparisons, superlatives or "guaranteed fit" (invariant 13). Tell the backend when a guide goes live, so it can be added to the sitemap.
+
+### 42. P2: SEO housekeeping
+
+1. **Apex redirect:** `https://inkcartridges.co.nz/...` redirects to `www` with a **307** (temporary; still 307 on 18 Oct). Make it a **308 or 301** (permanent) in Vercel. 31 apex URLs have Search Console impressions.
+2. **Pages Google indexes that it should not:** `/account/orders` (73 impressions), `/account/favourites`, `/quote`, `/track-order`, 14 site-search URLs (`/shop?search=…` and `/shop?q=…`), and 21 legacy `/html/*` URLs. Serve `<meta name="robots" content="noindex">` on the account, quote, track-order and search pages, and 301 each `/html/*` URL to its current page (or let it 404 if there is none).
+3. **Printer-page description, only if the SPA sets its own** (the prerendered page is already done by the backend). Mirror `buildPrinterPageMeta`:
+   - Lead sentence: when every listed product is `source:'genuine'`: "N genuine <noun> cartridges for the <Printer>."; all `'compatible'`: "N compatible <noun> cartridges for the <Printer>."; both: "N <noun> cartridges for the <Printer> — genuine & compatible." `<noun>` is the supply noun in lower case ("ink", "toner"), or nothing; "cartridge" when N is 1.
+   - Then add these sentences in order, each only if the total stays at or under 155 characters. A sentence that does not fit is skipped and the next one is still tried: "Free shipping over $<threshold>." (the threshold is in `/api/site/value-props`), "Auckland metro orders by <cutoff> NZT dispatch same day." (the cutoff from `/api/site/trust`, written like "12pm"), "<returns days>-day returns." (`/api/site/trust`).
+   - Never cut mid-sentence and never add "...".
+
+### 43. P1: Tracking that tells us why ad visitors leave
+
+**Why:** in the last two weeks 182 of 188 paid sessions that never interacted were a single page view, so we cannot tell "left before the products appeared" from "saw the prices and left". The Add buttons on listing grids also send nothing: product pages recorded 365 add-to-cart clicks, listing grids 0.
+
+**What to build:**
+1. **`grid_ready`:** when a listing grid (series, printer, brand, category page) shows its first product card, send one beacon to the traffic endpoint with `event_type: 'grid_ready'` and `element` = the milliseconds since navigation start, e.g. `grid_ready 1240`. Same for a product page's main card. The backend accepts `grid_ready` (live 17 Oct, migration 209).
+2. **Add on listing grids:** every Add button on a listing grid sends the same `add_to_cart` click the product page sends, with the product id, so `traffic_events` records the add.
+3. **Cart requests carry the session:** send `X-Session-Id` on every `POST /api/cart/items` (the cart funnel already reads it), so an add can be tied to the visit.
+4. **Test browsers identify themselves:** our own and your QA browsers (HeadlessChrome, emulated iOS devices) set `localStorage.ic_internal = '1'`, and the beacon skips sending when it is set. Today they make up a large share of "checkouts" in the funnel report.
+
+**Done when:** a listing-grid visit records `grid_ready` and, after an Add, an `add_to_cart` click carrying the product id; a QA browser with the flag records nothing.
+
+### 44. P1: Regression check, series and product pages between 27 and 29 September
+
+**What we see:** for visitors who landed on a series page from an ad, product page → Add to cart fell from 6 of 10 to 2 of 15 after the 29 September build. Site-wide, the product-page add rate held (49 of 254 vs 51 of 326), so it may be the sample, but it is cheap to check.
+
+**What to do:** compare the 27 and 29 September builds of the series and product pages (the `yieldTier` change in `utils.js` shipped then) on desktop and mobile: product order, which product the page leads with, and whether the Add button is visible without scrolling. The "Popular right now" and "Full colour sets" rows removed that day stay removed (owner).
+
+### 45. P1: One GA4 property, the one the owner can open
+
+**Why:**
+- `js/gtag.js` sends page views and the ecommerce events to `G-SDQELG0FGD`.
+- The server sends every paid order's `purchase` event (Measurement Protocol) to `G-YJXTSGLM28`. So no GA4 report can join a visit to its sale.
+- The owner's Google login (`junjackson0915@gmail.com`) can open only `G-YJXTSGLM28`: GA4 property 525158196, "InkCartridgesNZ - Production - Web". `G-SDQELG0FGD` sits in a Google account the owner cannot see, so the business cannot open its own browsing data (checked 17 Oct in GA4 and in Tag Manager's "Google tags" list).
+- In the 28 days to 16 Oct, `G-YJXTSGLM28` received 30 purchases ($3,458.58) and only 45 page views.
+- The 20 Sep change (ERR-276) removed `G-YJXTSGLM28` from `js/gtag.js` as "configured and never fed". It is fed, by the server.
+
+**What to change (`js/gtag.js`):**
+1. `gtag('config', 'G-SDQELG0FGD', GTAG_COOKIE_FLAGS)` becomes `gtag('config', 'G-YJXTSGLM28', GTAG_COOKIE_FLAGS)`, and `GA4.PROPERTY` becomes `'G-YJXTSGLM28'`. One GA4 property stays configured, so the one-bundle rule from ERR-276 still holds.
+2. Every ecommerce event keeps `send_to: GA4.PROPERTY`, so it follows the change.
+3. Leave `AW-18032498762` and its events as they are.
+4. Update the tests that pin the old id.
+5. Check that checkout sends `ga_client_id` whenever the `_ga` cookie exists. Only 19 of the 61 paid orders in the 30 days to 17 Oct carried one. With analytics consent declined there is no cookie, and a missing id is expected.
+
+**Do not:**
+- configure both ids (two GA4 bundles, the ERR-276 cost);
+- send a browser `purchase` event: the server already sends it, with the order number as `transaction_id`, and a browser twin would count every sale twice.
+
+**Backend:** nothing to change. The server already sends purchases to `G-YJXTSGLM28` (25 sent since 6 Oct, none failed). The `_ga` cookie is shared by every GA4 property on the domain, so an order that carries `ga_client_id` joins its visit once the browser tag moves; an order without one arrives as a new visitor.
+
+**Done when:**
+- a page view on www shows in property 525158196's Realtime report;
+- the browser's `collect` requests carry `tid=G-YJXTSGLM28` and never `G-SDQELG0FGD`;
+- the next paid order's `purchase` appears in that property;
+- within about two days, a GA4 funnel exploration (`view_item` → `add_to_cart` → `purchase`) renders.
+
+The history already in `G-SDQELG0FGD` stays there. If its owner later adds `junjackson0915@gmail.com` as an Administrator, the owner can read it.
+
+### 47. P1 (small, owner 22 Oct): the checkout email hint misses `gial.com`
+
+**Why:** the owner typed `junjackson0915@gial.com` on `/checkout` and no "Did you mean …?" appeared. `CheckoutPage.suggestEmailDomain` (`js/checkout-page.js`, item 15) suggests only when the domain is ONE edit from a known one. `gial.com` is two edits from `gmail.com` (a dropped `m` plus a swapped `ia`), so it returns `null`. The backend cannot catch it either: `gial.com` is a registered domain, so the address passes validation, and a guest's confirmation, tracking and invoice emails all go to it.
+
+**What to change:** replace `suggestEmailDomain` with the version below. Nothing else changes: same signature, same blur trigger, same hint box, still a hint that never blocks.
+
+- Allows TWO slips when the provider's name has 5 or more letters (gmail, yahoo, hotmail, outlook, icloud); keeps ONE for `xtra` and `live`, where two would flag real business domains (`astra.co.nz`, `ultra.co.nz`, `terra.co.nz`).
+- Picks the NEAREST provider, not the first one in the list, so `hotmal.co.nz` suggests `hotmail.co.nz`, not `hotmail.com`.
+- Adds the NZ providers our customers actually use: `yahoo.co.nz`, `hotmail.co.nz`, `outlook.co.nz`, `live.com`. The list is ordered by how often each appears in our orders and accounts.
+
+```js
+suggestEmailDomain(email) {
+    // Most-used first: a tie goes to the more common provider.
+    const DOMAINS = ['gmail.com', 'xtra.co.nz', 'hotmail.com', 'yahoo.com', 'yahoo.co.nz', 'outlook.com',
+        'icloud.com', 'live.com', 'hotmail.co.nz', 'outlook.co.nz'];
+    if (typeof email !== 'string') return null;
+    const at = email.lastIndexOf('@');
+    if (at < 1) return null;
+    const local = email.slice(0, at).trim();
+    const domain = email.slice(at + 1).trim().toLowerCase();
+    if (!local || !domain || DOMAINS.includes(domain)) return null;
+    // Optimal string alignment distance (one edit = substitution, insertion,
+    // deletion or a swap of two neighbours).
+    const osa = (a, b) => {
+        const d = [];
+        for (let i = 0; i <= a.length; i++) {
+            d[i] = [i];
+            for (let j = 1; j <= b.length; j++) {
+                if (i === 0) { d[i][j] = j; continue; }
+                const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+                if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                    d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+                }
+            }
+        }
+        return d[a.length][b.length];
+    };
+    // Two slips allowed when the provider's name is 5+ letters (gial.com ->
+    // gmail.com is a dropped m plus a swap); one for xtra and live, where two
+    // would catch real business domains (astra.co.nz, ultra.co.nz).
+    let best = null, bestDist = Infinity;
+    for (const k of DOMAINS) {
+        const max = k.indexOf('.') >= 5 ? 2 : 1;
+        const dist = osa(domain, k);
+        if (dist <= max && dist < bestDist) { best = k; bestDist = dist; }
+    }
+    best = best || DOMAINS.find(k => k.startsWith(domain + '.'));
+    return best ? local + '@' + best : null;
+},
+```
+
+**Tests (pin these):**
+
+| Typed | Hint |
+|---|---|
+| `a@gial.com`, `a@gamil.com`, `a@gmai.co`, `a@gmal.con`, `a@gmail.ocm`, `a@gmail` | `a@gmail.com` |
+| `a@hotmal.co.nz` | `a@hotmail.co.nz` |
+| `a@yaho.co.nz` | `a@yahoo.co.nz` |
+| `a@iclod.com` | `a@icloud.com` |
+| `a@xtra.co`, `a@xtra.co.nx`, `a@xrta.co.nz` | `a@xtra.co.nz` |
+| `a@liv.com` | `a@live.com` |
+| `a@gmail.com`, `a@xtra.co.nz`, `a@yahoo.co.nz`, `a@astra.co.nz`, `a@ultra.co.nz`, `a@terra.co.nz`, `a@gmx.com`, `a@me.com`, `a@yahoo.com.au`, `a@protonmail.com` | none |
+
+**Backend check (22 Oct):** this function was run over every email domain in our orders, accounts and suppression list (92 domains). It hints on exactly one, `gmail.ocm`, which is a real typo on a customer account. No real customer domain gets a false hint.
+
+**Signed-in shoppers:** their order emails go to the account's own address (`req.user.email`), never to the checkout field, so the hint only protects guests. It still shows for everyone.
+
+**Done when:** on `/checkout`, typing `test@gial.com` and leaving the field shows "Did you mean test@gmail.com?", and the tests above pass.
+
 ### Not to do
 
-- **PayPal: on hold by the owner.** Leave the PayPal button as it is. Do not apply the old hide rule.
+- **PayPal: on hold by the owner.** Leave the PayPal button as it is. Do not apply the old hide rule. (PayPal accepts payments again: orders have been created normally since 6 Oct, 02:15 UTC.)
 - No price comparisons, "lowest price", "best", star ratings or review counts (invariant 13). No "guaranteed fit".
 - No "dedicated account support" or account manager anywhere (owner, 5 Oct): business questions go to the one support email.
 - Shipping fees: unchanged (owner).
@@ -464,4 +790,7 @@ After you tell us a deploy is live, we re-run, as a first-time visitor (consent 
 11. A guest order's confirmation page offers the one-step account, and `next_order_offer` shows only when present (13).
 12. A mistyped email (`test@gmail.con`) is caught under the email field on `/checkout`, and "Continue to payment" stays disabled until it is fixed (15).
 13. On `/cart`, + stops at the line's stock and a typed quantity above stock becomes the stock, with no `400` from `PUT /api/cart/items` (17).
-14. Everything in Part 2 still holds.
+14. `/shop?brand=brother&code=LC3319XL&source=compatible` lists only the 6 compatible products, with a removable chip, and its canonical has no `source` (21).
+15. Everything in Part 2 still holds.
+16. GA4 `collect` requests carry `tid=G-YJXTSGLM28` only, and the next paid order's `purchase` lands in the same property (45).
+17. On `/checkout`, `test@gial.com` shows "Did you mean test@gmail.com?" when the field loses focus (47).

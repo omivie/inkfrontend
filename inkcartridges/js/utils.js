@@ -4575,6 +4575,101 @@ const DeliveryArea = {
 };
 if (typeof window !== 'undefined') window.DeliveryArea = DeliveryArea;
 
+/**
+ * CLIENT BEACON (checklist 2026-10-22 items 33 + 43, ERR-369)
+ * ===========================================================
+ * Two first-party beacons the backend reads from `traffic_events`, through the
+ * one traffic endpoint TrafficTracker already owns:
+ *
+ *   client_error  element = "<surface> <METHOD> <path> <status|timeout|network>"
+ *                 e.g. "shop-drilldown GET /api/shop?brand=hp&printer_slug=x 429".
+ *                 Sent once per distinct element per page when a catalogue read
+ *                 shows its error / Retry state. traffic_events held ZERO of
+ *                 these ever: 8 human Retry clicks (Safari 15.6 / iOS 15.8)
+ *                 since 18 Sep, and nothing recorded which request failed.
+ *   grid_ready    element = "grid_ready <ms since navigation start>". Once per
+ *                 page load, when a listing grid (or a PDP's main card) shows
+ *                 its first product. Tells "left before products appeared"
+ *                 from "saw the prices and left".
+ *
+ * Enum MEASURED 2026-10-24: the endpoint lists `client_error` and `grid_ready`
+ * among its accepted event_types (a bogus type 400s and names them; both
+ * returned 204). BF-053's pageview|click-only enum is closed.
+ *
+ * WHICH request failed comes from `API.lastFailure`, written by the ONE fetch
+ * layer every catalogue read goes through (api.js `_noteFailure`), so no
+ * surface has to thread a status through its own call chain.
+ *
+ * traffic-tracker.js is injected `defer` by gtag.js, so an early beacon can
+ * fire before it exists: those wait in a small queue and flush on its
+ * `traffic-tracker:ready` event. Under DNT and on /admin the tracker never
+ * loads and the queue simply never flushes — the same opt-outs as pageviews.
+ */
+const ClientBeacon = {
+    ELEMENT_MAX: 512,           // the API's element limit
+    FAILURE_MAX_AGE_MS: 30000,  // older than this is not the failure on screen
+    _queue: [],
+    _sent: new Set(),
+    _gridReady: false,
+
+    _send(type, element) {
+        const el = String(element).slice(0, this.ELEMENT_MAX);
+        const key = type + '\u0000' + el;
+        if (this._sent.has(key)) return false;
+        this._sent.add(key);
+        const tt = (typeof window !== 'undefined') ? window.TrafficTracker : null;
+        if (tt && typeof tt.send === 'function') tt.send(type, { element: el });
+        else if (this._queue.length < 20) this._queue.push([type, el]);
+        return true;
+    },
+
+    _flush() {
+        const tt = (typeof window !== 'undefined') ? window.TrafficTracker : null;
+        if (!tt || typeof tt.send !== 'function') return;
+        const q = this._queue.splice(0);
+        for (const [type, el] of q) tt.send(type, { element: el });
+    },
+
+    /**
+     * The failing request as "METHOD path status", or null. Pass a failure
+     * `{method, path, status}` explicitly, or let it read `API.lastFailure`
+     * (only when recent — a stale one would blame the wrong request).
+     */
+    describe(failure) {
+        let f = failure;
+        if (!f && typeof API !== 'undefined' && API && API.lastFailure) {
+            const lf = API.lastFailure;
+            if (Date.now() - (lf.at || 0) <= this.FAILURE_MAX_AGE_MS) f = lf;
+        }
+        if (!f || !f.path) return null;
+        return `${String(f.method || 'GET').toUpperCase()} ${f.path} ${f.status != null ? f.status : 'unknown'}`;
+    },
+
+    /**
+     * Report an error state. `surface` names the screen ("shop-drilldown",
+     * "search", "pdp", "cart"). With no known request the element still says
+     * so ("<surface> unknown"), so a render-side failure is not silent either.
+     */
+    error(surface, failure) {
+        const what = this.describe(failure) || 'unknown';
+        return this._send('client_error', `${surface} ${what}`);
+    },
+
+    /** First product on screen, once per page load. */
+    gridReady() {
+        if (this._gridReady) return false;
+        this._gridReady = true;
+        const ms = (typeof performance !== 'undefined' && performance.now) ? Math.round(performance.now()) : 0;
+        return this._send('grid_ready', `grid_ready ${ms}`);
+    },
+};
+if (typeof window !== 'undefined') {
+    window.ClientBeacon = ClientBeacon;
+    if (typeof window.addEventListener === 'function') {
+        window.addEventListener('traffic-tracker:ready', () => ClientBeacon._flush());
+    }
+}
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -4603,6 +4698,7 @@ if (typeof module !== 'undefined' && module.exports) {
         AdminOnlyRefusal,
         OrderNumber,
         QtyStepper,
+        ClientBeacon,
         DeliveryArea
     };
 }

@@ -109,9 +109,10 @@ test('§2 every gtag config call passes cookie_flags', () => {
     /* The count is the NEGATIVE CONTROL for the loop below, not the invariant:
      * with a single destination, "every config call passes cookie_flags" would
      * be a claim about one line and could pass by accident. Two is enough for
-     * that job. It was three until 2026-09-20, when the orphan GA4 property
-     * G-YJXTSGLM28 — configured, never fed, and costing ~187KB of bundle on
-     * every page load — was removed (ERR-276). The exact set of destinations is
+     * that job. It was three until 2026-09-20, when a second GA4 property
+     * (~187KB of bundle on every page load) was removed (ERR-276); the one
+     * GA4 property left moved to the owner's G-YJXTSGLM28 on 2026-10-24
+     * (ERR-369). The exact set of destinations is
      * pinned in tests/ga4-ecommerce-events-sep2026.test.js §2, which is where a
      * fourth one would have to be justified. */
     assert.ok(configs.length >= 2, 'more than one measurement ID configured');

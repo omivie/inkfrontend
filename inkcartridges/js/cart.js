@@ -1431,6 +1431,10 @@ const Cart = {
             return;
         }
 
+        // Item 33 (ERR-369): a cart showing "couldn't confirm today's prices" is
+        // a catalogue read in its error state — name the failing request.
+        if (degraded && typeof ClientBeacon !== 'undefined') ClientBeacon.error('cart-pricing');
+
         // A shortfall is the more specific and more alarming of the three — it
         // means a number on this page is wrong right now — so it wins the copy.
         if (hasShortfall) {

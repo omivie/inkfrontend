@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initCurrentYear();
     initDropdowns();
     initCartBadgeFromStorage();
-    captureGclid();
+    captureClickIds();
 });
 
 /**
@@ -308,30 +308,53 @@ function initAdminHeaderLink() {
 }
 
 /**
- * Capture Google Ads click ID (gclid) from URL and store in localStorage.
- * Expires after 90 days. Sent with checkout requests for conversion tracking.
+ * Google Ads click ids (item 34, ERR-369). An iPhone click can land with gbraid
+ * or wbraid and NO gclid; POST /api/orders takes all three and the backend picks
+ * which Google gets. Kept 90 days; a NEW ad click (any id present) REPLACES ALL
+ * THREE, or an old gclid beside a new gbraid credits the order to the old click.
  */
-function captureGclid() {
-    var params = new URLSearchParams(window.location.search);
-    var gclid = params.get('gclid');
-    if (gclid) {
-        localStorage.setItem('gclid', gclid);
-        localStorage.setItem('gclid_expiry', Date.now() + 90 * 24 * 60 * 60 * 1000);
-    }
+var CLICK_ID_KEYS = ['gclid', 'gbraid', 'wbraid'];
+var CLICK_ID_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+function captureClickIds() {
+    try {
+        var params = new URLSearchParams(window.location.search);
+        var fresh = {};
+        var any = false;
+        CLICK_ID_KEYS.forEach(function(k) {
+            var v = (params.get(k) || '').trim().slice(0, 255);
+            if (v) { fresh[k] = v; any = true; }
+        });
+        if (!any) return;
+        CLICK_ID_KEYS.forEach(function(k) {
+            if (fresh[k]) localStorage.setItem(k, fresh[k]);
+            else localStorage.removeItem(k);
+        });
+        localStorage.setItem('gclid_expiry', String(Date.now() + CLICK_ID_TTL_MS));
+    } catch (_) { /* storage blocked: no attribution, never a broken page */ }
 }
 
-/**
- * Retrieve stored gclid if not expired.
- * @returns {string|null}
- */
+/** Stored, unexpired ids, e.g. `{ gclid, gbraid }`; absent ones OMITTED. */
+function getClickIds() {
+    var out = {};
+    try {
+        var expiry = localStorage.getItem('gclid_expiry');
+        if (expiry && Date.now() > Number(expiry)) {
+            CLICK_ID_KEYS.forEach(function(k) { localStorage.removeItem(k); });
+            localStorage.removeItem('gclid_expiry');
+            return out;
+        }
+        CLICK_ID_KEYS.forEach(function(k) {
+            var v = localStorage.getItem(k);
+            if (v) out[k] = v;
+        });
+    } catch (_) { /* storage blocked */ }
+    return out;
+}
+
+/** @returns {string|null} the stored gclid if not expired */
 function getGclid() {
-    var expiry = localStorage.getItem('gclid_expiry');
-    if (expiry && Date.now() > Number(expiry)) {
-        localStorage.removeItem('gclid');
-        localStorage.removeItem('gclid_expiry');
-        return null;
-    }
-    return localStorage.getItem('gclid');
+    return getClickIds().gclid || null;
 }
 
 /**

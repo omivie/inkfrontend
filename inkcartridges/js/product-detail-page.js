@@ -348,6 +348,8 @@
                 }
 
                 this.renderProduct();
+                // Item 43.1 (ERR-369): the product page's main card is painted.
+                if (typeof ClientBeacon !== 'undefined') ClientBeacon.gridReady();
 
                 /* GA4 view_item (ERR-256).
                  *
@@ -3678,6 +3680,8 @@
             const safeMessage = (typeof API !== 'undefined' && API.extractErrorMessage)
                 ? API.extractErrorMessage(message, 'Product not found')
                 : (typeof message === 'string' ? message : 'Product not found');
+            // Item 33 (ERR-369): the "Try Again" state is reported like the shop's.
+            if (typeof ClientBeacon !== 'undefined') ClientBeacon.error('pdp');
             // Update title
             document.getElementById('product-title').textContent = safeMessage;
             document.getElementById('product-sku').textContent = '';

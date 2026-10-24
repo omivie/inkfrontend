@@ -63,7 +63,7 @@ function configsAt(pathname) {
 
 test('§1 POSITIVE CONTROL — a storefront page configures GA4 AND the Ads tag', () => {
     for (const p of ['/', '/products/x/SKU1', '/cart', '/business']) {
-        assert.deepEqual(configsAt(p).sort(), ['AW-18032498762', 'G-SDQELG0FGD'], p);
+        assert.deepEqual(configsAt(p).sort(), ['AW-18032498762', 'G-YJXTSGLM28'], p);
     }
 });
 

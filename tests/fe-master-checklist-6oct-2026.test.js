@@ -499,6 +499,24 @@ test('§15 typo hint: every listed slip is caught; exact and unrelated domains g
     }
 });
 
+test('§47 typo hint: the backend\'s 22 Oct table (two slips for 5+ letter providers, nearest wins, NZ providers)', () => {
+    /* Pinned verbatim from FE-MASTER-CHECKLIST 2026-10-22 item 47 (ERR-369). The
+       owner typed junjackson0915@gial.com and got no hint under the one-slip rule. */
+    const s = method('js/checkout-page.js', 'suggestEmailDomain');
+    const hints = {
+        'a@gial.com': 'a@gmail.com', 'a@gamil.com': 'a@gmail.com', 'a@gmai.co': 'a@gmail.com',
+        'a@gmal.con': 'a@gmail.com', 'a@gmail.ocm': 'a@gmail.com', 'a@gmail': 'a@gmail.com',
+        'a@hotmal.co.nz': 'a@hotmail.co.nz', 'a@yaho.co.nz': 'a@yahoo.co.nz', 'a@iclod.com': 'a@icloud.com',
+        'a@xtra.co': 'a@xtra.co.nz', 'a@xtra.co.nx': 'a@xtra.co.nz', 'a@xrta.co.nz': 'a@xtra.co.nz',
+        'a@liv.com': 'a@live.com', 'test@gial.com': 'test@gmail.com',
+    };
+    for (const [typed, want] of Object.entries(hints)) assert.equal(s(typed), want, typed);
+    for (const none of ['a@gmail.com', 'a@xtra.co.nz', 'a@yahoo.co.nz', 'a@astra.co.nz', 'a@ultra.co.nz',
+        'a@terra.co.nz', 'a@gmx.com', 'a@me.com', 'a@yahoo.com.au', 'a@protonmail.com']) {
+        assert.equal(s(none), null, none);
+    }
+});
+
 test('§15 checkout.html carries the hint slot; the blur pin for guest-prefill still holds', () => {
     const h = read('html/checkout.html');
     assert.match(h, /<p class="email-suggest" id="email-suggest" aria-live="polite" hidden><\/p>/);

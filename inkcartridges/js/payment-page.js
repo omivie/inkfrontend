@@ -1224,7 +1224,10 @@
                 ...this.orderLevelPrinterSlug(items),
                 ...this.reminderConsentField(this.checkoutData),
                 idempotency_key: await this.getIdempotencyKey(idempotencyLabel),
+                // gclid stays a key (null when absent, as before); gbraid / wbraid
+                // ride along only when the landing carried them (item 34, ERR-369).
                 gclid: typeof getGclid === 'function' ? getGclid() : null,
+                ...this.clickIdFields(),
                 ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
                 ...(isGuest && { guest_email: this.checkoutData.email }),
                 ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone }),
@@ -1610,6 +1613,20 @@
          * ONE owner for both builders (Stripe + PayPal) so the rails cannot drift.
          * The cart wallet's checkoutData has no such key ⇒ nothing is sent.
          */
+        /**
+         * The iPhone click ids for POST /api/orders: `{gbraid?, wbraid?}`, each
+         * only when stored (main.js getClickIds — one capture, one expiry, a new
+         * ad click replaces all three). Both order bodies spread this, so the
+         * card and PayPal rails cannot disagree (item 34, ERR-369).
+         */
+        clickIdFields() {
+            const ids = typeof getClickIds === 'function' ? getClickIds() : {};
+            const out = {};
+            if (ids.gbraid) out.gbraid = ids.gbraid;
+            if (ids.wbraid) out.wbraid = ids.wbraid;
+            return out;
+        },
+
         reminderConsentField(checkoutData) {
             return checkoutData && checkoutData.reminderConsent === true ? { reminder_consent: true } : {};
         },
@@ -1937,6 +1954,7 @@
                         ...self.reminderConsentField(self.checkoutData),
                         idempotency_key: await self.getIdempotencyKey('paypal'),
                         gclid: typeof getGclid === 'function' ? getGclid() : null,
+                        ...self.clickIdFields(),
                         ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
                         ...(isGuest && { guest_email: self.checkoutData.email }),
                         ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone }),

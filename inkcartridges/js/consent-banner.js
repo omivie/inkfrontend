@@ -75,7 +75,10 @@
         declined: 'declined',
         skipPathPrefixes: ['/admin'],   // staff tooling, not a public visitor
         heading: 'Analytics cookies',
-        body: 'We use Google Analytics to understand which pages help people find the right cartridge. No advertising profile is built from it.',
+        /* Item 35 (2026-10-22): the old second sentence, "No advertising profile is
+           built from it.", sat beside a Google Ads tag that builds visitor audiences
+           (privacy §6). A cookie bar must not deny what the privacy page discloses. */
+        body: 'We use Google Analytics to understand which pages help people find the right cartridge.',
         /* The ≤768px wording. The long body + heading made the bar 148px on a
            390x664 phone — 22% of the screen, over the Add button (conversion
            handoff 2026-09-23 D-P0-2). One line beside inline buttons targets

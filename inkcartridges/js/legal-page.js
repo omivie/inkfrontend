@@ -180,7 +180,7 @@
                     + '<tr>'
                     +   '<th scope="row">' + escapeHtml(c.category) + '</th>'
                     +   '<td>'             + escapeHtml(c.examples) + '</td>'
-                    +   '<td>'             + (c.optional ? 'Optional' : 'Required') + '</td>'
+                    +   '<td>'             + escapeHtml(c.status || (c.optional ? 'Optional' : 'Required')) + '</td>'
                     + '</tr>';
             }).join('');
         }

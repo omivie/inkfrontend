@@ -1569,6 +1569,9 @@
             }
             this.elements.empty.hidden = true;
             this.elements.error.hidden = false;
+            // Item 33 (ERR-369): the Retry state names its failing request in
+            // traffic_events — `client_error` "shop-drilldown GET /api/shop?… 429".
+            if (typeof ClientBeacon !== 'undefined') ClientBeacon.error('shop-drilldown');
 
             const btn = this.elements.errorRetryBtn;
             if (btn && typeof onRetry === 'function') {
@@ -5248,6 +5251,9 @@
                 const card = this.createProductCard(product, isCompatible, i);
                 container.appendChild(card);
             });
+            // Item 43.1 (ERR-369): the first product card is on the page — one
+            // `grid_ready <ms>` per page load (ClientBeacon dedupes later grids).
+            if (sortedProducts.length && typeof ClientBeacon !== 'undefined') ClientBeacon.gridReady();
 
             // Bind image error fallback handlers
             if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
@@ -5555,7 +5561,10 @@
                                     const ctaAria = hasStepper
                                         ? QtyStepper.ctaAriaLabel(1, displayName)
                                         : `Add ${displayName} to cart`;
+                                    // data-track (item 43.2, ERR-369): the grid Add files the
+                                    // same add_to_cart click the PDP does, with the product id.
                                     const cta = `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
+                                            data-track="add_to_cart:${Security.escapeAttr(String(product.id))}"
                                             data-product-id="${product.id}"
                                             data-product-name="${Security.escapeAttr(displayName)}"
                                             aria-label="${Security.escapeAttr(ctaAria)}">

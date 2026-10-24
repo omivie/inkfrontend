@@ -290,34 +290,34 @@ async function main() {
         ok(`"${sampleSlug}" agrees across both routes (${rpcCount})`);
     }
 
-    // ── 7. Can the first-party tracker carry a failure event yet? ──────────
+    // ── 7. Does the first-party tracker still accept client_error? ─────────
     console.log('\n\x1b[1m7. Failure telemetry — /api/analytics/traffic-event\x1b[0m');
     //
-    // THIS DOES NOT WRITE, AND CANNOT. The body below omits `session_id`,
-    // `visitor_id` and `path`, all of which are required, so the request is
-    // rejected whatever the enum says — there is no value of `event_type` that
-    // makes it persist. The validator runs with abortEarly off and reports every
-    // offending field at once, so the presence or absence of an `event_type`
-    // complaint is a clean read of the enum through a request that can never
-    // become a row. That is the only reason this belongs in a read-only probe.
+    // THIS DOES NOT WRITE, AND CANNOT. The body omits `session_id`,
+    // `visitor_id` and `path`, all required, so the request is rejected
+    // whatever the enum says. The validator runs with abortEarly off and lists
+    // every accepted event_type in its complaint about a bogus one, so the
+    // enum is read through a request that can never become a row.
+    //
+    // BF-053 closed (ERR-369, measured 2026-10-24): `client_error` and
+    // `grid_ready` are listed. reportLoadFailure() sends client_error through
+    // ClientBeacon; this check fails if the backend ever drops either value.
     const enumProbe = await getJson(`${API_BASE}/api/analytics/traffic-event`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event_type: 'catalogue_load_failed' }),
+        body: JSON.stringify({ event_type: 'fe_probe_not_a_type' }),
     });
     const details = enumProbe.json?.error?.details;
     const typeComplaint = Array.isArray(details) && details.find((d) => d.field === 'event_type');
-    if (enumProbe.status !== 400 || !Array.isArray(details)) {
-        soft('could not read the traffic-event validator',
-            `HTTP ${enumProbe.status} — ${enumProbe.text.slice(0, 160)}. The telemetry gap below is unverified either way.`);
-    } else if (typeComplaint) {
-        ok(`event_type is still ${(typeComplaint.message.match(/\[.*\]/) || ['[?]'])[0]} — a failure event cannot be recorded first-party`);
-        console.log('  \x1b[2mribbons-page.js reportLoadFailure() sends GA only, on purpose. BF-053.\x1b[0m');
+    if (enumProbe.status !== 400 || !typeComplaint) {
+        soft('could not read the traffic-event enum',
+            `HTTP ${enumProbe.status} — ${enumProbe.text.slice(0, 160)}. client_error / grid_ready acceptance is unverified.`);
     } else {
-        soft('event_type NOW ACCEPTS catalogue_load_failed',
-            'BF-053 has shipped. Add the TrafficTracker.send back to reportLoadFailure() in '
-            + 'js/ribbons-page.js — a catalogue outage can finally be seen in our own data, '
-            + 'instead of only in GA.');
+        const listed = (typeComplaint.message.match(/\[(.*)\]/) || [, ''])[1].split(',').map((x) => x.trim());
+        for (const t of ['client_error', 'grid_ready']) {
+            if (listed.includes(t)) ok(`event_type accepts ${t}`);
+            else bad(`event_type no longer accepts ${t}`, `enum is [${listed.join(', ')}] — ClientBeacon (utils.js) beacons now 400`);
+        }
     }
 
     report();

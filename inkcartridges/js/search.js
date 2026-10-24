@@ -1133,6 +1133,8 @@
                 : `Search is temporarily unavailable. Please try again.`;
             state.list.innerHTML = `<div class="smart-ac__error">${esc(msg)}</div>`;
             setLive(isRateLimited ? 'Searching too quickly' : 'Search error');
+            // Item 33 (ERR-369): one client_error naming the failed request.
+            if (typeof ClientBeacon !== 'undefined') ClientBeacon.error('search-dropdown');
         }
 
         function setLive(msg) {

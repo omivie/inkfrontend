@@ -40,6 +40,62 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-372 — FE checklist 22 Oct, retention: one-click reorder reminder on the confirmation page, reorder reminders on PDP + account, admin Retention panel, SEO noindex + printer description (items 38, 39, 40, 42) — **IN PROGRESS** (2026-10-24)
+
+Reserved by session feink-fa; full entry follows when shipped.
+
+---
+## ERR-371 — FE checklist 22 Oct, PDP / cart / checkout: compat yield line, photo top-aligned, 3+ price on the price row, cart lines first on phones, free-shipping bar in the totals and drawer, checkout reassurance, tap targets (items 16, 22, 23, 26, 27b, 28, 29, 30, 31) — **IN PROGRESS** (2026-10-24)
+
+Reserved by session feink-fa; full entry follows when shipped.
+
+---
+## ERR-370 — FE checklist 22 Oct, find what fits: printer finder on brand pages, exact-match search redirects, printer pages in-stock compatible first, compatible guarantee under the column head, inline Filter & Sort, one-row consent bar, no first-screen fade-in (items 24, 25, 27a, 32, 37, 46) — **IN PROGRESS** (2026-10-24)
+
+Reserved by session feink-fa; full entry follows when shipped.
+
+---
+## ERR-369 — FE checklist 22 Oct, tracking + compliance: privacy names the ad tags, GA4 on the owner's property, iPhone click ids, two-slip email hint, client_error / grid_ready / grid add_to_cart beacons (items 33, 34, 35, 43, 45, 47) — **SHIPPED (frontend)** (2026-10-24)
+
+**Seen (backend, `backend-docs/inbox/FE-MASTER-CHECKLIST-oct2026.md`, 22 Oct version).** Six open items, five of them "week 1" in the owner's four-week plan:
+
+- **35, compliance.** `js/gtag.js` loads the Google Ads tag (AW-18032498762) and Microsoft UET on every page, outside the consent bar (only `analytics_storage` is declared). `/privacy` named Google only for "Analytics (GA4), Customer Reviews, Tag Manager", the cookie list had no ad row, §6 said "Analytics and advertising cookies are optional", and the consent bar said "No advertising profile is built from it." The account was suspended over ad policy in May 2026.
+- **45.** The browser tag fed `G-SDQELG0FGD`, a property in a Google account the owner cannot open. The server sends every paid order's `purchase` to `G-YJXTSGLM28`, the owner's property. So no report could join a visit to its sale. ERR-276 had removed `G-YJXTSGLM28` from gtag.js as "configured and never fed". That was half right: the browser never fed it, but the server did.
+- **34.** An iPhone ad click can land with `gbraid`/`wbraid` and no `gclid`. The FE stored only `gclid`, so 0 of 77 orders carried one (91 of 1,463 click ids in traffic_events were iPhone-only).
+- **47.** The owner typed `junjackson0915@gial.com` and got no "Did you mean". `gial.com` is two edits from `gmail.com`, and the hint allowed one.
+- **33 / 43.** traffic_events held ZERO `client_error` rows ever. There were 8 human Retry clicks (Safari 15.6 / iOS 15.8) and nothing named the failing request. Listing-grid Adds sent `btn:Add to Cart` with no product. There was no `grid_ready` beacon, so "left before the products appeared" could not be told from "saw the prices and left". QA browsers were a large share of funnel "checkouts".
+
+**Measured before building.**
+- Beacon enum: a bogus `event_type` 400s, and the error lists `[pageview, click, rewards_nudge_*, client_error, grid_ready]`. BF-053 is closed. Two labelled rows were written while measuring (`path=/__fe_probe`, session `fe-probe-enum-20261024`). The validator runs with abortEarly off, so the enum can be read with NO write by omitting required fields. `probe:ribbon-brands` §7 now does exactly that, and fails if either value disappears.
+- Unknown body keys are ignored, not rejected, so adding `gbraid`/`wbraid` to the beacon is safe.
+- `/api/cart/items` preflight: a static allow-list naming `X-Session-Id`/`X-Visitor-Id`. Negative control: a bogus header is not echoed.
+
+**Fix.**
+- **35:** `legal-config.js` adds the processor row in the backend's prerender words, plus an "Advertising" cookie row. `status` overrides the derived Optional/Required label (the tags are NOT behind the bar, so "Optional" would be false). §6 gets the owner-approved sentence plus Google/Microsoft ad-settings links. "advertising cookies are optional" and the consent bar's "No advertising profile" sentence are both gone.
+- **45:** the one GA4 `config` + `GA4.PROPERTY` are now `G-YJXTSGLM28`, and the `gtag/js?id=` loader changed in 42 HTML files. Still exactly one GA4 property (the ERR-276 cost rule). Still no browser `purchase`. `ga_client_id` was already sent on both rails.
+- **34:** `main.js captureClickIds/getClickIds`: three keys, one 90-day expiry, and any id in the URL REPLACES all three. `PaymentPage.clickIdFields()` is spread into BOTH order bodies, and `gclid` keeps its own key. The new test caught the first PayPal edit writing `this.` inside the callback, where it needed `self.`.
+- **47:** the backend's `suggestEmailDomain`, verbatim: two slips for 5+ letter providers, the nearest provider wins, and the NZ providers are added.
+- **33:** ONE recorder, `API._noteFailure`, in `_fetchWithAuth` (final non-ok response, a 429 throw, timeout, network) and in `_anonRest`, gives `API.lastFailure {method, path, status, at}`. ONE sender, `ClientBeacon` (utils.js): `error(surface)` sends `"<surface> <METHOD> <path> <status>"`, capped at 512, deduped per page, and a failure older than 30s reads "unknown" so it never blames an old request. It is called from `ShopPage.showError` (after the admin-repaint return), the search dropdown `renderError`, PDP `showError` ("Try Again"), the ribbon `reportLoadFailure` and the cart's degraded-pricing notice. Beacons queue until the deferred tracker dispatches `traffic-tracker:ready`.
+- **43:** `ClientBeacon.gridReady()` fires once per page load from the shop grid (only when a card exists), the PDP main render and the ribbon grid. Grid Adds (shop, products.js, ribbons) carry `data-track="add_to_cart:<product id>"`, and the PDP keeps `add_to_cart` (its path carries the SKU). `API.addToCart` sends the `X-Session-Id` header AND keeps `?sid=` (the transport proven to land rows; ERR-158). The tracker's `send()` skips when `localStorage.ic_internal === '1'` or `navigator.webdriver === true` (every Playwright/Puppeteer/Selenium browser, emulated iOS included), so no probe needs editing. The check is per send, so search and cart ids keep working.
+
+**Verified.** `tests/fe-checklist-22oct-tracking-2026.test.js`: 26 tests, all 26 red against HEAD. The §47 table is red against the old function. Local Playwright (beacons captured and aborted, nothing reached prod):
+- the privacy rows render;
+- gtag loads `G-YJXTSGLM28` + `AW-18032498762` only;
+- `?gbraid=FE_TEST_1` gives `getClickIds() = {gbraid}`;
+- the series page sends `grid_ready 2267` and then `add_to_cart:ba01a684-…`;
+- a forced 503 on the printer read sends `client_error "shop-drilldown GET /api/products/printer/hp-deskjet-2820e 503"`;
+- the cart POST carries `X-Session-Id` + `?sid=`;
+- a default (webdriver) browser sends 0 beacons;
+- the checkout bundle suggests `test@gmail.com` for `test@gial.com`.
+
+**Owner / backend actions.**
+- Item 34's done-when needs a real `TEST-` SKU order from a `?gbraid=` landing. NOT placed by a probe.
+- Item 45: check GA4 Realtime in property 525158196 after deploy.
+- Grid click element format is `add_to_cart:<product uuid>`, told to the backend in the outbox.
+
+**Rule.** Name the failing request from the one fetch layer (`API.lastFailure`), never by threading status through each surface. `client_error`/`grid_ready` go only through `ClientBeacon`. The browser has exactly ONE GA4 property, and it is `G-YJXTSGLM28`.
+
+---
 ## ERR-368 — Receipt rolls: the category 301'd to /shop, /receipt-rolls was a 404, and a roll PDP read like a compatible cartridge (backend handoff 2026-10-23) — **SHIPPED (frontend)**
 
 **Seen (backend handoff, `backend-docs/inbox/receipt-rolls-FE-handoff-oct2026.md`, FE-MASTER-CHECKLIST item 48).** The backend sells 19 Okin POS paper rolls (`product_type: 'receipt_roll'`). Its nav feed links "Receipt Rolls" to `/shop?category=receipt`.

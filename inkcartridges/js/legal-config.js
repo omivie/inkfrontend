@@ -115,6 +115,11 @@
             { name: 'Vercel Inc.',              purpose: 'Frontend hosting and CDN',                             region: 'Global edge / United States' },
             { name: 'Cloudflare, Inc.',         purpose: 'Bot protection (Turnstile CAPTCHA) and edge security', region: 'Global edge / United States' },
             { name: 'Google LLC',               purpose: 'Analytics (GA4), Customer Reviews, Tag Manager',       region: 'United States' },
+            // Item 35 (checklist 2026-10-22, owner-approved 13 Oct): the SAME words
+            // the backend's prerendered privacy page carries (commit 54e6dce), so
+            // the page bots read and the page people read match. js/gtag.js loads
+            // the Ads tag (AW-18032498762) and UET (bat.bing.com) on every page.
+            { name: 'Google Ads / Microsoft Advertising', purpose: 'Advertising measurement: ad-click identifiers, the value of orders that followed an ad click, and cookie-based audiences of site visitors', region: 'United States' },
             { name: 'New Zealand Post Ltd.',    purpose: 'Order delivery (tracked courier)',                     region: 'New Zealand' },
             { name: 'Aramex New Zealand Ltd.',  purpose: 'Order delivery (tracked courier)',                     region: 'New Zealand' },
         ],
@@ -123,6 +128,9 @@
             { category: 'Functional',            examples: 'Saved address, login persistence (Supabase — “Remember me”)', optional: false },
             { category: 'Analytics',             examples: 'Google Analytics 4 (anonymised IP)',              optional: true  },
             { category: 'Advertising / reviews', examples: 'Google Customer Reviews opt-in survey',           optional: true  },
+            // Not behind the consent bar (gtag.js declares only analytics_storage),
+            // so it must NOT read "Optional" — `status` overrides the derived label.
+            { category: 'Advertising',           examples: 'Google Ads tag, Microsoft Advertising (UET) tag',  optional: false, status: 'On (opt out in Google / Microsoft ad settings)' },
         ],
 
         // ─── Shipping ─────────────────────────────────────────────────────

@@ -547,35 +547,27 @@ test('§4 the Ads call is NOT inside the server-rejected branch', () => {
 test('§5 POST /api/cart/items carries ?sid=/?vid=', () => {
     // Without it the row the backend now writes server-side from this request
     // lands with session_id: null and joins to nothing.
-    assert.match(API_SRC, /return this\.post\(this\.identifyUrl\('\/api\/cart\/items'\), \{ product_id: productId, quantity \}\);/);
+    assert.match(API_SRC, /return this\.request\(this\.identifyUrl\('\/api\/cart\/items'\), \{\s*method: 'POST',\s*body: JSON\.stringify\(\{ product_id: productId, quantity \}\),\s*identify: true,\s*\}\);/);
 });
 
-test('§5 the cart POST KEEPS ?sid=/?vid= now that the header works too', () => {
-    // THIS TEST USED TO ASSERT THE OPPOSITE, and it was right to. Until
-    // 2026-09-08 the header was absent from Access-Control-Allow-Headers, a
-    // browser failed the preflight and never sent the request, and on THIS
-    // endpoint that meant nobody could add to cart. BF-054 is now closed
-    // (verified against production 2026-09-09 with a negative control) and
-    // api.js sends the ids on its two search helpers.
-    //
-    // The cart POST is still not switched over, and that is deliberate. A POST
-    // already preflights, so the header would cost nothing here — but ?sid= is
-    // MEASURABLY working on this endpoint (server-side add_to_cart rows are
-    // landing with session ids), and swapping a transport that demonstrably
-    // works for one not yet confirmed on this route is a behaviour change, not
-    // cleanup (ERR-158).
+test('§5 the cart POST sends BOTH ?sid=/?vid= and the X-Session-Id header (item 43.3)', () => {
+    // History: until 2026-09-08 the header was absent from the CORS allow-list
+    // and a browser would have refused the add outright, so this test once
+    // banned `identify: true` here. BF-054 closed; on 2026-10-24 (ERR-369) the
+    // checklist asked for the header on every cart POST because the cart funnel
+    // reads it, and the preflight on /api/cart/items was re-measured with a
+    // negative control (static allow-list naming X-Session-Id; a bogus header
+    // not echoed). ?sid= is KEPT — it is the transport proven to land rows, and
+    // removing it would be a behaviour change, not cleanup (ERR-158).
     const start = API_CODE.indexOf('async addToCart(');
     assert.notEqual(start, -1, 'addToCart must still exist');
-    const addToCart = API_CODE.slice(start, API_CODE.indexOf('},', start));
-    assert.doesNotMatch(addToCart, /identify\s*:\s*true/,
-        'the cart POST does not enrol in the header transport — ?sid= is what lands its rows');
+    const addToCart = API_CODE.slice(start, API_CODE.indexOf('\n    },', start));
+    assert.match(addToCart, /identify\s*:\s*true/,
+        'the cart POST must enrol in the header transport (X-Session-Id)');
     assert.match(addToCart, /identifyUrl\('\/api\/cart\/items'\)/,
         'and it still carries the query-param join key');
-
-    // Positive control: the ban is scoped to this function, not an artefact of
-    // over-stripping — the header really is used elsewhere in the same file.
     assert.match(API_CODE, /if \(options\.identify\)/,
-        'api.js must still have the per-helper header enrolment this test is scoped around');
+        'request() must still honour the per-helper header enrolment');
     assert.match(API_SRC, /X-Session-Id/,
         'api.js must still EXPLAIN its transport choice in a comment, not only in a commit message');
 });

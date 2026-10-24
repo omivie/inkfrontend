@@ -303,6 +303,7 @@ const Products = {
                                         : `Add ${product.name} to cart`;
                                     const cta = `<button type="button" class="product-card__add-btn btn btn--primary"
                                         ${disabled ? 'disabled' : ''}
+                                        data-track="add_to_cart:${Security.escapeAttr(String(product.id))}"
                                         data-product-id="${Security.escapeAttr(product.id)}"
                                         data-product-sku="${Security.escapeAttr(product.sku)}"
                                         data-product-name="${Security.escapeAttr(product.name)}"

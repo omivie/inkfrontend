@@ -89,14 +89,19 @@ import { PHONE as MOBILE_PHONE, PHONE_SCALE, describeViewport } from './lib/mobi
 
 const BASE = process.env.PROBE_BASE || 'https://www.inkcartridges.co.nz';
 const SKU = process.env.PROBE_SKU || 'CLC37BK';
-const PROPERTY = 'G-SDQELG0FGD';
+const PROPERTY = 'G-YJXTSGLM28';
 /* REMOVED 2026-09-20 (ERR-276). A second GA4 property that was `gtag('config')`d
  * and never fed: no event in the repo named it, yet every `config` line makes the
  * browser fetch that destination's own gtag bundle (~187KB here, measured on a
  * throttled Pixel-5 profile), and every UNSCOPED custom event on the site was
  * silently duplicated into it. Kept named so the checks below can say which id
  * must never come back, rather than asserting against an anonymous regex. */
-const REMOVED_PROPERTY = 'G-YJXTSGLM28';
+/* RE-POINTED 2026-10-24 (ERR-369, checklist item 45). G-YJXTSGLM28 — removed
+ * by ERR-276 as "never fed" — is the property the owner can open and the one the
+ * server feeds with `purchase`, so it is now the ONE property above. The old
+ * browser property G-SDQELG0FGD sits in an account the owner cannot see; it is
+ * the id that must never come back (two GA4 bundles = the ERR-276 cost). */
+const REMOVED_PROPERTY = 'G-SDQELG0FGD';
 const ADS_TAG = 'AW-18032498762';
 /* ERR-280: the phone box comes from playwright's own device registry now.
    Every probe here hand-wrote { 390, 844 }, which is the iPhone 13's PHYSICAL

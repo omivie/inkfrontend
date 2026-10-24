@@ -450,27 +450,15 @@ const RibbonsPage = {
      * hand-off's suggested fix — "a DebugLog.error rather than a warn" — would
      * have changed nothing at all.
      *
-     * ONE CHANNEL, NOT TWO, AND THE MISSING ONE IS NAMED. The house dual-send
-     * (the retired rewards-nudge.js) is GA plus our own first-party tracker. GA takes an
-     * arbitrary event name and is used here. The first-party tracker CANNOT carry
-     * this yet — measured against production 2026-09-01:
+     * TWO CHANNELS. GA takes an arbitrary event name. The first-party tracker
+     * could not carry this until the backend widened its enum: measured
+     * 2026-09-01 it accepted only pageview|click (BF-053), so no call was
+     * shipped rather than one that 400'd on every failure. Re-measured
+     * 2026-10-24 (ERR-369): `client_error` is accepted, so the failure now also
+     * goes through ClientBeacon (utils.js), which names the failing request.
      *
-     *   POST /api/analytics/traffic-event {"event_type":"catalogue_load_failed"}
-     *     → 400 VALIDATION_FAILED: "event_type" must be one of [pageview, click]
-     *
-     * That is an honest rejection rather than a silent drop, which is to its
-     * credit, but it means a `TrafficTracker.send` here would 400 on every single
-     * failure and record nothing. Shipping a call that cannot succeed is how a
-     * page comes to believe it is instrumented when it is not — the same shape as
-     * the DebugLog line above it. So it is not shipped, the gap is written down,
-     * and `npm run probe:ribbon-brands` watches the enum in both directions so
-     * the day the backend widens it is the day we find out. The ask is BF-053 in
-     * ribbon-brand-pages-FE-response-aug2026.md.
-     *
-     * Sending this as `click` instead was considered and rejected: it would file
-     * an interaction the visitor never performed and corrupt the click metrics
-     * this endpoint exists to collect. A gap is recoverable; a fabricated row
-     * that looks right is not.
+     * Sending this as `click` was considered and rejected: it would file an
+     * interaction the visitor never performed.
      */
     reportLoadFailure(surface, res) {
         const props = {
@@ -481,6 +469,9 @@ const RibbonsPage = {
         };
         try { if (typeof DebugLog !== 'undefined') DebugLog.error('[Ribbons] load failed:', props); } catch (_) {}
         try { if (typeof gtag === 'function') gtag('event', 'catalogue_load_failed', props); } catch (_) {}
+        // BF-053 closed (enum measured 2026-10-24, ERR-369): the first-party
+        // channel now carries it too, as `client_error`.
+        try { if (typeof ClientBeacon !== 'undefined') ClientBeacon.error(`ribbons-${surface}`); } catch (_) {}
     },
 
     // =========================================
@@ -868,6 +859,8 @@ const RibbonsPage = {
             const grid = document.createElement('div');
             grid.className = 'ribbon-products-grid';
             items.forEach(ribbon => grid.appendChild(this.createRibbonCard(ribbon)));
+            // Item 43.1 (ERR-369): first ribbon card on the page.
+            if (items.length && typeof ClientBeacon !== 'undefined') ClientBeacon.gridReady();
             container.insertBefore(grid, pagination);
         };
 
@@ -979,6 +972,7 @@ const RibbonsPage = {
                             </div>
                             ${inStock
                                 ? `<div class="product-card__buy">${typeof QtyStepper !== 'undefined' ? QtyStepper.markup({ value: 1, stock: ribbon.stock_quantity }) : ''}<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
+                                        data-track="add_to_cart:${Security.escapeAttr(String(ribbonId))}"
                                         data-product-id="${ribbonId}"
                                         data-product-name="${Security.escapeAttr(displayName)}"
                                         aria-label="${Security.escapeAttr(typeof QtyStepper !== 'undefined' ? QtyStepper.ctaAriaLabel(1, displayName) : `Add ${displayName} to cart`)}">

@@ -439,12 +439,18 @@ test('§4 DebugLog alone is not treated as telemetry — it is a no-op off local
     // HOLE CANNOT FAIL.***
     const live = stripComments(bodyOf(PAGE_SRC, '    reportLoadFailure(surface, res) {', '    // ========='));
     assert.match(live, /gtag\(/, 'positive control: the code slice really does contain the call we allow');
+    // BF-053 closed: re-measured 2026-10-24 (ERR-369), the endpoint accepts
+    // `client_error`. The first-party channel is ClientBeacon (utils.js), which
+    // names the failing request — never a raw TrafficTracker call with an
+    // event name the endpoint has not listed.
+    assert.match(live, /ClientBeacon\.error\(/,
+        'the first-party channel must carry the failure now that client_error is accepted');
     assert.doesNotMatch(live, /TrafficTracker/,
-        'the first-party tracker cannot carry this event yet (hard 400) — shipping the call would record nothing while looking instrumented');
+        'go through ClientBeacon, the one owner of client_error, not the tracker directly');
     assert.doesNotMatch(live, /['"]click['"]/,
         'and it must never be smuggled through as a click — that fabricates an interaction and corrupts the click metrics');
-    assert.match(body, /pageview, click/,
-        'the measured enum must be written down beside the code, so the gap is a fact rather than an omission');
+    assert.match(body, /pageview\|click[\s\S]*client_error/,
+        'both measurements (the 09-01 gap and the 10-24 widening) stay written down beside the code');
 });
 
 test('§4 every failure path reports before it renders', () => {

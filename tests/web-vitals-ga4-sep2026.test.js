@@ -92,7 +92,7 @@ test('every metric goes to the GA4 property ONLY, never the Ads tag', () => {
     assert.equal(events.length, 5);
     for (const [cmd, , params] of events) {
         assert.equal(cmd, 'event');
-        assert.equal(params.send_to, 'G-SDQELG0FGD');
+        assert.equal(params.send_to, 'G-YJXTSGLM28');
         assert.doesNotMatch(JSON.stringify(params), /AW-/);
         assert.equal(params.non_interaction, true);
         assert.ok(Number.isInteger(params.value));

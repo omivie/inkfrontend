@@ -183,6 +183,7 @@ const API = {
                 throw new Error('Please sign in to continue.');
             }
 
+            if (!response.ok) this._noteFailure(method, url, response.status);
             return response;
         } catch (error) {
             clearTimeout(timeoutId);
@@ -204,11 +205,34 @@ const API = {
                 await new Promise(r => setTimeout(r, delay));
                 return this._fetchWithAuth(url, fetchOptions, { ...opts, transientRetry: transientRetry + 1 });
             }
+            if (error && error.code === 'RATE_LIMITED') this._noteFailure(method, url, 429);
+            else if (isAbort) this._noteFailure(method, url, 'timeout');
+            else if (isNetwork) this._noteFailure(method, url, 'network');
             if (isAbort) {
                 throw new Error('Request timed out. Please check your connection and try again.');
             }
             throw error;
         }
+    },
+
+    /**
+     * The most recent failed request, `{method, path, status, at}` — status is
+     * the HTTP code, or 'timeout' / 'network' when there is none. Read by
+     * ClientBeacon (utils.js) so an error screen can name the request behind it
+     * (checklist item 33, ERR-369). `path` is relative to the API origin and
+     * keeps its query (the element budget is 512, ample for a catalogue URL).
+     */
+    lastFailure: null,
+
+    _noteFailure(method, url, status) {
+        try {
+            let path = String(url);
+            try {
+                const u = new URL(path, (typeof location !== 'undefined' && location.href) || 'https://www.inkcartridges.co.nz/');
+                path = u.pathname + u.search;
+            } catch (_) { /* keep the raw string */ }
+            this.lastFailure = { method: String(method || 'GET').toUpperCase(), path, status, at: Date.now() };
+        } catch (_) { /* diagnostics must never throw */ }
     },
 
     /**
@@ -2247,6 +2271,7 @@ const API = {
                 if (typeof DebugLog !== 'undefined') {
                     DebugLog.error(`[API] ${label} failed: ${resp.status} ${code} — ${message}`);
                 }
+                this._noteFailure((init && init.method) || 'GET', url, resp.status);
                 return { ok: false, error: message, code, status: resp.status };
             }
             let rows;
@@ -2260,6 +2285,7 @@ const API = {
         } catch (e) {
             const timedOut = e && e.name === 'AbortError';
             const code = timedOut ? 'TIMEOUT' : 'NETWORK_ERROR';
+            this._noteFailure((init && init.method) || 'GET', url, timedOut ? 'timeout' : 'network');
             const message = timedOut
                 ? 'The catalogue took too long to respond.'
                 : ((e && e.message) || 'Network error');
@@ -2929,8 +2955,20 @@ const API = {
          * endpoint that would mean nobody could add to cart. The param costs
          * nothing here: a POST is never edge-cached, so the ERR-124/159
          * cache-key hazard that governs catalog GETs does not apply.
+         *
+         * AND the header, since 2026-10-24 (checklist item 43.3, ERR-369): the
+         * backend's cart funnel reads X-Session-Id. Re-measured that day against
+         * this exact route with a negative control: the preflight's
+         * Access-Control-Allow-Headers is a static list that names
+         * X-Session-Id / X-Visitor-Id and does not echo a bogus header, so the
+         * browser sends it. ?sid= stays: it is the transport proven to land rows,
+         * and removing a working path is a behaviour change (ERR-158).
          */
-        return this.post(this.identifyUrl('/api/cart/items'), { product_id: productId, quantity });
+        return this.request(this.identifyUrl('/api/cart/items'), {
+            method: 'POST',
+            body: JSON.stringify({ product_id: productId, quantity }),
+            identify: true,
+        });
     },
 
     /**

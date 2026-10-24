@@ -143,7 +143,24 @@
         return null;
     }
 
+    /* Our own and QA browsers set `localStorage.ic_internal = '1'` (checklist
+     * item 43.4, ERR-369): they were a large share of "checkouts" in the funnel
+     * report. Checked per send, not at load, so the ids above keep working for
+     * search and cart identity — only the beacon goes quiet.
+     *
+     * `navigator.webdriver` covers the automated half without touching every
+     * probe: Playwright, Puppeteer and Selenium set it (HeadlessChrome and the
+     * emulated iOS devices included), and no shopper's browser does. A manual
+     * QA browser sets the flag by hand. */
+    function isInternal() {
+        try {
+            if (typeof navigator !== 'undefined' && navigator.webdriver === true) return true;
+            return localStorage.getItem('ic_internal') === '1';
+        } catch (_) { return false; }
+    }
+
     async function send(payload) {
+        if (isInternal()) return;
         const url = getApiUrl() + '/api/analytics/traffic-event';
         const body = JSON.stringify(payload);
         try {
@@ -189,6 +206,8 @@
                 utm_term: p.get('utm_term') || null,
                 utm_content: p.get('utm_content') || null,
                 gclid: p.get('gclid') || null,
+                gbraid: p.get('gbraid') || null,
+                wbraid: p.get('wbraid') || null,
                 fbclid: p.get('fbclid') || null,
             };
         } catch (_) { return {}; }
@@ -512,5 +531,9 @@
         _useIdHeaders: () => USE_ID_HEADERS,
         _getUtmRid: getUtmRid,
         _getAccessToken: getAccessToken,
+        _isInternal: isInternal,
     };
+    // Beacons fired before this deferred script loaded (utils.js ClientBeacon)
+    // wait for this; DNT and /admin return above, so they never flush there.
+    try { window.dispatchEvent(new Event('traffic-tracker:ready')); } catch (_) { /* old browsers */ }
 })();
