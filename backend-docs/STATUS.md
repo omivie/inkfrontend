@@ -7,12 +7,14 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 
 ## `outbox/` — the ONE outgoing file
 
-**2026-10-20:** `outbox/backend-asks-2026-10-20.md` — NOT sent yet. §1 low-ticket margins (order 2026101404, ribbon `651.01`); §2 dashboard date-bound timezone (ERR-367).
+**2026-10-20:** `outbox/backend-asks-2026-10-20.md` — NOT sent yet. §1 low-ticket margins (order 2026101404, ribbon `651.01`); §2 dashboard date-bound timezone (ERR-367); §3–4 added 2026-10-24: receipt rolls live + follow-ups (ERR-368).
 
 | § | Ask | Written | Status (2026-10-20) |
 |---|---|---|---|
 | 1 | Low-ticket margins: order 2026101404 net $1.61 (ribbon `651.01` $7.95, `price_source` ribbon); 54 products < $3 gross ex GST. Backend to give its view and apply the best option (min-$ floor / ribbon tier / small-order fee), dry run first, never touch `manual` | 2026-10-20 | open |
 | 2 | `kpi-summary` bounds dates by UTC, `dashboard-bundle` series by NZ: order 2026102001 splits them by $6.10 on `date_to=2026-10-19`; bound both on Pacific/Auckland days (ERR-367, from the dashboard KPI audit) | 2026-10-20 | open |
+| 3 | Receipt rolls live (8d1c694c, probe 0 findings 2026-10-24): set taxonomy `landingPath` → `/receipt-rolls` (ERR-368) | 2026-10-24 | open |
+| 4 | Receipt follow-ups: API 422s the aliases; roll prerender links Okin brand page (404); bot footer lacks Receipt Rolls (ERR-368) | 2026-10-24 | open |
 
 **2026-10-18:** `backend-asks-2026-10-18.md` was removed from `outbox/` by the owner on 2026-10-18 (`f9915c73`; text `git show 4a5c7355:backend-docs/outbox/backend-asks-2026-10-18.md`). The rows below are its asks; delivery is not recorded here.
 History: `backend-asks-2026-10-15.md` was sent 2026-10-16 (text `git show 2f88c13f:backend-docs/outbox/backend-asks-2026-10-15.md`);

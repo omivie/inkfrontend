@@ -83,6 +83,14 @@ Pins updated for the intended change: `ia-reorg-jul2026` (allow-list), `genuine-
 
 **Probe:** `npm run probe:receipt-rolls` (READ-ONLY). Before deploy: 10 findings (all the 301/404s above), with the negative control (`?category=junk` → 301 /shop) ok.
 
+**Live after deploy (8d1c694c, 2026-10-24):**
+- The probe found 0 findings. `curl -sI https://www.inkcartridges.co.nz/shop?category=receipt` returns `HTTP/2 200`.
+- A browser on www showed:
+  - `/receipt-rolls` with 19 cards, the prerender h1, no badge, and canonical `/shop?category=receipt`;
+  - CTR80X80P5 with no badge, no disclaimer, an empty printers slot, six spec pills and six related rolls;
+  - CCR76X76P5 with the placeholder hero.
+- The backend was told in `outbox/backend-asks-2026-10-20.md` §3 (set `landingPath`) and §4 (aliases 422 on the API, roll prerender links a 404 Okin brand page, bot footer lacks Receipt Rolls). The outbox file is not sent yet.
+
 **Seen, not changed:** a PDP with no photo renders `placeholder-product.svg` through the *image* branch, because `storageUrl(null)` returns the placeholder path. That makes the placeholder hover-zoomable. This predates rolls and affects every no-photo row.
 
 ## ERR-367 — Dashboard "net drift $6.10": the admin filter bar's "today" was the UTC day (owner 2026-10-20) — **SHIPPED (frontend); backend half asked**

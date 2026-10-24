@@ -4,6 +4,7 @@
 
 Two asks. §1: the owner wants your view on low-ticket product margins, and wants you to apply the option you think is best.
 §2: two dashboard endpoints bound the same date range in different timezones (ERR-367).
+Added 24 Oct: §3 answers your receipt-rolls handoff (live, please set `landingPath`); §4 is three small follow-ups from it.
 Every figure below was measured on 20 Oct with read-only GETs (`/api/admin/orders/:id`, `/api/admin/products`).
 Nothing was written.
 
@@ -115,3 +116,44 @@ order's net profit. The admin dashboard's drift guard prints it.
 **Ask:** bound both endpoints on **Pacific/Auckland calendar days**, the same as order numbers and the series buckets.
 Then an order placed between 00:00 and 13:00 NZ time cannot be counted by one endpoint and not the other.
 The frontend now sends NZ dates (ERR-367). That hides the gap for "today", but not for custom ranges.
+
+---
+
+## §3 Receipt rolls are live, including `/receipt-rolls`. Please set the taxonomy `landingPath` (ERR-368)
+
+This answers `receipt-rolls-FE-handoff-oct2026.md` (23 Oct). It shipped in commit `8d1c694c` and was measured live on 24 Oct with
+`npm run probe:receipt-rolls` (read-only): 0 findings.
+
+| Check from your "Done when" | Live result |
+|---|---|
+| `curl -sI https://www.inkcartridges.co.nz/shop?category=receipt` | `HTTP/2 200` |
+| `/receipt-rolls`, `/shop?brand=okin&category=receipt` | 200, and the listing shows all 19 rolls in your order (bond, carbonless, thermal). There is no brand picker and no chip row. |
+| Aliases `receipt-rolls`, `receipt-roll`, `receipt_roll` | 301 → `/shop?category=receipt` |
+| Googlebot on all three URLs | `/api/prerender/category/receipt`. The SPA prints the same `<title>` and h1. |
+| CTR80X80P5 | No Genuine/Compatible badge, no disclaimer, no printers block. It does show a spec row (80 mm wide · 80 mm diameter · Thermal paper · 60 gsm · BPA free · 5 rolls per pack). |
+| CCR76X76P5 | Neutral placeholder image, not the colour tile |
+
+One click from the nav: the footer Shop column now has "Receipt Rolls", and `/shop` has a "View All Receipt Rolls" tile.
+There is no Okin brand tile or brand link anywhere.
+
+**Ask:** set the receipt category's `landingPath` to `/receipt-rolls`. The SPA's canonical reads `categories[].path` from
+`/api/site/nav`, so the canonical, nav link and sitemap move together with no frontend change.
+Today it is `/shop?category=receipt` with `landing: false`. Both URLs stay 200 after the switch.
+
+## §4 Three follow-ups from the receipt-rolls work
+
+1. **The API rejects the aliases.** The handoff says the backend accepts `receipt-rolls` / `receipt-roll` / `receipt_roll`. On 24 Oct,
+   `GET /api/products?category=receipt-rolls` and `GET /api/shop?brand=okin&category=receipt_roll` both returned
+   `422 VALIDATION_FAILED` ("category must be one of …"). The frontend now 301s them to `receipt` before any fetch, so nothing is
+   broken. Please confirm whether the aliases are meant for the API or only for your www redirect rules.
+2. **Bot pages link to an Okin brand page that does not exist.** The product prerender for a roll (CTR80X80P5) has a breadcrumb
+   "Okin" → `/shop?brand=okin` and "See all Okin products →". It also has "Receipt Rolls" →
+   `/shop?brand=okin&category=receipt`. `/api/prerender/brand/okin` returns **404**. On the storefront, `/shop?brand=okin` is a
+   brand page with nothing to show, because the handoff keeps Okin out of the brand nav. Could the roll prerender link "Receipt Rolls"
+   to the category URL and drop the Okin links? The SPA already does this: it shows "Okin" as plain text in the breadcrumb, and
+   "Receipt Rolls" links to `/shop?category=receipt`. Bot and human then match. In the meantime, the edge sends bots on
+   `?brand=okin&category=receipt` to your category prerender.
+3. **The bot footer has no Receipt Rolls link.** The human footer's Shop column now lists Receipt Rolls; your prerender footer
+   (Ink · Toner · Drum Units · Ribbons) does not. This is the safe direction for a cloaking review, but please add it so both
+   footers list the same five categories.
+
