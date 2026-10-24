@@ -104,6 +104,7 @@ export const CATEGORY_PRODUCT_TYPES_FALLBACK = {
   label:   ['label_tape'],
   paper:   ['photo_paper'],
   ribbons: ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'],
+  receipt: ['receipt_roll'],
 };
 
 /** The live category→types map: the storefront's own when we are in a browser. */

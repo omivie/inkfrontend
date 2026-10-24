@@ -185,7 +185,9 @@ test('§2 every page loads legal-config.js BEFORE footer.js', () => {
 const COLUMNS = {
     // Drum Units (/shop?category=drums) matches the bot footer's fourth category,
     // so a crawler and a human see the same four-category set — anti-cloaking §2c.
-    Shop: ['/ink-cartridges', '/toner-cartridges', '/shop?category=drums', '/ribbons', '/shop'],
+    // Receipt Rolls (ERR-368) sits before Shop All: the owner chose a footer
+    // link + /shop tile as the one-click entry, not a header item.
+    Shop: ['/ink-cartridges', '/toner-cartridges', '/shop?category=drums', '/ribbons', '/shop?category=receipt', '/shop'],
     // /business (Aug 2026) is the ONLY site-wide entry point to the Business
     // Centre. Every other B2B surface — PDP ladders, card overlays, cart nudges,
     // the account panel — renders only for a signed-in APPROVED account, so

@@ -34,7 +34,8 @@ export const PRODUCT_TYPE_LABELS = {
   belt_unit: 'Belt Units', fuser_kit: 'Fuser Kits', fax_film: 'Fax Film',
   fax_film_refill: 'Fax Film Refills', printer_ribbon: 'Printer Ribbons',
   typewriter_ribbon: 'Typewriter Ribbons', correction_tape: 'Correction Tape',
-  label_tape: 'Label Tape', photo_paper: 'Photo Paper', printer: 'Printers',
+  label_tape: 'Label Tape', photo_paper: 'Photo Paper', receipt_roll: 'Receipt Rolls',
+  printer: 'Printers',
 };
 
 /**
@@ -82,6 +83,8 @@ export const PRODUCT_TYPE_OPTIONS = [
   { value: 'correction_tape',   label: 'Correction Tape' },
   { value: 'label_tape',        label: 'Label Tape' },
   { value: 'photo_paper',       label: 'Photo Paper' },
+  // POS paper rolls, live 2026-10-22 (19 Okin rows; ERR-368).
+  { value: 'receipt_roll',      label: 'Receipt Roll' },
   { value: 'printer',           label: 'Printer' },
 ];
 

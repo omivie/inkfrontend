@@ -173,6 +173,7 @@
     { "source": "/shop", "destination": "/html/shop" },
     { "source": "/ink-cartridges", "destination": "/html/shop" },
     { "source": "/toner-cartridges", "destination": "/html/shop" },
+    { "source": "/receipt-rolls", "destination": "/html/shop" },
     { "source": "/search", "destination": "/html/shop" },
     { "source": "/cart", "destination": "/html/cart" },
     { "source": "/checkout", "destination": "/html/checkout" },

@@ -1756,6 +1756,7 @@ const API = {
         label:   ['label_tape'],
         paper:   ['photo_paper'],
         ribbons: ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'],
+        receipt: ['receipt_roll'],
     },
 
     /**
@@ -2549,6 +2550,26 @@ const API = {
      */
     async getSiteNav() {
         return this.getWithSWR('/api/site/nav', { ttl: 5 * 60 * 1000, anonymous: true });
+    },
+
+    /**
+     * The storefront path the backend taxonomy nominates for a category slug
+     * (`/api/site/nav` → categories[].path), or `fallback` when the feed is
+     * unreachable or does not list it. ONE reader for links and canonicals that
+     * must follow the backend's `landingPath` (ERR-368): receipt rolls live at
+     * /shop?category=receipt until the backend flips them to /receipt-rolls,
+     * and nothing here changes when it does. Only same-site paths are trusted.
+     */
+    async getCategoryPath(slug, fallback) {
+        try {
+            const res = await this.getSiteNav();
+            const cats = res && res.ok && res.data && Array.isArray(res.data.categories) ? res.data.categories : [];
+            const hit = cats.find((c) => c && c.slug === slug);
+            const path = hit && typeof hit.path === 'string' ? hit.path : '';
+            return /^\/(?!\/)/.test(path) ? path : fallback;
+        } catch (_) {
+            return fallback;
+        }
     },
 
     /**

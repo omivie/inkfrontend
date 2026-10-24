@@ -191,6 +191,7 @@ const SeoMeta = {
         if (path === '/ribbons' || path === '/ribbons/') return '/api/prerender/category/ribbons';
         if (path === '/ink-cartridges' || path === '/ink-cartridges/') return '/api/prerender/category/ink';
         if (path === '/toner-cartridges' || path === '/toner-cartridges/') return '/api/prerender/category/toner';
+        if (path === '/receipt-rolls' || path === '/receipt-rolls/') return '/api/prerender/category/receipt';
         if (path === '/shop' || path === '/shop/') {
             const brand = params.get('brand');
             const printer = params.get('printer_slug') || params.get('printer');
@@ -213,6 +214,12 @@ const SeoMeta = {
             // so the page it reconciles against is the one the crawler was served.
             if (brand && printer) {
                 return `/api/prerender/printer/${encodeURIComponent(brand)}/${encodeURIComponent(printer)}`;
+            }
+            // MIRROR of middleware.js (ERR-368): the roll listing with ?brand=okin
+            // is the category page; there is no Okin brand prerender.
+            if (brand && params.get('category') === 'receipt'
+                && !['code', 'q', 'search'].some((key) => params.get(key))) {
+                return '/api/prerender/category/receipt';
             }
             if (brand) {
                 // MIRROR of middleware.js's brand arm, allowlist included (ERR-270).
@@ -238,7 +245,7 @@ const SeoMeta = {
                 return `/api/prerender/brand/${encodeURIComponent(brand)}${forwardedQs}`;
             }
             const cat = params.get('category');
-            const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
+            const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper', 'receipt'];
             if (cat && CANON.includes(cat)
                 && !params.get('code') && !params.get('q')
                 && !params.get('search') && !params.get('type')
@@ -264,16 +271,19 @@ const SeoMeta = {
         if (path === '/ribbons' || path === '/ribbons/') return 'category-ribbons';
         if (path === '/ink-cartridges' || path === '/ink-cartridges/') return 'category-ink';
         if (path === '/toner-cartridges' || path === '/toner-cartridges/') return 'category-toner';
+        if (path === '/receipt-rolls' || path === '/receipt-rolls/') return 'category-receipt';
         if (path === '/shop' || path === '/shop/') {
             const brand = params.get('brand');
             const printer = params.get('printer_slug') || params.get('printer');
             if (brand && printer) return 'printer';
+            if (brand && params.get('category') === 'receipt'
+                && !['code', 'q', 'search'].some((key) => params.get(key))) return 'category-receipt';
             if (brand) return 'brand';
             // Sole-filter canonical category → its category surface (IA reorg
             // Jul 2026; same condition as prerenderPathForLocation). `ribbon`
             // maps onto the existing `category-ribbons` surface name.
             const cat = params.get('category');
-            const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
+            const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper', 'receipt'];
             if (cat && CANON.includes(cat)
                 && !params.get('code') && !params.get('q')
                 && !params.get('search') && !params.get('type')
@@ -453,6 +463,24 @@ const SeoMeta = {
         return { title, description };
     },
 
+    // Receipt rolls (ERR-368) are not cartridges: _buildCategory's "genuine &
+    // compatible" line and the cartridge-brand list would both be false here.
+    // The title is the prerender's own, verbatim, so a prerender outage changes
+    // nothing a crawler compares; the description names only the three papers.
+    _buildReceipt(ctx) {
+        const t = this._trustClauses(ctx.trust);
+        const title = this.titleLadder([
+            'Thermal Receipt & EFTPOS Rolls NZ — Fast NZ Delivery',
+            'Receipt Rolls NZ',
+        ]);
+        const description = this.truncateDescription(this._joinClauses([
+            'Thermal EFTPOS and receipt printer rolls, bond and 2-ply carbonless rolls.',
+            t.dispatch,
+            t.guarantee,
+        ]));
+        return { title, description };
+    },
+
     _buildBrand(ctx) {
         const t = this._trustClauses(ctx.trust);
         const brand = ctx.brandDisplay || this._titleCaseSlug(ctx.brandSlug);
@@ -501,6 +529,7 @@ const SeoMeta = {
             case 'category-drums':   return this._buildCategory(ctx, 'Printer Drums & Supplies NZ', 'drum units & supplies');
             case 'category-label':   return this._buildCategory(ctx, 'Label Tape NZ', 'label tapes');
             case 'category-paper':   return this._buildCategory(ctx, 'Photo Paper NZ', 'photo paper');
+            case 'category-receipt': return this._buildReceipt(ctx);
             case 'brand':            return this._buildBrand(ctx);
             case 'printer':          return this._buildPrinter(ctx);
             default:                 return null;
@@ -590,6 +619,13 @@ const SeoMeta = {
         if ((surface === 'printer' || codePage) && head.h1) {
             this._h1 = { path: prerenderPath, h1: head.h1 };
             this._setH1(head.h1, surface === 'printer');
+        }
+        // The receipt-roll listing (ERR-368) is a products-level page too: its
+        // h1 is the prerender's ("Receipt Rolls NZ — Buy Online at …"), kept
+        // visually hidden with the same words in the label, like a code page.
+        if (surface === 'category-receipt' && head.h1) {
+            this._h1 = { path: prerenderPath, h1: head.h1 };
+            this._setH1(head.h1, false);
         }
         return true;
     },

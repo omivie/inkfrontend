@@ -40,6 +40,51 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-368 — Receipt rolls: the category 301'd to /shop, /receipt-rolls was a 404, and a roll PDP read like a compatible cartridge (backend handoff 2026-10-23) — **SHIPPED (frontend)**
+
+**Seen (backend handoff, `backend-docs/inbox/receipt-rolls-FE-handoff-oct2026.md`, FE-MASTER-CHECKLIST item 48).** The backend sells 19 Okin POS paper rolls (`product_type: 'receipt_roll'`). Its nav feed links "Receipt Rolls" to `/shop?category=receipt`.
+
+**Measured 2026-10-23/24 (READ-ONLY GETs) before the fix:**
+- www answered `/shop?category=receipt` with **301 → /shop** and `/shop?brand=okin&category=receipt` with 301 → `/shop?brand=okin`, for shoppers and Googlebot. `receipt` was missing from the edge allow-list (`middleware.js` `CATEGORY_CANONICAL`), and the client mirror (`canonicalizeCategory`) and SeoMeta's `CANON` lists had the same gap. `photo_paper` was stripped the same way.
+- `/receipt-rolls` returned 404.
+- The API **rejects** the backend's aliases (`receipt-rolls`, `receipt_roll`; 422 `VALIDATION_FAILED`), so the FE must normalise them before any fetch.
+- `/api/prerender/brand/okin?category=receipt` returns **404** (Okin has no brand page), so the edge's brand arm would have handed crawlers the SPA shell on the `?brand=okin` URL.
+- Every roll payload carries `source: 'compatible'`, `compatible_printers: []`, `series_codes: []`, null colour/yield, and a `specifications` object. CCR76X76P5 has `image_url: null`.
+- The backend's own product prerender shows no badge, prints "Model: ITR80X80" and the breadcrumb Shop › Okin › Receipt Rolls, and lists "Related Okin Products" (the six cheapest other rolls).
+- Admin: the product-type enum (from the admin list's own validation message) is `[… photo_paper, receipt_roll, printer]`. The admin editor's menu did not offer `receipt_roll`.
+
+**Fix:**
+- **Category.** `receipt` is the 7th canonical slug in all three mirrors (edge, `canonicalizeCategory`, both SeoMeta `CANON` lists). Aliases `receipt-rolls` / `receipt-roll` / `receipt_roll` → `receipt` and `photo_paper` → `paper` are added in the edge and the client; junk is still stripped.
+- **Route.** `/receipt-rolls` is mounted like `/ink-cartridges` (vercel rewrite + serve.json → shop SPA; middleware matcher + prerender arm → `/api/prerender/category/receipt`; SeoMeta mirror).
+  - `?brand=okin&category=receipt` (no code or search) also routes bots to the category prerender, in both mirrors.
+  - `updateURL` keeps `/receipt-rolls` while the shopper is on it and never pushes `/shop` visitors onto it.
+- **Listing.** `category=receipt` is the products level directly: no one-tile brand picker and no empty chip row (handoff option A).
+  - `loadReceiptRolls` makes ONE `/api/products?category=receipt&limit=100` read. If `meta.total` exceeds the rows, it shows a visible "Showing N of M receipt rolls." note. A failed read shows the error pane, never "none".
+  - `renderProducts` keeps the API order (bond → carbonless → thermal → size) when every row is a roll, because `byCodeThenColor` would regroup them by name-derived families. Explicit sorts still apply.
+  - `_syncSourceColumns` (already the jump-button writer) hides the COMPATIBLE heading badge there.
+  - The filter sheet hides Genuine/Compatible.
+  - h1 = the prerender's, mirrored by `SeoMeta.reconcile` (surface `category-receipt`). Until the prerender lands, `RECEIPT_H1` holds the same string.
+  - The `<title>` is the prerender's. The canonical follows the nav feed's `path` via the new `API.getCategoryPath`, so it flips to `/receipt-rolls` when the backend sets `landingPath`, with no FE edit.
+  - The breadcrumb and CollectionPage JSON-LD name no brand.
+- **PDP.** The view model nulls a roll's `source` (`getProductInfo`: `source: isRoll ? null : p.source`, `isRoll`). Every `info.source` reader then renders nothing: the badge and its help link, the compliance disclaimer and headline, the colour tile and `--compatible` layout, the related-heading badge, and the meta fallback. Add-to-cart sends `this.product.source`, so the cart and order data shape is unchanged.
+  - `renderCompatiblePrinters` returns early: the slot stays empty and there is no Supabase fallback lookup.
+  - `rollSpecRows` feeds `renderSpecs` (the one writer of `#product-specs`). It shows only the handoff's keys, only when present, with no invented copy. **Pill text names itself** ("80 mm wide", "Thermal paper", "5 rolls per pack"): the shared chip CSS visually hides labels, and the first cut rendered "80 mm · 80 mm · Thermal · Yes · 5", caught in the browser before shipping.
+  - The breadcrumb matches the prerender's words, but Okin is text, not a link to a brand page that does not exist.
+  - The related rail mirrors the prerender: the six cheapest other rolls, in price order, under "Okin Receipt Rolls".
+- **Cards.** `BrandSource.isSourceless(p)` (roll ⇒ true) gates the colour block in `products.js` and the shop grid card. A roll with no photo shows the neutral placeholder. `BrandSource.of` is unchanged, so search still partitions by source.
+- **Navigation (owner choice 2026-10-23).** The footer Shop column has a "Receipt Rolls" link. This is the one human-only footer link; the safe direction, and the backend has been asked to add it to the bot footer. The `/shop` landing has a `#receipt-rolls-section` tile, hidden on a category picker. There is no Okin tile and no header item.
+- **Admin.** `receipt_roll` is in `PRODUCT_TYPE_LABELS` / `PRODUCT_TYPE_OPTIONS` (enum order), maps to shop category `receipt`, and `receipt` is in `SHOP_CATEGORIES` and the catalogue-pathway fallback. `APP_VERSION` was bumped.
+
+**Not changed (handoff "no change needed"):** search (rewritten server-side), cart/checkout, sitemap (backend).
+
+**Tests.** New `tests/receipt-rolls-oct2026.test.js` (40). It EXECUTES the real middleware, `canonicalizeCategory` parity with the edge, SeoMeta routing and h1 mirror, `parseURLState`/`updateURL`, `renderProducts` order (with a negative control proving `byCodeThenColor` would reorder), the loader's full/partial/failed states, the badge writer, the PDP view model, spec rows and printer slot, and the card image. Mutating the allow-list, the order guard, the view-model null or the card gate turns it red (4/1/1/1 failures).
+
+Pins updated for the intended change: `ia-reorg-jul2026` (allow-list), `genuine-no-color-tile` (`colourTile` gate), `brand-canonical-audit-may2026` (path chain), `footer-redesign-jul2026` (Shop column), `product-type-vocabulary-aug2026` (enum, measured). Suite: 7205 → 7245 pass, 0 fail.
+
+**Probe:** `npm run probe:receipt-rolls` (READ-ONLY). Before deploy: 10 findings (all the 301/404s above), with the negative control (`?category=junk` → 301 /shop) ok.
+
+**Seen, not changed:** a PDP with no photo renders `placeholder-product.svg` through the *image* branch, because `storageUrl(null)` returns the placeholder path. That makes the placeholder hover-zoomable. This predates rolls and affects every no-photo row.
+
 ## ERR-367 — Dashboard "net drift $6.10": the admin filter bar's "today" was the UTC day (owner 2026-10-20) — **SHIPPED (frontend); backend half asked**
 
 **Seen.** At 12:17 NZDT on 2026-10-20, period=all at month grain, the dashboard printed: "These two backend figures disagree. The per-period net profit adds up to −$3,026.66, but the Net Profit tile reads −$3,020.56 (gap $6.10)."

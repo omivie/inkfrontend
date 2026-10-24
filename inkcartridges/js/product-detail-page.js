@@ -397,12 +397,21 @@
             const name = p.name || '';
             const category = this.normalizeProductType(p.product_type) || this.normalizeCategory(p.category) || this.detectCategory(name);
             const isRibbonProduct = category === 'ribbon';
+            // ERR-368 — a receipt roll is its maker's own product, not a
+            // replacement for a printer brand's part. The API still sends
+            // `source: 'compatible'` (its supplier is the compatible one), so
+            // the VIEW MODEL drops the source: every `info.source` reader —
+            // the badge, the compliance disclaimer, the colour tile, the
+            // related-heading badge, the meta fallback — then renders nothing,
+            // exactly as for an unknown-source ribbon. `this.product.source`
+            // stays raw for the cart line and analytics.
+            const isRoll = category === 'receipt';
             // Trust `p.source`. The legacy `name.includes('compatible')`
             // fallback was for a pre-source-field data shape that no longer
             // exists, and it would now overmatch on the May 2026 compatible
             // name format ("Compatible <Type> Cartridge Replacement for ...")
             // rather than disambiguating anything new.
-            const isCompatible = !isRibbonProduct && p.source === 'compatible';
+            const isCompatible = !isRibbonProduct && !isRoll && p.source === 'compatible';
             // De-double redundant compact code tokens in genuine names (display only;
             // stored `name` stays raw for slug/identity). See ProductName in utils.js.
             const displayName = (typeof ProductName !== 'undefined') ? ProductName.clean(p) : name;
@@ -411,6 +420,8 @@
 
             return {
                 ...p,
+                source: isRoll ? null : p.source,
+                isRoll,
                 isCompatible,
                 displayName,
                 brandName,
@@ -455,6 +466,7 @@
                 case 'correction_tape': return 'ribbon';
                 case 'label_tape':      return 'label_tape';
                 case 'photo_paper':     return 'paper';
+                case 'receipt_roll':    return 'receipt';   // ERR-368
                 // Fax films are filed under /api/shop?category=drums (verified
                 // live: all 7 — Brother PC201/PC301/PC302RF/PC402RF/PC501 and
                 // Canon FX3/FX12). Without these cases the chain fell through
@@ -660,7 +672,14 @@
             // (IA reorg Jul 2026): the product payload's `category` can be the
             // singular 'drum', which the /shop redirect layer would strip.
             const canonCategory = (typeof canonicalizeCategory === 'function' && canonicalizeCategory(info.category)) || info.category;
-            if (isRibbon) {
+            if (info.isRoll) {
+                // ERR-368 — the prerender's crumbs are Shop › Okin › Receipt Rolls.
+                // Same words here, but Okin is TEXT: there is no Okin brand page
+                // (kept out of the brand nav on purpose), and the category link
+                // goes to the one listing that holds every roll.
+                document.getElementById('breadcrumb-category').innerHTML = '<a href="/shop?category=receipt">Receipt Rolls</a>';
+                document.getElementById('breadcrumb-brand').innerHTML = `<span>${Security.escapeHtml(info.brandName)}</span>`;
+            } else if (isRibbon) {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/ribbons">${Security.escapeHtml(categoryName)}</a>`;
                 document.getElementById('breadcrumb-brand').innerHTML = `<a href="/ribbons?printer_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
             } else {
@@ -668,8 +687,8 @@
                 document.getElementById('breadcrumb-brand').innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
             }
 
-            // Add product code breadcrumb (e.g., LC37) — skip for ribbons
-            if (!isRibbon) {
+            // Add product code breadcrumb (e.g., LC37) — skip for ribbons and rolls
+            if (!isRibbon && !info.isRoll) {
                 const productCode = this.extractProductCode(info);
                 const breadcrumbCode = document.getElementById('breadcrumb-code');
                 if (productCode && breadcrumbCode) {
@@ -729,6 +748,8 @@
             // manufacturer_part_number is the SUPPLIER's own code (CTN2345BK →
             // "IBTN2345"), which names no printer and no OEM part (backend
             // re-check 2026-09-28 §5 #9, ERR-294).
+            // A roll (source nulled, ERR-368) shows "Model: ITR80X80" — the
+            // backend's prerender prints it, and parity is the rule.
             const showModel = info.manufacturer_part_number && info.source !== 'compatible';
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${showModel ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
@@ -1111,6 +1132,9 @@
             if (yieldN) {
                 rows.push(`<li class="product-info__spec"><span class="product-info__spec-label">Page yield</span><span class="product-info__spec-value">${yieldN.toLocaleString()} pages (approx.)</span></li>`);
             }
+            for (const [label, value] of this.rollSpecRows(info)) {
+                rows.push(`<li class="product-info__spec"><span class="product-info__spec-label">${Security.escapeHtml(label)}</span><span class="product-info__spec-value">${Security.escapeHtml(value)}</span></li>`);
+            }
             if (rows.length) {
                 el.innerHTML = rows.join('');
                 el.hidden = false;
@@ -1118,6 +1142,34 @@
                 el.innerHTML = '';
                 el.hidden = true;
             }
+        },
+
+        /**
+         * ERR-368 — a receipt roll's spec rows from the backend's
+         * `specifications` (handoff 2026-10-23), in the handoff's order. Only
+         * these keys, only when present: no copy of our own about roll length,
+         * FSC or which devices a roll fits — there is no reliable source for any
+         * of it. `bpa_free` is sent on thermal rolls only; `core` only on the
+         * coreless 57x25. Returns [label, text] pairs; the caller escapes.
+         */
+        rollSpecRows(info) {
+            const spec = info && info.isRoll && info.specifications;
+            if (!spec || typeof spec !== 'object') return [];
+            const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+            const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+            const rows = [];
+            const add = (label, value) => { if (value != null) rows.push([label, String(value)]); };
+            // The pill text must read on its own: #product-specs keeps its
+            // label visually hidden (screen readers get "Roll width 80 mm wide").
+            add('Roll width', num(spec.roll_width_mm) && `${spec.roll_width_mm} mm wide`);
+            add('Roll diameter', num(spec.roll_diameter_mm) && `${spec.roll_diameter_mm} mm diameter`);
+            add('Paper', text(spec.paper) && `${text(spec.paper)} paper`);
+            add('Paper weight', num(spec.paper_weight_gsm) && `${spec.paper_weight_gsm} gsm`);
+            if (typeof spec.bpa_free === 'boolean') add('BPA', spec.bpa_free ? 'BPA free' : 'Contains BPA');
+            add('Core', text(spec.core));
+            const perPack = num(spec.rolls_per_pack);
+            add('Rolls per pack', perPack && `${perPack} ${perPack === 1 ? 'roll' : 'rolls'} per pack`);
+            return rows;
         },
 
         renderBuyBoxDeliveryAndReturns(info) {
@@ -2381,6 +2433,10 @@
         },
 
         async renderCompatiblePrinters(info) {
+            // ERR-368 — a receipt roll has no printer links
+            // (`compatible_printers: []`); neither the "For use in" list nor the
+            // Supabase fallback lookup applies, so the slot stays empty.
+            if (info && info.isRoll) { this._mountCompat(''); return; }
             // The admin-authored machine list, from /api/products/:sku/for-use-in
             // (ERR-243). Since 2026-09-28 the gallery no longer waits for it, so
             // the first call here usually arrives BEFORE the answer: await the
@@ -2638,6 +2694,23 @@
                         DebugLog.warn(`Curated related products for ${info.sku}: related_products is `
                             + `${info.related_products === null ? 'null (server lookup failed)' : 'absent'} — rail shows the error pane.`);
                     }
+                } else if (info.isRoll) {
+                    // ERR-368 — rolls have no series code to build a family from.
+                    // The backend's product page lists "Related Okin Products":
+                    // the six cheapest other rolls (measured on CTR80X80P5,
+                    // 2026-10-24). Same rule here, from the same category read
+                    // the /shop listing makes, so humans see what crawlers see.
+                    const res = await API.getProducts({ category: 'receipt', limit: 100 });
+                    const rows = res && res.ok
+                        ? (Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.products) ? res.data.products : null))
+                        : null;
+                    if (!rows) {
+                        fetchFailed = true;
+                    } else {
+                        const price = (p) => (Number.isFinite(Number(p.retail_price)) ? Number(p.retail_price) : Infinity);
+                        addProducts(rows.filter((p) => p.sku !== info.sku)
+                            .sort((a, b) => price(a) - price(b)).slice(0, 6));
+                    }
                 } else {
                     // Non-ribbon: mirror the brand+code shop page exactly.
                     // Use backend's own series list as the source of truth for the code,
@@ -2757,7 +2830,9 @@
                 // K→C→M→Y per-code rows the shop grid uses.
                 // Spec: readfirst/code-yield-grouping-may2026.md
                 const sortByCodeThenColor = (arr) => {
-                    const out = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                    // Rolls keep their price order (ERR-368): they have no code
+                    // family for byCodeThenColor to group by.
+                    const out = info.isRoll ? arr : (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
                         ? ProductSort.byCodeThenColor(arr)
                         : arr;
                     // Two rows a shopper cannot tell apart get their SKU printed
@@ -2785,6 +2860,7 @@
                 const inferProductType = (p) => {
                     const pt = (p.product_type || '').toLowerCase();
                     if (pt.includes('ribbon') || pt === 'correction_tape') return 'ribbon';
+                    if (pt === 'receipt_roll') return 'roll';
                     if (pt === 'toner_cartridge') return 'toner';
                     if (pt === 'ink_cartridge' || pt === 'ink_bottle') return 'ink';
                     if (DRUM_TYPES.includes(pt)) return 'drum';
@@ -2809,6 +2885,7 @@
                     const inks    = products.filter(p => inferProductType(p) === 'ink');
                     const toners  = products.filter(p => inferProductType(p) === 'toner');
                     const drums   = products.filter(p => inferProductType(p) === 'drum');
+                    const rolls   = products.filter(p => inferProductType(p) === 'roll');
 
                     const buildTypeGrid = (items, productType) => {
                         if (!items.length) return '';
@@ -2817,6 +2894,7 @@
                         // already seen those exact words on the tile they
                         // browsed through.
                         const label = productType === 'ribbon' ? 'Ribbons' :
+                                     productType === 'roll' ? 'Receipt Rolls' :
                                      productType === 'toner' ? 'Toner Cartridges' :
                                      productType === 'drum' ? 'Drums & Supplies' : 'Ink Cartridges';
                         const heading = `${brandName} ${label}`.trim();
@@ -2828,7 +2906,7 @@
                         // card (ERR-195). Runs on the SORTED list so a group is always
                         // adjacent, and marks only — it never filters or reorders.
                         if (typeof ProductIdentity !== 'undefined') ProductIdentity.markLookalikes(items);
-                        const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
+                        const breaks = (productType !== 'roll' && typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
                             ? new Set(ProductSort.rowBreakIndices(items))
                             : new Set();
                         const ROW_BREAK = '<div class="products-row__break" aria-hidden="true"></div>';
@@ -2852,6 +2930,7 @@
                             ${buildTypeGrid(inks, 'ink')}
                             ${buildTypeGrid(toners, 'toner')}
                             ${buildTypeGrid(drums, 'drum')}
+                            ${buildTypeGrid(rolls, 'roll')}
                         </div>
                     `;
                 };
@@ -3042,7 +3121,9 @@
                         image: info.image_url || '',
                         brand: info.brandName || '',
                         quantity: qty,
-                        product_source: info.source || null,
+                        // The raw source: the view model nulls it on a receipt
+                        // roll (ERR-368) but the cart line keeps its data shape.
+                        product_source: this.product.source || info.source || null,
                         // Item 17: lets the cart cap this line before the
                         // server has described it.
                         stock_quantity: info.stock_quantity,

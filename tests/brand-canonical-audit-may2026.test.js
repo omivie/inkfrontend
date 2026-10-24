@@ -307,8 +307,11 @@ test('vercel.json: /ink-cartridges and /toner-cartridges are REWRITES, not redir
 test('shop-page.js parseURLState seeds category from /ink-cartridges path (item 5)', () => {
     assert.match(SHOP_JS, /pathCategory\s*=\s*\(window\.location\.pathname\s*===\s*['"]\/ink-cartridges['"]/,
         'parseURLState must detect /ink-cartridges in pathname and seed category=ink');
-    assert.match(SHOP_JS, /\?\s*['"]toner['"]\s*\n?\s*:\s*null/,
+    // ERR-368: /receipt-rolls is the third landing, chained after toner.
+    assert.match(SHOP_JS, /\?\s*['"]toner['"]\s*\n?\s*:\s*\(window\.location\.pathname\s*===\s*['"]\/receipt-rolls['"]/,
         'parseURLState must detect /toner-cartridges in pathname and seed category=toner');
+    assert.match(SHOP_JS, /\?\s*['"]receipt['"][^\n]*\n\s*:\s*null/,
+        'parseURLState must detect /receipt-rolls in pathname and seed category=receipt');
     // IA reorg Jul 2026: the raw ?category= param is canonicalized then mapped
     // to the internal tab id before it wins over the pathname seed.
     assert.match(SHOP_JS, /this\.state\.category\s*=\s*_canonCategory\s*\n?\s*\?\s*\(this\.CATEGORY_INTERNAL_BY_CANONICAL\[_canonCategory\]\s*\|\|\s*_canonCategory\)\s*\n?\s*:\s*pathCategory/,

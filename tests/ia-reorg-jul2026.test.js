@@ -250,8 +250,9 @@ test('§6 middleware normalizes /shop?category BEFORE the bot gate (all UAs)', (
 });
 
 test('§6 middleware mirrors the backend redirect rules', () => {
-    assert.match(MIDDLEWARE, /CATEGORY_CANONICAL = new Set\(\['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'\]\)/);
-    assert.match(MIDDLEWARE, /CATEGORY_ALIASES = \{ ribbons: 'ribbon', 'ink-cartridges': 'ink' \}/);
+    // `receipt` + its aliases and photo_paper→paper joined 2026-10-23 (ERR-368).
+    assert.match(MIDDLEWARE, /CATEGORY_CANONICAL = new Set\(\['ink', 'toner', 'ribbon', 'drums', 'label', 'paper', 'receipt'\]\)/);
+    assert.match(MIDDLEWARE, /CATEGORY_ALIASES = \{\s*ribbons: 'ribbon', 'ink-cartridges': 'ink', photo_paper: 'paper',\s*'receipt-rolls': 'receipt', 'receipt-roll': 'receipt', receipt_roll: 'receipt',\s*\}/);
     assert.match(MIDDLEWARE, /Response\.redirect\(url\.toString\(\), 301\)/);
     // Loop guard: only redirect when the normalized value differs.
     assert.match(MIDDLEWARE, /if \(next !== raw\)/);

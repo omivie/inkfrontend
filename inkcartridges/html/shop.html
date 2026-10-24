@@ -292,6 +292,22 @@
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                             </a>
                         </div>
+
+                        <!-- ERR-368: receipt rolls (one maker, no brand picker) — one click
+                             to the listing. Static href: /shop?category=receipt answers 200
+                             and its canonical follows the backend taxonomy. No Okin tile. -->
+                        <div class="shop-section-card" id="receipt-rolls-section">
+                            <div class="shop-section-card__header">
+                                <div class="shop-section-card__icon shop-section-card__icon--ribbon">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>
+                                </div>
+                                <h2 class="shop-section-card__title">Thermal, EFTPOS &amp; bond receipt rolls</h2>
+                            </div>
+                            <a href="/shop?category=receipt" class="shop-section-card__link" id="receipt-rolls-view-all">
+                                View All Receipt Rolls
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                            </a>
+                        </div>
                     </div>
 
                     <div class="drilldown-level" id="level-categories" hidden>
@@ -329,6 +345,7 @@
                                     </h2>
                                     <button type="button" class="source-jump" id="source-jump" hidden><span class="source-jump__label"><span class="source-jump__text">Click here for genuine products</span> <span aria-hidden="true">&darr;</span></span></button>
                                 </div>
+                                <p class="products-section__partial" id="receipt-rolls-partial" role="status" hidden></p>
                                 <div class="products-row" id="compatible-products">
                                 </div>
                             </div>
@@ -500,17 +517,17 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=a8c45624"></script>
+    <script defer src="/js/shop-page.js?v=0a3fdb0e"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/api.js?v=0b750926"></script>
-    <script defer src="/js/seo-meta.js?v=6a86f2fd"></script>
+    <script defer src="/js/api.js?v=87814960"></script>
+    <script defer src="/js/seo-meta.js?v=c04a7fc4"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=7f6f213e"></script>
+    <script defer src="/js/utils.js?v=6f9bd1dd"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
@@ -519,7 +536,7 @@
     <script defer src="/js/cart-deep-link.js?v=4f6612d5"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=e934d05a"></script>
-    <script defer src="/js/products.js?v=a0cb9ec7"></script>
+    <script defer src="/js/products.js?v=a04437b6"></script>
     <script defer src="/js/search.js?v=9ff3c6b9"></script>
     <!-- search-click-tracking-aug2026 — POST /api/search/click for results-page
          card clicks. THIS PAGE ONLY: /search is a rewrite to this HTML, so the
@@ -528,7 +545,7 @@
     <script defer src="/js/search-click-beacon.js?v=5016c5df"></script>
     <script defer src="/js/main.js?v=1a0a037d"></script>
     <script defer src="/js/legal-config.js?v=3b1de764"></script>
-    <script defer src="/js/footer.js?v=26fe2dd9"></script>
+    <script defer src="/js/footer.js?v=8f4eb2c0"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=2c634821"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>

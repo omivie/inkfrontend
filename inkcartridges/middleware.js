@@ -44,8 +44,15 @@ const BOT_PATTERN = /googlebot|adsbot-google|storebot-google|google-inspectionto
 // document requests) while the client maps consumable→drums for SPA-internal
 // state — legacy bookmarks lose the catch-all category on load, exactly like
 // they do on the backend host.
-const CATEGORY_CANONICAL = new Set(['ink', 'toner', 'ribbon', 'drums', 'label', 'paper']);
-const CATEGORY_ALIASES = { ribbons: 'ribbon', 'ink-cartridges': 'ink' };
+// `receipt` (POS paper rolls) and its aliases joined 2026-10-23 (ERR-368,
+// backend receipt-rolls handoff): until then every /shop?category=receipt —
+// the nav's own link — was 301'd to bare /shop. `photo_paper` is the paper
+// category's product_type, so it aliases to `paper` instead of being stripped.
+const CATEGORY_CANONICAL = new Set(['ink', 'toner', 'ribbon', 'drums', 'label', 'paper', 'receipt']);
+const CATEGORY_ALIASES = {
+  ribbons: 'ribbon', 'ink-cartridges': 'ink', photo_paper: 'paper',
+  'receipt-rolls': 'receipt', 'receipt-roll': 'receipt', receipt_roll: 'receipt',
+};
 
 /**
  * Paths that exist as files in the deployed tree but are not part of the website
@@ -181,6 +188,11 @@ export default async function middleware(request) {
   else if (path === '/toner-cartridges' || path === '/toner-cartridges/') {
     prerenderPath = '/api/prerender/category/toner';
   }
+  // /receipt-rolls → category/receipt (ERR-368). Same shape as the two arms
+  // above: the SPA is mounted here by a vercel.json rewrite.
+  else if (path === '/receipt-rolls' || path === '/receipt-rolls/') {
+    prerenderPath = '/api/prerender/category/receipt';
+  }
   // /shop?brand=<slug>&printer_slug=<slug> → printer prerender (canonical).
   //
   // Spec (brand-canonical audit, May 2026 — backend handoff): the canonical
@@ -225,6 +237,13 @@ export default async function middleware(request) {
     const printerSlug = url.searchParams.get('printer_slug') || url.searchParams.get('printer');
     if (brandSlug && printerSlug) {
       prerenderPath = `/api/prerender/printer/${encodeURIComponent(brandSlug)}/${encodeURIComponent(printerSlug)}`;
+    } else if (brandSlug && url.searchParams.get('category') === 'receipt'
+      && !['code', 'q', 'search'].some((key) => url.searchParams.get(key))) {
+      // ERR-368 — /shop?brand=okin&category=receipt is the SAME listing as the
+      // bare category (the SPA ignores the brand there), and the backend has no
+      // Okin brand page: /api/prerender/brand/okin?category=receipt is a 404.
+      // Mirrored in js/seo-meta.js prerenderPathForLocation.
+      prerenderPath = '/api/prerender/category/receipt';
     } else if (brandSlug) {
       // Forward the two params the backend's brand prerender actually consumes
       // (ERR-270). Until 2026-09-20 this arm built the path from the brand alone,
@@ -451,6 +470,7 @@ export const config = {
     '/ribbons',
     '/ink-cartridges',
     '/toner-cartridges',
+    '/receipt-rolls',
     '/shop',
     // Non-web files that live in the deployed tree — see NON_WEB_PATH (ERR-229).
     // Disjoint from every entry above, so no request can reach both the denylist

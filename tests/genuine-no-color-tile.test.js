@@ -87,8 +87,12 @@ test('products.js — genuine card with no image renders placeholder, not color 
     const m = PRODUCTS_SRC.match(/getProductImageHTML\s*\(product[^)]*\)\s*\{([\s\S]*?)\n\s{4}\},/);
     assert.ok(m, 'products.js must define getProductImageHTML');
     const body = m[1];
-    assert.match(body, /colorStyle\s*&&\s*product\.source\s*===\s*['"]compatible['"]/,
-        'compatible-with-color tile must be gated on product.source === "compatible"');
+    // ERR-368: the gate is `colourTile` = source 'compatible' AND not a
+    // receipt roll (BrandSource.isSourceless) — still keyed on source.
+    assert.match(body, /const colourTile = product\.source === 'compatible'\s*&& !\(typeof BrandSource !== 'undefined' && BrandSource\.isSourceless\(product\)\);/,
+        'colourTile must be product.source === "compatible" minus receipt rolls');
+    assert.match(body, /colorStyle\s*&&\s*colourTile/,
+        'compatible-with-color tile must be gated on colourTile (source === "compatible")');
     assert.match(body, /product\.source\s*===\s*['"]compatible['"]/,
         'compatible-no-color fallback must be gated on product.source === "compatible"');
     assert.match(body, /placeholder-product\.svg/,
@@ -535,9 +539,15 @@ test('all three card renderers gate the colour-block fallback on source', () => 
     const PRODUCTS = PRODUCTS_SRC;
     const SHOP = stripComments(READ('shop-page.js'));
     const PDP = PDP_SRC;
-    assert.match(PRODUCTS, /if \(colorStyle && product\.source === 'compatible'\)/,
+    // ERR-368: products.js and shop-page.js gate on `colourTile` — the source
+    // test minus receipt rolls, which ride in the compatible column.
+    assert.match(PRODUCTS, /const colourTile = product\.source === 'compatible'/,
+        'products.js must derive colourTile from source');
+    assert.match(PRODUCTS, /if \(colorStyle && colourTile\)/,
         'products.js must gate the colour-block fallback on source');
-    assert.match(SHOP, /if \(colorStyle && isCompatible\)/,
+    assert.match(SHOP, /const colourTile = isCompatible\s*&& !\(typeof BrandSource !== 'undefined' && BrandSource\.isSourceless\(product\)\);/,
+        'shop-page.js must derive colourTile from isCompatible');
+    assert.match(SHOP, /if \(colorStyle && colourTile\)/,
         'shop-page.js must gate the colour-block fallback on source');
     assert.match(PDP, /if \(colorStyle && info\.isCompatible\)/,
         'product-detail-page.js must gate the colour-block fallback on source');

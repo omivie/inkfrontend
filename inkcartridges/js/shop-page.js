@@ -994,7 +994,9 @@
                 ? 'ink'
                 : (window.location.pathname === '/toner-cartridges' || window.location.pathname === '/toner-cartridges/')
                     ? 'toner'
-                    : null;
+                    : (window.location.pathname === '/receipt-rolls' || window.location.pathname === '/receipt-rolls/')
+                        ? 'receipt'   // ERR-368 — the receipt-roll landing route
+                        : null;
             // Canonicalize the incoming slug (IA reorg Jul 2026): the address
             // bar speaks the backend's canonical slugs (drums/label/ribbon…)
             // while internal state keeps the historical tab ids
@@ -1080,6 +1082,12 @@
                 this.state.level = 'printer-products';
             } else if (this.state.code) {
                 this.state.level = 'products';
+            } else if (this.state.category === 'receipt') {
+                // ERR-368 — receipt rolls have one maker (Okin) and no series
+                // codes, so neither the brand picker nor the chip grid has
+                // anything to offer: one tile, then an empty chip row. The
+                // listing IS the category, with or without ?brand=okin.
+                this.state.level = 'products';
             } else if (this.state.category && this.state.brand) {
                 this.state.level = 'codes';
             } else if (this.state.category) {
@@ -1148,12 +1156,19 @@
                 && this.state.category;
 
             const categoryLandings = { ink: '/ink-cartridges', toner: '/toner-cartridges' };
+            // /receipt-rolls (ERR-368) is KEPT, never adopted: until the backend
+            // sets the taxonomy landingPath its canonical is still
+            // /shop?category=receipt, so the SPA does not push visitors onto it.
+            const onReceiptLanding = window.location.pathname === '/receipt-rolls';
             const onCategoryLanding = window.location.pathname === '/ink-cartridges'
-                || window.location.pathname === '/toner-cartridges';
+                || window.location.pathname === '/toner-cartridges'
+                || onReceiptLanding;
 
             let pathname;
             if (isCategoryOnly && categoryLandings[this.state.category]) {
                 pathname = categoryLandings[this.state.category];
+            } else if (isCategoryOnly && this.state.category === 'receipt' && onReceiptLanding) {
+                pathname = '/receipt-rolls';
             } else if (onCategoryLanding) {
                 // Leaving the category-landing for a filtered state — switch
                 // back to /shop so the URL shape matches the canonical
@@ -1167,7 +1182,8 @@
             if (this.state.brand) params.set('brand', this.state.brand);
             // On a category-landing path the category is implied by pathname;
             // omitting the param keeps the URL canonical (no /ink-cartridges?category=ink).
-            const categoryImpliedByPath = pathname === '/ink-cartridges' || pathname === '/toner-cartridges';
+            const categoryImpliedByPath = pathname === '/ink-cartridges' || pathname === '/toner-cartridges'
+                || pathname === '/receipt-rolls';
             // Emit the backend's canonical slug, never the internal tab id
             // (consumable→drums etc. — IA reorg Jul 2026).
             if (this.state.category && !categoryImpliedByPath) params.set('category', this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
@@ -1234,6 +1250,10 @@
             if (!bar) return;
             const show = this._isProductListLevel();
             bar.hidden = !show;
+            // Genuine / Compatible means nothing on a roll (ERR-368): "Genuine"
+            // would empty the list. Sort and in-stock still apply.
+            const sourceGroup = document.querySelector('#filter-sort-sheet input[name="fs-source"]')?.closest('fieldset');
+            if (sourceGroup) sourceGroup.hidden = this._isReceiptListing();
             const countEl = document.getElementById('filter-sort-count');
             if (countEl) {
                 const n = this._activeRefinementCount();
@@ -1830,6 +1850,7 @@
             // tile clicks straight to the chip grid for brand + category.
             const categoryPicker = !this.state.brand && !!this.state.category;
             const ribbonsSection = document.getElementById('ribbons-section');
+            const receiptSection = document.getElementById('receipt-rolls-section');
             // Scoped to the card that HOLDS THE BRAND GRID, not to "the first
             // .shop-section-card__title inside #level-brands". From ERR-236 until
             // ERR-290 a popular-products shelf sat above it and the unscoped query
@@ -1842,6 +1863,7 @@
                 const label = labels[this.state.category] || `${this.state.category} products`;
                 if (sectionTitle) sectionTitle.textContent = `Choose a brand to see ${label}`;
                 if (ribbonsSection) ribbonsSection.hidden = true;
+                if (receiptSection) receiptSection.hidden = true;
                 // No "Popular … right now" / "Full colour sets" rows here or
                 // anywhere (owner, 2026-09-28, ERR-290): a best-seller shows
                 // cartridges for printers the visitor does not own. The printer
@@ -1850,6 +1872,7 @@
             } else {
                 if (sectionTitle) sectionTitle.textContent = 'Select your ink cartridge or toner brand';
                 if (ribbonsSection) ribbonsSection.hidden = false;
+                if (receiptSection) receiptSection.hidden = false;
                 this.renderLandingPrinterSearch(false);
             }
 
@@ -3263,6 +3286,8 @@
         },
 
         async loadProducts(navVersion) {
+            // ERR-368 — a code-less products level with category=receipt is the roll listing.
+            if (this.state.category === 'receipt' && !this.state.code) return this.loadReceiptRolls(navVersion);
             this.showLoading(true);
 
             try {
@@ -3582,6 +3607,72 @@
                 );
             }
 
+            this.showLoading(false);
+        },
+
+        /**
+         * ERR-368 — the receipt-roll category (backend handoff 2026-10-23).
+         * True on /shop?category=receipt, /shop?brand=okin&category=receipt and
+         * /receipt-rolls; never once a search, printer or code narrows the page.
+         */
+        _isReceiptListing() {
+            return this.state.category === 'receipt' && this.state.level === 'products'
+                && !this.state.code && !this.state.search && !this.state.printer && !this.state.printerModel;
+        },
+
+        /** The h1 the prerender serves for the roll category — byte-identical (cloaking check). */
+        RECEIPT_H1: 'Receipt Rolls NZ — Buy Online at InkCartridges.co.nz',
+
+        /**
+         * ERR-368 — every receipt roll in ONE request, in the backend's order.
+         *
+         * `/api/products?category=receipt` needs no brand (handoff option A), so
+         * there is no one-tile Okin picker and no empty chip row. Rows render
+         * into the compatible column because that is where `source` puts them;
+         * `_syncSourceColumns` hides that column's COMPATIBLE badge here.
+         * A page that holds fewer rows than `meta.total` says so on screen.
+         */
+        async loadReceiptRolls(navVersion) {
+            this.showLoading(true);
+            const stale = () => navVersion !== undefined && this.navigationVersion !== navVersion;
+            const fail = () => this.showError(
+                "We couldn't load receipt rolls. The server may be warming up — please try again.",
+                (v) => this.loadReceiptRolls(v)
+            );
+            const note = typeof document !== 'undefined' ? document.getElementById('receipt-rolls-partial') : null;
+            if (note) note.hidden = true;
+            try {
+                const response = await API.getProducts({ category: 'receipt', limit: 100 });
+                if (stale()) return;
+                const rows = response && response.ok && Array.isArray(response.data) ? response.data
+                    : (response && response.ok && Array.isArray(response.data?.products) ? response.data.products : null);
+                if (!rows) {
+                    fail();
+                } else if (rows.length === 0) {
+                    this.showEmpty('No receipt rolls are available right now.');
+                } else {
+                    const total = Number(response.meta && response.meta.total);
+                    if (Number.isFinite(total) && total > rows.length) {
+                        DebugLog.warn(`[Shop.loadReceiptRolls] PARTIAL: ${rows.length} of ${total} rolls loaded`);
+                        if (note) {
+                            note.textContent = `Showing ${rows.length} of ${total} receipt rolls.`;
+                            note.hidden = false;
+                        }
+                    }
+                    this.elements.compatibleTitleText.textContent = sectionTitleText('Receipt Rolls');
+                    this.elements.genuineTitleText.textContent = sectionTitleText('Receipt Rolls');
+                    // The type filter is hidden on this page, but a pasted
+                    // ?source=genuine must not leave the shopper with nothing:
+                    // every roll renders whatever the address bar says.
+                    this.renderProducts(rows, this.elements.compatibleProducts, this.elements.compatibleSection, true);
+                    this.renderProducts([], this.elements.genuineProducts, this.elements.genuineSection, false);
+                    this.elements.levelProducts.hidden = false;
+                }
+            } catch (error) {
+                DebugLog.error('Failed to load receipt rolls:', error);
+                if (stale()) return;
+                fail();
+            }
             this.showLoading(false);
         },
 
@@ -5056,6 +5147,10 @@
             for (const k of ['sourceJump', 'sourceJumpCompatible']) {
                 if (this.elements[k]) this.elements[k].hidden = shown !== 2;
             }
+            // A receipt roll is no compatible cartridge (ERR-368): its column
+            // keeps the heading but drops the COMPATIBLE badge. ONE writer.
+            const badge = wrap.querySelector('.products-section__badge--compatible');
+            if (badge) badge.hidden = this._isReceiptListing();
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
@@ -5121,6 +5216,12 @@
             if (sortMode !== 'recommended') {
                 sortedProducts = compatLast(this._sortProductsBy(products, sortMode));
                 breaks = new Set(); // flat sorted run — no yield-group row breaks
+            } else if (products.every((p) => p && p.product_type === 'receipt_roll')) {
+                // ERR-368 — the API already orders rolls by paper (bond,
+                // carbonless, thermal) then size; byCodeThenColor would regroup
+                // them by name-derived "families" (handoff: do not re-sort).
+                sortedProducts = products;
+                breaks = new Set();
             } else {
                 // ERR-301: the yield the ad asked for (288XL) leads each family.
                 const _intent = this._freshIntent();
@@ -5248,6 +5349,11 @@
             // canonical `color` is set, so admin color edits propagate
             // visually without an image re-upload.
             const swatchStale = ProductColors.isPlaceholderSwatchImage(product.image_url) && colorStyle;
+            // Parity with Products.getProductImageHTML: a receipt roll rides in
+            // the compatible column but is no cartridge, so it never gets the
+            // colour block — no photo ⇒ the neutral placeholder (ERR-368).
+            const colourTile = isCompatible
+                && !(typeof BrandSource !== 'undefined' && BrandSource.isSourceless(product));
             if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
                 const srcsetHtml = srcsetAttr ? ` srcset="${Security.escapeAttr(srcsetAttr)}" sizes="${sizesAttr}"` : '';
                 const rawAttr = rawImageUrl && rawImageUrl !== resolvedImageUrl ? ` data-raw-src="${Security.escapeAttr(rawImageUrl)}"` : '';
@@ -5256,7 +5362,7 @@
                 // let a genuine card reveal a striped tile when its image
                 // failed to load, which is the one path the
                 // genuine-no-colour-tile invariant was never tested on.
-                if (colorStyle && isCompatible) {
+                if (colorStyle && colourTile) {
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
@@ -5265,7 +5371,7 @@
                     const fallbackTile = (!isCompatible && typeof BrandSource !== 'undefined') ? BrandSource.tile(product, { hidden: true }) : '';
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} ${loadAttrs} data-fallback="placeholder"${rawAttr}>${fallbackTile}`;
                 }
-            } else if (isCompatible) {
+            } else if (colourTile) {
                 imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
             } else {
                 // ERR-301: a GENUINE row with no photo gets the brand tile, not
@@ -5589,8 +5695,9 @@
             });
             list.appendChild(shopItem);
 
-            // Brand level
-            if (this.state.brand) {
+            // Brand level. Never on the roll listing (ERR-368): Okin is kept out
+            // of the brand nav on purpose — its brand copy is about cartridges.
+            if (this.state.brand && this.state.category !== 'receipt') {
                 const brandName = this.brandName(this.state.brand);
                 const isCurrent = this.state.level === 'categories';
                 const brandItem = this.createBreadcrumbItem(brandName, isCurrent, () => {
@@ -5602,8 +5709,8 @@
             // Category level
             if (this.state.category) {
                 const cat = this.categories.find(c => c.id === this.state.category);
-                const catName = cat?.name || this.state.category;
-                const isCurrent = this.state.level === 'codes';
+                const catName = cat?.name || (this.state.category === 'receipt' ? 'Receipt Rolls' : this.state.category);
+                const isCurrent = this.state.level === 'codes' || this._isReceiptListing();
                 const catItem = this.createBreadcrumbItem(catName, isCurrent, () => {
                     this.navigateTo('codes', { category: this.state.category });
                 });
@@ -5648,7 +5755,10 @@
             ];
             let pageUrl = shopUrl;
             let pageName = 'Shop Ink Cartridges & Toner NZ';
-            if (this.state.brand) {
+            // The roll listing names no brand (ERR-368, Okin stays out of nav).
+            const rolls = this.state.category === 'receipt';
+            if (rolls) pageName = 'Receipt Rolls NZ';
+            if (this.state.brand && !rolls) {
                 const brandName = this.brandName(this.state.brand);
                 pageUrl = shopUrl + '?brand=' + encodeURIComponent(this.state.brand);
                 pageName = brandName + ' Ink Cartridges';
@@ -5656,10 +5766,10 @@
             }
             if (this.state.category) {
                 const cat = this.categories?.find(c => c.id === this.state.category);
-                const catName = cat?.name || this.state.category;
+                const catName = cat?.name || (rolls ? 'Receipt Rolls' : this.state.category);
                 // Canonical slug in the URL, internal id for the display name.
                 pageUrl += (pageUrl.includes('?') ? '&' : '?') + 'category=' + encodeURIComponent(this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
-                pageName = pageName + ' \u2014 ' + catName;
+                if (!rolls) pageName = pageName + ' \u2014 ' + catName;
                 items.push({ "@type": "ListItem", "position": items.length + 1, "name": catName, "item": pageUrl });
             }
             el.textContent = JSON.stringify({
@@ -5725,7 +5835,8 @@
                 'ink': 'Inkjet Cartridges',
                 'toner': 'Toner Cartridges',
                 'consumable': 'Drums & Supplies',
-                'paper': 'Paper'
+                'paper': 'Paper',
+                'receipt': 'Receipt Rolls'
             };
             return typeMap[this.state.category] || 'Cartridges';
         },
@@ -5734,6 +5845,8 @@
         // updateSEO (single-heading contexts), NOT by the two section headers.
         getProductTypeLabel() {
             let label = this.getBaseProductTypeLabel();
+            // A roll has no genuine/compatible reading (ERR-368).
+            if (this.state.category === 'receipt') return label;
 
             // Add type filter prefix if specified
             if (this.state.type === 'genuine') {
@@ -5775,7 +5888,7 @@
             const categoryLabels = {
                 ink: 'Ink Cartridges', toner: 'Toner Cartridges',
                 consumable: 'Drums & Supplies', label_tape: 'Label Tape',
-                paper: 'Photo Paper'
+                paper: 'Photo Paper', receipt: 'Receipt Rolls'
             };
             const catLabel = categoryLabels[category] || 'Printing Supplies';
 
@@ -5793,8 +5906,16 @@
             const lc = (v) => (v == null ? v : String(v).toLowerCase());
             const isCategoryOnly = !brand && !code && !this.state.printer && !this.state.search;
             const categoryLandings = { ink: '/ink-cartridges', toner: '/toner-cartridges' };
+            const receiptListing = this._isReceiptListing();
             if (isCategoryOnly && category && categoryLandings[lc(category)]) {
                 canonical = `${BASE}${categoryLandings[lc(category)]}`;
+            } else if (receiptListing) {
+                // ERR-368 — the roll category's canonical is whatever the backend
+                // taxonomy nominates (its prerender emits the same), so this
+                // follows the backend's `landingPath` flip to /receipt-rolls with
+                // no FE edit. Static value now; the nav feed's answer below.
+                // ?brand=okin is the same listing and canonicalises with it.
+                canonical = `${BASE}/shop?category=receipt`;
             } else {
                 // Printer URLs, two corrections (ERR-242).
                 //
@@ -5872,6 +5993,13 @@
                     description = `Browse all ${brandName} ${catLabel.toLowerCase()} — genuine and compatible options with free NZ shipping over $100.`;
                     break;
                 case 'products': {
+                    if (receiptListing) {
+                        // The prerender's own <title>; SeoMeta.render() below
+                        // reconciles the description byte-for-byte as well.
+                        title       = 'Thermal Receipt & EFTPOS Rolls NZ — Fast NZ Delivery';
+                        description = 'Thermal EFTPOS and receipt printer rolls, bond and 2-ply carbonless rolls. Fast NZ delivery.';
+                        break;
+                    }
                     const codeStr = code ? code.replace(/-/g, ' ').toUpperCase() : '';
                     title       = `${brandName} ${codeStr} ${catLabel} NZ | InkCartridges.co.nz`;
                     description = `Shop ${brandName} ${codeStr} ${catLabel.toLowerCase()} — genuine and compatible. Free NZ shipping over $100.`;
@@ -5914,6 +6042,14 @@
             // locale, self-referential) so filtered views don't go stale.
             set('hreflang-en',      'href',    canonical);
             set('hreflang-default', 'href',    canonical);
+            if (receiptListing && typeof API !== 'undefined' && API.getCategoryPath) {
+                const navSeen = this.navigationVersion;
+                API.getCategoryPath('receipt', '/shop?category=receipt').then((path) => {
+                    if (this.navigationVersion !== navSeen || !this._isReceiptListing()) return;
+                    const url = `${BASE}${path}`;
+                    for (const [id, attr] of [['og-url', 'content'], ['canonical-url', 'href'], ['hreflang-en', 'href'], ['hreflang-default', 'href']]) set(id, attr, url);
+                });
+            }
 
             // Update JSON-LD CollectionPage schema
             const schemaEl = document.getElementById('shop-schema');
@@ -5922,8 +6058,12 @@
                     { "@type": "ListItem", "position": 1, "name": "Home", "item": `${BASE}/` },
                     { "@type": "ListItem", "position": 2, "name": "Shop", "item": `${BASE}/shop` }
                 ];
-                if (brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": canonical });
-                if (catLabel && brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 4, "name": catLabel, "item": canonical });
+                if (receiptListing) {
+                    breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": catLabel, "item": canonical });
+                } else {
+                    if (brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": canonical });
+                    if (catLabel && brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 4, "name": catLabel, "item": canonical });
+                }
 
                 schemaEl.textContent = JSON.stringify({
                     "@context": "https://schema.org",
@@ -6038,7 +6178,16 @@
                 // is what the crawler indexes (ERR-270). SeoMeta mirrors the
                 // prerender's own h1 into both when it lands; until then — or
                 // if the prerender is down — brand + code + type stands in.
-                if (this.state.level === 'products' && this.state.code) {
+                if (this._isReceiptListing()) {
+                    // ERR-368 — the roll category's h1 is the prerender's, word for
+                    // word (cloaking check). SeoMeta mirrors it once the prerender
+                    // lands; the constant is that same string for the gap.
+                    const mirrored = (typeof SeoMeta !== 'undefined' && SeoMeta.h1For && typeof window !== 'undefined')
+                        ? SeoMeta.h1For(SeoMeta.prerenderPathForLocation(window.location))
+                        : null;
+                    productType = mirrored || this.RECEIPT_H1;
+                    this.elements.title.textContent = productType;
+                } else if (this.state.level === 'products' && this.state.code) {
                     const mirrored = (typeof SeoMeta !== 'undefined' && SeoMeta.h1For && typeof window !== 'undefined')
                         ? SeoMeta.h1For(SeoMeta.prerenderPathForLocation(window.location))
                         : null;

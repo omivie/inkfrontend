@@ -56,6 +56,11 @@ const Products = {
         // `products.color` (e.g. Red → Tri-Colour) without re-uploading. Pinned
         // by tests/stale-color-swatch.test.js.
         const swatchStale = ProductColors.isPlaceholderSwatchImage(product.image_url) && colorStyle;
+        // A colour block stands in for a COMPATIBLE CARTRIDGE photo. A receipt
+        // roll is sent as source 'compatible' too, but it is no cartridge: no
+        // photo ⇒ the neutral placeholder (ERR-368, CCR76X76P5 ships none).
+        const colourTile = product.source === 'compatible'
+            && !(typeof BrandSource !== 'undefined' && BrandSource.isSourceless(product));
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
             //
@@ -68,7 +73,7 @@ const Products = {
             // EXCEPT the image-error path, because every test covered
             // `image_url: null` and none covered "the image failed to load".
             // Genuine rows fall back to the neutral placeholder instead.
-            if (colorStyle && product.source === 'compatible') {
+            if (colorStyle && colourTile) {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
@@ -87,10 +92,10 @@ const Products = {
                              ${loadAttrs}${srcsetHtml}
                              data-fallback="placeholder"${rawAttr}>${fallbackTile}`;
             }
-        } else if (colorStyle && product.source === 'compatible') {
+        } else if (colorStyle && colourTile) {
             // Compatible with no image but has color - show color block
             return `<div class="product-card__color-block" style="${colorStyle}"></div>`;
-        } else if (product.source === 'compatible') {
+        } else if (colourTile) {
             // Compatible with no known color - default to black
             return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         } else {

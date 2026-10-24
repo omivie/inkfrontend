@@ -28,7 +28,7 @@ export const PRODUCT_TYPE_TO_SHOP_CATEGORY = {
   drum_unit: 'drums', waste_toner: 'drums', maintenance_box: 'drums',
   belt_unit: 'drums', fuser_kit: 'drums',
   fax_film: 'drums', fax_film_refill: 'drums',
-  label_tape: 'label', photo_paper: 'paper',
+  label_tape: 'label', photo_paper: 'paper', receipt_roll: 'receipt',
   printer_ribbon: 'ribbons', typewriter_ribbon: 'ribbons', correction_tape: 'ribbons',
 };
 
@@ -40,6 +40,7 @@ export const SHOP_CATEGORIES = [
   { value: 'ribbons', label: 'Ribbons' },
   { value: 'label', label: 'Label Tape' },
   { value: 'paper', label: 'Paper' },
+  { value: 'receipt', label: 'Receipt Rolls' },
 ];
 
 /** A /shop category value → its display label. */

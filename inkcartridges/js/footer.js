@@ -400,6 +400,7 @@
                                 <li><a href="/toner-cartridges">Toner Cartridges</a></li>
                                 <li><a href="/shop?category=drums">Drum Units</a></li>
                                 <li><a href="/ribbons">Printer Ribbons</a></li>
+                                <li><a href="/shop?category=receipt">Receipt Rolls</a></li>
                                 <li><a href="/shop">Shop All</a></li>
                             </ul>
                         </details>
@@ -646,6 +647,11 @@
     // added here 2026-07-15 so the human Shop column lists the same four the bot
     // does (Ink · Toner · Drum Units · Ribbons) — anti-cloaking §2c, closing the
     // divergence in readfirst/footer-redesign-backend-jul2026.md.
+    // Receipt Rolls (ERR-368, 2026-10-23) is the one link a human sees that the
+    // bot footer does not list yet — the safe direction for a cloaking review —
+    // and the backend has been asked to add it there. It stays static: the
+    // nav feed's `path` moves to /receipt-rolls later, and /shop?category=receipt
+    // keeps answering 200 with a canonical that follows the feed.
 
     // Sitewide social-proof counts. Deliberately AFTER the synchronous footer
     // paint and deliberately not awaited — the footer must never wait on a

@@ -2372,6 +2372,21 @@ const BrandSource = (function () {
         return of(row) === COMPATIBLE;
     }
 
+    /**
+     * True for a product that is its maker's own item, not a replacement for a
+     * printer brand's part — today only POS receipt rolls (ERR-368, backend
+     * receipt-rolls handoff 2026-10-23). The API still sends
+     * `source: 'compatible'` on them (Augmento is the compatible supplier), so
+     * `of()` is deliberately left alone: search keeps partitioning rows by it.
+     * What this gates is the CARTRIDGE FRAMING — the source badge, the
+     * compatible disclaimer, the colour-block "no photo" tile.
+     */
+    function isSourceless(row) {
+        if (!row || typeof row !== 'object') return false;
+        const type = row.product_type || (row.product && row.product.product_type);
+        return type === 'receipt_roll';
+    }
+
     /** True only for a PROVEN genuine. Unknown ⇒ false. */
     function isGenuine(row) {
         return of(row) === GENUINE;
@@ -2482,6 +2497,7 @@ const BrandSource = (function () {
         of,
         isCompatible,
         isGenuine,
+        isSourceless,
         isKnown,
         label,
         badgeHTML,
@@ -2717,14 +2733,18 @@ if (typeof window !== 'undefined') window.CompatSource = CompatSource;
 function canonicalizeCategory(raw) {
     if (raw === null || raw === undefined) return null;
     const v = String(raw).trim().toLowerCase();
-    const CANONICAL = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
+    const CANONICAL = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper', 'receipt'];
     if (CANONICAL.includes(v)) return v;
     const ALIASES = {
         consumable: 'drums',     // legacy FE mega-nav param
         drum: 'drums',           // PDP info.category (singular)
         label_tape: 'label',     // legacy FE mega-nav param
         ribbons: 'ribbon',
-        'ink-cartridges': 'ink'
+        'ink-cartridges': 'ink',
+        photo_paper: 'paper',    // the paper category's product_type (ERR-368)
+        'receipt-rolls': 'receipt', // ERR-368 — the backend's aliases; its API
+        'receipt-roll': 'receipt',  // 422s on them, so they never reach a fetch
+        receipt_roll: 'receipt'
     };
     if (Object.prototype.hasOwnProperty.call(ALIASES, v)) return ALIASES[v];
     return null;

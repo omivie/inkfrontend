@@ -77,6 +77,10 @@ const BACKEND_ENUM = [
   'toner_cartridge', 'drum_unit', 'waste_toner', 'maintenance_box', 'belt_unit', 'fuser_kit',
   'fax_film', 'fax_film_refill',
   'printer_ribbon', 'typewriter_ribbon', 'correction_tape', 'label_tape', 'photo_paper',
+  // receipt_roll — measured 2026-10-24 from the admin list's own validation
+  // message ("product_type" must be one of [... photo_paper, receipt_roll,
+  // printer]); 19 live rows (ERR-368).
+  'receipt_roll',
   'printer',
 ];
 
@@ -262,7 +266,7 @@ test('every enum member is enrolled in a shop category or is deliberately exempt
   const EXEMPT = new Set(['printer']);
   for (const t of BACKEND_ENUM) {
     if (EXEMPT.has(t)) continue;
-    assert.match(CODES_SRC, new RegExp(`\\b${t}:\\s*'(ink|toner|drums|label|paper|ribbons)'`),
+    assert.match(CODES_SRC, new RegExp(`\\b${t}:\\s*'(ink|toner|drums|label|paper|ribbons|receipt)'`),
       `${t} has no /shop category — add it to PRODUCT_TYPE_TO_SHOP_CATEGORY or to the exemption list with a reason`);
   }
 });
