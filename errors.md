@@ -80,6 +80,12 @@ describing the same incident.
   - the Retention tab renders the real cohorts (2026-03 … with small-sample flags).
 - The confirmation card could not be shown in a browser without a fresh order; it is unit-executed.
 
+**Post-deploy live check (2026-10-25).**
+- `probe:consent-banner` 24/0 with Google's real badge exercised; `probe:fe-master` 49/0; `probe:conversion-fixes` 48/0 (landing CLS 0); `probe:listing-phone-sweep` 4/4 plus its negative control.
+- X-Robots-Tag is live on /quote, /track-order and /account.
+- The browser loads `gtag/js?id=G-YJXTSGLM28`.
+- `probe:checkout-funnel --seed` found ONE real failure, at 1366x599. The Checkout button sat at 584–636, partly on screen but under the consent bar from 554. The sticky bar's IntersectionObserver counted "intersecting" as visible, so the bar stayed hidden. It now counts the button visible only when it is fully above the measured `--consent-banner-height`. Locally the seeded run is 43/0 (sticky at 501–546); live was 41/1 before the fix.
+
 **Rule.**
 - Show a consent ask only on an explicit `null`.
 - Name it "reorder reminder", never subscription or auto-reorder.

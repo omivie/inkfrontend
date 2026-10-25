@@ -324,3 +324,10 @@ test('Pay focuses what blocks it: email, delivery type, verification', () => {
     assert.doesNotMatch(src, /setTimeout\(\(\) => \{\s*deliverySection\.scrollIntoView/, 'no delayed scroll');
     assert.match(src, /this\.showVerificationRequired\(\);\s*const msg = document\.getElementById\('verification-required'\);\s*if \(msg\) msg\.scrollIntoView/);
 });
+
+test('cart sticky bar: the real button counts as visible only when fully above the consent bar', () => {
+    const src = stripComments(read('js/cart-page.js'));
+    assert.match(src, /const clear = entry\.isIntersecting && r\.top >= 0 && r\.bottom <= usable\(\);/);
+    assert.match(src, /getPropertyValue\('--consent-banner-height'\)/);
+    assert.doesNotMatch(src, /lastShouldShow = !entry\.isIntersecting;/, 'partly-on-screen-under-the-bar is not visible');
+});

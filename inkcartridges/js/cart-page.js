@@ -161,11 +161,23 @@ function initStickyCheckoutBar() {
     }
 
     if ('IntersectionObserver' in window) {
+        // "Visible" = the WHOLE button above the bottom chrome, not merely
+        // intersecting the viewport (ERR-372 live check, 1366x599): the button
+        // sat at 584–636, partly on screen but under the consent bar from 554,
+        // so the sticky bar stayed hidden and Checkout could not be pressed.
+        // The bar's height is the one consent-banner.js measures.
+        const usable = () => {
+            const b = document.body;
+            const h = b && b.classList.contains('has-consent-banner')
+                ? parseFloat(getComputedStyle(b).getPropertyValue('--consent-banner-height')) || 0 : 0;
+            return window.innerHeight - h;
+        };
         const io = new IntersectionObserver(([entry]) => {
-            // Show the sticky bar only once the real button has scrolled away.
-            lastShouldShow = !entry.isIntersecting;
+            const r = entry.boundingClientRect;
+            const clear = entry.isIntersecting && r.top >= 0 && r.bottom <= usable();
+            lastShouldShow = !clear;
             setVisible(lastShouldShow);
-        }, { threshold: 0 });
+        }, { threshold: [0, 0.25, 0.5, 0.75, 1] });
         io.observe(realBtn);
     }
 }
