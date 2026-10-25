@@ -1474,6 +1474,13 @@ const AdminAPI = {
       `/api/admin/analytics/acquisition/search-terms${catalogQueryString(opts)}`, signal);
   },
 
+  /** Retention cohorts (item 39, ERR-372). Takes NO query params (an unknown
+   *  one 400s); server-cached 10 min; 403 for non-owner admins — a named
+   *  refusal, so the panel can say so. */
+  async getRetention(signal = null) {
+    return analyticsHttpGetNamed('/api/admin/analytics/retention', signal);
+  },
+
   /** { buckets, channels, series: [{ channel, points: [{bucket_start, sessions, pageviews}] }] } */
   async getAcquisitionTimeseries(opts = {}, signal = null) {
     return analyticsHttpGetShared(

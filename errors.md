@@ -40,9 +40,50 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
-## ERR-372 — FE checklist 22 Oct, retention: one-click reorder reminder on the confirmation page, reorder reminders on PDP + account, admin Retention panel, SEO noindex + printer description (items 38, 39, 40, 42) — **IN PROGRESS** (2026-10-24)
+## ERR-372 — FE checklist 22 Oct, retention: one-click reorder reminder on the confirmation page, reorder reminders on PDP + account, admin Retention panel, SEO noindex + printer description (items 38, 39, 40, 42) — **SHIPPED (frontend)** (2026-10-25)
 
-Reserved by session feink-fa; full entry follows when shipped.
+**Seen.**
+- 2 of 223 orders carry reminder consent, and the checkout box (item 19) was ticked on 0 of 20.
+- Only one reorder reminder has ever existed (the owner's test), because nothing on the site offered one.
+- `?subscription=` toasts said "scheduled reorder", which reads as an order being placed.
+- There was no retention view; the Customers page's cohorts stub reads a contradicting endpoint.
+- `/quote` and `/track-order` were indexable.
+- The SPA's printer description was a generic sentence.
+
+**Fix.**
+- **38:** `ConfirmationPage.renderReminderCard` shows ONE card under the order summary, above the account and business offers. It shows only when `reminder_consent_at === null`: an ABSENT key (offline sessionStorage copy) is NOT "never asked". It never shows on cancelled, failed or refunded orders.
+  - One press = one `POST /api/orders/:n/reminder-consent` (no body; `API.request` attaches the Bearer token, else X-Guest-Session). The button is disabled while the request is in flight, and the backend's five outcome lines come from `reminderOutcome` (support email from `/api/site/trust` `contact.support_email`).
+  - On error: "Sorry, that didn't save. Please try again."
+  - One ask only: the "Set a Reminder" printer card is suppressed while this card is on the page.
+- **40:** ONE module, `js/reorder-reminders.js`.
+  - PDP (`#product-reminder`, after the fit line, which stays directly under Add):
+    - **Guests:** a sign-in link back to the same page.
+    - **Signed in:** the 4/6/8/10/12/16/26-week select, defaulting to the active reminder's interval, else 6 for ink and 8 for toner/bottles.
+    - **Already covered:** an existing reminder says "Reminder set…" or "paused" with Manage.
+    - **Results:** created and merged lines come from the response's `next_due`. NO_ORDERABLE_ITEMS gets its own line.
+  - Account dashboard `#reorder-reminders`: every non-cancelled reminder with item names (`GET /api/products/:sku`), "Every N weeks/days", the next reminder, change interval, remove item / delete reminder, pause / turn back on (with the "within a day" note), the empty state and the footnote. The reminder's `email` is never shown.
+  - `?subscription=` toasts use the backend's wording.
+  - `/cart?reorder=loaded|unavailable` while signed out shows "Sign in to see the items we added to your cart." with Sign in → `/cart`.
+- **39:** Analytics tab `retention` (manifest entry plus lazy `pages/retention.js`) makes ONE `analyticsHttpGetNamed` call. A 403 shows "owner account only".
+  - Segment toggle and the "Other web is not a clean control" note.
+  - Pure cell rules in `utils/retention.js`: null is "—", every rate reads "n of m · x%", small samples under 20 are greyed and labelled, and in-progress months are badged.
+  - The footer shows `as_of` and the exclusions; tooltips come from `meta.definitions`.
+  - Not on the Customers page beside `/analytics/cohorts`.
+- **42:** `<meta name="robots" content="noindex, follow">` on quote.html and track-order.html. vercel.json sends X-Robots-Tag for `/(quote|track-order)` and `/account(/.*)?`. `SeoMeta.printerPageDescription` mirrors `buildPrinterPageMeta`: a lead built from the listed sources, then free shipping / dispatch / returns, each added only if the total stays ≤155 (skip-and-continue, never "..."), fed by `ShopPage._printerListing`. The apex 307→308 is a Vercel domain setting and is listed as an owner action.
+
+**Verified.**
+- `tests/fe-checklist-22oct-retention-2026.test.js`: 17 tests; the file cannot load against HEAD.
+- Local Playwright against the live API, signed in as the owner, READ-ONLY (a route guard aborted any non-GET to subscriptions or reminder-consent; 0 attempted):
+  - the guest PDP shows the sign-in link;
+  - the signed-in PDP offers the select with 6 weeks pre-selected for CLC233BK;
+  - the account section is in its empty state;
+  - the Retention tab renders the real cohorts (2026-03 … with small-sample flags).
+- The confirmation card could not be shown in a browser without a fresh order; it is unit-executed.
+
+**Rule.**
+- Show a consent ask only on an explicit `null`.
+- Name it "reorder reminder", never subscription or auto-reorder.
+- The retention panel never derives a rate.
 
 ---
 ## ERR-371 — FE checklist 22 Oct, PDP / cart / checkout: compat yield line, photo top-aligned, 3+ price on the price row, cart lines first on phones, free-shipping bar in the totals and drawer, checkout reassurance, tap targets (items 16, 22, 23, 26, 27b, 28, 29, 30, 31) — **SHIPPED (frontend)** (2026-10-25)

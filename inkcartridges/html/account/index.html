@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=fe436580">
     <link rel="stylesheet" href="/css/components.css?v=78328ef3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=d08d00b1">
-    <link rel="stylesheet" href="/css/pages.css?v=aef42441">
+    <link rel="stylesheet" href="/css/pages.css?v=520ff0e7">
     <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="My Account | InkCartridges.co.nz">
@@ -394,6 +394,15 @@
                             <p class="business-panel__desc">Your account covers consolidated invoices, Net&nbsp;30 terms where approved, and your full order history in the Business Centre. Volume pricing applies to every order on the site, yours included: the more of an item you buy, the lower its unit price, and the breaks are shown on every product page.</p>
                         </section>
 
+                        <!-- Item 40 (ERR-372): every reminder except cancelled ones; change
+                             how often, remove an item, pause / turn back on, delete.
+                             js/reorder-reminders.js#mountAccount. -->
+                        <section class="reorder-reminders" id="reorder-reminders" data-testid="reorder-reminders" hidden aria-labelledby="reorder-reminders-title">
+                            <h2 class="reorder-reminders__title" id="reorder-reminders-title">Reorder reminders</h2>
+                            <div class="reorder-reminders__body"></div>
+                            <p class="reorder-reminders__foot">Reminders go to your account email address. Nothing is ordered or charged until you check out.</p>
+                        </section>
+
                     </div>
                 </div>
             </div>
@@ -425,7 +434,7 @@
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/utils.js?v=52270e49"></script>
-    <script defer src="/js/api.js?v=5e38c906"></script>
+    <script defer src="/js/api.js?v=ca438d7f"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
@@ -442,7 +451,8 @@
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=e934d05a"></script>
     <script defer src="/js/printer-data.js?v=2431d3ae"></script>
-    <script defer src="/js/account.js?v=55a762fa"></script>
+    <script defer src="/js/reorder-reminders.js?v=22449682"></script>
+    <script defer src="/js/account.js?v=803929e8"></script>
     <script defer src="/js/account-page.js?v=4a5f96a9"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>

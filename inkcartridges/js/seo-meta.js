@@ -303,7 +303,7 @@ const SeoMeta = {
     // ── trust facts (fail-open) ───────────────────────────────────────────────
 
     _emptyTrust() {
-        return { foundedYear: null, guaranteeDays: null, cutoff: null };
+        return { foundedYear: null, guaranteeDays: null, cutoff: null, returnsDays: null };
     },
 
     _normalizeTrust(data) {
@@ -313,10 +313,12 @@ const SeoMeta = {
         const shipping = data.shipping_promise || {};
         const founded = org.founded_year;
         const days = guarantee.days;
+        const returnsDays = (data.returns || {}).days;
         return {
             foundedYear: Number.isFinite(founded) ? founded : null,
             guaranteeDays: Number.isFinite(days) ? days : null,
             cutoff: this.formatDispatchCutoff(shipping.dispatch_cutoff_nzt),
+            returnsDays: Number.isFinite(returnsDays) ? returnsDays : null,
         };
     },
 
@@ -501,6 +503,42 @@ const SeoMeta = {
         return { title, description };
     },
 
+    /**
+     * The printer-page description, mirroring the backend's buildPrinterPageMeta
+     * (checklist item 42.3, ERR-372) so the page people see and the page bots
+     * see say the same thing when the prerender is down. PURE.
+     *   lead: all genuine → "N genuine <noun> cartridges for the <Printer>.";
+     *         all compatible → "N compatible <noun> cartridges for the <Printer>.";
+     *         both → "N <noun> cartridges for the <Printer> — genuine & compatible."
+     *         ("cartridge" when N is 1; <noun> lower case, or nothing)
+     *   then, in order, each ONLY if the total stays ≤ 155 chars — a sentence
+     *   that does not fit is skipped and the next is still tried:
+     *   "Free shipping over $<threshold>.", "Auckland metro orders by <cutoff>
+     *   NZT dispatch same day.", "<days>-day returns." Never cut mid-sentence,
+     *   never "...". Null when there is nothing listed.
+     */
+    printerPageDescription({ printer, count, sources, noun, threshold, cutoff, returnsDays }) {
+        const n = Number(count);
+        if (!printer || !Number.isFinite(n) || n < 1) return null;
+        const src = Array.isArray(sources) ? sources : [];
+        const word = n === 1 ? 'cartridge' : 'cartridges';
+        const kind = noun ? `${noun} ` : '';
+        let lead;
+        if (src.length === 1 && src[0] === 'genuine') lead = `${n} genuine ${kind}${word} for the ${printer}.`;
+        else if (src.length === 1 && src[0] === 'compatible') lead = `${n} compatible ${kind}${word} for the ${printer}.`;
+        else lead = `${n} ${kind}${word} for the ${printer} — genuine & compatible.`;
+        let out = lead;
+        const extra = [
+            threshold != null ? `Free shipping over $${threshold}.` : null,
+            cutoff ? `Auckland metro orders by ${cutoff} NZT dispatch same day.` : null,
+            Number.isFinite(returnsDays) ? `${returnsDays}-day returns.` : null,
+        ];
+        for (const s of extra) {
+            if (s && (out + ' ' + s).length <= this.DESC_MAX) out += ' ' + s;
+        }
+        return out;
+    },
+
     _buildPrinter(ctx) {
         const t = this._trustClauses(ctx.trust);
         const printer = ctx.printerDisplay || this._titleCaseSlug(ctx.printerSlug);
@@ -510,6 +548,12 @@ const SeoMeta = {
             `${printer} Cartridges — Fast NZ Delivery`,
             `${printer} Cartridges`,
         ]);
+        const listing = ctx.printerListing;
+        const mirrored = listing ? this.printerPageDescription({
+            printer, count: listing.count, sources: listing.sources, noun: listing.noun,
+            threshold: ctx.free, cutoff: ctx.trust.cutoff, returnsDays: ctx.trust.returnsDays,
+        }) : null;
+        if (mirrored) return { title, description: mirrored };
         const description = this.truncateDescription(this._joinClauses([
             `Cartridges for ${printer} — genuine & compatible.`,
             t.dispatch,
@@ -685,6 +729,7 @@ const SeoMeta = {
             printerDisplay: hints.printer || null,
             brandSlug: params.get('brand') || null,
             printerSlug: params.get('printer_slug') || params.get('printer') || null,
+            printerListing: hints.printerListing || null,
         };
 
         const built = this.buildForSurface(surface, ctx);

@@ -3900,6 +3900,17 @@
                     this.elements.compatibleTitleText.textContent = forPrinter;
                     this.elements.genuineTitleText.textContent = forPrinter;
 
+                    // Item 42.3 (ERR-372): what the printer page lists, for the SPA's
+                    // fallback meta description (SeoMeta mirrors the backend's
+                    // buildPrinterPageMeta from it).
+                    const listed = compatible.concat(genuine);
+                    const cats = new Set(listed.map((p) => String((p.category && (p.category.slug || p.category)) || p.product_type || '').toLowerCase()));
+                    this._printerListing = {
+                        count: listed.length,
+                        sources: [...new Set(listed.map((p) => (p.source === 'compatible' ? 'compatible' : 'genuine')))],
+                        noun: [...cats].every((c) => /ink/.test(c)) ? 'ink' : [...cats].every((c) => /toner/.test(c)) ? 'toner' : '',
+                    };
+
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
@@ -6307,6 +6318,7 @@
                     hints: {
                         brand: brandName || null,
                         printer: printerFull || null,
+                        printerListing: this.state.level === 'printer-products' ? (this._printerListing || null) : null,
                     },
                 });
             }

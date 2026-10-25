@@ -350,6 +350,12 @@
                 this.renderProduct();
                 // Item 43.1 (ERR-369): the product page's main card is painted.
                 if (typeof ClientBeacon !== 'undefined') ClientBeacon.gridReady();
+                // Item 40 (ERR-372): the reorder-reminder control, once Auth knows.
+                if (typeof ReorderReminders !== 'undefined') {
+                    const ready = (typeof Auth !== 'undefined' && Auth.readyPromise) ? Auth.readyPromise : Promise.resolve();
+                    const row = this.product;
+                    ready.then(() => ReorderReminders.mountPdp(row)).catch(() => {});
+                }
 
                 /* GA4 view_item (ERR-256).
                  *

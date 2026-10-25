@@ -64,7 +64,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=fe436580">
     <link rel="stylesheet" href="/css/components.css?v=78328ef3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=d08d00b1">
-    <link rel="stylesheet" href="/css/pages.css?v=aef42441">
+    <link rel="stylesheet" href="/css/pages.css?v=520ff0e7">
     <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
 </head>
 <body>
@@ -424,6 +424,11 @@
                                dispatch countdown sits under #product-free-ship (ERR-356).
                         -->
                         <div class="product-promise" id="product-promise" data-testid="product-promise" hidden></div>
+                        <!-- Item 40 (ERR-372): "Email me a reminder to reorder this every N
+                             weeks" for signed-in buyers of ink / toner / ink bottles; a sign-in
+                             link for guests. After the fit line, which stays directly under Add.
+                             js/reorder-reminders.js#mountPdp. -->
+                        <div class="product-reminder" id="product-reminder" data-testid="product-reminder" hidden></div>
 
                         <!-- "Our compatible version" on a GENUINE product (FE master checklist
                              item 16, 6 Oct): directly UNDER Add and the fit line, never above —
@@ -559,7 +564,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/api.js?v=5e38c906"></script>
+    <script defer src="/js/api.js?v=ca438d7f"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=52270e49"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
@@ -577,7 +582,8 @@
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=4abdb378"></script>
 
-    <script defer src="/js/product-detail-page.js?v=30b16d0b"></script>
+    <script defer src="/js/reorder-reminders.js?v=22449682"></script>
+    <script defer src="/js/product-detail-page.js?v=662f7b53"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

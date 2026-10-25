@@ -370,6 +370,13 @@
                 nextOrderOffer: Object.prototype.hasOwnProperty.call(apiOrder, 'next_order_offer')
                     ? apiOrder.next_order_offer
                     : undefined,
+                // Checklist item 38 (ERR-372). Tri-state: undefined = key ABSENT
+                // (offline sessionStorage copy, older payload) — NOT "never
+                // asked"; null = the buyer has not said yes; else the time they
+                // did (checkout box or an email button). Only null shows the card.
+                reminderConsentAt: Object.prototype.hasOwnProperty.call(apiOrder, 'reminder_consent_at')
+                    ? apiOrder.reminder_consent_at
+                    : undefined,
                 // Money is normalised by the ONE shared helper (js/order-totals.js)
                 // rather than by hand-rolled `?? 0` chains here — see DEC-006.
                 // Those chains collapsed UNKNOWN into 0, which is how the points
@@ -524,6 +531,9 @@
             // Google Customer Reviews opt-in
             this.renderGoogleReviewsOptIn(order);
 
+            // The one reorder-reminder ask (item 38).
+            this.renderReminderCard(order);
+
             // Only an explicit `true` shows the card (see transformAPIOrder).
             const bizOffer = document.getElementById('business-account-offer');
             if (bizOffer) bizOffer.hidden = order.businessAccountOffer !== true;
@@ -540,6 +550,94 @@
                     this.renderGuestPointsLine();
                 });
             }
+        },
+
+        /**
+         * "Remind me when it's time to reorder" — one click, on the page every
+         * buyer reads right after paying (checklist item 38, owner 2026-10-15:
+         * retention). A one-time buyer may only get a reorder reminder after
+         * saying yes (NZ spam law); 0 of 20 paid orders since 7 Oct ticked the
+         * checkout box and the email button had never been pressed.
+         *
+         * Shown ONLY when the server says `reminder_consent_at === null` (an
+         * absent key is not "never asked") and the order is not cancelled /
+         * failed. Same card for guests and signed-in buyers: the POST carries
+         * the same authority as GET /api/orders/:n (Bearer, else X-Guest-Session,
+         * both from API.request). Consent is recorded ONLY on the press; nothing
+         * is pre-selected. One ask only: the "Set a Reminder" printer card is
+         * suppressed while this one is on the page (_reminderAsked).
+         */
+        renderReminderCard(order) {
+            const card = document.getElementById('reminder-consent-card');
+            if (!card) return;
+            const status = String((order && order.status) || '').toLowerCase();
+            const eligible = !!order && order.reminderConsentAt === null && !!order.orderNumber
+                && !['cancelled', 'canceled', 'failed', 'refunded'].includes(status);
+            card.hidden = !eligible;
+            if (!eligible) return;
+            this._reminderAsked = true;
+            const savePrinter = document.getElementById('save-printer-prompt');
+            if (savePrinter) savePrinter.hidden = true;
+            const btn = document.getElementById('reminder-consent-btn');
+            const statusEl = document.getElementById('reminder-consent-status');
+            if (!btn || btn.dataset.bound === '1') return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', async () => {
+                if (btn.disabled) return;
+                btn.disabled = true;
+                if (statusEl) { statusEl.hidden = true; statusEl.textContent = ''; }
+                let res = null;
+                try { res = await API.setReminderConsent(order.orderNumber); } catch (_) { res = null; }
+                if (res && res.ok && res.data && res.data.reminder_consent === true) {
+                    const email = await this._supportEmail();
+                    const done = document.createElement('p');
+                    done.className = 'confirmation-card__done';
+                    done.setAttribute('role', 'status');
+                    done.textContent = this.reminderOutcome(res.data, email);
+                    card.innerHTML = '';
+                    card.appendChild(done);
+                    card.dataset.reminder = res.data.delivery_blocked ? `blocked-${res.data.delivery_blocked}` : 'done';
+                    return;
+                }
+                btn.disabled = false;
+                if (statusEl) {
+                    statusEl.textContent = "Sorry, that didn't save. Please try again.";
+                    statusEl.hidden = false;
+                }
+                card.dataset.reminder = 'error';
+            });
+        },
+
+        /**
+         * The line that replaces the card after a 200 — the backend's outcome
+         * words (checklist item 38, matching the email button). PURE.
+         * @param {{reminders_resumed?: boolean, delivery_blocked?: string|null}} data
+         * @param {string} email  contact.support_email
+         */
+        reminderOutcome(data, email) {
+            const d = data || {};
+            switch (d.delivery_blocked) {
+                case 'bounced':
+                    return `We've noted your request, but emails to this address have been bouncing, so reminders can't reach you. Contact us at ${email} to update your email address.`;
+                case 'unsubscribed':
+                    return `We've noted your request, but this address is unsubscribed from our emails, so we can't send reminders. To get them, contact us at ${email} and we'll switch emails back on.`;
+                case 'recommendations_off':
+                    return "We've noted your request, but product recommendation emails are switched off in your account, and reorder reminders follow that setting. Turn them back on under email preferences in your account.";
+                default:
+                    return d.reminders_resumed === true
+                        ? "Done — reorder reminders are back on. We'll email you before you run out."
+                        : "Done — we'll email you before you run out.";
+            }
+        },
+
+        /** `contact.support_email` from /api/site/trust; LegalConfig only if that read fails. */
+        async _supportEmail() {
+            try {
+                const data = (typeof TrustStats !== 'undefined') ? await TrustStats.raw() : null;
+                const e = data && data.contact && typeof data.contact.support_email === 'string' ? data.contact.support_email.trim() : '';
+                if (e) return e;
+            } catch (_) { /* fall through */ }
+            return (typeof LegalConfig !== 'undefined' && LegalConfig.email) || 'support@inkcartridges.co.nz';
         },
 
         renderGoogleReviewsOptIn(order) {
@@ -1048,7 +1146,8 @@
                     if (prompt) prompt.hidden = false;
                     ConfirmationPage.renderGuestPointsLine();
                     ConfirmationPage.renderAccountForm();
-                } else {
+                } else if (!ConfirmationPage._reminderAsked) {
+                    // One ask only (item 38): not beside the reminder card.
                     const savePrinter = document.getElementById('save-printer-prompt');
                     if (savePrinter) savePrinter.hidden = false;
                 }

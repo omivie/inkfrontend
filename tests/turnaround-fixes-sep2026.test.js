@@ -302,7 +302,9 @@ test('§5 the form uses the ORDER\'s email, is guest-only, and Save My Printer i
     assert.match(fn, /const email = this\._orderEmail;/);
     assert.match(fn, /if \(!form \|\| !email/, 'no email ⇒ form stays hidden (the register link remains)');
     assert.match(fn, /Auth\.signUp\(email, pw\.value/);
-    assert.match(code, /if \(!Auth\.isAuthenticated\(\)\) \{[\s\S]{0,300}ConfirmationPage\.renderAccountForm\(\);[\s\S]{0,80}\} else \{[\s\S]{0,120}save-printer-prompt/);
+    // ERR-372 (item 38, "one ask only"): signed-in buyers get the printer card
+    // only when the reorder-reminder card is not already asking.
+    assert.match(code, /if \(!Auth\.isAuthenticated\(\)\) \{[\s\S]{0,300}ConfirmationPage\.renderAccountForm\(\);[\s\S]{0,80}\} else if \(!ConfirmationPage\._reminderAsked\) \{[\s\S]{0,160}save-printer-prompt/);
     const html = read('html/order-confirmation.html');
     assert.match(html, /id="save-printer-prompt" hidden/);
     // Wording per FE master checklist 2026-10-05 item 13 ("Save your order and collect your points").

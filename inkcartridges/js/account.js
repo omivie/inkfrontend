@@ -17,10 +17,12 @@ const AccountPage = {
      * through the login redirect; anything else is ignored, never reflected.
      */
     SUBSCRIPTION_OUTCOMES: {
-        created:     { type: 'success', text: 'Your scheduled reorder is set up.' },
-        exists:      { type: 'success', text: 'You already have a scheduled reorder for this order — nothing has changed.' },
-        unavailable: { type: 'warning', text: 'A scheduled reorder isn\'t available for this order. Contact us and we\'ll help.' },
-        error:       { type: 'error',   text: 'We couldn\'t set up your scheduled reorder. Please try again from your email, or contact us.' },
+        // Item 40 §3 (ERR-372): "scheduled reorder" read as if an order would be
+        // placed. These are reminders; nothing is ordered or charged.
+        created:     { type: 'success', text: 'Your reorder reminder is set up. We\'ll email you every 60 days. Nothing is ordered or charged until you check out.' },
+        exists:      { type: 'success', text: 'You already have a reorder reminder for this order.' },
+        unavailable: { type: 'warning', text: 'Reorder reminders aren\'t available for this order. Contact us and we\'ll help.' },
+        error:       { type: 'error',   text: 'We couldn\'t set up your reorder reminder. Please try the link in your email again, or contact us.' },
     },
 
     /** The `subscription` param if it is one of the four outcomes, else null. */
@@ -895,6 +897,8 @@ const AccountPage = {
         // Business-account status (non-blocking; hidden for retail users).
         // No tier is fetched or shown — v2 retired them (ERR-139).
         this.loadBusinessStatus();
+        // Reorder reminders (item 40, ERR-372; non-blocking, loud on failure).
+        if (typeof ReorderReminders !== 'undefined') ReorderReminders.mountAccount().catch(() => {});
     },
 
     /**

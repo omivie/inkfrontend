@@ -7479,3 +7479,15 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .pricing-check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 4px 0 8px; }
 .pricing-rule-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 4px 12px; }
 #pricing-preview { margin-top: 8px; }
+
+/* Retention panel (checklist item 39, ERR-372). Small samples are greyed and
+   labelled; null is an em dash, never 0. */
+.retention__bar { display: flex; flex-wrap: wrap; gap: 6px; }
+.retention__bar [aria-pressed="true"] { outline: 2px solid var(--cyan); }
+.retention__note { margin: 8px 0 12px; font-size: 13px; opacity: 0.85; }
+.retention__table td, .retention__table th { white-space: nowrap; }
+.retention__small { opacity: 0.55; }
+.retention__flag { font-size: 11px; font-style: italic; }
+.retention__missing { opacity: 0.6; }
+.retention__total th, .retention__total td { font-weight: 700; border-top: 2px solid currentColor; }
+.retention__foot { margin: 10px 0 0; font-size: 12px; opacity: 0.8; }

@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=fe436580">
     <link rel="stylesheet" href="/css/components.css?v=78328ef3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=d08d00b1">
-    <link rel="stylesheet" href="/css/pages.css?v=aef42441">
+    <link rel="stylesheet" href="/css/pages.css?v=520ff0e7">
     <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=f53373f5">
     <meta name="twitter:card" content="summary_large_image">
@@ -177,6 +177,17 @@
                                 Download receipt (PDF)
                             </button>
                         </div>
+                    </div>
+
+                    <!-- Item 38 (ERR-372): the ONE reorder-reminder ask, under the order
+                         summary and above the account / business offers. Shown only when
+                         the order's reminder_consent_at is null; never pre-selected —
+                         consent is recorded only on the press. ConfirmationPage.renderReminderCard. -->
+                    <div class="confirmation-card confirmation-card--reminder" id="reminder-consent-card" data-testid="reminder-consent-card" hidden>
+                        <h2 class="confirmation-card__title">Want a reminder before you run out?</h2>
+                        <p>We'll email you when these cartridges are likely running low, so you can reorder in time. Unsubscribe from any reminder in one click.</p>
+                        <button type="button" class="btn btn--primary" id="reminder-consent-btn" data-track="cta_click" data-track-cta="Reminder Consent" data-track-location="post_purchase">Remind me when it's time to reorder</button>
+                        <p class="confirmation-card__status" id="reminder-consent-status" role="alert" hidden></p>
                     </div>
 
                     <div class="confirmation-next">
@@ -364,7 +375,7 @@
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
     <script defer src="/js/utils.js?v=52270e49"></script>
-    <script defer src="/js/api.js?v=5e38c906"></script>
+    <script defer src="/js/api.js?v=ca438d7f"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=263d27ef"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
@@ -383,7 +394,7 @@
          controller and order-receipt.js, which read window.OrderTotals. -->
     <script defer src="/js/order-totals.js?v=4d4a743f"></script>
     <script defer src="/js/order-receipt.js?v=8d7f6a13"></script>
-    <script defer src="/js/order-confirmation-page.js?v=13ec71d4"></script>
+    <script defer src="/js/order-confirmation-page.js?v=b9522090"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2021bf38"></script>
 </body>

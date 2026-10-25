@@ -338,11 +338,11 @@ test('§7 normalizeTrust maps the spec envelope', () => {
         shipping_promise: { dispatch_cutoff_nzt: '14:00' },
         organization: { founded_year: 2008 },
     });
-    sameShape(t, { foundedYear: 2008, guaranteeDays: 30, cutoff: '2pm' });
+    sameShape(t, { foundedYear: 2008, guaranteeDays: 30, cutoff: '2pm', returnsDays: null });
 });
 test('§7 normalizeTrust fail-open on garbage -> all null', () => {
-    sameShape(SeoMeta._normalizeTrust(null), { foundedYear: null, guaranteeDays: null, cutoff: null });
-    sameShape(SeoMeta._normalizeTrust({}), { foundedYear: null, guaranteeDays: null, cutoff: null });
+    sameShape(SeoMeta._normalizeTrust(null), { foundedYear: null, guaranteeDays: null, cutoff: null, returnsDays: null });
+    sameShape(SeoMeta._normalizeTrust({}), { foundedYear: null, guaranteeDays: null, cutoff: null, returnsDays: null });
 });
 
 test('§7 getTrust caches in sessionStorage and fails open on non-200', async () => {
@@ -354,7 +354,7 @@ test('§7 getTrust caches in sessionStorage and fails open on non-200', async ()
         Config: { API_URL: '', getSetting: (k, d) => d },
     });
     const t = await S2.getTrust();
-    sameShape(t, { foundedYear: null, guaranteeDays: null, cutoff: null });
+    sameShape(t, { foundedYear: null, guaranteeDays: null, cutoff: null, returnsDays: null });
     // failed fetch must NOT poison the cache (so a later success can populate it)
     assert.equal(storage.getItem(S2.TRUST_CACHE_KEY), null);
     assert.equal(calls, 1);
@@ -370,7 +370,7 @@ test('§7 getTrust returns + caches the parsed envelope, then serves from cache'
         Config: { API_URL: '', getSetting: (k, d) => d },
     });
     const t1 = await S2.getTrust();
-    sameShape(t1, { foundedYear: 2008, guaranteeDays: 30, cutoff: '2pm' });
+    sameShape(t1, { foundedYear: 2008, guaranteeDays: 30, cutoff: '2pm', returnsDays: null });
     const t2 = await S2.getTrust();
     sameShape(t2, t1);
     assert.equal(calls, 1, 'second call must hit the session cache, not the network');

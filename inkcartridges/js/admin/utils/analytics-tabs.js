@@ -39,6 +39,8 @@ export const ANALYTICS_TABS = [
   { id: 'market-intel', label: 'Market Intel',     lazy: './cc-market-intel.js' },
   { id: 'traffic',      label: 'Traffic',          lazy: './website-traffic.js' },
   { id: 'acquisition',  label: 'Acquisition',      lazy: './acquisition.js' },
+  // Item 39 (ERR-372): do customers come back? Owner only (the hub is too).
+  { id: 'retention',    label: 'Retention',        lazy: './retention.js' },
 ];
 
 export const ANALYTICS_TAB_IDS = ANALYTICS_TABS.map(t => t.id);

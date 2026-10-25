@@ -307,10 +307,36 @@ const CartDeepLink = {
             if (typeof DebugLog !== 'undefined') DebugLog.warn('[CartDeepLink] unknown ?reorder= status:', status);
             entry = this.REORDER_UNKNOWN;
         }
-        if (typeof showToast === 'function') {
-            showToast(entry.text, entry.type, 6000);
+        // Item 40 §4 (ERR-372): the reminder email's reorder link fills the
+        // ACCOUNT cart (via the backend's confirm page). A signed-out shopper
+        // lands on an empty guest cart, so they are told to sign in — and come
+        // back to /cart after — instead of a "ready to review" over nothing.
+        if ((status === 'loaded' || status === 'unavailable')
+            && typeof Auth !== 'undefined' && Auth.readyPromise && typeof Auth.isAuthenticated === 'function') {
+            Auth.readyPromise.then(() => {
+                if (Auth.isAuthenticated()) { this._toast(entry); return; }
+                this._toast(this.REORDER_SIGNED_OUT, '/account/login?redirect=' + encodeURIComponent('/cart'));
+            }).catch(() => this._toast(entry));
+            return entry;
         }
+        this._toast(entry);
         return entry;
+    },
+
+    REORDER_SIGNED_OUT: { text: 'Sign in to see the items we added to your cart.', type: 'info' },
+
+    /** One toast; an optional link appended to it (sign-in, item 40). */
+    _toast(entry, href) {
+        if (typeof showToast !== 'function') return;
+        const t = showToast(entry.text, entry.type, href ? 10000 : 6000);
+        if (href && t && typeof t.querySelector === 'function' && typeof document !== 'undefined') {
+            const a = document.createElement('a');
+            a.className = 'toast__action';
+            a.href = href;
+            a.textContent = 'Sign in';
+            const msg = t.querySelector('.toast__message');
+            if (msg && msg.parentNode) msg.parentNode.insertBefore(a, msg.nextSibling);
+        }
     },
 
     /**

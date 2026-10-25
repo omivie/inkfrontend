@@ -7066,6 +7066,13 @@ a.account-review-card__product:focus-visible {
 .confirmation-account-form__status.is-error { color: var(--color-error, #b91c1c); }
 .confirmation-account-form__alt { font-size: var(--font-size-sm); }
 
+/* Item 38 (ERR-372): the one reorder-reminder ask on the confirmation page. */
+.confirmation-card--reminder { margin: var(--spacing-lg) 0; border: 1px solid var(--cyan-primary); }
+.confirmation-card--reminder .confirmation-card__title { margin: 0 0 6px; font-size: 1.125rem; }
+.confirmation-card--reminder .btn { margin-top: 8px; }
+.confirmation-card__status { margin: 8px 0 0; color: var(--color-error, #c1124e); font-weight: 600; }
+.confirmation-card__done { margin: 0; font-weight: 600; color: var(--color-text); }
+
 .confirmation-card--subtle {
     background: var(--steel-50, #F8FAFC);
     border: 1px solid var(--steel-200, #E2E8F0);
@@ -14224,3 +14231,22 @@ html[data-landing="toner"] .drilldown-title__landing--toner { display: inline; }
         margin-bottom: -10px;
     }
 }
+
+/* Item 40 (ERR-372): reorder reminders — PDP control and account section. */
+.product-reminder { margin-top: 10px; font-size: var(--font-size-sm); color: var(--color-text); }
+.product-reminder[hidden] { display: none; }
+.product-reminder__label select { margin: 0 4px; min-height: 36px; font-size: 16px; }
+.product-reminder__set { display: inline; margin: 0; }
+.product-reminder__status { margin: 6px 0 0; color: var(--color-error, #c1124e); }
+.product-reminder__signin, .product-reminder__manage { color: var(--cyan-dark, #1d6a96); text-decoration: underline; }
+.reorder-reminders { margin-top: var(--spacing-lg); padding: var(--spacing-md); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+.reorder-reminders[hidden] { display: none; }
+.reorder-reminders__title { margin: 0 0 8px; font-size: 1.125rem; }
+.reorder-reminder { padding: 10px 0; border-top: 1px solid var(--color-border-light, #eef2f6); }
+.reorder-reminder__items { margin: 0; padding-left: 18px; }
+.reorder-reminder__every, .reorder-reminders__state { margin: 4px 0; }
+.reorder-reminder__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.reorder-reminder__actions select { min-height: 36px; font-size: 16px; }
+.reorder-reminders__link { background: none; border: 0; padding: 4px 0; color: var(--cyan-dark, #1d6a96); text-decoration: underline; cursor: pointer; font: inherit; }
+.reorder-reminder__msg { margin: 6px 0 0; font-weight: 600; }
+.reorder-reminders__foot { margin: 8px 0 0; font-size: var(--font-size-sm); color: var(--color-text-light); }

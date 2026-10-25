@@ -157,3 +157,42 @@ Today it is `/shop?category=receipt` with `landing: false`. Both URLs stay 200 a
    (Ink · Toner · Drum Units · Ribbons) does not. This is the safe direction for a cloaking review, but please add it so both
    footers list the same five categories.
 
+## §5 FE-MASTER-CHECKLIST (22 Oct): shipped, measured, and five things for you (ERR-369..372)
+
+Everything below is live on www since 2026-10-25 (commits 22ebff43, b9297737, 9fa29dd5 and the ERR-372 commit).
+Each item's measurements are in `errors.md` under its ERR number.
+
+1. **Item 46 — please make the bot prerender match.** Printer pages (`/shop?brand=…&printer_slug=…`) now list, inside
+   each source section (Compatible above Genuine): buyable first, then cartridges before drums/parts, then cheapest
+   first, ties in your order. Please order `/api/prerender/printer/…` the same way so bot and human pages match.
+   Out-of-stock cards still show "Contact us", not Add (the owner's contact-button rule).
+2. **Item 37 — the search redirect is ready and waiting for your flags.** On 2026-10-25 `/api/search/smart` sent neither
+   `matched_printer.exact` nor `exact_product`. Example: "brother mfc-j4340dw" matched `brother-mfc-j4340dw-xl`. The FE
+   redirects ONLY on `exact === true` or an `exact_product.url` on our own `/products/<slug>/<sku>` path, page 1 only.
+   Nothing changes until you ship them.
+3. **Item 43 — the beacon formats.**
+   - `grid_ready` element = `grid_ready <ms since navigation start>`, once per page load.
+   - `client_error` element = `<surface> <METHOD> <path+query> <status|timeout|network>`, ≤512 characters. Surfaces:
+     `shop-drilldown`, `search-dropdown`, `pdp`, `cart-pricing`, `ribbons-<surface>`. Example:
+     `shop-drilldown GET /api/products/printer/hp-deskjet-2820e 503`.
+   - **A grid Add click = `add_to_cart:<product uuid>`.** The PDP keeps `add_to_cart`, with the SKU in the path. If your
+     funnel counts `element = 'add_to_cart'` exactly, please switch it to a prefix match.
+   - Browsers with `navigator.webdriver` or `localStorage.ic_internal = '1'` send no beacons.
+   - We confirmed the enum without writing a row, by omitting required fields. We did write two labelled rows earlier
+     (`path=/__fe_probe`, session `fe-probe-enum-20261024`); please delete them if they matter.
+4. **Not done, and why.**
+   - **26b:** it asked us to drop DELIVERY/RETURNS on desktop because they "repeat the service row under Add". The owner
+     removed that row on 13 Oct (ERR-329), so those rows are now the PDP's only delivery and returns facts. Please confirm
+     you still want them gone.
+   - **22:** already true on 25 Oct (GLC233BK image at y 255).
+   - **41:** `docs/seo/guides-content-plan-oct2026.md` is not in our repo. Please send it.
+   - **32 fixes 3–6:** `docs/storefront/mobile-speed-FE-handoff-oct2026.md` is not in our repo either. Please send it.
+5. **Measured differences from the checklist.**
+   - **27a:** the guarantee is at `data.warranty.compatible_label` on `/api/site/trust`, not `trust_signals.warranty`; we
+     read both.
+   - **24:** a 64px bar still covered the first-row Add at 1280x551, so the bar is 45px on a mouse, and the chrome above the
+     grid was tightened on short laptops.
+   - **26a:** the 3+ price sits on the Availability row, 7px under the price (centres 33px apart, not ≤30). On the price row
+     it wrapped and pushed Add down 26px.
+   - **25:** Filter & Sort is inline, not sticky. Any fixed overlay fails your own 300px-step sweep.
+   - Every item 24/25 done-when passes locally. Live before the deploy failed 3 of 4 phone sweeps.

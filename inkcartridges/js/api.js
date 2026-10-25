@@ -3209,6 +3209,17 @@ const API = {
         return this.get(`/api/orders/${encodeURIComponent(orderNumber)}`);
     },
 
+    /**
+     * POST /api/orders/:orderNumber/reminder-consent — no body (checklist item
+     * 38, ERR-372). Same authority as getOrder: request() attaches the Bearer
+     * token, else X-Guest-Session. Idempotent server-side (keeps the first time).
+     * 200 ⇒ {ok, data:{reminder_consent, reminders_resumed, delivery_blocked}};
+     * 401/404/429/5xx come back as ok:false envelopes.
+     */
+    async setReminderConsent(orderNumber) {
+        return this.request(`/api/orders/${encodeURIComponent(orderNumber)}/reminder-consent`, { method: 'POST' });
+    },
+
     async getRecentTracking() {
         return this.get('/api/orders/recent-tracking');
     },
