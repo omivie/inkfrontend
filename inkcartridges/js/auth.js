@@ -148,13 +148,104 @@ const Auth = {
             this.readyPromise = new Promise(resolve => { this._resolveReady = resolve; });
         }
 
-        // Check if Supabase is loaded
+        // supabase-js is ~43 KB that an anonymous shopper never uses, so the
+        // browsing pages no longer ship its <script> tag (mobile-speed spec
+        // fix 4, backend reply 2026-10-25). It is fetched here only when this
+        // visitor may be signed in (a stored session, an OAuth return), and by
+        // ensureClient() the moment anything needs it (sign in, sign up, a
+        // sign-in in another tab). Pages that use the SDK directly — account,
+        // admin, checkout, payment, quote — keep the tag.
         if (typeof supabase === 'undefined' || !supabase.createClient) {
-            DebugLog.warn('Supabase SDK not loaded. Auth features disabled.');
-            if (this._resolveReady) this._resolveReady();
-            return false;
+            if (!this._needsClientNow()) {
+                this._clearAuthCookie();
+                this._watchForSignIn();
+                this.updateUI();
+                this.initialized = true;
+                if (this._resolveReady) this._resolveReady();
+                return true;
+            }
+            try {
+                await this._loadSdk();
+            } catch (e) {
+                DebugLog.warn('Supabase SDK not loaded. Auth features disabled.');
+                this.initialized = true;
+                if (this._resolveReady) this._resolveReady();
+                return false;
+            }
         }
+        return this._startClient();
+    },
 
+    // Pinned build of supabase-js, the same URL + SRI the remaining <script>
+    // tags carry (a test holds them equal).
+    SDK_URL: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0',
+    SDK_INTEGRITY: 'sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB',
+    _sdkPromise: null,
+    _clientPromise: null,
+
+    /** Load supabase-js once (no-op when a page's own tag already did). */
+    _loadSdk() {
+        if (typeof supabase !== 'undefined' && supabase.createClient) return Promise.resolve();
+        if (!this._sdkPromise) {
+            this._sdkPromise = new Promise((resolve, reject) => {
+                const el = document.createElement('script');
+                el.src = Auth.SDK_URL;
+                el.integrity = Auth.SDK_INTEGRITY;
+                el.crossOrigin = 'anonymous';
+                el.onload = () => ((typeof supabase !== 'undefined' && supabase.createClient) ? resolve() : reject(new Error('supabase-js loaded without createClient')));
+                el.onerror = () => { Auth._sdkPromise = null; reject(new Error('supabase-js failed to load')); };
+                document.head.appendChild(el);
+            });
+        }
+        return this._sdkPromise;
+    },
+
+    /**
+     * True when this page view may belong to a signed-in visitor: an auth
+     * token in the store the adapter reads (ERR-209 persist mode), or an
+     * OAuth / recovery return in the URL hash. Storage that throws ⇒ true,
+     * i.e. the old always-load behaviour, never a silent sign-out.
+     */
+    _needsClientNow() {
+        try {
+            if (/(^|[#&])(access_token|refresh_token|error_description)=|type=recovery/.test(location.hash || '')) return true;
+            const store = Auth._persistMode() === 'session' ? sessionStorage : localStorage;
+            for (let i = 0; i < store.length; i++) {
+                if (Auth._isAuthKey(store.key(i))) return true;
+            }
+            return false;
+        } catch (e) {
+            return true;
+        }
+    },
+
+    /** A sign-in in another tab writes the token here; start the client then. */
+    _watchForSignIn() {
+        if (this._watchingSignIn) return;
+        this._watchingSignIn = true;
+        window.addEventListener('storage', (e) => {
+            if (!this.supabase && e && e.newValue && Auth._isAuthKey(e.key)) this.ensureClient();
+        });
+    },
+
+    /**
+     * The Supabase client, starting it (and loading the SDK) on first use.
+     * Resolves to null when the SDK cannot load — callers keep their own
+     * "Auth not initialized" branch.
+     */
+    ensureClient() {
+        if (this.supabase) return Promise.resolve(this.supabase);
+        if (!this._clientPromise) {
+            this._clientPromise = this._loadSdk()
+                .then(() => (this.supabase ? true : this._startClient()))
+                .then(() => this.supabase)
+                .catch(() => { this._clientPromise = null; return null; });
+        }
+        return this._clientPromise;
+    },
+
+    /** Create the client, read the session, wire auth events (was init()'s body). */
+    async _startClient() {
         try {
             // Purge any on-disk token before the client can read it (ERR-209).
             this._reconcilePersistence();
@@ -501,6 +592,7 @@ const Auth = {
      * @param {object} [metadata] user_metadata (e.g. { full_name }), optional
      */
     async signUp(email, password, metadata) {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
         const options = { emailRedirectTo: `${window.location.origin}/account/verify-email` };
@@ -516,6 +608,7 @@ const Auth = {
      * @param {string} password
      */
     async signIn(email, password) {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
         const { data, error } = await this.supabase.auth.signInWithPassword({
@@ -530,6 +623,7 @@ const Auth = {
      * Sign out
      */
     async signOut() {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
         const { error } = await this.supabase.auth.signOut();
@@ -579,6 +673,7 @@ const Auth = {
      * @param {string} newPassword - The new password
      */
     async updatePassword(newPassword) {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return { ok: false, error: 'Auth not initialized' };
 
         try {
@@ -600,6 +695,7 @@ const Auth = {
      * Refresh the session
      */
     async refreshSession() {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return false;
 
         const { data: { session }, error } = await this.supabase.auth.refreshSession();
@@ -650,6 +746,7 @@ const Auth = {
      * Sign in with Google
      */
     async signInWithGoogle() {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
         const { data, error } = await this.supabase.auth.signInWithOAuth({
@@ -684,6 +781,7 @@ const Auth = {
      * favourites load, and UI refresh happen identically for both.
      */
     async signInWithMicrosoft() {
+        if (!this.supabase) await this.ensureClient();
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
         const { data, error } = await this.supabase.auth.signInWithOAuth({

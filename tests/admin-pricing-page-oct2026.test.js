@@ -8,6 +8,7 @@
  *   §5 guards: no FE price maths, no manual_retail_price read; bulk previews first
  *   §6 lock / unlock + "Price set by" filter + cost/price ranges (live 2026-10-16)
  *   §7 bulk endpoint, margin rules by filter, price_source (ERR-363, backend 2026-10-17)
+ *   §8 minimum unit profit floor printed from the server (backend reply 2026-10-25 §1)
  *
  * Run with: node --test tests/admin-pricing-page-oct2026.test.js
  */
@@ -268,4 +269,27 @@ test('§7d rules UI: list, preview-then-save, toggle via PATCH preview, delete, 
   assert.match(PAGE, /if \(res && res\.job_id\) pollJob\(res\.job_id\)/);
   assert.match(PAGE, /Could not load the margin rules: /, 'a failed read is loud, never "No filter rules yet"');
   assert.match(PAGE, /clearTimeout\(_jobTimer\)/, 'destroy stops the poll');
+});
+
+// §8 ─────────────────────────────────────────────────────────────────────────
+test('§8 the $2.50 floor line comes from min_unit_profit, absent ⇒ hidden', async () => {
+  const { minUnitProfitLine } = await loadUtil();
+  // The live payload, verbatim (GET /api/admin/pricing/tier-multipliers, 2026-10-26).
+  const live = minUnitProfitLine({
+    ex_gst: 2.5,
+    applies_to: 'compatible consumables (not receipt rolls) and ribbons, unless a pricing rule or manual price sets the price',
+    measured_as: 'profit_incl_fixed_ex_gst: price ex GST - cost - card fee of a one-unit order (2.65% + $0.30)',
+  });
+  assert.equal(live.state, 'ok');
+  assert.equal(live.text, 'Minimum $2.50 profit per unit, ex GST, after the card fee. Applies to compatible consumables '
+    + '(not receipt rolls) and ribbons, unless a pricing rule or manual price sets the price. Fixed in code; not editable here.');
+  assert.match(live.measuredAs, /^profit_incl_fixed_ex_gst/);
+  assert.equal(minUnitProfitLine({ ex_gst: 3 }).text, 'Minimum $3.00 profit per unit, ex GST, after the card fee. Fixed in code; not editable here.');
+  for (const bad of [undefined, null, {}, { ex_gst: 'x' }, { ex_gst: 0 }, 2.5]) {
+    assert.deepEqual(minUnitProfitLine(bad), { state: 'absent', text: '' }, JSON.stringify(bad));
+  }
+  // The page renders the server's number, never its own.
+  assert.match(RULES, /minUnitProfitLine\(_state\.live && _state\.live\.min_unit_profit\)/);
+  assert.match(RULES, /data-min-profit="absent" hidden/);
+  assert.doesNotMatch(RULES, /2\.50|2\.5\b/, 'no typed-in floor on the page');
 });

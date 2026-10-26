@@ -29,21 +29,21 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <title>Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz</title>
 
+    <script src="/js/first-paint.js?v=040c7015"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-YJXTSGLM28"></script>
-    <script src="/js/gtag.js?v=95648ec4"></script>
+    <script src="/js/gtag.js?v=e974b7a3" defer></script>
     <script defer src="/js/consent-banner.js?v=dbc6e734"></script>
 
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://www.ds.co.nz">
     <link rel="dns-prefetch" href="https://www.ds.co.nz">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
-    <link rel="stylesheet" href="/css/base.css?v=86eced2a">
-    <link rel="stylesheet" href="/css/layout.css?v=fe436580">
-    <link rel="stylesheet" href="/css/components.css?v=78328ef3">
-    <link rel="stylesheet" href="/css/modern-effects.css?v=d08d00b1">
-    <link rel="stylesheet" href="/css/pages.css?v=520ff0e7">
+    <link rel="preload" href="/assets/fonts/inter-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/assets/fonts/plus-jakarta-sans-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/css/base.css?v=aca7a629">
+    <link rel="stylesheet" href="/css/layout.css?v=44ea0e41">
+    <link rel="stylesheet" href="/css/components.css?v=b2cd5503">
+    <link rel="stylesheet" href="/css/modern-effects.css?v=e32b405f">
+    <link rel="stylesheet" href="/css/pages.css?v=339b039e">
     <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
 
     <script type="application/ld+json" id="shop-schema">
@@ -235,7 +235,7 @@
 
 
                 <!-- Item 32 fix 2 (ERR-370): the FINAL h1 at first paint on the two paid
-                     landings. gtag.js (the one render-blocking script) marks
+                     landings. first-paint.js (the one render-blocking script) marks
                      <html data-landing="ink|toner"> and CSS shows the matching span, so
                      the h1 never repaints from "Shop Ink…" when shop-page.js runs. Texts
                      must equal shop-page.js#landingH1() (pinned by a test). -->
@@ -391,6 +391,9 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Item 41: the how-to guide(s) for what this printer / series page lists.
+                             ONE writer: shop-page.js#_renderGuideLink (rule: _guideFor). -->
+                        <p class="guide-link" id="guide-link" hidden></p>
                     </div>
 
                     <div class="drilldown-loading" id="drilldown-loading">
@@ -536,18 +539,17 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=0ca726ac"></script>
+    <script defer src="/js/shop-page.js?v=f9caf421"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
-    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=32c37d87"></script>
     <script defer src="/js/security.js?v=258e462a"></script>
-    <script defer src="/js/api.js?v=ca438d7f"></script>
+    <script defer src="/js/api.js?v=45878631"></script>
     <script defer src="/js/seo-meta.js?v=0d7ac4bb"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=52270e49"></script>
-    <script defer src="/js/auth.js?v=263d27ef"></script>
+    <script defer src="/js/utils.js?v=6e9d7649"></script>
+    <script defer src="/js/auth.js?v=6dd8f705"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
     <script defer src="/js/cart.js?v=63d3a5bc"></script>
@@ -556,18 +558,18 @@
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=e934d05a"></script>
     <script defer src="/js/products.js?v=e6591a9f"></script>
-    <script defer src="/js/search.js?v=5495ca2e"></script>
+    <link rel="prefetch" href="/js/search.js?v=5495ca2e" as="script">
     <!-- search-click-tracking-aug2026 — POST /api/search/click for results-page
          card clicks. THIS PAGE ONLY: /search is a rewrite to this HTML, so the
          results grid lives here and nowhere else. Never add it to a page that
          renders the typeahead dropdown's cards as its main grid. -->
     <script defer src="/js/search-click-beacon.js?v=5016c5df"></script>
-    <script defer src="/js/main.js?v=761c979f"></script>
+    <script defer src="/js/main.js?v=3681760d"></script>
     <script defer src="/js/legal-config.js?v=52167958"></script>
-    <script defer src="/js/footer.js?v=8f4eb2c0"></script>
+    <script defer src="/js/footer.js?v=519abd92"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=4abdb378"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
-    <script defer src="/js/site-guard.js?v=2021bf38"></script>
+    <script defer src="/js/site-guard.js?v=fcfda757"></script>
 </body>
 </html>

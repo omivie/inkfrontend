@@ -43,7 +43,7 @@ import {
   attribute, shelfFigure, ratchetSummary, rowOutcome, diffLadders,
   errorMessage, pollDecision,
 } from '../utils/tierProposal.js';
-import { multFromMargin, marginFromMult } from '../utils/pricing-page.js';
+import { multFromMargin, marginFromMult, minUnitProfitLine } from '../utils/pricing-page.js';
 
 const SOURCE_LABEL = { genuine: 'Genuine', compatible: 'Compatible' };
 const STATUS_LABEL = { pending: 'Awaiting approval', approved: 'Approved', rejected: 'Rejected', superseded: 'Superseded' };
@@ -283,6 +283,7 @@ function renderMain() {
         ${brand ? renderBrandNote(brand) : ''}
         <div data-slot="validation"></div>
         <div class="admin-table-wrap"><table class="admin-table cc2-tiers__ladder" data-slot="ladder"></table></div>
+        ${renderMinUnitProfit()}
         ${_state.mode === 'bands' && !brand ? `<div class="cc2-tiers__bandtools">
             <button class="admin-btn admin-btn--sm admin-btn--ghost" data-action="band-add">${icon('plus', 14, 14)} Add band</button>
             <span class="cc2-tiers__muted">Moving a boundary renames its band. Brand multipliers keyed to a band that no longer exists are refused (UNKNOWN_TIER_BAND).</span>
@@ -315,6 +316,15 @@ function renderBrandNote(brand) {
     ${live && !cleared ? `<button class="admin-btn admin-btn--sm admin-btn--ghost" data-action="brand-clear">Remove ${esc(brand.name)}'s ladder</button>` : ''}
     ${cleared ? '<button class="admin-btn admin-btn--sm admin-btn--ghost" data-action="brand-unclear">Keep it</button>' : ''}
   </div>`;
+}
+
+// The backend's per-unit profit floor, printed beside the ladder (reply
+// 2026-10-25 §1). It applies after the ladder, so a row the floor lifted still
+// reads `default` / `ribbon` in "Price set by".
+function renderMinUnitProfit() {
+  const line = minUnitProfitLine(_state.live && _state.live.min_unit_profit);
+  if (line.state !== 'ok') return '<p class="cc2-tiers__muted" data-min-profit="absent" hidden></p>';
+  return `<p class="cc2-tiers__muted" data-min-profit="ok"${line.measuredAs ? ` title="${esc(line.measuredAs)}"` : ''}>${esc(line.text)}</p>`;
 }
 
 function renderLadder() {

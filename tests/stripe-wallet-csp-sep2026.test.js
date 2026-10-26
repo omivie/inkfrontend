@@ -183,7 +183,7 @@ const PRE_EXISTING = {
     'https://*.google-analytics.com', 'https://www.googletagmanager.com', 'https://*.google.com',
     'https://*.doubleclick.net', 'https://www.googleadservices.com', 'https://cdn.jsdelivr.net',
     'https://challenges.cloudflare.com', 'https://static.cloudflareinsights.com',
-    'https://*.paypal.com', 'https://*.paypalobjects.com', 'https://fonts.googleapis.com'],
+    'https://*.paypal.com', 'https://*.paypalobjects.com'], // fonts.googleapis.com dropped on purpose: fonts are self-hosted (2026-10-26)
   'frame-src': ['https://js.stripe.com', 'https://pay.google.com',
     'https://challenges.cloudflare.com', 'https://*.paypal.com', 'https://*.paypalobjects.com',
     'https://www.google.com'],

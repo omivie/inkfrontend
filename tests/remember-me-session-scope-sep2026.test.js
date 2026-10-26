@@ -231,9 +231,13 @@ test('§3d createClient passes the storage adapter', () => {
 });
 
 test('§3e signOut clears the flag and the cookie', () => {
-    const slice = AUTH_SRC.slice(AUTH_SRC.indexOf('async signOut()'));
-    assert.match(slice.slice(0, 2000), /removeItem\(Auth\.PERSIST_KEY\)/);
-    assert.match(slice.slice(0, 2000), /_clearAuthCookie\(\)/);
+    // The whole method body (to the next method), not a fixed char window —
+    // the window broke when signOut gained its ensureClient() line.
+    const from = AUTH_SRC.indexOf('async signOut()');
+    const next = AUTH_SRC.slice(from + 1).search(/\n {4}(?:async )?[A-Za-z_]+\([^)]*\) \{/);
+    const slice = AUTH_SRC.slice(from, next < 0 ? undefined : from + 1 + next);
+    assert.match(slice, /removeItem\(Auth\.PERSIST_KEY\)/);
+    assert.match(slice, /_clearAuthCookie\(\)/);
 });
 
 // ---------------------------------------------------------------------------

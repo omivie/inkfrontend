@@ -181,9 +181,11 @@ test('§1 P0 — /shop?category=receipt is no longer 301-ed to /shop (the report
     assert.equal(await edgeFor('?brand=okin&category=receipt'), 'pass');
 });
 
-test('§1 the backend aliases 301 to `receipt`, keeping every other param', async () => {
+test('§1 the backend aliases 301 to `receipt`, keeping every other param; a bare alias goes straight to /receipt-rolls', async () => {
+    // Backend reply 2026-10-25 §3: landingPath is /receipt-rolls, so a bare
+    // alias takes ONE hop to the canonical landing.
     for (const alias of ['receipt-rolls', 'receipt-roll', 'receipt_roll']) {
-        assert.equal(await edgeFor(`?category=${alias}`), `${SITE}/shop?category=receipt`, alias);
+        assert.equal(await edgeFor(`?category=${alias}`), `${SITE}/receipt-rolls`, alias);
     }
     assert.equal(await edgeFor('?brand=okin&category=receipt-rolls'), `${SITE}/shop?brand=okin&category=receipt`);
 });
@@ -237,7 +239,8 @@ test('§2 canonicalizeCategory agrees with the edge on every slug the edge decid
         'ribbons', 'ink-cartridges', 'photo_paper', 'receipt-rolls', 'receipt-roll', 'receipt_roll', 'junk'];
     for (const slug of SLUGS) {
         const edge = await edgeFor(`?category=${slug}`);
-        const edgeSlug = edge === 'pass' ? slug : (new URL(edge).searchParams.get('category'));
+        const u = edge === 'pass' ? null : new URL(edge);
+        const edgeSlug = edge === 'pass' ? slug : (u.pathname === '/receipt-rolls' ? 'receipt' : u.searchParams.get('category'));
         assert.equal(CTX.canonicalizeCategory(slug), edgeSlug, `client and edge disagree on "${slug}"`);
     }
 });
@@ -329,7 +332,7 @@ test('§4 a search or a code still wins over the roll listing', () => {
     assert.equal(self._isReceiptListing(), false);
 });
 
-test('§4 updateURL keeps /receipt-rolls while on it, and never pushes /shop visitors onto it', () => {
+test('§4 updateURL keeps /receipt-rolls, and adopts it for /shop?category=receipt (landingPath set 2026-10-25)', () => {
     let { self, replaced } = shopSelf('/receipt-rolls', '');
     self.parseURLState();
     self.state.sort = 'price_asc';
@@ -338,7 +341,12 @@ test('§4 updateURL keeps /receipt-rolls while on it, and never pushes /shop vis
     ({ self, replaced } = shopSelf('/shop', '?category=receipt'));
     self.parseURLState();
     self.updateURL({ replace: true });
-    assert.equal(replaced.pop(), '/shop?category=receipt', 'canonical is /shop?category=receipt until the backend sets landingPath');
+    assert.equal(replaced.pop(), '/receipt-rolls', 'the backend nominates /receipt-rolls (nav landing: true), like /ink-cartridges');
+    // A brand narrows it off the landing, back onto the /shop filter route.
+    ({ self, replaced } = shopSelf('/receipt-rolls', '?brand=okin'));
+    self.parseURLState();
+    self.updateURL({ replace: true });
+    assert.equal(replaced.pop(), '/shop?brand=okin&category=receipt');
 });
 
 function renderInto(products, sort = 'recommended') {

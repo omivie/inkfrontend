@@ -284,6 +284,12 @@
     const lock = await getLockStatus();
     if (!lock?.enabled) return;
 
+    // Browsing pages no longer ship the SDK tag (mobile-speed fix 4): load it
+    // here, only on a LOCKED site, through Auth's one pinned loader. A load
+    // failure keeps the old meaning of "no SDK": open.
+    if (!window.supabase?.createClient && window.Auth && typeof window.Auth._loadSdk === 'function') {
+      try { await window.Auth._loadSdk(); } catch { /* open, as before */ }
+    }
     if (!window.supabase?.createClient) return;
 
     const sb = initClient();

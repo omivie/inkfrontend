@@ -1938,10 +1938,10 @@ if (typeof window !== 'undefined') window.ProductName = ProductName;
 // Live evidence (2026-05-10):
 //   /api/shop?brand=epson&category=ink — backend ships 604, 200, 212, 220,
 //   252, 273, 676 with no XL variant; the compat-recovery sidecar in
-//   api.js (see catalog-defects-may2026.md §6) injects '200XL'/'604XL'/etc.
-//   chips because compat products in the catalog ship
-//   `series_codes: ['604XL']` from the canonical extractor. Frontend has to
-//   collapse on render or the customer sees doubled tiles.
+//   api.js (see catalog-defects-may2026.md §6; retired 2026-10-26) injected
+//   '200XL'/'604XL'/etc. chips because compat products in the catalog ship
+//   `series_codes: ['604XL']` from the canonical extractor. The backend's own
+//   series list can carry the same split, so the collapse on render stays.
 //
 // Suffixes that ARE yield (collapsed):
 //   X{1,3}L   → 200XL → 200, 812XXL → 812, T312XL → T312, LC133XL → LC133.
@@ -2742,9 +2742,9 @@ function canonicalizeCategory(raw) {
         ribbons: 'ribbon',
         'ink-cartridges': 'ink',
         photo_paper: 'paper',    // the paper category's product_type (ERR-368)
-        'receipt-rolls': 'receipt', // ERR-368 — the backend's aliases; its API
-        'receipt-roll': 'receipt',  // 422s on them, so they never reach a fetch
-        receipt_roll: 'receipt'
+        'receipt-rolls': 'receipt', // ERR-368 — the backend's aliases. Its API
+        'receipt-roll': 'receipt',  // accepts them too since 2026-10-25; we still
+        receipt_roll: 'receipt'     // send the canonical slug (one cache key)
     };
     if (Object.prototype.hasOwnProperty.call(ALIASES, v)) return ALIASES[v];
     return null;

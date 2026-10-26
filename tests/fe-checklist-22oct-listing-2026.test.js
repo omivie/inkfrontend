@@ -305,17 +305,56 @@ test('§32 fix 2: the paid landings paint their final h1 (spans equal landingH1)
     };
     assert.equal(span('ink'), h1('/ink-cartridges'));
     assert.equal(span('toner'), h1('/toner-cartridges'));
-    const gtag = read('js/gtag.js');
-    assert.ok(gtag.indexOf("setAttribute('data-landing', 'ink')") < gtag.indexOf("gtag('config'"), 'marked before anything else runs');
+    const fp = read('js/first-paint.js');
+    assert.match(fp, /setAttribute\('data-landing', 'ink'\)/);
     const css = stripComments(read('css/pages.css'));
     assert.match(css, /html\[data-landing="ink"\] \.drilldown-title__landing--ink/);
-    // gtag.js is render-blocking on shop.html (no defer/async) — the premise.
-    assert.match(SHOP_HTML, /<script src="\/js\/gtag\.js\?v=[0-9a-f]{8}"><\/script>/);
+    // first-paint.js is render-blocking on shop.html (no defer/async) and comes
+    // before every stylesheet-dependent paint — the premise. gtag.js, which used
+    // to carry these hints, is deferred now (mobile-speed fix 4).
+    assert.match(SHOP_HTML, /<script src="\/js\/first-paint\.js\?v=[0-9a-f]{8}"><\/script>/);
+    assert.match(SHOP_HTML, /<script src="\/js\/gtag\.js\?v=[0-9a-f]{8}" defer><\/script>/);
+    assert.doesNotMatch(read('js/gtag.js'), /data-landing|data-finder/, 'the hints have ONE home');
 });
 
-test('§37/§32 the first-paint finder hint in gtag.js agrees with _printerFinderBrand', () => {
-    const gtag = read('js/gtag.js');
-    const block = gtag.slice(gtag.indexOf('try {\n    var _landingPath'), gtag.indexOf('} catch (_) { /* never block analytics */ }') + 1) + ' catch (_) {}';
+test('§32 fix 2: updateTitle never repaints an h1 the first paint already shows (_writeTitle)', () => {
+    // A stub h1 with the three shop.html spans; `display` is what CSS would
+    // compute with <html data-landing="ink">.
+    const mk = (landing) => {
+        const span = (cls, text) => ({ className: cls, textContent: text, removed: false, remove() { this.removed = true; h1.kids = h1.kids.filter((k) => k !== this); } });
+        const h1 = { kids: [
+            span('drilldown-title__default', 'Shop Ink Cartridges & Toner NZ'),
+            span('drilldown-title__landing drilldown-title__landing--ink', 'Ink Cartridges NZ — Genuine & Compatible'),
+            span('drilldown-title__landing drilldown-title__landing--toner', 'Toner Cartridges NZ — Genuine & Compatible'),
+        ] };
+        Object.defineProperty(h1, 'textContent', {
+            get() { return this.kids.map((k) => k.textContent).join(''); },
+            set(v) { this.written = v; this.kids = [{ className: '', textContent: v }]; },
+        });
+        h1.querySelectorAll = () => h1.kids.filter((k) => /drilldown-title__/.test(k.className));
+        const shown = (k) => (landing ? k.className.includes(`--${landing}`) : k.className === 'drilldown-title__default');
+        return { h1, gcs: (k) => ({ display: shown(k) ? 'inline' : 'none' }) };
+    };
+    // Landing: the ink span is already painted ⇒ no write, siblings dropped, class cleared.
+    let { h1, gcs } = mk('ink');
+    method('_writeTitle', { elements: { title: h1 } }, { getComputedStyle: gcs })('Ink Cartridges NZ — Genuine & Compatible');
+    assert.equal(h1.written, undefined, 'no textContent write — the LCP text node stays');
+    assert.equal(h1.kids.length, 1);
+    assert.equal(h1.kids[0].className, '', 'kept span no longer depends on <html data-landing>');
+    assert.equal(h1.textContent, 'Ink Cartridges NZ — Genuine & Compatible');
+    // Same text again (SPA re-render) ⇒ still no write.
+    method('_writeTitle', { elements: { title: h1 } }, { getComputedStyle: gcs })('Ink Cartridges NZ — Genuine & Compatible');
+    assert.equal(h1.written, undefined);
+    // NEGATIVE CONTROL: a different text IS written.
+    ({ h1, gcs } = mk(null));
+    method('_writeTitle', { elements: { title: h1 } }, { getComputedStyle: gcs })('Toner Cartridges NZ — Genuine & Compatible');
+    assert.equal(h1.written, 'Toner Cartridges NZ — Genuine & Compatible', 'a hidden span is not "already shown"');
+    assert.match(SHOP, /this\._writeTitle\(this\.landingH1\(\) \|\| 'Shop Ink Cartridges & Toner NZ'\)/);
+});
+
+test('§37/§32 the first-paint finder hint in first-paint.js agrees with _printerFinderBrand', () => {
+    const gtag = read('js/first-paint.js');
+    const block = gtag.slice(gtag.indexOf('try {\n    var _landingPath'), gtag.indexOf('} catch (_) { /* a hint only: never block the page */ }') + 1) + ' catch (_) {}';
     const hint = (pathname, search) => {
         const attrs = {};
         new Function('location', 'document', 'URLSearchParams', block)(

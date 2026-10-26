@@ -132,6 +132,13 @@ export default async function middleware(request) {
     else next = null;
     if (next !== raw) {
       url.searchParams.delete('category'); // also collapses duplicated params
+      // A bare receipt alias goes straight to the roll landing, the category's
+      // canonical since the backend set its landingPath (reply 2026-10-25 §3):
+      // one hop, not alias -> /shop?category=receipt -> /receipt-rolls.
+      if (next === 'receipt' && [...url.searchParams.keys()].length === 0) {
+        url.pathname = '/receipt-rolls';
+        return Response.redirect(url.toString(), 301);
+      }
       if (next) url.searchParams.set('category', next);
       return Response.redirect(url.toString(), 301);
     }

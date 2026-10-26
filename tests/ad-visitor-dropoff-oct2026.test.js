@@ -302,9 +302,13 @@ test('§5 loadProducts sends the requested code UNCHANGED beside the family, and
     assert.match(fn, /if \(mergedProducts\.length === 0 && !packFilter\) \{\s*\/?\/?[\s\S]{0,40}codesCacheKey9/, 'the whole-family chip cache is skipped for a pack request');
 });
 
-test('§5 getShopData: no compatible sidecar when a pack is requested (it would merge singles back)', () => {
+test('§5 getShopData: no compatible sidecar can merge singles into a pack landing (sidecar retired 2026-10-26)', () => {
+    // The ERR-301 guard skipped the sidecar on ?pack=. The sidecar itself is
+    // gone now (0 rows recovered over 1,153 chips), so ONE request is made and
+    // nothing is merged into the pack listing.
     const fn = stripComments(liftMethod(API_SRC, 'async getShopData(params = {}, { fresh = false } = {})'));
-    assert.match(fn, /&& !params\.search\s*&& !params\.pack\);/);
+    assert.doesNotMatch(fn, /source: 'compatible'/);
+    assert.equal((fn.match(/getWithSWR\(/g) || []).length, 1);
 });
 
 test('§5 the address bar keeps the ad\'s code and pack while on that family; the canonical does not', () => {

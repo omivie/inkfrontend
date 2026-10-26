@@ -977,6 +977,9 @@
             const colorStyle = ProductColors.getProductStyle(info);
             // Build srcset for responsive product detail images (400/600/800w)
             const detailSrcset = typeof imageSrcset === 'function' && info.image_url_raw ? imageSrcset(info.image_url_raw, [400, 600, 800]) : '';
+            // width/height=800 on the hero <img> below: product photos are square
+            // (25 of 25 sampled 2026-10-26 are 1250x1250), so the box keeps its
+            // shape before the bytes arrive (mobile-speed spec fix 6).
             const detailSrcsetHtml = detailSrcset ? ` srcset="${Security.escapeAttr(detailSrcset)}" sizes="(max-width: 480px) 400px, (max-width: 768px) 600px, 800px"` : '';
             // High-res source for the hover-magnify zoom state. Prefer the
             // un-optimized raw URL (crisp when scaled up); fall back to the
@@ -998,14 +1001,14 @@
                 if (colorStyle && info.isCompatible) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
-                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
+                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} width="800" height="800" fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
                         <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
                     // Image with placeholder fallback — the GENUINE tile first
                     // when the row is known-genuine (ERR-301).
                     const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(info, { cls: 'genuine-tile--hero', hidden: true }) : '';
-                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
+                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} width="800" height="800" fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
                         data-fallback="placeholder">${fallbackTile}`;
                 }
 
@@ -1091,8 +1094,9 @@
             // Frequently bought together
             this.renderBoughtTogether(info);
 
-            // Compatible products for ALL categories
-            this.renderRelatedProducts(info);
+            // Compatible products for ALL categories — started near the
+            // viewport or once the hero image has loaded (item 32 fix 3).
+            this._startRelatedWhenNeeded(info);
 
             // Ribbon description — render below related products
             this.renderRibbonDescription(info);
@@ -2616,7 +2620,11 @@
          */
         async _fetchPrinters(sku) {
             try {
-                const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+                // Legacy-response path only: the SDK is no longer on the PDP
+                // by default (mobile-speed fix 4), so start it on demand.
+                const sb = (typeof Auth !== 'undefined')
+                    ? (Auth.supabase || (typeof Auth.ensureClient === 'function' ? await Auth.ensureClient() : null))
+                    : null;
                 if (!sb) return [];
 
                 const { data: product } = await sb
@@ -2695,6 +2703,43 @@
         // (accessoryTier, yieldTier, seriesBase, colorOrder, packRank, name)
         // hierarchy without shipping the same regex set as the backend, so
         // any client resort here is by definition wrong. Render in API order.
+
+        /**
+         * Item 32 fix 3 (backend reply 2026-10-25): the related-products block
+         * (a /api/shop listing plus up to a dozen card images) shared a phone's
+         * bandwidth with the hero image. It now starts when the block comes
+         * within 600px of the viewport OR the hero image has loaded, whichever
+         * is first — once. No IntersectionObserver (old Safari) ⇒ start now.
+         * The section is `hidden` (no box) until it renders, so a zero-height
+         * sentinel just before it is what gets observed.
+         */
+        _startRelatedWhenNeeded(info) {
+            let started = false;
+            let io = null;
+            const start = () => {
+                if (started) return;
+                started = true;
+                if (io) io.disconnect();
+                this.renderRelatedProducts(info);
+            };
+            const section = document.getElementById('related-products');
+            if (!section || typeof IntersectionObserver !== 'function') { start(); return; }
+            let sentinel = document.getElementById('related-products-sentinel');
+            if (!sentinel) {
+                sentinel = document.createElement('div');
+                sentinel.id = 'related-products-sentinel';
+                sentinel.setAttribute('aria-hidden', 'true');
+                section.parentNode.insertBefore(sentinel, section);
+            }
+            io = new IntersectionObserver((entries) => {
+                if (entries.some((e) => e.isIntersecting)) start();
+            }, { rootMargin: '600px 0px' });
+            io.observe(sentinel);
+            const hero = document.querySelector('#product-image img');
+            if (!hero || (hero.complete && hero.naturalWidth > 0)) { start(); return; }
+            hero.addEventListener('load', start, { once: true });
+            hero.addEventListener('error', start, { once: true });
+        },
 
         async renderRelatedProducts(info) {
             try {
@@ -3945,6 +3990,9 @@
         const setVisible = (visible) => {
             stickyBar.classList.toggle('is-visible', visible);
             stickyBar.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            // `inert` with it: aria-hidden alone left the bar's button in the
+            // tab order while the bar was off screen (Lighthouse a11y, spec fix 6).
+            stickyBar.inert = !visible;
         };
 
         /* THE UNOCCLUDED REGION HAS TWO EDGES, NOT ONE.

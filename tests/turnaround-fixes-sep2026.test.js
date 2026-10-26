@@ -568,7 +568,7 @@ test('§10 phones: toasts at the TOP; Filter & Sort is inline (ERR-370)', () => 
 // §11 fonts
 // ═════════════════════════════════════════════════════════════════════════════
 
-test('§11 base.css has no @import; every page linking base.css links the Google Fonts CSS BEFORE it', () => {
+test('§11 base.css has no @import; every page linking base.css preloads the self-hosted fonts BEFORE it', () => {
     assert.ok(!/@import\b/.test(stripComments(read('css/base.css'))), 'an @import is a render-blocking request chain');
     const pages = [];
     (function walk(dir) {
@@ -582,8 +582,14 @@ test('§11 base.css has no @import; every page linking base.css links the Google
         const html = fs.readFileSync(p, 'utf8');
         const base = html.indexOf('href="/css/base.css');
         if (base < 0) continue;
-        const font = html.indexOf('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans');
-        assert.ok(font >= 0 && font < base, `${path.relative(ROOT, p)}: fonts link must precede base.css`);
+        // Google Fonts was replaced by self-hosted files (mobile-speed fix 4,
+        // backend reply 2026-10-25); the preload is what now starts the font
+        // download before base.css parses.
+        assert.ok(!html.includes('fonts.googleapis.com'), `${path.relative(ROOT, p)}: still links Google Fonts`);
+        for (const f of ['inter-latin-wght.woff2', 'plus-jakarta-sans-latin-wght.woff2']) {
+            const font = html.indexOf(`<link rel="preload" href="/assets/fonts/${f}" as="font" type="font/woff2" crossorigin>`);
+            assert.ok(font >= 0 && font < base, `${path.relative(ROOT, p)}: ${f} preload must precede base.css`);
+        }
         checked++;
     }
     assert.ok(checked >= 40, `${checked} pages checked`);

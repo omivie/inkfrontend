@@ -507,14 +507,38 @@ async function main() {
   rule();
   say('  SCAN 7 — what does the compat sidecar actually recover?');
   rule();
-  const SIDECAR_CASES = [
+  // Default: the 8 chips below. `--sidecar-all` widens it to EVERY chip of
+  // every brand x category the storefront drills into (mobile-speed spec
+  // fix 3, backend reply 2026-10-25: "run it across the catalogue; if it
+  // recovers 0 rows, delete the sidecar"). Paced like every other request.
+  let SIDECAR_CASES = [
     { brand: 'epson',   category: 'ink',   codes: ['81N', '73N'] },
     { brand: 'canon',   category: 'ink',   codes: ['PGI650', 'CLI681'] },
     { brand: 'brother', category: 'ink',   codes: ['LC432', 'LC3339'] },
     { brand: 'hp',      category: 'toner', codes: ['128', '05A'] },
   ];
+  if (HAS('--sidecar-all')) {
+    say('  --sidecar-all: every chip of every brand x category (paced; ~15 min)');
+    const nav = await get('/api/site/nav');
+    const navData = (nav.json && nav.json.data) || {};
+    const brands = (navData.brands || []).map((b) => b.slug).filter(Boolean);
+    const cats = (navData.categories || []).map((c) => c.slug).filter((c) => c && c !== 'ribbon');
+    if (!brands.length || !cats.length) cannotRun('/api/site/nav returned no brands/categories — cannot enumerate chips');
+    SIDECAR_CASES = [];
+    for (const brand of brands) {
+      for (const category of cats) {
+        const shop = await get(`/api/shop?brand=${brand}&category=${category}&limit=1`);
+        const series = (shop.json && shop.json.data && shop.json.data.series) || [];
+        if (!shop.ok) { note(`${brand}/${category}: /api/shop ${shop.status} — chips undetermined, not zero.`); continue; }
+        const codes = series.map((s) => s && s.code).filter(Boolean);
+        if (codes.length) SIDECAR_CASES.push({ brand, category, codes });
+      }
+    }
+    say(`  ${SIDECAR_CASES.reduce((n, c) => n + c.codes.length, 0)} chips across ${SIDECAR_CASES.length} brand x category pairs`);
+  }
   let sidecarTotal = 0;
   let sidecarMeasured = 0;
+  let sidecarEmptyCodes = 0;
   for (const cs of SIDECAR_CASES) {
     const side = await get(`/api/products?brand=${cs.brand}&category=${cs.category}`
       + '&source=compatible&limit=200');
@@ -522,6 +546,15 @@ async function main() {
     if (!Array.isArray(sideList) || !side.ok) {
       note(`${cs.brand}/${cs.category}: sidecar request returned ${side.status} — yield undetermined, not zero.`);
       continue;
+    }
+    if (sideList.length >= 200) note(`${cs.brand}/${cs.category}: sidecar hit its limit=200 — rows past 200 unseen.`);
+    // The drilldown branch of the merge only counts compats whose backend
+    // series_codes is EMPTY. Any here means that branch is still live.
+    const empty = sideList.filter((p) => !Array.isArray(p.series_codes) || p.series_codes.length === 0);
+    if (empty.length) {
+      sidecarEmptyCodes += empty.length;
+      note(`${cs.brand}/${cs.category}: ${empty.length} compatible row(s) with NO series_codes `
+        + `(drilldown merge would count them) — ${empty.slice(0, 8).map((p) => p.sku).join(', ')}`);
     }
     for (const code of cs.codes) {
       const shop = await get(`/api/shop?brand=${cs.brand}&category=${cs.category}`
@@ -550,7 +583,8 @@ async function main() {
     note('sidecar yield: nothing could be measured — undetermined, not zero.');
   } else {
     ok('compat sidecar yield measured',
-      `${sidecarTotal} row(s) recovered across ${sidecarMeasured} chip(s). `
+      `${sidecarTotal} row(s) recovered across ${sidecarMeasured} chip(s); `
+      + `${sidecarEmptyCodes} compatible row(s) with empty series_codes. `
       + (sidecarTotal === 0
         ? 'It is buying a second request per drilldown and no cards on these chips '
           + '— evidence for the api.js note, NOT a licence to delete it.'

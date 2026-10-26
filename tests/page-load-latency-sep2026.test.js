@@ -281,7 +281,10 @@ test('§4 production beacon goes through Cloudflare even when Config is not defi
 
 test('§4 the race is real: gtag.js (which injects the tracker) runs before the deferred config.js', () => {
     const html = read('html/shop.html');
-    assert.match(html, /<script src="\/js\/gtag\.js\?v=[^"]+"><\/script>/, 'gtag.js is a sync head script');
+    // Deferred since the mobile-speed fix 4 (backend reply 2026-10-25), but it
+    // is still EARLIER in document order than config.js, and deferred scripts
+    // run in document order — so gtag.js still runs first and the race stands.
+    assert.match(html, /<script src="\/js\/gtag\.js\?v=[^"]+" defer><\/script>/, 'gtag.js is a deferred head script');
     assert.match(html, /<script defer src="\/js\/config\.js\?v=/, 'config.js is deferred');
     assert.ok(html.indexOf('/js/gtag.js') < html.indexOf('/js/config.js'));
 });

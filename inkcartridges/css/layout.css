@@ -277,7 +277,7 @@
     font-size: clamp(0.8125rem, 9.7vw - 22.3px, var(--font-size-2xl));
     font-weight: var(--font-weight-bold);
     color: var(--cyan-primary);
-    transition: all 0.2s ease;
+    transition: color 0.2s ease;
     letter-spacing: -0.02em;
     white-space: nowrap;
 }
@@ -298,7 +298,7 @@
     background: var(--magenta-primary);
     border-radius: 50%;
     margin-left: 2px;
-    transition: all 0.3s ease;
+    transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
 }
 
 .logo:hover::after {
@@ -321,7 +321,7 @@
     border-right: none;
     border-radius: var(--radius-md) 0 0 var(--radius-md);
     font-size: var(--font-size-sm);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, border-right-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, outline-color 0.2s ease, transform 0.2s ease;
 }
 
 .search-form__input:focus {
@@ -342,7 +342,7 @@
     border-radius: 0 var(--radius-md) var(--radius-md) 0;
     font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-sm);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
     cursor: pointer;
 }
 
@@ -455,7 +455,7 @@
     align-items: center;
     justify-content: center;
     box-shadow: 0 2px 8px rgba(199, 31, 110, 0.4);
-    transition: all 0.2s ease;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .header-actions__item:hover .cart-badge {
@@ -665,7 +665,7 @@
     opacity: 0;
     visibility: hidden;
     transform: translateY(10px);
-    transition: all var(--transition-fast);
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
     z-index: var(--z-dropdown);
 }
 
@@ -680,7 +680,7 @@
     display: block;
     padding: var(--spacing-3) var(--spacing-4);
     color: var(--color-text);
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .nav-dropdown__link:hover {
@@ -1437,7 +1437,7 @@
     min-height: 54px;
     white-space: nowrap;
     box-shadow: 0 4px 14px rgba(8, 145, 178, 0.35);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .printer-finder__btn:hover:not(:disabled) {
@@ -1472,7 +1472,7 @@
     cursor: pointer;
     min-height: 54px;
     text-align: left;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, outline-color 0.2s ease;
 }
 
 .dropdown__trigger:hover:not(:disabled) {
@@ -1533,7 +1533,7 @@
     color: var(--color-text);
     cursor: pointer;
     border-radius: var(--radius-md);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .dropdown__item:hover {
@@ -2305,9 +2305,9 @@
 }
 .breadcrumb--pdp .breadcrumb__item a {
     padding: 0 var(--spacing-sm);
-    color: var(--cyan-primary);
+    color: var(--color-primary-text);
     border-radius: var(--radius-sm);
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), outline-color var(--transition-fast);
 }
 .breadcrumb--pdp .breadcrumb__item a:hover {
     background-color: var(--cyan-light);

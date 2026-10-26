@@ -42,7 +42,7 @@
     border: 2px solid transparent;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast), outline-color var(--transition-fast), transform var(--transition-fast);
     min-height: 44px;                   /* Accessibility: minimum touch target */
 }
 
@@ -81,7 +81,7 @@
     color: var(--white-primary);
     box-shadow: var(--shadow-sm);
     font-weight: var(--font-weight-semibold);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .btn--primary:hover {
@@ -105,7 +105,7 @@
     border-color: var(--magenta-primary);
     color: var(--white-primary);
     font-weight: var(--font-weight-medium);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .btn--secondary:hover {
@@ -126,7 +126,7 @@
     background-color: transparent;
     border-color: var(--cyan-primary);
     color: var(--cyan-primary);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
 .btn--outline:hover {
@@ -148,7 +148,7 @@
     color: var(--cyan-primary);
     padding: var(--spacing-2) var(--spacing-3);
     min-height: 44px;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .btn--ghost:hover,
@@ -164,7 +164,7 @@
     border-color: var(--white-primary);
     color: var(--cyan-primary);
     font-weight: var(--font-weight-semibold);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .btn--white:hover {
@@ -532,7 +532,7 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: all 0.25s ease;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
     display: flex;
     flex-direction: column;
 }
@@ -988,7 +988,7 @@
     font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-xs);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -1193,7 +1193,7 @@ a.product-card__contact-btn {
     text-align: center;
     text-decoration: none;
     color: var(--color-text);
-    transition: all 0.25s ease;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
     position: relative;
     overflow: hidden;
 }
@@ -1231,7 +1231,7 @@ a.product-card__contact-btn {
     border-radius: var(--radius-full);
     background-color: var(--cyan-light);
     color: var(--cyan-primary);
-    transition: all 0.25s ease;
+    transition: background-color 0.25s ease, color 0.25s ease, transform 0.25s ease;
 }
 
 .category-card:hover .category-card__image {
@@ -1260,7 +1260,7 @@ a.product-card__contact-btn {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     text-align: center;
-    transition: all 0.25s ease;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 
 .benefit-card:hover,
@@ -1281,7 +1281,7 @@ a.product-card__contact-btn {
     background-color: var(--cyan-light);
     color: var(--cyan-primary);
     border-radius: var(--radius-lg);
-    transition: all 0.25s ease;
+    transition: color 0.25s ease, background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
     background-color: var(--color-primary-bg);
     color: var(--color-primary);
     border-radius: var(--radius-full);
@@ -1391,7 +1391,7 @@ a.product-card__contact-btn {
     border-radius: var(--radius-full);
     border: 1px solid var(--cyan-primary);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .active-filters__chip:hover {
@@ -1417,7 +1417,7 @@ a.product-card__contact-btn {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .active-filters__clear:hover {
@@ -2124,7 +2124,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     background-color: var(--color-background);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
 .pagination__link:hover {
@@ -2191,7 +2191,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border-bottom: 2px solid transparent;
     margin-bottom: -2px;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: border-bottom-color var(--transition-fast), color var(--transition-fast);
     white-space: nowrap;
 }
 
@@ -2383,7 +2383,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border-radius: var(--radius-full);
     background-color: rgba(255, 255, 255, 0.1);
     color: var(--color-text-inverse);
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .social-link:hover {
@@ -2464,7 +2464,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     box-shadow: var(--shadow-lg);
     transform: translateX(100%);
     opacity: 0;
-    transition: all var(--transition-normal);
+    transition: background-color var(--transition-normal), color var(--transition-normal), opacity var(--transition-normal), transform var(--transition-normal);
 }
 
 /* The ONE toast owner (ERR-321). modern-effects.css loads after this file and
@@ -2756,7 +2756,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     color: var(--color-text-muted);
     cursor: pointer;
     border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .modal__close:hover {
@@ -2860,7 +2860,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border-radius: 16px;
     padding: 0;
     overflow: hidden;
-    transition: all 0.3s ease;
+    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
@@ -2989,7 +2989,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     font-weight: 500;
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
     border: none;
     text-decoration: none;
 }
@@ -3079,7 +3079,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border: 1px solid #e2e8f0;
     border-radius: 14px;
     overflow: hidden;
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
 }
 
@@ -3170,7 +3170,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border-radius: 8px;
     border: none;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .printer-card__btn svg {
@@ -3232,7 +3232,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     background: #f8fafc;
     border-radius: 12px;
     border: 1px solid #e2e8f0;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
 
 .printer-finder__step--disabled {
@@ -3271,7 +3271,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     font-weight: 700;
     font-size: 15px;
     border-radius: 50%;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
     flex-shrink: 0;
 }
 
@@ -3308,7 +3308,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border: 2px solid #e2e8f0;
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3383,7 +3383,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     font-size: 15px;
     color: #1e293b;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, outline-color 0.2s ease;
 }
 
 .custom-select__trigger:hover:not(:disabled) {
@@ -3515,7 +3515,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border: 1px solid #e2e8f0;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
     flex-shrink: 0;
     margin-left: var(--spacing-2);
 }
@@ -3613,7 +3613,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     margin-bottom: var(--spacing-3);
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .printer-card-preview:hover {
@@ -3668,7 +3668,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border: 2px solid var(--color-border);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), outline-color var(--transition-fast), transform var(--transition-fast);
     color: var(--color-text-muted);
     flex-shrink: 0;
 }
@@ -3753,7 +3753,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: all var(--transition-fast);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .favourite-item:hover {
@@ -3854,7 +3854,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
     border-radius: var(--radius-md);
     color: var(--color-text-muted);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
 .favourite-item__remove:hover {
@@ -4066,7 +4066,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
 }
 
 .consent-banner__link {
-    color: var(--cyan-primary, #267FB5);
+    color: var(--color-primary-text, #2173A5);
     text-decoration: underline;
 }
 
@@ -4089,7 +4089,7 @@ a.cart-drawer__name:hover { text-decoration: underline; }
 }
 
 .consent-banner__btn--accept {
-    background: var(--cyan-primary, #267FB5);
+    background: var(--color-primary-text, #2173A5);
     border: 1px solid var(--cyan-primary, #267FB5);
     color: #fff;
 }

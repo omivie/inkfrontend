@@ -345,6 +345,12 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     // show-on-scroll-up for the pinned phone header, in initStickyHeader —
     // a header feature, nothing to do with search. ~36 lines incl. comments,
     // lifting the ceiling to 830.
-    assert.ok(lines <= 830,
-        `main.js is ${lines} lines; expected ≤830. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    //
+    // Oct 2026 (mobile-speed spec fix 4, backend reply 2026-10-25):
+    // loadSearchJs/attachSmartSearch run search.js on the first focus,
+    // pointer or touch on the box instead of shipping it as a <script>. It is
+    // the LOADER only — no suggestion, ranking or dropdown logic; SmartSearch
+    // still owns all of that. ~40 lines incl. comments, lifting it to 875.
+    assert.ok(lines <= 875,
+        `main.js is ${lines} lines; expected ≤875. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

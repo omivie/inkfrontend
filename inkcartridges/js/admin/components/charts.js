@@ -55,7 +55,7 @@ function baseOptions(colors) {
         padding: 10,
         cornerRadius: 6,
         titleFont: { family: "'Plus Jakarta Sans', sans-serif", weight: '600' },
-        bodyFont: { family: "'JetBrains Mono', monospace", size: 12 },
+        bodyFont: { family: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', size: 12 },
       },
     },
     scales: {

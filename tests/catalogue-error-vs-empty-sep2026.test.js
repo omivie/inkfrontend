@@ -684,6 +684,7 @@ function makeCodeNav(opts = {}) {
         loadProductCodes: opts.loadProductCodes || (async function () {}),
         async displayProductInfo() {},
         renderProducts() {},
+        _renderGuideLink() {}, // item 41 (2026-10-26); never throws in production
         showLoading() {},
         showEmpty(msg) { this.panes.push(['empty', msg]); this.elements.error.hidden = true; },
         showError(msg, onRetry) {

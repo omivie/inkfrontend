@@ -272,23 +272,15 @@ test('§1 the veto itself is present and is about skus, not names', () => {
 // §2 The stale sidecar justification
 // ═════════════════════════════════════════════════════════════════════════════
 
-test('§2 api.js no longer claims the retired SKUs as live sidecar recoveries', () => {
-    // The old comment read "-> getShopData 9  (+CT081KCMY)". Both rows are gone.
-    // A comment is not executable, so nothing else in this repo can catch it
-    // going stale — which is exactly how it stayed wrong.
-    const RAW = API_SRC;
-    assert.ok(RAW.includes('CT081KCMY'), 'the history is still recorded (it explains the change)');
-    assert.match(RAW, /THAT MEASUREMENT IS NOW DEAD/,
-        'api.js must say plainly that the old sidecar measurement no longer holds');
-    assert.match(RAW, /probe:lookalike/,
-        'and must point at the probe that re-derives the number instead of asserting it');
-});
-
-test('§2 the sidecar itself is still wired up — a dead comment is not a dead fallback', () => {
-    // ERR-158: removing a fallback is a behaviour change, not cleanup. The
-    // measurement going to zero is evidence, not an instruction.
-    assert.match(API_CODE, /source:\s*'compatible'/, 'the compat sidecar request must still be built');
-    assert.match(API_CODE, /sidecarPromise\s*=/, 'the sidecar must still be fired');
+test('§2 the sidecar was retired on a CATALOGUE-WIDE measurement, recorded where the code was', () => {
+    // History: kept alive in Sep 2026 because one brand/category pair is not a
+    // catalogue-wide proof (ERR-158), with probe:lookalike as the meter. On
+    // 2026-10-26 `probe:lookalike --sidecar-all` measured every chip: 0 rows.
+    assert.match(API_SRC, /probe:lookalike --sidecar-all/, 'api.js names the measurement that licensed the removal');
+    assert.match(API_SRC, /1,153 chips/, 'and its size, so the claim can be re-derived');
+    assert.doesNotMatch(API_CODE, /sidecarPromise|eligibleForRecovery/, 'no half-removed sidecar left behind');
+    assert.match(fs.readFileSync(path.join(ROOT, 'scripts', 'probe-lookalike-rows.mjs'), 'utf8'), /--sidecar-all/,
+        'the alarm stays: the probe flag that re-measures the yield per chip');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

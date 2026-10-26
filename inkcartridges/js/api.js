@@ -1230,30 +1230,20 @@ const API = {
     /**
      * Get shop data (products, series codes, category counts) in a single call.
      *
-     * Recovers compatible products that the backend's `code` filter drops.
-     * The backend filters /api/shop?code=X by `series_codes` array contains;
-     * compatible products in the catalog ship with `series_codes: []` (the
-     * extraction job that runs for genuines never ran for compatibles — see
-     * readfirst/catalog-defects-may2026.md §6 — "Backfill series_codes on
-     * compatible products"). Without recovery the storefront looks like it
-     * stocks no compatibles for any code: chips for compatible-only series
-     * (HP 02, Epson 73N, …) never appear in the drilldown, and chips that
-     * exist for genuine series (HP 564, Brother LC133, …) undercount and
-     * hide their compatible siblings on click.
-     *
-     * Strategy: when a brand+category is supplied and the caller hasn't
-     * narrowed to `source=genuine`, fire a parallel compatibles-only fetch
-     * for the same brand+category, derive series codes from each compat's
-     * name/SKU via `_enrichSeriesCodes`, and merge the missing rows back into
-     * the primary response. The sidecar fetch is deduplicated by SWR so
-     * across the codes drilldown + the code-filtered grid the customer pays
-     * for it once per brand+category per session.
-     *
-     * The merge is conservative: if the sidecar call fails or returns empty,
-     * the primary response stands. Code-filtered requests get extra products
-     * (with `meta.total` bumped to match); unfiltered requests get extra
-     * series entries (with merged counts). Genuine-source-only requests skip
-     * the sidecar entirely (zero recovery is needed).
+     * The compat-recovery SIDECAR is gone (backend reply 2026-10-25, mobile-speed
+     * spec fix 3). It fired a second request per brand+category —
+     * /api/products?source=compatible&limit=200, 361 KB on the GLC432XLBK PDP —
+     * and merged any compatible row whose series_codes named the chip but which
+     * /api/shop?code= had dropped. It was kept as a guard against a backend
+     * series_codes regression (ERR-158: removing a fallback is a behaviour
+     * change), and the deciding measurement was taken first:
+     * `probe:lookalike --sidecar-all` on 2026-10-26 walked EVERY chip of every
+     * brand x category (1,153 chips, 28 pairs) and it recovered 0 rows, with 0
+     * compatible rows carrying empty series_codes (the population its drilldown
+     * branch counted). Since BF-102 (15 Oct) the backend builds the ?code=
+     * listing from the same codes it emits, and pins that with a test. If that
+     * ever regresses, the same probe flag is the alarm — it prints the yield per
+     * chip; re-adding the merge is a decision for that day, on that evidence.
      *
      * @param {Object} params - Query parameters
      */
@@ -1262,226 +1252,13 @@ const API = {
         // exact sequence this method used to hand-roll, so the storefront's
         // hottest URLs keep the edge-cache entries they already hold.
         const shopEndpoint = this.catalogEndpoint('/api/shop', params);
-
-        // Eligibility for compat-recovery sidecar — decided BEFORE awaiting so
-        // primary and sidecar fire in parallel (halves cold-start latency on
-        // Render). Recovery is skipped when:
-        //  - no brand+category → can't dedupe the sidecar narrowly
-        //  - source=genuine → caller asked for genuine only; no compats wanted
-        //  - search= → server-side search match isn't a code drilldown
-        //  - pack= → the caller asked for packs only (ERR-301: an ad landing on
-        //    ?pack=value_pack); the sidecar reads every compatible row and
-        //    would merge the singles straight back in
-        const eligibleForRecovery = !!(params.brand
-            && params.category
-            && params.source !== 'genuine'
-            && !params.search
-            && !params.pack);
-
-        // Admin mirror (ERR-234) — same rule as getProducts. The sidecar below
-        // deliberately stays on the public route: it is a compat-recovery fetch
-        // whose rows are merged for ranking, and an admin-only row has no
-        // business entering that merge.
+        // Admin mirror (ERR-234) — same rule as getProducts.
         const shopRoute = this._catalogRoute(shopEndpoint);
-        // ERR-264 — a failing mirror degrades to the public route, once.
-        const primaryPromise = this._catalogReadWithPublicFallback(shopRoute, shopEndpoint,
+        // ERR-264 — a failing mirror degrades to the public route, once. The
+        // primary may still throw: the codes drilldown's fallback path expects
+        // a thrown error to trigger legacy mode.
+        const primary = await this._catalogReadWithPublicFallback(shopRoute, shopEndpoint,
             (endpoint, anonymous) => this.getWithSWR(endpoint, { anonymous, fresh }));
-        let sidecarPromise = null;
-        if (eligibleForRecovery) {
-            const fbEndpoint = this.catalogEndpoint('/api/products', {
-                brand: params.brand,
-                category: params.category,
-                source: 'compatible',
-                limit: 200
-            });
-            // Sidecar fires against /api/products, NOT /api/shop, because
-            // /api/shop?code=X does not return every row whose `series_codes`
-            // contains X. Without the swap the chip drilldown silently hides
-            // those rows — the customer hits the chip and sees only some of the
-            // family, even when the catalog ships the rest.
-            //
-            // RE-MEASURED 2026-09-07 (ERR-222), because the original numbers in
-            // this comment had gone stale and a stale comment is how ERR-216
-            // happened. What it said: /api/shop?brand=canon&category=ink&
-            // source=compatible returned 99 rows against /api/products' 106,
-            // the 7 missing being KCMY/CMY value-packs. BOTH HALVES ARE NOW
-            // FALSE. Those endpoints agree exactly today (104 rows / 27 packs,
-            // identical SKU sets), and 5 of the 7 named SKUs — CPGI650KCMY,
-            // CPGI670KCMY, CPGI520KCMY, CPGI525KCMY, CPGI5KCMY — were
-            // deliberately deactivated on 2026-05-13 as cross-series PGI+CLI
-            // duplicates, with sku_redirects to the CLI* equivalents. Restoring
-            // them would put a known-duplicate KCMY card back on the grid.
-            //
-            // The backend therefore asked us to retire this sidecar. WE
-            // MEASURED INSTEAD OF AGREEING, and in Sep 2026 it was still
-            // recovering two rows:
-            //
-            //   epson/81N  /api/shop alone 8 rows -> getShopData 9  (+CT081KCMY)
-            //   epson/73N  /api/shop alone 7 rows -> getShopData 8  (+CT073CMY)
-            //
-            // THAT MEASUREMENT IS NOW DEAD, AND SO IS ITS ARGUMENT (ERR-277).
-            // Both recovered rows were duplicate value packs, and both were
-            // retired by the backend on 2026-09-19 — `CT081KCMY` now 301s to
-            // `C81NKCMY`, `CT073CMY` to `C73NCMY`. Re-measured live 2026-09-20:
-            //
-            //   epson/81N  /api/shop 8 rows; sidecar carries 8 with that code
-            //              -> recovers NOTHING
-            //   epson/73N  /api/shop 7 rows; sidecar carries 6 with that code
-            //              -> recovers NOTHING
-            //
-            // So the two cards this block was kept alive to save no longer
-            // exist, and on the pairs measured it now buys a second request per
-            // drilldown and nothing else. That matters: the origin limiter is
-            // 100 req/60s SHARED per IP, and an admin spends it on every read
-            // (ERR-266).
-            //
-            // IT STAYS ANYWAY, and deliberately. One brand/category pair is not
-            // a catalogue-wide measurement, the merge is what covers a backend
-            // regression on `series_codes`, and removing a fallback is a
-            // behaviour change, not cleanup (ERR-158) — which is precisely how
-            // this comment came to assert something false in the first place.
-            // What changed is that the claim is no longer only a comment:
-            // `npm run probe:lookalike` re-measures the recovery live and prints
-            // the yield per brand/category/code. Read that table before anyone
-            // argues either way — do not re-derive it by hand, and do not let
-            // this paragraph rot again (a stale comment is how ERR-216
-            // happened, as the paragraph above already warned).
-            //
-            // The OTHER branch below (the drilldown series-count merge) is a
-            // different story and is now dormant: it only counts compats whose
-            // backend `series_codes` was EMPTY, and that population is down to
-            // 40 rows catalogue-wide, every one of them CON-RIBBON — a path that
-            // never calls getShopData at all (ERR-085/086). Dormant is not dead;
-            // it is the defense-in-depth path if the extractor ever regresses.
-            //
-            // .catch absorbs sidecar failure so it can never reject the
-            // top-level Promise.all below.
-            sidecarPromise = this.getWithSWR(fbEndpoint, { anonymous: true, fresh }).catch(() => null);
-        }
-
-        // Await both. The primary may still throw (no try/catch around
-        // primaryPromise — the codes drilldown's existing fallback path
-        // expects a thrown error to trigger legacy mode). The sidecar
-        // promise was wrapped in .catch(() => null) above so it can't reject.
-        const [primary, sidecar] = await Promise.all([primaryPromise, sidecarPromise || Promise.resolve(null)]);
-
-        // Skip merge when primary unhealthy or recovery wasn't requested.
-        // We always return `primary` so the caller's existing branching on
-        // `response.ok` / `response.data` semantics is unchanged.
-        if (!eligibleForRecovery
-            || !primary || !primary.ok || !primary.data
-            || !sidecar || !sidecar.ok || !sidecar.data || !Array.isArray(sidecar.data.products)) {
-            return this._finalizeShopData(primary, params);
-        }
-
-        // Enrich + merge in a try/catch — if any merge step throws (malformed
-        // data, unexpected shape) the primary response stands. We never
-        // surface a recovery failure to the caller because the alternative
-        // (whole drilldown shows "Failed to load products") is strictly worse
-        // than having the unrecovered primary render.
-        try {
-            // Enrich every compatible with derived series_codes (in place, on
-            // the SWR-cloned objects we own — _swrClone deep-copies on every
-            // read). _enrichSeriesCodes returns true when codes had to be
-            // derived from name/sku (backend hadn't supplied them) and false
-            // when the backend's series_codes array was already populated.
-            //
-            // Why we track the per-product enrichment flag (May 2026 fix):
-            // The backend now ships `series_codes` on every product via /api/shop
-            // AND /api/products (commit 5c99462 — see
-            // project_series_codes_thin_extractor_may2026). That means the primary
-            // /api/shop response's series[].count ALREADY includes every compatible
-            // the sidecar would surface. Counting the sidecar's compats again in
-            // the drilldown branch double-counts every chip:
-            //
-            //   /api/shop?brand=epson&category=ink  → series.81N.count = 8 (8 compats)
-            //   /api/products?...&source=compatible → 8 more 81N compats (same rows)
-            //   merged FE chip → 8 + 8 = 16 ❌ (customer saw 16; clicked → 8 products)
-            //
-            // The merge must skip products whose codes the backend already used.
-            // The only safe signal we have for that is the existence of backend
-            // series_codes BEFORE we enrich: if the array was populated, backend
-            // had already classified the row and used it in its count; if empty,
-            // backend skipped it and the sidecar count is the only thing pulling
-            // that chip onto the grid. Enrichment-true is therefore both the
-            // necessary signal that we own the count, and a defense-in-depth
-            // recovery path if backend regresses on a future product.
-            const compats = sidecar.data.products;
-            const enrichedSet = new Set();
-            for (const p of compats) {
-                if (this._enrichSeriesCodes(p)) enrichedSet.add(p);
-            }
-
-            if (params.code) {
-                // Code-filtered request: merge missing compatibles for that code.
-                // The seen-set dedupe handles the double-count question here —
-                // products already in primary (whether matched on backend
-                // series_codes or recovered) are skipped regardless of enrichment.
-                // We still consider ALL compats (not just enriched ones) because
-                // /api/shop?code=X is known to drop value-pack rows on the
-                // source=compatible filter; the sidecar is the recovery path for
-                // those even when their series_codes were backend-supplied.
-                const wanted = String(params.code).toUpperCase();
-                const seen = new Set();
-                for (const p of (primary.data.products || [])) {
-                    if (p && (p.id || p.sku)) seen.add(p.id || p.sku);
-                }
-                const recovered = compats.filter(p => {
-                    if (!p || seen.has(p.id || p.sku)) return false;
-                    if (p.source !== 'compatible') return false;
-                    const codes = (p.series_codes || []).map(c => String(c || '').toUpperCase());
-                    return codes.includes(wanted);
-                });
-                if (recovered.length) {
-                    primary.data.products = (primary.data.products || []).concat(recovered);
-                    if (primary.meta && typeof primary.meta.total === 'number') {
-                        primary.meta.total += recovered.length;
-                    }
-                }
-            } else {
-                // Codes drilldown request: merge compat counts into series[]
-                // so chips for compatible-only series that backend missed show
-                // up. Only enriched compats (backend `series_codes` was empty)
-                // contribute counts — backend-classified compats are already
-                // in primary.series[].count and would double-count otherwise.
-                const seriesByCode = new Map();
-                const seriesArr = Array.isArray(primary.data.series) ? primary.data.series : [];
-                primary.data.series = seriesArr;
-                for (const s of seriesArr) {
-                    if (s && s.code) seriesByCode.set(String(s.code).toUpperCase(), s);
-                }
-                for (const p of compats) {
-                    if (!p || p.source !== 'compatible') continue;
-                    if (!enrichedSet.has(p)) continue; // backend already counted this row
-                    const codes = p.series_codes || [];
-                    // Per-product dedupe in case enrichment yielded multiples
-                    // for the same family (eg a multi-printer compat naming
-                    // "BCI3 BCI6").
-                    const seen = new Set();
-                    for (const raw of codes) {
-                        const c = String(raw || '').toUpperCase();
-                        if (!c || seen.has(c)) continue;
-                        seen.add(c);
-                        const existing = seriesByCode.get(c);
-                        if (existing) {
-                            existing.count = (existing.count || 0) + 1;
-                        } else {
-                            const entry = { code: c, count: 1 };
-                            seriesByCode.set(c, entry);
-                            seriesArr.push(entry);
-                        }
-                    }
-                }
-                // Stable sort: alphanumeric, matching how the codes drilldown
-                // already orders chips client-side. Numeric-aware so "02" < "11".
-                seriesArr.sort((a, b) => String(a.code).localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
-            }
-        } catch (mergeErr) {
-            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
-                DebugLog.warn('[API.getShopData] compat-recovery merge failed; returning primary unchanged', mergeErr);
-            }
-        }
-
         return this._finalizeShopData(primary, params);
     },
 

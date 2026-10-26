@@ -15,7 +15,7 @@
  *   - the API still returns every roll, grouped bond → carbonless → thermal,
  *     with the `specifications` keys the PDP spec pills read;
  *   - where the nav feed points the category (NOTE: when it says
- *     /receipt-rolls, the backend has set landingPath and the canonical flips).
+ *     /receipt-rolls — set by the backend 2026-10-25; now REQUIRED, §4 fails otherwise).
  *
  * ── READ-ONLY. ──────────────────────────────────────────────────────────────
  * GETs only, against public pages, the public API and the public prerender.
@@ -78,9 +78,10 @@ for (const p of ['/shop?category=receipt', '/receipt-rolls', '/shop?brand=okin&c
     else bad(`${p} → ${r.status}${r.location ? ` ${r.location}` : ''} (expected 200)`);
 }
 const redirects = [
-    ['/shop?category=receipt-rolls', '/shop?category=receipt'],
-    ['/shop?category=receipt-roll', '/shop?category=receipt'],
-    ['/shop?category=receipt_roll', '/shop?category=receipt'],
+    ['/shop?category=receipt-rolls', '/receipt-rolls'], // one hop to the landing (reply 2026-10-25 §3)
+    ['/shop?category=receipt-roll', '/receipt-rolls'], // one hop to the landing (reply 2026-10-25 §3)
+    ['/shop?category=receipt_roll', '/receipt-rolls'], // one hop to the landing (reply 2026-10-25 §3)
+    ['/shop?brand=okin&category=receipt-rolls', '/shop?brand=okin&category=receipt'],
     ['/shop?category=photo_paper', '/shop?category=paper'],
     ['/shop?category=junk', '/shop'], // NEGATIVE CONTROL — still stripped
 ];
@@ -140,16 +141,18 @@ for (const [sku, expectImage] of [['CTR80X80P5', true], ['CCR76X76P5', false]]) 
     if (Array.isArray(p?.compatible_printers) && p.compatible_printers.length) note(`${sku} now lists ${p.compatible_printers.length} printers — the PDP still shows none for rolls`);
 }
 
-// ── §4 the half we do not own: where the backend points the category ─────────
-console.log('\n§4 nav feed (backend-owned — NOTE only)');
+// ── §4 the backend's landingPath (promised in its reply of 2026-10-25 §3) ──
+// The FE now canonicalises the roll category to /receipt-rolls; if the
+// backend's nav ever stops nominating it, the SPA follows the feed but this
+// fails, because shopper-facing canonical and bot prerender would split.
+console.log('\n§4 nav feed nominates /receipt-rolls');
 const nav = await get(`${API}/api/site/nav`, { json: true });
 if (nav) {
     try {
         const cat = JSON.parse(nav.body).data.categories.find((c) => c.slug === 'receipt');
         if (!cat) bad('/api/site/nav no longer lists the receipt category');
-        else note(`nav path ${cat.path} (landing: ${cat.landing}) — ${cat.path === '/receipt-rolls'
-            ? 'landingPath is SET: SPA canonical follows it'
-            : 'landingPath not set yet (outbox ask): canonical stays /shop?category=receipt'}`);
+        else if (cat.path === '/receipt-rolls' && cat.landing === true) ok('nav receipt path /receipt-rolls (landing: true)');
+        else bad(`nav receipt path ${cat.path} (landing: ${cat.landing}) — expected /receipt-rolls, landing true`);
     } catch { bad('/api/site/nav → not parseable'); }
 }
 

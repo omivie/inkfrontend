@@ -91,27 +91,15 @@ function blockBodyAt(src, anchor) {
 // /api/products, filtered to brand+category+source=compatible+limit=200 — it is
 // just asserted on the endpoint the code now builds rather than on the appends.
 
-test('getShopData sidecar fires against /api/products (recovers value-packs)', () => {
-    // Brace-walk the real block instead of a fixed window — see blockBodyAt's
-    // note above. stripComments leaves a blank line per comment line, so a
-    // char window counts comment residue as code: re-documenting this block
-    // pushed `sidecarPromise` out of a 1500-char reach and failed a test that
-    // has nothing to do with comments (ERR-277).
-    const slice = blockBodyAt(API_CODE, 'if (eligibleForRecovery)');
-    assert.ok(slice, 'eligibleForRecovery branch not found in api.js');
-    assert.match(slice, /catalogEndpoint\(\s*['"]\/api\/products['"]/,
-        'sidecar must fetch /api/products (was /api/shop, which drops pack_type=value_pack rows)');
-    assert.match(slice, /sidecarPromise\s*=\s*this\.getWithSWR\(fbEndpoint/,
-        'sidecar must go through the SWR layer so the drilldown pays for it once per session');
-});
-
-test('getShopData sidecar still passes brand+category+source=compatible+limit', () => {
-    const slice = blockBodyAt(API_CODE, 'if (eligibleForRecovery)');
-    assert.ok(slice, 'eligibleForRecovery branch not found in api.js');
-    assert.match(slice, /brand:\s*params\.brand/, 'sidecar must still filter by brand');
-    assert.match(slice, /category:\s*params\.category/, 'sidecar must still filter by category');
-    assert.match(slice, /source:\s*['"]compatible['"]/, 'sidecar exists to fetch compatibles specifically');
-    assert.match(slice, /limit:\s*200/, 'sidecar must still lift the default page size');
+test('getShopData makes ONE request: the compat sidecar is retired (2026-10-26)', () => {
+    // Bug #1 above was real in May 2026; by Oct the backend's ?code= listing
+    // carried every row (BF-102) and a catalogue-wide sweep recovered 0 rows
+    // over 1,153 chips, so the second request is gone (mobile-speed fix 3).
+    // _enrichSeriesCodes stays: the admin catalogue tools derive codes with it.
+    const start = API_CODE.indexOf('async getShopData(');
+    const fn = API_CODE.slice(start, API_CODE.indexOf('async _finalizeShopData(', start));
+    assert.doesNotMatch(fn, /\/api\/products/);
+    assert.equal((fn.match(/getWithSWR\(/g) || []).length, 1);
 });
 
 test('_enrichSeriesCodes derives PGI650 from CPGI650KCMY value-pack', () => {

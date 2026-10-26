@@ -858,7 +858,7 @@ test('setProductCodes REFUSES a visitor write before deleting when the column is
 // 6. getShopData integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('getShopData routes BOTH return paths through _finalizeShopData', () => {
+test('getShopData routes its return through _finalizeShopData', () => {
   // extractFunction is fooled by the `params = {}` default arg, so slice the
   // method span explicitly: getShopData ends where _finalizeShopData (the
   // post-processing hook it delegates to) is declared.
@@ -866,11 +866,11 @@ test('getShopData routes BOTH return paths through _finalizeShopData', () => {
   const end = API_SRC.indexOf('async _finalizeShopData(', start);
   assert.ok(start !== -1 && end !== -1 && end > start);
   const fn = API_SRC.slice(start, end);
-  // The compat-recovery skip and the merged return must BOTH post-process —
-  // the skip is the common path, so a hook only on the merged return would
-  // leave truncated-chip repair off for most requests.
+  // Since the compat sidecar was retired (2026-10-26) there is ONE return,
+  // and it must post-process: truncated-chip repair runs on every response.
   const hooks = fn.match(/_finalizeShopData\(primary, params\)/g) || [];
-  assert.equal(hooks.length, 2, 'the early-skip and the final return both post-process');
+  assert.equal(hooks.length, 1, 'the single return post-processes');
+  assert.doesNotMatch(fn, /return primary\b/, 'no return path may skip _finalizeShopData');
   assert.doesNotMatch(fn, /\n\s*return primary;/, 'no raw `return primary` bypasses the hook');
 
   // And the hook no longer runs a manual-code layer (ERR-299).

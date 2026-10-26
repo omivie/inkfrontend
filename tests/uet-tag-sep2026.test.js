@@ -157,7 +157,7 @@ test('§1 the UET host was ADDED, not swapped in for something else', () => {
             'https://*.google.com', 'https://*.doubleclick.net', 'https://www.googleadservices.com',
             'https://cdn.jsdelivr.net', 'https://challenges.cloudflare.com',
             'https://static.cloudflareinsights.com', 'https://*.paypal.com',
-            'https://*.paypalobjects.com', 'https://fonts.googleapis.com', 'https://link.com',
+            'https://*.paypalobjects.com', 'https://link.com', // fonts.googleapis.com dropped on purpose: fonts are self-hosted (2026-10-26)
             'https://*.link.com'],
     };
     const gone = [];
@@ -969,7 +969,8 @@ test('§8 every page with a call site actually loads gtag.js', () => {
     // claim that UET adds no new surface to maintain: its reach IS gtag.js's.
     const owners = {
         // cart.js 33 → 37 (Sep 2026): /rewards, /bulk-pricing, /value-packs, /review.
-        'product-detail-page.js': 1, 'cart.js': 37, 'checkout-page.js': 1,
+        // 37 → 47 (Oct 2026): /guides + the nine how-to guides (item 41).
+        'product-detail-page.js': 1, 'cart.js': 47, 'checkout-page.js': 1,
         'contact-page.js': 1, 'quote-page.js': 1,
     };
     const pages = htmlFiles().map((f) => [f, fs.readFileSync(f, 'utf8')]);

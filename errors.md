@@ -40,6 +40,65 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-375 — How-to guides: nine /guides pages + index, printer and series pages link back (checklist item 41) — **SHIPPED (frontend)** (2026-10-26)
+
+**Seen (backend reply 2026-10-25, Appendix A).** Search Console, 90 days: 284 how-to queries reached the site 539 times and took 0 clicks; the site had no page that answers a how-to question. The plan named 9 guides, their URLs, target queries, printer ⇄ cartridge tables and product SKUs, and said "check against the maker's list before publishing".
+
+**Measured before building (a maker check, 2026-10-26, READ-ONLY).** Every pairing was checked against the maker's own NZ/AU pages (brother.co.nz, HP's cartridge table, canon.co.nz, epson.co.nz) and every SKU against the live API. **The plan did not hold as written in 14 places:**
+- Dropped as not NZ models / wrong code: MFC-L2750DW (TN-2445); HL-L3280CDW, DCP-L3520CDW (TN-258XL); HL-L2445DW/2460DW, MFC-L2880DW (use the XL variants, DR-2530); PIXMA TS3560; DCP-J1140DW (EU, takes LC421); MFC-J6730DW (LC3317); DCP-J525W/725DW/925DW, MFC-J432W (LC73). The catalogue still LINKS several of them (outbox 10-26).
+- SKUs that do not exist: GCL646, GCL646XL, CLC73CMY, CLC73KCMY (real: GCL646CLR, GCL646XLCLR, CLC77CMY, CLC40KCMY). GDR233CLVP now 301s to GDR233CLCMY.
+- Not linked until fixed (data defects, outbox): CCL646XLRD (SKU/raw name still "RD", no yield), HP 72/70 heads stored as one colour (HP sells them as two-colour parts), DR-258CL drum not in the catalogue (Brother specifies DR258CL-4PK for all 6 TN-258 printers), GCL646XLCLR says 400 pages (Canon NZ: 300).
+- `brother-hl-l3210cw` has no printer row (only the typo `hll-3210cw`), so HL-L3210CW is named, not linked.
+
+**Fix.**
+- `html/guides.html` + `html/guides/<slug>.html` (the plan's 9 slugs). Head, header and footer are the template page's bytes (`genuine-vs-compatible.html`), so every page-walking parity suite covers them. `legal-page` layout (its TOC builder), plain numbered steps, Article + BreadcrumbList JSON-LD (index: CollectionPage), no FAQPage (inv 11), no HowTo (retired).
+- Copy rules (inv 9/13): no prices, no typed returns/guarantee days (link `/returns`, `/genuine-vs-compatible`), no "tested for", reset steps link the maker's own support page (15 URLs, each verified to load) instead of a generic button sequence.
+- Routes in BOTH `vercel.json` and `serve.json` (ERR-092). Footer Help: "How-to Guides".
+- Back-links: ONE rule `ShopPage._guideFor(brand, rows)` — from the rows the page LISTS (brand + `product_type` + `series_codes`), max two; ONE writer `_renderGuideLink` into `#guide-link` after the cards on the code page and the printer page, reset on every level, wrapped so a throw can never turn a loaded listing into the error pane (the loader test stub caught exactly that).
+
+**Measured.** `probe:guides` (new, READ-ONLY): 10 pages · 60 products · 94 printers · 15 maker links, **0 findings** (first run: 2 — GDR233CLVP 301, hl-l3210cw 404 — both removed). Playwright: 1366 and iPhone 13, 200, no horizontal scroll, TOC built, footer link; printer page HL-L2375DW shows the toner + drum guides; series `epson/ink/522` shows the EcoTank guide; a codes level shows none.
+
+**Not done here (named).** Sitemap + llms.txt entries are backend (`sitemap-static.xml` / `STATIC_PAGES`) — outbox 10-26 §1. Guides are static: a copy change is a hand edit (plan §6).
+
+**Rule.** A guide links only what `probe:guides` resolves; a pairing goes in only with a maker source.
+
+---
+## ERR-374 — Mobile speed (checklist item 32, fixes 2–6): self-hosted fonts, gtag.js deferred, no `transition: all`, supabase-js and search.js on demand, WebP hero, optimised logos, contrast, sidecar retired — **SHIPPED (frontend)** (2026-10-26)
+
+**Seen (backend reply 2026-10-25, Appendix B).** Lighthouse mobile 58–60, LCP 11.8–15.0 s with TBT 50–90 ms: the page waits, it does not compute. Fixes 1–2 were ERR-370; this is the rest.
+
+**Fix.**
+- **Fix 2 remainder:** `updateTitle` → `_writeTitle`: when the span `<html data-landing>` already shows says the same text, the hidden siblings are removed and the kept span loses its landing class — no text write, no new LCP candidate. Different text is still written.
+- **Fix 3:** PDP related products start at 600px from the viewport (IntersectionObserver on a zero-height sentinel — the section is `hidden`) or on the hero image `load`, whichever first, once. **The compat-recovery sidecar is DELETED** from `API.getShopData`: `probe:lookalike --sidecar-all` (new flag) walked every chip of every brand × category — **1,153 chips, 28 pairs: 0 rows recovered, 0 compatible rows with empty series_codes**. ERR-158 satisfied by measurement; the flag stays as the alarm. 15 tests that pinned the merge were removed and replaced by "one request per call".
+- **Fix 4:** Inter + Plus Jakarta Sans self-hosted (variable woff2, latin preloaded on every page, latin-ext on demand for NZ macrons), `@font-face` swap in `base.css`, Google Fonts link + both preconnects gone from 46 pages, CSP drops fonts.googleapis/gstatic (`font-src 'self'`), mono = system stack (admin too). **gtag.js is `defer` on 41 pages**: its first-paint hints moved to new `js/first-paint.js`, the ONE blocking script, on shop.html only (consent default stays gtag.js's first command). 78 `transition: all` → the properties each rule's state rules actually change (inferred per rule; layout properties excluded). **supabase-js** is no longer shipped on 19 browsing pages: `Auth._needsClientNow()` loads it (pinned URL + SRI, `Auth.SDK_*`) only for a stored session in the store the adapter reads (ERR-209), an OAuth/recovery hash, or storage that throws; every SDK method calls `ensureClient()` first; a sign-in in another tab starts it (`storage` event); site-guard loads it on a LOCKED site through the same loader; PDP legacy printer fallback uses `ensureClient()`. Account/admin/checkout/payment/quote keep the tag. **search.js** ships as `<link rel="prefetch">` (idle priority); main.js runs it on the first focus/pointer/touch, URL read from that link (no `?v=` in JS — page-load-latency §2), then replays focus/input.
+- **Fix 5:** hero WebP 29 KB (was 134 KB JPEG) + 20 KB phone crop by media query, both preloaded with the same media split, dark fallback colour. Brand logos via `/api/images/optimize` at w=280 WebP (HP 66 KB → 6 KB), `width`/`height` from a measured table, lazy after the first six — ONE helper `brandLogoImg` for the grid and the recovery rail.
+- **Fix 6:** `--color-primary-text: #2173A5` (5.17:1; brand cyan #267FB5 is 4.39:1) on the flagged links, active tab and consent link/Accept; ink-finder muted text → `--color-text-light`; legal-page lead too (it was #94A3B8, 2.6:1). `#sticky-atc` is `inert` while hidden. PDP hero `<img>` 800×800 (25/25 sampled product photos are 1250² squares).
+
+**NOT done, by decision (owner 2026-10-26):** minifying CSS/JS and splitting `pages.css` — the repo has no build step. Reported to the backend (outbox 10-26).
+
+**Measured (local, READ-ONLY).** Tests 7,345 → all green, plus `tests/mobile-speed-oct2026.test.js` (12, red-proofed on gtag defer and `transition: all`). Playwright: body opacity 1 on first read; Inter + Plus Jakarta Sans loaded from /assets/fonts; 0 supabase-js requests anonymous on home, /ink-cartridges, /faq, PDP; search.js runs on first focus and the panel opens; PDP sticky bar inert; logos served optimised with size. `probe:fe-master` 49/49, `probe:listing-phone-sweep` all pass (+ negative control red), `probe:consent-banner` 24/0. The only Google Fonts requests left come from Google's own Merchant badge iframe. Lighthouse numbers: live, after deploy (see STATUS).
+
+**Rule.** No first-screen request a shopper did not ask for; a fallback is removed only on a catalogue-wide measurement, with its meter kept.
+
+---
+## ERR-373 — Backend reply 2026-10-25 measured: $2.50 unit-profit floor line on admin Pricing, /receipt-rolls adopted as the canonical landing, aliases one hop — **SHIPPED (frontend)** (2026-10-26)
+
+**Seen.** `backend-docs/inbox/backend-response-2026-10-25.md` answers outbox 10-20 §1–§5 (owner had already deleted the outbox file).
+
+**Measured (`probe:backend-25oct`, new, READ-ONLY; backend commit aa2d157).** 43/43 after one probe fix:
+- §1 the 18 prices in the reply's tables hold (raised ladder + ribbons, 7 held rows at 5.49 / 6.99, packs re-anchored, manual rows untouched). `min_unit_profit` = `{ex_gst: 2.5, applies_to: "<sentence>", measured_as: "<sentence>"}` — **`applies_to` is FREE TEXT, not a list**; the first helper parsed it as one and was rewritten.
+- §2 kpi-summary 2026-03-14..2026-10-19 = 225 orders / $34,597.56 (the NZ answer; UTC was 226 / $34,630.55). The generic drift banner (`checkNetDrift`) stays — it compares, it does not assume.
+- §3 nav `/receipt-rolls` landing true, sitemap + llms.txt list it, category prerender canonical = /receipt-rolls. §4 the 8 aliases 200 on /api/products; roll prerender breadcrumb via /receipt-rolls, no Okin links, bot footer lists Receipt Rolls.
+- §5 item 46 printer prerender: all 14 compatible cards above the first genuine (the first probe draft said PENDING because "Genuine" appears in the page head — it now compares card titles). Item 37: "brother mfc-j4340dw" → `brother-mfc-j4340dw` exact true; g7060 / mfc-j4340 / canon 540 / epson 300 / ts5360 not exact; `exact_product` canon pg645 → GPG645BK, epson 288xl black → G288HYBK. The FE redirect (ERR-370) needed no change.
+- **ERR-254 disclosure:** the probe's 8 item-37 queries are real terms on `/api/search/smart`, which writes `search_analytics`; it prints the notice. Measuring also sent 4 hand queries (3 suggest, 1 smart) on 2026-10-26.
+
+**Fix.** Admin Pricing prints `minUnitProfitLine(live.min_unit_profit)` under the ladder — the server's number and sentence, never a typed $2.50; absent ⇒ hidden `data-min-profit="absent"`. Receipt rolls: `/receipt-rolls` joins `categoryLandings` (SPA adopts it like /ink-cartridges), static canonical `/receipt-rolls` (the nav feed still wins), a bare alias 301s straight to `/receipt-rolls` (one hop), `probe:receipt-rolls` §4 now REQUIRES the landingPath. Admin APP_VERSION bumped.
+
+**Not done (owner):** the manual rows the backend recommends raising (CT0491..6 5.79→5.99, CBCI6BK 5.99→6.49) — prices are the owner's call.
+
+**Data finding for the backend:** `probe:lookalike` — CBCI6KCMY (re-anchored to 20.99 in this very reply) is still live with no redirect, though the Sep retirement says it was superseded by CBCI3KCMY.
+
+---
 ## ERR-372 — FE checklist 22 Oct, retention: one-click reorder reminder on the confirmation page, reorder reminders on PDP + account, admin Retention panel, SEO noindex + printer description (items 38, 39, 40, 42) — **SHIPPED (frontend)** (2026-10-25)
 
 **Seen.**

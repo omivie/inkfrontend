@@ -61,6 +61,14 @@ const searchCss = read(path.join(SITE, 'css', 'search.css'));
 const stripComments = require('./helpers/strip-comments');
 
 /** The body of renderZeroResultsRecovery(), which is where rail 3 lives. */
+// Both brand surfaces build their <img> in ONE helper since the mobile-speed
+// fix 5 (backend reply 2026-10-25: optimised WebP logos, width/height).
+function logoHelperBody() {
+  const start = shopPageJs.indexOf('brandLogoImg(slug, displayName, { lazy = false } = {}) {');
+  assert.notEqual(start, -1, 'brandLogoImg must exist');
+  return shopPageJs.slice(start, shopPageJs.indexOf('\n        },', start));
+}
+
 function recoveryBody() {
   const start = shopPageJs.indexOf('async renderZeroResultsRecovery(query, navVersion, smartData) {');
   assert.notEqual(start, -1, 'renderZeroResultsRecovery must still exist');
@@ -144,7 +152,8 @@ test('a brand name is never rendered unescaped, and a logo URL is sanitized', ()
 
   assert.match(body, /Security\.escapeHtml\(displayName\)/,
     'the text tile must escape the brand name');
-  assert.match(body, /Security\.sanitizeUrl\(this\.brandLogo\(slug\), ''\)/,
+  assert.match(body, /this\.brandLogoImg\(slug, displayName, \{ lazy: true \}\)/);
+  assert.match(logoHelperBody(), /Security\.sanitizeUrl\(this\.brandLogo\(slug\), ''\)/,
     "logo_url is admin-writable; sanitize with an EMPTY fallback, not sanitizeUrl's "
     + "default '#', so a rejected URL renders the NAME rather than <img src=\"#\">");
   assert.match(body, /this\.brandName\(slug\)/,
@@ -154,8 +163,9 @@ test('a brand name is never rendered unescaped, and a logo URL is sanitized', ()
 test('renderBrands got the same logo hardening', () => {
   // Same admin-writable field, same page, one line apart in behaviour. Fixing it
   // on the new surface only would have left the older one as the exposed half.
-  assert.match(shopPageJs, /Security\.sanitizeUrl\(this\.brandLogo\(brandId\), ''\)/,
-    '/shop’s own brand grid must sanitize its logo URL too');
+  assert.match(shopPageJs, /this\.brandLogoImg\(brandId, displayName, \{ lazy: i >= 6 \}\)/,
+    '/shop’s own brand grid must go through the same sanitizing helper');
+  assert.match(logoHelperBody(), /Security\.escapeAttr\(src\)/);
 });
 
 // ── 3. The fallback survives, and it is loud ─────────────────────────────────
@@ -211,7 +221,7 @@ test('the recovery rail issues no per-brand count requests', () => {
 // ── 5. The CSS the tiles depend on ───────────────────────────────────────────
 
 test('the brand tile reuses the shop logo class rather than restyling logos', () => {
-  const body = recoveryBody();
+  const body = logoHelperBody();
   assert.match(body, /class="drilldown-box__logo drilldown-box__logo--\$\{Security\.escapeAttr\(slug\)\}"/,
     'reusing .drilldown-box__logo is what gives these tiles the per-slug heights AND '
     + 'the base max-height cap — without the cap an unknown brand renders at natural '

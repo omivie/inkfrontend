@@ -414,6 +414,7 @@
                                 <li><a href="/shipping">Shipping &amp; Delivery</a></li>
                                 <li><a href="/returns">Refunds &amp; Returns</a></li>
                                 <li><a href="/faq">FAQ</a></li>
+                                <li><a href="/guides">How-to Guides</a></li>
                                 <li><a href="/contact">Contact Us</a></li>
                                 <li><a href="/quote">Request a Quote</a></li>
                                 <!-- The ONLY site-wide entry point to /business.

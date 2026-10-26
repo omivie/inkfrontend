@@ -501,6 +501,50 @@ function initNavigation() {
  * Searches for products and printers, shows autocomplete suggestions
  */
 
+let _searchJsPromise = null;
+
+function loadSearchJs() {
+    if (typeof SmartSearch !== 'undefined') return Promise.resolve(true);
+    const link = document.querySelector('link[rel="prefetch"][href^="/js/search.js"]');
+    if (!link) return Promise.resolve(false);
+    if (!_searchJsPromise) {
+        _searchJsPromise = new Promise(function(resolve) {
+            const s = document.createElement('script');
+            s.src = link.getAttribute('href');
+            s.onload = function() { resolve(typeof SmartSearch !== 'undefined'); };
+            s.onerror = function() { _searchJsPromise = null; resolve(false); };
+            document.head.appendChild(s);
+        });
+    }
+    return _searchJsPromise;
+}
+
+function attachSmartSearch(searchForm, searchInput) {
+    let attached = false;
+    const attach = function() {
+        if (attached) return;
+        attached = true;
+        SmartSearch.init(searchForm, searchInput);
+        // The shopper is already in the box: replay what SmartSearch missed
+        // (its focus handler opens the panel; a typed query needs suggestions).
+        if (document.activeElement === searchInput) {
+            searchInput.dispatchEvent(new Event('focus'));
+            if (searchInput.value.trim()) searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    };
+    if (typeof SmartSearch !== 'undefined') { attach(); return; }
+    const onFirstUse = function() {
+        ['focus', 'pointerdown', 'touchstart'].forEach(function(ev) { searchInput.removeEventListener(ev, onFirstUse); });
+        loadSearchJs().then(function(ok) {
+            if (ok) attach();
+            else if (typeof DebugLog !== 'undefined') {
+                DebugLog.warn('[search] search.js failed to load — autocomplete disabled, submit-on-Enter still works');
+            }
+        });
+    };
+    ['focus', 'pointerdown', 'touchstart'].forEach(function(ev) { searchInput.addEventListener(ev, onFirstUse, { passive: true }); });
+}
+
 function initSearch() {
     const searchForms = $$('.search-form');
     if (!searchForms.length) return;
@@ -538,18 +582,15 @@ function initSearch() {
             });
         }
 
-        // Autocomplete is owned by /js/search.js (SmartSearch). It is loaded
-        // synchronously before /js/main.js on every page that has a search
-        // form, so the global is always defined when initSearch() runs after
-        // DOMContentLoaded. The legacy basic-autocomplete fallback (~210
-        // lines) was deleted in the 2026-05-03 search audit (see
-        // readfirst/SEARCH_AUDIT.md) as it duplicated logic the backend
-        // already returns through /api/search/suggest.
-        if (typeof SmartSearch !== 'undefined') {
-            SmartSearch.init(searchForm, searchInput);
-        } else if (typeof DebugLog !== 'undefined') {
-            DebugLog.warn('[search] SmartSearch not loaded — autocomplete disabled, submit-on-Enter still works');
-        }
+        // Autocomplete is owned by /js/search.js (SmartSearch). Pages carry it
+        // as <link rel="prefetch"> (idle priority, never competing with the
+        // first screen) and it RUNS the first time a shopper reaches for the
+        // box — focus, pointer or touch — so its trending-printers request
+        // leaves the first screen too (mobile-speed spec fix 4, backend reply
+        // 2026-10-25). The URL, cache token included, is read from that link,
+        // so the deploy stamp stays the only writer of ?v= (no token in JS).
+        // A page whose own <script> already defined SmartSearch inits at once.
+        attachSmartSearch(searchForm, searchInput);
 
         // Backend /api/search/* requires q.length >= 2 (Joi). Mirror that here so
         // users can't fire a 400 — disable submit until the input has 2+ chars.

@@ -313,11 +313,17 @@ test('chrome lock — layout.css cache key is bumped so the fix actually ships',
 // Match the PATH and ignore the ?v= token. Never pin a cache-busting token in
 // a test — its whole purpose is to move (ERR-067).
 function loadsScript(html, file) {
+    if (file === 'search' && SEARCH_PREFETCH.test(html)) return true;
     return new RegExp(`<script[^>]+src="/js/${file}\\.js(\\?[^"]*)?"`).test(html);
 }
+// search.js ships as an idle-priority prefetch that main.js runs on first use
+// of the box (mobile-speed fix 4, backend reply 2026-10-25). The link IS the
+// enrolment: without it main.js has no URL to load, and the box stays dead.
+const SEARCH_PREFETCH = /<link rel="prefetch" href="\/js\/search\.js\?v=[0-9a-f]{8}" as="script">/;
 
 // Position of the same tag, for the ordering check. -1 when absent.
 function scriptIndex(html, file) {
+    if (file === 'search' && SEARCH_PREFETCH.test(html)) return SEARCH_PREFETCH.exec(html).index;
     const m = new RegExp(`<script[^>]+src="/js/${file}\\.js(\\?[^"]*)?"`).exec(html);
     return m ? m.index : -1;
 }

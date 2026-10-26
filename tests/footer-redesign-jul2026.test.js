@@ -194,7 +194,7 @@ const COLUMNS = {
     // without this link a prospective business customer has no way to discover
     // that volume pricing exists. It sits last in Help, next to /quote, because
     // /quote is the intake it hands off to.
-    Help: ['/track-order', '/shipping', '/returns', '/faq', '/contact', '/quote', '/business'],
+    Help: ['/track-order', '/shipping', '/returns', '/faq', '/guides', '/contact', '/quote', '/business'],
     Company: ['/about', '/genuine-vs-compatible', '/terms', '/privacy'],
 };
 

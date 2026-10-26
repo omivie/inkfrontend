@@ -241,3 +241,23 @@ export function priceSourceOf(r = {}) {
   // Packs follow their singles and the bulk endpoint never prices them.
   return { kind: src, label, lockable: src !== 'pack' };
 }
+
+// Minimum unit profit floor (backend reply 2026-10-25 §1). The backend owns
+// the number: GET /pricing/tier-multipliers returns
+// `min_unit_profit: { ex_gst, applies_to, measured_as }`. It is fixed in code
+// server-side, so the page only prints it. Absent or malformed ⇒ state
+// 'absent' and no text — never a typed-in $2.50 standing in for the server.
+export function minUnitProfitLine(mup) {
+  const v = mup && typeof mup === 'object' ? Number(mup.ex_gst) : NaN;
+  if (!Number.isFinite(v) || v <= 0) return { state: 'absent', text: '' };
+  // `applies_to` is the backend's own sentence (live 2026-10-26: "compatible
+  // consumables (not receipt rolls) and ribbons, unless a pricing rule or
+  // manual price sets the price"), so it is printed as written, never parsed.
+  const scope = typeof mup.applies_to === 'string' && mup.applies_to.trim()
+    ? ` Applies to ${mup.applies_to.trim().replace(/[.\s]+$/, '')}.` : '';
+  return {
+    state: 'ok',
+    text: `Minimum $${v.toFixed(2)} profit per unit, ex GST, after the card fee.${scope} Fixed in code; not editable here.`,
+    measuredAs: typeof mup.measured_as === 'string' ? mup.measured_as : '',
+  };
+}

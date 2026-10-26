@@ -1014,13 +1014,93 @@
         },
 
         /**
-         * gtag.js (render-blocking) sets <html data-landing> / <html data-finder>
+         * first-paint.js (render-blocking) sets <html data-landing> / <html data-finder>
          * so the first paint already has the final h1 and the finder's space
          * (ERR-370). They describe the URL the page LOADED with; once this
          * controller has rendered (h1 text written, finder shown or hidden by
          * renderLandingPrinterSearch) they would only be stale, and a pushState
          * navigation away from a landing would keep their CSS. Dropped here.
          */
+        /**
+         * Write the brands-level h1 WITHOUT repainting it when the first paint
+         * already shows that text (item 32 fix 2, backend reply 2026-10-25:
+         * replacing a first-screen heading moves the LCP to the replacement).
+         * shop.html ships the three texts as spans and <html data-landing>
+         * picks one; when the shown span already says `text`, the hidden
+         * siblings are removed and the kept span loses its landing class, so
+         * dropping the hint later cannot hide it. Same text node, no new paint.
+         */
+        _writeTitle(text) {
+            const el = this.elements.title;
+            if (!el) return;
+            if (el.textContent === text) return;
+            const spans = el.querySelectorAll ? Array.from(el.querySelectorAll('.drilldown-title__default, .drilldown-title__landing')) : [];
+            const shown = spans.find((sp) => sp.textContent === text
+                && typeof getComputedStyle === 'function' && getComputedStyle(sp).display !== 'none');
+            if (shown) {
+                for (const sp of spans) if (sp !== shown) sp.remove();
+                shown.className = '';
+                return;
+            }
+            el.textContent = text;
+        },
+
+        /**
+         * The how-to guides a printer or series page links back to (item 41,
+         * backend reply 2026-10-25 Appendix A §6: "each of those printer pages
+         * links back to the guide"). ONE rule, read from the rows the page
+         * actually lists — brand + product_type + series_codes — so a page links
+         * a guide only when it sells what the guide is about. PURE. At most two.
+         */
+        GUIDES: {
+            toner: { href: '/guides/replace-brother-toner', label: 'How to replace the toner in a Brother printer' },
+            drum: { href: '/guides/replace-brother-drum-unit', label: 'How to replace a Brother drum unit' },
+            hpInk: { href: '/guides/change-hp-ink-cartridge', label: 'How to change an HP ink cartridge' },
+            canonInk: { href: '/guides/change-canon-pixma-ink-cartridge', label: 'How to change Canon PIXMA PG-645 / CL-646 cartridges' },
+            ecotank: { href: '/guides/refill-epson-ecotank', label: 'How to refill an Epson EcoTank (522 and 502 bottles)' },
+            detect: { href: '/guides/brother-cannot-detect-ink', label: 'Brother printer says "Cannot Detect Ink"? What to check' },
+        },
+        _guideFor(brand, rows) {
+            const b = String(brand || '').toLowerCase();
+            const list = Array.isArray(rows) ? rows : [];
+            const codes = new Set();
+            const types = new Set();
+            for (const p of list) {
+                if (!p) continue;
+                types.add(String(p.product_type || '').toLowerCase());
+                for (const c of (Array.isArray(p.series_codes) ? p.series_codes : [])) codes.add(String(c || '').toUpperCase());
+            }
+            const has = (re) => [...codes].some((c) => re.test(c));
+            const out = [];
+            if (b === 'brother') {
+                if (has(/^LC(431|3317|73)(XL)?$/)) out.push(this.GUIDES.detect);
+                if (types.has('toner_cartridge')) out.push(this.GUIDES.toner);
+                if (types.has('drum_unit')) out.push(this.GUIDES.drum);
+            } else if (b === 'hp' && types.has('ink_cartridge')) {
+                out.push(this.GUIDES.hpInk);
+            } else if (b === 'canon' && has(/^(PG645|CL646)/)) {
+                out.push(this.GUIDES.canonInk);
+            } else if (b === 'epson' && has(/^T?(522|502)$/)) {
+                out.push(this.GUIDES.ecotank);
+            }
+            return out.slice(0, 2);
+        },
+
+        /** ONE writer of #guide-link: the guides for what this page lists, or hidden. */
+        _renderGuideLink(rows) {
+            // Called from the listing loaders AFTER the cards render: a throw
+            // here must never turn a loaded page into the error pane.
+            try {
+                const el = typeof document !== 'undefined' ? document.getElementById('guide-link') : null;
+                if (!el) return;
+                const guides = rows ? this._guideFor(this.state.brand || (rows[0] && rows[0].brand && rows[0].brand.slug), rows) : [];
+                el.innerHTML = guides.map((g) => `<a href="${Security.escapeAttr(g.href)}">${Security.escapeHtml(g.label)} &rarr;</a>`).join(' ');
+                el.hidden = guides.length === 0;
+            } catch (e) {
+                if (typeof DebugLog !== 'undefined') DebugLog.warn('[guides] guide link not rendered:', e);
+            }
+        },
+
         _dropFirstPaintHints() {
             const root = (typeof document !== 'undefined') ? document.documentElement : null;
             if (!root) return;
@@ -1219,10 +1299,9 @@
                 && !this.state.type
                 && this.state.category;
 
-            const categoryLandings = { ink: '/ink-cartridges', toner: '/toner-cartridges' };
-            // /receipt-rolls (ERR-368) is KEPT, never adopted: until the backend
-            // sets the taxonomy landingPath its canonical is still
-            // /shop?category=receipt, so the SPA does not push visitors onto it.
+            // /receipt-rolls joined the landings when the backend set the
+            // taxonomy landingPath (reply 2026-10-25 §3; nav `landing: true`).
+            const categoryLandings = { ink: '/ink-cartridges', toner: '/toner-cartridges', receipt: '/receipt-rolls' };
             const onReceiptLanding = window.location.pathname === '/receipt-rolls';
             const onCategoryLanding = window.location.pathname === '/ink-cartridges'
                 || window.location.pathname === '/toner-cartridges'
@@ -1231,8 +1310,6 @@
             let pathname;
             if (isCategoryOnly && categoryLandings[this.state.category]) {
                 pathname = categoryLandings[this.state.category];
-            } else if (isCategoryOnly && this.state.category === 'receipt' && onReceiptLanding) {
-                pathname = '/receipt-rolls';
             } else if (onCategoryLanding) {
                 // Leaving the category-landing for a filtered state — switch
                 // back to /shop so the URL shape matches the canonical
@@ -1438,6 +1515,7 @@
         },
 
         async loadCurrentLevel(navVersion) {
+            this._renderGuideLink(null); // item 41: a level that lists nothing links no guide
             // Use current version if not provided (for direct calls)
             const expectedVersion = navVersion ?? this.navigationVersion;
 
@@ -1841,6 +1919,38 @@
         },
 
         /**
+         * Intrinsic size of each shipped brand logo AS SERVED below (raster
+         * logos through /api/images/optimize at w=LOGO_W; SVGs scaled to the
+         * same width), measured 2026-10-26. It feeds the <img> width/height so
+         * the tile reserves the logo's shape before it loads (mobile-speed
+         * spec fix 5/6). A brand the owner adds later has no entry and simply
+         * renders without the attributes — the CSS max-height cap still holds.
+         */
+        LOGO_W: 280,
+        LOGO_DIMS: {
+            brother: [280, 65], canon: [280, 61], epson: [280, 69], hp: [280, 280],
+            lexmark: [280, 55], 'fuji-xerox': [280, 56], dymo: [280, 187],
+            samsung: [280, 43], oki: [280, 140], kyocera: [280, 62],
+        },
+
+        /**
+         * The brand tile's <img> (or '' when no safe logo URL). Raster logos
+         * come through the image optimiser as WebP at LOGO_W — 2x the widest
+         * tile — instead of the full-size PNG (HP's is 66 KB; 6 KB served).
+         * `lazy` for tiles below the first screen.
+         */
+        brandLogoImg(slug, displayName, { lazy = false } = {}) {
+            const raw = Security.sanitizeUrl(this.brandLogo(slug), '');
+            if (!raw) return '';
+            const isRemoteRaster = /^https?:\/\//i.test(raw) && !/\.svg(\?|$)/i.test(raw);
+            const src = isRemoteRaster && typeof optimizedImageUrl === 'function'
+                ? optimizedImageUrl(raw, this.LOGO_W, 'webp') : raw;
+            const dims = this.LOGO_DIMS[String(slug || '')];
+            const size = dims ? ` width="${dims[0]}" height="${dims[1]}"` : '';
+            return `<img src="${Security.escapeAttr(src)}" alt="${Security.escapeAttr(displayName)}"${size}${lazy ? ' loading="lazy"' : ''} decoding="async" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(slug)}">`;
+        },
+
+        /**
          * The brand rows /shop puts on its grid: `show_on_shop === true`, ordered by
          * `sort_order` then name. The single answer to "which brands do we show?".
          *
@@ -2046,14 +2156,14 @@
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--brand';
                 box.dataset.brand = brandId;
-                // sanitizeUrl with an EMPTY fallback, not the default '#': `logo_url`
-                // is admin-writable, and a rejected URL has to fall through to the
-                // text tile rather than emit <img src="#">, which re-requests /shop.
-                const logoSrc = Security.sanitizeUrl(this.brandLogo(brandId), '');
+                // brandLogoImg runs sanitizeUrl with an EMPTY fallback, not the
+                // default '#': `logo_url` is admin-writable, and a rejected URL has
+                // to fall through to the text tile rather than emit <img src="#">.
                 const displayName = this.brandName(brandId) || brand.name || brandId;
-                const inner = logoSrc
-                    ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`
-                    : `<span class="drilldown-box__name">${Security.escapeHtml(displayName)}</span>`;
+                // The first six tiles are the first screen on a phone (2 x 3);
+                // the rest (Lexmark, Samsung, Dymo…) load lazily.
+                const inner = this.brandLogoImg(brandId, displayName, { lazy: i >= 6 })
+                    || `<span class="drilldown-box__name">${Security.escapeHtml(displayName)}</span>`;
                 box.innerHTML = `${inner}<span class="drilldown-box__count" data-count="${Security.escapeAttr(brandId)}" aria-hidden="true"></span>`;
                 box.addEventListener('click', () => categoryPicker
                     ? this.navigateTo('codes', { brand: brandId, category: this.state.category })
@@ -3719,6 +3829,7 @@
 
                 this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                 this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
+                this._renderGuideLink(compatible.concat(genuine));
 
                 if (genuine.length === 0 && compatible.length === 0) {
                     // ERR-266 — an empty screen that came from a failed fetch is an
@@ -3914,6 +4025,7 @@
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
+                    this._renderGuideLink(compatible.concat(genuine));
 
                     if (genuine.length === 0 && compatible.length === 0) {
                         this.showEmpty('No compatible products found for this printer.');
@@ -5152,17 +5264,15 @@
                     const slug = b.slug || b.id || '';
                     if (!slug) return '';
                     const displayName = this.brandName(slug) || b.name || slug;
-                    // Sanitize BEFORE the branch, with '' as the fallback rather than
+                    // brandLogoImg sanitizes with '' as the fallback rather than
                     // sanitizeUrl's default '#': a rejected URL must render the brand
                     // NAME, not an <img src="#"> that re-requests this page.
                     // `.drilldown-box__logo` is reused from pages.css so the per-slug
                     // heights AND the base max-height cap apply here for free — the cap
                     // is what keeps a logo we have no rule for (Brother's PNG is
                     // 3461x809) from blowing the tile apart.
-                    const logoSrc = Security.sanitizeUrl(this.brandLogo(slug), '');
-                    const inner = logoSrc
-                        ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(slug)}">`
-                        : `<span class="drilldown-box__name">${Security.escapeHtml(displayName)}</span>`;
+                    const inner = this.brandLogoImg(slug, displayName, { lazy: true })
+                        || `<span class="drilldown-box__name">${Security.escapeHtml(displayName)}</span>`;
                     return `<a class="recovery-tile recovery-tile--brand" href="/shop?brand=${encodeURIComponent(slug)}">${inner}</a>`;
                 }).filter(Boolean).join('');
                 railsHost.insertAdjacentHTML('beforeend', `
@@ -6115,11 +6225,12 @@
                 canonical = `${BASE}${categoryLandings[lc(category)]}`;
             } else if (receiptListing) {
                 // ERR-368 — the roll category's canonical is whatever the backend
-                // taxonomy nominates (its prerender emits the same), so this
-                // follows the backend's `landingPath` flip to /receipt-rolls with
-                // no FE edit. Static value now; the nav feed's answer below.
+                // taxonomy nominates (its prerender emits the same). Its
+                // landingPath is /receipt-rolls since 2026-10-25 (§3 of that
+                // reply), so that is the static value; the nav feed's answer
+                // below still wins if the backend ever moves it again.
                 // ?brand=okin is the same listing and canonicalises with it.
-                canonical = `${BASE}/shop?category=receipt`;
+                canonical = `${BASE}/receipt-rolls`;
             } else {
                 // Printer URLs, two corrections (ERR-242).
                 //
@@ -6248,7 +6359,7 @@
             set('hreflang-default', 'href',    canonical);
             if (receiptListing && typeof API !== 'undefined' && API.getCategoryPath) {
                 const navSeen = this.navigationVersion;
-                API.getCategoryPath('receipt', '/shop?category=receipt').then((path) => {
+                API.getCategoryPath('receipt', '/receipt-rolls').then((path) => {
                     if (this.navigationVersion !== navSeen || !this._isReceiptListing()) return;
                     const url = `${BASE}${path}`;
                     for (const [id, attr] of [['og-url', 'content'], ['canonical-url', 'href'], ['hreflang-en', 'href'], ['hreflang-default', 'href']]) set(id, attr, url);
@@ -6424,7 +6535,7 @@
                     // handoff 2026-09-23 D-P0-4 / §6.4): the "Toner NZ" ad group
                     // landed on a page titled "Shop Ink Cartridges & Toner NZ",
                     // identical to the ink page.
-                    this.elements.title.textContent = this.landingH1() || 'Shop Ink Cartridges & Toner NZ';
+                    this._writeTitle(this.landingH1() || 'Shop Ink Cartridges & Toner NZ');
                     this.elements.title.hidden = false;
                     this.elements.title.classList.remove('visually-hidden');
                 }

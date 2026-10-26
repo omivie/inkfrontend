@@ -25,6 +25,8 @@
     { "source": "about", "destination": "/html/about.html" },
     { "source": "faq", "destination": "/html/faq.html" },
     { "source": "genuine-vs-compatible", "destination": "/html/genuine-vs-compatible.html" },
+    { "source": "guides", "destination": "/html/guides.html" },
+    { "source": "guides/:slug", "destination": "/html/guides/:slug.html" },
     { "source": "rewards", "destination": "/html/rewards.html" },
     { "source": "bulk-pricing", "destination": "/html/bulk-pricing.html" },
     { "source": "value-packs", "destination": "/html/value-packs.html" },

@@ -430,7 +430,7 @@ section.checkout-page .payment-col-alt {
             align-items: center;
             justify-content: center;
             gap: 0.75rem;
-            transition: all 0.3s ease;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease, transform 0.3s ease;
             position: relative;
             overflow: hidden;
             margin-top: 0.75rem;
