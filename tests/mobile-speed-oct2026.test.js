@@ -243,9 +243,50 @@ test('§6 contrast: one darker cyan text token (≥4.5:1 on white) on every flag
     assert.ok(block('css/components.css', '.consent-banner__btn--accept {').includes('background: var(--color-primary-text, #2173A5)'));
 });
 
-test('§6 the hidden sticky bar is inert (not just aria-hidden); the PDP hero image is sized', () => {
+test('§6 the hidden sticky bar is inert (not just aria-hidden); the PDP hero box is reserved by CSS, not img attributes', () => {
     assert.match(read('html/product/index.html'), /<div class="sticky-atc" id="sticky-atc" aria-hidden="true" inert>/);
     const js = stripComments(read('js/product-detail-page.js'));
     assert.match(js, /stickyBar\.setAttribute\('aria-hidden', visible \? 'false' : 'true'\);\s*stickyBar\.inert = !visible;/);
-    assert.equal((js.match(/width="800" height="800" fetchpriority="high"/g) || []).length, 2, 'both hero <img> branches');
+    // 800x800 attributes + inline height:auto shifted .product-info__actions:
+    // Lighthouse mobile CLS 0.30 on GLC233BK (2026-10-26). The frame's
+    // aspect-ratio is what reserves the space.
+    assert.doesNotMatch(js, /width="800" height="800"/);
+    assert.match(stripComments(read('css/pages.css')), /\.product-gallery__main \{\s*aspect-ratio: 1;/);
+});
+
+// §6b — the regression Lighthouse caught after deploy (2026-10-26) ─────────
+test('§6b the Add row stays unpainted until the rows above it are final (CLS 0.30 → 0.03)', () => {
+    const css = stripComments(read('css/pages.css'));
+    assert.match(css, /\.product-info:not\(\[data-ready\]\) > \.product-info__actions,\s*\.product-info:not\(\[data-ready\]\) > \.product-info__actions ~ \* \{\s*visibility: hidden;\s*animation: pdp-buybox-reveal 0s linear 8s forwards;/);
+    assert.match(css, /@keyframes pdp-buybox-reveal \{ to \{ visibility: visible; \} \}/, 'CSS-only safety net: never a permanently hidden Add button');
+    const js = stripComments(read('js/product-detail-page.js'));
+    assert.match(js, /const valueLinesDone = this\.renderValueLines\(info\);/);
+    assert.match(js, /const volumeDone = this\.renderVolumePricing\(info\);\s*this\._revealBuyBox\(\[valueLinesDone, volumeDone\]\);/);
+    assert.match(js, /REVEAL_CAP_MS: 1500,/);
+    const showError = js.slice(js.indexOf('showError(message) {'));
+    assert.match(showError.slice(0, 2500), /box\.setAttribute\('data-ready', ''\)/, 'an error state reveals at once');
+    // Fallback faces keep the swap from re-wrapping lines.
+    assert.match(stripComments(read('css/base.css')), /--font-family-primary: 'Inter', 'Inter Fallback'/);
+});
+
+test('§6b _revealBuyBox: waits for the renders, then at most the cap, and marks once', async () => {
+    const js = read('js/product-detail-page.js');
+    const m = /\n {8}_revealBuyBox\(pending\) \{([\s\S]*?)\n {8}\},/.exec(js);
+    assert.ok(m);
+    const mk = () => { const attrs = {}; return { attrs, hasAttribute: (k) => k in attrs, setAttribute: (k, v) => { attrs[k] = v; } }; };
+    const run = (box, pending, cap) => new Function('document', `return function (pending) {${m[1]}}`)({ querySelector: () => box }).call({ REVEAL_CAP_MS: cap }, pending);
+    let box = mk(); let release;
+    run(box, [new Promise((r) => { release = r; })], 10000);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(!box.hasAttribute('data-ready'), 'not before the rows settle');
+    release(); await new Promise((r) => setTimeout(r, 0));
+    assert.ok(box.hasAttribute('data-ready'), 'as soon as they do');
+    box = mk();
+    run(box, [new Promise(() => {})], 30);
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(box.hasAttribute('data-ready'), 'a hung request cannot hold the Add button past the cap');
+    box = mk();
+    run(box, [Promise.reject(new Error('ladder 500'))], 10000);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(box.hasAttribute('data-ready'), 'a failed render still reveals');
 });

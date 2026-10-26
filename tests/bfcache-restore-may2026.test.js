@@ -121,7 +121,7 @@ test('product-detail-page.js — ProductPage.showError short-circuits when _unlo
     // never called when _unloading=true (the very next line after the guard).
     let getCalls = 0;
     const ctx = { _unloading: true };
-    const fakeDocument = { getElementById() { getCalls++; return { textContent: '', innerHTML: '', hidden: true, querySelector() { return { addEventListener() {} }; } }; }, querySelector() { getCalls++; return { hidden: false }; } };
+    const fakeDocument = { getElementById() { getCalls++; return { textContent: '', innerHTML: '', hidden: true, querySelector() { return { addEventListener() {} }; } }; }, querySelector() { getCalls++; return { hidden: false, setAttribute() {} }; } };
     // Run with `document` in scope.
     runWithGlobals({ document: fakeDocument, Security: { escapeHtml: (s) => s } }, () => fn.call(ctx, 'Failed to load product'));
     assert.equal(getCalls, 0,

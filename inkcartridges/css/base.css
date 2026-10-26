@@ -8,6 +8,35 @@
    family is the system stack — JetBrains Mono was a third download for the
    SKU line and the breadcrumb. Licences: /assets/fonts/LICENSE.txt (OFL 1.1).
    ERR-296 still holds: no import rule, ever. */
+
+/* Metric-matched fallbacks (ERR-374 follow-up, 2026-10-26). Self-hosting moved
+   first paint ahead of the font (Google's render-blocking stylesheet used to
+   hold it), so text painted in Arial and reflowed when Inter swapped in:
+   Lighthouse mobile CLS 0.30 on GLC233BK (.product-info__actions moved) vs 0.00
+   before. These faces make local Arial occupy Inter's / Plus Jakarta Sans's
+   space, so the swap changes no line breaks. Values computed with fontTools
+   from the Google Fonts sources over an English sample (Inter 400 vs Arial;
+   Plus Jakarta Sans 700 vs Arial Bold — headings are bold); Inter's match the
+   values Next.js ships (107.12 / 90.44 / 22.52) to within 0.3%.
+   ponytail: Arial only — Android has no Arial, so there the stack falls to
+   system-ui unadjusted; add a Roboto-matched face if field CLS on Android says so. */
+@font-face {
+    font-family: 'Inter Fallback';
+    src: local('Arial'), local('ArialMT');
+    size-adjust: 106.84%;
+    ascent-override: 90.67%;
+    descent-override: 22.58%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'Plus Jakarta Sans Fallback';
+    src: local('Arial Bold'), local('Arial-BoldMT'), local('Arial');
+    font-weight: 100 900;
+    size-adjust: 100.88%;
+    ascent-override: 102.89%;
+    descent-override: 22.01%;
+    line-gap-override: 0%;
+}
 @font-face {
     font-family: 'Inter';
     font-style: normal;
@@ -188,8 +217,8 @@
        Inter: Clean readable body text
        Plus Jakarta Sans: Elegant geometric headings
        Monospace (system stack): Technical data, SKUs, codes */
-    --font-family-primary: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-family-heading: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-family-primary: 'Inter', 'Inter Fallback', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-family-heading: 'Plus Jakarta Sans', 'Plus Jakarta Sans Fallback', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
     --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
     /* Font sizes - using rem for accessibility (respects user preferences) */

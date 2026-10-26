@@ -14279,3 +14279,14 @@ html[data-landing="toner"] .drilldown-title__landing--toner { display: inline; }
 .guide-index a { font-weight: var(--font-weight-semibold); color: var(--color-primary-text); }
 .guide-index p { margin: var(--spacing-xs) 0 0; color: var(--color-text-light); font-size: var(--font-size-sm); }
 .guide-table-wrap { overflow-x: auto; }
+
+/* Item 32 (ERR-374 follow-up): the Add row and everything after it stay
+   unpainted until ProductPage._revealBuyBox marks the rows above it final, so
+   their arrival is not a visible shift (measured CLS 0.30 → see errors.md).
+   Safety net: revealed after 8s by CSS alone, whatever the JS did. */
+.product-info:not([data-ready]) > .product-info__actions,
+.product-info:not([data-ready]) > .product-info__actions ~ * {
+    visibility: hidden;
+    animation: pdp-buybox-reveal 0s linear 8s forwards;
+}
+@keyframes pdp-buybox-reveal { to { visibility: visible; } }

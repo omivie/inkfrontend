@@ -824,7 +824,7 @@
             this._unitPrice = price;
             this.renderPromise(info);
             this.renderCompatibleAlternatives(info);
-            this.renderValueLines(info);
+            const valueLinesDone = this.renderValueLines(info);
 
             this.renderWaitlistProof(info);
             this.renderPrinterPurchaseProof(info);
@@ -875,7 +875,10 @@
             // retail price above is rendered and correct for everyone, and the
             // ladder appears afterwards only for a signed-in business customer.
             // Guests and retail shoppers fire no request at all.
-            this.renderVolumePricing(info);
+            const volumeDone = this.renderVolumePricing(info);
+            // Item 32 (ERR-374 follow-up): reveal the Add row only once the rows
+            // ABOVE it (value lines, volume ladder) have their final height.
+            this._revealBuyBox([valueLinesDone, volumeDone]);
 
             // GST trust signal lives in the static "Incl. GST" badge rendered
             // beside the price (html/product/index.html). The dollar breakdown
@@ -977,9 +980,11 @@
             const colorStyle = ProductColors.getProductStyle(info);
             // Build srcset for responsive product detail images (400/600/800w)
             const detailSrcset = typeof imageSrcset === 'function' && info.image_url_raw ? imageSrcset(info.image_url_raw, [400, 600, 800]) : '';
-            // width/height=800 on the hero <img> below: product photos are square
-            // (25 of 25 sampled 2026-10-26 are 1250x1250), so the box keeps its
-            // shape before the bytes arrive (mobile-speed spec fix 6).
+            // NO width/height on the hero <img> (ERR-374 follow-up, measured
+            // 2026-10-26): `.product-gallery__main` already reserves the square
+            // (aspect-ratio: 1). Adding 800x800 alongside the inline
+            // `height: auto` moved .product-info__actions on load — Lighthouse
+            // mobile CLS 0.30 on GLC233BK vs 0.00–0.01 without them.
             const detailSrcsetHtml = detailSrcset ? ` srcset="${Security.escapeAttr(detailSrcset)}" sizes="(max-width: 480px) 400px, (max-width: 768px) 600px, 800px"` : '';
             // High-res source for the hover-magnify zoom state. Prefer the
             // un-optimized raw URL (crisp when scaled up); fall back to the
@@ -1001,14 +1006,14 @@
                 if (colorStyle && info.isCompatible) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
-                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} width="800" height="800" fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
+                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
                         <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
                     // Image with placeholder fallback — the GENUINE tile first
                     // when the row is known-genuine (ERR-301).
                     const fallbackTile = typeof BrandSource !== 'undefined' ? BrandSource.tile(info, { cls: 'genuine-tile--hero', hidden: true }) : '';
-                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} width="800" height="800" fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
+                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} fetchpriority="high" decoding="async" style="max-width: 100%; height: auto;"
                         data-fallback="placeholder">${fallbackTile}`;
                 }
 
@@ -1388,6 +1393,25 @@
          * unfound SKU and any SKU whose band has no ladder leave the page exactly
          * as it is.
          */
+        /**
+         * The buy box below the price (.product-info__actions and everything
+         * after it) ships `visibility: hidden` until `.product-info[data-ready]`
+         * (pages.css). Measured 2026-10-26: #volume-pricing (212px) and the
+         * value lines land ABOVE the Add row when the product renders, and once
+         * the self-hosted fonts stopped holding first paint (ERR-374) Lighthouse
+         * counted that move — mobile CLS 0.30 on GLC233BK. A row nobody has
+         * seen yet does not count as a shift. Waits for the given renders, at
+         * most REVEAL_CAP_MS; CSS reveals it anyway after 8s if this never runs.
+         */
+        REVEAL_CAP_MS: 1500,
+        _revealBuyBox(pending) {
+            const box = document.querySelector('.product-info');
+            if (!box || box.hasAttribute('data-ready')) return;
+            const done = () => box.setAttribute('data-ready', '');
+            const cap = new Promise((r) => setTimeout(r, this.REVEAL_CAP_MS));
+            Promise.race([Promise.allSettled(pending || []), cap]).then(done, done);
+        },
+
         async renderVolumePricing(info) {
             const sku = info && info.sku;
             const section = document.getElementById('volume-pricing');
@@ -3786,6 +3810,9 @@
                 : (typeof message === 'string' ? message : 'Product not found');
             // Item 33 (ERR-369): the "Try Again" state is reported like the shop's.
             if (typeof ClientBeacon !== 'undefined') ClientBeacon.error('pdp');
+            // An error state has no rows to wait for: never leave the buy box hidden.
+            const box = document.querySelector('.product-info');
+            if (box) box.setAttribute('data-ready', '');
             // Update title
             document.getElementById('product-title').textContent = safeMessage;
             document.getElementById('product-sku').textContent = '';

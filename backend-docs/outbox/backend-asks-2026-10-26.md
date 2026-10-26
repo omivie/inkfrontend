@@ -59,4 +59,6 @@ Shipped (ERR-374): no h1 repaint on the paid landings; PDP related products wait
 
 **Not done, by the owner's decision:** minifying CSS/JS and splitting `pages.css`. The storefront has no build step and the owner wants to keep it that way.
 
+**Our live numbers** (`lighthouse@12.6.0`, default mobile, median of 3, 26 Oct): series `code=288` perf 67 / LCP 9.17 s / CLS 0.003; home 65 / 9.10 s / 0; `/ink-cartridges` 67 / 8.64 s / 0; desktop `/ink-cartridges` 99, CLS 0.005. GLC233BK measured CLS 0.307 on the first deploy. Self-hosted fonts let the skeleton paint, which exposed the volume ladder landing above the Add row. Fixed in the follow-up deploy: 0.03 locally. LCP is still above 4 s on the series page and the product page. The levers left are minify (declined) and the product JSON edge cache, which is yours: we measured 0.9 s on a cold read.
+
 **Ask:** you offered to re-run your Lighthouse set once a deploy is live — please run the pages in your tables plus the series page and GLC233BK. We will run the same command and put both sets of numbers side by side.
