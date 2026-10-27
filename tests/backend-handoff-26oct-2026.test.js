@@ -401,3 +401,13 @@ test('49: both editors show the chips owner-only, re-quote on a cost edit, and n
         assert.doesNotMatch(src, /belowWebPrice|grossMarginPct/, `${file}: only the chip helper reads them — nothing else can block a save`);
     }
 });
+
+// ─── backend change, no item: refunded shipped orders ───────────────────────
+
+test('a refunded order reads "Refunded" with the ended-order badge, never "pending"', () => {
+    for (const file of ['js/account.js', 'js/order-detail-page.js']) {
+        const src = stripComments(read(file));
+        assert.match(src, /'refunded': 'cancelled',/, `${file}: status class`);
+        assert.match(src, /'refunded': 'Refunded',/, `${file}: label`);
+    }
+});

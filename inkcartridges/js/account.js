@@ -1282,6 +1282,9 @@ const AccountPage = {
             'delivered': 'delivered',
             'completed': 'delivered',
             'cancelled': 'cancelled',
+            // A full Stripe refund now moves a shipped order to `refunded`
+            // (backend 26 Oct, ERR-376): an ended order, never "pending".
+            'refunded': 'cancelled',
             'test_completed': 'processing'
         };
         return statusMap[status?.toLowerCase()] || 'pending';
@@ -1301,6 +1304,7 @@ const AccountPage = {
             'delivered': 'Delivered',
             'completed': 'Completed',
             'cancelled': 'Cancelled',
+            'refunded': 'Refunded',
             'test_completed': 'Test Order'
         };
         return statusMap[status.toLowerCase()] || status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');

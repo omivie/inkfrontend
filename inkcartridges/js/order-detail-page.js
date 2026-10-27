@@ -546,6 +546,9 @@
                 'completed': 'delivered',
                 'delivered': 'delivered',
                 'cancelled': 'cancelled',
+                // A full Stripe refund now moves a shipped order to `refunded`
+                // (backend 26 Oct, ERR-376): an ended order, never "pending".
+                'refunded': 'cancelled',
                 'test_completed': 'processing'
             };
             return statusMap[status] || 'pending';
@@ -560,6 +563,7 @@
                 'completed': 'Completed',
                 'delivered': 'Delivered',
                 'cancelled': 'Cancelled',
+                'refunded': 'Refunded',
                 'test_completed': 'Test Order'
             };
             return statusMap[status] || status;
