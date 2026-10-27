@@ -273,9 +273,12 @@ test('§3 the duplicate single-line legal nav is gone, and the columns still car
 // §4 — payment chips
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CANONICAL_PAYMENTS = ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Google Pay', 'Apple Pay', 'Klarna'];
+// Afterpay added 2026-10-26 (ERR-376, backend handoff item 54): live in the
+// Stripe payment method configuration beside Klarna, and promised by every
+// Search ad ("Pay Later With Afterpay").
+const CANONICAL_PAYMENTS = ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Google Pay', 'Apple Pay', 'Klarna', 'Afterpay'];
 
-test('§4 all seven payment chips, uniformly sized, none invented', () => {
+test('§4 all eight payment chips, uniformly sized, none invented', () => {
     const chips = [...BOTTOM.matchAll(/<svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="([^"]+)">/g)]
         .map((m) => m[1]);
     assert.deepEqual(chips, CANONICAL_PAYMENTS, 'the payment chip set has changed');
@@ -292,7 +295,11 @@ test('§4 all seven payment chips, uniformly sized, none invented', () => {
 });
 
 test('§4 the footer advertises no payment method the site does not offer', () => {
-    assert.ok(!/afterpay|laybuy|zip pay|amex express checkout/i.test(TEMPLATE));
+    // Afterpay IS offered since ERR-376 (it is in CANONICAL_PAYMENTS); the
+    // ones still not offered stay forbidden — and Afterpay is named only, never
+    // with an instalment or "interest-free" claim.
+    assert.ok(!/laybuy|zip pay|amex express checkout/i.test(TEMPLATE));
+    assert.ok(!/interest[- ]free|instal?ments?|4 payments|pay in 4/i.test(TEMPLATE), 'name the method only');
 });
 
 test('§4 the WE ACCEPT label is an eyebrow, not a sentence', () => {

@@ -31,9 +31,9 @@
     <link rel="preload" href="/assets/fonts/plus-jakarta-sans-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=f97f1f0d">
     <link rel="stylesheet" href="/css/layout.css?v=44ea0e41">
-    <link rel="stylesheet" href="/css/components.css?v=b2cd5503">
+    <link rel="stylesheet" href="/css/components.css?v=799a9fcc">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e32b405f">
-    <link rel="stylesheet" href="/css/pages.css?v=4608a5a7">
+    <link rel="stylesheet" href="/css/pages.css?v=0e807cfc">
     <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
     <link rel="stylesheet" href="/css/cart-checkout.css?v=67fdd0b1">
     <meta name="twitter:card" content="summary_large_image">
@@ -252,7 +252,7 @@
 
                         <div class="cart-summary__totals">
                             <div class="cart-summary__row">
-                                <span>Subtotal (<span id="cart-item-count">0</span> items)</span>
+                                <span>Subtotal (<span id="cart-item-count">0 items</span>)</span>
                                 <span id="cart-subtotal">$0.00</span>
                             </div>
                             <div class="cart-summary__row cart-summary__row--savings" id="cart-savings-row" hidden>
@@ -393,7 +393,7 @@
 
                         <div class="cart-saved-until" id="cart-saved-until" hidden></div>
 
-                        <!-- Merchant Center readiness: all seven methods must stay on
+                        <!-- Merchant Center readiness: all eight methods must stay on
                              this page (tests/merchant-center-readiness.test.js). -->
                         <div class="cart-summary__payment-icons">
                             <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Visa">
@@ -432,6 +432,10 @@
                             <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Klarna">
                                 <rect width="48" height="30" rx="4" fill="#FFB3C7"/>
                                 <text x="24" y="20" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" fill="#0A0B09">Klarna</text>
+                            </svg>
+                            <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Afterpay">
+                                <rect width="48" height="30" rx="4" fill="#B2FCE4"/>
+                                <text x="24" y="19.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8.5" font-weight="700" fill="#000000">Afterpay</text>
                             </svg>
                             </div>
                     </aside>
@@ -511,12 +515,12 @@
     <script defer src="/js/products.js?v=e6591a9f"></script>
     <link rel="prefetch" href="/js/search.js?v=5495ca2e" as="script">
     <script defer src="/js/main.js?v=3681760d"></script>
-    <script defer src="/js/legal-config.js?v=52167958"></script>
-    <script defer src="/js/footer.js?v=519abd92"></script>
+    <script defer src="/js/legal-config.js?v=acab558f"></script>
+    <script defer src="/js/footer.js?v=6787353e"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>
     <script defer src="/js/modern-effects.js?v=4abdb378"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
-    <script defer src="/js/cart.js?v=63d3a5bc"></script>
+    <script defer src="/js/cart.js?v=55157c48"></script>
     <script defer src="/js/cart-drawer.js?v=b2263e1f"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/cart-page.js?v=933168c2"></script>

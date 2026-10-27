@@ -374,7 +374,19 @@
         // Update shipping cost and UI info (ETA, spend-more, split shipment)
         // NOTE: Final shipping cost is validated server-side during checkout
         // These are estimates only - backend has final authority
+        /** Debounce for the postcode re-quote: long enough to skip keystrokes, short enough to land before Pay. */
+        POSTCODE_REQUOTE_MS: 400,
+
+        /** The #postcode value when it is a full NZ postcode (4 digits), else ''. */
+        _quotablePostcode() {
+            const pc = (document.getElementById('postcode')?.value || '').trim();
+            return /^\d{4}$/.test(pc) ? pc : '';
+        },
+
         async updateShippingCost() {
+            // The postcode this quote is FOR, so the input listener re-quotes
+            // only on a real change.
+            this._quotedPostcode = this._quotablePostcode();
             // Fetch shipping from backend API with full item weights
             await this.fetchShippingFromAPI();
 
@@ -914,6 +926,20 @@
                 });
             });
 
+            // Typing or editing the postcode re-quotes too (item 52, ERR-376):
+            // POST /api/orders charges by postcode, so a fee quoted for 1010
+            // must not reach Pay after the shopper typed 9016. Once 4 digits are
+            // in, debounced, and only when the postcode actually changed.
+            const postcodeInput = document.getElementById('postcode');
+            if (postcodeInput) {
+                const requote = () => {
+                    const pc = this._quotablePostcode();
+                    if (!pc || pc === this._quotedPostcode) return;
+                    this.updateShippingCost();
+                };
+                postcodeInput.addEventListener('input', typeof debounce === 'function' ? debounce(requote, this.POSTCODE_REQUOTE_MS) : requote);
+            }
+
             // Region change recalculates shipping fee and updates ETA
             const regionSelect = document.getElementById('region');
             if (regionSelect) {
@@ -1088,13 +1114,16 @@
 
             const clear = () => labels.forEach(el => { el.textContent = ''; });
             const region = document.getElementById('region')?.value || '';
-            if (!region || !this.cartItems.length || typeof API === 'undefined') {
+            // The postcode prices the order (the backend's zone lookup prefers
+            // it), so it prices these labels too and keys their memo (ERR-376).
+            const postalCode = this._quotablePostcode();
+            if ((!region && !postalCode) || !this.cartItems.length || typeof API === 'undefined') {
                 this._deliveryPriceKey = null;
                 clear();
                 return;
             }
 
-            const key = region + '|' + this.cartItems.map(i => `${i.id}x${i.quantity}`).join(',');
+            const key = region + '|' + postalCode + '|' + this.cartItems.map(i => `${i.id}x${i.quantity}`).join(',');
             if (this._deliveryPriceKey === key) return;
             this._deliveryPriceKey = key;
 
@@ -1104,7 +1133,8 @@
                     const resp = await API.getShippingOptions({
                         cart_total: this.totals.subtotal,
                         items,
-                        region,
+                        ...(region ? { region } : {}),
+                        ...(postalCode ? { postal_code: postalCode } : {}),
                         delivery_type: deliveryType
                     });
                     if (!resp.ok || !resp.data) return null;
@@ -2786,7 +2816,48 @@
         _mountPayment(form) {
             if (typeof PaymentPage === 'undefined' || !document.getElementById('payment-form')) return;
             PaymentPage.collect = () => this.collectCheckoutData(form);
-            PaymentPage.attach(null);
+            // Pay re-quotes first, so it always charges a current fee, and it
+            // compares the order's total with what this panel shows (item 52).
+            PaymentPage.requote = () => this.updateShippingCost();
+            PaymentPage.shownTotal = () => (Number.isFinite(this.totals.total) ? this.totals.total : null);
+            PaymentPage.showServerTotal = (order) => this.showOrderTotal(order);
+            Promise.resolve(PaymentPage.attach(null)).then(() => this._resumePayPalRedirect());
+        },
+
+        /**
+         * The order came back with a total this panel did not show: paint the
+         * order's own figures (its shipping and its total) so the shopper sees
+         * what Pay will charge before anything is confirmed (item 52, ERR-376).
+         */
+        showOrderTotal(order) {
+            const ship = Number(order && order.shipping_cost);
+            const total = Number(order && order.total_amount);
+            if (Number.isFinite(ship)) this.totals.shipping = ship;
+            if (Number.isFinite(total)) this.totals.total = total;
+            this._shippingSource = 'order';
+            this.updateTotalsDisplay();
+        },
+
+        /**
+         * PayPal sent the buyer back by redirect (item 57, ERR-376): vercel.json
+         * maps /checkout/paypal-return to ?paypal=return and
+         * /checkout/paypal-cancel to ?paypal=cancelled. Runs once, then the
+         * query is dropped so a reload cannot capture twice.
+         */
+        async _resumePayPalRedirect() {
+            let params;
+            try { params = new URLSearchParams(window.location.search); } catch (_) { return; }
+            const mode = params.get('paypal');
+            if (!mode) return;
+            try { window.history.replaceState(null, '', '/checkout'); } catch (_) { /* ignore */ }
+            if (mode === 'cancelled') {
+                PaymentPage.showError('PayPal payment was cancelled. You can try again or use a different payment method.');
+                return;
+            }
+            if (mode !== 'return') return;
+            showToast('Completing your PayPal payment\u2026', 'info');
+            const result = await PaymentPage.resumePayPalReturn(params.get('token'));
+            if (result && result.status === 'refused') PaymentPage.showError(result.text);
         },
 
 

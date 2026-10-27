@@ -1,6 +1,8 @@
 {
   "redirects": [
-    { "source": "card", "destination": "/quote?utm_source=business-card&utm_medium=qr", "type": 302 }
+    { "source": "card", "destination": "/quote?utm_source=business-card&utm_medium=qr", "type": 302 },
+    { "source": "checkout/paypal-return", "destination": "/checkout?paypal=return", "type": 302 },
+    { "source": "checkout/paypal-cancel", "destination": "/checkout?paypal=cancelled", "type": 302 }
   ],
   "rewrites": [
     { "source": "ribbon/**", "destination": "/html/product/index.html" },

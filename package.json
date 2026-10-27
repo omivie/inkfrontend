@@ -102,6 +102,7 @@
     "probe:chip-counts": "node scripts/probe-chip-counts.mjs",
     "probe:backend-17oct": "node scripts/probe-backend-17oct.mjs",
     "probe:backend-25oct": "node scripts/probe-backend-25oct.mjs",
+    "probe:handoff-26oct": "node scripts/probe-handoff-26oct.mjs",
     "probe:guides": "node scripts/probe-guides.mjs",
     "probe:receipt-rolls": "node scripts/probe-receipt-rolls.mjs"
   },

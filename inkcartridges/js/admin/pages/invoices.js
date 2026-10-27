@@ -36,7 +36,7 @@ import {
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume, lineDocNote,
   hasManualDiscount, clearDiscount,
   volumeBadge, formatVolumePercent, resolveShippingSelection, freeShippingLost,
-  contractBadge, accountNotice, OFFER_CONTRACT,
+  contractBadge, accountNotice, OFFER_CONTRACT, quoteWarningChips,
   freeShippingAvailable, parcelWeightNote, planFreightAutofill, freeShippingGapNote,
   FREIGHT_OWNER_NONE, FREIGHT_OWNER_AUTO, FREIGHT_OWNER_OPERATOR,
   shippingRowState, SHIPPING_ROW_OPTIONS, SHIPPING_ROW_IDLE, SHIPPING_ROW_LOADING,
@@ -2089,7 +2089,8 @@ function onFormInput(e) {
       }
       // Code and quantity both change what the ladder says; price changes what
       // the free-shipping goods total is. All three are worth a re-quote.
-      if (f === 'code' || f === 'qty' || f === 'unitCost') scheduleQuote();
+      // The cost moves the quote's margin (item 49), so it re-quotes too.
+      if (f === 'code' || f === 'qty' || f === 'unitCost' || f === 'supplierCost') scheduleQuote();
     }
   } else if (t.matches('[data-freight-option]')) {
     onFreightOptionPick(t.value);
@@ -3386,6 +3387,10 @@ function lineQuoteNote(l, i) {
   if (ql && ql.resolved && !ql.isActive) {
     bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
   }
+  // Item 49 (ERR-376): "Below web price" / "Margin N%" from the quote. Owner
+  // only (the margin is built on our cost), advisory only: nothing here holds
+  // the save, changes the price or asks for a confirmation.
+  if (canSeeCost()) bits.push(...quoteWarningChips(ql));
 
   // The code was typed, we asked the catalogue, and the answer was no. Offer the
   // fix rather than only the complaint: the text is something the operator

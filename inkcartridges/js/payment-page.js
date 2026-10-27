@@ -167,6 +167,9 @@
             this._paying = true;
             try {
                 if (this.embedded && typeof this.collect === 'function') {
+                    // Re-quote shipping first (item 52, ERR-376): Pay charges
+                    // the fee for the address as it is NOW, never a stale one.
+                    if (typeof this.requote === 'function') await this.requote();
                     const data = await this.collect();
                     if (!data) return;
                     // Never charge on an unknown fee: calculateTotals would read a
@@ -400,8 +403,15 @@
                 const cartData = response.data;
                 const summary = cartData.summary || {};
 
-                // Update cart items from server response first (need fresh prices for fallback)
-                if (cartData.items && cartData.items.length > 0) {
+                // Embedded on /checkout the order's lines are the ones the summary
+                // SHOWS (CheckoutPage paints Cart.items), never a re-read of the
+                // server cart (item 51, ERR-376): after a refused press that cart
+                // could hold more than the shopper chose, and the payload and
+                // idempotency key would follow it.
+                if (this.embedded && typeof Cart !== 'undefined' && Array.isArray(Cart.items) && Cart.items.length > 0) {
+                    this.cartItems = Cart.items;
+                } else if (cartData.items && cartData.items.length > 0) {
+                    // Update cart items from server response first (need fresh prices for fallback)
                     this.cartItems = cartData.items.map(item => ({
                         id: item.product?.id || item.id,
                         sku: item.product?.sku || '',
@@ -641,6 +651,11 @@
                     ? { type: 'accordion', radios: true, spacedAccordionItems: false, defaultCollapsed: false }
                     : 'tabs',
                 wallets: { applePay: 'never', googlePay: 'never' },
+                // Item 53 (ERR-376): the form above already has the name, email
+                // and phone, so the Element never asks again (Afterpay asked for
+                // both, and Pay stayed disabled until they were retyped). Stripe
+                // then REQUIRES them at confirm — handlePayment sends all three.
+                fields: { billingDetails: { name: 'never', email: 'never', phone: 'never' } },
                 defaultValues: {
                     billingDetails: {
                         name: `${cd.firstName || ''} ${cd.lastName || ''}`.trim(),
@@ -926,7 +941,6 @@
                         const msg = this.getStripeErrorMessage(error);
                         event.paymentFailed({ reason: 'fail', message: msg });
                         sessionStorage.removeItem('lastOrder');
-                        this.resetTurnstile();
                         try { await API.cancelOrder(result.order_number); } catch (cancelErr) { DebugLog.warn('Could not cancel pending order:', cancelErr.message); }
                         this.showError(msg);
                         this.isSubmitting = false;
@@ -935,7 +949,6 @@
                 } catch (err) {
                     DebugLog.error('Express Checkout payment error:', err);
                     event.paymentFailed({ reason: 'fail', message: err.message });
-                    this.resetTurnstile();
                     this.showError(err.message || 'Payment failed. Please try again.');
                     this.isSubmitting = false;
                     if (payBtn) payBtn.disabled = false;
@@ -1114,6 +1127,14 @@
 
                 const { client_secret, order_number } = result;
 
+                // Never confirm a figure the shopper has not seen (item 52).
+                if (this.orderTotalCheck(result.order) === 'changed') {
+                    btnText.textContent = originalText;
+                    payBtn.disabled = false;
+                    this.isSubmitting = false;
+                    return;
+                }
+
                 // STEP 3: Store full order data before confirmPayment
                 // confirmPayment may redirect (3DS) before post-payment code runs
                 // Guest users can't fetch order via API, so store everything needed for confirmation
@@ -1131,7 +1152,8 @@
                             billing_details: {
                                 name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
                                 email: this.checkoutData.email,
-                                phone: this.checkoutData.phone || undefined,
+                                // '' not undefined: a 'never' field must be passed.
+                                phone: this.checkoutData.phone || '',
                                 address: {
                                     line1: this.checkoutData.address1,
                                     line2: this.checkoutData.address2 || undefined,
@@ -1168,6 +1190,33 @@
                 payBtn.disabled = false;
                 this.isSubmitting = false;
             }
+        },
+
+        /**
+         * Compare the order's total with the one on screen before confirming
+         * (item 52, ERR-376). POST /api/orders prices by postcode, so it can
+         * disagree with a fee quoted for an earlier address.
+         *   'match'      → confirm
+         *   'changed'    → the order's figures are now painted and the shopper is
+         *                  told; NOT confirmed. The next press replays the same
+         *                  pending order, whose total is then the one shown.
+         *   'unverified' → the response carried no total (or nothing is shown);
+         *                  confirm, but say so in the return value — never a
+         *                  silent pass.
+         */
+        orderTotalCheck(order) {
+            const total = Number(order && order.total_amount);
+            const shown = typeof this.shownTotal === 'function' ? this.shownTotal() : null;
+            if (!Number.isFinite(total) || !Number.isFinite(shown)) {
+                DebugLog.warn('[Payment] order total not compared:', order && order.total_amount, shown);
+                return 'unverified';
+            }
+            if (Math.abs(total - shown) < 0.005 || Math.abs(total - (this._shownOrderTotal ?? NaN)) < 0.005) return 'match';
+            this._shownOrderTotal = total;
+            if (typeof this.showServerTotal === 'function') this.showServerTotal(order);
+            const fmt = `$${total.toFixed(2)}`;
+            this.showError(`Your total is now ${fmt} — shipping was re-priced for this address. Check the summary, then press Pay now to pay ${fmt}.`);
+            return 'changed';
         },
 
         /**
@@ -1243,6 +1292,29 @@
         },
 
         /**
+         * POST /api/orders and SPEND the guest Turnstile token, whatever the
+         * answer (ERR-376, item 51). The backend consumes a token as soon as it
+         * has checked it — success, refusal or a throw from api.js alike — so a
+         * press that kept it re-sent a dead token and was refused again. The
+         * reset clears `turnstileToken`, so the next press waits for a fresh one
+         * (handlePayment → _awaitTurnstileToken). EVERY order POST goes here.
+         */
+        async _createOrderSpendingToken(payload) {
+            // A guest order carries the token held NOW: a retry body built
+            // before the last reset would otherwise re-send the spent one.
+            if (payload && payload.guest_email) {
+                if (!this.turnstileToken) await this._awaitTurnstileToken(this.TURNSTILE_PAY_WAIT_MS);
+                if (this.turnstileToken) payload.turnstile_token = this.turnstileToken;
+                else delete payload.turnstile_token;
+            }
+            try {
+                return await API.createOrder(payload);
+            } finally {
+                this.resetTurnstile();
+            }
+        },
+
+        /**
          * Create a Stripe order on the backend and normalise the response.
          *
          * This is the SINGLE source of order creation for BOTH Stripe paths — the
@@ -1267,19 +1339,13 @@
          * @param {string} idempotencyLabel  passed to getIdempotencyKey (e.g. 'stripe' | 'stripe-wallet')
          */
         async createStripeOrder(idempotencyLabel) {
-            // STEP 0.5: Ensure cart items are on the server before validation
-            // Cross-origin cookie issues or rate limits may leave the server cart empty
-            if (this.cartItems.length > 0) {
-                for (const item of this.cartItems) {
-                    try {
-                        await API.addToCart(item.id, item.quantity);
-                    } catch (e) {
-                        DebugLog.warn('Cart sync failed for item:', item.id, e.message);
-                    }
-                }
-            }
-
-            const orderResponse = await API.createOrder(await this._orderPayload('stripe', idempotencyLabel));
+            // NO cart sync before the order (ERR-376, handoff 26 Oct item 51).
+            // A "STEP 0.5" here POSTed /api/cart/items for every line on every
+            // press. That endpoint ADDS, so each refused press grew the server
+            // cart and the next order (order 2026100602: 3 cartridges bought,
+            // 9 charged). POST /api/orders prices the request body; nothing
+            // builds the order from the server cart. Never re-add a sync here.
+            const orderResponse = await this._createOrderSpendingToken(await this._orderPayload('stripe', idempotencyLabel));
 
             // Handle duplicate/idempotent replay
             if (orderResponse.ok && orderResponse.data?.is_duplicate) {
@@ -1442,7 +1508,6 @@
                     }
                     return { status: 'handled' }; // Don't throw — just show toast
                 } else if (errorCode === 'DISPOSABLE_EMAIL') {
-                    this.resetTurnstile();
                     throw new Error('Please use a permanent email address for your order.');
                 } else if (errorCode === 'IP_FLAGGED') {
                     if (typeof showToast === 'function') {
@@ -1450,17 +1515,15 @@
                     }
                     return { status: 'handled' };
                 } else if (errorCode === 'TURNSTILE_MISSING') {
-                    this.resetTurnstile();
                     throw new Error('Please complete the security check and try again.');
                 } else if (errorCode === 'TURNSTILE_FAILED') {
-                    this.resetTurnstile();
                     throw new Error('Security verification failed. Please complete the check and try again.');
                 }
                 throw new Error(errorMsg);
             }
 
             const { client_secret, order_number } = orderResponse.data;
-            return { status: 'confirm', client_secret, order_number };
+            return { status: 'confirm', client_secret, order_number, order: orderResponse.data };
         },
 
 
@@ -1492,7 +1555,7 @@
         async createPointsOrder() {
             let res;
             try {
-                res = await API.createOrder(await this._orderPayload('points', 'points'));
+                res = await this._createOrderSpendingToken(await this._orderPayload('points', 'points'));
             } catch (err) {
                 // A plain 400 throws (api.js): POINTS_NOT_APPLIED, POINTS_PAYMENT_REQUIRED, field validation.
                 res = { ok: false, code: err && err.code, error: err && err.message, details: err && err.details };
@@ -1877,6 +1940,65 @@
             this.turnstileToken = null;
         },
 
+        /** sessionStorage key of the PayPal order awaiting capture (item 57, ERR-376). */
+        PAYPAL_PENDING_KEY: 'paypalPending',
+
+        /**
+         * Keep the PayPal order for the capture step: in memory for the popup's
+         * onApprove, and in sessionStorage for a buyer PayPal sends back by
+         * REDIRECT (in-app browsers, the PayPal app) to /checkout/paypal-return.
+         */
+        _rememberPayPalOrder(orderNumber, paypalOrderId) {
+            this._pendingPayPalOrderNumber = orderNumber;
+            try {
+                sessionStorage.setItem(this.PAYPAL_PENDING_KEY, JSON.stringify({ order_number: orderNumber, paypal_order_id: paypalOrderId || null }));
+            } catch (_) { /* storage blocked: the popup path still has it in memory */ }
+        },
+
+        /** A captured PayPal order: clear the cart and go to the confirmation page. */
+        async _finishPayPalPaid(orderNumber) {
+            try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
+            if (typeof Cart !== 'undefined') {
+                Cart.items = [];
+                // A pending removal refers to a cart that no longer
+                // exists — purge it so it cannot fire against the
+                // shopper's next cart (ERR-136).
+                if (typeof Cart.purgePendingOps === 'function') Cart.purgePendingOps('order completed');
+                document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
+            }
+            localStorage.removeItem('inkcartridges_cart');
+            try { sessionStorage.removeItem(this.PAYPAL_PENDING_KEY); } catch (_) { /* ignore */ }
+            sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(orderNumber, 'paypal')));
+            sessionStorage.removeItem('checkoutData');
+            window.location.href = `/order-confirmation?order=${encodeURIComponent(orderNumber)}`;
+        },
+
+        /**
+         * PayPal's REDIRECT return (item 57, ERR-376). The backend gives PayPal
+         * /checkout/paypal-return (vercel.json sends it to
+         * /checkout?paypal=return&token=<PayPal order id>) for buyers who leave
+         * the popup flow. Capture only the order THIS tab created, matched by
+         * PayPal's token; anything else is said out loud, never guessed — an
+         * unmatched return must not invite a second payment.
+         *   → { status: 'navigated' } | { status: 'refused', text }
+         */
+        async resumePayPalReturn(token) {
+            const callUs = 'If PayPal shows the payment as taken, do not pay again: check your email for the order confirmation, or call us on 027 474 0115.';
+            let pending = null;
+            try { pending = JSON.parse(sessionStorage.getItem(this.PAYPAL_PENDING_KEY) || 'null'); } catch (_) { pending = null; }
+            if (!token || !pending || !pending.order_number || pending.paypal_order_id !== token) {
+                return { status: 'refused', text: 'We couldn\u2019t match this PayPal return to an order in this browser. ' + callUs };
+            }
+            let res = null;
+            try { res = await API.capturePaypal(pending.order_number, token); } catch (e) { res = { ok: false, error: e && e.message }; }
+            if (res && res.ok && res.data && res.data.status === 'paid') {
+                this.cartItems = (typeof Cart !== 'undefined' && Array.isArray(Cart.items)) ? Cart.items : this.cartItems;
+                await this._finishPayPalPaid(pending.order_number);
+                return { status: 'navigated' };
+            }
+            return { status: 'refused', text: 'We couldn\u2019t confirm your PayPal payment. ' + callUs };
+        },
+
         /**
          * Initialize PayPal button using PayPal JS SDK (popup approach)
          * Separate from Stripe — backend has its own PayPal integration
@@ -1911,6 +2033,7 @@
                 // self.checkoutData); a form with errors keeps the popup shut.
                 onClick: async (data, actions) => {
                     if (self.embedded && typeof self.collect === 'function') {
+                        if (typeof self.requote === 'function') await self.requote();
                         const d = await self.collect();
                         if (!d) return actions.reject();
                         if (!(typeof d.estimatedShipping === 'number' && Number.isFinite(d.estimatedShipping))) {
@@ -1925,52 +2048,13 @@
 
                 createOrder: async () => {
                     DebugLog.log('[PayPal] createOrder called — building payload...');
-                    // Build order payload with payment_method: 'paypal'
-                    const items = self.cartItems.map(item => self.withPrinterSlug({
-                        product_id: item.id,
-                        quantity: item.quantity
-                    }, item));
-
-                    const isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
-                    const orderPayload = {
-                        items: items,
-                        shipping_address: {
-                            first_name: self.checkoutData.firstName,
-                            last_name: self.checkoutData.lastName,
-                            phone: self.checkoutData.phone || '',
-                            address_line_1: self.checkoutData.address1,
-                            address_line_2: self.checkoutData.address2 || '',
-                            city: self.checkoutData.city,
-                            region: self.checkoutData.region,
-                            postal_code: self.checkoutData.postcode,
-                            country: 'NZ'
-                        },
-                        shipping_tier: self.checkoutData.shippingTier || '',
-                        shipping_zone: self.checkoutData.shippingZone || '',
-                        // Omitted, never guessed — the twin of the Stripe payload
-                        // above, where the reasoning is written out in full. The
-                        // two payloads have to agree: an order that records a
-                        // delivery type on one rail and not the other would be a
-                        // fact about the payment method, not about the address.
-                        ...(self.checkoutData.deliveryType ? { delivery_type: self.checkoutData.deliveryType } : {}),
-                        estimated_shipping: self.checkoutData.estimatedShipping ?? null,
-                        save_address: self.checkoutData.saveAddress !== false,
-                        customer_notes: self.checkoutData.orderNotes || '',
-                        payment_method: 'paypal',
-                        ...self.orderLevelPrinterSlug(items),
-                        ...self.reminderConsentField(self.checkoutData),
-                        idempotency_key: await self.getIdempotencyKey('paypal'),
-                        gclid: typeof getGclid === 'function' ? getGclid() : null,
-                        ...self.clickIdFields(),
-                        ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
-                        ...(isGuest && { guest_email: self.checkoutData.email }),
-                        ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone }),
-                        ...(isGuest && self.turnstileToken && { turnstile_token: self.turnstileToken })
-                    };
-
+                    // The ONE order body (ERR-376): PayPal used to hand-copy it,
+                    // and the copy drifted from the card path (region always
+                    // sent, no single owner of the quantities).
+                    const orderPayload = await self._orderPayload('paypal', 'paypal');
                     DebugLog.log('[PayPal] Sending order payload:', JSON.stringify(orderPayload, null, 2));
 
-                    const response = await API.createOrder(orderPayload);
+                    const response = await self._createOrderSpendingToken(orderPayload);
                     DebugLog.log('[PayPal] API response:', JSON.stringify(response, null, 2));
 
                     if (!response.ok) {
@@ -1982,16 +2066,13 @@
                         } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                             throw new Error('Your order total is below the minimum. Please add more items.');
                         } else if (errorCode === 'DISPOSABLE_EMAIL') {
-                            self.resetTurnstile();
                             throw new Error('Please use a permanent email address for your order.');
                         } else if (errorCode === 'IP_FLAGGED') {
                             self.showError('Unable to process your order. Please contact support.');
                             throw new Error('IP_FLAGGED'); // halt PayPal flow
                         } else if (errorCode === 'TURNSTILE_MISSING') {
-                            self.resetTurnstile();
                             throw new Error('Please complete the security check and try again.');
                         } else if (errorCode === 'TURNSTILE_FAILED') {
-                            self.resetTurnstile();
                             throw new Error('Security verification failed. Please complete the check and try again.');
                         } else if (errorCode === 'EMAIL_NOT_VERIFIED') {
                             self.showEmailVerificationRequired();
@@ -2005,7 +2086,7 @@
                     // Handle duplicate order replay
                     if (data.is_duplicate && data.paypal_order_id) {
                         DebugLog.log('[PayPal] Duplicate order — reusing paypal_order_id:', data.paypal_order_id);
-                        self._pendingPayPalOrderNumber = data.order_number;
+                        self._rememberPayPalOrder(data.order_number, data.paypal_order_id);
                         return data.paypal_order_id;
                     }
 
@@ -2020,7 +2101,7 @@
                         }
                         // Retry with a fresh idempotency key
                         orderPayload.idempotency_key = await self.getIdempotencyKey('paypal-retry-' + Date.now());
-                        const retryResponse = await API.createOrder(orderPayload);
+                        const retryResponse = await self._createOrderSpendingToken(orderPayload);
                         DebugLog.log('[PayPal] Retry API response:', JSON.stringify(retryResponse, null, 2));
 
                         if (!retryResponse.ok) {
@@ -2030,7 +2111,7 @@
                         if (!retryData.paypal_order_id) {
                             throw new Error('Server did not return a PayPal order on retry. Please contact support.');
                         }
-                        self._pendingPayPalOrderNumber = retryData.order_number;
+                        self._rememberPayPalOrder(retryData.order_number, retryData.paypal_order_id);
                         DebugLog.log('[PayPal] Retry succeeded. order_number:', retryData.order_number, 'paypal_order_id:', retryData.paypal_order_id);
                         return retryData.paypal_order_id;
                     }
@@ -2040,8 +2121,8 @@
                         throw new Error('Server did not return a PayPal order. Please try again.');
                     }
 
-                    // Store order number for capture step
-                    self._pendingPayPalOrderNumber = data.order_number;
+                    // Store order number for capture step (and for a redirect return)
+                    self._rememberPayPalOrder(data.order_number, data.paypal_order_id);
                     DebugLog.log('[PayPal] Order created. order_number:', data.order_number, 'paypal_order_id:', data.paypal_order_id);
                     return data.paypal_order_id;
                 },
@@ -2060,21 +2141,7 @@
                         DebugLog.log('[PayPal] Capture response:', JSON.stringify(captureResponse, null, 2));
 
                         if (captureResponse.ok && captureResponse.data?.status === 'paid') {
-                            // Payment successful — clear cart and redirect
-                            try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
-                            if (typeof Cart !== 'undefined') {
-                                Cart.items = [];
-                                // A pending removal refers to a cart that no longer
-                                // exists — purge it so it cannot fire against the
-                                // shopper's next cart (ERR-136).
-                                if (typeof Cart.purgePendingOps === 'function') Cart.purgePendingOps('order completed');
-                                document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
-                            }
-                            localStorage.removeItem('inkcartridges_cart');
-
-                            sessionStorage.setItem('lastOrder', JSON.stringify(self.buildOrderSnapshot(orderNumber, 'paypal')));
-                            sessionStorage.removeItem('checkoutData');
-                            window.location.href = `/order-confirmation?order=${encodeURIComponent(orderNumber)}`;
+                            await self._finishPayPalPaid(orderNumber);
                         } else {
                             self.showError(captureResponse.error?.message || 'Payment capture failed. Please contact support.');
                         }

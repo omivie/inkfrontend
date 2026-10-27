@@ -116,6 +116,9 @@
     { "source": "/card", "destination": "/quote?utm_source=business-card&utm_medium=qr", "permanent": false },
 
     { "source": "/account/", "destination": "/account", "permanent": true },
+    { "source": "/cart/", "destination": "/cart", "permanent": true },
+    { "source": "/checkout/paypal-return", "destination": "/checkout?paypal=return", "permanent": false },
+    { "source": "/checkout/paypal-cancel", "destination": "/checkout?paypal=cancelled", "permanent": false },
 
     { "source": "/orders/track", "destination": "/track-order", "permanent": true },
 

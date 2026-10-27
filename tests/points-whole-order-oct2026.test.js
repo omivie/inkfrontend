@@ -155,6 +155,8 @@ function orderHarness(createOrder) {
         buildOrderSnapshot: (n, m) => ({ order_number: n, payment_method: m, total: 4.99 }),
     };
     const API = { createOrder: async (b) => { sent.push(b); return createOrder(b); } };
+    // Every order POST goes through the token-spending wrapper (ERR-376).
+    self._createOrderSpendingToken = async (b) => API.createOrder(b);
     self.createPointsOrder = method('js/payment-page.js', 'createPointsOrder', self, { API, sessionStorage, window: { location } });
     return { self, store, location, sent };
 }
@@ -214,10 +216,15 @@ test('one body for card, wallet and points orders; only payment_method varies', 
     const src = stripComments(read('js/payment-page.js'));
     assert.match(src, /async _orderPayload\(paymentMethod, idempotencyLabel\)/);
     assert.match(src, /payment_method: paymentMethod,/);
-    assert.equal((src.match(/API\.createOrder\(await this\._orderPayload\(/g) || []).length, 2, 'createStripeOrder + createPointsOrder');
-    assert.match(src, /API\.createOrder\(await this\._orderPayload\('stripe', idempotencyLabel\)\)/);
-    assert.match(src, /API\.createOrder\(await this\._orderPayload\('points', 'points'\)\)/);
-    assert.doesNotMatch(src, /payment_method: 'stripe',/, 'no second hand-written body');
+    // ERR-376: every order POST goes through _createOrderSpendingToken (the
+    // Turnstile token is spent on every answer), and PayPal now uses the same
+    // body — three callers of the ONE builder, one raw API.createOrder.
+    assert.equal((src.match(/_orderPayload\('(stripe|points|paypal)'/g) || []).length, 3, 'createStripeOrder + createPointsOrder + PayPal');
+    assert.match(src, /_createOrderSpendingToken\(await this\._orderPayload\('stripe', idempotencyLabel\)\)/);
+    assert.match(src, /_createOrderSpendingToken\(await this\._orderPayload\('points', 'points'\)\)/);
+    assert.match(src, /self\._orderPayload\('paypal', 'paypal'\)/);
+    assert.equal((src.match(/API\.createOrder\(/g) || []).length, 1, 'one raw POST, inside the wrapper');
+    assert.doesNotMatch(src, /payment_method: '(stripe|paypal)',/, 'no second hand-written body');
 });
 
 test('POINTS_TOTAL_NOT_ZERO latches the card until the points change', () => {

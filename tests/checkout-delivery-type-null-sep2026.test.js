@@ -95,10 +95,13 @@ test("§1 neither order-create payload defaults delivery_type to 'urban'", () =>
 test('§1 both payloads OMIT the key rather than sending it, and they agree', () => {
     const spreads = PAYMENT_CODE.match(
         /\.\.\.\((?:this|self)\.checkoutData\.deliveryType \? \{ delivery_type: (?:this|self)\.checkoutData\.deliveryType \} : \{\}\)/g) || [];
-    assert.equal(spreads.length, 2,
-        'exactly two — the Stripe payload and the PayPal payload. An order that recorded a '
-        + 'delivery type on one payment rail and not the other would be a fact about the '
-        + 'payment method, not about the address.');
+    // ERR-376: PayPal now builds its body with the same _orderPayload, so ONE
+    // spread serves every rail and they cannot disagree by construction.
+    assert.equal(spreads.length, 1,
+        'exactly one — _orderPayload, used by card, wallet, points AND PayPal. An order that '
+        + 'recorded a delivery type on one payment rail and not the other would be a fact '
+        + 'about the payment method, not about the address.');
+    assert.match(PAYMENT_CODE, /self\._orderPayload\('paypal', 'paypal'\)/, 'PayPal uses the one body');
 
     // Omission, not an explicit null: "a client that sends nothing now records
     // NULL" is the sentence the backend documented and therefore the one that is

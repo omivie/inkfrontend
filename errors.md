@@ -40,6 +40,37 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-376 — Backend handoff 26 Oct, items 49–58: a refused Pay press no longer re-adds the cart, privacy phone-call + Google Customer Reviews copy, postcode re-quote + total check, Afterpay, drawer badge, pack chip, PayPal redirect return, invoice margin badges — **SHIPPED (frontend)** (2026-10-28)
+
+**Seen (backend handoff `inbox/fe-handoff-26oct2026.md`).** Order 2026100602: a guest bought 3 x HP 63XL Black, two Pay presses were refused (email check), the third charged them for **9** ($486.81). Plus nine smaller items (49, 50, 52–58).
+
+**Measured before building.**
+- **51 confirmed in code.** `createStripeOrder` "STEP 0.5" POSTed `/api/cart/items` (which ADDS) for every line on every press; `payNow` → `calculateTotals()` then rebuilt `cartItems` from `GET /api/cart`, so the inflated server quantity reached the order body and the idempotency key. `resetTurnstile()` ran only on DISPOSABLE_EMAIL / TURNSTILE_* — the email refusal (`'handled'`), every other refusal, api.js 400 throws and success all kept the spent token. PayPal's `createOrder` was a hand-copied twin of `_orderPayload` with the same gaps.
+- **50 confirmed live:** www `/privacy` had neither addition; the prerender already had both. The www page has no "How We Use It" heading (nearest: §3 "Why we collect it") and its third parties are a table from `legal-config.js` `dataProcessors`.
+- **52:** no listener on `#postcode`; `_refreshDeliveryPrices` sent no `postal_code` and keyed its memo on region only; nothing compared the order's total with the screen.
+- **54:** two tests FORBADE Afterpay ("a BNPL method the site does not offer"). The premise changed (Stripe pmc has Afterpay on; sale 14 Oct), so those tests were updated, not bypassed.
+- **57:** `/checkout/paypal-return` and `/paypal-cancel` were 404 live; PayPal is live (on hold = leave the button). **Also** `/cart/` was 404 live (the abandoned-cart email's old link).
+- **49:** both editors call `/api/admin/invoices/quote` (quick-order shares it on purpose); the body sent no cost; `normalizeQuote` dropped the new fields; cost edits never re-quoted. Backend contract measured live: a $0.50 GLC233BK line ⇒ `below_web_price: true`, `gross_margin_pct: -8674`; manual cost + none typed ⇒ `null`.
+
+**Fix.**
+- **51** STEP 0.5 deleted (no replacement: the order is priced from the body; the backend now also lowers cart lines to the order). Embedded, `calculateTotals` keeps `cartItems = Cart.items` — the lines the summary paints. ONE `_createOrderSpendingToken(payload)` for every order POST (card, wallet, points, PayPal + its retry): sends the token held NOW, `resetTurnstile()` in `finally`. PayPal builds its body with `_orderPayload('paypal', 'paypal')` (35-line twin deleted).
+- **50** `<p>` after the §3 list, byte for byte, straight apostrophes; `dataProcessors` row "Google Customer Reviews" + the prerender sentence (rendered row = the item text); "Customer Reviews" dropped from the Google LLC row.
+- **52** debounced (400 ms, global `debounce`) `input` on `#postcode` ⇒ `updateShippingCost()` at 4 digits, only on change; `_refreshDeliveryPrices` sends `postal_code`, keys on it, runs on region OR postcode. Pay (card + PayPal) awaits `PaymentPage.requote` before `collect`. `orderTotalCheck(order)`: order `total_amount` ≠ screen ⇒ paint the order's shipping + total (`CheckoutPage.showOrderTotal`), say so, do NOT confirm; the next press replays the pending order (match). No total in the answer ⇒ `'unverified'` (confirms, says so in the return value; asked backend to confirm the field). `inputmode="numeric"` on both postcode inputs (type text kept).
+- **53** `fields.billingDetails` name/email/phone `'never'`; confirm sends `phone: … || ''`.
+- **54** Afterpay mark after Klarna in the footer and on /cart (name only); `paymentMethods` + both CANONICAL lists. Cart row chips 22px / 6px gap so 8 fit one row (24px wrapped Afterpay alone, measured 340px).
+- **55** `html.cart-drawer-open #google-reviews-badge { display: none !important; }`.
+- **56** label `N-cartridge set $P — $S less than the N singles` from `cartridge_count`/`pack_price`/`savings_amount` (short honest form without them); chip only on a line of 1; swap decrements a grown line instead of removing it.
+- **57** `vercel.json` + `serve.json`: return ⇒ `/checkout?paypal=return` (PayPal's `token` carried), cancel ⇒ `/checkout?paypal=cancelled`. `createOrder` remembers `{order_number, paypal_order_id}` in sessionStorage; `resumePayPalReturn(token)` captures ONLY on a token match, else says "do not pay again" with the phone; one `_finishPayPalPaid` for popup and redirect; query dropped so a reload cannot capture twice. No new page.
+- **58** `Cart._itemsLabel(n)` at both writers; `cart.html` span holds the whole label. `/cart/` ⇒ `/cart` 301.
+- **49** quote body sends `cost_source` always and `supplier_cost_excl_gst` when known (typed 0 counts; blank never 0); re-quote on `supplierCost`; `normalizeQuote` keeps both fields (null stays null); `THIN_MARGIN_PCT = 20` + pure `quoteWarningChips` in invoice-quote.js; both `lineQuoteNote`s push them behind `canSeeCost()`. Advisory only.
+
+**Measured.** `tests/backend-handoff-26oct-2026.test.js` 24/24; **negative control**: the same suite against HEAD's payment-page.js fails 11 (every 51/52/53/57 case). `npm test` 7371 pass / 0 fail / 19 skipped (pre-existing LIVE-network tests). Nine pinned tests updated, each for a stated reason (PayPal now uses the one body; Afterpay offered; Pay re-quotes). Playwright (localhost, live API, live Stripe key, NO payment placed): Afterpay panel shows no Email / Full name and Pay is enabled; **HEAD code on the same page shows Email + Full name and Pay disabled**. Postcode 1010 ⇒ $7.00, then 9016 ⇒ $22.00 with nothing else changed. Drawer open at 1366 and 390: badge `display:none`, `elementFromPoint` at the Checkout button's right edge = the button (stand-in badge: Google's script does not render on localhost). Admin invoice: GLC233BK at $0.50 ⇒ "Below web price" + "Margin -8674.0%", Save enabled (not pressed); quick order $60 ⇒ none, $40 ⇒ both, typed cost $30 ⇒ margin chip cleared. `probe:handoff-26oct` (new, READ-ONLY + one non-saving quote) before deploy: 6 pass (prerender + item 49) / 15 fail (the www items, not yet deployed — the probe's negative control).
+
+**Not measurable here (named).** A refused-then-paid order on the super_admin product and a test-mode Afterpay payment need a real payment (owner/backend check, handoff "How we will check"); the site carries only the live Stripe key.
+
+**Rule.** No cart write before an order — the order body is the order. Every order POST goes through `_createOrderSpendingToken`. Never confirm a total the shopper has not seen.
+
+---
 ## ERR-375 — How-to guides: nine /guides pages + index, printer and series pages link back (checklist item 41) — **SHIPPED (frontend)** (2026-10-26)
 
 **Seen (backend reply 2026-10-25, Appendix A).** Search Console, 90 days: 284 how-to queries reached the site 539 times and took 0 clicks; the site had no page that answers a how-to question. The plan named 9 guides, their URLs, target queries, printer ⇄ cartridge tables and product SKUs, and said "check against the maker's list before publishing".

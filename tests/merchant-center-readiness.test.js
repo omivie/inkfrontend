@@ -115,7 +115,9 @@ test('shop section headers use the base label so the source word is not doubled'
 // Payment badge consistency
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CANONICAL_PAYMENTS = ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay', 'Klarna'];
+// Afterpay added 2026-10-26 (ERR-376, backend handoff item 54): on in the
+// Stripe payment method configuration beside Klarna, and sold through.
+const CANONICAL_PAYMENTS = ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay', 'Klarna', 'Afterpay'];
 
 test('legal-config lists exactly the canonical accepted payment methods', () => {
     const legal = read('js/legal-config.js');
@@ -141,8 +143,9 @@ test('footer, cart and 404 advertise the full canonical payment set', () => {
             const re = new RegExp(`aria-label="${method}"|title="${method}"|${short}`, 'i');
             assert.ok(re.test(src), `${file} is missing the ${method} payment badge`);
         }
-        assert.ok(!/afterpay|laybuy|zip pay/i.test(src),
+        assert.ok(!/laybuy|zip pay/i.test(src),
             `${file} must not advertise a BNPL method the site does not offer`);
+        assert.ok(!/interest[- ]free|pay in 4/i.test(src), `${file}: Afterpay/Klarna are named only (ERR-376)`);
     }
 });
 

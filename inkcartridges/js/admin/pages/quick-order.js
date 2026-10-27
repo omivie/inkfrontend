@@ -29,6 +29,7 @@ import {
   PRICE_AUTO, PRICE_MANUAL, MAX_QUOTE_LINES,
   quoteRequestBody, normalizeQuote, applyQuoteToLines, clearVolume,
   formatVolumePercent, contractBadge, accountNotice, OFFER_CONTRACT,
+  quoteWarningChips,
 } from '../utils/invoice-quote.js';
 import { costOrNull } from '../utils/invoice-math.js';
 import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
@@ -656,6 +657,10 @@ function lineQuoteNote(l, i) {
     bits.push(`<span class="inv-vol inv-vol--contract">Contract price ${esc(money(cb.unitPrice))}${esc(saving)}${esc(onTop)}</span>`);
   }
   if (ql && ql.resolved && !ql.isActive) bits.push(`<span class="inv-vol inv-vol--warn">Inactive product</span>`);
+  // Item 49 (ERR-376): "Below web price" / "Margin N%" from the quote. Owner
+  // only (the margin is built on our cost), advisory only: nothing here holds
+  // the save, changes the price or asks for a confirmation.
+  if (canSeeCost()) bits.push(...quoteWarningChips(ql));
   if (!bits.length) return '';
   return `<div class="inv-line__note">${bits.join('')}</div>`;
 }
@@ -709,7 +714,8 @@ function onFormInput(e) {
         _draft.lines[i].priceSource = PRICE_MANUAL;
         _draft.lines[i] = clearVolume(_draft.lines[i]);
       }
-      if (f === 'code' || f === 'qty' || f === 'unitPrice') scheduleQuote();
+      // The cost moves the quote's margin (item 49), so it re-quotes too.
+      if (f === 'code' || f === 'qty' || f === 'unitPrice' || f === 'supplierCost') scheduleQuote();
     }
     refreshTotals();
   } else { return; }

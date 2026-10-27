@@ -128,7 +128,8 @@ test('Pay now refuses while the shipping fee is unknown — Stripe must never ta
 
 test('PayPal collects + validates the details before its popup opens', () => {
     const code = stripComments(PAY_SRC);
-    assert.match(code, /onClick: async \(data, actions\) => \{\s*if \(self\.embedded && typeof self\.collect === 'function'\) \{\s*const d = await self\.collect\(\);\s*if \(!d\) return actions\.reject\(\);/);
+    // ERR-376 (item 52): the fee is re-quoted first, then the details collected.
+    assert.match(code, /onClick: async \(data, actions\) => \{\s*if \(self\.embedded && typeof self\.collect === 'function'\) \{\s*if \(typeof self\.requote === 'function'\) await self\.requote\(\);\s*const d = await self\.collect\(\);\s*if \(!d\) return actions\.reject\(\);/);
 });
 
 test('the /payment boot never runs on /checkout (it would read no sessionStorage and redirect-loop)', () => {
@@ -146,7 +147,11 @@ test('CheckoutPage: one button — collect runs every check, and the card form m
     assert.ok(fields > 0 && fields < gate && gate < save, 'validate → email gate → record, in that order');
     assert.match(collect, /return checkoutData;/);
     assert.doesNotMatch(code, /window\.location\.href = '\/payment'/, 'never leaves the page to pay');
-    assert.match(code, /PaymentPage\.collect = \(\) => this\.collectCheckoutData\(form\);\s*PaymentPage\.attach\(null\);/);
+    assert.match(code, /PaymentPage\.collect = \(\) => this\.collectCheckoutData\(form\);/);
+    // ERR-376: Pay re-quotes and compares the order total (item 52); the attach
+    // then resumes a PayPal redirect return (item 57).
+    assert.match(code, /PaymentPage\.requote = \(\) => this\.updateShippingCost\(\);/);
+    assert.match(code, /Promise\.resolve\(PaymentPage\.attach\(null\)\)\.then\(\(\) => this\._resumePayPalRedirect\(\)\);/);
     assert.doesNotMatch(code, /setupAccordion|_accordionSections|continue-to-payment-btn/, 'no accordion, no Continue');
     const totals = code.slice(code.indexOf('updateTotalsDisplay() {'));
     assert.match(totals.slice(0, 700), /PaymentPage\.pendingShipping = Number\.isFinite\(this\.totals\.shipping\)[\s\S]{0,120}PaymentPage\.refreshTotalsSoon\(\)/);

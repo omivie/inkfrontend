@@ -3334,7 +3334,7 @@ const Cart = {
         const itemCountEl = document.getElementById('cart-item-count');
         const subtotalEl = document.getElementById('cart-subtotal');
         const gstEl = document.getElementById('cart-gst');
-        if (itemCountEl) itemCountEl.textContent = itemCount;
+        if (itemCountEl) itemCountEl.textContent = this._itemsLabel(itemCount);
         if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
         if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
         this.renderTotalRow(cartTotal);
@@ -4760,7 +4760,7 @@ const Cart = {
             const subtotalEl = document.getElementById('cart-subtotal');
             const gstEl = document.getElementById('cart-gst');
 
-            if (itemCountEl) itemCountEl.textContent = itemCount;
+            if (itemCountEl) itemCountEl.textContent = this._itemsLabel(itemCount);
             if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
             if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
             this.renderTotalRow(cartTotal);
@@ -4913,11 +4913,15 @@ const Cart = {
     renderLinePackSuggestion: function(item) {
         const ps = item && item.pack_suggestion_for_line;
         const savings = ps ? parseFloat(ps.savings_amount) : NaN;
-        if (!ps || typeof ps !== 'object' || !ps.sku
+        // ERR-376 (handoff 26 Oct, item 56): a line of 1 only. The swap adds ONE
+        // pack in place of ONE single; on a line of 2+ it would silently drop
+        // units, and "switch" to one set is not what a shopper buying three
+        // blacks chose.
+        if (!ps || typeof ps !== 'object' || !ps.sku || Number(item.quantity) !== 1
             || !Number.isFinite(savings) || savings <= 0) {
             return '';
         }
-        const label = 'Save ' + formatPrice(savings) + ' — switch to the value pack';
+        const label = this.packChipLabel(ps, savings);
         return '<button type="button" class="cart-line-pack" data-pack-sku="'
             + Security.escapeAttr(ps.sku) + '" data-single-key="'
             + Security.escapeAttr(item.key || this.cartItemKey(item))
@@ -4925,6 +4929,29 @@ const Cart = {
             + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>'
             + '<span>' + Security.escapeHtml(label) + '</span>'
             + '</button>';
+    },
+
+    /**
+     * The chip says WHAT it compares (item 56, ERR-376): the set and its price
+     * against the singles it replaces — backend figures only
+     * (`cartridge_count`, `pack_price`, `savings_amount`). "Save $X" alone hid
+     * that the basis was the four singles. No "save up to", no "best value".
+     * Missing count or price ⇒ the honest short form, never a guessed number.
+     * PURE.
+     */
+    packChipLabel(ps, savings) {
+        const n = Number(ps && ps.cartridge_count);
+        const price = parseFloat(ps && ps.pack_price);
+        const less = formatPrice(savings);
+        if (Number.isInteger(n) && n > 1 && Number.isFinite(price) && price > 0) {
+            return n + '-cartridge set ' + formatPrice(price) + ' — ' + less + ' less than the ' + n + ' singles';
+        }
+        return 'Value pack — ' + less + ' less than buying the singles';
+    },
+
+    /** "1 item" / "3 items" — the whole label, never a bare number (item 58, ERR-376). PURE. */
+    _itemsLabel(n) {
+        return n + ' item' + (n === 1 ? '' : 's');
     },
 
     /**
@@ -5197,7 +5224,12 @@ const Cart = {
         });
         const single = this.items.find(function(i) { return (i.key || '') === singleKey; });
         if (single) {
-            await this.removeItem(single.key || this.cartItemKey(single));
+            // Never drop units (item 56): the chip only shows on a line of 1,
+            // but the line can have grown since it was painted — take ONE.
+            const key = single.key || this.cartItemKey(single);
+            const qty = Number(single.quantity) || 1;
+            if (qty > 1) await this.updateQuantity(key, qty - 1);
+            else await this.removeItem(key);
         }
         if (typeof showToast === 'function') showToast('Switched to the value pack.', 'success');
     }

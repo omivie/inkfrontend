@@ -218,6 +218,19 @@ export function quoteRequestBody(draft, identity = {}) {
       // suggestion; what gets SAVED is unaffected.
       item.unit_cost_excl_gst = round2(linePrice(l));
     }
+    // OUR cost, as the save will record it (item 49, ERR-376), so the quote's
+    // `gross_margin_pct` judges the same number. A typed cost of either sign
+    // wins (0 counts: warranty / exchange stock); an auto cost is the
+    // catalogue's own; a blank box sends nothing (unknown, never 0 — Number('')
+    // is 0, hence the explicit test). `cost_source` always, because 'manual'
+    // with no cost is how the backend knows the cost is UNKNOWN.
+    const rawCost = l?.supplierCost;
+    const cost = rawCost == null || str(rawCost) === '' ? NaN : Number(rawCost);
+    const costSource = l?.costSource === 'manual' ? 'manual' : 'auto';
+    if (Number.isFinite(cost) && (costSource === 'manual' || cost >= 0)) {
+      item.supplier_cost_excl_gst = round2(cost);
+    }
+    item.cost_source = costSource;
     return item;
   });
 
@@ -237,6 +250,35 @@ export function quoteRequestBody(draft, identity = {}) {
 // =========================================================================
 //  Response
 // =========================================================================
+
+/**
+ * Below this gross margin (%) an invoice / quick-order line shows a "Margin
+ * N%" warning (item 49, ERR-376, owner plan 24 Oct). ONE constant: the owner
+ * may move the level.
+ */
+export const THIN_MARGIN_PCT = 20;
+
+/**
+ * The owner-only warning chips for one quoted line: "Below web price" when the
+ * typed/autofill price is under what a guest pays on the website for the same
+ * quantity, and "Margin 12.5%" under THIN_MARGIN_PCT. Both when both apply;
+ * none for null (unknown cost, no product, not a sale). ADVISORY ONLY — never
+ * a save gate, never a price change. The caller gates on canSeeCost(): the
+ * margin comes from our cost. PURE; returns chip HTML (fixed text + a number).
+ */
+export function quoteWarningChips(ql) {
+  if (!ql) return [];
+  const chips = [];
+  if (ql.belowWebPrice === true) {
+    chips.push('<span class="inv-vol inv-vol--warn" data-quote-warn="below-web">Below web price</span>');
+  }
+  const m = ql.grossMarginPct;
+  if (m != null && Number.isFinite(m) && m < THIN_MARGIN_PCT) {
+    const shown = (Math.round(m * 10) / 10).toFixed(1);
+    chips.push(`<span class="inv-vol inv-vol--warn" data-quote-warn="thin-margin" title="Gross margin on the unit price ex GST, before card fees. Warning level: under ${THIN_MARGIN_PCT}%.">Margin ${shown}%</span>`);
+  }
+  return chips;
+}
 
 /**
  * Tolerant unwrap of the response into the shape the editor consumes.
@@ -271,6 +313,11 @@ export function normalizeQuote(payload) {
     unitExclGst: l?.unit_excl_gst != null ? num(l.unit_excl_gst) : null,
     volume: normalizeVolume(l?.volume),
     contract: normalizeContract(l?.contract),
+    // Item 49 (ERR-376), owner-only advisories. null stays null — an unknown
+    // cost is "no margin figure", never 0% (ERR-068) — and a line that is not
+    // a sale (return, credit, unknown code) gets neither.
+    grossMarginPct: l?.gross_margin_pct != null && Number.isFinite(Number(l.gross_margin_pct)) ? Number(l.gross_margin_pct) : null,
+    belowWebPrice: l?.below_web_price === true ? true : (l?.below_web_price === false ? false : null),
   }));
 
   const hasOptions = Array.isArray(rawShipping?.options);

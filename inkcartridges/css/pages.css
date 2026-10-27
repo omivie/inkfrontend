@@ -4296,14 +4296,16 @@ body.filter-sort-open { overflow: hidden; }
     flex-wrap: wrap;
     justify-content: center;
     align-items: center;
-    gap: var(--spacing-sm);
+    /* 8 marks since Afterpay (ERR-376): 6px gaps + 22px chips keep them on ONE
+       row in the 340px summary (24px + 8px wrapped Afterpay alone). */
+    gap: 6px;
     margin-top: var(--spacing-md);
     font-size: var(--font-size-sm);
     color: var(--color-text-muted);
 }
 
 .cart-summary__payment-icons .pay-card {
-    height: 24px;
+    height: 22px;
     width: auto;
     display: block;
     border-radius: 4px;

@@ -8,7 +8,7 @@
 - §3/§4 `/receipt-rolls` in nav, sitemap, llms.txt and the prerender; the aliases 200; the roll prerender breadcrumb and bot footer.
 - §5 item 46 (all compatible cards above the first genuine) and item 37 (`matched_printer.exact` on all six cases, `exact_product` on both).
 
-What we built from it: ERR-373 (floor line, `/receipt-rolls` adopted as the canonical landing, bare aliases now 301 in one hop), ERR-374 (item 32 fixes 2–6) and ERR-375 (item 41, the nine guides). Four asks follow.
+What we built from it: ERR-373 (floor line, `/receipt-rolls` adopted as the canonical landing, bare aliases now 301 in one hop), ERR-374 (item 32 fixes 2–6) and ERR-375 (item 41, the nine guides). Four asks follow, then §5: your 26 Oct handoff (items 49–58), all built (ERR-376), with one question.
 
 ---
 
@@ -62,3 +62,22 @@ Shipped (ERR-374): no h1 repaint on the paid landings; PDP related products wait
 **Our live numbers** (`lighthouse@12.6.0`, default mobile, median of 3, 26 Oct): series `code=288` perf 67 / LCP 9.17 s / CLS 0.003; home 65 / 9.10 s / 0; `/ink-cartridges` 67 / 8.64 s / 0; desktop `/ink-cartridges` 99, CLS 0.005. GLC233BK measured CLS 0.307 on the first deploy. Self-hosted fonts let the skeleton paint, which exposed the volume ladder landing above the Add row. Fixed in the follow-up deploy: 0.03 locally. LCP is still above 4 s on the series page and the product page. The levers left are minify (declined) and the product JSON edge cache, which is yours: we measured 0.9 s on a cold read.
 
 **Ask:** you offered to re-run your Lighthouse set once a deploy is live — please run the pages in your tables plus the series page and GLC233BK. We will run the same command and put both sets of numbers side by side.
+
+---
+
+## §5 Your handoff of 26 Oct (items 49–58): what is built, and one question
+
+Copied to `inbox/fe-handoff-26oct2026.md`. All ten items are built (ERR-376). The status below is for the deploy that carries this section. `npm run probe:handoff-26oct` (read-only, plus one invoice quote that saves nothing) re-measures each one on www after the deploy.
+
+- **51 (P0).** STEP 0.5 is deleted, with no replacement. On /checkout the order's lines are the summary's lines (`Cart.items`), not a re-read of the server cart. Every order POST (card, wallet, points, PayPal and its retry) goes through one function. That function sends the Turnstile token held at that moment and resets it after every answer: success, refusal, the email refusal and a thrown 400. PayPal now builds its body with the same function as the card path. The hand-copied twin is gone.
+- **50 (P0).** The www `/privacy` page carries the paragraph byte for byte, with straight apostrophes. It goes in §3 "Why we collect it": www has no "How We Use It" heading. The page lists third parties in a table, not a list, so the Google Customer Reviews item is a table row. The row reads "Google Customer Reviews" followed by your sentence, so its text is your item byte for byte. The probe compares both against `/api/prerender/static/privacy`. **The owner's calls can start once this deploy is live.**
+- **52.** The fee is re-quoted when the postcode changes (debounced, once 4 digits are in) and again before every Pay press (card and PayPal). The urban/rural price labels now send `postal_code`. Measured locally against the live API: 1010 gave $7.00, then typing 9016 gave $22.00. Both postcode inputs have `inputmode="numeric"` and stay `type="text"`.
+- **53.** The Element uses `fields.billingDetails` name/email/phone `'never'`, and confirm sends all three. Measured with the live key and no payment placed: the Afterpay panel shows no Email or Full name field, and Pay is enabled. With the old code, the same page showed both fields and Pay stayed disabled. **We could not run a test-mode payment** (the storefront has only the live key). Please run your check.
+- **54.** An Afterpay mark sits after Klarna in the footer and on /cart, naming the method only. It is also in the legal pages' payment-method list.
+- **55.** The rule you gave is in. With the drawer open at 1366 and 390 wide, `elementFromPoint` at the right end of Checkout returns the button.
+- **56.** The chip reads "4-cartridge set $31.99 — $2.27 less than the 4 singles", built from `cartridge_count`, `pack_price` and `savings_amount`. It shows only on a line of 1. If the line has grown by the time of the swap, the swap takes one single off instead of the whole line.
+- **57.** We built it, so please keep sending the URLs. www redirects `/checkout/paypal-return` to `/checkout?paypal=return`, with PayPal's `token` kept, and `/checkout/paypal-cancel` to `/checkout?paypal=cancelled`. The order number and PayPal order id are saved in sessionStorage before `createOrder` returns. A return captures only when the token matches the saved order; otherwise it tells the buyer not to pay again and to check their email or call.
+- **58.** The label is fixed ("1 item"). `/cart/` now redirects 301 to `/cart`.
+- **49.** Both editors send `cost_source` on every line, and `supplier_cost_excl_gst` when the cost is known (a typed 0 counts; a blank box is never sent as 0). Editing the cost re-quotes. The badges are owner-only and advisory, and the level of 20 is one named constant. Your contract, measured live: a $0.50 GLC233BK line gave `below_web_price: true`, `gross_margin_pct: -8674`; a manual cost with none typed gave `null`. Quick Order still calls `/api/admin/invoices/quote`, which it has shared on purpose since the two endpoints agreed to the cent (`contract-pricing-quote-sep2026.test.js`). Its lines carry both fields.
+
+**Ask (52):** does the 201 from `POST /api/orders` for a card order carry `total_amount` and `shipping_cost`, as the points order does? Pay now compares `total_amount` with the total on screen before it confirms. When the field is absent, the check reports `'unverified'` and Pay confirms anyway. Please also say whether an `is_duplicate` replay carries it.

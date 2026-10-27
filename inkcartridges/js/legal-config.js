@@ -114,12 +114,18 @@
             { name: 'Render Services, Inc.',    purpose: 'Backend application hosting',                          region: 'United States' },
             { name: 'Vercel Inc.',              purpose: 'Frontend hosting and CDN',                             region: 'Global edge / United States' },
             { name: 'Cloudflare, Inc.',         purpose: 'Bot protection (Turnstile CAPTCHA) and edge security', region: 'Global edge / United States' },
-            { name: 'Google LLC',               purpose: 'Analytics (GA4), Customer Reviews, Tag Manager',       region: 'United States' },
+            { name: 'Google LLC',               purpose: 'Analytics (GA4), Tag Manager',                         region: 'United States' },
             // Item 35 (checklist 2026-10-22, owner-approved 13 Oct): the SAME words
             // the backend's prerendered privacy page carries (commit 54e6dce), so
             // the page bots read and the page people read match. js/gtag.js loads
             // the Ads tag (AW-18032498762) and UET (bat.bing.com) on every page.
             { name: 'Google Ads / Microsoft Advertising', purpose: 'Advertising measurement: ad-click identifiers, the value of orders that followed an ad click, and cookie-based audiences of site visitors', region: 'United States' },
+            // Item 50 (handoff 26 Oct, owner-approved 24 Oct, ERR-376): byte for
+            // byte the prerendered page's list item — the row reads "Google
+            // Customer Reviews" then this sentence. footer.js
+            // renderSurveyIfConsented hands Google these fields on the
+            // confirmation page (`google_customer_reviews` in the order).
+            { name: 'Google Customer Reviews', purpose: '(an optional survey Google may offer after an order) \u2014 only if you opt in: your email address, order number, delivery country, estimated delivery date and the barcodes of the products you ordered, so Google can send you the survey.', region: 'United States' },
             { name: 'New Zealand Post Ltd.',    purpose: 'Order delivery (tracked courier)',                     region: 'New Zealand' },
             { name: 'Aramex New Zealand Ltd.',  purpose: 'Order delivery (tracked courier)',                     region: 'New Zealand' },
         ],
@@ -199,7 +205,7 @@
         },
 
         // ─── Operations ───────────────────────────────────────────────────
-        paymentMethods: ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay', 'Klarna'],
+        paymentMethods: ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay', 'Klarna', 'Afterpay'],
         // Effective / last-updated date for all policy pages. Bumped on
         // any substantive policy change. Read by legal-page.js to render
         // the "Last updated" stamp.

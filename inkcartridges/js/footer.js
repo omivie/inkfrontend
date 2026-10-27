@@ -608,6 +608,11 @@
                             <rect x="7" y="9.5" width="34" height="11" rx="1.5" fill="#FFB3C7"/>
                             <text x="24" y="18" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7.5" font-weight="700" fill="#0A0B09">Klarna</text>
                         </svg>
+                        <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Afterpay">
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect x="5" y="9.5" width="38" height="11" rx="5.5" fill="#B2FCE4"/>
+                            <text x="24" y="18" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" font-weight="700" fill="#000000">Afterpay</text>
+                        </svg>
                     </div>
                 </div>
                 </div>

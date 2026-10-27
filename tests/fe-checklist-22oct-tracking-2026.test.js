@@ -183,7 +183,9 @@ test('§34 the set expires together after 90 days', () => {
 test('§34 both order bodies (card/points AND PayPal) spread clickIdFields', () => {
     const src = code('js/payment-page.js');
     assert.equal((src.match(/\.\.\.this\.clickIdFields\(\)/g) || []).length, 1, 'the _orderPayload body');
-    assert.equal((src.match(/\.\.\.self\.clickIdFields\(\)/g) || []).length, 1, 'the PayPal body');
+    // ERR-376: PayPal's body IS _orderPayload now — no second spread to keep in step.
+    assert.equal((src.match(/\.\.\.self\.clickIdFields\(\)/g) || []).length, 0, 'no hand-copied PayPal body');
+    assert.match(src, /self\._orderPayload\('paypal', 'paypal'\)/, 'the PayPal body');
     const m = src.match(/clickIdFields\(\) \{[\s\S]*?\n        \},/);
     assert.ok(m);
     const fn = new Function('getClickIds', `return ({ ${m[0].replace(/,\s*$/, '')} }).clickIdFields();`);

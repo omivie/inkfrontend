@@ -4174,6 +4174,14 @@ body.has-consent-banner #google-reviews-badge {
     bottom: var(--consent-banner-height, 0px) !important;
 }
 
+/* ERR-376 (handoff 26 Oct, item 55): the badge (z 2147483647) sat over the
+   right ~36px of the open cart drawer's Checkout button (drawer z 10000), so a
+   tap there opened Google's card instead of checkout. Hidden while the drawer
+   is open; !important beats Google's inline styles, as above. */
+html.cart-drawer-open #google-reviews-badge {
+    display: none !important;
+}
+
 /* ERR-238 — THE SAME DEFECT, THREE MORE TIMES, AND THESE THREE ARE OURS.
    ERR-233 fixed the one fixed bottom-anchored element it happened to be looking
    at. It is not the only one. Four elements on this site are

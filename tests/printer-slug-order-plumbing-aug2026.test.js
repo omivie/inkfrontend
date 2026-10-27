@@ -252,12 +252,14 @@ test('§6 the payment page projection carries it (trap 2)', () => {
 
 test('§6 BOTH order payload builders send it — per item and order level', () => {
     const pay = JS('payment-page.js');
-    // Stripe and PayPal are near-verbatim duplicates and must change together.
+    // ERR-376: Stripe and PayPal used to be near-verbatim duplicates; PayPal
+    // now calls the same _orderPayload, so ONE item map serves both rails.
     const perItem = (pay.match(/withPrinterSlug\(\{/g) || []).length;
-    assert.equal(perItem, 2, 'expected the Stripe and PayPal item maps to both use the helper');
+    assert.equal(perItem, 1, 'expected the one order body to use the helper');
     // The leading `.` keeps the method DEFINITION out of the count.
     const orderLevel = (pay.match(/\.orderLevelPrinterSlug\(items\)/g) || []).length;
-    assert.equal(orderLevel, 2, 'expected both order payloads to spread the order-level value');
+    assert.equal(orderLevel, 1, 'expected the one order body to spread the order-level value');
+    assert.match(pay, /self\._orderPayload\('paypal', 'paypal'\)/, 'PayPal uses the one body');
 });
 
 test('§6 the capture sites pass what they genuinely know', () => {
