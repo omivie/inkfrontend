@@ -758,7 +758,9 @@
             // re-check 2026-09-28 §5 #9, ERR-294).
             // A roll (source nulled, ERR-368) shows "Model: ITR80X80" — the
             // backend's prerender prints it, and parity is the rule.
-            const showModel = info.manufacturer_part_number && info.source !== 'compatible';
+            // A ribbon keeps it even when compatible (handoff 2 Nov, item 59,
+            // ERR-377): on a ribbon it is the group buyers search for ("Group 24").
+            const showModel = info.manufacturer_part_number && (info.source !== 'compatible' || info.category === 'ribbon');
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${showModel ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
             // Aggregate rating badge — surface accumulating ratings at the top of
@@ -3448,6 +3450,21 @@
             formWrap.hidden = false;
         },
 
+        /**
+         * { avg, count } from GET /api/products/:id/reviews/summary, or null when
+         * there is nothing to show (handoff 2 Nov, item 63, ERR-377). The endpoint
+         * sends `average_rating` / `review_count` (aliases `avg_rating` / `count`),
+         * the same average the rating link at the top reads. It never sent
+         * `average`, so the old read printed "NaN based on 1 review".
+         */
+        _reviewSummaryStats(summary) {
+            if (!summary) return null;
+            const avg = parseFloat(summary.average_rating ?? summary.avg_rating);
+            const count = parseInt(summary.review_count ?? summary.count, 10);
+            if (!(avg > 0) || !(count > 0)) return null;
+            return { avg, count };
+        },
+
         async loadReviews() {
             const info = this.product;
             if (!info || !info.id) return;
@@ -3464,10 +3481,11 @@
 
                 const reviews = (reviewsResp.ok && reviewsResp.data?.reviews) ? reviewsResp.data.reviews : [];
                 const summary = (summaryResp.ok && summaryResp.data) ? summaryResp.data : null;
+                const stats = this._reviewSummaryStats(summary);
 
                 // Render summary with distribution bars
                 const summaryEl = document.getElementById('reviews-summary');
-                if (summary && summary.count > 0) {
+                if (stats) {
                     const dist = summary.distribution || {};
                     const maxCount = Math.max(dist['5'] || 0, dist['4'] || 0, dist['3'] || 0, dist['2'] || 0, dist['1'] || 0, 1);
                     const distBars = [5, 4, 3, 2, 1].map(star => {
@@ -3482,12 +3500,14 @@
 
                     summaryEl.innerHTML = `
                         <div class="reviews-summary__overview">
-                            <div class="reviews-summary__stars">${this._renderStars(summary.average, 20)}</div>
-                            <span class="reviews-summary__avg">${Number(summary.average).toFixed(1)}</span>
-                            <span class="reviews-summary__count">based on ${summary.count} review${summary.count !== 1 ? 's' : ''}</span>
+                            <div class="reviews-summary__stars">${this._renderStars(stats.avg, 20)}</div>
+                            <span class="reviews-summary__avg">${stats.avg.toFixed(1)}</span>
+                            <span class="reviews-summary__count">based on ${stats.count} review${stats.count !== 1 ? 's' : ''}</span>
                         </div>
                         <div class="reviews-dist">${distBars}</div>
                     `;
+                } else if (summaryEl) {
+                    summaryEl.innerHTML = '';
                 }
 
                 // Render review list

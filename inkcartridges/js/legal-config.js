@@ -93,8 +93,10 @@
         phoneDisplay:  '027 474 0115',
         phoneE164:     '+64274740115',
         email:         'support@inkcartridges.co.nz',
-        hoursDisplay:  'Monday – Friday, 9:00am – 5:00pm NZT',
-        responseSLA:   'within one business day',
+        // No opening hours and no reply-time promise (backend handoff 2 Nov
+        // 2026, ERR-377: removed from every bot page on 1 Nov; customers are not
+        // met at the address). `hoursDisplay` / `responseSLA` are deleted, not
+        // blanked — never re-add them.
 
         // Geo (used for LocalBusiness schema + the static map embed on /contact).
         // Pinned to 1/37 Archibald Road — the actual office on the corner of
@@ -156,7 +158,7 @@
         // GET /api/admin/shipping/carriers. Nothing derives behaviour from this
         // array — see js/admin/utils/shipping-info.js.
         carriers:               ['NZ Post', 'Aramex (CourierPost network)', 'NZ Couriers'],
-        handlingTime:           'Auckland metro orders placed before 12:00pm NZT on a business day are dispatched same-day. Orders placed after 12:00pm, on weekends, or on NZ public holidays dispatch the next working day. Outside Auckland metro, dispatch is the next working day after order placement.',
+        handlingTime:           'Auckland metro orders placed before 12:00pm NZT on a business day are dispatched same-day. Orders placed after 12:00pm, on weekends, or on NZ public holidays dispatch the next working day.',
         shippingZones: [
             { zone: 'Auckland metro',        urban: '$7.00', rural: '$14.00', eta: '1–2 working days' },
             { zone: 'North Island',          urban: '$7.00 – $12.00', rural: '$14.00 – $20.00', eta: '1–3 working days' },
@@ -209,8 +211,8 @@
         // Effective / last-updated date for all policy pages. Bumped on
         // any substantive policy change. Read by legal-page.js to render
         // the "Last updated" stamp.
-        policyEffectiveDate:    '2026-09-05',
-        policyVersion:          '2026.09',
+        policyEffectiveDate:    '2026-11-07',
+        policyVersion:          '2026.11',
 
         // ─── Helpers ──────────────────────────────────────────────────────
         formatAddressOneLine: function () {

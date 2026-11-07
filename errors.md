@@ -40,6 +40,49 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-377 — Backend handoff 2 Nov, items 38, 46, 50, 59–63: review summary NaN, ribbon part number, printer-page promise line, /ribbons mirrors the bot page, /about copy, no opening hours or reply-time promises site-wide, no "Fast NZ Delivery" titles — SHIPPED (frontend) (2026-11-07)
+
+**Seen (backend handoff `fe-handoff-2nov2026.md`, from the owner's Downloads).** The backend changed its bot pages for items 59–62 on 1 Nov, so www and bot said different things: Kelston dispatch, opening hours, reply-time promises, "Fast NZ Delivery", "lower cost than genuine". Five product pages printed "NaN based on 1 review" after five reviews were approved on 1 Nov.
+
+**Measured before building (code + live API, READ-ONLY, 2026-11-07).**
+- **Already shipped, nothing to do:** 51 and 52 (ERR-376), 27 (ERR-371), 37 (ERR-372), and the 46 sort (`printer_fit`). Item 50's copy is ERR-376; only its date was left.
+- **63:** `GET /api/products/:id/reviews/summary` sends `average_rating` / `avg_rating` / `review_count` / `count`. It never sent `average`, but `loadReviews` read `summary.average`, so `Number(undefined).toFixed(1)` printed "NaN" and the stars came out empty.
+- **59:** C62XLBK's `manufacturer_part_number` is `IHP62BXL` and was already hidden. But ribbon `C-OKI-IO182-RIB-BK` is `source: compatible`, so its "Model: IO182" was hidden too. The handoff says ribbons keep it.
+- **46:** the printer endpoint carries no `trust_signals`, and `/api/site/trust` has no `compatibility_promise`. `GET /api/cart` has it, but a first-time visitor never reads the cart (ERR-269 / backend 9-28 §6). `GET /api/products/:sku` carries it.
+- **61:** www renders no printer FAQ or intro, because bots get the prerender. Every bot title (home, shop, brand, ink, toner, receipt, ribbons, printer) had dropped "— Fast NZ Delivery". The FE fallbacks still had it, and the printer `updateSEO` title was "Compatible Ink for <slug>".
+- **62:** the bot `/ribbons` copy matched the handoff. The page has an intro `<p>` right after its `<h1>`, plus FAQPage JSON-LD with 4 questions. www had neither.
+- **Site-wide (owner chose "site-wide", 7 Nov):** the same claims appeared on /faq, /shipping, /terms, /quote, /business, /bulk-pricing, the QR poster, the account sidebar, checkout, home, the footer (an Hours row + LocalBusiness `openingHoursSpecification`), the contact-form toasts, and "outside Auckland metro, dispatch is the next working day" in legal-config/shipping/faq. The home FAQ also said "more affordable alternative" and "at a lower cost". None of these are on any bot page.
+
+**Fix.**
+- **63:** `_reviewSummaryStats(summary)` returns `{avg, count}` from `average_rating ?? avg_rating` and `review_count ?? count`, or null. The summary renders only from it and is cleared when null.
+- **59:** `showModel = mpn && (source !== 'compatible' || category === 'ribbon')`. Rolls still print theirs (ERR-368).
+- **38:** the two Done lines now say "when these are likely running low". The heading is unchanged.
+- **46:** an empty `<p class="product-card__promise" data-promise hidden>` sits after `.product-card__footer` on in-stock printer-page cards. **Inside the footer it broke the card: it became the footer's last child, so `.product-card__footer-row:last-child` stopped matching and the Add shrank to 12px at 1280 (measured, then moved).** There is ONE reader, `_compatPromiseLabel` (site trust, then cart envelope, then the first card's `/api/products/:sku`, memoised). There is ONE writer, `renderPromiseLines`, which writes text and records `data-promise` ok|absent. It runs from `renderProducts`, so a sort or filter re-render refills the slots.
+- **50:** `policyEffectiveDate` is now 2026-11-07 and `policyVersion` 2026.11. The 5 static fallbacks match.
+- **60:** the 10 /about edits and 2 /genuine-vs-compatible edits are word for word. `hoursDisplay` / `responseSLA` and their `hours` / `response-sla` bindings are DELETED, and every sentence that used them was rewritten. The openingHours JSON-LD is gone from footer.js and the root index.html. The registered address stays.
+- **61:** fallback titles are now the bot's form ("… | InkCartridges.co.nz"). The printer fallback is `<display_name> <Toner|Ink> Cartridges`. `updateSEO` and the SeoMeta hint read `state.printerName` (`PrinterName.of`, i.e. `display_name`).
+- **62:** ribbons.html has the bot's title, H1, intro and 4 FAQ as a static fallback. `SeoMeta.extractHead` also returns `intro` and `faq` (from the FAQPage JSON-LD). `reconcile('category-ribbons')` mirrors the h1, intro and FAQ as text (`data-mirror` prerender|static), so stock counts never go stale. The cache prefix moved to v3. Intro and FAQ show on the unfiltered view only.
+
+**Measured.**
+- `tests/backend-handoff-2nov-2026.test.js`: 24/24 pass. **Negative control:** against HEAD's files, 22 of 24 fail. The 2 that pass are by design: the NaN control and the address-stays check.
+- `npm test` in a clean copy of the staged tree: 7392 pass / 0 fail, 3 of 3 runs. In the main checkout, `genuine-no-color-tile` died with **SIGSEGV** (a node crash, not an assertion) under the parallel run 2 of 2 times. It passes 5/5 alone. The clean copy of HEAD ran 0 crashes in 2 runs, and so did the clean copy of this tree in 3 runs, so this is the checkout's environment, not this change.
+- 8 pinned tests re-pointed, each pinning copy this handoff removes: footer Hours row, LocalBusiness openingHours, `_v2` cache prefix, ribbons h1, receipt title, business SLA, 4 SEO titles, the Done lines.
+- Playwright (localhost, live API):
+  - C604XLKCMY summary reads "5.0 based on 1 review".
+  - C62XLBK shows no supplier code; the OKI ribbon shows "Model: IO182"; MPRIBBON keeps its Model.
+  - HL-L2375DW: the line is on 5/5 cards, and the Add rect is identical with and without it at 1280×551, 1366×768 and 390×664.
+  - /ribbons title, H1, intro and FAQ come from the live bot page, with no horizontal scroll at 1366 or 390.
+  - /about, /contact, /faq: no banned copy and no openingHours. /privacy shows "7 November 2026".
+- `probe:handoff-2nov` (new, READ-ONLY): localhost 35/35. Live before the deploy: 6 pass (bot reference) / 29 fail (www), which is the negative control.
+
+**Not done here (named).**
+- Printer FAQ and intro copy (61.1) is backend-only.
+- `compatibility_promise` in `/api/site/trust` would save the one product read. Asked in the outbox.
+- The bot ribbons FAQ says "109 printer ribbons — 11 genuine and 98 compatible" while its intro says 81 printer ribbons. That is a backend data question; the outbox names it.
+
+**Rule.** www says only what the bot page says. A new claim needs a bot-page twin or an API field. Never re-add opening hours, reply-time promises, "Fast" without a number, or a price comparison with genuine.
+
+---
 ## ERR-376 — Backend handoff 26 Oct, items 49–58: a refused Pay press no longer re-adds the cart, privacy phone-call + Google Customer Reviews copy, postcode re-quote + total check, Afterpay, drawer badge, pack chip, PayPal redirect return, invoice margin badges — **SHIPPED (frontend)** (2026-10-28)
 
 **Seen (backend handoff `inbox/fe-handoff-26oct2026.md`).** Order 2026100602: a guest bought 3 x HP 63XL Black, two Pay presses were refused (email check), the third charged them for **9** ($486.81). Plus nine smaller items (49, 50, 52–58).

@@ -338,9 +338,12 @@ test('§5 trust icons are decorative; the strip is a list on an elevated band', 
 
 test('§6 the contact block is an <address> with a labelled <dl>', () => {
     assert.match(GRID, /<address class="footer-contact">[\s\S]*?<dl class="footer-contact__list">/);
-    for (const label of ['Office', 'Phone', 'Email', 'Hours']) {
+    for (const label of ['Office', 'Phone', 'Email']) {
         assert.match(GRID, new RegExp(`<dt>${label}</dt>`), `the contact block must label ${label}`);
     }
+    // Opening hours were removed from every bot page on 1 Nov 2026 (backend
+    // handoff 2 Nov, ERR-377); the footer must not bring them back.
+    assert.doesNotMatch(GRID, /<dt>Hours<\/dt>/, 'no opening hours in the footer (ERR-377)');
     assert.match(GRID, /href="tel:\$\{TRUST\.phoneE164\}"/);
     assert.match(GRID, /href="mailto:\$\{TRUST\.email\}"/);
     // Phone digits line up when they're tabular.

@@ -153,7 +153,7 @@ var CheckoutCompact = (function () {
             return response.json().then(function (data) {
                 if (response.ok && data.ok) {
                     showResult(resultEl, 'success',
-                        'Your request has been sent! We\'ll get back to you within 1 business day.');
+                        'Your request has been sent! We\'ll get back to you by email.');
                     form.reset();
                 } else {
                     var errMsg = (data.error && typeof data.error === 'object') ? data.error.message : (data.error || 'Failed to send request.');

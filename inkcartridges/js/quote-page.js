@@ -1135,7 +1135,7 @@
         var honeypot = val(els.form, 'website');
         // Bot honeypot — silently succeed. Don't reveal the trap.
         if (honeypot) {
-            showResult(resultEl, 'success', "Thanks — we'll email your quote within one business day.");
+            showResult(resultEl, 'success', "Thanks — we'll email your quote.");
             els.form.reset();
             if (turnstileCtl) turnstileCtl.reset();
             return;

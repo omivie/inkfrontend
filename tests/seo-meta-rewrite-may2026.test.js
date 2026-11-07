@@ -205,8 +205,10 @@ test('§4 extractHead is attribute-order independent and tolerant of single quot
 });
 test('§4 extractHead returns nulls for empty / missing tags', () => {
     // h1 since ERR-294 (the printer hub mirrors the prerender's visible heading).
-    sameShape(SeoMeta.extractHead(''), { title: null, description: null, h1: null });
-    sameShape(SeoMeta.extractHead('<html></html>'), { title: null, description: null, h1: null });
+    // intro + faq since ERR-377 (/ribbons mirrors the prerender's intro and FAQ).
+    const none = { title: null, description: null, h1: null, intro: null, faq: null };
+    sameShape(SeoMeta.extractHead(''), none);
+    sameShape(SeoMeta.extractHead('<html></html>'), none);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -400,11 +402,10 @@ test('§8 every listing surface builds a title <=60 and description <=155 (full 
 
 test('§8 toner title uses the ladder (full form would exceed 60)', () => {
     const b = SeoMeta.buildForSurface('category-toner', ctx(FULL_TRUST));
-    // "Toner Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz" is exactly
-    // 60 chars, so since ERR-300 the full rung fits — and it is byte-identical to
-    // the backend's toner prerender title (measured 2026-10-02).
+    // Byte-identical to the backend's toner prerender title, which dropped
+    // "— Fast NZ Delivery" on 1 Nov 2026 (measured 2026-11-07, ERR-377).
     assert.ok(b.title.length <= 60);
-    assert.equal(b.title, 'Toner Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz');
+    assert.equal(b.title, 'Toner Cartridges NZ | InkCartridges.co.nz');
     // The ladder itself still drops the suffix when the full rung is too long.
     const long = SeoMeta.titleLadder(['x'.repeat(61), 'short', 'shorter']);
     assert.equal(long, 'short');
@@ -508,7 +509,7 @@ test('§10 render() applies the trust-built fallback when the prerender fetch fa
         },
     });
     await S2.render({ surface: 'home' });
-    assert.ok(doc.title.startsWith('Ink Cartridges NZ — Fast NZ Delivery'), `title was "${doc.title}"`);
+    assert.equal(doc.title, 'Ink Cartridges NZ | InkCartridges.co.nz', `title was "${doc.title}"`);
     assert.ok(doc._metas['meta[name="description"]']._content.includes('NZ-owned since 2008.'));
 });
 
@@ -657,6 +658,8 @@ test('§13 home/shop fixed titles are <=60 chars', () => {
     const home = SeoMeta.buildForSurface('home', ctx(FULL_TRUST));
     const shop = SeoMeta.buildForSurface('shop-landing', ctx(FULL_TRUST));
     assert.ok(home.title.length <= 60 && shop.title.length <= 60);
-    assert.equal(home.title, 'Ink Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz');
-    assert.equal(shop.title, 'Ink & Toner NZ — Fast NZ Delivery | InkCartridges.co.nz');
+    // The prerender titles since 1 Nov 2026 (ERR-377); home's own is 62 chars, so
+    // its fallback is the next rung.
+    assert.equal(home.title, 'Ink Cartridges NZ | InkCartridges.co.nz');
+    assert.equal(shop.title, 'Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz');
 });

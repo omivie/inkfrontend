@@ -294,7 +294,7 @@ test('§5 no customer-facing page states same-day dispatch without Auckland metr
 
 test('§5 the SEO fallback titles carry no unqualified same-day promise', () => {
     const seo = stripComments(read('js/seo-meta.js'));
-    assert.ok(!/Same-Day Dispatch/.test(seo), 'titles must use the backend\'s "Fast NZ Delivery"');
+    assert.ok(!/Same-Day Dispatch/.test(seo), 'titles carry no unqualified same-day promise (and, since 1 Nov 2026, no "Fast NZ Delivery" either, ERR-377)');
     assert.match(seo, /Auckland metro: same-day dispatch by \$\{trust\.cutoff\} NZT\./);
 });
 

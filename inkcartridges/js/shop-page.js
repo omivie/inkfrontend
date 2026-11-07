@@ -988,6 +988,54 @@
         },
 
         /**
+         * `trust_signals.compatibility_promise.label` ("Not sure it fits? 30-day
+         * returns on unopened items"), read from the API, never typed here
+         * (handoff 2 Nov, item 46.4, ERR-377). Sources, first non-empty wins:
+         *   1. /api/site/trust (TrustStats): not sent today, asked in the outbox;
+         *   2. the cart envelope (GET /api/cart) when this page read one;
+         *   3. the first listed product's own payload (GET /api/products/:sku,
+         *      edge-cached): a first-time visitor never reads /api/cart.
+         * Memoised once found; '' when no source carries it.
+         */
+        async _compatPromiseLabel(sku) {
+            if (this._promiseLabel) return this._promiseLabel;
+            const pick = (ts) => {
+                const l = ts && ts.compatibility_promise && ts.compatibility_promise.label;
+                return typeof l === 'string' ? l.trim() : '';
+            };
+            let label = '';
+            try { label = pick(typeof TrustStats !== 'undefined' ? await TrustStats.raw() : null); } catch { label = ''; }
+            if (!label && typeof Cart !== 'undefined' && Cart.serverCartMeta) label = pick(Cart.serverCartMeta.trust_signals);
+            if (!label && sku && typeof API !== 'undefined') {
+                try {
+                    const r = await API.getProduct(sku);
+                    label = pick(r && r.ok && r.data && r.data.trust_signals);
+                } catch { label = ''; }
+            }
+            if (label) this._promiseLabel = label;
+            return label;
+        },
+
+        /**
+         * ONE writer for the promise line under each Add on a printer page
+         * (item 46.4). Fills every `[data-promise]` slot under `root` as text;
+         * `data-promise` records ok | absent so a missing label is visible in
+         * the DOM, and the slot stays hidden rather than showing typed copy.
+         */
+        async renderPromiseLines(root) {
+            const slots = root ? Array.from(root.querySelectorAll('[data-promise]')) : [];
+            if (!slots.length) return 'none';
+            const card = slots[0].closest('[data-sku]');
+            const label = await this._compatPromiseLabel(card && card.getAttribute('data-sku'));
+            for (const el of slots) {
+                el.textContent = label;
+                el.hidden = !label;
+                el.dataset.promise = label ? 'ok' : 'absent';
+            }
+            return label ? 'ok' : 'absent';
+        },
+
+        /**
          * Where an exact search match should go instead of the results list
          * (item 37), or null. PURE.
          *   {kind:'product', href:'/products/…'}  from `exact_product.url`
@@ -5559,6 +5607,10 @@
             // Item 43.1 (ERR-369): the first product card is on the page — one
             // `grid_ready <ms>` per page load (ClientBeacon dedupes later grids).
             if (sortedProducts.length && typeof ClientBeacon !== 'undefined') ClientBeacon.gridReady();
+            // Item 46.4 (ERR-377): the promise line under each Add on a printer
+            // page. Here so a sort / filter re-render refills its slots too.
+            // async: a fault becomes a rejection, never a throw into the grid.
+            if (typeof this.renderPromiseLines === 'function') this.renderPromiseLines(container).catch(() => {});
 
             // Bind image error fallback handlers
             if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
@@ -5880,6 +5932,7 @@
                                 })()}
                             </div>
                         </div>
+                        ${inStock && this.state.level === 'printer-products' ? '<p class="product-card__promise" data-promise hidden></p>' : ''}
                     </div>
                 </a>
                 <button type="button" class="favourite-btn product-card__fav-btn ${isFav ? 'favourite-btn--active' : ''}"
@@ -6311,8 +6364,8 @@
                     if (receiptListing) {
                         // The prerender's own <title>; SeoMeta.render() below
                         // reconciles the description byte-for-byte as well.
-                        title       = 'Thermal Receipt & EFTPOS Rolls NZ — Fast NZ Delivery';
-                        description = 'Thermal EFTPOS and receipt printer rolls, bond and 2-ply carbonless rolls. Fast NZ delivery.';
+                        title       = 'Thermal Receipt & EFTPOS Rolls NZ | InkCartridges.co.nz';
+                        description = 'Thermal EFTPOS and receipt printer rolls, bond and 2-ply carbonless rolls. Free shipping over $100.';
                         break;
                     }
                     const codeStr = code ? code.replace(/-/g, ' ').toUpperCase() : '';
@@ -6326,12 +6379,17 @@
                     break;
                 case 'printer-products':
                 case 'printer-model-products': {
+                    // The printer's display_name (state.printerName, set by
+                    // loadPrinterProducts via PrinterName.of) — never the URL
+                    // slug — and no "Compatible Ink" on a genuine-only printer
+                    // (handoff 2 Nov, item 61.3, ERR-377). SeoMeta then mirrors
+                    // the prerender's exact title over this.
                     const printerDisplay = this.state.printerModelDisplay || this.state.printerModel || this.state.printer || '';
                     const pBrandName = this.state.printerBrand
                         ? this.brandName(this.state.printerBrand) : '';
-                    const printerFull = [pBrandName, printerDisplay].filter(Boolean).join(' ');
-                    title       = `Compatible Ink for ${printerFull} NZ | InkCartridges.co.nz`;
-                    description = `Shop compatible ink cartridges for the ${printerFull}. Free NZ-wide shipping over $100.`;
+                    const printerFull = this.state.printerName || [pBrandName, printerDisplay].filter(Boolean).join(' ');
+                    title       = `${printerFull} Cartridges | InkCartridges.co.nz`;
+                    description = `Genuine and compatible cartridges for the ${printerFull}. Free NZ-wide shipping over $100.`;
                     break;
                 }
                 default: // brands level
@@ -6419,7 +6477,7 @@
             // window.location and is a no-op when there is no prerender. The
             // hints feed only the fail-open fallback copy (prerender down).
             if (typeof SeoMeta !== 'undefined') {
-                const printerFull = [
+                const printerFull = this.state.printerName || [
                     this.state.printerBrand
                         ? this.brandName(this.state.printerBrand)
                         : '',

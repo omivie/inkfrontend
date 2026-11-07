@@ -7775,6 +7775,22 @@ a.account-review-card__product:focus-visible {
     text-align: left;
 }
 
+/* /ribbons intro + FAQ: the bot page's words (handoff 2 Nov, item 62, ERR-377). */
+.ribbons-intro {
+    max-width: 72ch;
+    margin: 0 0 var(--spacing-4, 16px);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-text);
+}
+.ribbons-faq { padding-top: var(--spacing-xl, 32px); }
+.ribbons-faq__title {
+    font-size: var(--font-size-xl);
+    margin: 0 0 var(--spacing-md, 16px);
+    color: var(--color-text-heading);
+}
+.ribbons-faq .faq-list { margin: 0; }
+
 
 /* ── Shop Section Cards ── */
 .shop-section-card {
@@ -10473,12 +10489,6 @@ body.page-shop {
     font-style: normal;
     font-weight: 500;
     line-height: 1.45;
-}
-
-.contact-card__hint {
-    margin-top: 2px;
-    font-size: 0.82rem;
-    color: var(--color-text-muted, #6b7280);
 }
 
 .contact-card__footnote {

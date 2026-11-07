@@ -1265,13 +1265,25 @@ const RibbonsPage = {
         } else if (activeBrand) {
             title.textContent = `${activeBrand} Typewriter & Printer Ribbons`;
         } else {
-            title.textContent = 'Typewriter & Printer Ribbons';
+            // The bot page's h1 (handoff 2 Nov, item 62, ERR-377): mirrored from
+            // the prerender when SeoMeta has it, else the same words typed.
+            const mirrored = (typeof SeoMeta !== 'undefined')
+                ? SeoMeta.h1For('/api/prerender/category/ribbons') : null;
+            title.textContent = mirrored || 'Typewriter and Printer Ribbons NZ';
         }
         title.hidden = false;
 
+        // The intro + FAQ describe the whole /ribbons landing: unfiltered only.
+        const landing = !activeBrand && !model;
+        for (const id of ['ribbons-intro', 'ribbons-faq']) {
+            const el = document.getElementById(id);
+            if (el) el.hidden = !landing;
+        }
+
         // Update document title to match
-        const docPrefix = activeBrand ? `${activeBrand} ` : '';
-        document.title = `${docPrefix}Typewriter & Printer Ribbons | InkCartridges.co.nz`;
+        document.title = activeBrand
+            ? `${activeBrand} Typewriter & Printer Ribbons | InkCartridges.co.nz`
+            : 'Typewriter & Printer Ribbons NZ | InkCartridges.co.nz';
 
         // SERP title + meta-description parity (seo-meta-rewrite-may2026).
         // /ribbons is served the `category/ribbons` prerender by middleware

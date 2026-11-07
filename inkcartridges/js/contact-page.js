@@ -141,7 +141,7 @@
 
         // Bot honeypot — silently succeed. Don't reveal the trap.
         if (honeypot) {
-            showResult(resultEl, 'success', "Thanks — we'll be in touch within one business day.");
+            showResult(resultEl, 'success', "Thanks — we'll be in touch by email.");
             form.reset();
             ts.reset();
             return;
@@ -182,7 +182,7 @@
 
         send(payload).then(function () {
             showResult(resultEl, 'success',
-                "Thanks " + payload.name.split(' ')[0] + " — we'll reply within one business day. " +
+                "Thanks " + payload.name.split(' ')[0] + " — we'll reply by email. " +
                 "If it's urgent, call 027 474 0115."
             );
             form.reset();

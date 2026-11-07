@@ -295,8 +295,7 @@
             if (!el || !L) return;   // the static sentence stays — it is still true
             const who = L.invoice && L.invoice.contactName ? `${esc(L.invoice.contactName)} on ` : '';
             el.innerHTML = `Call ${who}<a href="tel:${esc(L.phoneE164)}">${esc(L.phoneDisplay)}</a>`
-                + ` or email <a href="mailto:${esc(L.email)}">${esc(L.email)}</a>.`
-                + (L.hoursDisplay ? ` ${esc(L.hoursDisplay)}.` : '');
+                + ` or email <a href="mailto:${esc(L.email)}">${esc(L.email)}</a>.`;
         },
 
         /**
@@ -352,7 +351,6 @@
             if (!box || !form) return;
             const L = typeof LegalConfig !== 'undefined' ? LegalConfig : {};
             const talk = `Please call <a href="tel:${esc(L.phoneE164 || '+64274740115')}">${esc(L.phoneDisplay || '027 474 0115')}</a> or email <a href="mailto:${esc(L.email || 'support@inkcartridges.co.nz')}">${esc(L.email || 'support@inkcartridges.co.nz')}</a>.`;
-            const sla = esc(L.responseSLA || 'within one business day');
             const heading = $('business-apply-heading');
             form.hidden = true;
             this._applyEndpoint = null;
@@ -374,7 +372,7 @@
             const status = state.status;
             const canApply = state.canApply;
             if (status === 'pending') {
-                box.innerHTML = `<p class="business-gate__msg"><strong>We have your application.</strong> We reply ${sla}. Questions in the meantime? ${talk}</p>`;
+                box.innerHTML = `<p class="business-gate__msg"><strong>We have your application.</strong> We'll email you when it has been reviewed. Questions in the meantime? ${talk}</p>`;
                 return;
             }
             if (status === 'suspended' || status === 'closed' || canApply === false) {
@@ -389,7 +387,7 @@
             if (heading) heading.textContent = reapply ? 'Apply again' : 'Apply for a business account';
             box.innerHTML = reapply
                 ? '<p class="business-gate__msg">Your last application wasn\'t approved. If something has changed, you can apply again below.</p>'
-                : '<p class="business-gate__msg">Tell us about your business. We reply ' + sla + '.</p>';
+                : '<p class="business-gate__msg">Tell us about your business.</p>';
             form.hidden = false;
             this.prefillApply(form);
             this.wireApply(form);
@@ -504,8 +502,7 @@
 
             if (res && res.ok) {
                 form.hidden = true;
-                if (box) box.innerHTML = '<p class="business-gate__msg"><strong>Thanks, we have your application.</strong> We reply '
-                    + esc((typeof LegalConfig !== 'undefined' && LegalConfig.responseSLA) || 'within one business day') + '.</p>';
+                if (box) box.innerHTML = '<p class="business-gate__msg"><strong>Thanks, we have your application.</strong> We\'ll email you when it has been reviewed.</p>';
                 Business.reset();
                 return;
             }

@@ -873,6 +873,15 @@
     margin-top: auto;
 }
 
+/* Printer pages: trust_signals.compatibility_promise.label under the Add
+   (handoff 2 Nov, item 46.4, ERR-377). Below the Add, so the Add never moves. */
+.product-card__promise {
+    margin: 2px 0 0;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    color: var(--color-text-light, #475569);
+}
+
 .product-card__footer-row {
     display: flex;
     align-items: center;

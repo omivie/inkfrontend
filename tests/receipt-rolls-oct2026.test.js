@@ -263,7 +263,8 @@ test('§3 SeoMeta mirrors the edge for the three listing URLs, and not for narro
 
 test('§3 the fail-open title is the prerender\'s own title, and the copy claims no cartridges', () => {
     const built = SeoMeta.buildForSurface('category-receipt', { trust: {} });
-    assert.equal(built.title, 'Thermal Receipt & EFTPOS Rolls NZ — Fast NZ Delivery');
+    // The prerender's title since 1 Nov 2026 (no "— Fast NZ Delivery", ERR-377).
+    assert.equal(built.title, 'Thermal Receipt & EFTPOS Rolls NZ | InkCartridges.co.nz');
     assert.doesNotMatch(built.description, /genuine|compatible|cartridge/i);
 });
 
@@ -287,7 +288,7 @@ test('§3 reconcile mirrors the prerender h1 onto the roll listing (visually hid
 
 test('§3 the SPA\'s own h1 constant is byte-identical to the prerender\'s', () => {
     assert.match(SHOP_SRC, /RECEIPT_H1: 'Receipt Rolls NZ — Buy Online at InkCartridges\.co\.nz'/);
-    assert.match(SHOP_SRC, /title {7}= 'Thermal Receipt & EFTPOS Rolls NZ — Fast NZ Delivery';/);
+    assert.match(SHOP_SRC, /title {7}= 'Thermal Receipt & EFTPOS Rolls NZ \| InkCartridges\.co\.nz';/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

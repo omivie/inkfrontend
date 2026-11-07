@@ -83,8 +83,6 @@
             'phone-href':             'tel:' + cfg.phoneE164,
             'email':                  cfg.email,
             'email-href':             'mailto:' + cfg.email,
-            'hours':                  cfg.hoursDisplay,
-            'response-sla':           cfg.responseSLA,
             'free-threshold':         cfg.currencySymbol + cfg.freeShippingThreshold,
             'currency':               cfg.currency,
             'return-window':          String(cfg.returnWindowDays),

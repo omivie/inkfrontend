@@ -289,7 +289,7 @@ test('§E reconcile on the PRINTER surface writes the visible H1; any other surf
     assert.deepEqual(title.classList.removed, ['visually-hidden']);
     assert.equal(S.h1For(path), 'Brother HL-L2375DW Toner NZ', 'shop-page reads the same answer');
     assert.equal(S.h1For('/api/prerender/printer/x/y'), null);
-    assert.match(S.PRERENDER_CACHE_PREFIX, /_v2:$/, 'v1 heads carry no h1 — bumped');
+    assert.match(S.PRERENDER_CACHE_PREFIX, /_v3:$/, 'v1 heads carry no h1, v2 no intro/faq (ERR-377) — bumped');
 });
 
 test('§E updateTitle prints the mirrored H1 on a printer hub, the printer name until it lands', () => {
@@ -550,10 +550,10 @@ test('§I every heading writer goes through sectionTitleText; search sets its ti
     assert.match(html, /products-section__badge--compatible">Compatible<\/span>/, 'the badge still says it once');
 });
 
-test('§I /ribbons: the page title appears once, as the h1', () => {
+test('§I /ribbons: the page title appears once, as the h1 (the bot page\'s words since 1 Nov, ERR-377)', () => {
     const html = read('html/ribbons.html').replace(/<!--[\s\S]*?-->/g, '');
-    assert.equal((html.match(/Typewriter &amp; Printer Ribbons<\/h[12]>/g) || []).length, 1);
-    assert.match(html, /<h1 class="drilldown-title" id="drilldown-title">Typewriter &amp; Printer Ribbons<\/h1>/);
+    assert.equal((html.match(/Typewriter (?:&amp;|and) Printer Ribbons(?: NZ)?<\/h[12]>/g) || []).length, 1);
+    assert.match(html, /<h1 class="drilldown-title" id="drilldown-title">Typewriter and Printer Ribbons NZ<\/h1>/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

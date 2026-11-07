@@ -625,8 +625,8 @@
                     return "We've noted your request, but product recommendation emails are switched off in your account, and reorder reminders follow that setting. Turn them back on under email preferences in your account.";
                 default:
                     return d.reminders_resumed === true
-                        ? "Done — reorder reminders are back on. We'll email you before you run out."
-                        : "Done — we'll email you before you run out.";
+                        ? "Done — reorder reminders are back on. We'll email you when these are likely running low."
+                        : "Done — we'll email you when these are likely running low.";
             }
         },
 

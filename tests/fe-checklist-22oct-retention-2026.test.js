@@ -54,8 +54,8 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 test('§38 the five outcome lines, in the backend\'s words', () => {
     const f = method('js/order-confirmation-page.js', 'reminderOutcome');
     const E = 'support@inkcartridges.co.nz';
-    assert.equal(f({ delivery_blocked: null, reminders_resumed: false }, E), "Done — we'll email you before you run out.");
-    assert.equal(f({ delivery_blocked: null, reminders_resumed: true }, E), "Done — reorder reminders are back on. We'll email you before you run out.");
+    assert.equal(f({ delivery_blocked: null, reminders_resumed: false }, E), "Done — we'll email you when these are likely running low.");
+    assert.equal(f({ delivery_blocked: null, reminders_resumed: true }, E), "Done — reorder reminders are back on. We'll email you when these are likely running low.");
     assert.equal(f({ delivery_blocked: 'bounced' }, E), `We've noted your request, but emails to this address have been bouncing, so reminders can't reach you. Contact us at ${E} to update your email address.`);
     assert.equal(f({ delivery_blocked: 'unsubscribed' }, E), `We've noted your request, but this address is unsubscribed from our emails, so we can't send reminders. To get them, contact us at ${E} and we'll switch emails back on.`);
     assert.equal(f({ delivery_blocked: 'recommendations_off' }, E), "We've noted your request, but product recommendation emails are switched off in your account, and reorder reminders follow that setting. Turn them back on under email preferences in your account.");

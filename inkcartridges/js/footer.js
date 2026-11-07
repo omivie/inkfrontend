@@ -318,12 +318,9 @@
         priceRange: '$$',
         currenciesAccepted: 'NZD',
         areaServed: { '@type': 'Country', name: 'New Zealand' },
-        openingHoursSpecification: {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
-          opens: '09:00',
-          closes: '17:00',
-        },
+        // No openingHoursSpecification: the backend removed opening hours from
+        // its LocalBusiness on 1 Nov 2026 (customers are not met at the
+        // address; handoff 2 Nov, ERR-377). Never re-add.
       },
     };
   }
@@ -463,10 +460,6 @@
                                 <div class="footer-contact__row">
                                     <dt>Email</dt>
                                     <dd><a data-legal-bind="email-href" href="mailto:${TRUST.email}"><span data-legal-bind="email">${TRUST.email}</span></a></dd>
-                                </div>
-                                <div class="footer-contact__row">
-                                    <dt>Hours</dt>
-                                    <dd>Mon&ndash;Fri, 9am &ndash; 5pm</dd>
                                 </div>
                             </dl>
                         </address>

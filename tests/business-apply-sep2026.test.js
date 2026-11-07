@@ -90,7 +90,7 @@ function load({ statusReply, postReply, valueProps, user } = {}) {
         },
         DebugLog: { warn: (...a) => warns.push(a.join(' ')), log() {} },
         Security: { escapeHtml: (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) },
-        LegalConfig: { phoneE164: '+64274740115', phoneDisplay: '027 474 0115', email: 'support@inkcartridges.co.nz', responseSLA: 'within one business day', hoursDisplay: 'Mon–Fri', invoice: { contactName: 'Trevor Walker' } },
+        LegalConfig: { phoneE164: '+64274740115', phoneDisplay: '027 474 0115', email: 'support@inkcartridges.co.nz', invoice: { contactName: 'Trevor Walker' } },
         Auth: {
             initialized: true,
             isAuthenticated: () => !!user,
@@ -200,7 +200,9 @@ test('§2 each state renders the right panel and endpoint', () => {
     const pending = run({ status: 'pending', canApply: false });
     assert.equal(pending.formShown, false);
     assert.match(pending.html, /We have your application/);
-    assert.match(pending.html, /within one business day/);
+    // No reply-time promise (backend handoff 2 Nov, ERR-377).
+    assert.match(pending.html, /We'll email you when it has been reviewed/);
+    assert.doesNotMatch(pending.html, /business day/);
 
     for (const s of [{ status: 'suspended', canApply: false }, { status: 'closed', canApply: null }, { status: 'personal', canApply: false }]) {
         const r = run(s);

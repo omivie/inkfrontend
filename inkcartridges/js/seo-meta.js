@@ -64,7 +64,7 @@ const SeoMeta = {
 
     // v2 (ERR-294): a cached head now carries the prerender's <h1> too; a v1
     // entry has none and would leave the printer H1 on its fallback for an hour.
-    PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v2:',
+    PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v3:',  // v3: heads carry intro + faq (ERR-377)
     PRERENDER_TTL_MS: 60 * 60 * 1000, // 1h listings (products use API seo, not this)
 
     _seq: 0,            // bumped on every render() — guards against stale async applies
@@ -147,11 +147,14 @@ const SeoMeta = {
 
     /**
      * Pull the decoded <title> + <meta name="description"> + first <h1> out of
-     * a prerender HTML document. Returns { title, description, h1 } (any may be
-     * null). The h1 is text only: inner tags are dropped before decoding.
+     * a prerender HTML document, plus the intro (the <p> directly after that
+     * <h1>) and the FAQ (FAQPage JSON-LD `mainEntity`, as [{ q, a }]). Returns
+     * { title, description, h1, intro, faq } (any may be null). Text only:
+     * inner tags are dropped before decoding. intro + faq feed /ribbons
+     * (handoff 2 Nov, item 62, ERR-377).
      */
     extractHead(html) {
-        if (typeof html !== 'string' || !html) return { title: null, description: null, h1: null };
+        if (typeof html !== 'string' || !html) return { title: null, description: null, h1: null, intro: null, faq: null };
         const titleM = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
         // meta name="description" — attribute order independent
         let desc = null;
@@ -166,11 +169,36 @@ const SeoMeta = {
         }
         const h1M = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
         const h1 = h1M ? this.decodeEntities(h1M[1].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim() : '';
+        const introM = h1M ? /^\s*<p\b[^>]*>([\s\S]*?)<\/p>/i.exec(html.slice(h1M.index + h1M[0].length)) : null;
+        const intro = introM ? this.decodeEntities(introM[1].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim() : '';
         return {
             title: titleM ? this.decodeEntities(titleM[1]).trim() : null,
             description: desc,
             h1: h1 || null,
+            intro: intro || null,
+            faq: this.extractFaq(html),
         };
+    },
+
+    /** [{ q, a }] from the first FAQPage JSON-LD block, or null. PURE. */
+    extractFaq(html) {
+        const re = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+        let m;
+        while ((m = re.exec(html)) !== null) {
+            let data;
+            try { data = JSON.parse(m[1]); } catch { continue; }
+            const nodes = [].concat(data || []).flatMap((d) => (d && Array.isArray(d['@graph']) ? d['@graph'] : [d]));
+            const page = nodes.find((d) => d && d['@type'] === 'FAQPage' && Array.isArray(d.mainEntity));
+            if (!page) continue;
+            const faq = page.mainEntity
+                .map((e) => ({
+                    q: String((e && e.name) || '').trim(),
+                    a: String((e && e.acceptedAnswer && e.acceptedAnswer.text) || '').trim(),
+                }))
+                .filter((e) => e.q && e.a);
+            return faq.length ? faq : null;
+        }
+        return null;
     },
 
     // ── surface + prerender-path mapping (mirrors middleware.js exactly) ──────
@@ -402,8 +430,11 @@ const SeoMeta = {
 
     // Same-day dispatch is an AUCKLAND METRO promise only (BF-078); the
     // backend dropped every unqualified "same-day dispatch" from its titles and
-    // descriptions on 2026-09-30. Titles copy its "— Fast NZ Delivery" exactly
-    // (measured on the prerender 2026-10-02, ERR-300). The description clause
+    // descriptions on 2026-09-30. Titles copy the prerender's own form, which
+    // since 1 Nov 2026 ends "| InkCartridges.co.nz" with no "— Fast NZ Delivery"
+    // ("fast" with no number is gone from every bot title; handoff 2 Nov,
+    // item 61.2, ERR-377 — measured on home, shop, brand, ink, toner, receipt,
+    // ribbons and printer prerenders 2026-11-07). The description clause
     // is a shorter, equally qualified form of its "Auckland metro orders by <cutoff>
     // NZT dispatch same day." — the full sentence pushed home/shop past 155
     // chars and truncation cut "Free shipping over $100" down to a stub.
@@ -418,8 +449,9 @@ const SeoMeta = {
     _buildHome(ctx) {
         const t = this._trustClauses(ctx.trust);
         const title = this.titleLadder([
-            'Ink Cartridges NZ — Fast NZ Delivery | InkCartridges.co.nz',
-            'Ink Cartridges NZ — Fast NZ Delivery',
+            // The prerender's "Ink Cartridges NZ — Genuine & Compatible | …" is
+            // 62 chars, over the 60 cap, so the fallback starts one rung down.
+            'Ink Cartridges NZ | InkCartridges.co.nz',
             'Ink Cartridges NZ',
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -435,8 +467,8 @@ const SeoMeta = {
     _buildShop(ctx) {
         const t = this._trustClauses(ctx.trust);
         const title = this.titleLadder([
-            'Ink & Toner NZ — Fast NZ Delivery | InkCartridges.co.nz',
-            'Ink & Toner NZ — Fast NZ Delivery',
+            'Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz',
+            'Ink & Toner NZ | InkCartridges.co.nz',
             'Ink & Toner NZ',
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -452,8 +484,7 @@ const SeoMeta = {
         const t = this._trustClauses(ctx.trust);
         const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
         const title = this.titleLadder([
-            `${label} — Fast NZ Delivery | InkCartridges.co.nz`,
-            `${label} — Fast NZ Delivery`,
+            `${label} | InkCartridges.co.nz`,
             label,
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -472,7 +503,8 @@ const SeoMeta = {
     _buildReceipt(ctx) {
         const t = this._trustClauses(ctx.trust);
         const title = this.titleLadder([
-            'Thermal Receipt & EFTPOS Rolls NZ — Fast NZ Delivery',
+            'Thermal Receipt & EFTPOS Rolls NZ | InkCartridges.co.nz',
+            'Thermal Receipt & EFTPOS Rolls NZ',
             'Receipt Rolls NZ',
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -490,8 +522,7 @@ const SeoMeta = {
         // Brand prerender is category-agnostic (middleware drops ?category), so
         // the fallback omits the category too — matching what the bot receives.
         const title = this.titleLadder([
-            `${brand} NZ — Fast NZ Delivery | InkCartridges.co.nz`,
-            `${brand} NZ — Fast NZ Delivery`,
+            `${brand} NZ | InkCartridges.co.nz`,
             `${brand} NZ`,
         ]);
         const description = this.truncateDescription(this._joinClauses([
@@ -543,12 +574,14 @@ const SeoMeta = {
         const t = this._trustClauses(ctx.trust);
         const printer = ctx.printerDisplay || this._titleCaseSlug(ctx.printerSlug);
         if (!printer) return null;
-        const title = this.titleLadder([
-            `${printer} Cartridges — Fast NZ Delivery | InkCartridges.co.nz`,
-            `${printer} Cartridges — Fast NZ Delivery`,
-            `${printer} Cartridges`,
-        ]);
+        // "<Printer> Toner Cartridges | …" like the prerender when the listing
+        // is all one kind; "<Printer> Cartridges | …" otherwise.
         const listing = ctx.printerListing;
+        const kind = listing && listing.noun ? `${listing.noun.charAt(0).toUpperCase()}${listing.noun.slice(1)} ` : '';
+        const title = this.titleLadder([
+            `${printer} ${kind}Cartridges | InkCartridges.co.nz`,
+            `${printer} ${kind}Cartridges`,
+        ]);
         const mirrored = listing ? this.printerPageDescription({
             printer, count: listing.count, sources: listing.sources, noun: listing.noun,
             threshold: ctx.free, cutoff: ctx.trust.cutoff, returnsDays: ctx.trust.returnsDays,
@@ -569,7 +602,7 @@ const SeoMeta = {
             case 'shop-landing':     return this._buildShop(ctx);
             case 'category-ink':     return this._buildCategory(ctx, 'Ink Cartridges NZ', 'ink cartridges');
             case 'category-toner':   return this._buildCategory(ctx, 'Toner Cartridges NZ', 'toner cartridges');
-            case 'category-ribbons': return this._buildCategory(ctx, 'Printer Ribbons NZ', 'printer ribbons');
+            case 'category-ribbons': return this._buildCategory(ctx, 'Typewriter & Printer Ribbons NZ', 'typewriter & printer ribbons');
             case 'category-drums':   return this._buildCategory(ctx, 'Printer Drums & Supplies NZ', 'drum units & supplies');
             case 'category-label':   return this._buildCategory(ctx, 'Label Tape NZ', 'label tapes');
             case 'category-paper':   return this._buildCategory(ctx, 'Photo Paper NZ', 'photo paper');
@@ -671,6 +704,15 @@ const SeoMeta = {
             this._h1 = { path: prerenderPath, h1: head.h1 };
             this._setH1(head.h1, false);
         }
+        // /ribbons (handoff 2 Nov, item 62, ERR-377): visible h1, intro and FAQ
+        // are the prerender's, so the stock counts in them never go stale.
+        if (surface === 'category-ribbons') {
+            if (head.h1) {
+                this._h1 = { path: prerenderPath, h1: head.h1 };
+                this._setH1(head.h1, true);
+            }
+            this._setRibbonsCopy(head);
+        }
         return true;
     },
 
@@ -680,6 +722,41 @@ const SeoMeta = {
         if (this._h1 && this._h1.path === prerenderPath) return this._h1.h1;
         const head = this._readPrerenderCache(prerenderPath);
         return (head && head.h1) || null;
+    },
+
+    /**
+     * Mirror the prerender's intro + FAQ into #ribbons-intro / #ribbons-faq-list
+     * as text. A missing part leaves the static copy in place (the page's own
+     * words, dated in ribbons.html) and says so in `data-mirror`.
+     */
+    _setRibbonsCopy(head) {
+        if (typeof document === 'undefined') return;
+        const intro = document.getElementById('ribbons-intro');
+        if (intro) {
+            if (head.intro) intro.textContent = head.intro;
+            intro.dataset.mirror = head.intro ? 'prerender' : 'static';
+        }
+        const list = document.getElementById('ribbons-faq-list');
+        if (list) {
+            if (Array.isArray(head.faq) && head.faq.length) {
+                list.textContent = '';
+                for (const { q, a } of head.faq) {
+                    const item = document.createElement('details');
+                    item.className = 'faq-item';
+                    const sum = document.createElement('summary');
+                    sum.className = 'faq-question';
+                    sum.textContent = q;
+                    const body = document.createElement('div');
+                    body.className = 'faq-answer';
+                    const p = document.createElement('p');
+                    p.textContent = a;
+                    body.appendChild(p);
+                    item.append(sum, body);
+                    list.appendChild(item);
+                }
+            }
+            list.dataset.mirror = (Array.isArray(head.faq) && head.faq.length) ? 'prerender' : 'static';
+        }
     },
 
     _setH1(text, reveal = true) {

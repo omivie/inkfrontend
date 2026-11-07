@@ -256,8 +256,9 @@ test('§5 the transparency facts survive, and come from LegalConfig', () => {
     const local = docs['site-jsonld-localbusiness'];
     assert.equal(local['@type'], 'LocalBusiness');
     assert.deepEqual(local.geo, { '@type': 'GeoCoordinates', latitude: -36.9005, longitude: 174.6669 });
-    assert.deepEqual(local.openingHoursSpecification.dayOfWeek,
-        ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+    // Opening hours left the backend's LocalBusiness on 1 Nov 2026 (customers
+    // are not met at the address; handoff 2 Nov, ERR-377).
+    assert.equal(local.openingHoursSpecification, undefined);
 });
 
 test('§5 every document is serialisable — a broken one reports as NO structured data', () => {
