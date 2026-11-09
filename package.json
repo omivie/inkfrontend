@@ -104,6 +104,7 @@
     "probe:backend-25oct": "node scripts/probe-backend-25oct.mjs",
     "probe:handoff-26oct": "node scripts/probe-handoff-26oct.mjs",
     "probe:handoff-2nov": "node scripts/probe-handoff-2nov.mjs",
+    "probe:search-inactive": "node scripts/probe-search-inactive.mjs",
     "probe:guides": "node scripts/probe-guides.mjs",
     "probe:receipt-rolls": "node scripts/probe-receipt-rolls.mjs"
   },

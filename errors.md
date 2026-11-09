@@ -40,6 +40,21 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-378 — A deactivated product still showed in search: the backend's compatibility match tier skips is_active — OPEN (backend) (2026-11-09)
+
+**Seen (owner, 9 Nov).** The KXP160 ribbon (SKU `72778.01`) is deactivated in admin and its product page is gone, which is correct. But typing "KXP160" in the search bar still showed it, with price and Add.
+
+**Measured (live API, READ-ONLY, cache-busted, `cf-cache-status: MISS`, 2026-11-09).**
+- `/api/search/smart?q=KXP160` and `/api/search/suggest?q=KXP160` both return `72778.01`, with `match_reason: "compatibility"` and `match_tier: 3`.
+- `/api/search/smart?q=72778` returns no rows. `/api/products?search=KXP160` returns no rows. `/api/products/72778.01` is 404. `/api/printers/panasonic-kxp160/products` leaves it out.
+- So only the backend's compatibility tier (printer model to the products that fit it) skips the `is_active` filter. This is not a stale edge cache.
+
+**Why no FE fix.** Search rows carry no `is_active` field, so the FE cannot tell an inactive row from an active one. Checking each row against `/api/products/:sku` would add one request per row on every keystroke. The fix belongs in the backend query.
+
+**Done (frontend).**
+- Ask 4 added to `backend-docs/outbox/fe-reply-2026-11-07.md` (not sent yet).
+- `npm run probe:search-inactive` (READ-ONLY, paced 700ms, cache-busted). It searches KXP160, HL-L2375DW and MX511, then checks that every SKU returned by smart and suggest has a product page. A 404 is a LEAK (exit 1). Negative control: `C62XLBK` must resolve, or the run is INCONCLUSIVE (exit 2). Measured today: control PASS, 20 rows / 10 SKUs checked, 2 leaks (`72778.01` in smart and in suggest, both `compatibility`), exit 1. It turns green when the backend ships the fix.
+
 ## ERR-377 — Backend handoff 2 Nov, items 38, 46, 50, 59–63: review summary NaN, ribbon part number, printer-page promise line, /ribbons mirrors the bot page, /about copy, no opening hours or reply-time promises site-wide, no "Fast NZ Delivery" titles — SHIPPED (frontend) (2026-11-07)
 
 **Seen (backend handoff `fe-handoff-2nov2026.md`, from the owner's Downloads).** The backend changed its bot pages for items 59–62 on 1 Nov, so www and bot said different things: Kelston dispatch, opening hours, reply-time promises, "Fast NZ Delivery", "lower cost than genuine". Five product pages printed "NaN based on 1 review" after five reviews were approved on 1 Nov.
