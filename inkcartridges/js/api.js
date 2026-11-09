@@ -2027,6 +2027,49 @@ const API = {
      * @param {string} label     for the dev-console line
      * @returns {Promise<{ok:true, rows:*}|{ok:false, error:string, code:string, status:number|null}>}
      */
+    /**
+     * Drop search rows whose product is not active (ERR-378).
+     *
+     * /api/search/smart and /api/search/suggest kept returning products the
+     * owner had deactivated (72778.01, 670.01 on 2026-11-09) after their
+     * product page already 404'd — on text AND compatibility matches, with
+     * fresh (cf MISS) responses. Search rows carry no `is_active`, so the FE
+     * asks the database directly: ONE PostgREST read of `id=in.(…)` with
+     * `is_active=eq.true` for the whole result set. Anonymous callers send the
+     * anon key, where RLS also hides admin-only rows (matching the public
+     * search); the admin mirror sends the admin's token so their admin-only
+     * test products survive (ERR-234).
+     *
+     * FAIL-SOFT, LOUD: if the check cannot run, the rows are returned
+     * UNFILTERED (an outage must not blank search) and `checked: false` says
+     * so; callers put that on their answer as `inactive_check: 'failed'`.
+     *
+     * @param {Array} rows   search rows with `id`
+     * @param {boolean} anonymous   the route's `anonymous` from _catalogRoute
+     * @returns {Promise<{rows: Array, checked: boolean, removed: number}>}
+     */
+    async dropInactiveRows(rows, anonymous = true) {
+        const list = Array.isArray(rows) ? rows : [];
+        const ids = [...new Set(list.map(r => r && r.id).filter(id => /^[0-9a-f-]{36}$/i.test(String(id))))];
+        if (!ids.length || typeof Config === 'undefined' || !Config.SUPABASE_URL) {
+            return { rows: list, checked: ids.length === 0, removed: 0 };
+        }
+        let bearer = Config.SUPABASE_ANON_KEY;
+        if (!anonymous) {
+            try { bearer = (await this.getToken()) || bearer; } catch (_) { /* anon key */ }
+        }
+        const url = `${Config.SUPABASE_URL}/rest/v1/products?select=id&is_active=eq.true&id=in.(${ids.join(',')})`;
+        const res = await this._anonRest(url, {
+            headers: { 'apikey': Config.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${bearer}`, 'Accept': 'application/json' },
+        }, 'dropInactiveRows');
+        if (!res.ok || !Array.isArray(res.rows)) {
+            return { rows: list, checked: false, removed: 0 };
+        }
+        const active = new Set(res.rows.map(r => r.id));
+        const kept = list.filter(r => !r || !r.id || active.has(r.id));
+        return { rows: kept, checked: true, removed: list.length - kept.length };
+    },
+
     async _anonRest(url, init, label) {
         const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
         const timer = controller
@@ -2499,10 +2542,20 @@ const API = {
         // the exact path the reported /search?q=273h failure came down: /smart was
         // healthy for shoppers the whole time and only the admin's mirrored copy
         // of it failed.
-        return this._catalogReadWithPublicFallback(route, endpoint,
+        const res = await this._catalogReadWithPublicFallback(route, endpoint,
             (ep, anonymous) => (anonymous
                 ? this.getPublic(ep, { identify: true })
                 : this.get(ep, { identify: true })));
+        // ERR-378: search returns deactivated products; drop them here.
+        if (res && res.ok && res.data && Array.isArray(res.data.products)) {
+            const kept = await this.dropInactiveRows(res.data.products, route.anonymous);
+            res.data.products = kept.rows;
+            if (kept.removed && typeof res.data.total === 'number') {
+                res.data.total = Math.max(0, res.data.total - kept.removed);
+            }
+            if (!kept.checked) res.data.inactive_check = 'failed';
+        }
+        return res;
     },
 
     /* identifySearch() WAS HERE, AND IS GONE ON PURPOSE (ERR-253, 2026-09-10).
@@ -2607,7 +2660,8 @@ const API = {
                 ? await this.getPublic(`/api/search/suggest?${params}`, { identify: true })
                 : await this.get(suggestRoute.endpoint, { identify: true });
             if (res && res.ok && res.data && Array.isArray(res.data.suggestions)) {
-                return res.data.suggestions;
+                // ERR-378: drop deactivated products (failure keeps rows, see dropInactiveRows).
+                return (await this.dropInactiveRows(res.data.suggestions, suggestRoute.anonymous)).rows;
             }
         } catch (_) { /* swallow — caller treats [] as "no suggest data" */ }
         return [];

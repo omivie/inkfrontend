@@ -40,7 +40,7 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
-## ERR-378 — A deactivated product still showed in search: the backend's compatibility match tier skips is_active — OPEN (backend) (2026-11-09)
+## ERR-378 — A deactivated product still showed in search for minutes after its page was gone; the FE now drops inactive rows itself — FIXED (frontend), backend lag open (2026-11-09)
 
 **Seen (owner, 9 Nov).** The KXP160 ribbon (SKU `72778.01`) is deactivated in admin and its product page is gone, which is correct. But typing "KXP160" in the search bar still showed it, with price and Add.
 
@@ -54,6 +54,14 @@ describing the same incident.
 **Done (frontend).**
 - Ask 4 added to `backend-docs/outbox/fe-reply-2026-11-07.md` (not sent yet).
 - `npm run probe:search-inactive` (READ-ONLY, paced 700ms, cache-busted). It searches KXP160, HL-L2375DW and MX511, then checks that every SKU returned by smart and suggest has a product page. A 404 is a LEAK (exit 1). Negative control: `C62XLBK` must resolve, or the run is INCONCLUSIVE (exit 2). Measured today: control PASS, 20 rows / 10 SKUs checked, 2 leaks (`72778.01` in smart and in suggest, both `compatibility`), exit 1. It turns green when the backend ships the fix.
+
+**Update (2026-11-09, 2:57 pm).** The owner re-ran `update products set is_active = false where sku = '72778.01'` in the Supabase SQL editor. The value was already `false`. Right after it, cache-busted `q=KXP160` stopped returning `72778.01` (smart: `72779.01`, `72970.01`, `670.01`, all `fuzzy`; suggest: no rows), and `probe:search-inactive` read 0 leaks across 21 rows and 12 SKUs (exit 0). So the cause is more likely a stale derived copy behind the compatibility tier that a row write refreshes, which the admin Active toggle did not trigger, than a missing filter. The outbox ask is updated to say so. Status: symptom gone, backend cause still unconfirmed.
+
+**Second case, same day (3:00 pm), and the FE fix.** The owner deactivated `670.01` (KXP145 ERC27 ribbon) in the Supabase table editor. Its product page was 404 by 15:01, but `/api/search/smart?q=670.01` (cf MISS) kept returning it on a plain TEXT match until 15:06. So the lag is not only the compatibility tier: backend search trails `is_active` by about 5 minutes after a deactivation, and the owner would not wait for a backend fix.
+- **Fix:** `API.dropInactiveRows(rows, anonymous)` (api.js) makes ONE PostgREST read, `products?select=id&is_active=eq.true&id=in.(…)`, for the whole result set and drops every row it does not return. It sends the anon key for public routes (RLS also hides admin-only rows, matching public search) and the admin token on the admin mirror, so ERR-234 admin-only test products survive. It is called from `API.smartSearch` (the /search page; `total` is reduced by the rows removed), `API.searchSuggest`, and search.js `fetchSmart` (the header dropdown).
+- **Fail-soft, loud:** if the read fails, the rows are kept (an outage must not blank search) and the answer carries `inactive_check: 'failed'`. The dropdown does not cache a failed answer, so the next keystroke retries.
+- **Cost:** one extra Supabase request per search MISS (not per row). An edge HIT on `/api/search/*` still triggers it, because the filter runs in the browser.
+- **Measured:** `tests/search-drop-inactive-nov2026.test.js` 5/5 pass, 0/5 against HEAD's files. Live anon read of 72779.01, 72970.01, 72778.01 and 670.01 returned only the two active ids. Playwright on localhost against the live API, with the deactivated 72778.01 row (its real id) injected into every smart response: dropdown hides it with the filter on and shows it with the Supabase read blocked (negative control). `API.smartSearch` returns it removed with the filter on, and kept plus `inactive_check: 'failed'` with the read blocked. (The /search?q=KXP160 page itself cannot show the row in either arm, because an exact printer match redirects to the printer page, so the page is measured at the API layer.) Full `npm test`: 7401 pass, 1 fail before the fix below, 18 skipped. The fail was this entry's own probe missing `SEARCH_ANALYTICS_NOTICE` (already on main since a1ae7e77), now fixed. api.js and search.js `?v=` restamped.
 
 ## ERR-377 — Backend handoff 2 Nov, items 38, 46, 50, 59–63: review summary NaN, ribbon part number, printer-page promise line, /ribbons mirrors the bot page, /about copy, no opening hours or reply-time promises site-wide, no "Fast NZ Delivery" titles — SHIPPED (frontend) (2026-11-07)
 

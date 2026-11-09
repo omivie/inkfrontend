@@ -13,18 +13,22 @@
  * carry no is_active field.
  *
  * MODE: READ-ONLY. GET requests only. No login, no cart, no admin call.
+ * (Each /api/search/* GET still writes one search_analytics row server-side.)
  *
  * Negative control: a known-active SKU must resolve, or the run is
  * INCONCLUSIVE (exit 2). A dead or rate-limited API never reads as green.
  *
  *   npm run probe:search-inactive
  */
+import { SEARCH_ANALYTICS_NOTICE } from './lib/probe-search-notice.mjs';
+
 const API = process.env.API_BASE || 'https://api.inkcartridges.co.nz';
 const PACE = Number(process.env.PROBE_PACE_MS || 700);
 const QUERIES = (process.env.PROBE_QUERIES || 'KXP160,HL-L2375DW,MX511').split(',');
 const CONTROL_SKU = 'C62XLBK';
 
 console.log(`probe:search-inactive — MODE: READ-ONLY (GET only) against ${API}`);
+console.log(SEARCH_ANALYTICS_NOTICE);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function get(path) {

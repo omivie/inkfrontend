@@ -348,10 +348,20 @@
         // same slot so renderResults — which reads `data.suggestions` — is
         // untouched; fall back to `suggestions` for resilience if the envelope
         // shape changes.
-        const items = Array.isArray(data.products)
+        let items = Array.isArray(data.products)
             ? data.products
             : (Array.isArray(data.suggestions) ? data.suggestions : []);
+        // ERR-378: the backend returns deactivated products; drop them. If the
+        // check cannot run the rows stay (search must not blank) and the answer
+        // says so in `inactive_check`.
+        let inactiveCheck = 'skipped';
+        if (typeof API !== 'undefined' && typeof API.dropInactiveRows === 'function') {
+            const kept = await API.dropInactiveRows(items, route.anonymous);
+            items = kept.rows;
+            inactiveCheck = kept.checked ? 'ok' : 'failed';
+        }
         const answer = {
+            inactive_check: inactiveCheck,
             suggestions: items,
             matched_printer: data.matched_printer || null,
             did_you_mean: data.did_you_mean || null,
@@ -362,7 +372,8 @@
         // Only a real answer gets remembered. Every failure above threw before
         // reaching this line, so a 429 or a dropped connection is retried on the
         // next keystroke rather than cached as an empty shelf.
-        cacheSet(query, answer);
+        // A failed inactive check is not remembered: the next keystroke retries it.
+        if (inactiveCheck !== 'failed') cacheSet(query, answer);
         return cacheGet(query) || answer;
     }
 
