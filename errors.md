@@ -40,6 +40,29 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-383 — Invoice 3297 "Failed to update invoice": the "Existing order" picker linked another invoice's shadow order (2026-11-20) — FRONTEND GUARD SHIPPED, backend repair + 500 cause OPEN
+
+**Seen (owner, 20 Nov, 5:31pm).** Editing invoice 3297 (changing the bill-to, the delivery address and the unit price) and pressing Save gave the toast "Failed to update invoice". That text is the backend's generic HTTP 500 message, passed through by `AdminAPI.updateInvoice` → `invoiceError`. It carries no detail.
+
+**Measured (read-only GETs, admin token, 2026-11-20).**
+- Invoice 3297 (`1e351785-…`, created 00:26 UTC today, $685.49, unpaid) has `source_order_id = 24a9f5ab-…`.
+- That order is **INV-3274**: `channel: 'invoice'`, i.e. the shadow order the backend materialised for invoice **3274** (`17c0ee9e-…`, $685.49, **paid**, created 19 Aug).
+- INV-3274 now has `invoice_id = 3297` and `updated_at` = 3297's `created_at` to the microsecond. Saving 3297 re-pointed it. Invoice 3274 no longer owns a shadow order, and 3297 is linked to a sale from 19 Aug instead of booking its own.
+
+**Cause (frontend half).** `loadFromOrder` (the "Existing order" picker) set `source_order_id` to whatever order was picked. `/api/admin/orders?search=` returns invoice shadow orders too, so "INV-3274" was offered and accepted as if it were a customer order. Per the invoice spec §4 an invoice with a `source_order_id` is paperwork for that order and the backend sets `orders.invoice_id` on it — which, for a shadow order, steals it from its own invoice.
+
+**Not measured: the 500 itself.** The backend repo is not on this machine, and a diagnostic PUT of 3297's unchanged stored body was refused by the session's permission classifier (a write to a live invoice). The most likely cause is the tangled link above, but that is an inference. The backend dev has the Render log line; the ask is in `backend-docs/outbox/invoice-3297-urgent-2026-11-20.md`.
+
+**Fix (frontend).** `loadFromOrder`: an order with `channel === 'invoice'` is used as a template only — goods copied, `source_order_id` left null, and a 12s warning toast names the order and says to open the original invoice to re-send it. Real web orders link exactly as before. `getOrder` returns `channel` (checked live on INV-3274).
+
+**Open (backend).** (1) Repair: `orders.invoice_id` of INV-3274 back to 3274; 3297 gets `source_order_id = null` and its own shadow order. (2) Report the 500 cause from the logs. (3) Refuse, server side, a `source_order_id` whose order already belongs to a different invoice.
+
+**Tests.** `tests/admin-invoice-shadow-order-source-nov2026.test.js` 2/2; negative control on HEAD: the shadow-order case fails. Suite 7407 pass / 0 fail.
+
+**Lesson.** A picker that lists rows the backend made for its own bookkeeping will eventually be used to pick one. Filter by what the row *is* (`channel`), not by what it looks like in a dropdown.
+
+**Files.** `inkcartridges/js/admin/pages/invoices.js` · `tests/admin-invoice-shadow-order-source-nov2026.test.js` (new) · `backend-docs/outbox/invoice-3297-urgent-2026-11-20.md` (new) · `errors.md`.
+
 ## ERR-382 — Side margins cut to 1/3 on wide screens, wider and shorter product cards, Admin moved beside the IC mark (owner 2026-11-20) — FIXED (frontend)
 
 **Seen (owner, 20 Nov).** On a ~1600px screen every page had a wide blank band left and right of the content. The owner asked to cut that blank space by 2/3, so that product cards get wider instead of taller. Later the same day, the Admin shortcut (pinned into the right gutter at >=1360px) sat jammed against Cart once the gutters shrank. The owner asked for it to sit left of the IC logo.

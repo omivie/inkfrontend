@@ -3760,7 +3760,13 @@ async function loadFromOrder(orderId) {
   // and Quick Order (utils/party-search.js) — a guest row carries the address as
   // flat shipping_* columns and the contact details in guest_email/guest_phone.
   const party = orderToParty(order);
-  _draft.source_order_id = order.id || orderId;
+  // An `invoice`-channel order is ANOTHER INVOICE'S shadow order (INV-<n>), not
+  // a sale of its own. Linking it as this invoice's source re-points
+  // orders.invoice_id at the new invoice and orphans the old one — invoice 3297
+  // took INV-3274 from invoice 3274 that way (ERR-383). Treat it as a template:
+  // copy the goods, no link, so the new invoice books its own sale.
+  const isInvoiceShadow = order.channel === 'invoice';
+  _draft.source_order_id = isInvoiceShadow ? null : (order.id || orderId);
   // Order date reflects when the order was actually placed (used in the email line).
   _draft.order_date = party.orderDate || _draft.order_date;
   _draft.customer = {
@@ -3797,7 +3803,11 @@ async function loadFromOrder(orderId) {
 
   _fillSource = { type: 'order', label: order.order_number || String(orderId) };
   rebuildEditor();
-  Toast.success(`Filled from order ${order.order_number || ''}`.trim());
+  if (isInvoiceShadow) {
+    Toast.warning(`${order.order_number || 'That order'} belongs to an existing invoice — lines copied as a NEW sale, not linked. To re-send that invoice, open it from the list instead.`, 12000);
+  } else {
+    Toast.success(`Filled from order ${order.order_number || ''}`.trim());
+  }
 }
 
 /**
