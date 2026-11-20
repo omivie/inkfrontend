@@ -218,7 +218,7 @@
     border-radius: var(--radius-xl);
     padding: var(--spacing-md) var(--spacing-2xl) var(--spacing-xl);
     box-shadow: var(--shadow-xl);
-    max-width: 1200px;
+    max-width: var(--container-max-width);
     margin: 0 auto;
     overflow-x: clip;
 }
@@ -8776,6 +8776,30 @@ a.account-review-card__product:focus-visible {
 @media (min-width: 1100px) {
     .products-sections .products-row .product-card {
         flex: 0 0 calc(16.666% - var(--spacing-sm));
+        /* Owner 11-20 (ERR-382): the page widened (gutters cut to 1/3), so
+           the six cards take the extra width instead of the 185px cap. Past
+           200px the card leaves the `@container pcard` stack, so price and
+           Add sit on one row — wider AND shorter, which is the point. */
+        max-width: none;
+    }
+    /* ...and the 4:3 image must not grow with it: hold the 137px a
+       185px-wide card had, so the extra width shortens the card. */
+    .products-sections .products-row .product-card .product-card__image-wrapper {
+        max-height: 137px;
+    }
+    /* 201-300px cards left the @container stack but the one-row footer did
+       not fit: Add was squeezed to 12px (measured 1440/1600/1920). Wrap the
+       stepper + Add under the price when they do not fit beside it. Only
+       above 200px: at or below it the column stack owns this row, and a
+       150px flex-basis there is a 150px HEIGHT (measured +114px cards). */
+    @container pcard (min-width: 201px) {
+        .products-sections .products-row .product-card .product-card__footer-row:last-child {
+            flex-wrap: wrap;
+        }
+        .products-sections .products-row .product-card .product-card__footer-row:last-child .product-card__buy {
+            width: auto;
+            flex: 1 0 150px;
+        }
     }
 }
 
@@ -8790,7 +8814,9 @@ a.account-review-card__product:focus-visible {
 /* Shop / search / brand / printer pages: trim outer gutters so 7 cards fit
    without shrinking each card too much. Scoped via body class on shop.html. */
 body.page-shop {
-    --container-max-width: 1240px;
+    /* 1/3 of the old blank gutter on wide screens (ERR-382): 1192px text/3 +
+       48px padding; never under 100px blank per side (badge, see base.css). */
+    --container-max-width: max(1240px, min(calc(66.667vw + 445px), calc(100vw - 152px)));
     --container-padding: 24px;
 }
 
@@ -8880,9 +8906,9 @@ body.page-shop {
     line-height: 1.3;
     /* Clamp to 4 lines so long generic names ("Compatible Ink Cartridge
        Replacement for Epson …") show enough text to identify which
-       cartridge the card represents. Reserves ~64px and keeps cards
-       in the same row aligned. */
-    min-height: calc(var(--font-size-xs) * 1.3 * 4);
+       cartridge the card represents. No height reserve (ERR-380, owner
+       11-19: least white space) — the footer's margin-top: auto keeps
+       prices level across a row. */
     display: -webkit-box;
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
@@ -14162,6 +14188,19 @@ html[data-landing="toner"] .drilldown-title__landing--toner { display: inline; }
     }
 }
 
+/* ERR-380 (owner 11-19: "remove as much white space as possible") — price,
+   Was price and "Incl. GST" share one line at every desktop height, not only
+   on short laptops (was the ERR-301 tier rule); the volume rung keeps its own. */
+@media (min-width: 768px) {
+    .shop-page .products-row .product-card .product-card__pricing {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        column-gap: 6px;
+        row-gap: 0;
+    }
+}
+
 /* Compact card on short laptop windows (ERR-301), /shop browse levels only.
    /search shares this page, but its printer banner keeps the first row below
    the first screen anyway, so the 5:2 image there cost the picture and bought
@@ -14178,15 +14217,6 @@ html[data-landing="toner"] .drilldown-title__landing--toner { display: inline; }
         line-clamp: 3;
         min-height: calc(var(--font-size-xs) * 1.3 * 3);
     }
-    /* Price and "Incl. GST" share a line; the volume rung keeps its own. */
-    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__pricing {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: baseline;
-        column-gap: 6px;
-        row-gap: 0;
-    }
-    .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__fits { order: 9; margin: 4px 0 0; }
     .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__footer { margin-top: 0; }
     .shop-page:not([data-level="search-results"]) .products-row .product-card .product-card__biz-price {
         flex-direction: row;
@@ -14302,3 +14332,34 @@ html[data-landing="toner"] .drilldown-title__landing--toner { display: inline; }
     animation: pdp-buybox-reveal 0s linear 8s forwards;
 }
 @keyframes pdp-buybox-reveal { to { visibility: visible; } }
+
+/* Shop title row (owner 2026-11-19): printer finder to the RIGHT of the h1
+   on a desktop, label + input + Find on one line; and less air above the
+   breadcrumb and between it and the h1. Mouse only for the 28px crumb links
+   (touch keeps 44px targets). Phones (<768) keep the stacked layout. */
+@media (min-width: 768px) {
+    .drilldown-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;   /* a long landing h1 pushes the finder to its own row */
+        gap: var(--spacing-sm) var(--spacing-md);
+        margin-bottom: var(--spacing-md);
+    }
+    .drilldown-title-row > .drilldown-title { margin: 0; flex: 0 1 auto; min-width: 0; }
+    .drilldown-title-row > .landing-printer-search { margin: 0; flex: 1 1 480px; max-width: 620px; padding: 8px 10px; }
+    .drilldown-title-row .landing-printer-search__form {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        column-gap: 10px;
+    }
+    .drilldown-title-row .landing-printer-search__label { margin: 0; white-space: nowrap; }
+    .drilldown-title-row .landing-printer-search__results { grid-column: 1 / -1; }
+    .shop-page.shop-page--drilldown { padding-top: 4px; }
+    .shop-page .drilldown-header { margin-bottom: 0; }
+}
+@media (min-width: 768px) and (pointer: fine) {
+    .shop-page .drilldown-breadcrumb { padding-top: 0; padding-bottom: 0; }
+    .shop-page .drilldown-breadcrumb__link { min-height: 28px; padding-top: 2px; padding-bottom: 2px; }
+}

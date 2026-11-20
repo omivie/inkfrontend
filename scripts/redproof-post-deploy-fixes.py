@@ -26,11 +26,6 @@ M = [
  ("inkcartridges/css/pages.css", ".product-info > #volume-pricing,\n.product-info > #product-terms,\n.product-info > #pack-upsell {\n    order: 1;", ".product-info > #volume-pricing,\n.product-info > #product-terms,\n.product-info > #pack-upsell {\n    order: 0;"),
  ("inkcartridges/css/pages.css", ".product-headline { display: none; }", ""),
  ("inkcartridges/css/pages.css", "    .product-info > #compat-disclaimer {\n        order: 1;", "    .product-info > #compat-disclaimer {\n        order: 0;"),
- # §3 card +N
- ("inkcartridges/js/utils.js", "const rest = Math.max(Number.isFinite(count) ? count : 0, names.length) - shown.length;", "const rest = names.length - shown.length;"),
- ("inkcartridges/js/utils.js", "const rest = Math.max(Number.isFinite(count) ? count : 0, names.length) - shown.length;", "const rest = (Number.isFinite(count) ? count : names.length) - names.length;"),
- ("inkcartridges/js/shop-page.js", "PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count)", "PrinterName.fitsLine(product.compatible_printers)"),
- ("inkcartridges/js/products.js", "PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count)", "PrinterName.fitsLine(product.compatible_printers)"),
  # §4 countdown scope
  ("inkcartridges/js/utils.js", "for same-day dispatch${this.scope(deliveryEstimate)}`;", "for same-day dispatch`;"),
  ("inkcartridges/js/utils.js", "/auckland metro/i.test(promise) ? ' (Auckland metro)' : '';", "true ? ' (Auckland metro)' : '';"),

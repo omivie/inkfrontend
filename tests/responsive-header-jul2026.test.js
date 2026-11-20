@@ -118,8 +118,15 @@ test('R4 --container-padding is a fluid clamp() in :root AND the .site-header ch
     assert.ok(lock, 'the .site-header chrome-lock rule must exist');
     assert.match(lock[0], /--container-padding:\s*clamp\(/,
         'the chrome lock must mirror the fluid padding (not a pinned 32px)');
-    assert.match(lock[0], /--container-max-width:\s*1200px/,
-        'the chrome lock must keep --container-max-width: 1200px');
+    // ERR-382 (owner 11-20): the default width is now a viewport formula that
+    // keeps 1/3 of the old gutter. The lock must carry the SAME value as the
+    // base.css :root token, so the header lines up with every default page.
+    const rootVal = (BASE.match(/--container-max-width:\s*([^;]+);/) || [])[1];
+    const lockVal = (lock[0].match(/--container-max-width:\s*([^;]+);/) || [])[1];
+    assert.ok(rootVal && /^max\(1200px,/.test(rootVal.trim()),
+        'base.css :root --container-max-width must keep 1200px as its floor');
+    assert.equal(lockVal && lockVal.trim(), rootVal.trim(),
+        'the chrome lock must mirror the base.css :root --container-max-width');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,15 +231,22 @@ test('R7 .header-main is the positioned ancestor and .header-main .container is 
         '.primary-nav .container must stay position:relative — .nav-menu is absolutely positioned against it');
 });
 
-test('R7b the Admin pin is gated on there being a gutter to pin into', () => {
-    // Below the gate the container fills the viewport, so a pinned Admin would
-    // land on top of the cart — a customer-facing break, not a cosmetic one.
-    const pin = LAYOUT.match(/@media \(min-width: (\d+)px\)\s*\{\s*\.header-actions__item--admin\s*\{([^}]*)\}/);
-    assert.ok(pin, 'a min-width media query must pin .header-actions__item--admin (MODE E)');
-    assert.ok(Number(pin[1]) >= 1300,
-        `the Admin pin must not engage before ~1300px — measured, a 1280px viewport leaves only ~5px between the cluster and the pinned shortcut. Found ${pin[1]}px.`);
-    assert.match(pin[2], /position:\s*absolute/, 'the pinned Admin shortcut must be position:absolute');
-    assert.match(pin[2], /right:/, 'the pinned Admin shortcut must be offset from the RIGHT edge');
+test('R7b Admin sits LEFT of the IC mark, gated to >=1100px (owner 11-20, ERR-382)', () => {
+    // MODE E (Admin pinned into the right gutter at >=1360px) is gone: the
+    // gutters were cut to 1/3, so there is no reliable empty stretch to pin into.
+    assert.doesNotMatch(LAYOUT, /\.header-actions__item--admin\s*\{[^}]*position:\s*absolute/,
+        'Admin must not be pinned with position:absolute any more');
+    const MAIN = fs.readFileSync(path.join(ROOT, 'inkcartridges/js/main.js'), 'utf8');
+    assert.match(MAIN, /insertBefore\(a, mark\)/,
+        'main.js must insert Admin immediately before the .header-lead__logo mark');
+    assert.match(MAIN, /else actions\.appendChild\(a\)/,
+        'pages without the mark must keep Admin as the last action item');
+    assert.match(LAYOUT, /\.header-lead \.header-actions__item--admin\s*\{\s*margin-left:\s*auto/,
+        'Admin must be parked against the mark (margin-left:auto inside the lead)');
+    // Measured: email→Admin clearance is negative below 1200 and 2-8px to 1366,
+    // so the OWNER's header drops the email below 1440 (customers never see Admin).
+    assert.match(LAYOUT, /@media \(max-width: 1439\.98px\)\s*\{\s*\.header-lead:has\(\.header-actions__item--admin\) \.header-contact__item\[href\^="mailto:"\]\s*\{\s*display:\s*none/,
+        'below 1440 the admin view must drop the email so Admin does not overlap it');
 
     // Below 1100 it is hidden outright (five icon-only items at the 48px tap
     // floor do not fit the track — ERR-148).

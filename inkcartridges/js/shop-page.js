@@ -2990,6 +2990,25 @@
             return relatedRows.filter(p => p && p.product_type === pair[1] && slugsOf(p).some(s => slugs.has(s)));
         },
 
+        // ERR-379 — a drum code is never a tile on the toner grid (and vice
+        // versa); drums show INSIDE a toner tile via _printerPartners. The
+        // backend's toner series_codes cross-tag drum codes (GTN1070BK =
+        // [TN1070, DR1070]), so the code's family is judged by MPN: no own row
+        // carrying it has it in its MPN, and a partner-type row does.
+        // ponytail: backend chip path only; the client-extraction fallback has
+        // no related walk and keeps cross-tagged chips.
+        _partnerOnlyCode(code, carriers, relatedRows) {
+            const pair = this.PRINTER_PAIR[this.state.category];
+            if (!pair || !Array.isArray(relatedRows)) return false;
+            const S = window.SeriesCodes;
+            const parts = [code, ...(S ? S.pairHalves(code) : [])].map(c => String(c).toUpperCase());
+            const mpnHas = (p) => {
+                const mpn = String((p && p.manufacturer_part_number) || '').toUpperCase();
+                return !!mpn && parts.some(c => mpn.includes(c));
+            };
+            return !carriers.some(mpnHas) && relatedRows.some(p => p && p.product_type === pair[1] && mpnHas(p));
+        },
+
         // Every listing row of one category, paged. The response carries no
         // pagination object, so a short page is the last one. null = the walk
         // did not complete (never a partial array — a partial count is a lie).
@@ -3037,13 +3056,20 @@
             const [ownRows, relatedRows = []] = walks;
             const keyOf = (p) => p && (p.id || p.sku);
             const out = [];
+            const dropped = [];
             for (const chip of codes) {
                 const own = ownRows.filter(p => this._rowCarriesCode(p, chip.code));
+                if (this._partnerOnlyCode(chip.code, own, relatedRows)) { dropped.push(chip.code); continue; }
                 const ids = new Set([...own, ...this._printerPartners(own, relatedRows)].map(keyOf).filter(Boolean));
                 if (ids.size !== Number(chip.count)) {
                     DebugLog.warn(`[Shop._recountChipsFromListing] ${chip.code} series=${chip.count} rows=${ids.size}`);
                 }
                 if (ids.size > 0) out.push({ ...chip, count: ids.size });
+            }
+            this._chipsDroppedAsPartner = dropped;
+            if (dropped.length) {
+                DebugLog.warn(`[Shop._recountChipsFromListing] dropped partner-category tiles ` +
+                    `(${this.state.category}): ${dropped.join(', ')} — backend series_codes cross-tag them (ERR-379)`);
             }
             this._chipCountsFrom = 'listing-rows';
             return { codes: out, ok: true };
@@ -5861,7 +5887,6 @@
                     <div class="product-card__content">
                         ${infoRowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
-                        ${(() => { const t = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count) : ''; return t ? `<p class="product-card__fits">${Security.escapeHtml(t)}</p>` : ''; })()}
                         ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${ratingHTML}
                         <div class="product-card__footer">

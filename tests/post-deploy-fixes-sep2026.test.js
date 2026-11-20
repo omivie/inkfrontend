@@ -242,28 +242,14 @@ test('§2 CSS: headline desktop-only; chips + terms order 1 at every width; comp
 // §3 card +N
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§3 fitsLine reads compatible_printers_count: LC73 (2 of 11) ⇒ +9', () => {
-    // Listing rows carry display_name since BF-094 (measured 2026-10-06).
-    const P = (n) => ({ full_name: n.replace('-', ' '), display_name: n });
-    const row = [P('Brother DCP-J525W'), P('Brother DCP-J725DW')];
-    assert.equal(U.PrinterName.fitsLine(row, 11), 'Fits Brother DCP-J525W, Brother DCP-J725DW +9');
-    assert.equal(U.PrinterName.fitsLine(row, 2), 'Fits Brother DCP-J525W, Brother DCP-J725DW', 'nothing extra at 0');
-    assert.equal(U.PrinterName.fitsLine(row, '11'), 'Fits Brother DCP-J525W, Brother DCP-J725DW +9', 'a numeric string counts');
-    for (const bad of [undefined, null, '', 'abc', NaN]) {
-        assert.equal(U.PrinterName.fitsLine(row, bad), 'Fits Brother DCP-J525W, Brother DCP-J725DW', `count ${String(bad)} ⇒ list length`);
-    }
-    assert.equal(U.PrinterName.fitsLine([P('A'), P('B'), P('C')], 3), 'Fits A, B +1', 'total − SHOWN, not total − array length');
-    assert.equal(U.PrinterName.fitsLine([P('A'), P('B'), P('C'), P('D')], 1), 'Fits A, B +2', 'a count below the list we hold never hides printers');
-    assert.equal(U.PrinterName.fitsLine([], 11), '', 'no names ⇒ no line, whatever the count');
-});
 
-test('§3 BOTH card renderers pass the count (products.js + the shop-page.js duplicate)', () => {
+test('§3 no card renders a "Fits …" line (owner 2026-11-19, ERR-380) — both renderers, and no helper left', () => {
     for (const f of ['js/products.js', 'js/shop-page.js']) {
         const src = stripComments(read(f));
-        const calls = src.match(/PrinterName\.fitsLine\([^)]*\)/g) || [];
-        assert.ok(calls.length >= 1, `${f} renders a fits line`);
-        for (const c of calls) assert.equal(c, 'PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count)', f);
+        assert.doesNotMatch(src, /product-card__fits|fitsLine/, f);
     }
+    assert.doesNotMatch(stripComments(read('js/utils.js')), /fitsLine/, 'PrinterName.fitsLine deleted');
+    assert.doesNotMatch(read('css/search.css') + read('css/pages.css'), /product-card__fits/, 'no orphan CSS');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

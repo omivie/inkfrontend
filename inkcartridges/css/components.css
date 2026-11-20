@@ -852,7 +852,8 @@
    omitted entirely when no pills apply — no vertical space is lost. */
 .product-card__info-row {
     display: flex;
-    flex-direction: column;
+    /* ERR-380 (owner 11-19): pills share one line when they fit, wrap when not. */
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 3px;
     margin: 0;

@@ -253,14 +253,6 @@ test('§3 PrinterName.of prints the backend\'s display_name verbatim; the mirror
     assert.equal(U.PrinterName.display, undefined);
 });
 
-test('§3 fitsLine: two models then +N, nothing when the row has no list', () => {
-    const P = (n) => ({ full_name: n.replace(/-/g, ' '), display_name: n });
-    assert.equal(U.PrinterName.fitsLine([P('Brother MFC-J5930DW'), P('Brother MFC-J6935DW'), P('A'), P('B')]),
-        'Fits Brother MFC-J5930DW, Brother MFC-J6935DW +2');
-    assert.equal(U.PrinterName.fitsLine([P('HP Color LaserJet 5500')]), 'Fits HP Color LaserJet 5500');
-    assert.equal(U.PrinterName.fitsLine(undefined), '', 'a row with no list renders nothing');
-    assert.equal(U.PrinterName.fitsLine([]), '');
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §4 PDP — the dispatch promise follows `same_day_eligible`
@@ -542,7 +534,7 @@ test('§9 banned claims appear in none of the new copy', () => {
     // Comments are stripped: the modules' own docblocks NAME the banned phrases.
     for (const f of files) assert.doesNotMatch(f.endsWith('.js') ? stripComments(read(f)) : read(f).replace(/<!--[\s\S]*?-->/g, ''), BANNED, f);
     for (const [f, name] of [['js/product-detail-page.js', 'renderPromise'], ['js/product-detail-page.js', 'renderValueLines'],
-        ['js/utils.js', 'fitsLine'], ['js/shop-page.js', 'renderLandingPrinterSearch']]) {
+        ['js/shop-page.js', 'renderLandingPrinterSearch']]) {
         assert.doesNotMatch(extractMethod(read(f), name).body, BANNED, `${f}#${name}`);
     }
 });

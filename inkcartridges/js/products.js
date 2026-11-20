@@ -196,10 +196,7 @@ const Products = {
         const packRibbonHTML = String(product.pack_type || '').toLowerCase() === 'value_pack'
             ? `<span class="product-card__ribbon product-card__ribbon--value-pack">${Security.escapeHtml(ProductColors.packLabel(product))}</span>`
             : '';
-        // "Fits <two models> +N" from the product's own compatible_printers
-        // (§8.1). Empty until listing payloads carry the field.
-        const fitsText = (typeof PrinterName !== 'undefined') ? PrinterName.fitsLine(product.compatible_printers, product.compatible_printers_count) : '';
-        const fitsLineHTML = fitsText ? `<p class="product-card__fits">${Security.escapeHtml(fitsText)}</p>` : '';
+        // ERR-380 — no "Fits <models>" line on cards (owner 11-19: it took room and was cut off).
 
         // Brand eyebrow — suppressed when the product name already leads with
         // the brand (most DB names do, e.g. "Brother 1030 Compatible…"), so the
@@ -227,7 +224,6 @@ const Products = {
                     <div class="product-card__content">
                         ${brandEyebrowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayTitle)}">${Security.escapeHtml(displayTitle)}</h3>
-                        ${fitsLineHTML}
                         ${product._lookalikeSku ? `<p class="product-card__sku">SKU ${Security.escapeHtml(product._lookalikeSku)}</p>` : ''}
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
                         ${qualifiesForFreeShipping(product) ? '<div class="product-card__info-row"><span class="product-card__free-shipping">Free Shipping</span></div>' : ''}

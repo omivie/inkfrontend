@@ -58,24 +58,17 @@ test('components.css — .product-card__title clamps to 4 lines', () => {
     assert.equal(clampValue(body), 4, 'main product-card title must clamp at 4');
 });
 
-test('pages.css — .product-card__title (search-page override) clamps to 4 lines', () => {
+test('pages.css — .product-card__title (search-page override) clamps to 4 lines, no height reserve (ERR-380)', () => {
     const css = loadCss('pages.css');
-    // pages.css contains a .product-card__title override scoped to the
-    // search/shop list view. Find it by looking for the min-height calc
-    // so we don't collide with components.css definitions if the build
-    // ever inlines them.
-    const idx = css.indexOf('min-height: calc(var(--font-size-xs)');
-    assert.ok(idx !== -1, 'expected pages.css min-height calc anchor');
-    const ruleStart = css.lastIndexOf('.product-card__title', idx);
+    // The unscoped base rule: first `\n.product-card__title {` at column 0.
+    const ruleStart = css.indexOf('\n.product-card__title {');
+    assert.ok(ruleStart !== -1, 'expected the base pages.css .product-card__title rule');
     const open = css.indexOf('{', ruleStart);
-    const close = css.indexOf('}', open);
-    const body = css.slice(open + 1, close);
+    const body = css.slice(open + 1, css.indexOf('}', open));
     assert.equal(clampValue(body), 4, 'search-page product-card title must clamp at 4');
-    assert.match(
-        body,
-        /min-height:\s*calc\(var\(--font-size-xs\)\s*\*\s*1\.3\s*\*\s*4\)/,
-        'min-height multiplier must match the 4-line clamp',
-    );
+    // Owner 2026-11-19: least white space — no 4-line min-height reserve;
+    // the footer's margin-top: auto keeps prices level across a row.
+    assert.doesNotMatch(body.replace(/\/\*[\s\S]*?\*\//g, ''), /min-height/, 'no title height reserve');
 });
 
 test('pages.css — .product-card__title reveals the full name on hover', () => {

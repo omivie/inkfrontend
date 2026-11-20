@@ -3193,16 +3193,6 @@ const PrinterName = {
         return shown.slice(0, b.length + 1).toLowerCase() === `${b.toLowerCase()} ` ? shown.slice(b.length + 1) : shown;
     },
 
-    fitsLine(printers, total) {
-        const names = (Array.isArray(printers) ? printers : [])
-            .map((p) => this.of(p))
-            .filter(Boolean);
-        if (!names.length) return '';
-        const shown = names.slice(0, 2);
-        const count = Number(total);
-        const rest = Math.max(Number.isFinite(count) ? count : 0, names.length) - shown.length;
-        return `Fits ${shown.join(', ')}${rest > 0 ? ` +${rest}` : ''}`;
-    },
 };
 if (typeof window !== 'undefined') window.PrinterName = PrinterName;
 

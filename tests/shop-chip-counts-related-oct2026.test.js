@@ -58,8 +58,10 @@ function loadSeriesCodes() {
     return sandbox.__SC;
 }
 
+// MPN = the SKU minus its G/C source letter (live shape: GTN1070BK ⇒ TN1070).
 const row = (id, product_type, series_codes, printers = []) =>
-    ({ id, product_type, series_codes, compatible_printers: printers.map(slug => ({ slug })) });
+    ({ id, product_type, series_codes, manufacturer_part_number: id.slice(1),
+       compatible_printers: printers.map(slug => ({ slug })) });
 // Live code shape, measured 2026-10-15 (Brother); printers = the listing's 2-slug sample.
 const L23 = ['brother-hl-l2350dw', 'brother-hl-l2375dw'];
 const L51 = ['brother-hl-l5100dn'];
@@ -75,6 +77,8 @@ const DRUM_ROWS = [
     row('GDR2425BK', 'drum_unit', ['DR2425'], ['brother-hl-l2375dw']),
     row('CDR2425BK', 'drum_unit', ['DR2425'], ['brother-hl-l2375dw']),
     row('GDR2530BK', 'drum_unit', ['DR2530', 'TN2530'], L51),
+    // ERR-379: the drum whose code the toner rows cross-tag (no printers here, so it joins nothing).
+    row('GDR2415BK', 'drum_unit', ['DR2415']),
     // Shares a printer but is not a drum: never a partner.
     row('GWT223CL', 'waste_toner', ['WT223CL'], L23),
 ];
@@ -96,7 +100,7 @@ function makeShop({ category = 'toner', failCategory = null } = {}) {
         DebugLog: { warn: (m) => warnings.push(m), error() {}, log() {} },
     };
     vm.createContext(sandbox);
-    const body = ['_listingApiCategories', '_rowCarriesCode', '_printerPartners', '_walkListing', '_recountChipsFromListing'].map(methodSource).join(',\n');
+    const body = ['_listingApiCategories', '_rowCarriesCode', '_printerPartners', '_partnerOnlyCode', '_walkListing', '_recountChipsFromListing'].map(methodSource).join(',\n');
     const shop = vm.runInContext(`({
         RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' },
         PRINTER_PAIR: { toner: ['toner_cartridge', 'drum_unit'], consumable: ['drum_unit', 'toner_cartridge'] },
@@ -131,6 +135,17 @@ test('a chip no own row carries is dropped (it would open empty) — drums alone
     const { shop } = makeShop();
     const r = await shop._recountChipsFromListing([{ code: 'DR2530', count: 2 }, { code: 'TN2530', count: 2 }]);
     assert.deepEqual([...r.codes.map(c => c.code)], ['TN2530']);
+});
+
+test('ERR-379: a drum code is never a toner tile (backend cross-tags DR2415 on toner rows), and vice versa', async () => {
+    const { shop, warnings } = makeShop();
+    const r = await shop._recountChipsFromListing([{ code: 'DR2415', count: 6 }, { code: 'TN2415', count: 3 }]);
+    assert.deepEqual([...r.codes.map(c => c.code)], ['TN2415']);
+    assert.deepEqual([...shop._chipsDroppedAsPartner], ['DR2415']);
+    assert.ok(warnings.some(w => /dropped partner-category tiles.*DR2415/.test(w)), 'the drop is logged');
+    const drums = makeShop({ category: 'consumable' });
+    const d = await drums.shop._recountChipsFromListing([{ code: 'TN2530', count: 2 }, { code: 'DR2530', count: 2 }, { code: 'WT223CL', count: 1 }]);
+    assert.deepEqual([...d.codes.map(c => c.code)], ['DR2530', 'WT223CL']);
 });
 
 test('drum page: drum tiles pull toners sharing a printer; a waste-box tile pulls none', async () => {

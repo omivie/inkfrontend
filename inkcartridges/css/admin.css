@@ -5495,7 +5495,10 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 /* Freight row — the typed box and the courier picker sit side by side.
    The INPUT is unchanged and still authoritative; the select only writes into
    it, which is why nothing about saving an invoice had to change. */
-.inv-freight { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 12px; }
+/* flex-START (ERR-381): flex-end seated the freight box on the bottom of the
+   picker, which grows a second row when the free-shipping pill wraps. Both
+   labels are label + "excl. GST", so tops aligned = inputs aligned. */
+.inv-freight { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin-top: 12px; }
 .inv-freight .inv-field--freight { margin-top: 0; }
 .inv-freight__pick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; flex: 1 1 260px; min-width: 0; }
 .inv-field--freightpick { flex: 1 1 220px; min-width: 0; max-width: 340px; }

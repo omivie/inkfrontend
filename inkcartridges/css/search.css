@@ -659,15 +659,6 @@ mark.smart-ac__mark {
     white-space: normal;
     line-height: 1.2;
 }
-.product-card__fits {
-    margin: 2px 0 4px;
-    font-size: 0.8125rem;
-    line-height: 1.3;
-    color: var(--color-text-light, #475569);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
 .product-card__image-wrapper { position: relative; }
 
 /* Spec §2.3 — zero-results recovery rails. */

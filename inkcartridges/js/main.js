@@ -202,9 +202,12 @@ function initAdminHeaderLink() {
         a.innerHTML = '<span class="header-actions__icon">' +
             '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
             '</span><span>Admin</span>';
-        // Append so it sits LAST in the cluster — past the cart, at the far
-        // right of the brand row. (business.js inserts Business Centre first.)
-        actions.appendChild(a);
+        // Owner 11-20 (ERR-382): Admin sits immediately LEFT of the IC mark in
+        // the header lead. Pages that ship no mark (checkout/payment/account
+        // auth) keep it as the last item of the action cluster.
+        var mark = document.querySelector('.header-lead .header-lead__logo');
+        if (mark) mark.parentNode.insertBefore(a, mark);
+        else actions.appendChild(a);
         return a;
     }
 

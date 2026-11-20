@@ -540,6 +540,26 @@ const customLine = () => ({
   priceSource: PRICE_MANUAL,
 });
 
+/**
+ * A CREDIT / ADJUSTMENT: money on or off the invoice with no goods behind it —
+ * a refund (negative) or an extra charge (positive). It rides the ordinary
+ * line path because negative lines already work end to end (ERR-186), so the
+ * server still recomputes subtotal/GST/total and nothing new reaches the
+ * payload. The amount is ex-GST like every line; GST is applied on top.
+ *
+ * Our cost is pinned to a MANUAL 0 for both signs: a credit already costs 0
+ * (lineSupplierCost), and a positive surcharge left at "unknown" would report
+ * the invoice at 100% margin (BF-047). `kind` is session-only, as for shipping.
+ */
+const adjustmentLine = () => ({
+  ...blankLine(),
+  kind: 'adjustment',
+  description: 'Credit',
+  supplierCost: 0,
+  costSource: 'manual',
+  priceSource: PRICE_MANUAL,
+});
+
 /** Is this line a custom (non-catalogue) item? */
 const isCustomLine = (l) => l?.kind === 'custom';
 
@@ -676,6 +696,11 @@ const hasDelivery = (d) => !!(d.delivery
 function invoiceMeta(d) {
   const rows = [['Invoice No', d.invoice_number || '—'], ['Date', formatInvoiceDate(d.date)]];
   rows.push(['Date order placed', orderPlacedDisplay(d)]);
+  // The customer's own PO reference. It was collected, saved and shown on their
+  // portal but never printed — so the document they file against their PO
+  // didn't carry it (ERR-381). Printed only when filled: no "PO Number —" noise.
+  const po = String(d.po_number || '').trim();
+  if (po) rows.push(['PO Number', po]);
   if (d.seller.gst) rows.push(['GST No', d.seller.gst]);
   // NB: paid/unpaid status is deliberately NOT rendered on the customer-facing
   // invoice — it's an internal field only (see the list's Paid toggle).
@@ -2128,6 +2153,21 @@ function addCustomLine() {
   focusLineField(i, 'description');
 }
 
+/** "Add credit / adjustment" — same pristine-row rule as addCustomLine; focus the amount. */
+function addAdjustmentLine() {
+  const only = _draft.lines.length === 1 ? _draft.lines[0] : null;
+  const pristine = !!only && !(only.code || '').trim() && !(only.description || '').trim()
+    && !(only.ref || '').trim() && !num(only.unitCost);
+
+  if (pristine) _draft.lines[0] = adjustmentLine();
+  else _draft.lines.push(adjustmentLine());
+  const i = _draft.lines.length - 1;
+
+  renderLines();
+  refreshPreview();
+  focusLineField(i, 'unitCost');
+}
+
 /**
  * "Keep as a custom item" — the way out of a code that isn't a SKU.
  *
@@ -2337,6 +2377,7 @@ function onFormClick(e) {
   if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshPreview(); scheduleQuote(); }
   else if (act === 'add-shipping') { addShippingLine(); }
   else if (act === 'add-custom') { addCustomLine(); }
+  else if (act === 'add-adjustment') { addAdjustmentLine(); }
   else if (act === 'make-custom') { makeLineCustom(+e.target.closest('[data-line]').dataset.line); }
   else if (act === 'open-discount') { setDiscountOpen(+e.target.closest('[data-line]').dataset.line, true); }
   else if (act === 'close-discount') { setDiscountOpen(+e.target.closest('[data-line]').dataset.line, false); }
@@ -3115,6 +3156,7 @@ function editorBodyHtml(d) {
           <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
           <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-custom" title="Invoice something that isn't in the catalogue \u2014 a refurbished unit, a one-off machine, a service. You give it your own reference.">${icon('plus', 13, 13)} Add custom item</button>
           <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-shipping" title="Bill for freight without a product \u2014 NZ or international">${icon('plus', 13, 13)} Add shipping charge</button>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-adjustment" title="Take money off (a refund \u2014 type a negative amount, e.g. -50) or add an extra charge (positive). Amount is excl. GST; GST is added on top.">${icon('plus', 13, 13)} Add credit / adjustment</button>
         </div>
         <div class="inv-freight" id="inv-freight">
           <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight — 0 shows as “Free”${gstSub(GST_EXCL)}</span>

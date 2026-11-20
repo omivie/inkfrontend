@@ -244,8 +244,10 @@ function extractRuleBody(css, selector) {
 test('chrome lock — .site-header re-declares --container-max-width to shadow page-level overrides', () => {
     const body = extractRuleBody(LAYOUT_CSS, '.site-header');
     assert.ok(body, '.site-header rule must exist in layout.css');
-    assert.match(body, /--container-max-width\s*:\s*1200px/,
-        '.site-header must re-declare --container-max-width: 1200px so body.page-shop (1240px) and any future page-level override cannot bleed into the navbar.');
+    // ERR-382: the default is max(1200px, <gutter formula>) — the lock keeps
+    // the 1200px floor so body.page-shop (1240px floor) cannot bleed in.
+    assert.match(body, /--container-max-width\s*:\s*max\(1200px,/,
+        '.site-header must re-declare the default --container-max-width (1200px floor) so body.page-shop and any future page-level override cannot bleed into the navbar.');
     assert.match(body, /--container-padding\s*:/,
         '.site-header must re-declare --container-padding so the chrome cannot inherit body.page-shop\'s 24px override.');
 });

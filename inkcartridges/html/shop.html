@@ -39,12 +39,12 @@
     <link rel="dns-prefetch" href="https://www.ds.co.nz">
     <link rel="preload" href="/assets/fonts/inter-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/assets/fonts/plus-jakarta-sans-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/css/base.css?v=f97f1f0d">
-    <link rel="stylesheet" href="/css/layout.css?v=44ea0e41">
-    <link rel="stylesheet" href="/css/components.css?v=2d841466">
+    <link rel="stylesheet" href="/css/base.css?v=c1995cbf">
+    <link rel="stylesheet" href="/css/layout.css?v=f41e4f45">
+    <link rel="stylesheet" href="/css/components.css?v=3c6ee8b9">
     <link rel="stylesheet" href="/css/modern-effects.css?v=e32b405f">
-    <link rel="stylesheet" href="/css/pages.css?v=dc619e4c">
-    <link rel="stylesheet" href="/css/search.css?v=cabdb6f2">
+    <link rel="stylesheet" href="/css/pages.css?v=854f4507">
+    <link rel="stylesheet" href="/css/search.css?v=fb261dd5">
 
     <script type="application/ld+json" id="shop-schema">
     {
@@ -239,6 +239,10 @@
                      <html data-landing="ink|toner"> and CSS shows the matching span, so
                      the h1 never repaints from "Shop Ink…" when shop-page.js runs. Texts
                      must equal shop-page.js#landingH1() (pinned by a test). -->
+                <!-- Title row (owner 2026-11-19): on a desktop the printer finder sits to
+                     the RIGHT of the h1, not under it (pages.css .drilldown-title-row);
+                     phones stack it under the h1 as before. -->
+                <div class="drilldown-title-row">
                 <h1 class="drilldown-title" id="drilldown-title"><span class="drilldown-title__default">Shop Ink Cartridges &amp; Toner NZ</span><span class="drilldown-title__landing drilldown-title__landing--ink">Ink Cartridges NZ — Genuine &amp; Compatible</span><span class="drilldown-title__landing drilldown-title__landing--toner">Toner Cartridges NZ — Genuine &amp; Compatible</span></h1>
 
                 <!-- "Find your printer" — the FIRST thing under the h1 on the paid
@@ -261,6 +265,7 @@
                         <ul class="landing-printer-search__results" id="landing-printer-search-results" hidden></ul>
                     </form>
                 </section>
+                </div>
 
                 <section class="drilldown-content">
                     <!-- WITHOUT JAVASCRIPT THERE IS NO LOADING, SO THERE MUST BE NO
@@ -539,7 +544,7 @@
         </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=172f7acb"></script>
+    <script defer src="/js/shop-page.js?v=c0d3e8e2"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
@@ -548,7 +553,7 @@
     <script defer src="/js/api.js?v=7e71cda7"></script>
     <script defer src="/js/seo-meta.js?v=a3856e52"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/utils.js?v=6e9d7649"></script>
+    <script defer src="/js/utils.js?v=659afce1"></script>
     <script defer src="/js/auth.js?v=6dd8f705"></script>
     <script defer src="/js/business.js?v=cb786305"></script>
     <script defer src="/js/printer-context.js?v=ee09e81f"></script>
@@ -557,14 +562,14 @@
     <script defer src="/js/cart-deep-link.js?v=5020c047"></script>
     <script defer src="/js/cart-analytics.js?v=95df3d46"></script>
     <script defer src="/js/favourites.js?v=e934d05a"></script>
-    <script defer src="/js/products.js?v=e6591a9f"></script>
+    <script defer src="/js/products.js?v=dcc4b979"></script>
     <link rel="prefetch" href="/js/search.js?v=11db363f" as="script">
     <!-- search-click-tracking-aug2026 — POST /api/search/click for results-page
          card clicks. THIS PAGE ONLY: /search is a rewrite to this HTML, so the
          results grid lives here and nowhere else. Never add it to a page that
          renders the typeahead dropdown's cards as its main grid. -->
     <script defer src="/js/search-click-beacon.js?v=5016c5df"></script>
-    <script defer src="/js/main.js?v=3681760d"></script>
+    <script defer src="/js/main.js?v=f19d9306"></script>
     <script defer src="/js/legal-config.js?v=51bcb348"></script>
     <script defer src="/js/footer.js?v=0d5c3db4"></script>
     <script defer src="/js/mega-nav.js?v=41f146a4"></script>

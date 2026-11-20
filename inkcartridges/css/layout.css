@@ -59,7 +59,7 @@
        Without this, the search bar, logo position, and account/cart actions
        all shift between pages. See project_navbar_parity_may2026 — search
        bar drift was a regression caused exactly by this cascade leak. */
-    --container-max-width: 1200px;
+    --container-max-width: max(1200px, min(calc(66.667vw + 443px), calc(100vw - 136px))); /* = base.css token (ERR-382) */
     --container-padding: clamp(var(--spacing-4), 0.5rem + 2vw, var(--spacing-8));
 }
 
@@ -91,10 +91,9 @@
 .header-main {
     padding: var(--spacing-2) 0;
     background-color: var(--color-background);
-    /* CONTAINING BLOCK for the pinned Admin shortcut (MODE E, >=1360px). This
-       element is full-bleed; .container inside it is capped at 1200px. Admin
-       has to reach the WINDOW's right edge, so it must anchor here — hence the
-       relative, and hence .container below must NOT be positioned. */
+    /* Positioned ancestor of the header (R7). It once anchored the Admin
+       shortcut pinned into the right gutter (MODE E, removed 11-20, ERR-382:
+       Admin now sits beside the IC mark). Keep .container unpositioned. */
     position: relative;
 }
 
@@ -915,7 +914,7 @@
     }
 
     /* The fifth item is affordable only here — see the --admin rule above.
-       Above 1360px it leaves the flow entirely (MODE E). */
+       From 11-20 it lives in .header-lead, beside the IC mark (ERR-382). */
     .header-actions__item--admin {
         display: flex;
     }
@@ -1031,10 +1030,11 @@
    untouched, so every target stays 48px tall and the narrowest (Cart, ~32px
    wide) still clears WCAG 2.5.8's 24x24 by a wide margin.
 
-   It stops at 1360 because MODE E pulls Admin out of the flow there, leaving
-   four items with ~40px to spare — so the full 48px targets come back at the
-   widths most desktops actually use. Do not widen this band without redoing
-   the measurement; do not delete it, or 1100-1360 overlaps the logo again.
+   It stops at 1360: from there four items have ~40px to spare, so the full
+   48px targets come back. (Admin left this cluster for the header lead on
+   11-20, ERR-382, on pages that ship the IC mark; pages without the mark
+   still carry it here, so the band stays.) Do not widen this band without
+   redoing the measurement; do not delete it, or 1100-1360 overlaps the logo.
    ========================================================================== */
 @media (min-width: 1100px) and (max-width: 1359.98px) {
     .header-actions__item {
@@ -1045,33 +1045,25 @@
 }
 
 /* ==========================================================================
-   HEADER MODE E — >=1360px. The Admin shortcut leaves the action cluster and
-   pins to the WINDOW's right edge.
-
-   Owner request: "far right side within the right side border … it doesn't
-   need to be displayed too pretty, just so that the admin can get to it." The
-   cluster's right edge is the 1200px container's content edge, so on a wide
-   screen there is a large empty stretch of white bar to its right. Admin now
-   lives out there instead of crowding the four customer actions.
-
-   It anchors to .header-main (full-bleed, position: relative) — NOT to
-   .container, which is why .container must stay unpositioned. `top: 50%`
-   against .header-main is the white bar's true vertical centre, so Admin stays
-   in line with the cluster.
-
-   WHY 1360 AND NOT ALWAYS: the gutter only exists once the viewport clears the
-   1200px container by more than Admin's width plus insets. Pin it any narrower
-   and it lands on top of the cart — a customer-facing break, not a cosmetic
-   one. Below 1360 Admin stays the last in-flow item (MODE D), and below 1100
-   it is hidden entirely. Threshold is measured, not guessed: see the clearance
-   figures in the MODE D-narrow note above.
+   ADMIN SHORTCUT IN THE LEAD — owner 11-20 (ERR-382). main.js puts the
+   owner-only Admin link immediately LEFT of the IC mark (pages without the mark
+   keep it last in .header-actions). margin-left:auto parks it against the mark
+   inside the lead's space-between, so the contact stack keeps the left edge.
+   Replaces MODE E (Admin pinned into the right gutter at >=1360px): with the
+   gutters cut to 1/3 there is no longer a reliable empty stretch to pin into.
+   Visibility gates are unchanged: hidden <1100px, shown from 1100px.
    ========================================================================== */
-@media (min-width: 1360px) {
-    .header-actions__item--admin {
-        position: absolute;
-        right: var(--spacing-4);
-        top: 50%;
-        transform: translateY(-50%);
+.header-lead .header-actions__item--admin {
+    margin-left: auto;
+}
+/* Room budget, measured 11-20 with Admin injected: email→Admin clearance is
+   -39px at 1100, -19 at 1150, 2 at 1200-1280, 8 at 1366, 25 at 1440. Admin is
+   owner-only, so below 1440 the OWNER's header drops the support email (the
+   phone stays). Customers never get the Admin link, so their header is
+   untouched at every width. */
+@media (max-width: 1439.98px) {
+    .header-lead:has(.header-actions__item--admin) .header-contact__item[href^="mailto:"] {
+        display: none;
     }
 }
 

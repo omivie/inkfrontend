@@ -40,6 +40,81 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-382 — Side margins cut to 1/3 on wide screens, wider and shorter product cards, Admin moved beside the IC mark (owner 2026-11-20) — FIXED (frontend)
+
+**Seen (owner, 20 Nov).** On a ~1600px screen every page had a wide blank band left and right of the content. The owner asked to cut that blank space by 2/3, so that product cards get wider instead of taller. Later the same day, the Admin shortcut (pinned into the right gutter at >=1360px) sat jammed against Cart once the gutters shrank. The owner asked for it to sit left of the IC logo.
+
+**Done.**
+- The page width is one token. `--container-max-width` in base.css `:root` and in the `.site-header` chrome lock (layout.css) is now `max(1200px, min(calc(66.667vw + 443px), calc(100vw - 136px)))`. `body.page-shop` (pages.css) uses `max(1240px, min(calc(66.667vw + 445px), calc(100vw - 152px)))`.
+  - The 66.667vw term keeps 1/3 of the old blank gutter.
+  - The `100vw - N` term keeps at least 100px of blank per side. That is the footprint of Google's fixed bottom-right reviews badge (`--google-badge-max`).
+  - The 1200/1240 floor keeps today's width wherever there was no gutter. Phones and tablets are unchanged.
+- `.ink-finder__wrapper` follows the token instead of a fixed 1200px.
+- Shop and search six-up rows (>=1100px, `.products-sections .products-row`): cards drop the 185px cap and the 4:3 image is held at 137px (its old height), so the extra width shortens the card. In cards from 201px wide, the stepper + Add wrap under the price (`@container pcard (min-width: 201px)`). Without this, Add was squeezed to 12px at 1440-1920.
+- Admin: `main.js ensureLink` inserts it before `.header-lead__logo`, with `margin-left: auto` in the lead. Pages with no mark (checkout, payment, order-confirmation, account auth) keep it last in `.header-actions`. MODE E (the absolute pin at >=1360px) is deleted. Below 1440 the owner's header drops the support email. Admin is owner-only, so customers' headers are unchanged.
+- `?v=` restamped: base.css c1995cbf, layout.css f41e4f45, pages.css 854f4507, main.js f19d9306.
+
+**Measured.** Blank space left of the text:
+- 1600: 232 to 100px. The badge floor stops it at 100; the exact 1/3 would be 77.
+- 1920: 392 to 131px (exact 1/3).
+- 390 phone: unchanged.
+
+Search cards at 1600: 185x427 before, 225x377 after. At 1920: 271x377.
+
+Badge clash: the first version (no 100px floor) moved the 6th Add on 1280x551 from right edge 1183 to 1237. Google's 100x100 loading clip (x>=1180) then covered its centre: 4/6 runs covered with the new CSS, 0/6 with the old, and `probe:fe-master` §1b went red. With the floor: 0/16 covered at 1280-1600, and `probe:fe-master` is 49/49 twice.
+
+Header with Admin + Business injected: Admin to mark 16px at every width. Before the email rule, email to Admin clearance was -39px at 1100, -19 at 1150, 2 at 1200-1280, 8 at 1366 and 25 at 1440.
+
+**Known trade-off.** The scrolled compact header hides `.header-lead` (ERR-101), so Admin is not in the compact header. Scroll up to reach it.
+
+**Tests.** `tests/responsive-header-jul2026.test.js`: R4 (the lock mirrors the `:root` token) and R7b (Admin before the mark, no absolute pin, email rule, 1100 gate). `tests/navbar-parity-may2026.test.js` (the lock keeps the 1200px floor). Full suite 7405/7405 after deleting untracked `.DS_Store` files.
+
+## ERR-381 — Admin invoice: PO number never printed, freight box misaligned with courier picker, no credit/adjustment button (owner 2026-11-20) — FIXED (frontend)
+
+**Seen (owner, 20 Nov).** Invoice 3297 had "PO# 36104" in the PO number field, but the emailed invoice showed no PO anywhere. On the same editor the Freight box sat about 50px lower than the "Courier rate" select. The owner also asked for a way to add or take off an amount from the invoice total (refunds, or an extra charge).
+
+**Cause.**
+- `invoiceMeta()` in `js/admin/pages/invoices.js` is the one header source for the live preview, the downloaded PDF and the emailed PDF (`syncStoredPdf` uploads `buildInvoiceDoc`). It had no PO row. `po_number` was saved and shown on the portal, but never printed.
+- `.inv-freight` used `align-items: flex-end`. When the "This order qualifies for free shipping — apply" pill wraps to a second row inside `.inv-freight__pick`, the picker grows and the freight box seats on the bottom of the pill row.
+
+**Done.**
+- `invoiceMeta` adds a "PO Number" row after "Date order placed", only when the PO is filled (trimmed). Preview, PDF and email PDF all get it.
+- `.inv-freight` is now `align-items: flex-start`. Both labels are label + "excl. GST", so the inputs line up.
+- New "Add credit / adjustment" button. It adds an `adjustmentLine()`: description "Credit", manual price, our cost pinned to a manual 0. Negative amount = credit/refund, positive = extra charge. Amount is ex-GST like every line; GST is added on top. It rides the ordinary line path, because negative lines already work end to end (ERR-186). `kind` stays session-only and never reaches the payload.
+- admin.css `?v=` restamped to 662cd0b6 in the 4 admin pages.
+
+**Measured.** Freight row rendered with admin.css at a 540px column, pill wrapped: old rule input top 118.3px vs select top 63.8px (54.5px off, reproduces the screenshot); new rule 63.8 / 63.8.
+
+**Tests.** `tests/admin-invoice-po-adjustment-nov2026.test.js` (PO row present/absent, preview + PDF + stored PDF read `invoiceMeta`, flex-start rule, adjustment line shape + button wiring, no `kind` in payload). All 556 admin-invoice tests pass.
+
+## ERR-380 — Product cards: the "Fits <models>" line is gone and the card's white space is cut — SHIPPED (frontend) (2026-11-19)
+
+**Seen (owner, 19 Nov).** On `/shop?brand=brother&category=toner&code=TN155` every card had a "Fits Brother DCP-9040C…" line. It was cut off, so it did not even show the full list, and it took room. The owner asked to remove it and to remove as much white space from the cards as possible.
+
+**Done.**
+- Both card renderers (`products.js` and `shop-page.js#createProductCard`) no longer render `.product-card__fits`. `PrinterName.fitsLine`, its CSS (search.css, pages.css) and its unit tests are deleted. The teal search chip "Fits <token>" (ERR-133, shown when search matched a printer) is a different element and stays.
+- The base `.product-card__title` rule no longer reserves four lines of height. The footer's `margin-top: auto` still keeps prices level across a row.
+- The "Free Shipping" and "Save $X" pills share one line when they fit (they were always stacked).
+- At 768px and wider, price, Was price and "Incl. GST" share one line on /shop cards. Before, this was only on short laptop windows (ERR-301).
+
+**Measured.** TN155 code page at 2000×1100, first card: 529px tall before, 468px after.
+
+**Tests.** `tests/post-deploy-fixes-sep2026.test.js` §3 now asserts that no card renderer has a fits line, no `fitsLine` helper is left and no orphan CSS remains. `tests/product-card-title-clamp.test.js` asserts the 4-line clamp and no height reserve. `scripts/probe-post-deploy-fixes.mjs` §3 counts fits lines on the live listing, with a negative control that cards rendered.
+
+## ERR-379 — Brother toner code grid showed drum tiles (DR1070, DR2415, DR3605); a drum code is now never a tile on the toner grid — FIXED (frontend), backend series_codes ask open (2026-11-19)
+
+**Seen (owner, 19 Nov).** `/shop?brand=brother&category=toner` showed DR1070, DR2415 and DR3605 tiles among the TN tiles. Owner: drums show INSIDE a toner code page (they already do, by shared printer, ERR-358), never as their own tile in the toner grid.
+
+**Measured (live API, READ-ONLY, 2026-11-19).** `GET /api/shop?brand=brother&category=toner` returns `series` with `DR1070:4`, `DR2415:6`, `DR3605:7`. Cause: the backend tags Brother toner rows with drum codes in `series_codes`: `GTN1070BK`/`CTN1070BK` = [TN1070, DR1070]; `GTN2415BK`, `GTN2445BK`, `CTN2445BK`, `CTN2449BK` carry DR2415; and the five TN3605 toners (`GTN3605BK`, `GTN3605XLBK`, `GTN3605XXLBK`, `CTN3605XLBK`, `CTN3605XXLBK`) carry ONLY [DR3605], not TN3605 (their MPN is TN3605…).
+
+**Fix (frontend).** `ShopPage._partnerOnlyCode` (shop-page.js), called by `_recountChipsFromListing` (toner and drums pages, backend chip path). A chip is dropped when no own-category row carrying it has the code in its `manufacturer_part_number`, and a partner-type row (drum on the toner page, toner on the drums page) does. Dropped codes are logged and kept on `ShopPage._chipsDroppedAsPartner`. TZE, BU, WT and other drums-page tiles are unaffected (no toner MPN contains them). The client-extraction fallback path has no related walk and is not covered (`ponytail:` comment).
+
+**Known cost (owner accepted 19 Nov).** The five TN3605 toners lose their only tile until the backend tags them TN3605. They stay reachable by search and printer pages.
+
+**Tests.** `tests/shop-chip-counts-related-oct2026.test.js`: DR2415 dropped on the toner page and TN2530 dropped on the drums page; TN, DR and WT own tiles kept.
+
+**Backend.** Ask 5 in `backend-docs/outbox/fe-reply-2026-11-07.md` (not sent yet). When the backend fixes the tags, no FE change is needed.
+
 ## ERR-378 — A deactivated product still showed in search for minutes after its page was gone; the FE now drops inactive rows itself — FIXED (frontend), backend lag open (2026-11-09)
 
 **Seen (owner, 9 Nov).** The KXP160 ribbon (SKU `72778.01`) is deactivated in admin and its product page is gone, which is correct. But typing "KXP160" in the search bar still showed it, with price and Add.

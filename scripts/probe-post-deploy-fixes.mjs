@@ -175,37 +175,20 @@ try {
         await ctx.close();
     }
 
-    /* ══ §3 card +N ══════════════════════════════════════════════════════ */
-    head(`§3 card "+N" — ${LISTING}`);
+    /* ══ §3 card fits line — REMOVED (owner 2026-11-19, ERR-380) ══════════ */
+    head(`§3 no "Fits …" line on cards — ${LISTING}`);
     {
         const ctx = await ctxFor('desktop');
         const page = await ctx.newPage();
-        const rows = new Map();
-        page.on('response', async (r) => {
-            if (!/\/api\/shop\b/.test(r.url())) return;
-            try {
-                const j = await r.json();
-                for (const p of (j.data && j.data.products) || []) rows.set(p.sku, p);
-            } catch (_) { /* not JSON */ }
-        });
         await page.goto(`${BASE}${LISTING}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(7000);
-        const cards = await page.evaluate(() => [...document.querySelectorAll('.product-card')].map((c) => ({
-            sku: c.getAttribute('data-sku') || c.querySelector('[data-sku]')?.getAttribute('data-sku'),
-            fits: c.querySelector('.product-card__fits')?.textContent.trim() || null,
-        })));
-        let compared = 0;
-        for (const c of cards) {
-            const row = rows.get(c.sku);
-            if (!row || !c.fits || !Array.isArray(row.compatible_printers)) continue;
-            compared++;
-            const total = Number(row.compatible_printers_count);
-            const shown = Math.min(2, row.compatible_printers.length);
-            const want = Math.max(Number.isFinite(total) ? total : 0, row.compatible_printers.length) - shown;
-            const got = (c.fits.match(/ \+(\d+)$/) || [])[1];
-            check(`${c.sku}: "+N" = count − shown`, want > 0 ? got === String(want) : got === undefined, `${c.fits} (count ${row.compatible_printers_count})`);
-        }
-        check('at least one card compared against its API row', compared > 0, `${compared} of ${cards.length} cards, ${rows.size} rows`);
+        const m = await page.evaluate(() => ({
+            cards: document.querySelectorAll('.product-card').length,
+            fits: document.querySelectorAll('.product-card .product-card__fits').length,
+        }));
+        // Negative control: zero cards would make "zero fits lines" meaningless.
+        check('cards rendered (control)', m.cards > 0, `${m.cards} cards`);
+        check('no card renders a fits line', m.fits === 0, `${m.fits} of ${m.cards}`);
         await ctx.close();
     }
 

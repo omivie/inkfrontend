@@ -334,7 +334,13 @@
        LAYOUT
        ========================================== */
 
-    --container-max-width: 1200px;
+    /* Owner 11-20 (ERR-382): wide screens keep only 1/3 of the old blank
+       side gutter: (2/3)·100vw + 1136px text/3 + 64px padding. min() keeps
+       at least 100px of blank per side, the footprint of Google's fixed
+       bottom-right reviews badge (components.css --google-badge-max), so
+       the badge never sits on a product card's Add button (measured 1280x551).
+       max() keeps 1200px wherever there was no gutter to cut. */
+    --container-max-width: max(1200px, min(calc(66.667vw + 443px), calc(100vw - 136px)));
     /* Fluid page gutter: ~16px at 375px viewport → 32px from ~1200px.
        Responsive rebuild Jul 2026 — replaces the fixed 32px that burned
        64px of a 390px phone on padding alone. */

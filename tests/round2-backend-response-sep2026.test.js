@@ -59,12 +59,6 @@ test('§1 a row without display_name prints the RAW name (mirror deleted, BF-094
     assert.equal(U.PrinterName.of('Brother HL L2375DW'), '', 'a bare string is not a printer row');
 });
 
-test('§1 fitsLine reads display_name first, the raw name for a row without it', () => {
-    assert.equal(U.PrinterName.fitsLine([PDP_ROW, LISTING_ROW], 5), 'Fits Brother HL-L2375DW, Brother HL 1110 +3');
-    // A display_name the mirror cannot produce: only reading it verbatim passes.
-    const hp = { full_name: 'HP DESKJET 3520 E-ALL-IN-ONE-PRINTER', display_name: 'HP DeskJet 3520 e-All-in-One Printer' };
-    assert.equal(U.PrinterName.fitsLine([hp]), 'Fits HP DeskJet 3520 e-All-in-One Printer');
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §2 call sites
