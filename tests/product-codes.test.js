@@ -805,7 +805,9 @@ function loadSetProductCodes({ prev = [], prevErr = null, rlsDropsDelete = false
   const ctx = { DebugLog: { warn() {} } };
   vm.createContext(ctx);
   const obj = vm.runInContext(`({ normalizeProductCode: (c) => String(c).toUpperCase(),
-    _clearStorefrontCodeCache() {}, ${body} })`, ctx);
+    _clearStorefrontCodeCache() {},
+    // ERR-384's cross-type check has its own test file; here it always passes.
+    async _refuseCrossTypePlainCodes() {}, ${body} })`, ctx);
   obj._sb = () => sb;
   return { obj, log };
 }

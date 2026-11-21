@@ -449,3 +449,51 @@ export function reachabilityFacets(product, { overrideCodes = null, brandSlug = 
  * make that impossible.
  */
 export { SHOP_CATEGORIES };
+
+/**
+ * Toner ⇄ drum: which product types are each other's "other type" (ERR-384).
+ * Only these two pair — every other type is untouched by the rule below.
+ */
+export const PARTNER_TYPE = { toner_cartridge: 'drum_unit', drum_unit: 'toner_cartridge' };
+
+/**
+ * The codes about to be saved as PLAIN rows (no `chip_category`) that name the
+ * OTHER type's code: a DR code on a toner, a TN code on a drum (ERR-384).
+ *
+ * Why this is refused (backend response 2026-11-20, ERR-379): a plain row
+ * REPLACES a product's derived codes, so seven hand-entered rows filed the
+ * TN3605 toners under DR3605 only, and put DR tiles on the toner grid. The
+ * backend cannot tell such a row from a deliberate override, so the admin must
+ * not write one. Showing a toner under a drum's tile is still possible — as a
+ * VISITOR row (chip_category set), which the membership editor writes when an
+ * other-type product is ticked.
+ *
+ * A code is "the other type's" when a half of it (split on "/") IS a
+ * partner-type product's part number (DR3605 is the genuine drum's MPN) and no
+ * half of it appears in this product's own MPN. EXACT match, not substring:
+ * measured live 2026-11-21, a substring rule refused six legitimate Lexmark/OKI
+ * drum rows whose printer-family codes (C544, X264, B401) are fragments of
+ * toner MPNs (C544X1KG). Exact match refuses 0 of the 75 live rows. A combo
+ * pack whose own MPN names both (TN2445DR2425) keeps both codes.
+ *
+ * @param {object} a
+ * @param {string} a.productType  this product's product_type
+ * @param {string} a.mpn          this product's manufacturer_part_number
+ * @param {string[]} a.codes      normalised codes being saved
+ * @param {object} a.visits       code → chip_category for visitor rows
+ * @param {string[]} a.partnerMpns MPNs of partner-type products that may match
+ * @returns {string[]} the offending codes, in input order ([] = fine)
+ */
+export function crossTypePlainCodes({ productType, mpn, codes = [], visits = {}, partnerMpns = [] } = {}) {
+  if (!PARTNER_TYPE[productType]) return [];
+  const partners = new Set(partnerMpns.map(normCode).filter(Boolean));
+  return plainCandidateCodes({ mpn, codes, visits }).filter((code) =>
+    code.split('/').filter(Boolean).some((half) => partners.has(half)));
+}
+
+/** The plain (non-visitor) codes no half of which is in the product's own MPN — the only ones worth a lookup. */
+export function plainCandidateCodes({ mpn, codes = [], visits = {} } = {}) {
+  const own = normCode(mpn);
+  return codes.filter((code) => !visits[code]
+    && !code.split('/').filter(Boolean).some((half) => own.includes(half)));
+}

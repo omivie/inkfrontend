@@ -533,13 +533,14 @@
             { id: 'ribbons',      name: 'Printer Ribbons',  icon: 'file-text', apiCategory: 'ribbons' }
         ],
 
-        // ERR-337 — a drum that pairs with a toner shows on the toner's code
-        // tile, and the toner on the drum's (owner, 2026-10-15). The backend
-        // already tags them into each other's series_codes, but its
-        // `series[].count` and its `?code=` listing disagree about whether the
-        // other category's rows belong (Brother toner DR2415: tile 5, click 4;
-        // DR2530: tile 2, click 0). ONE owner of "which categories a chip
-        // spans": the tile count and the click both read `_listingApiCategories`.
+        // Toner ⇄ drums. Since backend 5c8b73b (2026-11-20) the backend owns
+        // pairing: `series[].count` and the own-category `?code=` listing both
+        // include the drums that fit a toner's printers (and vice versa), and a
+        // DR code is never a toner tile. The FE recount walk + printer join that
+        // used to do this (ERR-337/358/379) were DELETED (ERR-384). The one job
+        // left here: an old tile link `?category=toner&code=DR…` (or drums+TN…)
+        // now lists nothing in its own category, so it is moved to the
+        // category whose tile that code IS (_adoptPartnerCategory).
         RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' },
 
         // URL-boundary translation between the backend's canonical category
@@ -2820,22 +2821,12 @@
                     codes = window.SeriesCodes.collapseChipList(codes);
                 }
 
-                // ERR-337 — tile count from the SAME rows the click shows.
-                let countsPartial = false;
-                if (this._chipsDerivedFrom === 'backend' && this.RELATED_CATEGORY[this.state.category]) {
-                    const recount = await this._recountChipsFromListing(codes);
-                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                    codes = recount.codes;
-                    countsPartial = !recount.ok;
-                }
-
                 // Cache the final codes with counts — but ONLY when they describe
                 // an answer the backend actually gave (ERR-264). `codesCacheKey` is
                 // consulted at the top of this function on every later visit (:2029),
                 // so memoising an outage-derived [] is precisely what makes a
                 // transient 500 look permanent for the rest of the session.
-                // ERR-337: a failed recount walk is not memoised either.
-                if (!productsUnavailable && !countsPartial) {
+                if (!productsUnavailable) {
                     this.cache.products[codesCacheKey] = codes;
                 }
 
@@ -2951,128 +2942,51 @@
             return true;
         },
 
-        // ERR-337 — the API categories a code tile spans: its own, plus the
-        // related one (toner ⇄ drums). Read by the tile count AND the click.
-        _listingApiCategories() {
-            const ids = [this.state.category, this.RELATED_CATEGORY[this.state.category]].filter(Boolean);
-            return ids.map(id => this.categories.find(c => c.id === id)?.apiCategory || id);
-        },
-
-        // ERR-337 — does this row's series_codes (yield-collapsed) contain the
-        // code, or either half of a pair code? The ONE membership rule shared by
-        // the tile count (_recountChipsFromListing) and the related-category click.
-        _rowCarriesCode(row, code) {
-            const S = window.SeriesCodes;
-            const have = new Set((row && row.series_codes || []).map(S.collapseYieldSuffix).filter(Boolean));
-            return [code, ...S.pairHalves(code)].some(c => have.has(S.collapseYieldSuffix(c)));
-        },
-
-        // ERR-358 — toner ⇄ drum by PRINTER (owner 10-16: "match products
-        // universally by using the printer model"). [own type, partner type]
-        // per category; anything else on the page pairs with nothing.
-        PRINTER_PAIR: { toner: ['toner_cartridge', 'drum_unit'], consumable: ['drum_unit', 'toner_cartridge'] },
-
-        // The ONE related-category rule, shared by the tile count and the click:
-        // partner-type rows that share ≥1 printer with the own-type rows. A
-        // waste-box chip has no drum rows ⇒ no printers ⇒ no toners.
-        // Printers = the row's full `compatible_printer_slugs` (backend
-        // 2026-10-17, ERR-361; `[]` = fits no printer). Absent = the backend's
-        // lookup failed ⇒ the 2-printer `compatible_printers` sample, as told.
-        _printerPartners(ownRows, relatedRows) {
-            const pair = this.PRINTER_PAIR[this.state.category];
-            if (!pair || !Array.isArray(relatedRows)) return [];
-            const slugsOf = (p) => (p && Array.isArray(p.compatible_printer_slugs)
-                ? p.compatible_printer_slugs
-                : (p && Array.isArray(p.compatible_printers) ? p.compatible_printers : []).map(c => c && c.slug))
-                .filter(s => typeof s === 'string' && s);
-            const slugs = new Set((ownRows || []).filter(p => p && p.product_type === pair[0]).flatMap(slugsOf));
-            if (!slugs.size) return [];
-            return relatedRows.filter(p => p && p.product_type === pair[1] && slugsOf(p).some(s => slugs.has(s)));
-        },
-
-        // ERR-379 — a drum code is never a tile on the toner grid (and vice
-        // versa); drums show INSIDE a toner tile via _printerPartners. The
-        // backend's toner series_codes cross-tag drum codes (GTN1070BK =
-        // [TN1070, DR1070]), so the code's family is judged by MPN: no own row
-        // carrying it has it in its MPN, and a partner-type row does.
-        // ponytail: backend chip path only; the client-extraction fallback has
-        // no related walk and keeps cross-tagged chips.
-        _partnerOnlyCode(code, carriers, relatedRows) {
-            const pair = this.PRINTER_PAIR[this.state.category];
-            if (!pair || !Array.isArray(relatedRows)) return false;
-            const S = window.SeriesCodes;
-            const parts = [code, ...(S ? S.pairHalves(code) : [])].map(c => String(c).toUpperCase());
-            const mpnHas = (p) => {
-                const mpn = String((p && p.manufacturer_part_number) || '').toUpperCase();
-                return !!mpn && parts.some(c => mpn.includes(c));
-            };
-            return !carriers.some(mpnHas) && relatedRows.some(p => p && p.product_type === pair[1] && mpnHas(p));
-        },
-
-        // Every listing row of one category, paged. The response carries no
-        // pagination object, so a short page is the last one. null = the walk
-        // did not complete (never a partial array — a partial count is a lie).
-        async _walkListing(apiCategory) {
-            const PAGE = 200;
-            const rows = [];
-            for (let page = 1; page <= 20; page++) {
-                const r = await API.getShopData({
+        /**
+         * ERR-384 — `?category=toner&code=DR2415` (and drums + TN…) came from
+         * tiles the storefront showed until 2026-11-20; bookmarks and crawlers
+         * still hold them, and the own-category listing is now empty. Ask the
+         * partner category once with the same code(s). Rows ⇒ the page BECOMES
+         * that category (state + replaceState — a correction of the address,
+         * not a navigation, same as the retired-stem adopt) and they render.
+         * No rows / a failed ask ⇒ null and the normal empty state stands; a
+         * failure is logged, because then "no products" is a guess.
+         * @returns {Promise<Array|null>}
+         */
+        async _adoptPartnerCategory(aliases, { packFilter = null, sourceFilter = null } = {}) {
+            const partner = this.RELATED_CATEGORY[this.state.category];
+            if (!partner || !this.state.code) return null;
+            const apiCategory = this.categories.find(c => c.id === partner)?.apiCategory || partner;
+            const responses = await Promise.all((aliases || [this.state.code]).map(alias =>
+                API.getShopData({
                     brand: this.state.brand,
                     category: apiCategory,
-                    page,
-                    limit: PAGE,
-                    ...(this.state.type === 'genuine' || this.state.type === 'compatible'
-                        ? { source: this.state.type } : {})
-                });
-                if (!r || r.ok !== true || !Array.isArray(r.data?.products)) return null;
-                rows.push(...r.data.products);
-                if (r.data.products.length < PAGE) return rows;
-            }
-            return null; // ponytail: 20×200 rows cap; no brand/category is near it (Brother toner = 268)
-        },
-
-        /**
-         * ERR-337 — recount each chip as the number of distinct listing rows,
-         * across `_listingApiCategories()`, whose series_codes (yield-collapsed,
-         * or a half of a pair chip) contain the chip code: the predicate the
-         * `?code=` listing applies, so tile number = cards on click. Chip LIST
-         * stays the backend's; a chip whose count is 0 is dropped (it opens
-         * empty). Walk failure ⇒ backend counts kept and said so (fail-soft LOUD).
-         * @returns {Promise<{codes: Array, ok: boolean}>}
-         */
-        async _recountChipsFromListing(codes) {
-            const S = window.SeriesCodes;
-            const walks = await Promise.all(
-                this._listingApiCategories().map(c => this._walkListing(c).catch(() => null)));
-            if (!S || walks.some(w => w === null)) {
-                this._chipCountsFrom = 'backend-series';
-                DebugLog.warn(
-                    `[Shop._recountChipsFromListing] listing walk failed (brand=${this.state.brand}, ` +
-                    `category=${this.state.category}) — tiles show the backend series count, which can ` +
-                    'disagree with the products a tile opens (ERR-337). Not cached.');
-                return { codes, ok: false };
-            }
-            // ERR-358 — own rows by code, related rows by shared printer.
-            const [ownRows, relatedRows = []] = walks;
-            const keyOf = (p) => p && (p.id || p.sku);
-            const out = [];
-            const dropped = [];
-            for (const chip of codes) {
-                const own = ownRows.filter(p => this._rowCarriesCode(p, chip.code));
-                if (this._partnerOnlyCode(chip.code, own, relatedRows)) { dropped.push(chip.code); continue; }
-                const ids = new Set([...own, ...this._printerPartners(own, relatedRows)].map(keyOf).filter(Boolean));
-                if (ids.size !== Number(chip.count)) {
-                    DebugLog.warn(`[Shop._recountChipsFromListing] ${chip.code} series=${chip.count} rows=${ids.size}`);
+                    code: alias,
+                    limit: 200,
+                    ...(packFilter ? { pack: packFilter } : {}),
+                    ...(sourceFilter ? { source: sourceFilter } : {})
+                }).catch(err => ({ ok: false, code: (err && err.code) || 'FETCH_FAILED' }))));
+            const rows = [];
+            const seen = new Set();
+            for (const r of responses) {
+                if (!r || r.ok !== true || !Array.isArray(r.data?.products)) {
+                    DebugLog.warn(`[Shop._adoptPartnerCategory] ${partner} ?code=${this.state.code} ask failed ` +
+                        `(${(r && r.code) || 'no answer'}) — showing the empty ${this.state.category} result, which may be wrong.`);
+                    continue;
                 }
-                if (ids.size > 0) out.push({ ...chip, count: ids.size });
+                for (const p of r.data.products) {
+                    const key = p && (p.id || p.sku);
+                    if (key == null || seen.has(key)) continue;
+                    seen.add(key);
+                    rows.push(p);
+                }
             }
-            this._chipsDroppedAsPartner = dropped;
-            if (dropped.length) {
-                DebugLog.warn(`[Shop._recountChipsFromListing] dropped partner-category tiles ` +
-                    `(${this.state.category}): ${dropped.join(', ')} — backend series_codes cross-tag them (ERR-379)`);
-            }
-            this._chipCountsFrom = 'listing-rows';
-            return { codes: out, ok: true };
+            if (!rows.length) return null;
+            DebugLog.warn(`[Shop._adoptPartnerCategory] ${this.state.code} is a ${partner} tile, not ` +
+                `${this.state.category} — moved there (old tile link, ERR-384).`);
+            this.state.category = partner;
+            this.updateURL({ replace: true });
+            return rows;
         },
 
         extractProductCodes(products) {
@@ -3641,6 +3555,7 @@
                 const productCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-products-${code}${packFilter ? `-pack-${packFilter}` : ''}`;
 
                 let mergedProducts = this.cache.products[productCacheKey] || [];
+                let adoptedCategory = false;   // ERR-384 — set by _adoptPartnerCategory
 
                 // ERR-266 — "we could not ask" is a THIRD state, distinct from both
                 // "here are the products" and "there are none". This is the same rule
@@ -3697,10 +3612,8 @@
                         // cold deep link the chip cache is empty and only the
                         // collapsed code used to be sent.
                         if (intent && intent.requested && !aliases.includes(intent.requested)) aliases.unshift(intent.requested);
-                        // ERR-358 — ?code= asks the OWN category only; the related
-                        // category joins by shared printer below (_printerPartners).
-                        const relatedCategory = this.RELATED_CATEGORY[this.state.category]
-                            ? this._listingApiCategories()[1] : null;
+                        // ?code= asks the OWN category only — since backend 5c8b73b
+                        // that listing already holds the paired drums/toners (ERR-384).
                         const requests = aliases.map(alias => ({ alias, category: loadApiCategory }));
                         const responses = await Promise.all(requests.map(({ alias, category }) =>
                             API.getShopData({
@@ -3745,21 +3658,16 @@
                             }
                         }
 
-                        // ERR-358 — the related category by shared printer. The walk
-                        // is SWR-warm from the tile count; a failed walk is a PARTIAL
-                        // answer (rendered, never cached), not "no drums".
-                        if (relatedCategory && mergedProducts.length) {
-                            const relatedRows = await this._walkListing(relatedCategory).catch(() => null);
+                        // ERR-384 — an old tile link lists nothing here now: the
+                        // backend stopped filing drum codes on toners (5c8b73b), so
+                        // `?category=toner&code=DR2415` is empty. Move the visitor to
+                        // the category whose tile that code IS, instead of a dead end.
+                        if (!mergedProducts.length && !productsUnavailable) {
+                            const adopted = await this._adoptPartnerCategory(aliases, { packFilter, sourceFilter });
                             if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                            if (relatedRows === null) {
-                                productsUnavailable = true;
-                                if (!unavailableCode) unavailableCode = 'RELATED_WALK_FAILED';
-                            }
-                            for (const p of this._printerPartners(mergedProducts, relatedRows)) {
-                                const key = p.id || p.sku;
-                                if (key == null || seenIds.has(key)) continue;
-                                seenIds.add(key);
-                                mergedProducts.push(p);
+                            if (adopted) {
+                                adoptedCategory = true;
+                                mergedProducts.push(...adopted);
                             }
                         }
                     }
@@ -3804,7 +3712,12 @@
                     // rate-limit window into the answer for the rest of the session.
                     // The partial set still RENDERS — fail-soft — it just never
                     // becomes what the next navigation reads.
-                    if (mergedProducts.length > 0 && !productsUnavailable) {
+                    // An adopted category is a redirect, not this key's answer: cached
+                    // under the OLD category it would paint drums under a toner heading
+                    // on the next visit, skipping the adopt.
+                    if (adoptedCategory) {
+                        // Not cached: see the comment above — a redirect, not an answer.
+                    } else if (mergedProducts.length > 0 && !productsUnavailable) {
                         this.cache.products[productCacheKey] = mergedProducts;
                     } else if (mergedProducts.length > 0) {
                         // Partial-ness belongs in the STATE, not only in a log line

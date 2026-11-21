@@ -40,7 +40,27 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
-## ERR-383 — Invoice 3297 "Failed to update invoice": the "Existing order" picker linked another invoice's shadow order (2026-11-20) — FRONTEND GUARD SHIPPED, backend repair + 500 cause OPEN
+## ERR-384 — Toner/drum code tiles: the backend owns the numbers now; FE recount walk deleted, old drum links redirected, admin refuses cross-type code rows (2026-11-21) — SHIPPED (frontend)
+
+**Trigger.** Backend response 2026-11-20 (`backend-docs/inbox/fe-reply-20nov-backend-response-nov2026.md`, commit `5c8b73b`) answered ERR-379 at the source: tag rows (`chip_category`) no longer enter `series_codes`, the seven hand-entered plain rows that filed toners under drum codes are deleted, and the toner `?code=` listing itself carries the drums that fit the same printers. It also asked the admin to stop offering a plain code row that names the other type's code.
+
+**Measured before deleting anything (read-only, 2026-11-21).** Brother toner 51 tiles / 0 DR; drums 39 / 0 TN; TN3605 tile 7 = listing 7 (5 toners + 2 drums); `?category=toner&code=DR2415` = 0 rows. Full `probe:chip-counts` sweep (rewritten, below) over every brand `/api/brands` lists: **108 brand×category pairs, 1,100 tiles, 0 tile ≠ click, 0 cross-type, exit 0** (900 ms pace, 1,208 GETs). An earlier run STOPPED on RATE_LIMITED at 225 calls because an admin check ran beside it — reported as incomplete, not a pass, and rerun alone.
+
+**Changes.**
+1. **FE recount deleted (owner approved 2026-11-21).** `_recountChipsFromListing`, `_walkListing` (up to 20 pages × 2 categories on every toner/drum page), `_printerPartners`, `_partnerOnlyCode`, `_listingApiCategories`, `_rowCarriesCode`, `PRINTER_PAIR`, the related-category merge on click and `RELATED_WALK_FAILED`. Tiles show the backend `series[].count` (yield variants still summed by `SeriesCodes.collapseChipList`); a click asks the own category only. Browser check (local, live API): Brother toner page makes 1 `/api/shop` call (was 1 + a full two-category walk), 51 tiles, no DR; TN3605 shows 7 cards.
+2. **Old tile links.** `?category=toner&code=DR…` / `?category=drums&code=TN…` now list nothing in their own category. `_adoptPartnerCategory` asks the partner category once (only on a real empty, never on a failure); rows ⇒ the page becomes that category via `updateURL({replace:true})`, rows are NOT cached under the old key and NOT reported as PARTIAL. Measured: `/shop?brand=brother&category=toner&code=DR2415` lands on `category=drums&code=DR2415`, crumb "Drums & Supplies", 7 cards, identical to a direct visit.
+3. **Admin guard** (`AdminAPI.setProductCodes`, the one choke point for drawer, membership editor, brand rename and new-product filing): before the delete, `_refuseCrossTypePlainCodes` refuses a PLAIN row whose code is EXACTLY a part number of the other type (DR3605 on a toner) with "…is a drum code. A toner can show under that tile only as a visitor — open Product Codes → Brother → Drums & Kits → DR3605 and tick this toner there. Nothing was changed." A failed lookup also refuses (nothing written yet). **Exact, not substring:** measured over all 75 live `product_codes` rows, a substring rule refused six legitimate Lexmark/OKI drum rows (C544, X264, B401 are fragments of toner MPNs); exact refuses 0. Live read-only run of the shipped method: GTN3605BK+DR3605 refused, GDR3605BK+TN3605 refused, GTN3605BK own codes / GC540X35GBK C540,C544 / GTN2445BK three TN codes pass.
+4. **`probe:chip-counts` rewritten** — now the ONLY drift detector: brands from `/api/brands` (was a hard-coded nine), tile = backend count collapsed exactly as the storefront collapses yield variants, click = union of alias listings, new CROSS-TYPE check. First CROSS-TYPE rule ("no own-type row") flagged 20 false positives — "Drums & Supplies" also holds waste boxes, belts and fax rolls — so it is now "every row is the partner type".
+
+**Not changed, and why.** The www return confirmation already has no reply time. Drum-code pages read "Brother DR2415 Toner Cartridges" — that is the backend prerender's h1 (bot page checked 21 Nov, DR2415 and DR3605), which www mirrors by the ERR-377 rule; asked in `backend-docs/outbox/fe-reply-2026-11-21.md`.
+
+**Tests.** `shop-code-tiles-backend-owned-nov2026.test.js` 10/10 (replaces `shop-chip-counts-related-oct2026.test.js`, which tested the deleted walk); `admin-product-codes-cross-type-nov2026.test.js` 14/14; both 0 pass on HEAD (negative control). `catalogue-error-vs-empty` lifts the real `_adoptPartnerCategory`; `product-codes` stubs the guard (own file covers it). Suite 7423 pass / 0 fail.
+
+**Lesson.** A workaround that recounts someone else's numbers becomes dead weight the day they fix them — and a cost the shopper keeps paying. Measure the source across the whole catalogue, then delete the workaround and keep the measurement (the probe) as the guard.
+
+**Files.** `inkcartridges/js/shop-page.js` · `inkcartridges/html/shop.html` (`?v=` only) · `inkcartridges/js/admin/api.js` · `inkcartridges/js/admin/utils/catalogue-pathway.js` · `scripts/probe-chip-counts.mjs` · tests above · `backend-docs/inbox/…20nov…` · `backend-docs/outbox/fe-reply-2026-11-21.md` · `errors.md`.
+
+## ERR-383 — Invoice 3297 "Failed to update invoice": the "Existing order" picker linked another invoice's shadow order (2026-11-20) — FIXED (frontend guard 11-20, backend repair + server guard 11-20, FE error copy 11-21)
 
 **Seen (owner, 20 Nov, 5:31pm).** Editing invoice 3297 (changing the bill-to, the delivery address and the unit price) and pressing Save gave the toast "Failed to update invoice". That text is the backend's generic HTTP 500 message, passed through by `AdminAPI.updateInvoice` → `invoiceError`. It carries no detail.
 
@@ -58,6 +78,12 @@ describing the same incident.
 **Open (backend).** (1) Repair: `orders.invoice_id` of INV-3274 back to 3274; 3297 gets `source_order_id = null` and its own shadow order. (2) Report the 500 cause from the logs. (3) Refuse, server side, a `source_order_id` whose order already belongs to a different invoice.
 
 **Tests.** `tests/admin-invoice-shadow-order-source-nov2026.test.js` 2/2; negative control on HEAD: the shadow-order case fails. Suite 7407 pass / 0 fail.
+
+**Resolved (backend response 2026-11-20, `backend-docs/inbox/fe-reply-20nov-backend-response-nov2026.md`; re-measured read-only 2026-11-21).**
+- **500 cause (backend's log):** `sync_invoice_shadow_order` did not check ownership, so creating 3297 re-pointed INV-3274 at it. Every later save of 3297 first deletes "this invoice's own sales record" — now INV-3274 — and the delete hit `order_items_order_id_fkey` (23503), which the route did not map, hence the generic 500. Without that line item the save would have silently deleted invoice 3274's sales record and answered 200. So the inference above was right, and the 500 was the *lucky* outcome.
+- **Repair, measured:** INV-3274 `invoice_id` = 3274 (`17c0ee9e…`) again; 3297 `source_order_id = null`; new shadow order INV-3297 (`13e56979…`, channel `invoice`, $685.49, 1× GTK5494KCMY).
+- **Server guard:** POST/PUT refuse a bad `source_order_id` with 400 `SOURCE_ORDER_NOT_FOUND` / `SOURCE_ORDER_IS_INVOICE` / `SOURCE_ORDER_ALREADY_INVOICED` (DB function: `SOURCE_ORDER_NOT_LINKABLE`), 503 `SOURCE_ORDER_LOOKUP_FAILED`, 409 `INVOICE_REFERENCE_CONFLICT`; any remaining 500 says "Failed to update invoice: <reason>".
+- **FE (2026-11-21):** `saveErrorMessage` keeps the server sentence and adds what to DO — the SOURCE_ORDER refusals say "Nothing was saved … close the invoice, reopen it from the list, and re-apply your edit" (the usual cause is an editor tab opened before the repair); the 503 says try again. Email and Download auto-saves now go through the same translator (they showed bare `err.message`). Void reads `data.warnings` (`SALES_RECORD_NOT_CANCELLED`) through `withInvoiceWarnings` and toasts "Invoice N voided, but: …" instead of a plain "voided". Tests: `admin-invoice-shadow-order-source-nov2026.test.js` 7/7 (4 red on HEAD).
 
 **Lesson.** A picker that lists rows the backend made for its own bookkeeping will eventually be used to pick one. Filter by what the row *is* (`channel`), not by what it looks like in a dropdown.
 

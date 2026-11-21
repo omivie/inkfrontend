@@ -666,7 +666,7 @@ function makeCodeNav(opts = {}) {
         state: { brand: 'brother', category: 'ink', type: null, code: 'LC431' },
         cache: { products: opts.cache || {} },
         categories: [{ id: 'ink', name: 'Ink Cartridges', apiCategory: 'ink' }],
-        RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' }, // ERR-337 (ink spans only ink)
+        RELATED_CATEGORY: { toner: 'consumable', consumable: 'toner' }, // ERR-384 old-link adopt (ink has no partner)
         elements: {
             levelCodes: { hidden: true, children: [] },
             levelProducts: { hidden: true },
@@ -702,6 +702,8 @@ function liftLoadProducts(getShopData, src = SHOP_SRC) {
         '_isCatalogueFailure(resp)',
         // ERR-301: loadProducts reads the ad's intent (288XL / pack) through it.
         '_freshIntent()',
+        // ERR-384: an empty own-category code listing asks the partner category.
+        'async _adoptPartnerCategory(aliases, { packFilter = null, sourceFilter = null } = {})',
     ], {
         API: { getShopData },
         DebugLog: QUIET,
@@ -717,6 +719,7 @@ async function runLoadProducts(getShopData, opts = {}) {
     nav._errorPaneShowing = lifted._errorPaneShowing;
     nav._isCatalogueFailure = lifted._isCatalogueFailure;
     nav._freshIntent = lifted._freshIntent;
+    nav._adoptPartnerCategory = lifted._adoptPartnerCategory;
     await lifted.loadProducts.call(nav, 1);
     return nav;
 }
@@ -1017,8 +1020,8 @@ test('§9 MUTANT — drop the rate-limit arm and a 429 is told the server is war
 
 test('§9 MUTANT — revert the partial-cache guard and an incomplete set is memoised', async () => {
     const broken = mutate(SHOP_SRC,
-        'if (mergedProducts.length > 0 && !productsUnavailable) {',
-        'if (mergedProducts.length > 0) {');
+        '} else if (mergedProducts.length > 0 && !productsUnavailable) {',
+        '} else if (mergedProducts.length > 0) {');
     const nav = await runLoadProducts(async ({ code }) => (
         code === 'LC431'
             ? { ok: true, data: { products: LC431.slice(0, 12) } }

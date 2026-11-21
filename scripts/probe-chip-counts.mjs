@@ -3,22 +3,25 @@
  * probe-chip-counts.mjs
  * =====================
  * Does every "Select a Product Code" tile on /shop say the number of products
- * it opens? (ERR-337, owner 2026-10-15: Brother toner DR2415 said 5, opened 4.)
+ * it opens, and is every toner/drum tile the page's OWN type?
+ * (ERR-337 owner 2026-10-15: Brother toner DR2415 said 5, opened 4. ERR-379
+ * 2026-11-19: DR tiles on the toner grid.)
  *
- * For every brand × category it reads the tile list (/api/shop?brand&category),
- * then for every tile computes what the click shows, by the storefront's rules
- * (shop-page.js, ERR-358/361): `?code=X` over the OWN category, plus — toner ⇄
- * drums only — partner-type rows of the related category that share ≥1 printer
- * (`compatible_printer_slugs`, else the 2-printer sample). Three numbers:
+ * Since backend 5c8b73b (2026-11-20) the storefront shows the backend's numbers
+ * as they are: tile = `series[].count`, click = `?code=` over the page's own
+ * category (the backend pairs toners and drums by printer inside that listing).
+ * Yield variants collapse exactly as the storefront collapses them (collapse()
+ * below = SeriesCodes.collapseChipList): one tile, summed count, union click.
+ * The FE recount walk was deleted (ERR-384), so THIS probe is now the only thing
+ * that would notice the backend drifting again.
  *
- *   backend  `series[].count` as the API ships it (pairs by CODE, BF-102)
- *   tile     what the storefront shows: the backend count outside toner/drums,
- *            else own walk rows carrying the code + their printer partners
- *   click    distinct rows the click shows
+ *   FAIL        tile ≠ click (the storefront lies)
+ *   CROSS-TYPE  toner/drums only: a tile whose listing is ENTIRELY the other
+ *               type (a drum code on the toner grid opens only drums, ERR-379)
  *
- * FAIL = tile ≠ click (the storefront lies). BACKEND-DRIFT = backend ≠ click
- * (reported separately — the negative control; expected non-zero for toner/drums
- * until the backend ask in backend-docs/outbox ships).
+ * Brands = every brand `GET /api/brands` lists (27 on 2026-11-21), not a list
+ * kept here that goes stale. A brand with no products in a category answers an
+ * empty series and counts as 0 tiles.
  *
  * READ-ONLY. GET only, no credentials, no fixture written.
  * PACED (PROBE_PACE_MS, default 700ms) because the origin limiter is shared per
@@ -30,10 +33,11 @@
  */
 const API = process.env.API_BASE || 'https://api.inkcartridges.co.nz';
 const PACE = Number(process.env.PROBE_PACE_MS || 700);
-const BRANDS = ['brother', 'canon', 'epson', 'hp', 'samsung', 'lexmark', 'oki', 'fuji-xerox', 'kyocera'];
 const CATEGORIES = ['ink', 'toner', 'drums', 'label'];
-const RELATED = { toner: 'drums', drums: 'toner' }; // apiCategory form of shop-page.js RELATED_CATEGORY
-const PAIR = { toner: ['toner_cartridge', 'drum_unit'], drums: ['drum_unit', 'toner_cartridge'] }; // shop-page.js PRINTER_PAIR
+// "Drums & Supplies" also holds waste boxes, belts and fuser units, so "no drum
+// row" is normal there. A cross-type tile is one whose rows are ALL the other
+// type: a drum code on the toner grid opens only drums (ERR-379).
+const PARTNER_TYPE = { toner: 'drum_unit', drums: 'toner_cartridge' };
 const PAGE = 200;
 
 console.error(`probe:chip-counts — READ-ONLY (GET only) against ${API}, paced ${PACE}ms`);
@@ -58,84 +62,75 @@ async function shop(params) {
     return body.data;
 }
 
-const norm = (c) => String(c ?? '').trim().toUpperCase().replace(/[\s-]/g, '');
-const base = (c) => norm(c).replace(/^([A-Z]*\d+)(X{1,3}L)$/, '$1');
-const halves = (c) => (norm(c).includes('/') ? norm(c).split('/').filter(Boolean) : []);
-const carries = (p, code) => {
-    const have = new Set((p.series_codes || []).map(base).filter(Boolean));
-    return [code, ...halves(code)].some(c => have.has(base(c)));
-};
-
-// shop-page.js _printerPartners, verbatim rule.
-const slugsOf = (p) => (Array.isArray(p.compatible_printer_slugs) ? p.compatible_printer_slugs
-    : (Array.isArray(p.compatible_printers) ? p.compatible_printers : []).map(c => c && c.slug)).filter(Boolean);
-let sampleFallbacks = 0;
-function partners(category, ownRows, relatedRows) {
-    const [own, partner] = PAIR[category];
-    const slugs = new Set(ownRows.filter(p => p.product_type === own).flatMap(slugsOf));
-    if (!slugs.size) return [];
-    return relatedRows.filter(p => p.product_type === partner && slugsOf(p).some(s => slugs.has(s)));
-}
-
-async function walk(brand, category) {
+async function listing(brand, category, code) {
     const rows = [];
     for (let page = 1; ; page++) {
-        const d = await shop({ brand, category, page, limit: PAGE });
+        const d = await shop({ brand, category, code, page, limit: PAGE });
         rows.push(...d.products);
         if (d.products.length < PAGE) return rows;
     }
 }
 
 const fails = [];
-const drift = [];
+const crossType = [];
 const summary = [];
 
-async function probe(brand, category) {
-    const series = (await shop({ brand, category })).series || [];
-    let ownRows = null;
-    let relatedRows = null;
-    if (RELATED[category]) {
-        ownRows = await walk(brand, category);
-        relatedRows = await walk(brand, RELATED[category]);
-        sampleFallbacks += [...ownRows, ...relatedRows].filter(p => !Array.isArray(p.compatible_printer_slugs)).length;
-    }
-
-    let bad = 0;
-    let shown = 0;
+// utils.js SeriesCodes.collapseChipList, verbatim rule: yield variants
+// (604 / 604XL) become ONE tile whose count is the SUM of the backend counts and
+// whose click fans out to every alias (union of rows, de-duplicated by id).
+const norm = (c) => String(c ?? '').trim().toUpperCase().replace(/[\s-]/g, '');
+const base = (c) => norm(c).replace(/^([A-Z]*\d+)(X{1,3}L)$/, '$1');
+function collapse(series) {
+    const tiles = new Map();
     for (const chip of series) {
-        let tile = chip.count;
-        if (ownRows) {
-            const own = ownRows.filter(p => carries(p, chip.code));
-            tile = new Set([...own, ...partners(category, own, relatedRows)].map(p => p.id)).size;
-            if (tile === 0) continue; // storefront drops it — opens nothing, shows nothing
-        }
-        shown++;
-        const clickRows = (await shop({ brand, category, code: chip.code, limit: PAGE })).products;
-        const ids = new Set(clickRows.map(p => p.id));
-        if (relatedRows) for (const p of partners(category, clickRows, relatedRows)) ids.add(p.id);
-        const click = ids.size;
-        const row = `${brand}\t${category}\t${chip.code}\tbackend=${chip.count}\ttile=${tile}\tclick=${click}`;
-        if (tile !== click) { bad++; fails.push(row); console.log(`FAIL\t${row}`); }
-        if (chip.count !== click) drift.push(row);
+        const b = base(chip.code);
+        if (!b) continue;
+        if (!tiles.has(b)) tiles.set(b, { code: b, count: 0, aliases: [] });
+        const t = tiles.get(b);
+        if (!t.aliases.includes(norm(chip.code))) t.aliases.push(norm(chip.code));
+        t.count += Number(chip.count) || 0;
     }
-    summary.push(`${brand}/${category}: ${shown} tiles, ${bad} wrong`);
-    console.error(`  ${brand}/${category}: ${shown} tiles, ${bad} wrong`);
+    return [...tiles.values()];
+}
+
+async function probe(brand, category) {
+    const series = collapse((await shop({ brand, category })).series || []);
+    let bad = 0;
+    for (const chip of series) {
+        const rows = [];
+        for (const alias of chip.aliases) rows.push(...await listing(brand, category, alias));
+        const click = new Set(rows.map(p => p.id)).size;
+        const row = `${brand}\t${category}\t${chip.code}${chip.aliases.length > 1 ? `[${chip.aliases.join('+')}]` : ''}\ttile=${chip.count}\tclick=${click}`;
+        if (chip.count !== click) { bad++; fails.push(row); console.log(`FAIL\t${row}`); }
+        const partner = PARTNER_TYPE[category];
+        if (partner && rows.length && rows.every(p => p.product_type === partner)) {
+            bad++; crossType.push(row); console.log(`CROSS-TYPE\t${row}\t(every row is ${partner})`);
+        }
+    }
+    summary.push(`${brand}/${category}: ${series.length} tiles, ${bad} wrong`);
+    console.error(`  ${brand}/${category}: ${series.length} tiles, ${bad} wrong`);
 }
 
 function report() {
     console.log(`\n# ${summary.length} brand/category pairs measured, ${calls} GETs`);
     for (const s of summary) console.log(`#   ${s}`);
-    console.log(`# toner/drum rows WITHOUT compatible_printer_slugs (sample fallback, loud): ${sampleFallbacks}`);
-    console.log(`# BACKEND-DRIFT (series count ≠ click; negative control — backend pairs by code until option (b)): ${drift.length}`);
-    for (const d of drift) console.log(`#   ${d}`);
+    console.log(`# CROSS-TYPE (toner/drums tile whose rows are all the other type): ${crossType.length}`);
     console.log(`# FAIL (tile ≠ click): ${fails.length}`);
 }
 
 const [onlyBrand, onlyCategory] = process.argv.slice(2);
-for (const brand of onlyBrand ? [onlyBrand] : BRANDS) {
+let brands = onlyBrand ? [onlyBrand] : null;
+if (!brands) {
+    const res = await fetch(`${API}/api/brands`);
+    const body = await res.json().catch(() => null);
+    brands = Array.isArray(body?.data) ? body.data.map(b => b.slug).filter(Boolean) : [];
+    if (!brands.length) { console.error('STOPPED: /api/brands gave no brands — nothing measured (not a pass).'); process.exit(2); }
+    console.error(`  ${brands.length} brands from /api/brands`);
+}
+for (const brand of brands) {
     for (const category of onlyCategory ? [onlyCategory] : CATEGORIES) {
         await probe(brand, category);
     }
 }
 report();
-process.exit(fails.length ? 1 : 0);
+process.exit(fails.length || crossType.length ? 1 : 0);

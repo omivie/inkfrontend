@@ -2,13 +2,14 @@
  * AdminAPI — Admin-specific API layer
  * Uses window.API for REST calls + Supabase RPC for analytics
  */
-import { PRODUCT_TYPE_TO_SHOP_CATEGORY } from './utils/product-codes.js';
+import { PRODUCT_TYPE_TO_SHOP_CATEGORY, SHOP_CATEGORIES } from './utils/product-codes.js';
 import { normalisePurgeResult } from './utils/order-deletability.js';
 import { BusinessAccountRegistry } from './utils/business-accounts.js';
 // One vocabulary for "when was this order's invoice sent", shared with
 // pages/orders.js — see the module header for why it is not defined twice.
 import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './utils/order-invoice-sent.js';
 import { pgrstLike } from './utils/pgrst.js';
+import { PARTNER_TYPE, crossTypePlainCodes, plainCandidateCodes } from './utils/catalogue-pathway.js';
 import { TOP_PRODUCTS_MAX_LIMIT, normalizeRows } from './utils/best-sellers.js';
 
 // The carrier registry (GET /api/admin/shipping/carriers) is a constant per
@@ -2600,6 +2601,53 @@ const AdminAPI = {
       .replace(/^\/+|\/+$/g, '');
   },
 
+  /**
+   * ERR-384 — refuse a plain (no chip_category) code row that names the other
+   * type's code: a DR code on a toner, a TN code on a drum. The backend asked
+   * for this on 2026-11-20 (ERR-379 follow-up): a plain row REPLACES the
+   * product's derived codes, so seven such rows had filed the TN3605 toners
+   * under DR3605 only, and the backend cannot tell one from a deliberate
+   * override. The rule is `crossTypePlainCodes` (utils/catalogue-pathway.js).
+   *
+   * Two reads, only when needed: the product's type + MPN, then partner-type
+   * MPNs matching the candidate codes. A failed read REFUSES the save — it runs
+   * before the delete, so "nothing was changed" is literally true, and letting
+   * the write through unchecked is exactly how the bug came back last time.
+   */
+  async _refuseCrossTypePlainCodes(sb, productId, codes, visits) {
+    const { data: product, error } = await sb.from('products')
+      .select('product_type, manufacturer_part_number, brand:brands(name)').eq('id', productId).maybeSingle();
+    if (error) throw new Error(`couldn’t check the codes against the catalogue (${error.message}) — nothing was changed`);
+    const partner = PARTNER_TYPE[product?.product_type];
+    if (!partner) return;
+    const candidates = plainCandidateCodes({ mpn: product.manufacturer_part_number, codes, visits });
+    if (!candidates.length) return;
+    const halves = [...new Set(candidates.flatMap(c => c.split('/')).filter(Boolean))];
+    const { data: rows, error: pErr } = await sb.from('products')
+      .select('manufacturer_part_number').eq('product_type', partner)
+      .or(halves.map(h => `manufacturer_part_number.ilike.${pgrstLike(h)}`).join(','))
+      .limit(500);
+    if (pErr) throw new Error(`couldn’t check the codes against the catalogue (${pErr.message}) — nothing was changed`);
+    const bad = crossTypePlainCodes({
+      productType: product.product_type, mpn: product.manufacturer_part_number,
+      codes, visits, partnerMpns: (rows || []).map(r => r.manufacturer_part_number),
+    });
+    if (!bad.length) return;
+    const own = product.product_type === 'drum_unit' ? 'drum' : 'toner';
+    const other = own === 'drum' ? 'toner' : 'drum';
+    // The Product Codes page's own picker labels (utils/product-codes.js SHOP_CATEGORIES).
+    const otherTab = SHOP_CATEGORIES.find(c => c.value === (other === 'drum' ? 'drums' : 'toner'))?.label
+      || (other === 'drum' ? 'Drums & Kits' : 'Toner');
+    const brand = product.brand?.name || '<brand>';
+    const list = bad.join(', ');
+    const err = new Error(`${list} ${bad.length === 1 ? 'is a' : 'are'} ${other} code${bad.length === 1 ? '' : 's'}. `
+      + `A ${own} can show under ${bad.length === 1 ? 'that' : 'those'} tile${bad.length === 1 ? '' : 's'} only as a visitor — `
+      + `open Product Codes → ${brand} → ${otherTab} → ${bad[0]} and tick this ${own} there. Nothing was changed.`);
+    err.code = 'CROSS_TYPE_CODE';
+    err.codes = bad;
+    throw err;
+  },
+
   /** Codes assigned to one product, ascending. Returns null on error. */
   async getProductCodes(productId) {
     try {
@@ -2645,6 +2693,9 @@ const AdminAPI = {
       if (!prevErr && Array.isArray(prev)) prev.forEach(r => { visits[r.code] = r.chip_category; });
       if (renamed && visits[renamed.from]) visits[renamed.to] = visits[renamed.from];
       Object.assign(visits, chipCategory);
+      // ERR-384 — never write a plain row naming the OTHER type's code (a DR
+      // code on a toner). Checked BEFORE the delete, so a refusal changes nothing.
+      await this._refuseCrossTypePlainCodes(sb, productId, clean, visits);
       const wantsVisit = clean.some(code => visits[code]);
       if (prevErr && wantsVisit) {
         // The column isn't there (sql/product_codes.sql's Sep 2026 block hasn't
@@ -4628,7 +4679,9 @@ const AdminAPI = {
   async voidInvoice(invoiceId) {
     const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/void`, {});
     if (resp && resp.ok === false) throw invoiceError(resp, 'Void invoice failed');
-    return resp?.data ?? null;
+    // A void whose sales-record cancel failed still answers 200, WITH
+    // data.warnings (SALES_RECORD_NOT_CANCELLED) — the same shape create/update use.
+    return withInvoiceWarnings(resp);
   },
 
   // Flip an invoice's internal status from the list toggle, without re-sending

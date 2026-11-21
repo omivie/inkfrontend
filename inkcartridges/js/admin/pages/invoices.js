@@ -1196,7 +1196,19 @@ async function onRowAction(e) {
       onConfirm: async () => {
         // POST /:id/void is live (probed 401, not 404, 2026-07-31) — so a failure
         // here is a real failure. Never dress it as an unbuilt feature (ERR-131).
-        try { await AdminAPI.voidInvoice(id); Toast.success('Invoice voided.'); loadData(); }
+        try {
+          const res = await AdminAPI.voidInvoice(id);
+          // The invoice IS void even when cancelling its sales record failed —
+          // but then the sale still counts in reports, so say so by name
+          // (SALES_RECORD_NOT_CANCELLED, backend d759957). Never a quiet "voided".
+          const warnings = res?._warnings || [];
+          if (warnings.length) {
+            for (const w of warnings) Toast.warning(`Invoice ${btn.dataset.num || ''} voided, but: ${w}`.replace('  ', ' '), 12000);
+          } else {
+            Toast.success('Invoice voided.');
+          }
+          loadData();
+        }
         catch (err) { Toast.error(err.message || 'Could not void that invoice. Try again.'); }
       },
     });
@@ -2479,7 +2491,7 @@ async function onEditorFooterClick(e) {
       try { await persistDraft(); rebuildEditor(); loadData(); }
       catch (err) {
         if (surfaceUnresolvedCodes(err, _editorToken)) return;
-        Toast.error(err.message || 'Save the invoice before emailing it.'); return;
+        Toast.error(saveErrorMessage(err)); return;
       }
       finally { if (btn) btn.disabled = false; }
       if (!_draft.id) return;   // save didn't produce an id
@@ -2889,6 +2901,9 @@ function surfaceUnresolvedCodes(err, token) {
  * When the server says nothing, say THAT; never guess at a cause.
  */
 function saveErrorMessage(err) {
+  // 400s from POST/PUT /api/admin/invoices for a source order that can't be linked (ERR-383).
+  const SOURCE_ORDER_REFUSALS = ['SOURCE_ORDER_NOT_FOUND', 'SOURCE_ORDER_IS_INVOICE',
+    'SOURCE_ORDER_ALREADY_INVOICED', 'SOURCE_ORDER_NOT_LINKABLE'];
   const parts = [];
   const add = (t) => {
     const s = String(t ?? '').trim();
@@ -2903,6 +2918,16 @@ function saveErrorMessage(err) {
       + 'business application, isn’t one), or clear the link and save.');
   }
   add(err?.message);
+  // ERR-383 — the server checks `source_order_id` BEFORE writing anything
+  // (backend d759957, 2026-11-20). Its sentence says what is wrong with the
+  // link; ours says what to DO, because the usual cause is an editor tab opened
+  // before the link was repaired, still holding the old order id.
+  if (SOURCE_ORDER_REFUSALS.includes(err?.code)) {
+    add('Nothing was saved. This editor is holding an order link the server won’t accept — '
+      + 'close the invoice, reopen it from the list, and re-apply your edit.');
+  } else if (err?.code === 'SOURCE_ORDER_LOOKUP_FAILED') {
+    add('Nothing was saved — the server couldn’t check the linked order just now. Try again in a moment.');
+  }
   add(err?.details?.reason);
   // `details` also arrives as a bare array (or `details.errors`) for multi-field
   // validation failures — surface those instead of dropping them on the floor.
@@ -4051,7 +4076,7 @@ async function downloadPdf(d) {
       } catch (err) {
         warn('auto-save before download failed', err);
         if (surfaceUnresolvedCodes(err, _editorToken)) return;
-        Toast.error(err.message || 'Could not save the invoice to assign a number.');
+        Toast.error(saveErrorMessage(err));
         return;
       } finally {
         if (btn) btn.disabled = false;
