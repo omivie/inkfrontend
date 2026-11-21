@@ -632,6 +632,16 @@ function draftFromInvoice(rec) {
   if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
   if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
   if (rec.delivery) d.delivery = { ...d.delivery, ...rec.delivery, address: Array.isArray(rec.delivery.address) ? rec.delivery.address.join('\n') : (rec.delivery.address ?? '') };
+  // ERR-385 — the invoice service has no delivery column yet, so a saved "Deliver
+  // to" block comes back as NO key at all. Restore this browser's copy, and say so.
+  d._deliveryStore = deliveryStoreState(rec);
+  if (d._deliveryStore === 'server-missing') {
+    const kept = DeliveryKeep.read(rec.id);
+    if (kept) {
+      d.delivery = { ...d.delivery, ...kept, address: Array.isArray(kept.address) ? kept.address.join('\n') : (kept.address ?? '') };
+      d._deliveryStore = 'restored-local';
+    }
+  }
   const items = rec.line_items || rec.lines || [];
   d.lines = items.length ? items.map((l) => ({
     code: l.product_code ?? l.code ?? '',
@@ -684,6 +694,54 @@ const computeTotals = (d) => computeInvoiceTotals(d);
 // out here would drop it from line_items while invoiceDocRows still PRINTED it —
 // the document and the stored invoice disagreeing, which is the ERR-181 shape.
 const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || (l.description || '').trim() || (l.ref || '').trim());
+
+/**
+ * ERR-385 — "it says it saves but it does not save" (owner, 2026-11-21).
+ *
+ * The invoice service has NO column for the "Deliver to" block: PUT/POST accept
+ * `delivery` and drop it, and GET returns no `delivery` key at all (measured on
+ * invoice 3297 after the owner's save: price 619.60 stored, delivery absent). The
+ * PDF uploaded at save time DOES carry it (stored PDF read back: "DELIVER TO
+ * Braden / Hall Machinery ltd / 7 Lorne Street"), so the customer's copy was
+ * right — but reopening showed the block blank, and saving again from that
+ * reopened copy would have re-rendered the PDF WITHOUT it.
+ *
+ * Until the backend stores it (ask in backend-docs/outbox/fe-reply-2026-11-21.md):
+ *   - every save keeps this browser's copy (localStorage, per invoice id);
+ *   - reopening restores it and SAYS it came from this browser;
+ *   - a browser without a copy shows a standing warning in the Deliver-to box.
+ * It retires itself: once GET carries a `delivery` key the server is the truth
+ * and the local copy is never read again (deliveryStoreState ⇒ 'server').
+ */
+const DeliveryKeep = {
+  key: (id) => `ic_inv_delivery_v1:${id}`,
+  read(id) {
+    if (!id) return null;
+    try {
+      const v = JSON.parse(localStorage.getItem(this.key(id)) || 'null');
+      return v && typeof v === 'object' ? v : null;
+    } catch { return null; }
+  },
+  write(id, delivery) {
+    if (!id) return;
+    try {
+      if (delivery) localStorage.setItem(this.key(id), JSON.stringify(delivery));
+      else localStorage.removeItem(this.key(id));
+    } catch { /* storage blocked — the standing warning still tells the truth */ }
+  },
+};
+
+/** 'server' = the record carries `delivery` (the column exists); 'server-missing' = it doesn't. */
+function deliveryStoreState(rec) {
+  return rec && Object.prototype.hasOwnProperty.call(rec, 'delivery') ? 'server' : 'server-missing';
+}
+
+const DELIVERY_NOTE = {
+  'restored-local': 'Restored from this browser — the invoice service doesn’t store “Deliver to” yet. '
+    + 'It is on the PDF the customer gets. On another computer this box opens blank: re-type it there before saving.',
+  'server-missing': 'The invoice service doesn’t store “Deliver to” yet, so this box opens blank. '
+    + 'If this invoice had a delivery address, re-type it before saving — saving re-makes the PDF without it.',
+};
 
 // The optional "Deliver to" block is only surfaced (preview/PDF) when the operator
 // actually entered something in it.
@@ -1756,6 +1814,7 @@ function resetQuoteState() {
   // is a fact about the catalogue, not about a draft, so the answer is still
   // true on the next invoice and re-asking would be wasted.)
   _refNotStored = false;
+  _deliveryNotStored = false;
   clearTimeout(_codeCheckTimer);
   _codeCheckQueue.clear();
 }
@@ -2771,6 +2830,15 @@ async function persistDraft() {
     const st = serverTotals(saved);
     if (st) _draft._serverTotals = st;
     noteRefEcho(payload, saved);
+    // ERR-385 — the echo has no `delivery` key ⇒ the server dropped it. Keep this
+    // browser's copy (or clear it when the box was emptied) and say so on save.
+    if (deliveryStoreState(saved) === 'server-missing') {
+      DeliveryKeep.write(_draft.id, payload.delivery);
+      _deliveryNotStored = !!payload.delivery;
+    } else {
+      DeliveryKeep.write(_draft.id, null);   // the server is the truth now
+      _deliveryNotStored = false;
+    }
     // Push the rendered PDF up so the backend serves/emails the same document.
     try { await syncStoredPdf(); }
     // POST /:id/pdf is live (probed 401, 2026-07-31); this stays non-fatal because
@@ -2960,7 +3028,8 @@ async function saveInvoice() {
       // would never see it. Read the flag BEFORE Drawer.close(), whose onClose
       // runs resetQuoteState() and clears it, and say it in the toast instead.
       const refsLost = _refNotStored;
-      if (refsLost) Toast.warning(`Invoice ${num} saved. ${REF_NOT_STORED}`.replace('  ', ' '));
+      const notes = [refsLost && REF_NOT_STORED, _deliveryNotStored && DELIVERY_NOT_STORED].filter(Boolean);
+      if (notes.length) Toast.warning(`Invoice ${num} saved. ${notes.join(' ')}`.replace('  ', ' '), 12000);
       else Toast.success(`Invoice ${num} saved.`.replace('  ', ' '));
       Drawer.close();
       loadData();
@@ -3165,6 +3234,7 @@ function editorBodyHtml(d) {
         </div>
         ${areaField('Delivery address (leave blank to ship to the invoice address)', 'delivery.address', d.delivery.address)}
         ${field('Phone (delivery contact)', 'delivery.phone', d.delivery.phone, { placeholder: 'For the person receiving the goods' })}
+        ${d.id && DELIVERY_NOTE[d._deliveryStore] ? `<div class="inv-refwarn" id="inv-delivery-note">${esc(DELIVERY_NOTE[d._deliveryStore])}</div>` : ''}
       </section>
 
       <section class="inv-section">
@@ -3242,6 +3312,9 @@ function costPlaceholder(l) {
 const _codeChecks = new Map();
 // Set by noteRefEcho() when a save proves the backend dropped product_ref.
 let _refNotStored = false;
+let _deliveryNotStored = false;   // ERR-385 — last save sent a Deliver-to block the server dropped
+const DELIVERY_NOT_STORED = '“Deliver to” is on the PDF the customer gets and kept in this browser, '
+  + 'but the invoice service doesn’t store it yet — on another computer it opens blank.';
 const REF_NOT_STORED = 'Your own text on these lines — the refs and the discount reasons — prints '
   + 'on this invoice and on the PDF the customer receives, but the invoice service isn’t storing it '
   + 'yet (BF-051). The prices are saved correctly; only the wording is lost if you reopen this invoice.';

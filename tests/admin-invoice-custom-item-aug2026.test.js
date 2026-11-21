@@ -356,7 +356,10 @@ test('§6 the Save path says it in the TOAST, because it closes the drawer', () 
     'read the flag BEFORE Drawer.close() — its onClose runs resetQuoteState(), which clears it');
   assert.ok(code.indexOf('const refsLost') < code.indexOf('Drawer.close()'),
     'reading it after the close would always see false');
-  assert.match(body, /if \(refsLost\) Toast\.warning\(/);
+  // ERR-385 joined it: one warning toast carries every "not stored" note.
+  assert.match(body, /const notes = \[refsLost && REF_NOT_STORED, _deliveryNotStored && DELIVERY_NOT_STORED\]/);
+  assert.match(body, /if \(notes\.length\) Toast\.warning\(/);
+  assert.ok(code.indexOf('_deliveryNotStored') < code.indexOf('Drawer.close()'), 'read before the close resets it');
   assert.match(body, /REF_NOT_STORED/, 'the same sentence, not a second copy of it');
   assert.match(body, /else Toast\.success\(/, 'an ordinary save still reads as a plain success');
 });

@@ -40,6 +40,26 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-385 — Invoice "it says it saves but it does not save": the "Deliver to" block is dropped by the invoice service (owner 2026-11-21) — FE STOPGAP SHIPPED, backend column OPEN
+
+**Seen (owner, 21 Nov).** After the ERR-383 repair the owner re-applied the invoice 3297 edit and saved: green "saved" toast, but on reopening the edit looked gone.
+
+**Measured (read-only).** GET straight after the save (updated 06:23 UTC): `line_items` changed (619.60 / cost 551.77, total $712.54) — the save DID land. The record has **no `delivery` key**; its keys are `seller, customer, footer, line_items, …` only. The fields the owner edited (Attn, Company, Delivery address) are the **"Deliver to (goods)"** block, which `buildPayload` sends as `delivery` and the invoice service silently drops (the code comment had called this out since August: "backend ignores unknown keys … until it persists"). The stored PDF, read back via `GET /:id/pdf`, carries "DELIVER TO" with the new address and $619.60 — uploaded by `syncStoredPdf` at save — so the customer's copy is right. Hazard: reopening shows the block blank and **saving again re-makes the PDF without it**. Also `pdf_updated_at` did not move on that upload.
+
+**Why nothing flagged it.** `refEchoMissing` measured only line-level display keys (`product_ref`, `discount_note`); a dropped top-level block passed as "saved".
+
+**Fix (frontend stopgap).** `DeliveryKeep` (localStorage, per invoice id, try/catch) + `deliveryStoreState(rec)` = 'server' when GET carries a `delivery` key (even null), else 'server-missing'. `persistDraft`: echo without the key ⇒ keep this browser's copy (empty box ⇒ remove it) and flag `_deliveryNotStored` ⇒ the save toast warns; echo WITH the key ⇒ local copy deleted (self-retiring). `draftFromInvoice`: 'server-missing' + a copy ⇒ restored (address array re-joined with newlines — caught in the browser: it came back "line 1,line 2") and the Deliver-to box says "Restored from this browser…"; no copy ⇒ standing warning "…re-type it before saving — saving re-makes the PDF without it". Browser check on the local build with every invoice write ABORTED (0 writes): no copy ⇒ blank + warning; seeded copy ⇒ fields restored with line breaks + note.
+
+**Open (backend).** `delivery jsonb` column, stored on POST/PUT, ALWAYS returned as a key on GET, on the server PDF; `pdf_updated_at` stamp on upload — `backend-docs/outbox/fe-reply-2026-11-21.md` ask 2.
+
+**Owner action.** Invoice 3297 was saved before this stopgap, so this browser has no copy: reopen it, re-type the Deliver-to block once, save. From then on it is kept.
+
+**Tests.** `admin-invoice-delivery-not-stored-nov2026.test.js` 6/6 (5 red on HEAD); `admin-invoice-custom-item-aug2026.test.js` §6 now pins the combined save toast.
+
+**Lesson.** "Saved" is a claim about every field, not about the request. Measure the echo for whole blocks the server might not have a column for, not only the fields you already suspected.
+
+**Files.** `inkcartridges/js/admin/pages/invoices.js` · tests above · `backend-docs/outbox/fe-reply-2026-11-21.md` · `errors.md`.
+
 ## ERR-384 — Toner/drum code tiles: the backend owns the numbers now; FE recount walk deleted, old drum links redirected, admin refuses cross-type code rows (2026-11-21) — SHIPPED (frontend)
 
 **Trigger.** Backend response 2026-11-20 (`backend-docs/inbox/fe-reply-20nov-backend-response-nov2026.md`, commit `5c8b73b`) answered ERR-379 at the source: tag rows (`chip_category`) no longer enter `series_codes`, the seven hand-entered plain rows that filed toners under drum codes are deleted, and the toner `?code=` listing itself carries the drums that fit the same printers. It also asked the admin to stop offering a plain code row that names the other type's code.
