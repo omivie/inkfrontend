@@ -634,12 +634,16 @@ function draftFromInvoice(rec) {
   if (rec.delivery) d.delivery = { ...d.delivery, ...rec.delivery, address: Array.isArray(rec.delivery.address) ? rec.delivery.address.join('\n') : (rec.delivery.address ?? '') };
   // ERR-385 — the invoice service has no delivery column yet, so a saved "Deliver
   // to" block comes back as NO key at all. Restore this browser's copy, and say so.
+  // Backend 2026-11-22 (migration 215) stores it: the key is now always present,
+  // `null` when not stored. Blocks saved BEFORE that deploy were never stored and
+  // come back null — so a null with this browser's copy restores the copy too,
+  // with a note that one Save stores it (the save then clears the copy).
   d._deliveryStore = deliveryStoreState(rec);
-  if (d._deliveryStore === 'server-missing') {
+  if (d._deliveryStore === 'server-missing' || (d._deliveryStore === 'server' && rec.delivery == null)) {
     const kept = DeliveryKeep.read(rec.id);
     if (kept) {
       d.delivery = { ...d.delivery, ...kept, address: Array.isArray(kept.address) ? kept.address.join('\n') : (kept.address ?? '') };
-      d._deliveryStore = 'restored-local';
+      d._deliveryStore = d._deliveryStore === 'server' ? 'restored-unsaved' : 'restored-local';
     }
   }
   const items = rec.line_items || rec.lines || [];
@@ -711,7 +715,9 @@ const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || 
  *   - reopening restores it and SAYS it came from this browser;
  *   - a browser without a copy shows a standing warning in the Deliver-to box.
  * It retires itself: once GET carries a `delivery` key the server is the truth
- * and the local copy is never read again (deliveryStoreState ⇒ 'server').
+ * (deliveryStoreState ⇒ 'server'); the copy is read then only to hand over a
+ * block the server returns `null` for (saved before migration 215, 2026-11-22),
+ * and the next save clears it.
  */
 const DeliveryKeep = {
   key: (id) => `ic_inv_delivery_v1:${id}`,
@@ -737,6 +743,8 @@ function deliveryStoreState(rec) {
 }
 
 const DELIVERY_NOTE = {
+  'restored-unsaved': 'Restored from this browser — this address was saved before the invoice service could store it. '
+    + 'Check it and press Save once to store it for every computer.',
   'restored-local': 'Restored from this browser — the invoice service doesn’t store “Deliver to” yet. '
     + 'It is on the PDF the customer gets. On another computer this box opens blank: re-type it there before saving.',
   'server-missing': 'The invoice service doesn’t store “Deliver to” yet, so this box opens blank. '
@@ -817,8 +825,8 @@ function buildPayload(d) {
     business_account_id: d.business_account_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
-    // Sent only when filled; backend ignores unknown keys (cf. preview_totals) until
-    // it persists/renders this on the server-side PDF.
+    // ALWAYS sent as a key: the backend (migration 215) stores it, and a missing
+    // key would leave the stored value unchanged — null is how a clear sticks.
     delivery: hasDelivery(d) ? { ...d.delivery, address: lines(d.delivery.address) } : null,
     line_items: realLines(d).map((l) => ({
       // WHICH CATALOGUE PRODUCT THIS IS — a real products.sku or ''. Never the

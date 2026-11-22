@@ -40,7 +40,7 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
-## ERR-385 — Invoice "it says it saves but it does not save": the "Deliver to" block is dropped by the invoice service (owner 2026-11-21) — FE STOPGAP SHIPPED, backend column OPEN
+## ERR-385 — Invoice "it says it saves but it does not save": the "Deliver to" block is dropped by the invoice service (owner 2026-11-21) — FIXED (backend migration 215, 2026-11-22; FE hand-over shipped)
 
 **Seen (owner, 21 Nov).** After the ERR-383 repair the owner re-applied the invoice 3297 edit and saved: green "saved" toast, but on reopening the edit looked gone.
 
@@ -51,6 +51,10 @@ describing the same incident.
 **Fix (frontend stopgap).** `DeliveryKeep` (localStorage, per invoice id, try/catch) + `deliveryStoreState(rec)` = 'server' when GET carries a `delivery` key (even null), else 'server-missing'. `persistDraft`: echo without the key ⇒ keep this browser's copy (empty box ⇒ remove it) and flag `_deliveryNotStored` ⇒ the save toast warns; echo WITH the key ⇒ local copy deleted (self-retiring). `draftFromInvoice`: 'server-missing' + a copy ⇒ restored (address array re-joined with newlines — caught in the browser: it came back "line 1,line 2") and the Deliver-to box says "Restored from this browser…"; no copy ⇒ standing warning "…re-type it before saving — saving re-makes the PDF without it". Browser check on the local build with every invoice write ABORTED (0 writes): no copy ⇒ blank + warning; seeded copy ⇒ fields restored with line breaks + note.
 
 **Open (backend).** `delivery jsonb` column, stored on POST/PUT, ALWAYS returned as a key on GET, on the server PDF; `pdf_updated_at` stamp on upload — `backend-docs/outbox/fe-reply-2026-11-21.md` ask 2.
+
+**Resolved (backend 2026-11-22, inbox `fe-reply-21nov-backend-response-nov2026.md`).** `standalone_invoices.delivery jsonb NULL` (migration 215). POST/PUT store `delivery` as sent; null or all-blank ⇒ null; a MISSING key leaves the stored value unchanged (buildPayload always sends the key, so a cleared box sticks). GET/PUT/POST always return `delivery`, null when not stored. Server fallback PDF prints "Deliver To:". `pdf_updated_at` does move: our 06:23 reading was taken before the upload finished (the PUT echo is built before the upload) — not a bug. Measured READ-ONLY 2026-11-22: GET 3297 ⇒ `delivery` key present, value **null** (saved before the column existed).
+
+**Hand-over gap found and fixed.** With the key present the stopgap treated null as the truth and ignored this browser's copy ⇒ 3297 would reopen blank and the next save would re-make the PDF without the address. `draftFromInvoice` now restores the browser copy when the server says null (`_deliveryStore = 'restored-unsaved'`, note "…press Save once to store it for every computer"); a stored server value always wins; the save echo (key present) clears the copy. Test §hand-over (7/7; 2 red on HEAD).
 
 **Owner action.** Invoice 3297 was saved before this stopgap, so this browser has no copy: reopen it, re-type the Deliver-to block once, save. From then on it is kept.
 

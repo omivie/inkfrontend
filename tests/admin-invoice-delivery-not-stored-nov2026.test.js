@@ -74,12 +74,12 @@ test('blocked storage never throws (the standing warning still tells the truth)'
 test('reopen: server-missing + a kept copy ⇒ restored and labelled; no copy ⇒ warned', () => {
   const fn = block(INVOICES, 'function draftFromInvoice(', '  const items = rec.line_items');
   assert.match(fn, /d\._deliveryStore = deliveryStoreState\(rec\);/);
-  assert.match(fn, /if \(d\._deliveryStore === 'server-missing'\) \{\s*const kept = DeliveryKeep\.read\(rec\.id\);\s*if \(kept\) \{/);
+  assert.match(fn, /if \(d\._deliveryStore === 'server-missing' \|\| \(d\._deliveryStore === 'server' && rec\.delivery == null\)\) \{\s*const kept = DeliveryKeep\.read\(rec\.id\);\s*if \(kept\) \{/);
   // The kept copy is the PAYLOAD shape (address = array of lines); the textarea
   // wants one line per row. Measured in the browser: without the join it read
   // "line 1,line 2" and the next save would print one comma-joined line.
   assert.match(fn, /address: Array\.isArray\(kept\.address\) \? kept\.address\.join\('\\n'\)/);
-  assert.match(fn, /d\._deliveryStore = 'restored-local';/);
+  assert.match(fn, /d\._deliveryStore = d\._deliveryStore === 'server' \? 'restored-unsaved' : 'restored-local';/);
   const { DELIVERY_NOTE } = load();
   assert.match(DELIVERY_NOTE['restored-local'], /Restored from this browser/);
   assert.match(DELIVERY_NOTE['server-missing'], /re-type it before saving/);
@@ -96,7 +96,38 @@ test('save: echo without `delivery` keeps the copy + flags the toast; echo WITH 
   assert.ok(keep < fn.indexOf('syncStoredPdf()'), 'decided before the PDF upload, which can fail');
 });
 
+// ── Backend 2026-11-22 (migration 215): `delivery` is stored, GET always has the key ──
+// Measured READ-ONLY 2026-11-22: GET invoice 3297 ⇒ `delivery` key present, value null
+// (the owner's block was saved before the column existed). Without the hand-over the
+// box opened blank and the next save re-made the PDF without the address.
+
+test('hand-over: server null + this browser’s copy ⇒ restored as "restored-unsaved"; server value ⇒ copy ignored', () => {
+  const store = new Map();
+  const { DeliveryKeep, deliveryStoreState, DELIVERY_NOTE } = load(store);
+  DeliveryKeep.write('inv-1', DELIVERY);
+  const restore = vm.runInNewContext(`(function (rec) {
+    const d = { delivery: { attn: '', company: '', address: '', phone: '' } };
+    if (rec.delivery) d.delivery = { ...d.delivery, ...rec.delivery, address: rec.delivery.address.join('\\n') };
+    ${block(INVOICES, '  d._deliveryStore = deliveryStoreState(rec);', '  const items = rec.line_items')}
+    return d;
+  })`, { DeliveryKeep, deliveryStoreState });
+  const unsaved = restore({ id: 'inv-1', delivery: null });
+  assert.equal(unsaved._deliveryStore, 'restored-unsaved');
+  assert.equal(unsaved.delivery.company, 'Some Company Ltd');
+  assert.equal(unsaved.delivery.address, '1 Example Street\nDunedin 9012');
+  assert.match(DELIVERY_NOTE['restored-unsaved'], /press Save once/);
+  const stored = restore({ id: 'inv-1', delivery: { ...DELIVERY, company: 'Server Ltd' } });
+  assert.equal(stored._deliveryStore, 'server', 'a stored block is the truth');
+  assert.equal(stored.delivery.company, 'Server Ltd');
+  store.clear();
+  const none = restore({ id: 'inv-1', delivery: null });
+  assert.equal(none._deliveryStore, 'server');
+  assert.equal(DELIVERY_NOTE.server, undefined, 'stored-and-empty shows no note');
+});
+
 test('buildPayload still SENDS delivery — the day the column ships, nothing here has to change', () => {
   const fn = block(INVOICES, 'function buildPayload(d) {', '// ====');
+  // Always a key: the backend leaves the stored value unchanged when the key is
+  // missing, so `null` is how an emptied box clears it.
   assert.match(fn, /delivery: hasDelivery\(d\) \? \{ \.\.\.d\.delivery, address: lines\(d\.delivery\.address\) \} : null,/);
 });
