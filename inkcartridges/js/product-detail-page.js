@@ -1671,12 +1671,6 @@
                 : null;
             let html = '';
             if (label) html += `<p class="product-promise__label">${Security.escapeHtml(label)}</p>`;
-            // Item 27b (ERR-371): on a COMPATIBLE page, the guarantee directly under
-            // the fit line — the backend's words (warranty.compatible_label), never
-            // typed here. Genuine pages carry it inside the item 16 box instead.
-            const guarantee = (info && info.source === 'compatible' && typeof CompatGuarantee !== 'undefined')
-                ? CompatGuarantee.pick(ts) : '';
-            if (guarantee) html += `<p class="product-promise__guarantee">${Security.escapeHtml(guarantee)}</p>`;
             if (reviewsUrl) {
                 html += `<a class="product-promise__reviews" href="${Security.escapeAttr(reviewsUrl)}" target="_blank" rel="noopener">See our reviews on Google</a>`;
             }
@@ -1719,8 +1713,6 @@
                 && typeof a.sku === 'string' && a.sku && typeof a.slug === 'string' && a.slug
                 && Number.isFinite(Number(a.retail_price)) && Number(a.retail_price) > 0).slice(0, 3);
             if (!rows.length) return '';
-            const warranty = info.trust_signals && info.trust_signals.warranty;
-            const note = warranty && typeof warranty.compatible_label === 'string' ? warranty.compatible_label.trim() : '';
             const cards = rows.map((a) => {
                 const href = `/products/${encodeURIComponent(a.slug)}/${encodeURIComponent(a.sku)}`;
                 // ERR-359 — no `display_name` on alternatives yet (outbox 10-18 §3); clean() falls back.
@@ -1753,8 +1745,7 @@
             }).join('');
             const heading = rows.length > 1 ? 'Our compatible versions' : 'Our compatible version';
             return `<h2 class="compat-alt__heading" id="compat-alt-heading">${heading}</h2>`
-                + `<ul class="compat-alt__list">${cards}</ul>`
-                + (note ? `<p class="compat-alt__note">${Security.escapeHtml(note)}</p>` : '');
+                + `<ul class="compat-alt__list">${cards}</ul>`;
         },
 
         /** PURE: "1,000 pages" from `page_yield` (a string such as "1,000", or a number); '' when absent. */

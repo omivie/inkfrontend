@@ -589,7 +589,6 @@
             compatibleSection: document.getElementById('compatible-section'),
             sourceSections: document.getElementById('source-sections'),
             sourceJump: document.getElementById('source-jump'),
-            compatibleGuarantee: document.getElementById('compatible-guarantee'),
             sourceJumpCompatible: document.getElementById('source-jump-compatible'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
@@ -621,9 +620,6 @@
         // INITIALIZATION
         // =========================================
         async init() {
-            // Item 27a — fetch once, early; the line shows with the section.
-            this.renderCompatGuarantee();
-
             // ERR-327 jump buttons — Compatible is stacked above Genuine and
             // each section's head row carries a button to the OTHER one: cyan
             // (beside the Compatible heading) goes down to Genuine, yellow
@@ -970,22 +966,6 @@
             chip.setAttribute('aria-label', `Remove filter: ${label}`);
             chip.onclick = () => this.removeFilter('type');
             chip.hidden = false;
-        },
-
-        /**
-         * The compatible guarantee under the COMPATIBLE column head (item 27a,
-         * ERR-370): `warranty.compatible_label` from /api/site/trust, verbatim,
-         * as text. ONE text writer (visibility: _syncSourceColumns). The
-         * `data-guarantee` attribute records ok | absent, so a missing label is
-         * visible in the DOM rather than a silent gap.
-         */
-        async renderCompatGuarantee() {
-            const el = document.getElementById('compatible-guarantee');
-            if (!el || typeof CompatGuarantee === 'undefined') return;
-            const label = await CompatGuarantee.load().catch(() => '');
-            el.textContent = label;
-            el.dataset.guarantee = label ? 'ok' : 'absent';
-            this._syncSourceColumns();
         },
 
         /**
@@ -5434,10 +5414,6 @@
             // keeps the heading but drops the COMPATIBLE badge. ONE writer.
             const badge = wrap.querySelector('.products-section__badge--compatible');
             if (badge) badge.hidden = this._isReceiptListing();
-            // …and no cartridge guarantee under it (item 27a). Text is written
-            // by renderCompatGuarantee; whether it SHOWS is decided here only.
-            const guarantee = this.elements.compatibleGuarantee;
-            if (guarantee) guarantee.hidden = !guarantee.textContent || this._isReceiptListing();
         },
 
         renderProducts(products, container, section, isCompatible = false, _options = {}) {

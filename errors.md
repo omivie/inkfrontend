@@ -40,6 +40,18 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-386 — "Compatible cartridges are covered by our 30-day satisfaction guarantee." removed from every page (owner 2026-11-22) — SHIPPED (frontend)
+
+**Ask.** Owner, screenshot of `/shop?brand=brother&category=ink&code=LC38`: remove that sentence from all pages.
+
+**Where it showed.** The backend's `warranty.compatible_label` (GET /api/site/trust, and `trust_signals.warranty` on product payloads), drawn by `CompatGuarantee` (utils.js) in four places: under the COMPATIBLE heading on /shop listings (`#compatible-guarantee`), under the COMPATIBLE column in the search dropdown (`.smart-ac__guarantee`), under the fit line on a compatible PDP (`.product-promise__guarantee`), and under "Our compatible version" on a genuine PDP (`.compat-alt__note`). Plus one typed copy on /about ("Warranty and guarantee" box).
+
+**Change.** `CompatGuarantee`, all four render sites, the `#compatible-guarantee` slot, their CSS and the /about sentence are deleted. The label is no longer read, so a backend that still sends it changes nothing. Kept on purpose: the policy prose on /returns, /faq, /genuine-vs-compatible and /about's "Compatible:" list item (different sentences, the guarantee terms themselves). Browser check (local, live API): LC38 listing 12 cards, sentence absent, /about absent, 0 page errors.
+
+**Tests.** `fe-checklist-22oct-listing` §27a and `fe-checklist-22oct-pdp-cart` §27b now pin the removal; `fe-master-checklist-v2` §16 asserts no guarantee line; `backend-handoff-2nov` /about list moved the sentence to "must not appear". `?v=` restamped for shop-page.js, search.js, product-detail-page.js, utils.js, pages.css, search.css.
+
+**Note.** The backend bot /about page may still carry the sentence; www now says less than it, which the ERR-377 rule allows.
+
 ## ERR-385 — Invoice "it says it saves but it does not save": the "Deliver to" block is dropped by the invoice service (owner 2026-11-21) — FIXED (backend migration 215, 2026-11-22; FE hand-over shipped)
 
 **Seen (owner, 21 Nov).** After the ERR-383 repair the owner re-applied the invoice 3297 edit and saved: green "saved" toast, but on reopening the edit looked gone.

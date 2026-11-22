@@ -204,7 +204,7 @@ const ABOUT_NEW = [
     'on the NZ Post, Aramex and NZ Couriers courier networks.',
     'Auckland metro orders placed before 12pm on a business day are dispatched same-day.',
     'Warranty and guarantee',
-    'Genuine cartridges carry the original manufacturer warranty. Compatible cartridges are covered by our 30-day satisfaction guarantee.',
+    'Genuine cartridges carry the original manufacturer warranty.',
     'No surcharges',
     'Compatible: third-party cartridges built to comparable specifications. Each one is tested before dispatch and covered by our 30-day satisfaction guarantee.',
     'Every order ships by courier.',
@@ -229,6 +229,8 @@ const ABOUT_OLD = [
     'in business hours',
     'within one business day',
     'within one working day',
+    // Owner 2026-11-22: removed from every page.
+    'Compatible cartridges are covered by our 30-day satisfaction guarantee.',
 ];
 
 test('60 /about carries every new line exactly, and none of the replaced ones', () => {

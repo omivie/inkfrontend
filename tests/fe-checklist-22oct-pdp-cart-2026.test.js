@@ -80,25 +80,17 @@ function promiseDom() {
     const el = { innerHTML: '', hidden: true };
     return { el, document: { getElementById: (id) => (id === 'product-promise' ? el : null) } };
 }
-const { CompatGuarantee } = require('../inkcartridges/js/utils.js');
-const LABEL = 'Compatible cartridges are covered by our 30-day satisfaction guarantee.';
-const TS = { compatibility_promise: { label: 'Not sure it fits? <b>Ask</b>' }, warranty: { compatible_label: LABEL } };
+const TS = { compatibility_promise: { label: 'Not sure it fits? <b>Ask</b>' }, warranty: { compatible_label: 'Compatible cartridges are covered by our 30-day satisfaction guarantee.' } };
 
-test('§27b a compatible PDP prints the guarantee directly under the fit line, escaped', () => {
-    const { el, document } = promiseDom();
-    method('js/product-detail-page.js', 'renderPromise', {}, { document, Security, CompatGuarantee, TrustStats: undefined })({ source: 'compatible', trust_signals: TS });
-    const fit = el.innerHTML.indexOf('product-promise__label');
-    const g = el.innerHTML.indexOf('product-promise__guarantee');
-    assert.ok(fit >= 0 && g > fit, 'fit line, then the guarantee');
-    assert.ok(el.innerHTML.includes(LABEL));
-    assert.ok(el.innerHTML.includes('&lt;b&gt;Ask&lt;/b&gt;'), 'escaped');
-});
-
-test('§27b a genuine PDP (and a roll, source null) never gets it here', () => {
-    for (const source of ['genuine', null]) {
+// Owner 2026-11-22: the guarantee line is removed from every page — even when the
+// backend still sends warranty.compatible_label.
+test('§27b no PDP prints the guarantee line, whatever the backend sends', () => {
+    for (const source of ['compatible', 'genuine', null]) {
         const { el, document } = promiseDom();
-        method('js/product-detail-page.js', 'renderPromise', {}, { document, Security, CompatGuarantee, TrustStats: undefined })({ source, trust_signals: TS });
-        assert.ok(!el.innerHTML.includes('product-promise__guarantee'), String(source));
+        method('js/product-detail-page.js', 'renderPromise', {}, { document, Security, TrustStats: undefined })({ source, trust_signals: TS });
+        assert.ok(el.innerHTML.includes('product-promise__label'), 'the fit line stays');
+        assert.ok(el.innerHTML.includes('&lt;b&gt;Ask&lt;/b&gt;'), 'escaped');
+        assert.ok(!/satisfaction guarantee|product-promise__guarantee/.test(el.innerHTML), String(source));
     }
 });
 

@@ -65,7 +65,7 @@ console.log('\n60 — static pages');
 const ABOUT_NEW = [
     'We started InkCartridges.co.nz to be a New Zealand business that sells the cartridge you actually need.',
     'Warranty and guarantee',
-    'Genuine cartridges carry the original manufacturer warranty. Compatible cartridges are covered by our 30-day satisfaction guarantee.',
+    'Genuine cartridges carry the original manufacturer warranty.',
     'No surcharges',
     'Each one is tested before dispatch and covered by our 30-day satisfaction guarantee.',
     'Every order ships by courier.',

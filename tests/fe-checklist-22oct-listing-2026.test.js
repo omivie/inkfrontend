@@ -205,38 +205,15 @@ test('§46 only the printer page uses it, inside each source section, with no yi
 
 // ═══ §27a compatible guarantee ══════════════════════════════════════════════
 
-test('§27a CompatGuarantee reads the live shape and the checklist\'s shape, never invents text', () => {
-    const { CompatGuarantee } = require('../inkcartridges/js/utils.js');
-    const label = 'Compatible cartridges are covered by our 30-day satisfaction guarantee.';
-    assert.equal(CompatGuarantee.pick({ warranty: { compatible_label: label } }), label, 'live /api/site/trust');
-    assert.equal(CompatGuarantee.pick({ trust_signals: { warranty: { compatible_label: ` ${label} ` } } }), label);
-    assert.equal(CompatGuarantee.pick({}), '');
-    assert.equal(CompatGuarantee.pick({ warranty: { compatible_label: 7 } }), '');
-    assert.equal(CompatGuarantee.pick(null), '');
-    for (const f of ['js/utils.js', 'js/shop-page.js', 'js/search.js']) {
-        assert.doesNotMatch(stripComments(read(f)), /30-day satisfaction guarantee/, `${f} must not type the guarantee`);
-    }
-});
-
-test('§27a ONE line under the COMPATIBLE head; visibility has one owner and skips receipt rolls', () => {
-    const head = SHOP_HTML.indexOf('id="compatible-title"');
-    const line = SHOP_HTML.indexOf('id="compatible-guarantee"');
-    const grid = SHOP_HTML.indexOf('id="compatible-products"');
-    assert.ok(head < line && line < grid, 'between the COMPATIBLE head and the first card');
-    assert.equal((SHOP_HTML.match(/compatible-guarantee/g) || []).length, 1, 'not on the Genuine section');
-    const sync = methodSrc(SHOP, '_syncSourceColumns').body;
-    assert.match(sync, /guarantee\.hidden = !guarantee\.textContent \|\| this\._isReceiptListing\(\);/);
-    const render = methodSrc(SHOP, 'renderCompatGuarantee').body;
-    assert.match(render, /el\.textContent = label;/, 'text, never HTML');
-    assert.match(render, /el\.dataset\.guarantee = label \? 'ok' : 'absent';/, 'absence is recorded, loud');
-    assert.doesNotMatch(render, /\.hidden\s*=/, 'the writer of the text does not also own visibility');
-});
-
-test('§27a the search dropdown shows it in the COMPATIBLE column only, escaped', () => {
-    const src = stripComments(read('js/search.js'));
-    assert.match(src, /\(source === 'compatible' && guarantee \? `<p class="smart-ac__guarantee">\$\{esc\(guarantee\)\}<\/p>` : ''\)/);
-    assert.match(src, /const guarantee = \(typeof CompatGuarantee !== 'undefined'\) \? CompatGuarantee\.now\(\) : '';/);
-    assert.match(src, /CompatGuarantee\.load\(\)\.catch\(\(\) => \{\}\)/, 'warmed before the first results paint');
+// Owner 2026-11-22: "remove the 'Compatible cartridges are covered by our 30-day
+// satisfaction guarantee.' text from all pages". The line, its helper and its CSS
+// are deleted; this pins that it does not come back.
+test('§27a the compatible guarantee line is gone from the listing and the search dropdown', () => {
+    assert.ok(!SHOP_HTML.includes('compatible-guarantee'), 'no slot under the COMPATIBLE head');
+    assert.doesNotMatch(read('js/shop-page.js'), /renderCompatGuarantee|compatibleGuarantee/);
+    assert.doesNotMatch(read('js/search.js'), /CompatGuarantee|smart-ac__guarantee/);
+    assert.doesNotMatch(read('js/utils.js'), /CompatGuarantee/);
+    assert.doesNotMatch(read('css/pages.css') + read('css/search.css'), /__guarantee/);
 });
 
 // ═══ §25 Filter & Sort ══════════════════════════════════════════════════════

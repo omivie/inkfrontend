@@ -356,7 +356,7 @@ const C604XLBK = { sku: 'C604XLBK', slug: '604xlbk-compatible-ink-cartridge-for-
     retail_price: 25.49, page_yield: null, yield_tier: 'XL', same_capacity: false, image_url: 'https://lmdlgldjgcanknsjrcxh.supabase.co/x/c604xlbk/compatible-tile-v1.png', in_stock: true };
 const WARRANTY = { warranty: { compatible_label: 'Compatible cartridges are covered by our 30-day satisfaction guarantee.' } };
 
-test('§16 GTN2030BK: "Our compatible version", CTN2030BK at $24.49, 1,000 pages, View link, Add, warranty line', () => {
+test('§16 GTN2030BK: "Our compatible version", CTN2030BK at $24.49, 1,000 pages, View link, Add — no guarantee line (owner 2026-11-22)', () => {
     const html = pdpSelf().compatibleAlternativesHtml({ source: 'genuine', yield_tier: 'STD', compatible_alternatives: [CTN2030BK], trust_signals: WARRANTY });
     assert.match(html, /<h2 class="compat-alt__heading" id="compat-alt-heading">Our compatible version<\/h2>/);
     assert.match(html, /TN2030BK Compatible Toner Cartridge for Brother TN2030\/TN2250 Black/);
@@ -364,7 +364,7 @@ test('§16 GTN2030BK: "Our compatible version", CTN2030BK at $24.49, 1,000 pages
     assert.match(html, />1,000 pages</);
     assert.match(html, /href="\/products\/tn2030bk-compatible-toner-cartridge-for-brother-tn2030tn2250-black\/CTN2030BK"/);
     assert.match(html, /data-compat-add data-sku="CTN2030BK"/);
-    assert.match(html, /Compatible cartridges are covered by our 30-day satisfaction guarantee\./);
+    assert.doesNotMatch(html, /satisfaction guarantee|compat-alt__note/, 'removed from every page, owner 2026-11-22');
     assert.doesNotMatch(html, /capacity/, 'same capacity ⇒ no capacity line');
 });
 
