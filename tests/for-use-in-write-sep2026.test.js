@@ -360,6 +360,14 @@ test('§7 the drawer passes the product id, or the panel can never save', () => 
   assert.match(PRODUCTS_CODE, /mode: 'create'/, 'and the create modal must use create mode');
 });
 
+test('§7b the drawer hands the panel AdminAPI — window.AdminAPI does not exist (ERR-388)', () => {
+  // AdminAPI is an ES-module export; nothing assigns it to window. Without an
+  // injected client the panel's read fails "admin API client is not loaded"
+  // and the editor never opens.
+  assert.match(PRODUCTS_CODE, /wireForUseInPanel\(modal, full\.sku, esc, \{[\s\S]{0,400}?adminApi: AdminAPI/,
+    'the edit drawer must inject AdminAPI');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 8. The margin page no longer reports a refusal as a success
 // ─────────────────────────────────────────────────────────────────────────────

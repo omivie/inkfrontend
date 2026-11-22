@@ -1986,6 +1986,10 @@ function buildProductModalTabs(modal, full, isOwner) {
   wireForUseInPanel(modal, full.sku, esc, {
     mode: 'edit',
     productId: full.id,
+    // AdminAPI is an ES-module export, never a window global — the panel's
+    // `window.AdminAPI` fallback is always null in the browser, which painted
+    // "the admin API client is not loaded" and hid the editor on every product.
+    adminApi: AdminAPI,
     // The route requires retail_price on every product update. Passing the row's
     // own value back is a no-op; passing a FORM value would let a list save
     // quietly commit an unsaved price edit.

@@ -48,7 +48,8 @@ import {
   ordersFrom, searchParties, orderToParty, partyEmptyText, orderEmptyText,
 } from '../utils/party-search.js';
 import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
-import { isOutstanding } from '../utils/invoice-cash-basis.js';
+// Do they still owe us? Unpaid or draft — never paid, never void.
+const isOutstanding = (inv) => !!inv && inv.status !== 'paid' && inv.status !== 'void';
 
 const GST_RATE = 0.15;
 

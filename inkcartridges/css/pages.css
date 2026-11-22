@@ -2380,17 +2380,6 @@
     display: none;
 }
 
-@media (max-width: 1024px) {
-    .ribbon-detail-columns__right .related-products__grid {
-        grid-template-columns: repeat(3, 1fr);
-    }
-}
-
-@media (max-width: 600px) {
-    .ribbon-detail-columns__right .related-products__grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
 
 
 /* ── Product Reviews Section ─────────────────────────── */
@@ -8394,14 +8383,8 @@ a.account-review-card__product:focus-visible {
 .ribbon-detail-columns {
     padding: var(--spacing-xl) 0;
 }
-.ribbon-detail-columns__grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-3xl);
-    align-items: start;
-}
-.ribbon-detail-columns__left .product-compat-devices {
-    grid-column: auto;
+/* Ribbon "FOR USE IN" under the image (owner, 22 Nov 2026). */
+.product-gallery__compat .product-compat-devices {
     padding-top: 0;
     border-top: none;
 }
@@ -8411,17 +8394,6 @@ a.account-review-card__product:focus-visible {
 }
 .ribbon-detail-columns__right .related-products {
     padding: 0;
-}
-.ribbon-detail-columns__right .related-products__grid {
-    grid-template-columns: repeat(3, 1fr);
-}
-@media (max-width: 768px) {
-    .ribbon-detail-columns__grid {
-        grid-template-columns: 1fr;
-    }
-    .ribbon-detail-columns__right .related-products__grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
 }
 
 /* Ribbon Compatible Devices — spans both columns inside product layout grid */

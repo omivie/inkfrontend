@@ -40,6 +40,50 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-389 — Ribbon PDP: a tall blank under the photo; the "FOR USE IN" machine list now sits under the image (owner 2026-11-22) — FIXED (frontend)
+
+**Symptom.** On a ribbon page (e.g. 81001.01) the photo is short and the buy column is tall, so the gallery column left ~680px of white space before the "FOR USE IN" list, which only started in a separate full-width section below the whole product block.
+
+**Root cause.** Layout, not data. Ribbons rendered the admin-written list into `#ribbon-col-left`, the left half of `#ribbon-detail-columns` — a section AFTER `.product-detail`. Non-ribbons already put their printer list under the image via `#product-compat-slot` / `_mountCompat`.
+
+**Fix.** `renderCompatiblePrinters` mounts the ribbon ok/unavailable blocks through `_mountCompat` (same slot as every other product). `_mountCompat('')` now runs before the ribbon `return`, so a ribbon with no list never inherits the previous product's. `#ribbon-col-left` and the two-column grid are deleted; ribbon related products are one full-width row using the default related grid. Phones keep the slot below the buy box (existing CSS `order: 1`). `.product-compat-devices` class and `data-for-use-in-state` kept, so `probe:for-use-in` still finds the block.
+
+**Measured.** Live page, DOM moved in place (read-only), 1440x900: gap between photo box and list 683px -> 16px. The list is long (3,949px tall for 81001.01), so the gallery column now runs past the buy column (buy box ends at 1,243px, list at 4,607px). The blank moves to the right column below the buy box. In the old layout that right half held the related ribbons (none for 81001.01); they now sit full-width after the list.
+
+---
+## ERR-388 — Admin product "For Use In" tab never opened its editor: "the current list could not be read (the admin API client is not loaded)" (owner 2026-11-22) — FIXED (frontend)
+
+**Symptom.** Every product's For Use In tab showed the red "could not be read (the admin API client is not loaded)" box, with no Source/Preview editor and no Save. The machine list could not be edited from the admin at all.
+
+**Root cause.** `js/admin/utils/for-use-in.js` (ERR-272, 2026-09-20) falls back to `window.AdminAPI` when no `adminApi` is injected. Nothing in the codebase ever assigns `window.AdminAPI` — `AdminAPI` is an ES-module export of `js/admin/api.js`, re-exported by `app.js`. The unit tests always inject `deps.adminApi`, so they passed; the browser always got `null`. The panel correctly refuses to open the editor over a failed read, so the failure was loud but total.
+
+**Fix.** `products.js` passes `adminApi: AdminAPI` to `wireForUseInPanel` (it already imports `AdminAPI` from `app.js`). The panel forwards it to both `readForUseInAdmin` and `writeForUseIn`.
+
+**Guard.** `tests/for-use-in-write-sep2026.test.js` §7b — fails if the edit drawer's `wireForUseInPanel` call stops injecting `adminApi: AdminAPI`. Negative control: removing the line turns it red (26/1).
+
+**Lesson.** A `window.X` fallback in a module whose tests always inject X is untested in the browser. Grep for the assignment, not just the read.
+
+---
+
+## ERR-387 — Dashboard: unpaid invoices no longer held out of revenue and profit — every invoice counts as paid (owner 2026-11-22) — SHIPPED (frontend)
+
+**Ask.** Owner, screenshot of `/admin#dashboard?period=all`: Net Profit read −$5,351.76 "paid invoices only", with the note "$2753.48 across 11 unpaid invoices is held out of revenue and profit; the cost of those goods stays in costs." Owner: profit must not be taken away for customers who have not paid yet — when totalling profit, assume every invoice is paid and show all of it.
+
+**Cause.** Not a bug: ERR-197 (2026-09-01) deliberately put invoiced sales on a hybrid basis — revenue/profit only once marked paid, COGS from the day invoiced — so an unpaid invoice showed as pure cost. The owner has reversed that decision.
+
+**Fix.** The ERR-197 layer is deleted, not switched off, so the backend's own figures (which already count every invoice from the day it is raised, `includes_invoices: true`) render as themselves:
+- `pages/dashboard.js`: `buildCashBasis`, `getAllOrdersInRange`, fetch slots 14/15 (invoice list + all orders in range), the per-bucket chart deduction in `buildOverviewBuckets`, the drift-guard offset, the chart footer clause, the KPI-strip adjustment (`applyCashBasis`, `cbPrev`, "paid invoices only" subs, `CASH_BASIS_TIP`) and the basis banner/refusal note. Previous-period deltas come back on Revenue / Gross / Net / margins / AOV.
+- `utils/invoice-cash-basis.js` deleted. Its one other reader, `pages/invoices.js`, only needed `isOutstanding` (the Outstanding box) — inlined there, same rule (not paid, not void ⇒ still owed).
+- `pages/financial-health.js`: the "Dashboard counts invoices only once marked paid" P&L note deleted — the two screens now agree.
+- `scripts/probe-invoice-cash-basis.mjs` + its npm entry, and `tests/dashboard-invoice-cash-basis-sep2026.test.js`, deleted. The cash-basis pager tests in `dashboard-margin-and-cash-basis-pages-oct2026.test.js` deleted (fmtPct test kept).
+- `admin/app.js` `APP_VERSION` bumped (lazy page imports are keyed on it); the ERR-313 version-date guard widened to accept Nov/Dec.
+
+**Guard.** `admin-cogs-honesty.test.js` — "the dashboard never holds unpaid invoices out of revenue or profit (ERR-387)": fails if `utils/invoice-cash-basis.js` returns or dashboard.js mentions `_cashBasis` / `applyCashBasis` / "paid invoices only". The overlay ban (ADDING invoice revenue = double count) is unchanged.
+
+**Expected effect (arithmetic, not yet measured live).** All-time at the time of the screenshot: revenue +$2,753.48 incl. GST; gross and net profit each + $2,753.48 × 20/23 = +$2,394.33 ex-GST, i.e. net ≈ −$2,957.43. Net stays negative because operating expenses and supplier freight are still in it — that part is real cost, not invoicing.
+
+**Verified.** Full suite 7387 pass / 0 fail. Not checked live in a browser (owner-login dashboard).
+
 ## ERR-386 — "Compatible cartridges are covered by our 30-day satisfaction guarantee." removed from every page (owner 2026-11-22) — SHIPPED (frontend)
 
 **Ask.** Owner, screenshot of `/shop?brand=brother&category=ink&code=LC38`: remove that sentence from all pages.

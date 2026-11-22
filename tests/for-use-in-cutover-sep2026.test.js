@@ -270,11 +270,12 @@ test('§4 "unavailable" on a NON-ribbon falls through to the compat fallbacks', 
         'the ribbon-only notice must come BEFORE the ribbon short-circuit, so non-ribbons keep falling through');
 });
 
-test('§4 the ok-state block is still injected into the ribbon left column', () => {
+test('§4 the ok-state block renders under the image, not in a section below (owner, 22 Nov 2026)', () => {
     const fn = PDP.match(/async renderCompatiblePrinters\(info\)\s*\{[\s\S]*?\n        \},/)[0];
-    assert.match(fn, /ribbon-col-left/);
-    assert.match(fn, /ribbon-detail-columns/);
+    assert.match(fn, /_mountCompat\(html\)/);
+    assert.doesNotMatch(fn, /ribbon-col-left/, 'the old left column below the product block left a tall blank under the photo');
     assert.match(fn, /FOR USE IN:/);
+    assert.doesNotMatch(fs.readFileSync(path.join(ROOT, 'inkcartridges/html/product/index.html'), 'utf8'), /ribbon-col-left/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────

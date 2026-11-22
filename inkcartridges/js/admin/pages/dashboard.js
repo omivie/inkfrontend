@@ -24,10 +24,6 @@ import { cashMs, pnlCost } from '../utils/expense-math.js';
 // Robustly parse the traffic time-series (array | {data|series|points}) into
 // [{ date, sessions, pageviews }] for the Performance overview overlay.
 import { normalizeSeries } from '../utils/traffic-analytics.js';
-import {
-  indexShadowOrders, joinToShadowOrders, withinPeriod, reconcilePeriod,
-  unrealisedDeduction, bucketDeduction, applyCashBasis, cashBasisNote,
-} from '../utils/invoice-cash-basis.js';
 import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
 import { METRICS, rankBy, metricIncomplete } from '../utils/best-sellers.js';
 
@@ -766,28 +762,6 @@ function buildOverviewBuckets(d) {
 
   order.sort(); // "YYYY-MM-DD" sorts chronologically
 
-  // ── Cash basis (ERR-197) ───────────────────────────────────────────────────
-  // Hold unpaid invoiced sales out of revenue and profit, bucket by bucket, so the
-  // chart, its subtitle and its legend all agree with the KPI strip by construction
-  // (they all come through here). COGS, opex and fees are untouched — the goods were
-  // still bought — which is exactly why the profit line dips below the cost line
-  // while money is outstanding.
-  //
-  // Buckets are assigned from the series' OWN bucket_start keys, so this works at
-  // day/week/month/quarter without knowing the backend's boundary rules.
-  const cb = d?._cashBasis;
-  if (cb?.applied && cb.joined) {
-    const ded = bucketDeduction(cb.joined, order);
-    for (const [key, cut] of ded) {
-      const b = byBucket.get(key);
-      if (!b) continue;
-      // null stays null: an unknown bucket must not become a number by subtraction.
-      if (b.revenue != null) b.revenue = round2(b.revenue - cut.revenueInclGst);
-      if (b.grossProfit != null) b.grossProfit = round2(b.grossProfit - cut.revenueExGst);
-      if (b.netProfit != null) b.netProfit = round2(b.netProfit - cut.revenueExGst);
-    }
-  }
-
   return { order, byBucket };
 }
 
@@ -975,13 +949,7 @@ function drawPerformanceOverview(d) {
   // blaming the chart. Resolved from the same expression the KPI tile renders, so the guard
   // can't pass while the tile shows something else.
   const recovered = recoverProfitFromSeries(cur, d.sGrossProfit, d.sNetProfit);
-  const kpiNetRaw = cur.net_profit ?? recovered?.net ?? null;
-  // The buckets behind `plan` have already had unpaid invoiced sales taken out
-  // (buildOverviewBuckets), so the tile figure must have too — otherwise this guard
-  // reports a "backend disagrees with itself" drift exactly equal to the deduction,
-  // every single load, and a real drift would be lost in the noise.
-  const cbTotal   = d?._cashBasis?.applied ? d._cashBasis.deduction.revenueExGst : 0;
-  const kpiNet    = kpiNetRaw == null ? null : round2(kpiNetRaw - cbTotal);
+  const kpiNet    = cur.net_profit ?? recovered?.net ?? null;
   const drift     = checkNetDrift(plan, kpiNet, order.length);
   if (drift) {
     window.DebugLog?.warn?.(
@@ -1111,8 +1079,7 @@ function drawPerformanceOverview(d) {
           // (incl-GST), but PROFIT is measured net of GST — GST is collected on behalf of
           // IRD and remitted, so it was never income. Without this note the lines look
           // like they should subtract to the profit line, and they don't.
-          footer: () => 'Revenue and costs incl. GST; profit is measured net of GST.'
-            + (d?._cashBasis?.applied ? ' Invoiced sales count once marked paid; their goods cost counts from the day invoiced.' : ''),
+          footer: () => 'Revenue and costs incl. GST; profit is measured net of GST.',
         } },
       },
       scales: {
@@ -1313,15 +1280,6 @@ async function runDashboardLoad(mySeq) {
     // method's comment). The card says so on its face rather than pretending to
     // follow the page's range.
     AdminAPI.getConversionFunnel(signal),
-    // 14/15  Cash-basis recognition for invoiced sales (ERR-197). The backend counts
-    // an invoice on ACCRUAL, from the day it was raised; the owner wants its revenue
-    // and profit to appear only once it is marked paid, while its COGS keeps landing
-    // on day one. So we fetch the invoices (for `status`) and the orders in range
-    // (for the SHADOW ORDER that actually carries the money), and subtract the ones
-    // whose cash has not arrived. See utils/invoice-cash-basis.js for why the join
-    // is needed and why `issue_date` is the wrong date to bucket on.
-    AdminAPI.listInvoices({}, 1, 100),                        // 14  invoice status
-    getAllOrdersInRange(from, to, signal),                     // 15  INV- shadow orders in range (all pages, ERR-310)
   ];
 
   const results = await Promise.allSettled(promises);
@@ -1363,11 +1321,8 @@ async function runDashboardLoad(mySeq) {
     return pcts.length > 0 && Math.max(...pcts) < LOW_MARGIN_PCT;
   });
 
-  const cashBasis = buildCashBasis(val(14), val(15), val(1), from, to);
-
   const payload = {
     isOwner: true,
-    _cashBasis: cashBasis,
     // The grain the bundle ACTUALLY served at (getDashboardBundle may have escalated past
     // a backend bucket-cap rejection). Carried in the payload — not just a module var — so
     // a stale-while-revalidate cache repaint labels its x-axis to match its own bars.
@@ -2064,28 +2019,6 @@ function fmtPct(v) {
   return `${n.toFixed(1)}%`;
 }
 
-// Every order in the range, for the cash basis (ERR-310). One 200-row page left "all time"
-// (217 orders) refused with "only 200 of 217 orders in range were read". Oldest-first so an
-// order placed between page reads appends at the end instead of shifting a row into a page
-// already read. A failed or short page just stops: buildCashBasis's count check then refuses
-// LOUDLY rather than deducting from a partial list.
-async function getAllOrdersInRange(from, to, signal) {
-  const filters = { from, to, sort: 'created_at', order: 'asc' };
-  const first = await AdminAPI.getOrders(filters, 1, 200, signal);
-  const list = (d) => Array.isArray(d) ? d : (d?.orders || d?.items || null);
-  const rows = list(first);
-  const total = Number(first?.pagination?.total ?? first?.total);
-  if (!rows || !(total > rows.length)) return first;
-  // ponytail: 10-page cap (2,000 orders); past that the refusal fires — page the backend's
-  // invoice-orders instead if the shop outgrows it.
-  for (let page = 2; rows.length < total && page <= 10; page++) {
-    const next = list(await AdminAPI.getOrders(filters, page, 200, signal));
-    if (!next?.length) break;
-    rows.push(...next);
-  }
-  return Array.isArray(first) ? rows : { ...first, orders: rows };
-}
-
 /**
  * Decide what the Performance chart's profit line actually plots, and say so honestly.
  *
@@ -2303,90 +2236,6 @@ function recoverProfitFromSeries(cur, grossProfitSeries, netProfitSeries) {
   };
 }
 
-// =========================================================================
-//  Cash-basis recognition for invoiced sales (ERR-197)
-// =========================================================================
-
-/**
- * Decide whether the dashboard may hold unpaid invoiced sales out of revenue and
- * profit for this range — and by how much.
- *
- * The owner's basis: an invoice's REVENUE lands when the money does, its COGS
- * lands when the invoice is raised. So we subtract the revenue side of every
- * invoice that has not been marked paid, and leave every cost alone.
- *
- * FIVE REFUSALS. Each returns `applied:false` with a reason that gets PRINTED —
- * the unadjusted backend figures then render as themselves. Silently falling back
- * to accrual numbers while the strip claims to be cash-basis is the failure this
- * whole guard exists to prevent.
- *
- * The reconciliation (#4) is the load-bearing one. `/api/admin/invoices` list rows
- * carry no `source_order_id`, so nothing on the invoice says whether the backend
- * counted it. Instead we prove it: sum the invoices we joined to shadow orders in
- * this period and require it to EQUAL the backend's own `invoice_revenue`, and the
- * count to equal `invoice_orders`. If they match we know exactly which money is in
- * the total and may remove part of it. If they don't, we don't know — and
- * subtracting an amount the backend never added would corrupt the page.
- *
- * @returns {{applied:boolean, reason:string|null, deduction:object|null,
- *            byBucket:Map|null, note:string|null}}
- */
-function buildCashBasis(invoiceData, orderData, kpiData, from, to) {
-  const no = (reason) => ({ applied: false, reason, deduction: null, byBucket: null, note: null });
-
-  const kpis = kpiData?.current ?? null;
-  // 1. The backend must actually be counting invoiced sales. If it isn't, they are
-  //    not in the totals and there is nothing to take out.
-  if (!kpis) return no('the KPI summary did not load, so its invoiced-sales figures could not be checked');
-  if (kpis.includes_invoices !== true) {
-    return no('the backend did not report counting invoiced sales in this range');
-  }
-
-  // 2. Both fetches must have succeeded. A failed fetch is not an empty book.
-  const invoices = invoiceData?.invoices || invoiceData?.items
-    || (Array.isArray(invoiceData) ? invoiceData : null);
-  if (!invoices) return no('the invoice list could not be loaded');
-  // /api/admin/orders returns `data` as a BARE ARRAY (ERR-176) — `data.orders` is
-  // [] for every query and would look like "no orders" rather than a shape error.
-  const orders = Array.isArray(orderData) ? orderData
-    : (orderData?.orders || orderData?.items || null);
-  if (!orders) return no('the order list could not be loaded');
-
-  // 3. A truncated order page would hide shadow orders and under-state the
-  //    deduction. Better to skip than to remove an arbitrary subset.
-  const orderTotal = orderData?.pagination?.total ?? orderData?.total ?? null;
-  if (orderTotal != null && orders.length < Number(orderTotal)) {
-    return no(`only ${orders.length} of ${orderTotal} orders in range were read`);
-  }
-  const invoiceTotal = invoiceData?.pagination?.total ?? invoiceData?.total ?? null;
-  if (invoiceTotal != null && invoices.length < Number(invoiceTotal)) {
-    return no(`only ${invoices.length} of ${invoiceTotal} invoices were read`);
-  }
-
-  // 4. THE RECONCILIATION.
-  const joined = withinPeriod(joinToShadowOrders(invoices, indexShadowOrders(orders)), from, to);
-  const rec = reconcilePeriod(joined, kpis);
-  if (!rec.ok) return no(rec.reason);
-
-  // 5. Nothing unpaid → nothing to do. Not a refusal; just no adjustment.
-  const deduction = unrealisedDeduction(joined);
-  if (!deduction.count) {
-    return { applied: false, reason: null, deduction, byBucket: null, note: null };
-  }
-  if (deduction.unknownTotal) {
-    return no(`${deduction.unknownTotal} unpaid invoice(s) have no readable total`);
-  }
-
-  return {
-    applied: true,
-    reason: null,
-    deduction,
-    byBucket: null,          // filled per-render; bucket keys come from the series
-    note: cashBasisNote(deduction),
-    joined,
-  };
-}
-
 function renderKpiStrip(d) {
   // Invoiced sales are counted by the BACKEND (kpi-summary carries
   // includes_invoices: true). The frontend does not aggregate — it renders.
@@ -2450,33 +2299,6 @@ function renderKpiStrip(d) {
                            : marginOf(prev.gross_profit, prev.revenue);
   const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
 
-  // ── Cash basis for invoiced sales (ERR-197) ────────────────────────────────
-  // ORDER MATTERS. checkMarginConsistency has already run, above, against the
-  // UNADJUSTED backend pair — that keeps it working as the ERR-111 basis
-  // regression detector it was built to be. Only now do we hold the unpaid
-  // invoices out, and re-derive the margins from the adjusted figures.
-  //
-  // Deltas: `previous` cannot be adjusted — kpi-summary ships no date range and no
-  // `invoice_revenue` for the prior window, so there is nothing to reconcile it
-  // against. Comparing an adjusted current to an unadjusted previous would print a
-  // confidently wrong arrow, so the affected tiles drop their delta instead. Same
-  // discipline as recoverProfitFromSeries above.
-  const cb = d._cashBasis || null;
-  const cbOn = !!cb?.applied;
-  const adj = cbOn
-    ? applyCashBasis({ ...cur, gross_profit: grossProfit, net_profit: netProfit, aov }, cb.deduction)
-    : null;
-
-  const revenueShown     = cbOn ? adj.revenue      : cur.revenue;
-  const grossProfitShown = cbOn ? adj.gross_profit : grossProfit;
-  const netProfitShown   = cbOn ? adj.net_profit   : netProfit;
-  const aovShown         = cbOn ? adj.aov          : aov;
-  const grossMarginShown = cbOn ? adj.gross_margin : grossMarginPct;
-  const netMarginShown   = cbOn ? adj.net_margin   : netMarginPct;
-  // Suppress the arrow on every tile the adjustment moved.
-  const cbPrev = (v) => (cbOn ? null : v);
-  const CASH_BASIS_TIP = ' Unpaid invoiced sales are held out until they are marked paid; the cost of their goods stays in costs.';
-
   // "—" on a profit tile is the honest answer when the backend can't compute COGS
   // (a sale with an un-costed line). The Action-needed panel names the offenders.
   const COGS_UNKNOWN = ' Shows "—" when any sale in the range has no cost of goods recorded — see "Sales missing a cost" under Action needed.';
@@ -2489,25 +2311,23 @@ function renderKpiStrip(d) {
   const netNote   = recovered?.netRebuilt   ? REBUILT : COGS_UNKNOWN;
 
   const tiles = [
-    { label: 'Revenue', value: revenueShown != null ? formatPrice(revenueShown) : null, raw: revenueShown, prev: cbPrev(prev.revenue),
-      gst: GST_INCL, sub: cbOn ? 'paid invoices only' : '',
-      tooltip: `Total sales (incl. GST) for the selected range. Includes invoiced (phone / walk-in / B2B) sales.${cbOn ? CASH_BASIS_TIP : ''}` },
+    { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
+      gst: GST_INCL,
+      tooltip: `Total sales (incl. GST) for the selected range. Includes invoiced (phone / walk-in / B2B) sales, paid or not.` },
     {
-      label: 'Gross Profit', value: grossProfitShown != null ? formatPrice(grossProfitShown) : null,
-      raw: grossProfitShown, prev: cbPrev(prev.gross_profit), stackNext: true, gst: GST_EXCL,
-      sub: cbOn ? 'paid invoices only' : '',
-      alert: cbOn && grossProfitShown != null && grossProfitShown < 0,
-      tooltip: `Revenue (ex-GST) − cost of goods (ex-GST), computed by the backend.${grossNote}${cbOn ? CASH_BASIS_TIP : ''}`,
+      label: 'Gross Profit', value: grossProfit != null ? formatPrice(grossProfit) : null,
+      raw: grossProfit, prev: prev.gross_profit, stackNext: true, gst: GST_EXCL,
+      tooltip: `Revenue (ex-GST) − cost of goods (ex-GST), computed by the backend.${grossNote}`,
     },
     {
-      label: 'Gross Margin', value: fmtPct(grossMarginShown), raw: grossMarginShown, prev: cbPrev(grossMarginPctPrev),
-      alert: grossMarginShown != null && grossMarginShown < 0, gst: GST_BASE,
+      label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
+      alert: grossMarginPct != null && grossMarginPct < 0, gst: GST_BASE,
       tooltip: 'Gross profit ÷ revenue, both ex-GST. Profit quality, not size.',
     },
     {
-      label: 'Net Profit', value: netProfitShown != null ? formatPrice(netProfitShown) : null,
-      raw: netProfitShown, prev: cbPrev(prev.net_profit),
-      alert: netProfitShown != null && netProfitShown < 0, stackNext: true,
+      label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
+      raw: netProfit, prev: prev.net_profit,
+      alert: netProfit != null && netProfit < 0, stackNext: true,
       gst: GST_EXCL,
       // Supplier freight is a COMPONENT of net profit, not a peer KPI, so it
       // rides here rather than taking a tenth grid cell (ERR-255). It is the
@@ -2518,9 +2338,7 @@ function renderKpiStrip(d) {
       // `!= null` and not a truthiness test: a real $0 freight fortnight is a
       // fact worth printing, and an ABSENT figure must print nothing at all
       // rather than "after $0.00 supplier freight" (absence-as-zero, ERR-063).
-      sub: [cbOn ? 'paid invoices only' : '',
-        cur.supplier_freight != null ? `after ${formatPrice(cur.supplier_freight)} supplier freight` : '']
-        .filter(Boolean).join(' · '),
+      sub: cur.supplier_freight != null ? `after ${formatPrice(cur.supplier_freight)} supplier freight` : '',
       // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
       // so GST is already outside this calculation rather than a line item inside it.
       // The Stripe-basis divergence is named on BOTH sides of it (ERR-255). An
@@ -2528,21 +2346,18 @@ function renderKpiStrip(d) {
       // roughly $0.47 per card order, and it is the backend's ÷1.15 against our
       // 2026-05-17 convention — not an error in either screen. Naming it only in
       // the modal would leave whoever starts from the Dashboard re-deriving it.
-      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer). KNOWN DIFFERENCE: this figure divides Stripe's 2.65% + $0.30 by 1.15; an order's own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower. Settled by reading a real Stripe payout, not by changing either screen.${netNote}${cbOn ? CASH_BASIS_TIP : ''}`,
+      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer). KNOWN DIFFERENCE: this figure divides Stripe's 2.65% + $0.30 by 1.15; an order's own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower. Settled by reading a real Stripe payout, not by changing either screen.${netNote}`,
     },
     {
-      label: 'Net Margin', value: fmtPct(netMarginShown), raw: netMarginShown, prev: cbPrev(netMarginPctPrev),
-      alert: netMarginShown != null && netMarginShown < 0, gst: GST_BASE,
+      label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
+      alert: netMarginPct != null && netMarginPct < 0, gst: GST_BASE,
       tooltip: 'Net profit ÷ revenue, both ex-GST. What you actually keep.',
     },
     { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
-      tooltip: `Orders placed in the selected range. Includes invoiced sales${cbOn ? ', whether or not they have been paid — only the money waits.' : '.'}` },
-    { label: 'Avg Order Value', value: aovShown != null ? formatPrice(aovShown) : null, raw: aovShown, prev: cbPrev(aovPrev),
+      tooltip: `Orders placed in the selected range. Includes invoiced sales, paid or not.` },
+    { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev,
       gst: GST_INCL,  // inherits revenue's basis
-      sub: cbOn ? 'paid invoices only' : '',
-      // Orders keeps counting unpaid invoices while revenue no longer does, so this
-      // necessarily falls. That is the owner's decision, stated rather than hidden.
-      tooltip: `Revenue ÷ orders, both incl. GST.${cbOn ? ' Unpaid invoiced sales still count as orders, so this falls while they are outstanding.' : ''}` },
+      tooltip: `Revenue ÷ orders, both incl. GST.` },
     { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
       tooltip: 'First-time buyers in the range.' },
     {
@@ -2592,22 +2407,6 @@ function renderKpiStrip(d) {
   // data-integrity problem, not a footnote — the last time a backend figure silently
   // contradicted its own inputs it went unnoticed for weeks (ERR-111). Say which number the
   // backend sent, which one we're showing, and why.
-  // Say what basis the strip is on. A dashboard that quietly withholds three
-  // quarters of its invoiced revenue and shows a loss without explaining why is
-  // indistinguishable from a broken one.
-  if (cbOn) {
-    html += `<p class="fh-pnl-note">${esc(cb.note)} Deltas against the previous period are hidden `
-      + `on the affected tiles: the backend publishes no invoiced-sales figure for that window, `
-      + `so an adjusted figure cannot honestly be compared with an unadjusted one.</p>`;
-  } else if (cb && cb.reason) {
-    // A skip is not a pass. If we could not apply the basis, the figures above are
-    // the backend's ACCRUAL numbers and must not be passed off as cash ones.
-    html += `<p class="fh-pnl-note admin-dash-note--alert"><strong>Showing invoiced sales on the `
-      + `backend's accrual basis.</strong> Unpaid invoices could not be held out because `
-      + `${esc(cb.reason)}. Revenue and profit above therefore include invoices that have not `
-      + `been paid.</p>`;
-  }
-
   for (const chk of [grossMarginCheck, netMarginCheck]) {
     if (!chk) continue;
     const scale = chk.ratio != null && Math.abs(Math.abs(chk.ratio) - 100) < 10

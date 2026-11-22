@@ -2534,11 +2534,10 @@
                         <h2 class="product-compat-devices__title">FOR USE IN:</h2>
                         <div class="product-compat-devices__content">${forUseIn.html}</div>
                     </div>`;
-                const leftCol = document.getElementById('ribbon-col-left');
-                if (leftCol) {
-                    leftCol.insertAdjacentHTML('beforeend', html);
-                    document.getElementById('ribbon-detail-columns').hidden = false;
-                }
+                // Under the image, in the gallery column (owner, 22 Nov 2026):
+                // it was a full-width section below the product block, which
+                // left a tall blank under a ribbon's short photo.
+                this._mountCompat(html);
                 return;
             }
 
@@ -2555,18 +2554,13 @@
                             <button type="button" class="btn btn--secondary" id="for-use-in-retry">Try again</button>
                         </div>
                     </div>`;
-                const leftCol = document.getElementById('ribbon-col-left');
-                if (leftCol) {
-                    leftCol.insertAdjacentHTML('beforeend', html);
-                    document.getElementById('ribbon-detail-columns').hidden = false;
+                if (this._mountCompat(html)) {
                     const retry = document.getElementById('for-use-in-retry');
                     if (retry) {
                         retry.addEventListener('click', async () => {
                             retry.disabled = true;
                             retry.textContent = 'Loading…';
                             await this._fetchForUseIn(info.sku);
-                            const block = retry.closest('.product-compat-devices');
-                            if (block) block.remove();
                             await this.renderCompatiblePrinters(info);
                         });
                     }
@@ -2583,10 +2577,10 @@
             // product_compatibility join (that fallback runs below for
             // non-ribbons only). Search still indexes ribbon compatibility
             // server-side; this only governs what the PAGE displays.
-            if (info.category === 'ribbon') return;
-
-            // Never carry the previous product's list.
+            // Never carry the previous product's list (ribbons included: their
+            // list now lives in the same slot).
             this._mountCompat('');
+            if (info.category === 'ribbon') return;
 
             // Fast path 1 — backend grouped compatibility (audit §1.4).
             if (this._renderGroupedPrinterCompat(info)) return;
