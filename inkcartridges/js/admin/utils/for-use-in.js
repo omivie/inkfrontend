@@ -77,6 +77,12 @@
  * `<span>` and `<br>` all survive, because the description sanitiser would strip
  * them and collapse the list into one run-on paragraph.
  *
+ * 2026-11-22 (owner): the Preview is now editable as well (contenteditable +
+ * B/I/U toolbar). That does NOT reopen the problem above: an edit in the
+ * preview is written BACK into the Source textarea through the same
+ * attribute-stripping allow-list as the preview, and the textarea is still the
+ * only thing saved. The operator can see the exact markup before pressing Save.
+ *
  * ── THREE STATES ON READ, FOUR ON WRITE ────────────────────────────────────
  *
  * Read (ERR-243, unchanged): `null` used to mean both "this product has no list"
@@ -415,7 +421,8 @@ export function previewForUseIn(html) {
  * six copies and ERR-192 then relocated it instead of sharing it.
  */
 export function forUseInNotice() {
-    return 'Type the list as HTML — it is stored as you write it. This field keeps more '
+    return 'Edit the list in the Preview (B / I / U buttons, Enter for a new line) or type it as HTML '
+        + 'in Source — the two stay in sync, and it is stored as you write it. This field keeps more '
         + 'formatting than the description does: <div>, <b>, <span> and <br> all survive. '
         + 'Leaving the box empty and saving CLEARS the list; not touching it leaves it alone. '
         + 'The list is stored separately from the product, so if it fails to save the rest of '
@@ -448,7 +455,7 @@ export function forUseInPanelHtml(esc, opts = {}) {
     const notice = mode === 'edit'
         ? `<p class="admin-fui__notice" role="note">${esc(forUseInNotice())}</p>`
         : mode === 'create'
-            ? `<p class="admin-fui__notice" role="note">${esc('Type the list as HTML — <div>, <b>, '
+            ? `<p class="admin-fui__notice" role="note">${esc('Edit the list in the Preview or type it as HTML in Source — <div>, <b>, '
                 + '<span> and <br> all survive here, unlike in the description. It is saved together '
                 + 'with the product when you press Create; leave it empty to add one later.')}</p>`
             : `<p class="admin-fui__notice" role="note">${esc('This list is read-only here — no admin '
@@ -473,8 +480,18 @@ export function forUseInPanelHtml(esc, opts = {}) {
                       spellcheck="false" wrap="soft"></textarea>
           </div>
           <div class="admin-fui__col">
-            <span class="admin-fui__collabel">Preview</span>
-            <div class="admin-fui__preview" id="for-use-in-preview" aria-live="polite"></div>
+            <div class="admin-fui__prevhead">
+              <span class="admin-fui__collabel" id="for-use-in-preview-label">Preview — click to edit</span>
+              <div class="admin-fui__tools" role="toolbar" aria-label="Formatting">
+                <button type="button" class="admin-fui__tool" data-fui-cmd="bold" title="Bold (Ctrl/Cmd+B)" aria-label="Bold"><b>B</b></button>
+                <button type="button" class="admin-fui__tool" data-fui-cmd="italic" title="Italic (Ctrl/Cmd+I)" aria-label="Italic"><i>I</i></button>
+                <button type="button" class="admin-fui__tool" data-fui-cmd="underline" title="Underline (Ctrl/Cmd+U)" aria-label="Underline"><u>U</u></button>
+                <button type="button" class="admin-fui__tool" data-fui-cmd="removeFormat" title="Clear formatting" aria-label="Clear formatting">Clear</button>
+              </div>
+            </div>
+            <div class="admin-fui__preview" id="for-use-in-preview" contenteditable="true"
+                 role="textbox" aria-multiline="true" aria-labelledby="for-use-in-preview-label"
+                 data-placeholder="Nothing to preview — saving an empty box clears the list."></div>
           </div>
         </div>${actions}
       </div>` : '';
@@ -573,9 +590,50 @@ export async function wireForUseInPanel(root, sku, esc, deps = {}) {
     const paintPreview = () => {
         if (!preview || !input) return;
         const safe = previewForUseIn(input.value);
-        preview.innerHTML = safe
-            || '<span class="admin-text-muted" style="font-size:12px">Nothing to preview — '
-             + 'saving an empty box clears the list.</span>';
+        // Empty = no child nodes, so the CSS :empty placeholder shows. A
+        // placeholder ELEMENT would sit inside the editable box and get typed into.
+        preview.innerHTML = safe;
+    };
+    /**
+     * The preview is editable too. Editing it writes back into the Source
+     * textarea, which stays the ONE value Save/Create read — so every save
+     * path, the dirty check and the read-back verification are unchanged.
+     * The written-back markup goes through the same allow-list as the
+     * preview (no attributes survive), and the preview itself is NOT repainted
+     * while it is being typed in, or the caret would jump to the start.
+     * The backend's sanitiser still has the last word: a tag it drops (we have
+     * only been told <div>/<b>/<span>/<br> survive) makes the save read back
+     * different, which reports "saved-unverified" — loud, not silent.
+     */
+    const wireEditablePreview = () => {
+        if (!preview || !input) return;
+        input.addEventListener('input', paintPreview);
+        preview.addEventListener('input', () => {
+            // A box emptied by the browser still holds <br> or <div><br></div>;
+            // that must become '' (the CLEAR value), not a list of one blank line.
+            input.value = preview.textContent.trim() ? previewForUseIn(preview.innerHTML) : '';
+            if (!input.value) preview.innerHTML = '';
+        });
+        // Paste as plain text: pasted web/Word markup would otherwise carry
+        // styles, images and links into the box before the write-back strips them.
+        preview.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const text = e.clipboardData?.getData('text/plain') || '';
+            document.execCommand('insertText', false, text);
+        });
+        preview.addEventListener('drop', (e) => e.preventDefault());
+        root.querySelectorAll('[data-fui-cmd]').forEach((btn) => {
+            // mousedown, not click: keep the selection inside the preview.
+            btn.addEventListener('mousedown', (e) => e.preventDefault());
+            btn.addEventListener('click', () => {
+                if (!preview.contains(document.getSelection()?.anchorNode)) preview.focus();
+                // execCommand is deprecated but still the only native rich-text
+                // command set; ponytail: swap for Selection/Range wrapping if a
+                // browser ever drops it.
+                document.execCommand(btn.dataset.fuiCmd, false, null);
+                preview.dispatchEvent(new Event('input'));
+            });
+        });
     };
     const say = (msg, kind) => {
         if (!statusEl) return;
@@ -652,7 +710,7 @@ export async function wireForUseInPanel(root, sku, esc, deps = {}) {
     // up by the create handler through forUseInCreateValue().
     if (mode === 'create') {
         if (input) {
-            input.addEventListener('input', paintPreview);
+            wireEditablePreview();
             paintPreview();
         }
         if (box) {
@@ -666,7 +724,7 @@ export async function wireForUseInPanel(root, sku, esc, deps = {}) {
     const result = await load();
 
     if (canEdit) {
-        input.addEventListener('input', paintPreview);
+        wireEditablePreview();
 
         const commit = async (value, verb) => {
             const saveBtn = root.querySelector('[data-action="for-use-in-save"]');

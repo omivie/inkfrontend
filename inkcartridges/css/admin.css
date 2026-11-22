@@ -7377,7 +7377,45 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
   max-height: 420px;
   overflow: auto;
   word-break: break-word;
+  cursor: text;
 }
+/* Editable preview (owner 11-22): solid border + focus ring like the Source box,
+   so it reads as a field, not a picture. Placeholder via :empty — an element
+   placeholder would sit inside the editable box and get typed into. */
+.admin-fui__preview[contenteditable="true"] { border-style: solid; }
+.admin-fui__preview[contenteditable="true"]:focus {
+  outline: none;
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px var(--cyan-dim);
+}
+.admin-fui__preview:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.admin-fui__prevhead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+.admin-fui__tools { display: flex; gap: 4px; margin-bottom: 5px; }
+/* Source label as tall as the toolbar, so the two boxes start level. */
+.admin-fui__col > label.admin-fui__collabel { display: flex; align-items: flex-end; min-height: 26px; }
+.admin-fui__tool {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 7px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+.admin-fui__tool:hover { border-color: var(--cyan); }
+.admin-fui__tool:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 .admin-fui__actions {
   display: flex;
   flex-wrap: wrap;

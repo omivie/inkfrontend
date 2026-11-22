@@ -457,3 +457,35 @@ test('§9 MUTANT — an allow-list without the tag filter lets a handler through
   assert.match(out, /onclick/,
     'the mutant must leak the handler — otherwise §5 is not testing the rebuild');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. Editable preview (owner 2026-11-22)
+// ─────────────────────────────────────────────────────────────────────────────
+// The preview is contenteditable with a B/I/U toolbar, but the Source textarea
+// stays the ONLY value that is saved: preview edits are written back into it
+// through previewForUseIn (attribute-free allow-list). Browser behaviour was
+// measured with Playwright; these pins stop the wiring silently coming apart.
+
+test('§10 the preview is editable, with a formatting toolbar, in edit AND create mode', async () => {
+  const { forUseInPanelHtml } = await load();
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  for (const mode of ['edit', 'create']) {
+    const html = forUseInPanelHtml(esc, { mode });
+    assert.match(html, /id="for-use-in-preview"[^>]*contenteditable="true"/, `${mode}: preview must be editable`);
+    for (const cmd of ['bold', 'italic', 'underline', 'removeFormat']) {
+      assert.match(html, new RegExp(`data-fui-cmd="${cmd}"`), `${mode}: toolbar must offer ${cmd}`);
+    }
+  }
+  // The placeholder is CSS (:empty), never an element inside the editable box.
+  assert.doesNotMatch(FUI_CODE, /preview\.innerHTML = safe\s*\|\|/, 'no placeholder element inside the editable box');
+});
+
+test('§10 preview edits write back through the allow-list, and an emptied box means CLEAR', () => {
+  const body = FUI_CODE.slice(FUI_CODE.indexOf('const wireEditablePreview'));
+  assert.match(body, /input\.value = preview\.textContent\.trim\(\) \? previewForUseIn\(preview\.innerHTML\) : ''/,
+    'write-back must sanitise, and a browser-emptied box (<br>) must become the CLEAR value ""');
+  assert.match(body, /addEventListener\('paste'[\s\S]{0,200}text\/plain/, 'paste must be plain text');
+  // Both modes wire it — create mode used to wire only the textarea.
+  assert.equal((FUI_CODE.match(/wireEditablePreview\(\);/g) || []).length, 2,
+    'wireEditablePreview must run in create mode and in edit mode');
+});

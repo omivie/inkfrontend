@@ -40,6 +40,17 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-390 — Admin "For Use In": the Preview is now editable, with Bold / Italic / Underline / Clear buttons (owner 2026-11-22) — SHIPPED (frontend)
+
+**Ask.** Editing the machine list meant typing raw HTML in the Source box; the owner wanted to edit in the Preview and have formatting buttons.
+
+**Change.** `#for-use-in-preview` is `contenteditable` with a toolbar (`data-fui-cmd` = bold / italic / underline / removeFormat, native `document.execCommand`). Every preview edit is written BACK into the Source textarea through `previewForUseIn` (the existing attribute-free allow-list). The textarea stays the ONLY value saved, so Save, Clear, the dirty check, the create-modal read (`forUseInCreateValue`) and the read-back verification are unchanged. One wirer, `wireEditablePreview`, runs in edit AND create mode. Paste is plain text only; drop is blocked. A box the browser empties (`<br>` / `<div><br></div>`) becomes `''`, the CLEAR value. The empty-preview hint moved to a CSS `:empty::before` placeholder, because a placeholder element inside an editable box gets typed into.
+
+**Not measured: whether the backend keeps `<i>` and `<u>`.** The backend only said `<div>`, `<b>`, `<span>`, `<br>` survive. If its sanitiser drops `<i>`/`<u>`, the save reads back different and the panel says "saved-unverified ... read back something different" (warning colour) — loud, never a false "Saved". The Bold button emits `<b>`, which is on the stated list.
+
+**Measured.** Headless Chromium against local serve, panel in create mode: typing in the preview, Italic, Bold, Enter (new `<div>`), plain-text paste of an `<img onerror>` + styled `<b>` payload (only the text arrived, no `img`/`style` in the box), and select-all + Backspace (`''` in Source, `forUseInCreateValue` = `null`) all synced as expected. Tests §10 in `for-use-in-write-sep2026.test.js`; full suite 7390/0.
+
+---
 ## ERR-389 — Ribbon PDP: a tall blank under the photo; the "FOR USE IN" machine list now sits under the image (owner 2026-11-22) — FIXED (frontend)
 
 **Symptom.** On a ribbon page (e.g. 81001.01) the photo is short and the buy column is tall, so the gallery column left ~680px of white space before the "FOR USE IN" list, which only started in a separate full-width section below the whole product block.
