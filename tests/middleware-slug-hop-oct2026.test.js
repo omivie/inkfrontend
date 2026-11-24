@@ -89,8 +89,8 @@ test('a 301 to ANOTHER SKU, to itself, to a foreign host, or a non-301 is never 
 
 test('shoppers never pay for the lookup (bots only)', async () => {
     const { res, seen } = await run(OLD, () => redirect(`https://www.inkcartridges.co.nz${NEW}`), HUMAN);
-    assert.equal(res, undefined, 'falls through to the SPA');
-    assert.deepEqual(seen, []);
+    assert.notEqual(res && res.status, 301, 'no slug redirect for a shopper');
+    assert.ok(seen.every((u) => !u.startsWith(BACKEND)), 'no Render origin call (FE-1 reads the cached API host)');
 });
 
 test('only /products/<slug>/<SKU> asks; /p/<sku> and /html/product do not', async () => {

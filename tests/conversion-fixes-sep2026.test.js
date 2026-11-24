@@ -117,10 +117,9 @@ test('§1 /shop with any param does NOT get the whole-shop prerender', async () 
     }
 });
 
-test('§1 humans never reach the prerender (control)', async () => {
-    const { res, calls } = await run(`${SITE}/shop`, html200(), HUMAN);
-    assert.equal(res, undefined);
-    assert.equal(calls.length, 0);
+test('§1 humans never reach the Render prerender origin (control; FE-1 reads the cached API host)', async () => {
+    const { calls } = await run(`${SITE}/shop`, html200(), HUMAN);
+    assert.ok(calls.every((c) => !c.target.startsWith('https://ink-backend-sg.onrender.com')), 'no Render origin call');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

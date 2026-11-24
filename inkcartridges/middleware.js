@@ -12,6 +12,19 @@ const PRERENDER_RETRY_AFTER_S = 120;
 // no wait unless it is the slower of the two; past this it is skipped.
 const SLUG_HOP_TIMEOUT_MS = 2500;
 
+// FE-1 (Nov 2026) — humans and non-listed crawlers get the SAME head + H1 in the
+// initial HTML that a bot gets from the prerender. The prerender is read from the
+// Cloudflare-cached API host (measured HIT, 55-75 ms), not the Render origin the
+// bot path uses (200-800 ms): a human must not wait on a cold origin, and past
+// the budget below the page is simply the untouched shell (fail-open, loudly: see
+// X-Head-Inject).
+const HEAD_PRERENDER_HOST = 'https://api.inkcartridges.co.nz';
+const HEAD_PRERENDER_TIMEOUT_MS = 1500;
+const SHELL_FETCH_TIMEOUT_MS = 5000;
+// Request header on the middleware's own shell fetch; the middleware returns at
+// once when it sees it, so the fetch reaches the static file (no recursion).
+const SHELL_GUARD_HEADER = 'x-ic-shell';
+
 // `adsbot-google` and `storebot-google` are intentionally listed even though
 // `googlebot` is already present — the AdsBot ("AdsBot-Google", "AdsBot-Google-
 // Mobile") and StoreBot ("Storebot-Google") user-agents do NOT contain the
@@ -85,68 +98,117 @@ const CATEGORY_ALIASES = {
  */
 const NON_WEB_PATH = /^\/(?:sql|scripts)\/|^\/(?:serve\.json|vercel\.json|middleware\.js)$/;
 
-export default async function middleware(request) {
-  const url = new URL(request.url);
+// <head-inject> — PURE string helpers; no I/O, no imports. tests/seo-initial-html-nov2026.test.js
+// slices this block out of the source and evaluates it, so keep it self-contained.
+// Values are copied through VERBATIM: the prerender already emits escaped HTML
+// (`&amp;`), so nothing here escapes or unescapes (no double-escaping).
+const RE_TITLE = /<title\b[^>]*>([\s\S]*?)<\/title>/i;
+const RE_H1 = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i;
+const RE_CANONICAL_G = /<link\b[^>]*\brel\s*=\s*["']canonical["'][^>]*>/gi;
+const RE_CONTENT_ATTR = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+const RE_HREF_ATTR = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+const metaTagRe = (name, flags = 'i') => new RegExp(`<meta\\b[^>]*\\bname\\s*=\\s*["']${name}["'][^>]*>`, flags);
+
+function attrValue(tag, re) {
+  const m = re.exec(tag || '');
+  if (!m) return null;
+  const v = m[1] !== undefined ? m[1] : m[2];
+  return v === undefined || v === '' ? null : v;
+}
+
+/** Replace (or add) one attribute on a single tag string. Function replacers: a `$&` in a value is literal. */
+function setTagAttr(tag, attr, value) {
+  const safe = value.replace(/"/g, '&quot;');
+  const re = new RegExp(`\\b${attr}\\s*=\\s*(?:"[^"]*"|'[^']*')`, 'i');
+  if (re.test(tag)) return tag.replace(re, () => `${attr}="${safe}"`);
+  return tag.replace(/\s*\/?>$/, (end) => ` ${attr}="${safe}"${end}`);
+}
+
+/**
+ * Pull title, description, canonical, robots and the first H1's TEXT out of a
+ * prerender page. Every value is raw escaped HTML text or null.
+ */
+function extractPrerenderHead(html) {
+  const out = { title: null, description: null, canonical: null, robots: null, h1: null };
+  if (typeof html !== 'string' || !html) return out;
+  const t = RE_TITLE.exec(html);
+  if (t) out.title = t[1].trim() || null;
+  const d = metaTagRe('description').exec(html);
+  if (d) out.description = attrValue(d[0], RE_CONTENT_ATTR);
+  const r = metaTagRe('robots').exec(html);
+  if (r) out.robots = attrValue(r[0], RE_CONTENT_ATTR);
+  const c = new RegExp(RE_CANONICAL_G.source, 'i').exec(html);
+  if (c) out.canonical = attrValue(c[0], RE_HREF_ATTR);
+  const h = RE_H1.exec(html);
+  if (h) out.h1 = h[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() || null;
+  return out;
+}
+
+/**
+ * Write a prerender head into a static shell. Head fields apply to the part of
+ * the shell BEFORE </head>; the H1 to the part after it. The shell's own tag is
+ * edited in place (ids and other attributes survive: js/seo-meta.js and
+ * shop-page.js look the elements up by id/selector); a duplicate canonical is
+ * removed so exactly ONE remains.
+ * @returns {{html: string, applied: string[], missing: string[]}} `missing`
+ *   names every field the prerender lacked or the shell had no slot for.
+ */
+function injectHead(shell, head) {
+  const lower = shell.toLowerCase();
+  const cut = lower.indexOf('</head>');
+  if (cut < 0) return { html: shell, applied: [], missing: ['shell-head'] };
+  let headHtml = shell.slice(0, cut);
+  let body = shell.slice(cut);
+  const applied = [];
+  const missing = [];
+
+  if (head.title && RE_TITLE.test(headHtml)) {
+    headHtml = headHtml.replace(RE_TITLE, (m) => m.replace(/(<title\b[^>]*>)[\s\S]*?(<\/title>)/i, (_x, a, b) => `${a}${head.title}${b}`));
+    applied.push('title');
+  } else if (head.title) {
+    headHtml += `<title>${head.title}</title>\n`;
+    applied.push('title');
+  } else missing.push('title');
+
+  if (head.description) {
+    const re = metaTagRe('description');
+    if (re.test(headHtml)) headHtml = headHtml.replace(re, (m) => setTagAttr(m, 'content', head.description));
+    else headHtml += `<meta name="description" content="${head.description.replace(/"/g, '&quot;')}">\n`;
+    applied.push('description');
+  } else missing.push('description');
+
+  if (head.canonical) {
+    let seen = 0;
+    headHtml = headHtml.replace(RE_CANONICAL_G, (m) => (seen++ === 0 ? setTagAttr(m, 'href', head.canonical) : ''));
+    if (seen === 0) headHtml += `<link rel="canonical" href="${head.canonical.replace(/"/g, '&quot;')}">\n`;
+    applied.push('canonical');
+  } else missing.push('canonical');
+
+  // robots is optional: no prerender robots ⇒ the shell's own stands (not a miss).
+  if (head.robots) {
+    const re = metaTagRe('robots');
+    if (re.test(headHtml)) headHtml = headHtml.replace(re, (m) => setTagAttr(m, 'content', head.robots));
+    else headHtml += `<meta name="robots" content="${head.robots.replace(/"/g, '&quot;')}">\n`;
+    applied.push('robots');
+  }
+
+  if (head.h1 && RE_H1.test(body)) {
+    body = body.replace(/(<h1\b[^>]*>)[\s\S]*?(<\/h1>)/i, (_m, a, b) => `${a}${head.h1}${b}`);
+    applied.push('h1');
+  } else missing.push('h1');
+
+  return { html: headHtml + body, applied, missing };
+}
+// </head-inject>
+
+/**
+ * Which backend prerender serves this URL, if any? PURE (no I/O): the routing table
+ * that used to sit inline in middleware(), moved verbatim so the human head-inject
+ * path and the bot path share ONE computation.
+ * @returns {{prerenderPath: string|null, slugHopFor: {path:string, sku:string}|null}}
+ */
+function routePrerender(url) {
   const path = url.pathname;
-
-  // Deny non-web files FIRST — before the admin gate, the category normaliser
-  // and the bot prerender. Nothing below can be reached from these paths (the
-  // matcher entries are disjoint), and putting the check anywhere else would
-  // make that a matter of reading 200 lines carefully rather than one.
-  if (NON_WEB_PATH.test(path)) {
-    return new Response('Not Found', {
-      status: 404,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'public, max-age=0, must-revalidate',
-        'X-Content-Type-Options': 'nosniff',
-        'X-Robots-Tag': 'noindex, nofollow',
-      },
-    });
-  }
-
-  // Gate admin routes — redirect to login if no auth cookie
-  if (path === '/admin' || path.startsWith('/admin/')) {
-    const cookie = request.headers.get('cookie') || '';
-    if (!/__ink_auth=1/.test(cookie)) {
-      const loginUrl = new URL('/account/login', request.url);
-      loginUrl.searchParams.set('redirect', path + url.search);
-      return Response.redirect(loginUrl.toString(), 302);
-    }
-  }
-
-  // /shop ?category 301 normalization — ALL user agents, before the bot gate
-  // (IA reorg, Jul 2026). Mirrors the backend's redirect rules exactly:
-  // canonical slugs pass through, ribbons→ribbon / ink-cartridges→ink are
-  // aliased, everything else (consumable, cartridge, unknowns) is stripped.
-  // vercel.json redirects cannot strip a single query param (untouched params
-  // pass through, which would loop), so the edge middleware is the only FE
-  // layer that can express this. Loop-safe: redirects only when the
-  // normalized value differs from the raw one, and the target always carries
-  // a canonical-or-absent category.
-  if (path === '/shop' && url.searchParams.has('category')) {
-    const raw = url.searchParams.get('category');
-    let next;
-    if (CATEGORY_CANONICAL.has(raw)) next = raw;
-    else if (CATEGORY_ALIASES[raw]) next = CATEGORY_ALIASES[raw];
-    else next = null;
-    if (next !== raw) {
-      url.searchParams.delete('category'); // also collapses duplicated params
-      // A bare receipt alias goes straight to the roll landing, the category's
-      // canonical since the backend set its landingPath (reply 2026-10-25 §3):
-      // one hop, not alias -> /shop?category=receipt -> /receipt-rolls.
-      if (next === 'receipt' && [...url.searchParams.keys()].length === 0) {
-        url.pathname = '/receipt-rolls';
-        return Response.redirect(url.toString(), 301);
-      }
-      if (next) url.searchParams.set('category', next);
-      return Response.redirect(url.toString(), 301);
-    }
-  }
-
-  const ua = request.headers.get('user-agent') || '';
-  if (!BOT_PATTERN.test(ua)) return;
-
   let prerenderPath = null;
   let slugHopFor = null;
 
@@ -310,6 +372,85 @@ export default async function middleware(request) {
     }
   }
 
+  // (literal kept: source-order pins in ai-search-readiness / seo-meta-rewrite slice up to it)
+  if (!prerenderPath) return { prerenderPath: null, slugHopFor: null };
+  return { prerenderPath, slugHopFor };
+}
+
+export default async function middleware(request) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // Deny non-web files FIRST — before the admin gate, the category normaliser
+  // and the bot prerender. Nothing below can be reached from these paths (the
+  // matcher entries are disjoint), and putting the check anywhere else would
+  // make that a matter of reading 200 lines carefully rather than one.
+  if (NON_WEB_PATH.test(path)) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'public, max-age=0, must-revalidate',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Robots-Tag': 'noindex, nofollow',
+      },
+    });
+  }
+
+  // Gate admin routes — redirect to login if no auth cookie
+  if (path === '/admin' || path.startsWith('/admin/')) {
+    const cookie = request.headers.get('cookie') || '';
+    if (!/__ink_auth=1/.test(cookie)) {
+      const loginUrl = new URL('/account/login', request.url);
+      loginUrl.searchParams.set('redirect', path + url.search);
+      return Response.redirect(loginUrl.toString(), 302);
+    }
+  }
+
+  // /shop ?category 301 normalization — ALL user agents, before the bot gate
+  // (IA reorg, Jul 2026). Mirrors the backend's redirect rules exactly:
+  // canonical slugs pass through, ribbons→ribbon / ink-cartridges→ink are
+  // aliased, everything else (consumable, cartridge, unknowns) is stripped.
+  // vercel.json redirects cannot strip a single query param (untouched params
+  // pass through, which would loop), so the edge middleware is the only FE
+  // layer that can express this. Loop-safe: redirects only when the
+  // normalized value differs from the raw one, and the target always carries
+  // a canonical-or-absent category.
+  if (path === '/shop' && url.searchParams.has('category')) {
+    const raw = url.searchParams.get('category');
+    let next;
+    if (CATEGORY_CANONICAL.has(raw)) next = raw;
+    else if (CATEGORY_ALIASES[raw]) next = CATEGORY_ALIASES[raw];
+    else next = null;
+    if (next !== raw) {
+      url.searchParams.delete('category'); // also collapses duplicated params
+      // A bare receipt alias goes straight to the roll landing, the category's
+      // canonical since the backend set its landingPath (reply 2026-10-25 §3):
+      // one hop, not alias -> /shop?category=receipt -> /receipt-rolls.
+      if (next === 'receipt' && [...url.searchParams.keys()].length === 0) {
+        url.pathname = '/receipt-rolls';
+        return Response.redirect(url.toString(), 301);
+      }
+      if (next) url.searchParams.set('category', next);
+      return Response.redirect(url.toString(), 301);
+    }
+  }
+
+  // Loop guard for the human head-inject self-fetch (FE-1): the shell request
+  // carries this header and must reach the static file untouched. Placed AFTER
+  // the denylist, admin gate and ?category normaliser so none of them can be skipped.
+  if (request.headers.get('x-ic-shell')) return;
+
+  const ua = request.headers.get('user-agent') || '';
+  const { prerenderPath, slugHopFor } = routePrerender(url);
+
+  // Everyone who is not a listed bot (humans, uncatalogued crawlers) gets the
+  // static shell with the prerender's head + H1 written in (FE-1).
+  if (!BOT_PATTERN.test(ua)) {
+    if (!prerenderPath || (request.method || 'GET') !== 'GET') return;
+    return injectedShell(url, prerenderPath);
+  }
+
   if (!prerenderPath) return;
 
   // Started before the prerender and awaited after it: see slugHop().
@@ -392,6 +533,68 @@ export default async function middleware(request) {
     // Timeout (AbortSignal.timeout → TimeoutError) or a network failure.
     return prerenderUnavailable();
   }
+}
+
+/**
+ * FE-1 — the static shell with the prerender's <title>, description, canonical,
+ * robots and H1 written into the initial HTML. Both fetches run in parallel.
+ *
+ * FAIL-OPEN, LOUDLY: any error, timeout, non-200 or parse miss serves the shell
+ * exactly as today and says why in `X-Head-Inject: miss-<reason>`; success is
+ * `ok`, or `ok-partial-<fields>` when the prerender/shell lacked a field. If even
+ * the shell fetch fails we return undefined and the platform serves the file.
+ * Shell headers are copied (static asset, no per-user data); length/encoding are
+ * dropped because the body is re-built.
+ */
+async function injectedShell(url, prerenderPath) {
+  const shellP = fetch(url.toString(), {
+    headers: { [SHELL_GUARD_HEADER]: '1', 'Accept': 'text/html' },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(SHELL_FETCH_TIMEOUT_MS),
+  });
+  const preP = fetch(`${HEAD_PRERENDER_HOST}${prerenderPath}`, {
+    headers: { 'Accept': 'text/html' },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(HEAD_PRERENDER_TIMEOUT_MS),
+  });
+  const [shellRes, preRes] = await Promise.allSettled([shellP, preP]);
+  if (shellRes.status !== 'fulfilled' || shellRes.value.status !== 200) return;
+  const shell = shellRes.value;
+  const shellHtml = await shell.text();
+
+  let reason = 'ok';
+  let html = shellHtml;
+  if (preRes.status !== 'fulfilled') {
+    reason = preRes.reason && preRes.reason.name === 'TimeoutError' ? 'miss-timeout' : 'miss-fetch-error';
+  } else if (preRes.value.status !== 200) {
+    reason = `miss-status-${preRes.value.status}`;
+  } else {
+    try {
+      const head = extractPrerenderHead(await preRes.value.text());
+      // Home: the hero H1 is styled markup (a highlight span); swapping it for the
+      // prerender's plain text would visibly change the hero. Head fields only.
+      if (url.pathname === '/') head.h1 = null;
+      if (!head.title || !head.canonical) reason = 'miss-parse';
+      else {
+        const r = injectHead(shellHtml, head);
+        if (r.applied.length === 0) reason = 'miss-no-slot';
+        else {
+          html = r.html;
+          if (r.missing.length) reason = `ok-partial-no-${r.missing.join('-')}`;
+        }
+      }
+    } catch {
+      reason = 'miss-exception';
+    }
+  }
+
+  const headers = new Headers(shell.headers);
+  headers.delete('content-length');
+  headers.delete('content-encoding');
+  headers.delete('transfer-encoding');
+  if (!headers.get('content-type')) headers.set('Content-Type', 'text/html; charset=utf-8');
+  headers.set('X-Head-Inject', reason);
+  return new Response(html, { status: 200, headers });
 }
 
 /**

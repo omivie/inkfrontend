@@ -171,7 +171,7 @@ async function run(url, ua) {
 /** What a SHOPPER's document request gets: 'pass' (200 from the SPA) or the 301 target. */
 async function edgeFor(search) {
     const { res } = await run(`${SITE}/shop${search}`, HUMAN);
-    if (!res) return 'pass';
+    if (!res || res.status === 200) return 'pass';
     assert.equal(res.status, 301, `unexpected status for ${search}`);
     return res.headers.get('location');
 }
@@ -214,7 +214,7 @@ test('§1 the okin arm does not capture narrower shapes, and other brands are un
         `${BACKEND}/api/prerender/brand/okin?code=X&category=receipt`);
     assert.equal((await run(`${SITE}/shop?brand=brother&category=toner`, GOOGLEBOT)).fetched,
         `${BACKEND}/api/prerender/brand/brother?category=toner`);
-    assert.equal((await run(`${SITE}/receipt-rolls`, HUMAN)).fetched, null, 'humans get the SPA');
+    assert.ok(!String((await run(`${SITE}/receipt-rolls`, HUMAN)).fetched).startsWith(BACKEND), 'humans never hit the Render origin');
 });
 
 test('§1 /receipt-rolls is routed: middleware matcher + vercel rewrite to the shop SPA', async () => {

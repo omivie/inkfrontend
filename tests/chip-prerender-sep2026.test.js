@@ -152,10 +152,10 @@ test('§1 ONLY code+category are forwarded — tracking params must not fragment
         `${BACKEND}/api/prerender/brand/brother?code=LC73`);
 });
 
-test('§1 a non-bot gets no prerender fetch at all', async () => {
+test('§1 a non-bot never reaches the Render origin (FE-1: it reads the cached API host for the head)', async () => {
     assert.equal(
         await prerenderFetchFor(`${SITE}/shop?brand=brother&code=LC73`, { ua: 'Mozilla/5.0 (Macintosh)' }),
-        null);
+        'https://api.inkcartridges.co.nz/api/prerender/brand/brother?code=LC73');
 });
 
 test('§1 printer hub still wins over brand and forwards nothing', async () => {

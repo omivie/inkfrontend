@@ -128,9 +128,8 @@ test('§1 a 404 is an ANSWER, not an outage — still falls through to the SPA',
 test('§1 negative controls: a 200 still renders as 200; a human never reaches the prerender', async () => {
     const ok = await runMw(PRINTER_URL, () => new Response('<html>stub</html>', { status: 200 }));
     assert.equal(ok.res.status, 200);
-    const human = await runMw(PRINTER_URL, () => { throw new Error('must not fetch'); }, HUMAN);
-    assert.equal(human.res, undefined);
-    assert.equal(human.calls.length, 0);
+    const human = await runMw(PRINTER_URL, () => new Response('<html></html>', { status: 200 }), HUMAN);
+    assert.ok(human.calls.every((c) => !String(c.target || c).startsWith('https://ink-backend-sg.onrender.com')), 'no Render origin call');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
