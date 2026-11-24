@@ -874,7 +874,7 @@ const SeoMeta = {
     },
 
     // ── FE-3: visible mirror of the prerender body on listing pages ──────────
-    MIRROR_SURFACES: ['category-ink', 'category-toner', 'category-receipt', 'brand'],
+    MIRROR_SURFACES: ['category-ink', 'category-toner', 'category-receipt', 'brand', 'category-ribbons'],
 
     _mirrorEl() { return (typeof document === 'undefined' || typeof document.getElementById !== 'function') ? null : document.getElementById('seo-mirror'); },
 
@@ -922,13 +922,16 @@ const SeoMeta = {
             return;
         }
         const path = String(prerenderPath || '');
-        const tilesShown = /\/category\/(ink|toner)$/.test(path) || /\/brand\/[^/?]+$/.test(path);
+        // /ribbons (FE-3b): the brand picker is the page's own drilldown and the
+        // intro + FAQ are already written by _setRibbonsCopy; mirror the rest.
+        const ribbons = /\/category\/ribbons$/.test(path);
+        const tilesShown = ribbons || /\/category\/(ink|toner)$/.test(path) || /\/brand\/[^/?]+$/.test(path);
         const lp = document.getElementById('level-products');
         const listShown = /\/category\/receipt$/.test(path) || /[?&]code=/.test(path) || (lp && !lp.hidden);
         const skipped = [];
         const frag = document.createDocumentFragment();
         const h = (tag, text, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; n.textContent = text; return n; };
-        if (head.intro) frag.appendChild(h('p', head.intro, 'seo-mirror__intro'));
+        if (head.intro && !ribbons) frag.appendChild(h('p', head.intro, 'seo-mirror__intro'));
         for (const sec of c.sections || []) {
             if (sec.linkList && tilesShown) { skipped.push('tiles'); continue; }
             const box = document.createElement('section');
@@ -968,7 +971,7 @@ const SeoMeta = {
                 frag.appendChild(box);
             }
         }
-        if (Array.isArray(head.faq) && head.faq.length) {
+        if (!ribbons && Array.isArray(head.faq) && head.faq.length) {
             const box = document.createElement('section');
             box.className = 'seo-mirror__section seo-mirror__faq';
             box.appendChild(h('h2', c.faqTitle || 'Frequently asked questions', 'seo-mirror__title'));

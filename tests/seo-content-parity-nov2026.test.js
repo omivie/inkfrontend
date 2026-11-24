@@ -113,10 +113,52 @@ test('route coverage: each listing surface gets a prerender path and mirrors', (
     }
     // printer pages are already at parity: left alone
     assert.ok(!SeoMeta.MIRROR_SURFACES.includes('printer'));
-    assert.ok(!SeoMeta.MIRROR_SURFACES.includes('category-ribbons'));
+    // /ribbons mirrors guide + products only (FE-3b); see the ribbons test below
+    assert.ok(SeoMeta.MIRROR_SURFACES.includes('category-ribbons'));
 });
 
 test('shop.html carries the mirror container, hidden + static until populated', () => {
     const html = fs.readFileSync(path.join(ROOT, 'html/shop.html'), 'utf8');
     assert.match(html, /<section[^>]*id="seo-mirror"[^>]*data-mirror="static"[^>]*hidden/);
+});
+
+test('FE-3b /ribbons: mirror shows guide + product list, never a second intro, FAQ or brand picker', () => {
+    // Minimal DOM: enough for _renderMirror (createElement, append, textContent).
+    const mk = (tag) => {
+        const n = { tagName: tag.toUpperCase(), children: [], dataset: {}, hidden: false, className: '', _t: '',
+            appendChild(c) { if (c.isFrag) this.children.push(...c.children); else this.children.push(c); return c; },
+            append(...cs) { cs.forEach((c) => this.appendChild(c)); },
+            get firstChild() { return this.children[0] || null; },
+            get textContent() { return this._t + this.children.map((c) => c.textContent).join(' '); },
+            set textContent(v) { this._t = v; this.children = []; } };
+        return n;
+    };
+    const el = mk('section'); el.hidden = true;
+    const saved = global.document;
+    global.document = {
+        createElement: mk,
+        createDocumentFragment: () => Object.assign(mk('#frag'), { isFrag: true }),
+        createTextNode: (t) => ({ textContent: t }),
+        getElementById: (id) => (id === 'seo-mirror' ? el : null),
+    };
+    try {
+        const html = '<main><section><h2>Shop Printer Ribbons by Brand</h2><ul><li><a href="/ribbons?brand=epson">Epson</a></li></ul></section>'
+            + '<section><h2>How to Choose the Right Ribbon</h2><p>Match the ribbon code on your old ribbon.</p></section>'
+            + '<section><h2>All Printer Ribbons</h2><ul><li class="product-card"><a href="/products/x/Y"><h3>Epson ERC-30 Ribbon</h3></a><p>$9.95 incl. GST</p></li></ul></section></main>';
+        const head = { intro: 'INTRO-TEXT', faq: [{ q: 'FAQ-Q', a: 'FAQ-A' }], content: SeoMeta.extractContent(html) };
+        SeoMeta._renderMirror(head, '/api/prerender/category/ribbons');
+        const text = el.textContent;
+        assert.match(text, /How to Choose the Right Ribbon/);
+        assert.match(text, /Epson ERC-30 Ribbon/);
+        assert.match(text, /\$9\.95 incl\. GST/);
+        assert.doesNotMatch(text, /INTRO-TEXT|FAQ-Q|Shop Printer Ribbons by Brand/);
+        assert.equal(el.hidden, false);
+        assert.equal(el.dataset.mirror, 'prerender');
+    } finally { global.document = saved; }
+});
+
+test('ribbons.html carries the mirror container before its FAQ, hidden + static until populated', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'html/ribbons.html'), 'utf8');
+    assert.match(html, /<section[^>]*id="seo-mirror"[^>]*data-mirror="static"[^>]*hidden/);
+    assert.ok(html.indexOf('id="seo-mirror"') < html.indexOf('id="ribbons-faq"'));
 });
