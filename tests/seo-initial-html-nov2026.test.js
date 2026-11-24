@@ -182,7 +182,6 @@ test('human: prerender timeout / 500 / 404 / garbage ⇒ the untouched shell + a
         ['timeout', () => { throw Object.assign(new Error('t'), { name: 'TimeoutError' }); }, 'miss-timeout'],
         ['network', () => { throw new Error('boom'); }, 'miss-fetch-error'],
         ['500', () => new Response('x', { status: 500 }), 'miss-status-500'],
-        ['404', () => new Response('x', { status: 404 }), 'miss-status-404'],
         ['301', () => new Response(null, { status: 301, headers: { Location: '/x' } }), 'miss-status-301'],
         ['garbage', () => new Response('<html>no head</html>', { status: 200 }), 'miss-parse'],
     ];
@@ -194,6 +193,76 @@ test('human: prerender timeout / 500 / 404 / garbage ⇒ the untouched shell + a
             assert.equal(await res.text(), shell(p), `${p} ${name}: shell byte-identical`);
         }
     }
+});
+
+test('human: a category 404 is NOT a not-found (only printer/product are) — shell + miss header', async () => {
+    const { res } = await run('/ink-cartridges', { prerender: () => new Response('x', { status: 404 }) });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('x-head-inject'), 'miss-status-404');
+});
+
+// ── FE-2: no indexable 200 for a nonexistent printer / product ───────────────
+const NF = [
+    ['/shop?brand=hp&printer_slug=zz-not-a-printer', '/api/prerender/printer/hp/zz-not-a-printer', SHOP_SHELL],
+    ['/products/zz/NOSUCHSKU', '/api/prerender/product/NOSUCHSKU', PDP_SHELL],
+    ['/product/zz-not-a-slug', '/api/prerender/product-by-slug/zz-not-a-slug', PDP_SHELL],
+    ['/p/NOSUCHSKU', '/api/prerender/product/NOSUCHSKU', null],
+    ['/html/product?sku=NOSUCHSKU', '/api/prerender/product/NOSUCHSKU', PDP_SHELL],
+];
+for (const [ua, who] of [[HUMAN, 'human'], [GOOGLEBOT, 'bot']]) {
+    for (const [p, pre, shell] of NF) {
+        test(`${who} ${p}: backend 404 ⇒ HTTP 404 + noindex (body + header)`, async () => {
+            const { res, calls } = await run(p, { ua, prerender: () => new Response('nf', { status: 404 }) });
+            assert.equal(res.status, 404);
+            assert.equal(res.headers.get('x-robots-tag'), 'noindex');
+            const html = await res.text();
+            assert.match(html, /<meta name="robots" content="noindex">/);
+            assert.equal((html.match(/name="robots"/g) || []).length, 1, 'one robots tag');
+            assert.ok(!/content="index/.test(html), 'no indexable robots left');
+            if (shell && /\/shop|product/.test(p)) assert.ok(html.includes('<body'), 'body is the shell (SPA not-found UI)');
+            const host = who === 'bot' ? RENDER : API;
+            assert.ok(calls.some((c) => c.url === `${host}${pre}`));
+        });
+    }
+}
+
+test('5xx / timeout on a printer or product is NEVER a 404: 503 for bots, the plain shell for humans', async () => {
+    for (const p of [NF[0][0], NF[1][0]]) {
+        for (const prerender of [() => new Response('x', { status: 503 }), () => { throw new Error('boom'); }]) {
+            const bot = await run(p, { ua: GOOGLEBOT, prerender });
+            assert.equal(bot.res.status, 503, p);
+            const human = await run(p, { prerender });
+            assert.equal(human.res.status, 200, p);
+            assert.match(human.res.headers.get('x-head-inject'), /^miss-/);
+            assert.equal(human.res.headers.get('x-robots-tag'), null);
+        }
+    }
+});
+
+test('unknown BRAND keeps today\'s fallthrough: bot → undefined, human → shell 200 (never a 404)', async () => {
+    const bot = await run('/shop?brand=okin&category=receipt&code=X', { ua: GOOGLEBOT, prerender: () => new Response('nf', { status: 404 }) });
+    assert.equal(bot.res, undefined);
+    const human = await run('/shop?brand=zz-nobrand', { prerender: () => new Response('nf', { status: 404 }) });
+    assert.equal(human.res.status, 200);
+    assert.equal(human.res.headers.get('x-head-inject'), 'miss-status-404');
+});
+
+test('bot 404 with the shell unreachable still answers 404 + noindex (status is what matters)', async () => {
+    const m = await middleware();
+    const original = globalThis.fetch;
+    globalThis.fetch = async (t) => (String(t).startsWith(SITE) ? Promise.reject(new Error('down')) : new Response('nf', { status: 404 }));
+    try {
+        const res = await m(req(NF[0][0], GOOGLEBOT));
+        assert.equal(res.status, 404);
+        assert.equal(res.headers.get('x-robots-tag'), 'noindex');
+        assert.match(await res.text(), /noindex/);
+    } finally { globalThis.fetch = original; }
+});
+
+test('noindexShell: replaces the shell robots in place, adds one when absent', () => {
+    const f = new Function(`${block}\nreturn noindexShell;`)();
+    assert.equal(f('<head><meta name="robots" content="index, follow"></head>'), '<head><meta name="robots" content="noindex"></head>');
+    assert.equal(f('<head><title>t</title></head>'), '<head><title>t</title><meta name="robots" content="noindex">\n</head>');
 });
 
 test('human: unrouted paths and non-GET fall through exactly as before (undefined, no fetch)', async () => {

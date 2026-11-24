@@ -199,6 +199,17 @@ function injectHead(shell, head) {
 
   return { html: headHtml + body, applied, missing };
 }
+
+/** FE-2: the shell with robots forced to noindex (replaced in place, or added). */
+function noindexShell(shell) {
+  const cut = shell.toLowerCase().indexOf('</head>');
+  if (cut < 0) return shell;
+  let headHtml = shell.slice(0, cut);
+  const re = metaTagRe('robots');
+  if (re.test(headHtml)) headHtml = headHtml.replace(re, (m) => setTagAttr(m, 'content', 'noindex'));
+  else headHtml += '<meta name="robots" content="noindex">\n';
+  return headHtml + shell.slice(cut);
+}
 // </head-inject>
 
 /**
@@ -504,6 +515,13 @@ export default async function middleware(request) {
     // (ERR-296). A 4xx is an answer — a printer or product that does not exist —
     // and still falls through to the SPA, which renders its own not-found state.
     if (response.status >= 500) return prerenderUnavailable();
+    // FE-2: a printer or product the backend does not know is a real 404 for the
+    // crawler too — the SPA fallthrough was an indexable 200 (soft 404). Brand,
+    // category and series 404s keep the fallthrough (a brand 404 can be legitimate:
+    // ERR-368 receipt comment above).
+    if (response.status === 404 && isEntityPrerender(prerenderPath)) {
+      return notFoundResponse(await fetchShellHtml(url));
+    }
     if (!response.ok) return;
 
     // Headers are BUILT, never copied from upstream. The backend's prerender
@@ -535,6 +553,43 @@ export default async function middleware(request) {
   }
 }
 
+/** Printer and product prerenders: the only two where a backend 404 means "no such page". */
+function isEntityPrerender(prerenderPath) {
+  return /^\/api\/prerender\/(?:printer|product|product-by-slug)\//.test(prerenderPath);
+}
+
+/** The static shell via the loop-guarded self-fetch, or null (bot 404 path). */
+async function fetchShellHtml(url) {
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { [SHELL_GUARD_HEADER]: '1', 'Accept': 'text/html' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(SHELL_FETCH_TIMEOUT_MS),
+    });
+    return res.status === 200 ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * FE-2 — HTTP 404 for a printer/product URL that does not exist. The body is the
+ * shell (so a shopper still gets the SPA's not-found UI) with robots=noindex, plus
+ * the header form. No shell ⇒ a minimal noindex page: the status is what matters.
+ */
+function notFoundResponse(shellHtml) {
+  return new Response(shellHtml ? noindexShell(shellHtml)
+    : '<!DOCTYPE html><html lang="en-NZ"><head><meta charset="UTF-8"><meta name="robots" content="noindex"><title>Page not found | InkCartridges.co.nz</title></head><body><h1>Page not found</h1></body></html>', {
+    status: 404,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=0, must-revalidate',
+      'X-Robots-Tag': 'noindex',
+      'X-Head-Inject': 'not-found',
+    },
+  });
+}
+
 /**
  * FE-1 — the static shell with the prerender's <title>, description, canonical,
  * robots and H1 written into the initial HTML. Both fetches run in parallel.
@@ -558,6 +613,12 @@ async function injectedShell(url, prerenderPath) {
     signal: AbortSignal.timeout(HEAD_PRERENDER_TIMEOUT_MS),
   });
   const [shellRes, preRes] = await Promise.allSettled([shellP, preP]);
+  // FE-2: the backend says this printer/product does not exist ⇒ a real 404.
+  // Only a 404 does this: a 5xx / timeout stays a miss (never a transient-as-404).
+  if (preRes.status === 'fulfilled' && preRes.value.status === 404 && isEntityPrerender(prerenderPath)) {
+    const ok = shellRes.status === 'fulfilled' && shellRes.value.status === 200;
+    return notFoundResponse(ok ? await shellRes.value.text() : null);
+  }
   if (shellRes.status !== 'fulfilled' || shellRes.value.status !== 200) return;
   const shell = shellRes.value;
   const shellHtml = await shell.text();

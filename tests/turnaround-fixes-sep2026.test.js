@@ -120,9 +120,11 @@ test('§1 a backend 5xx and a network error both answer 503', async () => {
     assert503(res, 'network error on a PDP');
 });
 
-test('§1 a 404 is an ANSWER, not an outage — still falls through to the SPA', async () => {
-    const { res } = await runMw(PRINTER_URL, () => new Response('nope', { status: 404 }));
-    assert.equal(res, undefined);
+test('§1 a 404 is an ANSWER, not an outage — never 503. FE-2: a printer/product 404 is a real 404 (tests/seo-initial-html-nov2026.test.js); a brand 404 still falls through to the SPA', async () => {
+    const printer = await runMw(PRINTER_URL, () => new Response('nope', { status: 404 }));
+    assert.equal(printer.res.status, 404);
+    const brand = await runMw(`${SITE}/shop?brand=zz-nobrand`, () => new Response('nope', { status: 404 }));
+    assert.equal(brand.res, undefined);
 });
 
 test('§1 negative controls: a 200 still renders as 200; a human never reaches the prerender', async () => {
