@@ -200,6 +200,80 @@ function injectHead(shell, head) {
   return { html: headHtml + body, applied, missing };
 }
 
+// FE-4: JSON-LD parity. The prerender's blocks are copied byte-for-byte into the
+// shell's <head> so a visitor and a crawler read the same structured data.
+const RE_LD_G = /<script\b[^>]*\btype\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+// ids the client code already upserts by id (footer.js site-jsonld-*, schema.js
+// collection-/printer-jsonld-*, shop-page.js #shop-schema): reusing them means a
+// later runtime write REPLACES the injected block instead of adding a second one.
+const LD_SITE_IDS = { organization: 'site-jsonld-organization', website: 'site-jsonld-website', localbusiness: 'site-jsonld-localbusiness' };
+
+function ldType(body) {
+  try {
+    const t = JSON.parse(body)['@type'];
+    return Array.isArray(t) ? t.join(',') : (typeof t === 'string' ? t : null);
+  } catch { return undefined; } // undefined = does not parse
+}
+
+/** FAQPage only where the visible page shows the same Q&A (category, brand, product). */
+function ldFaqAllowed(prerenderPath) {
+  return /^\/api\/prerender\/(category|brand|product|product-by-slug)\//.test(prerenderPath);
+}
+
+function ldIdFor(type, prerenderPath) {
+  const k = type.toLowerCase();
+  if (LD_SITE_IDS[k]) return LD_SITE_IDS[k];
+  const scope = /^\/api\/prerender\/printer\//.test(prerenderPath) ? 'printer' : /\/product/.test(prerenderPath) ? 'product' : 'collection';
+  if (k === 'collectionpage') return `${scope}-jsonld-collection-page`;
+  if (k === 'breadcrumblist') return `${scope}-jsonld-breadcrumbs`;
+  return `${scope}-jsonld-${k.replace(/[^a-z0-9]+/g, '-')}`;
+}
+
+/**
+ * Copy the prerender's ld+json blocks into the shell head. One block per @type:
+ * a shell block of an injected type is replaced in place (its id survives), the
+ * rest stay. A block that does not JSON.parse is skipped and counted.
+ * @returns {{html: string, injected: string[], skipped: number}}
+ */
+function injectLdJson(shell, prerenderHtml, prerenderPath) {
+  const cut = shell.toLowerCase().indexOf('</head>');
+  if (cut < 0 || typeof prerenderHtml !== 'string') return { html: shell, injected: [], skipped: 0 };
+  const blocks = [];
+  let skipped = 0;
+  const seenTypes = new Set();
+  for (const m of prerenderHtml.matchAll(RE_LD_G)) {
+    const type = ldType(m[1]);
+    if (type === undefined) { skipped++; continue; }
+    if (!type) continue;
+    if (type === 'FAQPage' && !ldFaqAllowed(prerenderPath)) continue;
+    blocks.push({ type, body: m[1], first: !seenTypes.has(type) });
+    seenTypes.add(type);
+  }
+  if (!blocks.length) return { html: shell, injected: [], skipped };
+  let head = shell.slice(0, cut);
+  const shellIds = {};
+  const done = new Set();
+  const make = (b, id) => `<script type="application/ld+json"${id ? ` id="${id}"` : ''}>${b.body}</script>`;
+  // Replace the first shell block of each injected type with ALL prerender blocks
+  // of that type; drop the other shell blocks of that type.
+  head = head.replace(RE_LD_G, (whole, body) => {
+    const t = ldType(body);
+    if (!t || !seenTypes.has(t)) return whole;
+    const idm = /\bid\s*=\s*["']([^"']*)["']/i.exec(whole.slice(0, whole.indexOf('>')));
+    if (done.has(t)) return '';
+    done.add(t);
+    shellIds[t] = idm ? idm[1] : null;
+    return blocks.filter((b) => b.type === t).map((b, i) => make(b, i === 0 ? (shellIds[t] || ldIdFor(t, prerenderPath)) : null)).join('\n');
+  });
+  const added = [];
+  for (const t of seenTypes) {
+    if (done.has(t)) continue;
+    blocks.filter((b) => b.type === t).forEach((b, i) => added.push(make(b, i === 0 ? ldIdFor(t, prerenderPath) : null)));
+  }
+  if (added.length) head += `${added.join('\n')}\n`;
+  return { html: head + shell.slice(cut), injected: blocks.map((b) => b.type), skipped };
+}
+
 /** FE-2: the shell with robots forced to noindex (replaced in place, or added). */
 function noindexShell(shell) {
   const cut = shell.toLowerCase().indexOf('</head>');
@@ -631,7 +705,8 @@ async function injectedShell(url, prerenderPath) {
     reason = `miss-status-${preRes.value.status}`;
   } else {
     try {
-      const head = extractPrerenderHead(await preRes.value.text());
+      const preHtml = await preRes.value.text();
+      const head = extractPrerenderHead(preHtml);
       // Home: the hero H1 is styled markup (a highlight span); swapping it for the
       // prerender's plain text would visibly change the hero. Head fields only.
       if (url.pathname === '/') head.h1 = null;
@@ -642,6 +717,12 @@ async function injectedShell(url, prerenderPath) {
         else {
           html = r.html;
           if (r.missing.length) reason = `ok-partial-no-${r.missing.join('-')}`;
+          // FE-4: JSON-LD. Never fatal: a failure here keeps the head/H1 result.
+          try {
+            const ld = injectLdJson(html, preHtml, prerenderPath);
+            html = ld.html;
+            if (ld.skipped) reason += `-ldjson-skip-${ld.skipped}`;
+          } catch { reason += '-ldjson-error'; }
         }
       }
     } catch {
