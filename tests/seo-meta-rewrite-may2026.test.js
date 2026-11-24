@@ -206,9 +206,9 @@ test('§4 extractHead is attribute-order independent and tolerant of single quot
 test('§4 extractHead returns nulls for empty / missing tags', () => {
     // h1 since ERR-294 (the printer hub mirrors the prerender's visible heading).
     // intro + faq since ERR-377 (/ribbons mirrors the prerender's intro and FAQ).
-    const none = { title: null, description: null, h1: null, intro: null, faq: null };
+    const none = { title: null, description: null, h1: null, intro: null, faq: null, content: null };
     sameShape(SeoMeta.extractHead(''), none);
-    sameShape(SeoMeta.extractHead('<html></html>'), none);
+    sameShape(SeoMeta.extractHead('<html></html>'), { ...none, content: { sections: [], products: null, faqTitle: null } });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

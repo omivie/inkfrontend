@@ -289,7 +289,7 @@ test('§E reconcile on the PRINTER surface writes the visible H1; any other surf
     assert.deepEqual(title.classList.removed, ['visually-hidden']);
     assert.equal(S.h1For(path), 'Brother HL-L2375DW Toner NZ', 'shop-page reads the same answer');
     assert.equal(S.h1For('/api/prerender/printer/x/y'), null);
-    assert.match(S.PRERENDER_CACHE_PREFIX, /_v3:$/, 'v1 heads carry no h1, v2 no intro/faq (ERR-377) — bumped');
+    assert.match(S.PRERENDER_CACHE_PREFIX, /_v4:$/, 'v1 heads carry no h1, v2 no intro/faq (ERR-377), v3 no content (FE-3) — bumped');
 });
 
 test('§E updateTitle prints the mirrored H1 on a printer hub, the printer name until it lands', () => {

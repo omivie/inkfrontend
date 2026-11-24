@@ -64,7 +64,7 @@ const SeoMeta = {
 
     // v2 (ERR-294): a cached head now carries the prerender's <h1> too; a v1
     // entry has none and would leave the printer H1 on its fallback for an hour.
-    PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v3:',  // v3: heads carry intro + faq (ERR-377)
+    PRERENDER_CACHE_PREFIX: 'ic_seo_pr_v4:',  // v3: heads carry intro + faq (ERR-377); v4: + content (FE-3 visible parity)
     PRERENDER_TTL_MS: 60 * 60 * 1000, // 1h listings (products use API seo, not this)
 
     _seq: 0,            // bumped on every render() — guards against stale async applies
@@ -154,7 +154,7 @@ const SeoMeta = {
      * (handoff 2 Nov, item 62, ERR-377).
      */
     extractHead(html) {
-        if (typeof html !== 'string' || !html) return { title: null, description: null, h1: null, intro: null, faq: null };
+        if (typeof html !== 'string' || !html) return { title: null, description: null, h1: null, intro: null, faq: null, content: null };
         const titleM = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
         // meta name="description" — attribute order independent
         let desc = null;
@@ -177,7 +177,110 @@ const SeoMeta = {
             h1: h1 || null,
             intro: intro || null,
             faq: this.extractFaq(html),
+            content: this.extractContent(html),
         };
+    },
+
+    // ── FE-3: visible content parity (listing pages) ─────────────────────────
+    // Same-site hosts a prerender link may point at; anything else is dropped to text.
+    SITE_HOSTS: ['www.inkcartridges.co.nz', 'inkcartridges.co.nz'],
+
+    /** Same-origin PATH (+query) for a prerender href, or null. PURE. */
+    safePath(href) {
+        if (typeof href !== 'string' || !href) return null;
+        try {
+            const u = new URL(this.decodeEntities(href).trim(), 'https://www.inkcartridges.co.nz');
+            if (u.protocol !== 'https:' || !this.SITE_HOSTS.includes(u.hostname)) return null;
+            return u.pathname + u.search;
+        } catch { return null; }
+    },
+
+    _plain(h) {
+        return this.decodeEntities(String(h).replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+    },
+
+    /** Inline HTML -> [{ t } | { t, href }] (text + same-origin links only). PURE. */
+    _segments(inner) {
+        const out = [];
+        const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+        let last = 0, m;
+        const pushText = (raw) => {
+            const t = this.decodeEntities(raw.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ');
+            if (t.trim()) out.push({ t });
+        };
+        while ((m = re.exec(inner)) !== null) {
+            pushText(inner.slice(last, m.index));
+            const hM = /\bhref\s*=\s*"([^"]*)"/i.exec(m[1]);
+            const t = this._plain(m[2]);
+            const href = hM ? this.safePath(hM[1]) : null;
+            if (t) out.push(href ? { t, href } : { t });
+            last = m.index + m[0].length;
+        }
+        pushText(inner.slice(last));
+        return out;
+    },
+
+    /**
+     * Everything under the intro that a bot reads in <main>, as plain data:
+     *   sections: [{ h2, linkList, blocks:[{k:'h3',t}|{k:'p',s}|{k:'ul',items:[segs]}] }]
+     *   products: { h2, items:[{ href, name, lines }], more:[segs] } | null
+     *   faqTitle: the FAQ section's h2 (the FAQ itself is the JSON-LD, extractFaq)
+     * `linkList` = a section that is only a list of links (brand / category
+     * tiles), which the SPA already shows as its drilldown. PURE; no DOM.
+     */
+    extractContent(html) {
+        const empty = { sections: [], products: null, faqTitle: null };
+        if (typeof html !== 'string') return empty;
+        const mainM = /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(html);
+        if (!mainM) return empty;
+        const out = { sections: [], products: null, faqTitle: null };
+        const secRe = /<section\b([^>]*)>([\s\S]*?)<\/section>/gi;
+        let sm;
+        while ((sm = secRe.exec(mainM[1])) !== null) {
+            const attrs = sm[1], body = sm[2];
+            const h2M = /<h2\b[^>]*>([\s\S]*?)<\/h2>/i.exec(body);
+            const h2 = h2M ? this._plain(h2M[1]) : '';
+            if (/\bclass\s*=\s*"[^"]*\bfaq\b/i.test(attrs)) { out.faqTitle = h2 || null; continue; }
+            if (/class\s*=\s*"product-card"/i.test(body)) {
+                const items = [];
+                const cardRe = /<li\s+class="product-card"[^>]*>([\s\S]*?)<\/li>/gi;
+                let cm;
+                while ((cm = cardRe.exec(body)) !== null) {
+                    const hM = /<a\b[^>]*\bhref\s*=\s*"([^"]*)"/i.exec(cm[1]);
+                    const nM = /<h3\b[^>]*>([\s\S]*?)<\/h3>/i.exec(cm[1]);
+                    const name = nM ? this._plain(nM[1]) : '';
+                    if (!name) continue;
+                    const lines = [];
+                    const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+                    let pm;
+                    while ((pm = pRe.exec(cm[1])) !== null) { const t = this._plain(pm[1]); if (t) lines.push(t); }
+                    items.push({ href: hM ? this.safePath(hM[1]) : null, name, lines });
+                }
+                const tail = body.slice(body.lastIndexOf('</ul>') + 5);
+                const moreM = /<p\b[^>]*>([\s\S]*?)<\/p>/i.exec(tail);
+                out.products = { h2, items, more: moreM ? this._segments(moreM[1]) : [] };
+                continue;
+            }
+            const blocks = [];
+            const tagRe = /<(h3|p|ul|nav)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+            let tm;
+            while ((tm = tagRe.exec(body)) !== null) {
+                if (tm[1] === 'h3') { const t = this._plain(tm[2]); if (t) blocks.push({ k: 'h3', t }); }
+                else if (tm[1] === 'p') { const s = this._segments(tm[2]); if (s.length) blocks.push({ k: 'p', s }); }
+                else if (tm[1] === 'ul') {
+                    const items = [...tm[2].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((x) => this._segments(x[1])).filter((s) => s.length);
+                    if (items.length) blocks.push({ k: 'ul', items });
+                } else {
+                    const items = [...tm[2].matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)].map((x) => this._segments(x[0])).filter((s) => s.length);
+                    if (items.length) blocks.push({ k: 'ul', items });
+                }
+            }
+            if (!h2 && !blocks.length) continue;
+            const linkList = blocks.length === 1 && blocks[0].k === 'ul'
+                && blocks[0].items.every((it) => it.length === 1 && it[0].href);
+            out.sections.push({ h2, linkList: !!linkList, blocks });
+        }
+        return out;
     },
 
     /** [{ q, a }] from the first FAQPage JSON-LD block, or null. PURE. */
@@ -669,19 +772,24 @@ const SeoMeta = {
      * whichever of the two runs last prints the prerender's words.
      */
     async reconcile(prerenderPath, seq, surface) {
+        if (!this.MIRROR_SURFACES.includes(surface) || !prerenderPath) this._clearMirror();
         if (!prerenderPath) return false;
+        const mirrors = this.MIRROR_SURFACES.includes(surface);
         let head = this._readPrerenderCache(prerenderPath);
         if (!head) {
             if (typeof fetch !== 'function') return false;
             try {
                 // Public prerender read — cookies explicitly omitted (ERR-124).
             const res = await fetch(this._apiUrl(prerenderPath), { headers: { 'Accept': 'text/html' }, credentials: 'omit' });
-                if (!res.ok) return false;
+                if (!res.ok) throw new Error(`prerender HTTP ${res.status}`);
                 const html = await res.text();
                 head = this.extractHead(html);
-                if (!head || (!head.title && !head.description)) return false;
+                if (!head || (!head.title && !head.description)) throw new Error('prerender had no head');
                 this._writePrerenderCache(prerenderPath, head);
-            } catch {
+            } catch (err) {
+                // LOUD, not silent: the static page stays, but the mirror says why.
+                if (mirrors && seq === this._seq) this._setMirrorState('error');
+                if (typeof DebugLog !== 'undefined') DebugLog.warn('[SeoMeta] prerender mirror failed:', prerenderPath, err && err.message);
                 return false;
             }
         }
@@ -704,6 +812,7 @@ const SeoMeta = {
             this._h1 = { path: prerenderPath, h1: head.h1 };
             this._setH1(head.h1, false);
         }
+        if (mirrors) this._renderMirror(head, prerenderPath);
         // /ribbons (handoff 2 Nov, item 62, ERR-377): visible h1, intro and FAQ
         // are the prerender's, so the stock counts in them never go stale.
         if (surface === 'category-ribbons') {
@@ -738,25 +847,143 @@ const SeoMeta = {
         }
         const list = document.getElementById('ribbons-faq-list');
         if (list) {
-            if (Array.isArray(head.faq) && head.faq.length) {
-                list.textContent = '';
-                for (const { q, a } of head.faq) {
-                    const item = document.createElement('details');
-                    item.className = 'faq-item';
-                    const sum = document.createElement('summary');
-                    sum.className = 'faq-question';
-                    sum.textContent = q;
-                    const body = document.createElement('div');
-                    body.className = 'faq-answer';
-                    const p = document.createElement('p');
-                    p.textContent = a;
-                    body.appendChild(p);
-                    item.append(sum, body);
-                    list.appendChild(item);
+            const has = this._renderFaq(list, head.faq);
+            list.dataset.mirror = has ? 'prerender' : 'static';
+        }
+    },
+
+    /** Fill `list` with <details class="faq-item"> from [{q,a}] as TEXT. Returns true when written. */
+    _renderFaq(list, faq) {
+        if (!Array.isArray(faq) || !faq.length) return false;
+        list.textContent = '';
+        for (const { q, a } of faq) {
+            const item = document.createElement('details');
+            item.className = 'faq-item';
+            const sum = document.createElement('summary');
+            sum.className = 'faq-question';
+            sum.textContent = q;
+            const body = document.createElement('div');
+            body.className = 'faq-answer';
+            const p = document.createElement('p');
+            p.textContent = a;
+            body.appendChild(p);
+            item.append(sum, body);
+            list.appendChild(item);
+        }
+        return true;
+    },
+
+    // ── FE-3: visible mirror of the prerender body on listing pages ──────────
+    MIRROR_SURFACES: ['category-ink', 'category-toner', 'category-receipt', 'brand'],
+
+    _mirrorEl() { return (typeof document === 'undefined' || typeof document.getElementById !== 'function') ? null : document.getElementById('seo-mirror'); },
+
+    _setMirrorState(state) {
+        const el = this._mirrorEl();
+        if (el) el.dataset.mirror = state;
+    },
+
+    _clearMirror() {
+        const el = this._mirrorEl();
+        if (!el) return;
+        el.textContent = '';
+        el.hidden = true;
+        el.dataset.mirror = 'static';
+    },
+
+    _appendSegments(parent, segs) {
+        for (const g of segs) {
+            if (g.href) {
+                const a = document.createElement('a');
+                a.href = g.href;
+                a.textContent = g.t;
+                parent.appendChild(a);
+            } else {
+                parent.appendChild(document.createTextNode(g.t));
+            }
+        }
+    },
+
+    /**
+     * Render intro + text sections + product list + FAQ from the prerender head
+     * into #seo-mirror (TEXT nodes only; links are same-origin paths). Skips
+     * (recorded in data-skipped): link-list sections the drilldown already shows
+     * (brand/category tiles on a page with no ?category), and the product list
+     * where the SPA already lists products (receipt rolls, ?code= pages, or any
+     * page whose #level-products is showing).
+     */
+    _renderMirror(head, prerenderPath) {
+        const el = this._mirrorEl();
+        if (!el) return;
+        const c = head && head.content;
+        if (!c || (!head.intro && !(c.sections && c.sections.length) && !c.products && !head.faq)) {
+            this._clearMirror();
+            this._setMirrorState('static');
+            return;
+        }
+        const path = String(prerenderPath || '');
+        const tilesShown = /\/category\/(ink|toner)$/.test(path) || /\/brand\/[^/?]+$/.test(path);
+        const lp = document.getElementById('level-products');
+        const listShown = /\/category\/receipt$/.test(path) || /[?&]code=/.test(path) || (lp && !lp.hidden);
+        const skipped = [];
+        const frag = document.createDocumentFragment();
+        const h = (tag, text, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; n.textContent = text; return n; };
+        if (head.intro) frag.appendChild(h('p', head.intro, 'seo-mirror__intro'));
+        for (const sec of c.sections || []) {
+            if (sec.linkList && tilesShown) { skipped.push('tiles'); continue; }
+            const box = document.createElement('section');
+            box.className = 'seo-mirror__section';
+            if (sec.h2) box.appendChild(h('h2', sec.h2, 'seo-mirror__title'));
+            for (const b of sec.blocks) {
+                if (b.k === 'h3') box.appendChild(h('h3', b.t, 'seo-mirror__subtitle'));
+                else if (b.k === 'p') { const p = document.createElement('p'); this._appendSegments(p, b.s); box.appendChild(p); }
+                else {
+                    const ul = document.createElement('ul');
+                    for (const it of b.items) { const li = document.createElement('li'); this._appendSegments(li, it); ul.appendChild(li); }
+                    box.appendChild(ul);
                 }
             }
-            list.dataset.mirror = (Array.isArray(head.faq) && head.faq.length) ? 'prerender' : 'static';
+            frag.appendChild(box);
         }
+        if (c.products && c.products.items.length) {
+            if (listShown) skipped.push('products');
+            else {
+                const box = document.createElement('section');
+                box.className = 'seo-mirror__section';
+                if (c.products.h2) box.appendChild(h('h2', c.products.h2, 'seo-mirror__title'));
+                const ul = document.createElement('ul');
+                ul.className = 'seo-mirror__products';
+                for (const it of c.products.items) {
+                    const li = document.createElement('li');
+                    li.className = 'seo-mirror__card';
+                    const host = it.href ? document.createElement('a') : document.createElement('div');
+                    if (it.href) host.href = it.href;
+                    host.appendChild(h('h3', it.name, 'seo-mirror__name'));
+                    for (const line of it.lines) host.appendChild(h('p', line));
+                    li.appendChild(host);
+                    ul.appendChild(li);
+                }
+                box.appendChild(ul);
+                if (c.products.more && c.products.more.length) { const p = document.createElement('p'); this._appendSegments(p, c.products.more); box.appendChild(p); }
+                frag.appendChild(box);
+            }
+        }
+        if (Array.isArray(head.faq) && head.faq.length) {
+            const box = document.createElement('section');
+            box.className = 'seo-mirror__section seo-mirror__faq';
+            box.appendChild(h('h2', c.faqTitle || 'Frequently asked questions', 'seo-mirror__title'));
+            const list = document.createElement('div');
+            list.className = 'faq-list';
+            this._renderFaq(list, head.faq);
+            box.appendChild(list);
+            frag.appendChild(box);
+        }
+        el.textContent = '';
+        el.appendChild(frag);
+        el.hidden = !el.firstChild;
+        el.dataset.mirror = el.firstChild ? 'prerender' : 'static';
+        if (skipped.length) el.dataset.skipped = [...new Set(skipped)].join(',');
+        else delete el.dataset.skipped;
     },
 
     _setH1(text, reveal = true) {

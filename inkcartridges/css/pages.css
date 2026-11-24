@@ -7780,6 +7780,23 @@ a.account-review-card__product:focus-visible {
 }
 .ribbons-faq .faq-list { margin: 0; }
 
+/* FE-3: listing-page mirror of the prerender body (SeoMeta._renderMirror). */
+.seo-mirror { padding-top: var(--spacing-xl, 32px); padding-bottom: var(--spacing-xl, 32px); }
+.seo-mirror__intro { max-width: 72ch; margin: 0 0 var(--spacing-4, 16px); font-size: var(--font-size-sm); line-height: 1.6; color: var(--color-text); }
+.seo-mirror__section { margin: 0 0 var(--spacing-xl, 32px); }
+.seo-mirror__title { font-size: var(--font-size-xl); margin: 0 0 var(--spacing-md, 16px); color: var(--color-text-heading); }
+.seo-mirror__subtitle { font-size: var(--font-size-base); margin: var(--spacing-md, 16px) 0 var(--spacing-2, 8px); color: var(--color-text-heading); }
+.seo-mirror__section p, .seo-mirror__section li { max-width: 72ch; font-size: var(--font-size-sm); line-height: 1.6; color: var(--color-text); overflow-wrap: anywhere; }
+.seo-mirror__section ul { padding-left: 1.25em; margin: 0 0 var(--spacing-3, 12px); }
+.seo-mirror__section .seo-mirror__products { list-style: none; padding: 0; margin: 0 0 var(--spacing-3, 12px); display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--spacing-3, 12px); }
+.seo-mirror__products .seo-mirror__card { max-width: none; }
+.seo-mirror__card > a, .seo-mirror__card > div { display: block; height: 100%; padding: var(--spacing-3, 12px); border: 1px solid var(--steel-200); border-radius: var(--radius-lg, 8px); color: inherit; text-decoration: none; }
+.seo-mirror__card > a:hover { border-color: var(--steel-400, var(--steel-200)); }
+.seo-mirror__name { font-size: var(--font-size-sm); margin: 0 0 var(--spacing-2, 8px); color: var(--color-text-heading); }
+.seo-mirror__card p { margin: 0 0 var(--spacing-1, 4px); }
+.seo-mirror__faq .faq-list { margin: 0; }
+@media (max-width: 480px) { .seo-mirror__products { grid-template-columns: 1fr; } }
+
 
 /* ── Shop Section Cards ── */
 .shop-section-card {
