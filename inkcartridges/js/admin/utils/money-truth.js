@@ -228,9 +228,10 @@ function revenueInclFigure(w) {
 
 function revenueExFigure(w) {
   if (w.revEx == null) return fig(null, 'excl. GST', [], { note: 'The backend did not report revenue.' });
+  // The whole chain, so the owner sees every step from the backend's figure to the box.
   const inputs = [
-    { label: 'Revenue incl. GST (shipping charged included, refunds taken off)', amount: w.revIncl, source: w.r1.applied || w.r3.applied ? ADJUSTED : BACKEND },
-    { label: 'GST (3/23 of it)', amount: mtCents(w.revEx - w.revIncl), source: 'calculated' },
+    ...revenueInclFigure(w).inputs,
+    { label: 'GST (3/23 of the incl-GST total)', amount: mtCents(w.revEx - w.revIncl), source: 'calculated' },
   ];
   return fig(w.revEx, 'excl. GST', inputs, { replaces: 'kpi-summary revenue ÷ 1.15' });
 }

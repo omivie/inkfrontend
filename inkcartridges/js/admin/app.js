@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.11.25-trends-tab';
+const APP_VERSION = '2026.11.25-dashboard-new';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -102,6 +102,8 @@ function icon(name, w = 18, h = 18) {
 const NAV_ITEMS = [
   { section: 'Overview' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  // Rebuilt dashboard, side-by-side until the owner approves it (Nov 2026).
+  { key: 'dashboard-new', label: 'Dashboard (new)', icon: 'dashboard', ownerOnly: true },
 
   { section: 'Sales' },
   { key: 'orders', label: 'Orders', icon: 'orders' },

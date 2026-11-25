@@ -48,6 +48,10 @@ We believe pnl buckets months by UTC and kpi-summary by NZ day (migration 212), 
 **Ask:** make pnl bucket by NZ calendar month, the same rule as kpi-summary. Both must return identical totals for a
 whole NZ month.
 
+**Also:** the dashboard-bundle `net_profit_series` and kpi-summary disagree for the same range. For
+2026-10-26..2026-11-25 the series adds up to −1630.67 but kpi-summary `net_profit` is −1620.01 (gap 10.66). They
+should be equal.
+
 ---
 
 ## §3 Subtract refunds from revenue (definition change, owner 2026-11-25)
@@ -55,8 +59,13 @@ whole NZ month.
 Today every status except `cancelled` counts in revenue, including `refunded`. October had 2 refunds totalling
 $84.49 (`refunds-series` → `reasons[0].amount`), and revenue still includes them.
 
+**Measured:** `refunds-series` counts a PENDING refund (2026100901, $14.00, pending since 14 Oct) and dates refunds by
+`created_at`. Refund 2026091503 ($70.49) has `refunded_at` 2026-09-17 but `created_at` 2026-10-25, so the series puts it
+in October. The owner counts only PROCESSED refunds, on the day the money went back.
+
 **Ask:**
-1. Revenue, gross profit and net profit subtract refunds, dated on the refund date.
+1. Revenue, gross profit and net profit subtract PROCESSED refunds, dated on `refunded_at` (NZ day). Goods are not
+   restocked (owner), so the whole ex-GST refund comes off profit.
 2. Document whether `refunds-series` `total_amount` is incl- or ex-GST.
 3. Say whether a refund puts the goods back into stock (so cost of goods reverses) or not.
 4. Return `refunds` (amount) on kpi-summary `current`/`previous`.

@@ -585,7 +585,7 @@ export function renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex, traf
     // plainly rather than implying the chart is at fault.
     notes.push(`<p class="fh-pnl-note admin-dash-note--alert"><strong>These two backend figures disagree.</strong>
       The per-period ${esc(plan.label.toLowerCase())} adds up to ${esc(formatPrice(drift.seriesTotal))},
-      but the Net Profit tile reads ${esc(formatPrice(drift.kpiNet))} (gap ${esc(formatPrice(Math.abs(drift.gap)))}).
+      but the backend's own net-profit summary (kpi-summary, before any adjustment on this screen) reads ${esc(formatPrice(drift.kpiNet))} (gap ${esc(formatPrice(Math.abs(drift.gap)))}).
       Neither figure can be trusted until this is resolved.</p>`);
   }
 
