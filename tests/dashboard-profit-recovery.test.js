@@ -43,7 +43,7 @@ const DASHBOARD = path.resolve(
   __dirname, '..', 'inkcartridges', 'js', 'admin', 'pages', 'dashboard.js'
 );
 // Moved helpers now live in utils/dash-charts.js; lift() still reads them from this combined source.
-const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(DASHBOARD, 'utf8');
+const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-alerts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(DASHBOARD, 'utf8');
 
 /**
  * Lift a declaration out of dashboard.js by brace-matching from its opening `{`.

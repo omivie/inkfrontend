@@ -32,7 +32,7 @@ const path = require('node:path');
 
 const ADMIN = path.resolve(__dirname, '..', 'inkcartridges', 'js', 'admin');
 // Moved helpers now live in utils/dash-charts.js; lift() still reads them from this combined source.
-const dashboardSrc = fs.readFileSync(path.join(ADMIN, 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(path.join(ADMIN, 'pages', 'dashboard.js'), 'utf8');
+const dashboardSrc = fs.readFileSync(path.join(ADMIN, 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(path.join(ADMIN, 'utils', 'dash-alerts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(path.join(ADMIN, 'pages', 'dashboard.js'), 'utf8');
 const financeSrc = fs.readFileSync(path.join(ADMIN, 'pages', 'financial-health.js'), 'utf8');
 
 /** Brace-match a top-level function body out of a source file. */

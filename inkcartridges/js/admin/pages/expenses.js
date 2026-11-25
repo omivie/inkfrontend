@@ -38,7 +38,7 @@ import {
   EXPENSE_CATEGORIES, RETIRED_CATEGORY_DEFAULTS,
   categoryByKey, categoryLabel, categoryKind,
   normalizeCategory, isOrderLinked, gstDefaultFor,
-  operatingCategories, orderLinkedCategories,
+  operatingCategories, orderLinkedCategories, notExpenseCategories,
   CUSTOM_CATEGORIES_KEY, CATEGORY_OVERRIDES_KEY, setCustomCategories,
   addCustomCategory, renameCustomCategory, removeCustomCategory, seedMissingCategories,
   normalizeCategoryOverrides, resolveRowCategory,
@@ -881,7 +881,9 @@ async function loadCategories() {
  */
 function backendAcceptsCategory(key) {
   if (_backendCatKeys) return _backendCatKeys.has(key);
-  return EXPENSE_CATEGORIES.some(c => c.key === key) || !!RETIRED_CATEGORY_DEFAULTS[key];
+  // A built-in the backend has not shipped yet (gst_payment) must ride the override map,
+  // or the save is a 400 whenever the live enum read failed.
+  return EXPENSE_CATEGORIES.some(c => c.key === key && !c.backendPending) || !!RETIRED_CATEGORY_DEFAULTS[key];
 }
 
 async function saveCategoryOverrides() {
@@ -931,12 +933,13 @@ function categorySelectOptions(selected) {
   return `<option value="">Select…</option>
     <optgroup label="Your categories">${operatingCategories().map(opt).join('')}</optgroup>
     <optgroup label="Order-linked (already counted)">${orderLinkedCategories().map(opt).join('')}</optgroup>
+    <optgroup label="Not an expense">${notExpenseCategories().map(opt).join('')}</optgroup>
     <option value="__new__">＋ Add new category…</option>`;
 }
 
 /** <option>s for the All tab's category filter select. */
 function filterCategoryOptions() {
-  const all = [...operatingCategories(), ...orderLinkedCategories()];
+  const all = [...operatingCategories(), ...orderLinkedCategories(), ...notExpenseCategories()];
   return `<option value="">All categories</option>`
     + all.map(c => `<option value="${escA(c.key)}"${_expFilters.cat === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('');
 }

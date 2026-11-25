@@ -20,7 +20,7 @@ import { icon, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
-import { categoryLabel, operatingCategories, orderLinkedCategories } from '../utils/expense-categories.js';
+import { categoryLabel, operatingCategories, orderLinkedCategories, notExpenseCategories } from '../utils/expense-categories.js';
 import { describeRecurrence, parseUtcDate } from '../utils/expense-recurrence.js';
 import { pnlCost, gstCredit } from '../utils/expense-math.js';
 import { GST_INCL, GST_CLAIM, GST_AMOUNT } from '../utils/gst-basis.js';
@@ -382,7 +382,7 @@ function bulkMarkPaid(ctx) {
 function bulkChangeCategory(ctx) {
   const rows = selectedRows();
   if (!rows.length) return;
-  const opts = [...operatingCategories(), ...orderLinkedCategories()]
+  const opts = [...operatingCategories(), ...orderLinkedCategories(), ...notExpenseCategories()]
     .map(c => `<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('');
   const modal = Modal.open({
     title: 'Change category',

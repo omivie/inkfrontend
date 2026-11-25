@@ -46,16 +46,17 @@ test.beforeEach(() => { sandbox.setCustomCategories([]); });
 
 // ─── built-ins ────────────────────────────────────────────────────────────────
 
-test('built-ins are exactly the 3 order-linked categories + the "other" fallback', () => {
+test('built-ins are exactly the 3 order-linked categories + the "other" fallback + gst_payment', () => {
+  // gst_payment (owner 2026-11-25): paying IRD the GST we collected is not an expense.
   const keys = JSON.parse(JSON.stringify(sandbox.EXPENSE_CATEGORIES.map(c => c.key))).sort();
-  assert.deepEqual(keys, ['customer_shipping', 'inventory', 'merchant_fees', 'other']);
+  assert.deepEqual(keys, ['customer_shipping', 'gst_payment', 'inventory', 'merchant_fees', 'other']);
 });
 
 test('every built-in has key, label, a valid kind, and gstDefault', () => {
   for (const c of sandbox.EXPENSE_CATEGORIES) {
     assert.ok(c.key && typeof c.key === 'string', `key on ${JSON.stringify(c)}`);
     assert.ok(c.label && typeof c.label === 'string', `label on ${c.key}`);
-    assert.ok(c.kind === 'operating' || c.kind === 'order_linked', `kind on ${c.key} is ${c.kind}`);
+    assert.ok(['operating', 'order_linked', 'not_expense'].includes(c.kind), `kind on ${c.key} is ${c.kind}`);
     assert.equal(typeof c.gstDefault, 'boolean', `gstDefault on ${c.key}`);
   }
 });
@@ -85,7 +86,18 @@ test('the retired defaults hold the 15 old operating categories, none overlappin
 
 test('reserved keys = built-ins + non-identity legacy keys, and nothing else', () => {
   const reserved = JSON.parse(JSON.stringify(sandbox.RESERVED_CATEGORY_KEYS)).sort();
-  assert.deepEqual(reserved, ['cogs', 'customer_shipping', 'inventory', 'merchant_fees', 'other', 'platform', 'salaries', 'shipping']);
+  assert.deepEqual(reserved, ['cogs', 'customer_shipping', 'gst_payment', 'inventory', 'merchant_fees', 'other', 'platform', 'salaries', 'shipping']);
+});
+
+test('gst_payment: not an expense, backend-pending, and the ONLY built-in an override may carry', () => {
+  const g = sandbox.categoryByKey('gst_payment');
+  assert.equal(g.kind, 'not_expense');
+  assert.equal(g.backendPending, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.notExpenseCategories().map(c => c.key))), ['gst_payment']);
+  const ov = JSON.parse(JSON.stringify(sandbox.normalizeCategoryOverrides({ a: 'gst_payment', b: 'inventory', c: 'other' })));
+  assert.deepEqual(ov, { a: 'gst_payment' });
+  // A G.S.T row is stored as 'other'; the override resolves it.
+  assert.equal(sandbox.resolveRowCategory('other', 'a', { a: 'gst_payment' }), 'gst_payment');
 });
 
 // ─── slug + list normalisation ────────────────────────────────────────────────

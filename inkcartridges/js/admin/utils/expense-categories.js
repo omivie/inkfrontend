@@ -59,6 +59,15 @@ export const EXPENSE_CATEGORIES = [
 
   // ── The one built-in operating category: the unknown-key fallback ──
   { key: 'other',                label: 'Other',                  kind: 'operating', gstDefault: false, deductibleDefault: true },
+
+  // ── Not an expense (owner 2026-11-25) ──
+  // Paying IRD the GST we collected is not a cost: revenue and profit are already ex-GST.
+  // The Dashboard's net profit (utils/money-truth.js) leaves this kind out. The Expenses
+  // page still counts it as cash paid out, so its totals keep matching the backend's
+  // operating_paid until backend ask §5 (outbox 2026-11-25) ships.
+  // `backendPending`: the backend's category enum does not know this key yet, so a save
+  // stores 'other' + a CATEGORY_OVERRIDES_KEY entry (pages/expenses.js backendAcceptsCategory).
+  { key: 'gst_payment',          label: 'GST payment to IRD',     kind: 'not_expense', gstDefault: false, deductibleDefault: false, backendPending: true, hint: 'Your GST return payment. Not a cost — left out of net profit on the Dashboard.' },
 ];
 
 /**
@@ -196,7 +205,9 @@ export function normalizeCategoryOverrides(raw) {
   const out = {};
   for (const id of Object.keys(raw)) {
     const key = raw[id];
-    if (!id || typeof key !== 'string' || !isValidKey(key) || _RESERVED.has(key)) continue;
+    // A built-in the backend does not accept yet (backendPending) can only be stored as an
+    // override, so it is the one reserved key allowed here.
+    if (!id || typeof key !== 'string' || !isValidKey(key) || (_RESERVED.has(key) && !_BY_KEY[key]?.backendPending)) continue;
     out[id] = key;
   }
   return out;
@@ -285,6 +296,11 @@ export function operatingCategories() {
 
 export function orderLinkedCategories() {
   return EXPENSE_CATEGORIES.filter(c => c.kind === 'order_linked');
+}
+
+/** Built-ins that are not an expense at all (GST payment to IRD). */
+export function notExpenseCategories() {
+  return EXPENSE_CATEGORIES.filter(c => c.kind === 'not_expense');
 }
 
 export function orderLinkedKeys() {
@@ -386,7 +402,7 @@ try {
       EXPENSE_CATEGORIES, RETIRED_CATEGORY_DEFAULTS, LEGACY_CATEGORY_MAP,
       CUSTOM_CATEGORIES_KEY, CATEGORY_OVERRIDES_KEY, MAX_CUSTOM_CATEGORIES, MAX_CATEGORY_LABEL, RESERVED_CATEGORY_KEYS,
       normalizeCategory, categoryByKey, categoryLabel, isOrderLinked, categoryKind,
-      operatingCategories, orderLinkedCategories, orderLinkedKeys, gstDefaultFor,
+      operatingCategories, orderLinkedCategories, notExpenseCategories, orderLinkedKeys, gstDefaultFor,
       slugifyCategoryKey, normalizeCustomCategoryList, setCustomCategories, customCategories,
       addCustomCategory, renameCustomCategory, removeCustomCategory, seedMissingCategories,
       normalizeCategoryOverrides, resolveRowCategory,

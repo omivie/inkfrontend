@@ -50,7 +50,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const INK = path.join(ROOT, 'inkcartridges');
 // Moved helpers now live in utils/dash-charts.js; lift() still reads them from this combined source.
-const DASH = fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(path.join(INK, 'js', 'admin', 'pages', 'dashboard.js'), 'utf8');
+const DASH = fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-alerts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(path.join(INK, 'js', 'admin', 'pages', 'dashboard.js'), 'utf8');
 const ADMIN_API = fs.readFileSync(path.join(INK, 'js', 'admin', 'api.js'), 'utf8');
 const CSS = fs.readFileSync(path.join(INK, 'css', 'admin.css'), 'utf8');
 
