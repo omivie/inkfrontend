@@ -37,8 +37,10 @@ const BACKEND = 'backend';
 const ADJUSTED = 'adjusted on this screen';
 const ORDER_LINKED_RAW = ['inventory', 'merchant_fees', 'customer_shipping'];
 
-/** Cents, and never −0. */
-const mtCents = (n) => Math.round(n * 100) / 100 || 0;
+/** Cents, and never −0. A non-finite input stays NaN so a guard can see it — never a 0. */
+const mtCents = (n) => (Number.isFinite(n) ? Math.round(n * 100) / 100 || 0 : NaN);
+/** |a − b| within tol. Written so a NaN on either side FAILS the check (NaN > tol is false). */
+const mtClose = (a, b, tol) => Math.abs(a - b) <= tol;
 /** A finite number, or null (null / '' / NaN are "not reported", never zero). */
 const mtNum = (v) => (v === null || v === undefined || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
 /** NZ calendar day (YYYY-MM-DD) of a timestamp. NEVER `iso.slice(0,10)` — that is the UTC day. */
@@ -47,7 +49,7 @@ const mtIn = (day, r) => !!day && day >= r.from && day <= r.to;
 /** Ex-GST cost of an expense row (the backend's own rule: GST comes off only when claimable). */
 const mtCost = (row) => (row.gst_claimable ? Number(row.amount) * (1 - GST_SHARE) : Number(row.amount));
 /** Gross profit of one invoice: ex-GST total (shipping charged included) − its cost. */
-const mtInvGross = (inv) => inv.total_incl_gst * EX_GST - inv.cost_excl_gst;
+const mtInvGross = (inv) => Number(inv.total_incl_gst) * EX_GST - Number(inv.cost_excl_gst);
 const mtFmt = (n) => (n < 0 ? '−$' : '$') + Math.abs(n).toFixed(2);
 
 /** The backend's comparison window: same number of NZ days, ending the day before `from`. */
@@ -62,21 +64,37 @@ export function previousRange(r) {
 
 const refuse = (reason) => ({ applied: false, reason });
 
+/** A list is complete only when its server total is a whole number AND equals the rows read. */
+function incomplete(list, noun) {
+  if (!Number.isInteger(list.total)) return `the ${noun} list did not say how many there are`;
+  if (list.rows.length !== list.total) return `${list.rows.length} of ${list.total} ${noun} were read`;
+  const ids = list.rows.map((r) => r.id).filter((id) => id != null);
+  if (new Set(ids).size !== ids.length) return `the ${noun} list holds the same row twice`;
+  return null;
+}
+
 // ── §1 invoice dating ──────────────────────────────────────────────────────────────────
 function redateInvoices(k, range, invoices, shadows) {
   if (!invoices) return refuse('the invoice list did not load');
   if (!shadows) return refuse('the invoice sales records did not load');
-  if (invoices.rows.length < invoices.total) return refuse(`only ${invoices.rows.length} of ${invoices.total} invoices were read`);
-  if (shadows.rows.length < shadows.total) return refuse(`only ${shadows.rows.length} of ${shadows.total} invoice sales records were read`);
-  if (k.includes_invoices !== true || mtNum(k.invoice_revenue) == null || mtNum(k.invoice_orders) == null) {
+  const bad = incomplete(invoices, 'invoices') || incomplete(shadows, 'invoice sales records');
+  if (bad) return refuse(bad);
+  const kRev = mtNum(k.invoice_revenue), kOrders = mtNum(k.invoice_orders);
+  if (k.includes_invoices !== true || kRev == null || kOrders == null) {
     return refuse('the backend did not report its invoice figures');
   }
   const byId = new Map(invoices.rows.map((i) => [i.id, i]));
   const live = shadows.rows.filter((s) => s.status !== 'cancelled');
+  const seen = new Set();
   for (const s of live) {
     const inv = byId.get(s.invoice_id);
     if (!inv || s.order_number !== `INV-${inv.invoice_number}`) {
       return refuse(`sales record ${s.order_number} does not match its invoice`);
+    }
+    if (seen.has(s.invoice_id)) return refuse(`INV-${inv.invoice_number} has two live sales records`);
+    seen.add(s.invoice_id);
+    if (mtNum(s.total) == null || mtNum(inv.total_incl_gst) == null || !mtClose(Number(s.total), Number(inv.total_incl_gst), 0.005)) {
+      return refuse(`the sales record for INV-${inv.invoice_number} does not carry the invoice's total`);
     }
   }
   const shadowed = new Set(live.map((s) => s.invoice_id));
@@ -85,8 +103,8 @@ function redateInvoices(k, range, invoices, shadows) {
   // up to one of the backend's figures).
   const kset = live.filter((s) => mtIn(mtNzDay(s.created_at), range));
   const kTotal = kset.reduce((a, s) => a + Number(s.total), 0);
-  if (Math.abs(kTotal - k.invoice_revenue) > 0.005 || kset.length !== k.invoice_orders) {
-    return refuse(`the backend's invoice figures do not reconcile (${mtCents(kTotal).toFixed(2)} from ${kset.length} records vs ${k.invoice_revenue} from ${k.invoice_orders})`);
+  if (!mtClose(kTotal, kRev, 0.005) || kset.length !== kOrders) {
+    return refuse(`the backend's invoice figures do not reconcile (${mtCents(kTotal).toFixed(2)} from ${kset.length} records vs ${kRev} from ${kOrders})`);
   }
   // I: what should count — invoices issued in range that have a sales record. An invoice with
   // no sales record is left out (probably paperwork for a web order) and named in a warning.
@@ -100,43 +118,63 @@ function redateInvoices(k, range, invoices, shadows) {
   }
   const kIds = new Set(kset.map((s) => s.invoice_id));
   const iIds = new Set(iset.map((i) => i.id));
+  const label = (i) => `INV-${i.invoice_number} (issued ${i.issue_date})`;
+  const out = kset.filter((s) => !iIds.has(s.invoice_id)).map((s) => byId.get(s.invoice_id));
   return {
     applied: true,
-    revenueIncl: mtCents(iset.reduce((a, i) => a + i.total_incl_gst, 0) - kTotal),
+    revenueIncl: mtCents(iset.reduce((a, i) => a + Number(i.total_incl_gst), 0) - kTotal),
     gross: mtCents(iset.reduce((a, i) => a + mtInvGross(i), 0) - kset.reduce((a, s) => a + mtInvGross(byId.get(s.invoice_id)), 0)),
     orders: iset.length - kset.length,
-    movedOut: kset.filter((s) => !iIds.has(s.invoice_id)).map((s) => {
-      const i = byId.get(s.invoice_id);
-      return `INV-${i.invoice_number} (issued ${i.issue_date})`;
-    }),
-    movedIn: iset.filter((i) => !kIds.has(i.id)).map((i) => `INV-${i.invoice_number} (issued ${i.issue_date})`),
+    // A voided invoice whose sales record is still live is named as voided, not "moved".
+    movedOut: out.filter((i) => i.status !== 'void').map(label),
+    voided: out.filter((i) => i.status === 'void').map(label),
+    movedIn: iset.filter((i) => !kIds.has(i.id)).map(label),
     unrecorded,
   };
 }
 
 // ── §3 refunds ─────────────────────────────────────────────────────────────────────────
+// Rows: GET /api/admin/refunds, plus `order_status` / `order_is_test` that the page looks up
+// for each processed refund (refund rows carry no order status). A refund on an order the
+// backend never counted (cancelled or test) must not come off revenue a second time.
+const REFUND_TYPES = ['refund', 'chargeback'];
 function refundsIn(k, range, refunds) {
-  if (mtNum(k.refunds) != null) return { applied: false, reason: 'the backend already takes refunds off', backendHasIt: true };
+  if (mtNum(k.refunds) != null) {
+    return { applied: false, backendHasIt: true, reason: 'kpi-summary now returns `refunds`, so this screen stopped taking refunds off. Confirm the backend’s revenue is net of refunds (outbox §3) and delete this adjustment' };
+  }
   if (!refunds) return refuse('the refunds list did not load');
-  if (refunds.rows.length < refunds.total) return refuse(`only ${refunds.rows.length} of ${refunds.total} refunds were read`);
-  const rows = refunds.rows.filter((r) => r.status === 'processed' && mtIn(mtNzDay(r.refunded_at || r.created_at), range));
+  const bad = incomplete(refunds, 'refunds');
+  if (bad) return refuse(bad);
+  const processed = refunds.rows.filter((r) => r.status === 'processed' && REFUND_TYPES.includes(r.type || 'refund'));
+  const undated = processed.filter((r) => !r.refunded_at);
+  if (undated.length) return refuse(`refund ${undated.map((r) => r.order_number).join(', ')} is processed but has no refund date`);
+  const rows = processed.filter((r) => mtIn(mtNzDay(r.refunded_at), range));
   if (rows.some((r) => mtNum(r.amount) == null)) return refuse('a refund in range has no amount');
-  const total = rows.reduce((a, r) => a + Number(r.amount), 0);
+  const unknown = rows.filter((r) => typeof r.order_status !== 'string');
+  if (unknown.length) return refuse(`the order status behind refund ${unknown.map((r) => r.order_number).join(', ')} could not be read`);
+  const skip = (r) => r.order_status === 'cancelled' || r.order_is_test === true;
+  const counted = rows.filter((r) => !skip(r));
+  const total = counted.reduce((a, r) => a + Number(r.amount), 0);
+  const kinds = (t) => counted.filter((r) => (r.type || 'refund') === t).length;
   return {
     applied: true,
-    count: rows.length,
+    count: counted.length,
+    chargebacks: kinds('chargeback'),
     revenueIncl: mtCents(-total),
     gross: mtCents(-total * EX_GST),
-    orders: rows.map((r) => r.order_number),
+    orders: counted.map((r) => r.order_number),
+    skipped: rows.filter(skip).map((r) => r.order_number),
   };
 }
 
 // ── §4 + §5 operating expenses by bill date ────────────────────────────────────────────
 function opexByBillDate(k, range, expenses) {
-  if (mtNum(k.operating_expenses) == null) return refuse('the backend did not report operating expenses');
+  const kOpex = mtNum(k.operating_expenses);
+  if (kOpex == null) return refuse('the backend did not report operating expenses');
   if (!expenses) return refuse('the expense list did not load');
   if (expenses.legacy) return refuse('the expense list came from the old endpoint');
-  if (expenses.rows.length < expenses.total) return refuse(`only ${expenses.rows.length} of ${expenses.total} expenses were read`);
+  const bad = incomplete(expenses, 'expenses');
+  if (bad) return refuse(bad);
   if (expenses.rows.some((r) => r.recurrence && r.recurrence !== 'none')) {
     return refuse('recurring bills are not supported on this screen yet');
   }
@@ -146,19 +184,22 @@ function opexByBillDate(k, range, expenses) {
   const paidBasis = live
     .filter((r) => !ORDER_LINKED_RAW.includes(r.category) && mtIn(r.paid_date, range))
     .reduce((a, r) => a + mtCost(r), 0);
-  if (Math.abs(mtCents(paidBasis) - k.operating_expenses) > 0.01) {
-    return refuse(`the expense rows do not reproduce the backend's figure (${mtCents(paidBasis).toFixed(2)} vs ${k.operating_expenses})`);
+  if (!mtClose(mtCents(paidBasis), kOpex, 0.01)) {
+    return refuse(`the expense rows do not reproduce the backend's figure (${mtCents(paidBasis).toFixed(2)} vs ${kOpex})`);
   }
   const billDay = (r) => r.expense_date || r.date;
   const inRange = live.filter((r) => mtIn(billDay(r), range));
   if (inRange.some((r) => mtNum(r.amount) == null)) return refuse('an expense in range has no amount');
+  // An unknown kind would silently drop the row from the total — refuse instead.
+  const odd = inRange.filter((r) => !['operating', 'order_linked', 'not_expense'].includes(r.kind));
+  if (odd.length) return refuse(`${odd.length} expense${odd.length === 1 ? ' has' : 's have'} no known category kind`);
   const counted = inRange.filter((r) => r.kind === 'operating');
   const gstRows = inRange.filter((r) => r.kind === 'not_expense');
   const billDate = mtCents(counted.reduce((a, r) => a + mtCost(r), 0));
   return {
     applied: true,
     opex: billDate,
-    net: mtCents(k.operating_expenses - billDate),
+    net: mtCents(kOpex - billDate),
     gstExcluded: mtCents(gstRows.reduce((a, r) => a + mtCost(r), 0)),
     unpaidCounted: mtCents(counted.filter((r) => r.derived_status !== 'paid').reduce((a, r) => a + mtCost(r), 0)),
   };
@@ -172,13 +213,20 @@ function windowFigures(k, range, src) {
   const r4 = opexByBillDate(k, range, src.expenses);
   const d = (t, f) => (t.applied ? (t[f] ?? 0) : 0);
 
-  const rev = mtNum(k.revenue);
-  const revIncl = rev == null ? null : mtCents(rev + d(r1, 'revenueIncl') + d(r3, 'revenueIncl'));
+  // Backend figures coerced once (a numeric string is a number; anything else is "not reported").
+  const kn = {
+    revenue: mtNum(k.revenue), gross: mtNum(k.gross_profit), net: mtNum(k.net_profit), orders: mtNum(k.orders),
+    stripe: mtNum(k.stripe_fees), freight: mtNum(k.supplier_freight), opex: mtNum(k.operating_expenses),
+    unpriced: mtNum(k.supplier_freight_unpriced_orders),
+  };
+  const fin = (v) => (Number.isFinite(v) ? v : null);   // a NaN that slipped through is "not available", never 0
+  const revIncl = kn.revenue == null ? null : fin(mtCents(kn.revenue + d(r1, 'revenueIncl') + d(r3, 'revenueIncl')));
   const revEx = revIncl == null ? null : mtCents(revIncl * EX_GST);
-  const gross = mtNum(k.gross_profit) == null ? null : mtCents(k.gross_profit + d(r1, 'gross') + d(r3, 'gross'));
-  const net = mtNum(k.net_profit) == null ? null : mtCents(k.net_profit + d(r1, 'gross') + d(r3, 'gross') + d(r4, 'net'));
-  const orders = mtNum(k.orders) == null ? null : k.orders + d(r1, 'orders');
-  return { k, range, r1, r3, r4, revIncl, revEx, gross, net, orders };
+  const grossDelta = d(r1, 'gross') + d(r3, 'gross');
+  const gross = kn.gross == null ? null : fin(mtCents(kn.gross + grossDelta));
+  const net = kn.net == null ? null : fin(mtCents(kn.net + grossDelta + d(r4, 'net')));
+  const orders = kn.orders == null ? null : kn.orders + d(r1, 'orders');
+  return { k, kn, range, r1, r3, r4, revIncl, revEx, gross, net, orders, grossMoved: grossDelta !== 0, opexMoved: d(r4, 'net') !== 0 };
 }
 
 const sameAdjustments = (a, b) => !!a && !!b
@@ -216,12 +264,18 @@ const fig = (value, basis, inputs, extra = {}) => ({
 
 function revenueInclFigure(w) {
   if (w.revIncl == null) return fig(null, 'incl. GST', [], { note: 'The backend did not report revenue.' });
-  const inputs = [{ label: 'Sales the backend counted (every status except cancelled)', amount: mtCents(w.k.revenue), source: BACKEND }];
+  const inputs = [{ label: 'Sales the backend counted (every status except cancelled)', amount: w.kn.revenue, source: BACKEND }];
   if (w.r1.applied && w.r1.revenueIncl !== 0) {
-    inputs.push({ label: `Invoices counted on their issue date${w.r1.movedOut.length ? ` — moved out: ${w.r1.movedOut.join(', ')}` : ''}${w.r1.movedIn.length ? ` — moved in: ${w.r1.movedIn.join(', ')}` : ''}`, amount: w.r1.revenueIncl, source: ADJUSTED });
+    const parts = [
+      w.r1.movedOut.length ? `moved out: ${w.r1.movedOut.join(', ')}` : '',
+      w.r1.voided.length ? `voided: ${w.r1.voided.join(', ')}` : '',
+      w.r1.movedIn.length ? `moved in: ${w.r1.movedIn.join(', ')}` : '',
+    ].filter(Boolean).join(' — ');
+    inputs.push({ label: `Invoices counted on their issue date${parts ? ` — ${parts}` : ''}`, amount: w.r1.revenueIncl, source: ADJUSTED });
   }
   if (w.r3.applied && w.r3.revenueIncl !== 0) {
-    inputs.push({ label: `Refunds processed in this period (${w.r3.count}: ${w.r3.orders.join(', ')})`, amount: w.r3.revenueIncl, source: ADJUSTED });
+    const what = w.r3.chargebacks ? `Refunds and chargebacks (${w.r3.chargebacks} chargeback${w.r3.chargebacks === 1 ? '' : 's'})` : 'Refunds';
+    inputs.push({ label: `${what} processed in this period (${w.r3.count}: ${w.r3.orders.join(', ')})`, amount: w.r3.revenueIncl, source: ADJUSTED });
   }
   return fig(w.revIncl, 'incl. GST', inputs, { replaces: 'kpi-summary revenue' });
 }
@@ -240,7 +294,7 @@ function grossFigure(w) {
   if (w.gross == null) {
     return fig(null, 'excl. GST', [], { note: 'The backend did not return gross profit for this range (it drops it when a sale has no cost recorded). See "Sales missing a cost" in the to-do list.' });
   }
-  const inputs = [{ label: 'Gross profit the backend counted (revenue ex GST − cost of goods)', amount: mtCents(w.k.gross_profit), source: BACKEND }];
+  const inputs = [{ label: 'Gross profit the backend counted (revenue ex GST − cost of goods)', amount: w.kn.gross, source: BACKEND }];
   if (w.r1.applied && w.r1.gross !== 0) inputs.push({ label: 'Invoice profit counted on issue date (revenue ex GST − our cost)', amount: w.r1.gross, source: ADJUSTED });
   if (w.r3.applied && w.r3.gross !== 0) inputs.push({ label: 'Refunds, ex GST (goods are not restocked, so the whole refund comes off)', amount: w.r3.gross, source: ADJUSTED });
   return fig(w.gross, 'excl. GST', inputs, { replaces: 'kpi-summary gross_profit' });
@@ -248,31 +302,42 @@ function grossFigure(w) {
 
 function netFigure(w) {
   if (w.net == null || w.gross == null) {
-    return fig(null, 'excl. GST', [], { note: 'Net profit needs gross profit, which the backend did not return for this range.' });
+    const why = w.gross == null
+      ? 'Net profit needs gross profit, which the backend did not return for this range.'
+      : 'The backend did not return net profit for this range.';
+    return fig(null, 'excl. GST', [], { note: why });
   }
-  const stripe = mtNum(w.k.stripe_fees), freight = mtNum(w.k.supplier_freight);
-  const opex = w.r4.applied ? w.r4.opex : mtNum(w.k.operating_expenses);
+  const { stripe, freight } = w.kn;
+  const opex = w.r4.applied ? w.r4.opex : w.kn.opex;
+  // Freight the backend could not price is charged as $0, so net is an UPPER bound (ERR-252).
+  const unpriced = w.kn.unpriced || 0;
+  const atMost = unpriced > 0 ? { note: `${unpriced} order${unpriced === 1 ? '' : 's'} had supplier freight the backend could not price, so freight is at least this much and net profit is AT MOST this figure.` } : {};
   if (stripe == null || freight == null || opex == null) {
-    // Identity terms missing: show the figure as backend net + deltas.
-    const inputs = [{ label: 'Net profit the backend counted', amount: mtCents(w.k.net_profit), source: BACKEND }];
+    // Identity terms missing: show the figure as backend net + the changes.
+    const inputs = [{ label: 'Net profit the backend counted', amount: w.kn.net, source: BACKEND }];
     for (const [t, f, label] of [[w.r1, 'gross', 'Invoice profit counted on issue date'], [w.r3, 'gross', 'Refunds, ex GST'], [w.r4, 'net', 'Operating expenses by bill date']]) {
       if (t.applied && t[f] !== 0) inputs.push({ label, amount: t[f], source: ADJUSTED });
     }
-    return fig(w.net, 'excl. GST', inputs, { replaces: 'kpi-summary net_profit' });
+    return fig(w.net, 'excl. GST', inputs, { replaces: 'kpi-summary net_profit', ...atMost });
   }
   const opexLabel = w.r4.applied
     ? `Operating expenses by bill date, paid or not${w.r4.unpaidCounted ? ` (incl. ${mtFmt(w.r4.unpaidCounted)} not paid yet)` : ''}${w.r4.gstExcluded ? `; ${mtFmt(w.r4.gstExcluded)} of GST payments to IRD left out` : ''}`
     : `Operating expenses the backend counted (paid only) — bill-date basis unavailable: ${w.r4.reason}`;
   const inputs = [
-    { label: 'Gross profit (box above)', amount: w.gross, source: w.r1.applied || w.r3.applied ? ADJUSTED : BACKEND },
+    { label: 'Gross profit (box above)', amount: w.gross, source: w.grossMoved ? ADJUSTED : BACKEND },
     { label: 'Stripe card fees (ex GST)', amount: mtCents(-stripe), source: BACKEND },
-    { label: 'Supplier freight we pay (Dynamic every order; Augmento under $100 ex GST of goods)', amount: mtCents(-freight), source: BACKEND },
-    { label: opexLabel, amount: mtCents(-opex), source: w.r4.applied ? ADJUSTED : BACKEND },
+    { label: `Supplier freight we pay (Dynamic every order; Augmento under $100 ex GST of goods)${unpriced > 0 ? ` — AT LEAST this: ${unpriced} unpriced` : ''}`, amount: mtCents(-freight), source: BACKEND },
+    { label: opexLabel, amount: mtCents(-opex), source: w.opexMoved ? ADJUSTED : BACKEND },
   ];
-  // The backend's own identity is occasionally a cent out; show that, never hide it.
-  const rounding = mtCents(w.net - inputs.reduce((a, i) => a + i.amount, 0));
-  if (rounding !== 0) inputs.push({ label: 'Rounding in the backend’s own figures', amount: rounding, source: BACKEND });
-  return fig(w.net, 'excl. GST', inputs, { replaces: 'kpi-summary net_profit' });
+  // The backend's own identity is occasionally a cent out; show that, never hide it. Anything
+  // bigger is not rounding, and says so.
+  const gap = mtCents(w.net - inputs.reduce((a, i) => a + i.amount, 0));
+  if (gap !== 0) {
+    inputs.push(Math.abs(gap) <= 0.02
+      ? { label: 'Rounding in the backend’s own figures', amount: gap, source: BACKEND }
+      : { label: 'UNEXPLAINED difference inside the backend’s own figures (gross − fees − freight − expenses ≠ net)', amount: gap, source: BACKEND });
+  }
+  return fig(w.net, 'excl. GST', inputs, { replaces: 'kpi-summary net_profit', ...atMost, unexplained: Math.abs(gap) > 0.02 ? gap : 0 });
 }
 
 const ratio = (profitFig, revFig, label) => {
@@ -308,7 +373,7 @@ export function moneyTruth(src) {
     const grossProfit = grossFigure(w);
     const netProfit = netFigure(w);
     const orders = fig(w.orders, null, w.orders == null ? [] : [
-      { label: 'Orders the backend counted', amount: w.k.orders, source: BACKEND },
+      { label: 'Orders the backend counted', amount: w.kn.orders, source: BACKEND },
       ...(w.r1.applied && w.r1.orders ? [{ label: 'Invoices counted on their issue date', amount: w.r1.orders, source: ADJUSTED }] : []),
     ], { note: 'A refunded order still counts as an order.' });
     const aov = {
@@ -341,7 +406,17 @@ export function moneyTruth(src) {
 
   const warnings = [];
   if (!src.kpi?.current) warnings.push('The backend summary (kpi-summary) did not load, so no money figure can be shown.');
-  for (const a of adjustments) if (!a.applied && !a.backendHasIt) warnings.push(`Not adjusted (${a.id}): ${a.reason}. Showing the backend’s figure for that part.`);
+  for (const a of adjustments) {
+    if (a.backendHasIt) warnings.push(`Check (${a.id}): ${a.reason}.`);
+    else if (!a.applied) warnings.push(`Not adjusted (${a.id}): ${a.reason}. Showing the backend’s figure for that part.`);
+  }
+  if (cur?.r3.applied && cur.r3.skipped.length) {
+    warnings.push(`Refund on ${cur.r3.skipped.join(', ')} not taken off: the order is cancelled or a test, so its sale was never counted.`);
+  }
+  if (figures?.netProfit.unexplained) {
+    warnings.push(`The backend’s own net profit does not equal gross − fees − freight − expenses (${mtFmt(figures.netProfit.unexplained)} unexplained). Treat net profit with care.`);
+  }
+  if (figures && cur.kn.unpriced > 0) warnings.push(figures.netProfit.note);
   if (cur?.r1.applied && cur.r1.unrecorded.length) {
     warnings.push(`${cur.r1.unrecorded.join(', ')} issued in this period ha${cur.r1.unrecorded.length === 1 ? 's' : 've'} no sales record, so ${cur.r1.unrecorded.length === 1 ? 'it is' : 'they are'} not counted.`);
   }
@@ -388,13 +463,13 @@ export function moneyTodos({ range, expenses, refunds, invoices }) {
   if (refunds) {
     out.pendingRefunds = refunds.rows
       .filter((r) => r.status === 'pending')
-      .map((r) => ({ label: `${r.order_number}: ${mtFmt(Number(r.amount))} pending since ${mtNzDay(r.created_at)}`, href: `orders?focus=${encodeURIComponent(r.order_number)}` }));
+      .map((r) => ({ label: `${r.order_number}: ${mtNum(r.amount) == null ? 'amount unknown' : mtFmt(Number(r.amount))} pending${r.created_at ? ` since ${mtNzDay(r.created_at)}` : ''}`, href: `orders?focus=${encodeURIComponent(r.order_number)}` }));
   }
   if (invoices) {
     out.invoiceCostOverPrice = invoices.rows
       .filter((i) => i.status !== 'void' && mtNum(i.cost_excl_gst) != null && mtNum(i.total_incl_gst) != null
-        && i.cost_excl_gst > i.total_incl_gst * EX_GST)
-      .map((i) => ({ label: `INV-${i.invoice_number}: cost ${mtFmt(i.cost_excl_gst)} vs price ${mtFmt(mtCents(i.total_incl_gst * EX_GST))} ex GST`, href: 'invoices' }));
+        && Number(i.cost_excl_gst) > Number(i.total_incl_gst) * EX_GST)
+      .map((i) => ({ label: `INV-${i.invoice_number}: cost ${mtFmt(Number(i.cost_excl_gst))} vs price ${mtFmt(mtCents(Number(i.total_incl_gst) * EX_GST))} ex GST`, href: 'invoices' }));
   }
   return out;
 }

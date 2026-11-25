@@ -55,8 +55,8 @@ async function allPages(fetchPage, readRows, pageSize, maxPages = 10) {
     if (data == null) return null;   // a failed read is "did not load", never an empty list
     const got = readRows(data);
     rows.push(...got);
-    total = Number(data.pagination?.total);
-    if (!Number.isFinite(total)) total = got.length < pageSize ? rows.length : rows.length + 1;
+    // No server total ⇒ NaN, and money-truth refuses the list as "did not say how many".
+    total = Number(data.pagination?.total ?? NaN);
     if (rows.length >= total || got.length < pageSize) break;
   }
   return { rows, total };
@@ -68,7 +68,33 @@ async function loadExpenses() {
   if (!list) return null;
   const overrides = normalizeCategoryOverrides(prefs?.[CATEGORY_OVERRIDES_KEY]);
   const rows = list.items.map((r) => ({ ...r, kind: categoryKind(resolveRowCategory(r.category, r.id, overrides)) }));
-  return { rows, total: Number(list.pagination?.total ?? rows.length), legacy: !!list._legacy };
+  return { rows, total: Number(list.pagination?.total ?? NaN), legacy: !!list._legacy };
+}
+
+/** Invoice sales records: every order matching INV-, kept only if it IS an invoice sale. */
+async function loadShadows(signal) {
+  const all = await allPages((p, n) => AdminAPI.getOrders({ search: 'INV-' }, p, n, signal), orderRows, 200);
+  if (!all || all.rows.length !== all.total) return all;   // incomplete stays incomplete (refused downstream)
+  const rows = all.rows.filter((o) => o.channel === 'invoice');
+  return { rows, total: rows.length };
+}
+
+/**
+ * Refunds, each processed one carrying the status of its order (refund rows have none), so a
+ * refund on a cancelled or test order is not taken off revenue the backend never counted.
+ * A lookup that fails leaves the status unknown, and money-truth refuses the refunds part.
+ */
+async function loadRefunds(signal) {
+  const list = await allPages((p, n) => AdminAPI.getRefunds({}, p, n), (d) => d.refunds || [], 100);
+  if (!list) return null;
+  const numbers = [...new Set(list.rows.filter((r) => r.status === 'processed').map((r) => r.order_number))];
+  const found = new Map();
+  await Promise.all(numbers.map(async (num) => {
+    const rows = orderRows(await AdminAPI.getOrders({ search: num }, 1, 5, signal) || []);
+    const o = rows.find((x) => x.order_number === num);
+    if (o) found.set(num, { order_status: String(o.status || ''), order_is_test: o.is_test_order === true });
+  }));
+  return { ...list, rows: list.rows.map((r) => ({ ...r, ...(found.get(r.order_number) || {}) })) };
 }
 
 // ── money boxes ────────────────────────────────────────────────────────────────────────
@@ -278,8 +304,8 @@ async function load() {
   const signal = FilterState.getAbortSignal();
   const lists = {
     invoices: allPages((p, n) => AdminAPI.listInvoices({}, p, n), (d) => d.invoices || [], 100),
-    shadows: allPages((p, n) => AdminAPI.getOrders({ search: 'INV-' }, p, n, signal), orderRows, 200),
-    refunds: allPages((p, n) => AdminAPI.getRefunds({}, p, n), (d) => d.refunds || [], 100),
+    shadows: loadShadows(signal),
+    refunds: loadRefunds(signal),
     expenses: loadExpenses(),
   };
   const kpiP = AdminAPI.getDashboardKPIs(kpiParams, signal);

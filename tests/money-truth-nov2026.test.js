@@ -150,7 +150,7 @@ test('§1 refuses when the backend’s invoice set does not reconcile', () => {
 
 test('§1 refuses on a truncated list', () => {
   const m = oct({ invoices: { rows: F.invoices.rows.slice(0, 30), total: F.invoices.total } });
-  assert.match(m.adjustments[0].reason, /only 30 of 37 invoices/);
+  assert.match(m.adjustments[0].reason, /30 of 37 invoices were read/);
 });
 
 test('refunds list missing: refused, named, revenue stays the backend figure for that part', () => {
@@ -168,7 +168,9 @@ test('refunds: only PROCESSED, dated by refunded_at; switches off when kpi retur
   const a = m.adjustments.find((x) => x.id === 'refunds');
   assert.equal(a.applied, false);
   assert.equal(a.backendHasIt, true);
-  assert.ok(!m.warnings.some((w) => /refunds/.test(w)), 'not a failure — the backend owns it now');
+  // Not silent: the switch-off is named so the owner (and FE) confirm before deleting §3.
+  assert.ok(m.warnings.some((w) => /^Check \(refunds\): kpi-summary now returns `refunds`/.test(w)));
+  assert.ok(!m.warnings.some((w) => /Not adjusted \(refunds\)/.test(w)));
 });
 
 test('kpi missing ⇒ every money figure null (never 0); owed still works', () => {
@@ -190,7 +192,7 @@ test('§4 refuses: legacy list, truncated list, recurring row, cross-check misma
   const rows = expenseRows();
   const reason = (expenses) => oct({ expenses }).adjustments.find((a) => a.id === 'expenses-by-bill-date').reason;
   assert.match(reason({ rows, total: rows.length, legacy: true }), /old endpoint/);
-  assert.match(reason({ rows: rows.slice(1), total: rows.length }), /only 75 of 76/);
+  assert.match(reason({ rows: rows.slice(1), total: rows.length }), /75 of 76 expenses were read/);
   assert.match(reason({ rows: rows.map((r, i) => (i ? r : { ...r, recurrence: 'monthly' })), total: rows.length }), /recurring/);
   const noSupabase = rows.filter((r) => !(r.name === 'Supabase' && r.expense_date === '2026-10-07'));
   assert.match(reason({ rows: noSupabase, total: noSupabase.length }), /3446\.05 vs 3491\.4/);
@@ -246,4 +248,133 @@ test('Expenses save path: a backend-pending built-in rides the override map', ()
   const s = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'admin', 'pages', 'expenses.js'), 'utf8');
   assert.match(s, /EXPENSE_CATEGORIES\.some\(c => c\.key === key && !c\.backendPending\)/);
   assert.match(s, /<optgroup label="Not an expense">\$\{notExpenseCategories\(\)/);
+});
+
+// ── chief verify findings (2026-11-25), each pinned ─────────────────────────────────────
+const NOVsrc = (over) => M.moneyTruth({ range: NOV, kpi: F.kpiNov, ...src(over) });
+const refundList = (rows) => ({ rows, total: rows.length });
+const novRefund = F.refunds.rows.find((r) => r.order_number === '2026110601');
+
+test('F1: a refund on a cancelled or test order is NOT taken off again (named instead)', () => {
+  const extra = { id: 'x1', order_number: 'C1', type: 'refund', amount: 120, status: 'processed', created_at: '2026-11-10T00:00:00Z', refunded_at: '2026-11-10T00:00:00Z', order_status: 'cancelled', order_is_test: false };
+  const m = NOVsrc({ refunds: refundList([...F.refunds.rows, extra]) });
+  assert.equal(m.figures.revenueInclGst.value, 5763.38);
+  assert.ok(m.warnings.some((w) => /Refund on C1 not taken off/.test(w)));
+});
+
+test('F1: an unknown order status behind a refund refuses the refunds part', () => {
+  const rows = F.refunds.rows.map((r) => (r === novRefund ? { ...r, order_status: undefined } : r));
+  const a = NOVsrc({ refunds: refundList(rows) }).adjustments.find((x) => x.id === 'refunds');
+  assert.equal(a.applied, false);
+  assert.match(a.reason, /order status behind refund 2026110601 could not be read/);
+});
+
+test('F2: unpriced supplier freight ⇒ "at most" net profit, loudly', () => {
+  const kpi = { ...F.kpiNov, current: { ...F.kpiNov.current, supplier_freight_unpriced_orders: 3 } };
+  const m = M.moneyTruth({ range: NOV, kpi, ...src() });
+  assert.match(m.figures.netProfit.note, /AT MOST/);
+  assert.ok(m.figures.netProfit.inputs.some((i) => /AT LEAST this: 3 unpriced/.test(i.label)));
+  assert.ok(m.warnings.some((w) => /could not price/.test(w)));
+});
+
+test('F3: a shadow with no total refuses §1 (never "applied" with revenue and gross disagreeing)', () => {
+  const shadows = F.shadows.map((x) => (x.order_number === 'INV-3284' ? { ...x, total: undefined } : x));
+  const a = oct({ shadows: { rows: shadows, total: shadows.length } }).adjustments[0];
+  assert.equal(a.applied, false);
+  assert.match(a.reason, /INV-3284 does not carry the invoice's total/);
+});
+
+test('F3: numeric strings from the backend are numbers; garbage is null, never 0', () => {
+  const str = Object.fromEntries(Object.entries(F.kpiOct.current).map(([k, v]) => [k, typeof v === 'number' ? String(v) : v]));
+  const f = M.moneyTruth({ range: OCT, kpi: { ...F.kpiOct, current: str }, ...src() }).figures;
+  assert.equal(f.grossProfit.value, 1413.31);
+  assert.equal(f.orders.value, 52);
+  const junk = { ...F.kpiOct.current, net_profit: 'n/a' };
+  assert.equal(M.moneyTruth({ range: OCT, kpi: { ...F.kpiOct, current: junk }, ...src() }).figures.netProfit.value, null);
+});
+
+test('F4: an expense with an unknown kind refuses §4 instead of vanishing from the total', () => {
+  const rows = expenseRows().map((r) => (r.name === 'Google Ads' && r.expense_date === '2026-10-14' ? { ...r, kind: undefined } : r));
+  const a = oct({ expenses: { rows, total: rows.length } }).adjustments.find((x) => x.id === 'expenses-by-bill-date');
+  assert.equal(a.applied, false);
+  assert.match(a.reason, /no known category kind/);
+});
+
+test('F5: a list without a total, or with a duplicated row, is refused', () => {
+  const noTotal = NOVsrc({ refunds: { rows: F.refunds.rows.filter((r) => r !== novRefund) } }).adjustments.find((x) => x.id === 'refunds');
+  assert.match(noTotal.reason, /did not say how many/);
+  const dup = NOVsrc({ refunds: refundList([...F.refunds.rows, novRefund]) }).adjustments.find((x) => x.id === 'refunds');
+  assert.match(dup.reason, /same row twice/);
+});
+
+test('F6a: zero deltas ⇒ not badged "adjusted" (Oct 7–31: every delta is 0)', () => {
+  const m = M.moneyTruth({ range: { from: '2026-10-07', to: '2026-10-31' }, kpi: { current: F.kpiNov.previous, previous: null }, ...src({ compare: false }) });
+  assert.equal(m.figures.netProfit.value, mtNet(F.kpiNov.previous));
+  assert.equal(m.figures.netProfit.adjusted, false);
+  assert.equal(m.figures.netMargin.adjusted, false);
+});
+function mtNet(k) { return k.net_profit; }
+
+test('F6b: a big gap in the backend identity is "unexplained", not "rounding"', () => {
+  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, net_profit: F.kpiOct.current.net_profit - 50 } };
+  const m = M.moneyTruth({ range: OCT, kpi, ...src() });
+  assert.ok(m.figures.netProfit.inputs.some((i) => /UNEXPLAINED/.test(i.label) && i.amount === -50));
+  assert.ok(m.warnings.some((w) => /unexplained/.test(w)));
+});
+
+test('F6c: chargebacks are labelled as chargebacks', () => {
+  const cb = { ...novRefund, id: 'cb1', type: 'chargeback', order_number: '2026110601' };
+  const rows = F.refunds.rows.map((r) => (r === novRefund ? cb : r));
+  const inp = NOVsrc({ refunds: refundList(rows) }).figures.revenueInclGst.inputs;
+  assert.ok(inp.some((i) => /Refunds and chargebacks \(1 chargeback\)/.test(i.label)));
+});
+
+test('F6d: two live sales records for one invoice refuse §1; a void invoice is named as voided', () => {
+  const twin = { ...F.shadows.find((x) => x.order_number === 'INV-3290'), id: 'twin' };
+  const a = oct({ shadows: { rows: [...F.shadows, twin], total: F.shadows.length + 1 } }).adjustments[0];
+  assert.match(a.reason, /INV-3290 has two live sales records/);
+  const invoices = F.invoices.rows.map((i) => (i.invoice_number === 3290 ? { ...i, status: 'void' } : i));
+  const inp = oct({ invoices: { rows: invoices, total: invoices.length } }).figures.revenueInclGst.inputs;
+  assert.ok(inp.some((i) => /voided: INV-3290/.test(i.label) && !/moved out: [^—]*INV-3290/.test(i.label)));
+});
+
+test('F6e: only net missing ⇒ the note says net, not gross', () => {
+  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, net_profit: null } };
+  assert.match(M.moneyTruth({ range: OCT, kpi, ...src() }).figures.netProfit.note, /did not return net profit/);
+});
+
+test('F7: a processed refund with no refund date refuses (never dated by created_at)', () => {
+  const rows = F.refunds.rows.map((r) => (r === novRefund ? { ...r, refunded_at: null } : r));
+  const a = NOVsrc({ refunds: refundList(rows) }).adjustments.find((x) => x.id === 'refunds');
+  assert.match(a.reason, /2026110601 is processed but has no refund date/);
+});
+
+test('mutation guards the chief found uncaught: cancelled shadow, void invoice, freight in invoice gross', () => {
+  // A cancelled shadow is not counted by the backend: keeping it would break reconciliation.
+  const cancelled = F.shadows.find((x) => x.status === 'cancelled');
+  assert.ok(cancelled, 'fixture holds the cancelled INV-3264 record');
+  // A void invoice issued in range must not be counted as revenue.
+  const invoices = F.invoices.rows.map((i) => (i.invoice_number === 3290 ? { ...i, status: 'void' } : i));
+  assert.equal(oct({ invoices: { rows: invoices, total: invoices.length } }).figures.revenueInclGst.value, mtRound(5877.15 - 46.99));
+  // INV-3290 carries a $7 freight line: moving it must move 46.99 × 20/23 − 23.00 = 17.86, not profit_excl_gst 11.77.
+  const shadows = F.shadows.map((x) => (x.order_number === 'INV-3290' ? { ...x, created_at: '2026-09-20T00:00:00Z' } : x));
+  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, invoice_revenue: mtRound(1270.26 - 46.99), invoice_orders: 7, revenue: mtRound(6073.14 - 46.99), gross_profit: mtRound(1443.94 - 17.86) } };
+  const f = M.moneyTruth({ range: OCT, kpi, ...src({ shadows: { rows: shadows, total: shadows.length } }) }).figures;
+  assert.equal(f.grossProfit.value, 1413.31, 'moving INV-3290 back in restores exactly 17.86');
+});
+function mtRound(n) { return Math.round(n * 100) / 100; }
+
+test('§1 reconciliation needs the COUNT too, not only the amount', () => {
+  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, invoice_orders: 9 } };
+  const a = M.moneyTruth({ range: OCT, kpi, ...src() }).adjustments[0];
+  assert.equal(a.applied, false);
+  assert.match(a.reason, /from 8 records vs 1270\.26 from 9/);
+});
+
+test('§1 ignores a CANCELLED sales record (the backend does not count it)', () => {
+  // INV-3264's cancelled record, moved into October: it must not join the backend's set.
+  const shadows = F.shadows.map((x) => (x.status === 'cancelled' ? { ...x, created_at: '2026-10-10T00:00:00Z' } : x));
+  const m = oct({ shadows: { rows: shadows, total: shadows.length } });
+  assert.equal(m.adjustments[0].applied, true);
+  assert.equal(m.figures.revenueInclGst.value, 5877.15);
 });

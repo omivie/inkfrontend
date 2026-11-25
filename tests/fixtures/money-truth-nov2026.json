@@ -1,6 +1,6 @@
 {
  "capturedAt": "2026-11-25T03:51:56.605Z",
- "note": "READ-ONLY capture, owner session, 2026-11-25. Money fields only; no customer names/emails.",
+ "note": "READ-ONLY capture, owner session, 2026-11-25. Money fields only; no customer names/emails. Refund rows carry order_status/order_is_test looked up READ-ONLY the same day (as the page does).",
  "kpiOct": {
   "current": {
    "revenue": 6073.14,
@@ -775,7 +775,9 @@
     "amount": 59.4,
     "status": "processed",
     "created_at": "2026-11-06T10:06:56.245433+00:00",
-    "refunded_at": "2026-11-06T10:06:56.034+00:00"
+    "refunded_at": "2026-11-06T10:06:56.034+00:00",
+    "order_status": "refunded",
+    "order_is_test": false
    },
    {
     "id": "e2c4bcf3-4056-4930-9282-74b4bdbc9646",
@@ -784,7 +786,9 @@
     "amount": 70.49,
     "status": "processed",
     "created_at": "2026-10-25T13:24:28.358418+00:00",
-    "refunded_at": "2026-09-17T06:03:25+00:00"
+    "refunded_at": "2026-09-17T06:03:25+00:00",
+    "order_status": "refunded",
+    "order_is_test": false
    },
    {
     "id": "36fbcdb5-f896-463b-a278-95e885e45985",
@@ -793,7 +797,9 @@
     "amount": 14,
     "status": "pending",
     "created_at": "2026-10-14T06:15:41.699028+00:00",
-    "refunded_at": null
+    "refunded_at": null,
+    "order_status": "shipped",
+    "order_is_test": false
    }
   ]
  },

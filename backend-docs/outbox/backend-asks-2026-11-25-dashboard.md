@@ -68,7 +68,9 @@ in October. The owner counts only PROCESSED refunds, on the day the money went b
    restocked (owner), so the whole ex-GST refund comes off profit.
 2. Document whether `refunds-series` `total_amount` is incl- or ex-GST.
 3. Say whether a refund puts the goods back into stock (so cost of goods reverses) or not.
-4. Return `refunds` (amount) on kpi-summary `current`/`previous`.
+4. Return `refunds` (amount) on kpi-summary `current`/`previous`, in the SAME deploy that starts subtracting them.
+5. Only subtract refunds (and chargebacks) on orders the revenue counted: never one on a cancelled or test order.
+6. Add `order_status` to `/api/admin/refunds` rows. The FE currently looks up each refund's order to check this.
 
 ---
 
