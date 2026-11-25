@@ -406,7 +406,8 @@ test('the dashboard tables render every order-number shape WHOLE', () => {
     // has no .slice" and "the operator can read the order number" are different
     // claims and only the second one matters.
     const vm = require('node:vm');
-    const src = read(JS('admin', 'pages', 'dashboard.js'));
+    // Moved helpers now live in utils/dash-charts.js; lift still reads them from this combined source.
+    const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + read(JS('admin', 'pages', 'dashboard.js'));
 
     /** Body of a named function declaration, brace-matched. */
     function lift(name) {

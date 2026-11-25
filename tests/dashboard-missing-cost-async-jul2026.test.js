@@ -39,7 +39,8 @@ const vm = require('node:vm');
 const DASHBOARD = path.resolve(
   __dirname, '..', 'inkcartridges', 'js', 'admin', 'pages', 'dashboard.js'
 );
-const src = fs.readFileSync(DASHBOARD, 'utf8');
+// Moved helpers now live in utils/dash-charts.js; lift() still reads them from this combined source.
+const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'dash-charts.js'), 'utf8').replace(/^export /gm, '') + '\n' + fs.readFileSync(DASHBOARD, 'utf8');
 
 /** Same brace-matching lifter used by tests/dashboard-profit-recovery.test.js. */
 function lift(name) {
