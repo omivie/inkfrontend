@@ -7,6 +7,17 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 
 ## `outbox/` — the ONE outgoing file
 
+**2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — NOT sent yet. Admin Dashboard numbers + speed (ERR-393). The new dashboard adjusts on screen until each § ships; tell FE which § shipped so the matching adjustment in `utils/money-truth.js` is deleted.
+
+| § | Ask | Written | Status (2026-11-25) |
+|---|---|---|---|
+| 1 | Invoice shadow orders dated by `issue_date` (INV-3298 issued 22 Nov, record 1 Oct; 13 invoices differ) + backfill | 2026-11-25 | open |
+| 2 | pnl buckets by NZ month like kpi-summary (Oct: 6073.14 vs 6019.65); bundle net series vs kpi net gap 10.66 | 2026-11-25 | open |
+| 3 | Subtract PROCESSED refunds on `refunded_at`; return `refunds` on kpi-summary (series counts a pending refund, dates by created_at) | 2026-11-25 | open |
+| 4 | Operating expenses by `expense_date`, paid or not (accrual) | 2026-11-25 | open |
+| 5 | Built-in `gst_payment` expense category excluded from operating expenses | 2026-11-25 | open |
+| 6 | One `dashboard-summary` endpoint (money + graph series + action counts); `traffic/timeseries` takes 10 s | 2026-11-25 | open |
+
 **2026-11-24:** `outbox/backend-asks-2026-11-24.md` — NOT sent yet.
 
 | § | Ask | Written | Status (2026-11-24) |

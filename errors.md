@@ -40,6 +40,44 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-393 — Admin Dashboard rebuilt: numbers wrong, too much on it, 17 s to load (owner 2026-11-25) — IN PROGRESS (frontend, side-by-side)
+
+**Ask.** Owner: "completely redo the admin dashboard … the numbers are most definitely wrong … make somewhere where I can see how everything is calculated … it loads very very slowly." First: revenue, gross profit, net profit and their percentages, then what the business needs to run and improve. Keep the graph and the money boxes; every other chart moves to Analytics.
+
+**Measured (live, 2026-11-25, October 2026).** Six concrete reasons the old boxes were wrong:
+1. INV-3298 (issued 22 Nov) has a sales record dated 1 Oct, so October revenue was $195.99 too high. 13 invoices have a record date earlier than their issue date. Backend bug (outbox §1).
+2. The "G.S.T" expense ($724.51, 20 Oct) is the GST return paid to IRD, and it was subtracted from net profit. Revenue is already ex GST, so it is not a cost.
+3. Refunds were never taken off revenue. `refunds-series` also counts a PENDING refund, and it dates the $70.49 refund on 25 Oct (`created_at`) although the money went back on 17 Sep (`refunded_at`).
+4. Expenses counted only once PAID, while invoices counted paid or not: two bases in one figure.
+5. kpi-summary and pnl disagree for the same month: $6,073.14 vs $6,019.65. pnl buckets by UTC; one $53.49 order sits on the boundary.
+6. Revenue was shown incl GST next to ex-GST profit, so the boxes did not subtract.
+
+Slow: the money boxes appeared after **17.0 s**, 147 requests, with four 429s. The page waited for all 15 calls (traffic alone took 10 s), then ran a scan of ~120 `GET /orders/:id`.
+
+**Fix (owner definitions; side-by-side at `#dashboard-new` until the owner approves, old page untouched).**
+- `utils/money-truth.js`: starts from kpi-summary and applies three LABELLED adjustments, each refusing as a unit with a reason (never a zero):
+  - §1 invoices on issue date: reconciled to the backend's own invoice total AND count before it applies;
+  - §3 PROCESSED refunds on `refunded_at`, the whole ex-GST amount off profit (goods are not restocked);
+  - §4 expenses by bill date, paid or not, with `kind:'not_expense'` excluded. Before it applies, it cross-checks that the rows reproduce the backend's paid-date figure.
+- Every box opens "How it's calculated": each input, its amount, and the source (backend / adjusted on this screen). The inputs add up exactly to the value.
+- New built-in expense category `gst_payment` ("GST payment to IRD", kind `not_expense`, `backendPending` so it is saved as `other` + override). The Expenses page totals are unchanged (they stay equal to the backend's `operating_paid`).
+- `pages/dashboard-new.js`:
+  - the money boxes wait only for their own inputs; the graph and the to-do list paint into their own slots;
+  - "Sales missing a cost" reads `cost_complete` off the order LIST rows (backend handoff, Jul 2026) instead of the detail scan;
+  - the graph paints before the traffic overlay arrives.
+- To-do list: tracking, missing cost, low margin, out of stock, bills to pay, possible duplicate expenses, pending refunds, a tax payment filed as an expense, and an invoice whose cost is above its price.
+- The secondary charts moved to Analytics → Trends (`pages/trends.js`). The shared code is in `utils/dash-charts.js` + `utils/dash-alerts.js`.
+- Backend asks: `backend-docs/outbox/backend-asks-2026-11-25-dashboard.md` §1–6. Each FE adjustment is deleted when its section ships (removal map in money-truth.js).
+
+**Measured after.** Cold reload: first money box **2.9 s**, 19 requests including admin boot, 0 × 429. October hand-reconciled:
+- revenue incl $5,877.15 / ex $5,110.57;
+- gross $1,413.31;
+- net −$2,615.30, or −$1,890.79 once G.S.T is moved;
+- 52 orders.
+
+**Guard.** `tests/money-truth-nov2026.test.js` (22, on a READ-ONLY live fixture; 4 mutants killed: no reconciliation, pending refunds counted, UTC date slice, kind ≠ order_linked), `tests/dashboard-new-nov2026.test.js`, `tests/analytics-trends-tab-nov2026.test.js`, `tests/admin-expenses-categories.test.js` (gst_payment).
+
+---
 ## ERR-392 — Dashboard Net Profit: second line shows profit after unpaid bills (owner 2026-11-23) — SHIPPED (frontend)
 
 **Ask.** Owner, screenshot of `/admin#dashboard?period=all` (Net Profit −$2,957.43 "after $2,168.77 supplier freight"): is this profit counting every invoice and NOT yet taking off what we still owe? It should sit above the final profit after everything is paid.
