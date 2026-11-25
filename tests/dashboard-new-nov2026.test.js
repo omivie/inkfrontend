@@ -19,7 +19,7 @@ test('nav: owner-only "Dashboard (new)" sits under the old Dashboard', () => {
 });
 
 test('money boxes come from money-truth, and every box opens How it is calculated', () => {
-  assert.match(page, /import \{ moneyTruth, moneyTodos \} from '\.\.\/utils\/money-truth\.js';/);
+  assert.match(page, /import \{ moneyTruth, moneyTodos, previousRange \} from '\.\.\/utils\/money-truth\.js';/);
   assert.match(page, /data-how="\$\{esc\(b\.key\)\}"/);
   assert.match(page, /addEventListener\('click', \(\) => openHow\(state\.money, btn\.dataset\.how\)\)/);
   for (const k of ['revenueExGst', 'grossProfit', 'netProfit', 'orders', 'aov', 'owed']) {
@@ -47,4 +47,11 @@ test('speed: no per-order detail scan; missing cost reads cost_complete off list
 test('fail-soft is loud: a list that did not load is null, and a null card says so', () => {
   assert.match(page, /if \(data == null\) return null;/);
   assert.match(page, /this is not a zero/);
+});
+
+test('refund order lookups pass only correctly-typed fields, and only for the shown window', () => {
+  assert.match(page, /if \(typeof o\.status === 'string' && o\.status\) known\.order_status = o\.status;/);
+  assert.match(page, /if \(typeof o\.is_test_order === 'boolean'\) known\.order_is_test = o\.is_test_order;/);
+  assert.match(page, /loadRefunds\(signal, \(compare && previousRange\(range\)\?\.from\) \|\| range\.from\)/);
+  assert.match(page, /m\.owedToUs\.value == null \? m\.owedToUs\.note/);
 });

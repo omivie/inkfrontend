@@ -44,7 +44,10 @@ const mtClose = (a, b, tol) => Math.abs(a - b) <= tol;
 /** A finite number, or null (null / '' / NaN are "not reported", never zero). */
 const mtNum = (v) => (v === null || v === undefined || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
 /** NZ calendar day (YYYY-MM-DD) of a timestamp. NEVER `iso.slice(0,10)` — that is the UTC day. */
-const mtNzDay = (ts) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date(ts));
+const mtNzDay = (ts) => {
+  const d = ts ? new Date(ts) : null;
+  return d && Number.isFinite(d.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(d) : null;
+};
 const mtIn = (day, r) => !!day && day >= r.from && day <= r.to;
 /** Ex-GST cost of an expense row (the backend's own rule: GST comes off only when claimable). */
 const mtCost = (row) => (row.gst_claimable ? Number(row.amount) * (1 - GST_SHARE) : Number(row.amount));
@@ -93,15 +96,22 @@ function redateInvoices(k, range, invoices, shadows) {
     }
     if (seen.has(s.invoice_id)) return refuse(`INV-${inv.invoice_number} has two live sales records`);
     seen.add(s.invoice_id);
-    if (mtNum(s.total) == null || mtNum(inv.total_incl_gst) == null || !mtClose(Number(s.total), Number(inv.total_incl_gst), 0.005)) {
-      return refuse(`the sales record for INV-${inv.invoice_number} does not carry the invoice's total`);
-    }
+    if (!mtNzDay(s.created_at)) return refuse(`the sales record for INV-${inv.invoice_number} has no date`);
   }
   const shadowed = new Set(live.map((s) => s.invoice_id));
   // K: what the backend counted (its sales records dated in range). Must reconcile EXACTLY,
   // by total AND count — an amount match alone is not proof (15 different invoice sets add
   // up to one of the backend's figures).
   const kset = live.filter((s) => mtIn(mtNzDay(s.created_at), range));
+  // Only the records this period uses must carry their invoice's total (a stale July record
+  // must not block October).
+  const used = live.filter((s) => kset.includes(s) || (mtIn(byId.get(s.invoice_id).issue_date, range)));
+  for (const s of used) {
+    const inv = byId.get(s.invoice_id);
+    if (mtNum(s.total) == null || mtNum(inv.total_incl_gst) == null || !mtClose(Number(s.total), Number(inv.total_incl_gst), 0.005)) {
+      return refuse(`the sales record for INV-${inv.invoice_number} does not carry the invoice's total`);
+    }
+  }
   const kTotal = kset.reduce((a, s) => a + Number(s.total), 0);
   if (!mtClose(kTotal, kRev, 0.005) || kset.length !== kOrders) {
     return refuse(`the backend's invoice figures do not reconcile (${mtCents(kTotal).toFixed(2)} from ${kset.length} records vs ${kRev} from ${kOrders})`);
@@ -146,6 +156,7 @@ function refundsIn(k, range, refunds) {
   const bad = incomplete(refunds, 'refunds');
   if (bad) return refuse(bad);
   const processed = refunds.rows.filter((r) => r.status === 'processed' && REFUND_TYPES.includes(r.type || 'refund'));
+  const otherTypes = [...new Set(refunds.rows.filter((r) => r.status === 'processed' && !REFUND_TYPES.includes(r.type || 'refund')).map((r) => r.type))];
   const undated = processed.filter((r) => !r.refunded_at);
   if (undated.length) return refuse(`refund ${undated.map((r) => r.order_number).join(', ')} is processed but has no refund date`);
   const rows = processed.filter((r) => mtIn(mtNzDay(r.refunded_at), range));
@@ -164,6 +175,7 @@ function refundsIn(k, range, refunds) {
     gross: mtCents(-total * EX_GST),
     orders: counted.map((r) => r.order_number),
     skipped: rows.filter(skip).map((r) => r.order_number),
+    otherTypes,
   };
 }
 
@@ -296,7 +308,7 @@ function grossFigure(w) {
   }
   const inputs = [{ label: 'Gross profit the backend counted (revenue ex GST − cost of goods)', amount: w.kn.gross, source: BACKEND }];
   if (w.r1.applied && w.r1.gross !== 0) inputs.push({ label: 'Invoice profit counted on issue date (revenue ex GST − our cost)', amount: w.r1.gross, source: ADJUSTED });
-  if (w.r3.applied && w.r3.gross !== 0) inputs.push({ label: 'Refunds, ex GST (goods are not restocked, so the whole refund comes off)', amount: w.r3.gross, source: ADJUSTED });
+  if (w.r3.applied && w.r3.gross !== 0) inputs.push({ label: `${w.r3.chargebacks ? 'Refunds and chargebacks' : 'Refunds'}, ex GST (goods are not restocked, so the whole amount comes off)`, amount: w.r3.gross, source: ADJUSTED });
   return fig(w.gross, 'excl. GST', inputs, { replaces: 'kpi-summary gross_profit' });
 }
 
@@ -389,12 +401,13 @@ export function moneyTruth(src) {
   const figures = build(cur);
   const prevFigures = build(prev);
   if (figures && prevFigures) {
+    const unpricedEither = (cur.kn.unpriced || 0) > 0 || (prev.kn.unpriced || 0) > 0;
     for (const key of Object.keys(figures)) {
       figures[key].prev = prevFigures[key].value;
       // Orders do not move with refunds/opex, so they stay comparable when only those differ.
       figures[key].prevComparable = key === 'orders'
         ? cur.r1.applied === prev.r1.applied
-        : comparable;
+        : comparable && !((key === 'netProfit' || key === 'netMargin') && unpricedEither);
     }
   }
 
@@ -416,7 +429,13 @@ export function moneyTruth(src) {
   if (figures?.netProfit.unexplained) {
     warnings.push(`The backend’s own net profit does not equal gross − fees − freight − expenses (${mtFmt(figures.netProfit.unexplained)} unexplained). Treat net profit with care.`);
   }
-  if (figures && cur.kn.unpriced > 0) warnings.push(figures.netProfit.note);
+  if (cur && cur.kn.unpriced > 0) warnings.push(`${cur.kn.unpriced} order(s) had supplier freight the backend could not price, so net profit is AT MOST the figure shown.`);
+  if (cur?.r3.applied && cur.r3.otherTypes.length) warnings.push(`Processed refund rows of type ${cur.r3.otherTypes.join(', ')} are not taken off — say whether they should be.`);
+  // A tax payment still filed as an expense moves net profit, so it is a money warning, not just a to-do.
+  const taxRows = taxLikeExpenses(src.expenses, range);
+  if (taxRows.length) {
+    warnings.push(`Net profit includes ${mtFmt(mtCents(taxRows.reduce((a, r) => a + mtCost(r), 0)))} that looks like a tax payment (${taxRows.map((r) => r.name || r.payee).join(', ')}). Move it to "GST payment to IRD" if it is one.`);
+  }
   if (cur?.r1.applied && cur.r1.unrecorded.length) {
     warnings.push(`${cur.r1.unrecorded.join(', ')} issued in this period ha${cur.r1.unrecorded.length === 1 ? 's' : 've'} no sales record, so ${cur.r1.unrecorded.length === 1 ? 'it is' : 'they are'} not counted.`);
   }
@@ -436,7 +455,8 @@ function pick(t) {
 /** Unpaid invoices, any date — the same rule as the Invoices page's Outstanding box. */
 export function owedToUs(invoices) {
   if (!invoices) return { value: null, inputs: [], note: 'The invoice list did not load.' };
-  if (invoices.rows.length < invoices.total) return { value: null, inputs: [], note: `Only ${invoices.rows.length} of ${invoices.total} invoices were read.` };
+  const bad = incomplete(invoices, 'invoices');
+  if (bad) return { value: null, inputs: [], note: `Not shown: ${bad}.` };
   const open = invoices.rows.filter((i) => i && i.status !== 'paid' && i.status !== 'void');
   if (open.some((i) => mtNum(i.total_incl_gst) == null)) return { value: null, inputs: [], note: 'An unpaid invoice has no total.' };
   return {
@@ -447,6 +467,13 @@ export function owedToUs(invoices) {
   };
 }
 
+/** Operating expenses in range whose name/payee looks like a tax payment (GST, IRD, Inland Revenue). */
+function taxLikeExpenses(expenses, range) {
+  if (!expenses) return [];
+  return expenses.rows.filter((r) => !r.deleted_at && r.kind === 'operating' && mtIn(r.expense_date || r.date, range)
+    && mtNum(r.amount) != null && /\bG\.?S\.?T\b|\bIRD\b|inland\s+revenue|tax\s+payment/i.test(`${r.name || ''} ${r.payee || ''}`));
+}
+
 /**
  * To-do items that come from the same lists (no extra requests).
  * Each item: { label, href }.
@@ -455,9 +482,7 @@ export function moneyTodos({ range, expenses, refunds, invoices }) {
   const out = { duplicates: null, pendingRefunds: null, taxAsExpense: null, invoiceCostOverPrice: null };
   if (expenses) {
     out.duplicates = possibleDuplicateExpenses(expenses.rows, range).map((p) => ({ label: p.label, href: 'expenses' }));
-    out.taxAsExpense = expenses.rows
-      .filter((r) => !r.deleted_at && r.kind === 'operating' && mtIn(r.expense_date || r.date, range)
-        && /\bG\.?S\.?T\b|\bIRD\b/i.test(`${r.name || ''} ${r.payee || ''}`))
+    out.taxAsExpense = taxLikeExpenses(expenses, range)
       .map((r) => ({ label: `${r.name || r.payee}: ${mtFmt(Number(r.amount))} on ${r.expense_date || r.date} — move to "GST payment to IRD"`, href: 'expenses' }));
   }
   if (refunds) {

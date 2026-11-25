@@ -378,3 +378,46 @@ test('§1 ignores a CANCELLED sales record (the backend does not count it)', () 
   assert.equal(m.adjustments[0].applied, true);
   assert.equal(m.figures.revenueInclGst.value, 5877.15);
 });
+
+// ── chief re-verify (round 2) ───────────────────────────────────────────────────────────
+test('R2: a refund on a TEST order is not taken off', () => {
+  const t = { id: 't1', order_number: 'T1', type: 'refund', amount: 0.5, status: 'processed', created_at: '2026-11-10T00:00:00Z', refunded_at: '2026-11-10T00:00:00Z', order_status: 'paid', order_is_test: true };
+  const m = NOVsrc({ refunds: refundList([...F.refunds.rows, t]) });
+  assert.equal(m.figures.revenueInclGst.value, 5763.38);
+  assert.ok(m.warnings.some((w) => /Refund on T1 not taken off/.test(w)));
+});
+
+test('R2: a sales record whose total differs from its invoice refuses §1; a stale one OUTSIDE the period does not', () => {
+  const stale = (num) => F.shadows.map((x) => (x.order_number === num ? { ...x, total: Number(x.total) + 1 } : x));
+  const inOct = oct({ shadows: { rows: stale('INV-3285'), total: F.shadows.length } }).adjustments[0];
+  assert.match(inOct.reason, /INV-3285 does not carry the invoice's total/);
+  const july = oct({ shadows: { rows: stale('INV-3265'), total: F.shadows.length } }).adjustments[0];
+  assert.equal(july.applied, true, 'a July record must not block October');
+});
+
+test('R2: a record with no date refuses §1 instead of throwing', () => {
+  const shadows = F.shadows.map((x) => (x.order_number === 'INV-3285' ? { ...x, created_at: undefined } : x));
+  const m = oct({ shadows: { rows: shadows, total: shadows.length } });
+  assert.match(m.adjustments[0].reason, /INV-3285 has no date/);
+});
+
+test('R2: owed-to-us refuses a list without a whole total', () => {
+  const o = M.owedToUs({ rows: F.invoices.rows.slice(0, 30), total: NaN });
+  assert.equal(o.value, null);
+  assert.match(o.note, /did not say how many/);
+});
+
+test('R2: an unknown processed refund type is named, not silently skipped', () => {
+  const sc = { ...novRefund, id: 'sc1', type: 'store_credit', order_number: 'S1' };
+  const m = NOVsrc({ refunds: refundList([...F.refunds.rows, sc]) });
+  assert.ok(m.warnings.some((w) => /type store_credit are not taken off/.test(w)));
+});
+
+test('R2: a tax payment still filed as an expense is a MONEY warning (with its amount)', () => {
+  const m = oct();
+  assert.ok(m.warnings.some((w) => /Net profit includes \$724\.51 that looks like a tax payment \(G\.S\.T\)/.test(w)));
+  const moved = oct({ expenses: { rows: expenseRows([GST_ROW]), total: F.expenses.pagination.total } });
+  assert.ok(!moved.warnings.some((w) => /looks like a tax payment/.test(w)));
+  const renamed = expenseRows().map((r) => (r.id === GST_ROW ? { ...r, name: 'Tax payment', payee: 'Inland Revenue' } : r));
+  assert.ok(oct({ expenses: { rows: renamed, total: renamed.length } }).warnings.some((w) => /looks like a tax payment/.test(w)));
+});

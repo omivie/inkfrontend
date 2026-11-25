@@ -32,7 +32,7 @@ import {
   LOW_MARGIN_PCT, isInvoiceOrder, outOfStockCount, computeTrackingAlert, computeLowMarginAlert,
   alertCard, wireAlertToggles,
 } from '../utils/dash-alerts.js';
-import { moneyTruth, moneyTodos } from '../utils/money-truth.js';
+import { moneyTruth, moneyTodos, previousRange } from '../utils/money-truth.js';
 import {
   categoryKind, resolveRowCategory, normalizeCategoryOverrides, CATEGORY_OVERRIDES_KEY,
 } from '../utils/expense-categories.js';
@@ -84,15 +84,26 @@ async function loadShadows(signal) {
  * refund on a cancelled or test order is not taken off revenue the backend never counted.
  * A lookup that fails leaves the status unknown, and money-truth refuses the refunds part.
  */
-async function loadRefunds(signal) {
+async function loadRefunds(signal, since) {
   const list = await allPages((p, n) => AdminAPI.getRefunds({}, p, n), (d) => d.refunds || [], 100);
   if (!list) return null;
-  const numbers = [...new Set(list.rows.filter((r) => r.status === 'processed').map((r) => r.order_number))];
+  // Only refunds that can land in the shown or previous period need their order's status.
+  const nzDay = (ts) => (ts ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date(ts)) : null);
+  const numbers = [...new Set(list.rows
+    .filter((r) => r.status === 'processed' && (!r.refunded_at || nzDay(r.refunded_at) >= since))
+    .map((r) => r.order_number))];
   const found = new Map();
   await Promise.all(numbers.map(async (num) => {
     const rows = orderRows(await AdminAPI.getOrders({ search: num }, 1, 5, signal) || []);
     const o = rows.find((x) => x.order_number === num);
-    if (o) found.set(num, { order_status: String(o.status || ''), order_is_test: o.is_test_order === true });
+    // Only a field of the right type is passed on; anything else stays unknown and
+    // money-truth refuses the refunds part rather than guess.
+    if (o) {
+      const known = {};
+      if (typeof o.status === 'string' && o.status) known.order_status = o.status;
+      if (typeof o.is_test_order === 'boolean') known.order_is_test = o.is_test_order;
+      if ('order_status' in known && 'order_is_test' in known) found.set(num, known);
+    }
   }));
   return { ...list, rows: list.rows.map((r) => ({ ...r, ...(found.get(r.order_number) || {}) })) };
 }
@@ -104,7 +115,7 @@ const BOXES = [
   { key: 'netProfit', label: 'Net profit', sub: (f) => `margin ${pct(f.netMargin.value)}`, alertNeg: true },
   { key: 'orders', label: 'Orders', fmt: (v) => (v == null ? '—' : String(v)) },
   { key: 'aov', label: 'Average order', sub: () => 'revenue ÷ orders' },
-  { key: 'owed', label: 'Owed to us', sub: (f, m) => `${m.owedToUs.inputs.length} unpaid invoice${m.owedToUs.inputs.length === 1 ? '' : 's'} · any date` },
+  { key: 'owed', label: 'Owed to us', sub: (f, m) => (m.owedToUs.value == null ? m.owedToUs.note : `${m.owedToUs.inputs.length} unpaid invoice${m.owedToUs.inputs.length === 1 ? '' : 's'} · any date`) },
 ];
 
 function delta(fig, compare) {
@@ -305,7 +316,7 @@ async function load() {
   const lists = {
     invoices: allPages((p, n) => AdminAPI.listInvoices({}, p, n), (d) => d.invoices || [], 100),
     shadows: loadShadows(signal),
-    refunds: loadRefunds(signal),
+    refunds: loadRefunds(signal, (compare && previousRange(range)?.from) || range.from),
     expenses: loadExpenses(),
   };
   const kpiP = AdminAPI.getDashboardKPIs(kpiParams, signal);
