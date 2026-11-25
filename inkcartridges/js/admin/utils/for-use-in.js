@@ -151,13 +151,19 @@ export const canWriteForUseIn = () => FOR_USE_IN_WRITE_ROUTE !== null;
  *
  * Used to decide (a) whether the operator has actually edited the field and
  * (b) whether a save round-tripped. A looser normaliser would hide real loss,
- * so this one names what it forgives: self-closing style on void elements, and
- * collapsed whitespace. A dropped tag or lost text is still a difference.
+ * so this one names what it forgives: self-closing style on void elements,
+ * `&nbsp;` decoded to U+00A0, and collapsed whitespace. A dropped tag or lost
+ * text is still a difference.
  */
 export function normaliseForUseIn(html) {
     if (typeof html !== 'string') return '';
     return html
         .replace(/<(br|hr|img)\s*\/?>/gi, '<$1>')
+        // MEASURED 2026-11-23 (ERR-391): the sanitiser stores `&nbsp;` as the raw
+        // U+00A0 character. The preview always serialises U+00A0 as `&nbsp;`, so
+        // without this every save of a list with a non-breaking space read back
+        // "different" and reported saved-unverified while the list HAD saved.
+        .replace(/&nbsp;|&#160;|&#xa0;/gi, '\u00a0')
         .replace(/\s+/g, ' ')
         .trim();
 }

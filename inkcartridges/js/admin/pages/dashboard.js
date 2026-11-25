@@ -1257,7 +1257,7 @@ async function runDashboardLoad(mySeq) {
   // the parallel fan-out that tripped the rate limiter). The KPI band, tables and
   // refund reasons stay on their existing dedicated endpoints. The last three feed the
   // "Action needed" panel + worst-margin card, and the last two the cash-basis
-  // adjustment for invoiced sales. 16 calls total (under the 60/min limit).
+  // adjustment for invoiced sales, plus the unpaid-bills summary. 17 calls total (under the 60/min limit).
   const promises = [
     AdminAPI.getDashboardBundle(params, g, signal),          // 0  all graph charts
     AdminAPI.getDashboardKPIs(params, signal),               // 1  KPI band
@@ -1280,6 +1280,9 @@ async function runDashboardLoad(mySeq) {
     // method's comment). The card says so on its face rather than pretending to
     // follow the page's range.
     AdminAPI.getConversionFunnel(signal),
+    // 14  Unpaid operating bills (overdue + due) for the Net Profit tile's second
+    // line (ERR-392). Net profit is cash basis — an unpaid bill is not in it yet.
+    AdminAPI.expenses.summary({ from, to }),
   ];
 
   const results = await Promise.allSettled(promises);
@@ -1331,6 +1334,8 @@ async function runDashboardLoad(mySeq) {
     kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
     recentOrders: val(5), topProducts: val(6), missingCost,
     funnel: val(13),
+    // number | null. null = summary failed ⇒ the tile SAYS so (never "no unpaid bills").
+    unpaidBills: unpaidBillsOf(val(14)),
     trackingReq: val(7), trackingOrders: val(8),
     worstMarginSkus: worstMargin, worstMarginTruncated,
     // Raw expense records for the performance chart's Added/Total expense lines.
@@ -2008,6 +2013,32 @@ function renderKpiTile(t, extraClass = '', noDelta = false) {
   return h;
 }
 
+/**
+ * Unpaid operating bills (ERR-392) from GET /api/admin/expenses/summary — the same
+ * server `overdue_amount` + `due_amount` the Expenses page's Unpaid tile uses.
+ * GLOBAL open amounts (not range-scoped) at GROSS. null when either is missing:
+ * a half-read total would understate what is owed.
+ */
+function unpaidBillsOf(resp) {
+  const s = resp?.summary ?? resp;
+  if (!s || typeof s !== 'object' || s.overdue_amount == null || s.due_amount == null) return null;
+  const total = Number(s.overdue_amount) + Number(s.due_amount);
+  return Number.isFinite(total) ? Math.round(total * 100) / 100 : null;
+}
+
+/**
+ * Second line under Net Profit. Net profit is cash basis, so a bill still owed is
+ * not in it — this line shows what is left once those bills are paid.
+ *   undefined unpaid → '' (a cached payload from before this line existed)
+ *   null unpaid      → says the read failed — never prints "no unpaid bills"
+ */
+function unpaidBillsSub(netProfit, unpaid) {
+  if (unpaid === undefined || netProfit == null) return '';
+  if (unpaid === null) return 'unpaid bills: could not load — see Expenses';
+  if (unpaid === 0) return 'no unpaid bills';
+  return `${formatPrice(netProfit - unpaid)} after ${formatPrice(unpaid)} unpaid bills`;
+}
+
 // Format a margin as a percent. Every caller passes a PERCENT (e.g. 33.2). There used to be a
 // "fraction guard" here (|n| ≤ 1.5 → ×100); it cannot tell 0.33 from a real 0.33%, and live
 // 2026-10-07 it rendered a −1.39% net margin as −139.0% (ERR-310). A near-breakeven margin
@@ -2329,16 +2360,10 @@ function renderKpiStrip(d) {
       raw: netProfit, prev: prev.net_profit,
       alert: netProfit != null && netProfit < 0, stackNext: true,
       gst: GST_EXCL,
-      // Supplier freight is a COMPONENT of net profit, not a peer KPI, so it
-      // rides here rather than taking a tenth grid cell (ERR-255). It is the
-      // reason the last 30 days went from +$446.58 to −$56.06, and a tile that
-      // shows the new number without the term that moved it invites the owner
-      // to go looking for a bug.
-      //
-      // `!= null` and not a truthiness test: a real $0 freight fortnight is a
-      // fact worth printing, and an ABSENT figure must print nothing at all
-      // rather than "after $0.00 supplier freight" (absence-as-zero, ERR-063).
-      sub: cur.supplier_freight != null ? `after ${formatPrice(cur.supplier_freight)} supplier freight` : '',
+      // No "after $X supplier freight" line (owner 2026-11-23, ERR-392): freight is one
+      // expense among several already inside net profit, and naming only it read as if
+      // the others were not. The tooltip still lists every deduction.
+      sub: unpaidBillsSub(netProfit, d.unpaidBills),
       // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
       // so GST is already outside this calculation rather than a line item inside it.
       // The Stripe-basis divergence is named on BOTH sides of it (ERR-255). An
@@ -2346,7 +2371,7 @@ function renderKpiStrip(d) {
       // roughly $0.47 per card order, and it is the backend's ÷1.15 against our
       // 2026-05-17 convention — not an error in either screen. Naming it only in
       // the modal would leave whoever starts from the Dashboard re-deriving it.
-      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer). KNOWN DIFFERENCE: this figure divides Stripe's 2.65% + $0.30 by 1.15; an order's own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower. Settled by reading a real Stripe payout, not by changing either screen.${netNote}`,
+      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer). KNOWN DIFFERENCE: this figure divides Stripe's 2.65% + $0.30 by 1.15; an order's own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower. Settled by reading a real Stripe payout, not by changing either screen. Operating expenses count only once marked PAID; the second line takes off bills still owed (overdue + due on the Expenses page, all dates, at the amount you will pay incl. GST — the GST part is reclaimable, so the true figure sits slightly higher).${netNote}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,

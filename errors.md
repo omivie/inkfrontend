@@ -40,6 +40,31 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-392 — Dashboard Net Profit: second line shows profit after unpaid bills (owner 2026-11-23) — SHIPPED (frontend)
+
+**Ask.** Owner, screenshot of `/admin#dashboard?period=all` (Net Profit −$2,957.43 "after $2,168.77 supplier freight"): is this profit counting every invoice and NOT yet taking off what we still owe? It should sit above the final profit after everything is paid.
+
+**Answer (from the code, not measured live).** Partly. Every invoice counts as revenue, paid or not (ERR-387). Cost of goods and supplier freight come off per sale, whether or not the supplier has been paid. Operating expenses come off only once marked PAID (cash basis, `utils/expense-math.js` rule 3). So bills still owed are the part not taken off.
+
+**Fix.** `pages/dashboard.js`: fetch slot 14 = `AdminAPI.expenses.summary({from,to})`; `unpaidBillsOf` = server `overdue_amount + due_amount` (the Expenses page's Unpaid figure: global, not range-scoped, gross incl. GST; null when either is missing); `unpaidBillsSub` prints "<net − unpaid> after <unpaid> unpaid bills" as a second sub line on the Net Profit tile. A failed read prints "unpaid bills: could not load — see Expenses", never "no unpaid bills"; an old cached payload (no key) prints nothing. Tooltip says the line is gross, so the true figure is slightly higher once GST on those bills is reclaimed. `admin/app.js` `APP_VERSION` bumped.
+
+**Follow-up, same day (owner).** "We shouldn't need to state that profit is with supplier freight included — any expense should be taken from the total profit." The "after $X supplier freight" sub line (ERR-255) is removed from the Net Profit tile. Freight is still deducted inside net profit (backend), and the tooltip still lists every deduction; only the line naming that one expense is gone.
+
+**Guard.** `tests/dashboard-unpaid-bills-nov2026.test.js` (sum, half-present ⇒ null, line wording, wiring, no freight sub line).
+
+**Verified.** New test 4/4. Full suite 7393 pass / 1 fail — the fail is `.playwright-mcp/ debug directory must not exist` (a stray directory in the working tree, not this change). Not checked live in a browser (owner-login dashboard).
+
+## ERR-391 — Admin "For Use In": a save that landed reported "the server accepted it but read back something different" (owner 2026-11-23) — FIXED (frontend)
+
+**Symptom.** Owner edited 81001.01 in the new editable preview (ERR-390), typed one letter, pressed Save list: yellow "the server accepted it but read back something different — check the list below before editing it again."
+
+**Root cause.** False alarm in the dirty/verify comparison, not a failed save. The live public read of 81001.01 holds the edit ("aABC"). The backend sanitiser stores `&nbsp;` as the raw U+00A0 character (live list: 80 raw U+00A0, zero `&nbsp;`). The editor sends `&nbsp;` (innerHTML always serialises U+00A0 that way, and the old stored copy the textarea was seeded from also had `&nbsp;`). `normaliseForUseIn` forgave only `<br/>` style and whitespace, so every save of a list with a non-breaking space read back "different". This was not new with ERR-390: the textarea-only Save hit the same path on any list containing `&nbsp;`.
+
+**Fix.** `normaliseForUseIn` decodes `&nbsp;` / `&#160;` / `&#xa0;` to U+00A0 before collapsing whitespace — a measured transform, named in the function's doc. A dropped space or tag is still a difference (test).
+
+**Measured.** Live 81001.01 list vs the same list with U+00A0 written as `&nbsp;`: `forUseInChanged` = true at HEAD (the false alarm), false with the fix. `tests/for-use-in-write-sep2026.test.js` §3 pins both directions.
+
+---
 ## ERR-390 — Admin "For Use In": the Preview is now editable, with Bold / Italic / Underline / Clear buttons (owner 2026-11-22) — SHIPPED (frontend)
 
 **Ask.** Editing the machine list meant typing raw HTML in the Source box; the owner wanted to edit in the Preview and have formatting buttons.

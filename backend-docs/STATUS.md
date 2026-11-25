@@ -7,6 +7,17 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 
 ## `outbox/` — the ONE outgoing file
 
+**2026-11-24:** `outbox/backend-asks-2026-11-24.md` — NOT sent yet.
+
+| § | Ask | Written | Status (2026-11-24) |
+|---|---|---|---|
+| 1 | 8 Brother split-black KCMY value packs (LC137XL/LC139XL + LC135, LC237XL/LC239XL + LC235XL), genuine + compatible; tag colour code AND black code in `series_codes` so they list under the CMY set (owner) | 2026-11-24 | open |
+| 2 | HP split-black KCMY packs: compatible 932/933; genuine + compatible 934/935 and 950/951 (970/971 + 647A/648A noted, not asked) | 2026-11-24 | open |
+| 3 | `CLC137BK` lists 7 printers, `GLC137XLBK` lists 4 (J6 models differ) — check against the maker | 2026-11-24 | open |
+| 4 | `C950XLBK` `series_codes` = `['950XL','951']` ⇒ should be `['950']` | 2026-11-24 | open |
+| 5 | Search: `q=LC139` puts the 2 LC139XL rows at 19–20 of 20 — rank exact series-code matches first | 2026-11-24 | open |
+| 6 | 50 rows: `compatible_printer_slugs` shorter than `compatible_printers_count` (HP 61/62/70/727/728/90) | 2026-11-24 | open |
+
 **2026-10-26:** `outbox/backend-asks-2026-10-26.md` — NOT sent yet. Opens with the measurement of the 25 Oct reply (43/43).
 
 | § | Ask | Written | Status (2026-10-26) |

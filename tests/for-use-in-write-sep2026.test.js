@@ -171,6 +171,11 @@ test('§1 the normaliser forgives ONLY the transforms it names', async () => {
   // Forgiven, because measured.
   assert.equal(forUseInChanged('<div>A<br>B</div>', '<div>A<br />B</div>'), false);
   assert.equal(forUseInChanged('<div>A</div>', '  <div>A</div>  '), false);
+  // ERR-391: the sanitiser stores `&nbsp;` as raw U+00A0 — measured on 81001.01.
+  assert.equal(forUseInChanged('<div><strong>ABC&nbsp;</strong>1300</div>',
+    '<div><strong>ABC\u00a0</strong>1300</div>'), false, '&nbsp; vs stored U+00A0 is not an edit');
+  assert.equal(forUseInChanged('<div><strong>ABC&nbsp;</strong>1300</div>',
+    '<div><strong>ABC</strong>1300</div>'), true, 'a dropped space is still a difference');
   // NOT forgiven. A normaliser loose enough to hide these would hide real loss.
   assert.equal(forUseInChanged('<div><b>A</b></div>', '<div>A</div>'), true, 'a dropped tag is a difference');
   assert.equal(forUseInChanged('<div>A<br>B</div>', '<div>A</div>'), true, 'dropped text is a difference');
