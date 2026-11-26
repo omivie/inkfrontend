@@ -5,7 +5,8 @@
  * ── This module no longer decides anything about money (ERR-255) ────────────
  *
  * Until 2026-09-12 it did. It held the per-supplier terms (DSNZ always pays,
- * Augmento free at $100 ex-GST), a transcription of the courier ladder, and a
+ * Augmento free at $100 — ex-GST then; the owner restated it as $100 INCL GST on
+ * 2026-11-26, ERR-395, a backend change), a transcription of the courier ladder, and a
  * guard that dropped one consignment because `shipping_absorbed` was believed
  * to cover it. All of that is gone. The backend now computes the figure from
  * the owner's actual terms and publishes it per order, per consignment, with

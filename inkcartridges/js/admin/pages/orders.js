@@ -3139,14 +3139,24 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
       // figure without a second request.
       const lines = (b.supplierFreightConsignments || []).map((c) => {
         const why = freightReasonPhrase(c && c.reason);
-        const goods = Number(c && c.goods_cost_ex_gst);
-        const limit = Number(c && c.free_threshold_ex_gst);
-        const amt = Number(c && c.amount_incl_gst);
+        const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+        // The owner states the Augmento rule incl GST ("free at $100 incl GST", 2026-11-26), so the
+        // backend's incl-GST pair is shown when it sends one (outbox 2026-11-26 §6). Until then the
+        // ex-GST pair — the numbers the backend actually tested — is shown as it is. The FE never
+        // converts one into the other: this line explains the backend's decision, it doesn't remake it.
+        const goodsIncl = num(c && c.goods_cost_incl_gst);
+        const limitIncl = num(c && c.free_threshold_incl_gst);
+        const goods = num(c && c.goods_cost_ex_gst);
+        const limit = num(c && c.free_threshold_ex_gst);
+        const amt = num(c && c.amount_incl_gst);
+        const against = Number.isFinite(goodsIncl) && Number.isFinite(limitIncl)
+          ? ` (${formatPrice(goodsIncl)} incl GST against ${formatPrice(limitIncl)})`
+          : (Number.isFinite(goods) && Number.isFinite(limit)
+            ? ` (${formatPrice(goods)} ex-GST against ${formatPrice(limit)})` : '');
         return `• ${c && c.supplier ? c.supplier : 'unnamed supplier'}`
           + (Number.isFinite(amt) ? ` ${formatPrice(amt)}` : '')
           + (why ? ` — ${why}` : '')
-          + (Number.isFinite(goods) && Number.isFinite(limit)
-            ? ` (${formatPrice(goods)} ex-GST against ${formatPrice(limit)})` : '')
+          + against
           + (c && c.billed === false ? ' — not billed' : '');
       });
       // "urban, assumed" is worth flagging; "rural, from the stored courier

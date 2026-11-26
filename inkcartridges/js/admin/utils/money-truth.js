@@ -151,7 +151,7 @@ function windowFigures(w, flags) {
     const c = closeInputs(net, [
       { label: 'Gross profit (box above)', amount: gross, source: BACKEND },
       { label: 'Stripe card fees (excl. GST)', amount: mtCents(-stripe), source: BACKEND },
-      { label: 'Supplier freight we pay (Dynamic every order; Augmento under $100 ex GST of goods)', amount: mtCents(-freight), source: BACKEND },
+      { label: 'Supplier freight we pay (Dynamic on every order; Augmento only when our cost is under its free-shipping threshold)', amount: mtCents(-freight), source: BACKEND },
       { label: 'Operating expenses by bill date, paid or not (excl. GST; GST payments to IRD are not an expense)', amount: mtCents(-opex), source: BACKEND },
     ]);
     const notes = [costNote || costListMissing, freightNote].filter(Boolean).join(' ');

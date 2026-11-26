@@ -511,6 +511,37 @@ test('the shipped freight row renders the supplier, the amount and the rule that
   assert.match(html, /\$76\.00 ex-GST against \$100\.00/, 'the two numbers the rule fired on');
 });
 
+// ERR-395 (owner 2026-11-26): the Augmento rule is stated INCL GST ("free at $100 incl GST").
+// Once the backend sends the incl-GST pair the tooltip shows it; until then the ex-GST pair the
+// backend actually tested. The FE never converts one into the other or decides `billed` itself.
+test('ERR-395: the tooltip shows the incl-GST pair when the backend sends it', () => {
+  const env = ENVELOPE();
+  env.consignments[0] = { ...env.consignments[0], goods_cost_incl_gst: 87.4, free_threshold_incl_gst: 100 };
+  const b = computeProfitBreakdown(116.95, 76.00, {
+    customerPaidInclGst: 134.49, supplierFreight: supplierFreightForOrder(mkOrder({ supplier_freight: env })),
+  });
+  const html = renderFreightRow(b);
+  assert.match(html, /\$87\.40 incl GST against \$100\.00/, 'the rule in the owner\'s own terms');
+  assert.doesNotMatch(html, /ex-GST against/, 'one pair, not both');
+});
+
+test('ERR-395: without the incl-GST pair the backend\'s ex-GST pair stays, unconverted', () => {
+  const b = computeProfitBreakdown(116.95, 76.00, {
+    customerPaidInclGst: 134.49, supplierFreight: supplierFreightForOrder(mkOrder()),
+  });
+  assert.match(renderFreightRow(b), /\$76\.00 ex-GST against \$100\.00/);
+  // No FE threshold arithmetic: neither a ×1.15 conversion nor a comparison against a threshold.
+  assert.doesNotMatch(ordersSrc, /goods_cost_ex_gst\)?\s*\*\s*1\.15|free_threshold_(ex|incl)_gst\s*[<>]/);
+});
+
+test('ERR-395: the Products profit columns say they are before supplier freight', () => {
+  const productsSrc = fs.readFileSync(path.join(ADMIN, 'pages', 'products.js'), 'utf8');
+  assert.match(productsSrc, /const BEFORE_FREIGHT_TIP = 'Per unit at list price, before supplier freight\./);
+  assert.match(productsSrc, /key: 'profit_ex_gst', label: 'Profit \$', sortable: true, className: 'col-w-pct',\s*title: BEFORE_FREIGHT_TIP/);
+  assert.match(productsSrc, /key: 'margin_pct'[\s\S]{0,140}title: BEFORE_FREIGHT_TIP/);
+  assert.match(productsSrc, /Augmento when our cost is under \$100 incl GST/);
+});
+
 test('the row NEVER says "estimated" — that state no longer exists', () => {
   const b = computeProfitBreakdown(116.95, 76.00, {
     customerPaidInclGst: 134.49, supplierFreight: supplierFreightForOrder(mkOrder()),

@@ -191,11 +191,13 @@ function buildColumns() {
     cols.push({
       key: 'margin_pct', label: 'Margin %', sortable: true, className: 'col-w-pct',
       gst: GST_BASE,
+      title: BEFORE_FREIGHT_TIP,
       render: (r) => marginCell(r),
       align: 'right',
     });
     cols.push({
       key: 'profit_ex_gst', label: 'Profit $', sortable: true, className: 'col-w-pct',
+      title: BEFORE_FREIGHT_TIP,
       // Both paths are ex-GST: the backend's `profit_incl_fixed_ex_gst` and the
       // local computeProfitability() fallback, which divides retail by 1.15
       // before subtracting an ex-GST cost. The two differ by cents on the
@@ -291,6 +293,12 @@ function buildColumns() {
 // column sorts by the key that fills its cell — never by the stored gross
 // `margin_pct` / `profit_ex_gst`, which put a $4.50 Dymo label (net 3.8%)
 // among the ~10% rows. Rows with no cost or price sort last either way.
+// Why a product's Profit $ can be higher than an order's take-home for the same item (owner
+// 2026-11-26: CTN237CMY reads $41.54 here, order 2026112601 took home $14.86). This column is per
+// unit at list price; supplier freight is billed per ORDER by the backend and lands only there.
+const BEFORE_FREIGHT_TIP = 'Per unit at list price, before supplier freight. DSNZ bills freight on every order; '
+  + 'Augmento when our cost is under $100 incl GST. An order\'s own take-home is in its order view.';
+
 const NET_SORT_KEY = { margin_pct: 'net_margin_incl_fixed_pct', profit_ex_gst: 'profit_incl_fixed_ex_gst' };
 
 // ─── Margin % cell (read-only) ────────────────────────────────────────────────

@@ -510,6 +510,77 @@ async function main() {
     }
   }
 
+  // ── §7 THE OWNER'S THRESHOLD, IN THE OWNER'S TERMS (ERR-395, 2026-11-26) ───
+  //
+  // Owner: "if our supplier cost incl GST is under $100 we pay shipping, if it's
+  // $100 or more we don't. For our customer: if our price incl GST is under $100
+  // they pay shipping, $100 or above they don't."
+  //
+  // The backend's Augmento rule was "goods under $100 EX GST" until this was
+  // restated (outbox backend-asks-2026-11-26-dashboard-followup §6). This section
+  // checks the backend's `billed` verdict against the owner's rule on EVERY
+  // order, not the §1–§6 sample. It does not decide money: it only reports where
+  // the backend's own decision disagrees with the rule. Measured 2026-11-26 it
+  // names 8 orders ($109 incl GST) — red until the backend ships §6, then 0.
+  head('§7  Owner\'s rule: Augmento bills only when our cost incl GST is under $100; customers ship free at $100+ incl GST');
+  const incl = (ex) => Math.round(Number(ex) * 115) / 100;
+  const formatMoney = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : `$${Number(v).toFixed(2)}`);
+  // ONE predicate, used on live data and on the negative control below.
+  const augmentoDisagrees = (c) => {
+    if (!c || !/augmento/i.test(String(c.supplier || '')) || c.unpriced) return false;
+    const goods = Number(c.goods_cost_ex_gst);
+    if (!Number.isFinite(goods)) return false;   // no goods cost ⇒ §6 reports it; no verdict to grade
+    const under = incl(goods) < 100;
+    return c.billed === true ? !under : (c.billed === false ? under : false);
+  };
+  // Negative control: today's order 2026112601 shape must be flagged by the same predicate.
+  if (!augmentoDisagrees({ supplier: 'Augmento', billed: true, goods_cost_ex_gst: 96, unpriced: false })
+      || augmentoDisagrees({ supplier: 'Augmento', billed: true, goods_cost_ex_gst: 80, unpriced: false })) {
+    bad('§7 negative control', 'the threshold predicate does not separate $110.40 incl (free) from $92.00 incl (billed) — the check is not checking');
+  }
+  const allRows = [];
+  for (let page = 1; page <= 20; page++) {
+    const r = await fetchWithRetry(`${BASE}/api/admin/orders?limit=100&page=${page}`, { headers: H });
+    const j = await r.json();
+    const got = Array.isArray(j?.data) ? j.data : (j?.data?.orders || []);
+    allRows.push(...got);
+    if (got.length < 100) break;
+  }
+  const counted = allRows.filter((o) => String(o.status || '').toLowerCase() !== 'cancelled' && !o.is_test_order);
+  if (!counted.length) {
+    degraded('owner threshold check', 'the paged orders list returned nothing — §7 did NOT run.');
+  } else {
+    const off = [];
+    let augmentoSeen = 0;
+    for (const o of counted) {
+      for (const c of (o.supplier_freight?.consignments || [])) {
+        if (/augmento/i.test(String(c?.supplier || ''))) augmentoSeen++;
+        if (augmentoDisagrees(c)) {
+          off.push(`${o.order_number}: Augmento ${c.billed ? 'BILLED' : 'not billed'} ${formatMoney(c.amount_incl_gst)} on goods $${incl(c.goods_cost_ex_gst).toFixed(2)} incl GST`);
+        }
+      }
+    }
+    if (off.length) {
+      bad(`${off.length} of ${augmentoSeen} Augmento consignments disagree with "billed only under $100 incl GST"`,
+        `Pending backend change (outbox backend-asks-2026-11-26-dashboard-followup §6):\n  ${off.join('\n  ')}`);
+    } else {
+      ok(`${augmentoSeen} Augmento consignments over ${counted.length} orders all follow "billed only under $100 incl GST"`);
+    }
+    // Customer side: free shipping exactly when the goods come to $100+ incl GST (before discount).
+    const web = counted.filter((o) => o.channel !== 'invoice');
+    const custOff = web.filter((o) => {
+      const sub = Number(o.subtotal);
+      if (!Number.isFinite(sub)) return false;
+      const free = o.shipping_tier === 'free' || Number(o.shipping_cost ?? o.shipping_fee ?? 0) === 0;
+      return free !== (incl(sub) >= 100);
+    }).map((o) => `${o.order_number}: goods $${incl(o.subtotal).toFixed(2)} incl GST, shipping ${formatMoney(o.shipping_cost ?? o.shipping_fee)} (${o.shipping_tier || 'no tier'})`);
+    if (custOff.length) {
+      bad(`${custOff.length} of ${web.length} web orders break "customer ships free at $100+ incl GST"`, custOff.slice(0, 15).join('\n  '));
+    } else {
+      ok(`${web.length} of ${web.length} web orders: shipping free exactly when the goods come to $100+ incl GST`);
+    }
+  }
+
   // ── verdict ───────────────────────────────────────────────────────────────
   head('Result');
   const degradedNotes = notes.filter((n) => n.startsWith('DEGRADED: '));

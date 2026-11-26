@@ -40,6 +40,21 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-395 — Order took home $14.86, Products page said $41.54: Augmento's free-shipping threshold was ex GST, owner says incl GST (owner 2026-11-26) — FE SHIPPED, backend asked
+
+**Ask.** Owner: order 2026112601 made $14.86 but the CTN237CMY row on Products says $41.54; the order view shows us paying shipping, "however, augmento's shipping is free to both us and our customer $100 or over".
+
+**Measured (live, GET only).** The whole gap is supplier freight. `supplier_freight` billed **Augmento $30.00** (6 kg, south-island rural, `goods_under_free_threshold`, `free_threshold_ex_gst: 100`) because our cost was **$96.00 ex GST = $110.40 incl GST**. $41.54 (Products: per unit at list price, Stripe ÷ 1.15) − $26.09 freight ex GST − ≈$0.60 Stripe-basis difference (ERR-255) ≈ $14.86. Without the freight, take-home = 162.79 − 110.40 − 5.31 − 6.14 GST to IRD = **$40.94**.
+
+**Root cause.** Not a code bug. The rule the backend implements is the one recorded on 2026-09-09 ("Augmento bills when goods cost under $100 EXCL GST"). The owner has now restated it: "if our supplier cost incl GST is under $100 we pay shipping, if it's $100 or more we don't; for our customer, if our price incl GST is under $100 they pay shipping, $100 or above they don't". Over all 313 orders, **8 Augmento consignments flip to free ($109 incl GST)**; 45 stay billed (customer shipped free at $100+, our cost under $100 incl, ≈$441 — the owner was unsure whether Augmento charged those and chose this rule). The customer half already holds on **246 of 246** web orders (free ⇔ goods incl GST ≥ $100, before discount).
+
+**Fix.**
+- Backend (owns the figure, ERR-255): `backend-docs/outbox/backend-asks-2026-11-26-dashboard-followup.md` §6. Threshold → $100 incl GST; recompute history; add `goods_cost_incl_gst` + `free_threshold_incl_gst` per consignment.
+- FE: the order-view freight tooltip prints the incl-GST pair when sent, else the backend's ex-GST pair, never converting. The Dashboard net-profit freight label no longer restates a figure. Products "Profit $" / "Margin %" headers say "per unit at list price, before supplier freight". `APP_VERSION` + `app.js?v=` bumped.
+
+**Guard.** `npm run probe:supplier-freight` §7 (READ-ONLY, every order, with a negative control): names every Augmento consignment whose `billed` disagrees with "under $100 incl GST", plus the customer-side rule. Today it is **red on exactly the 8 orders** (pending backend §6) and 246/246 on the customer side; it must read 0 once the backend ships. `tests/supplier-freight-sep2026.test.js` (+3), `tests/money-truth-nov2026.test.js` (+1). Full suite 7,421 / 0 fail.
+
+---
 ## ERR-394 — Backend shipped the 25 Nov dashboard asks: ONE Dashboard on `dashboard-summary`, every FE money adjustment deleted (owner 2026-11-26) — SHIPPED (frontend)
 
 **Trigger.** The backend answered `backend-asks-2026-11-25-dashboard` §1–6 in one deploy (migrations 218–220; reply filed as `backend-docs/inbox/backend-asks-2026-11-25-dashboard-backend-response.md`). Owner: verify it, implement everything, and keep ONE Dashboard: "use the new one but design it to be like the old one … the smaller cards at the top and the information below … just change all the endpoints, connections and data." Net Profit second line: "show what's still unpaid".

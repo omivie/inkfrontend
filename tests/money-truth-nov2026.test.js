@@ -148,6 +148,16 @@ test('no payload ⇒ no figures and a reason — never a $0', () => {
   assert.equal(m.figures.grossMargin.value, null);
 });
 
+test('ERR-395: the freight row names no threshold figure, so it cannot go stale again', () => {
+  // The rule moved from "$100 ex GST" to "$100 incl GST" (owner 2026-11-26) and the old label
+  // stated the ex-GST one. The backend decides; the label only says a threshold exists.
+  const { figures: f } = M.dashboardMoney(norm(F.dsum_oct));
+  const freight = f.netProfit.inputs.find((i) => /Supplier freight/.test(i.label));
+  assert.ok(freight);
+  assert.match(freight.label, /Augmento only when our cost is under its free-shipping threshold/);
+  assert.doesNotMatch(freight.label, /\$100|ex GST of goods/);
+});
+
 test('margins are profit ÷ ex-GST revenue from the same payload', () => {
   const { figures: f } = M.dashboardMoney(norm(F.dsum_oct));
   assert.equal(Math.round(f.grossMargin.value * 100) / 100, Math.round((1413.32 / 5110.57) * 10000) / 100);
