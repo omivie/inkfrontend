@@ -10,7 +10,7 @@ All times UTC, 2026-11-26. No deploy was made inside 13:55–15:30.
 |---|---|
 | P0 crawler IP + secret, 429 ⇒ 503 | **LIVE** in production `eaa22f6e` (06:56). Secret set in Vercel (Production + Preview, Sensitive) by the owner before the deploy. |
 | P2 trailing slash 404 ⇒ 308 | **LIVE** (`trailingSlash: false`). |
-| P2 apex 307 ⇒ 308 | Vercel Domains setting (the 307 carries `x-vercel-id`, so it is Vercel, not a Cloudflare rule). Owner changing it in the dashboard; see row 5. |
+| P2 apex 307 ⇒ 308 | **LIVE.** It was a Vercel Domains setting (the 307 carried `x-vercel-id`). Now 308; see row 5. |
 | P1 FE-1…FE-4b | Applied on `seo-phase2-preview`, **tree matches** `4ef169c7`, tests fail 0, Vercel **Preview built**. Preview is behind Vercel Deployment Protection (see §P1). **Not merged.** The rebase onto main **conflicts in `middleware.js`** (one hunk; not resolved, as asked). |
 | Item 32 | Logo sizes + WebP, cart/order thumbnails, staggered list fade removed: **LIVE**. pages.css split: **still declined by the owner**. PDP hero `width`/`height`: **not done, measured regression**. |
 
@@ -60,7 +60,7 @@ Before the fix you measured 30 × `200 true` then 10 × `200 -`. Now no bot gets
 - `/shop/?brand=hp` → `308 /shop?brand=hp` (query kept)
 - `/ink-cartridges`, `/shop?brand=hp` and `/products/x/GLC233BK` still answer 200.
 
-**Row 5** (apex): still `307` at 07:01. The owner is switching the Vercel Domains redirect for `inkcartridges.co.nz` to 308. `probe:seo-nov26` row 5 checks it, and the query is kept.
+**Row 5** (apex): **PASS** after the owner set `redirectStatusCode: 308` on the Vercel domain (the target is unchanged). `https://inkcartridges.co.nz/ink-cartridges?x=1` now answers `308` with location `https://www.inkcartridges.co.nz/ink-cartridges?x=1`. `/` and a printer URL with two parameters also answer `308` with the path and query kept, and www answers 200.
 
 **Row 6** (unknown printer/product): `200`, no `x-robots-tag`, for bot and browser, as expected. FE-2 is in P1 Stage A, which is not in production.
 
