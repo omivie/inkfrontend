@@ -17,6 +17,7 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 | 4 | Σ daily `net_profit` −1,890.77 vs total −1,890.79 (per-bucket rounding; optional) | 2026-11-26 | open; probe allows ½¢/bucket |
 | 5 | `daily-revenue` refuses `days` > 365 (FE stopped asking for 372/750) | 2026-11-26 | info only |
 | 6 | Augmento free-shipping threshold → $100 INCL GST (owner 11-26); recompute history (8 orders, $109); add `goods_cost_incl_gst`/`free_threshold_incl_gst` | 2026-11-26 | open; `probe:supplier-freight` §7 names the 8 until shipped (ERR-395) |
+| 7 | Invoice lines with no product (INV-3275 "Freight & delivery") never reach the shadow order ⇒ cost unknown, Aug profit null/"at most"; copy them with their own cost | 2026-11-26 | open; INV-3275 cost set to $85.51 (pass-through) 11-26 (ERR-396) |
 
 **2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — SENT (owner deleted the file 2026-11-26) and **ANSWERED** by
 `inbox/backend-asks-2026-11-25-dashboard-backend-response.md` (all six sections shipped in one deploy, migrations 218–220).

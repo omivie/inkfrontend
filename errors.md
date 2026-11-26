@@ -40,6 +40,19 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-396 — "Profit is AT MOST … INV-3275 has no cost of goods recorded": a freight-only invoice line the backend can't see (owner 2026-11-26) — DATA FIXED, backend asked
+
+**Ask.** Owner: check the Dashboard warning "Profit is AT MOST the figure shown: INV-3275 has no cost of goods recorded", then "why can't the backend see this?", then "do whatever is necessary — the customer had to pay extra shipping so we charged them for more shipping".
+
+**Measured (live, GET only).** INV-3275 (28 Aug, Michael Wright, $98.34 incl GST, paid) has one line, "Freight & delivery" $85.51 ex GST, **no product code**, "Our Cost" $0 (manual). Its shadow order has **0 items**, `cost_complete:false`. Profit is built from orders + order items, never invoice lines, and the backend's rule is that a non-web sale with no lines has unknown cost (reply 2026-11-25 §2). The line's cost existed only where profit never looks.
+
+**Fix.**
+- Data (owner-authorised, via the admin invoice editor): the line's "Our Cost" set to **$85.51**, a pass-through. Read back: `supplier_cost_excl_gst` 85.51, invoice profit $0.00, total/status/email count unchanged. The invoice now carries its true cost. Before, August profit counted the $85.51 as pure profit.
+- Backend: outbox 2026-11-26 §7. Copy product-less invoice lines into the shadow order with their own cost. Until it ships, the shadow order stays at 0 items, so the AT MOST warning and kpi/pnl's null August profit remain.
+
+**Lesson.** "No cost recorded" can mean "no LINE recorded". An invoice line without a product never becomes an order item, so nothing typed into it reaches any profit figure.
+
+---
 ## ERR-395 — Order took home $14.86, Products page said $41.54: Augmento's free-shipping threshold was ex GST, owner says incl GST (owner 2026-11-26) — FE SHIPPED, backend asked
 
 **Ask.** Owner: order 2026112601 made $14.86 but the CTN237CMY row on Products says $41.54; the order view shows us paying shipping, "however, augmento's shipping is free to both us and our customer $100 or over".
