@@ -8,7 +8,7 @@ All times UTC, 2026-11-26. No deploy was made inside 13:55–15:30.
 
 | Item | State |
 |---|---|
-| P0 crawler IP + secret, 429 ⇒ 503 | **LIVE** in production `eaa22f6e` (06:56). Secret set in Vercel (Production + Preview, Sensitive) by the owner before the deploy. |
+| P0 crawler IP + secret, 429 ⇒ 503 | **LIVE** in production `eaa22f6e` (06:56). Secret set in Vercel (Production + Preview, Sensitive). **The match with Render is proved** (row 3 and the 25 = 30 − 5 test). |
 | P2 trailing slash 404 ⇒ 308 | **LIVE** (`trailingSlash: false`). |
 | P2 apex 307 ⇒ 308 | **LIVE.** It was a Vercel Domains setting (the 307 carried `x-vercel-id`). Now 308; see row 5. |
 | P1 FE-1…FE-4b | Applied on `seo-phase2-preview`, **tree matches** `4ef169c7`, tests fail 0, Vercel **Preview built**. Preview is behind Vercel Deployment Protection (see §P1). **Not merged.** The rebase onto main **conflicts in `middleware.js`** (one hunk; not resolved, as asked). |
@@ -52,7 +52,9 @@ Before the fix you measured 30 × `200 true` then 10 × `200 -`. Now no bot gets
 **Row 2** (second network straight after): **owner action.** It needs a second network, such as a phone hotspot. Command:
 `node scripts/probe-seo-nov26.mjs --burst 40 --offset 40`. Pass = it starts again at `200 true`.
 
-**Row 3** (backend alone, 35 TEST-NET IPs with the secret): PENDING. The owner runs `PRERENDER_PROXY_SECRET="$(pbpaste)" node scripts/probe-seo-nov26.mjs --backend-limit` (the secret is read from the clipboard and never printed). Pass = 35 × 200.
+**Row 3** (backend alone, 35 TEST-NET IPs with the secret, 07:27): `{"200":35}`. **PASS.** The owner ran it with the secret from the clipboard; it was never printed. A first run at 07:25 with the wrong clipboard contents (86 characters, not the 64-hex value) gave 26 × 200 then 9 × 429. That is what a rejected secret looks like: the requests were keyed on the owner's own IP, and 26 = 30 − 4 earlier requests.
+
+**Vercel's value = Render's value, proved end to end (07:29–07:30).** Steps: wait 65 s; send 5 Googlebot requests through www (all `200 forwarded`); then send direct backend requests from the same machine with no secret until the first 429. Result: **25** answered 200. That is 30 − 5, so the 5 www requests were counted against this machine's IP. That only happens when the backend accepts the secret Vercel sends. Had the values differed, they would have landed in Vercel's shared bucket and the run would have stopped at 30.
 
 **Row 4** (trailing slash, 06:57): PASS.
 - `/ink-cartridges/` → `308 /ink-cartridges`
@@ -164,4 +166,3 @@ The runs varied: series LCP was 11.60 / 7.91 / 7.92 s and GLC233BK 14.46 / 8.31 
 ## What we need from you
 1. Confirm the conflict resolution above, or send a re-based 0002.
 2. Decide FE-1 and the limiter: the `api.inkcartridges.co.nz` human fetch.
-3. Row 3 result from your side, if the owner can't run it.
