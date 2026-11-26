@@ -28,7 +28,7 @@ import {
   setEffectiveGranularity,
 } from '../utils/dash-charts.js';
 import {
-  LOW_MARGIN_PCT, ZERO_SEARCH_MIN, outOfStockCount,
+  LOW_MARGIN_PCT, ZERO_SEARCH_MIN,
   computeTrackingAlert, computeZeroSearchAlert, computeLowMarginAlert, alertCard, wireAlertToggles,
 } from '../utils/dash-alerts.js';
 import {
@@ -249,16 +249,16 @@ async function runDashboardLoad(mySeq) {
   // The bundle needs a real grain; the 'all' bar width is FE-only (cumulative plot).
   const g = resolveGranularity();
   const dsumGrain = ['day', 'week', 'month'].includes(g) ? g : 'month';
-  // 18 requests, none of them per-order (the old "sales missing a cost" scan made ~120 GETs).
+  // 17 requests, none of them per-order (the old "sales missing a cost" scan made ~120 GETs).
   const promises = [
     AdminAPI.getDashboardBundle(rangeParams, g, signal),     // 0  all graph charts
     AdminAPI.getDashboardSummary(range, dsumGrain, signal),  // 1  money tiles + action lists (§6)
     AdminAPI.getCustomerStats(rangeParams, signal),          // 2  new / returning KPI
     AdminAPI.getRefundAnalytics(rangeParams, signal),        // 3  refund reasons + refund count
-    // 4  out-of-stock tile. NOT dashboard-summary's `out_of_stock` action: that counts every
-    // active product at stock 0 (813 on 2026-11-26) while this tile has always counted the
-    // genuine feed (608) — two definitions, so the tile keeps its own until the owner picks one.
-    AdminAPI.getOutOfStock({ limit: 5 }, signal),
+    // 4  invoice cost-over-price to-do. (This slot was the supplier-feed out-of-stock read, 608;
+    // the Out of Stock tile now uses dashboard-summary's shopper view, 813 — backend reply
+    // 2026-11-26 §3: "use 813 for a can't-be-bought to-do, 608 for a supplier view".)
+    AdminAPI.listInvoices({}, 1, 100),
     AdminAPI.getOrders({ from, to }, 1, 8, signal),          // 5  recent orders table
     AdminAPI.getBestSellers(rangeParams, signal),            // 6  most-bought card
     AdminAPI.getTrackingRequests({ status: 'pending' }, signal), // 7  customer tracking requests
@@ -273,7 +273,6 @@ async function runDashboardLoad(mySeq) {
     // every filter it appears to accept is a decoy. The card says so on its face.
     AdminAPI.getConversionFunnel(signal),
     AdminAPI.getRefunds({}, 1, 100),                         // 13 pending refunds to-do
-    AdminAPI.listInvoices({}, 1, 100),                       // 14 invoice cost-over-price to-do
   ];
 
   const results = await Promise.allSettled(promises);
@@ -330,7 +329,7 @@ async function runDashboardLoad(mySeq) {
     // The Performance overview's drift guard compares the net-profit series with the backend's
     // own total; dashboard-summary's `current` is that total (same field names as kpi-summary).
     kpis: dsum ? { current: dsum.current, previous: dsum.previous } : null,
-    custStats: val(2), refunds: val(3), outOfStock: val(4),
+    custStats: val(2), refunds: val(3),
     recentOrders: val(5), topProducts: val(6),
     funnel: val(12),
     trackingReq: val(7),
@@ -345,7 +344,7 @@ async function runDashboardLoad(mySeq) {
     // the expense to-dos then say "could not load", and the chart drops its expense lines.
     expenseRows,
     refundRows: wholeList(val(13), ['refunds', 'data', 'items']),
-    invoiceRows: wholeList(val(14), ['invoices', 'data', 'items']),
+    invoiceRows: wholeList(val(4), ['invoices', 'data', 'items']),
     // Daily traffic rows for the Performance overview overlay; [] when the fetch failed or the
     // range has no data → both traffic lines omit and the card notes it (never a misleading zero).
     sTraffic: normalizeSeries(val(11)),
@@ -560,12 +559,15 @@ function renderKpiStrip(d) {
   const cc = d.custStats?.current ?? {};
   const cp = d.custStats?.previous ?? {};
   const noDelta = FilterState.get('period') === 'all';   // all-time → deltas are meaningless
-  const oosCount = outOfStockCount(d.outOfStock);
+  // What a shopper sees as out of stock — active, stock 0, packs included (dashboard-summary
+  // `actions.out_of_stock`, backend reply 2026-11-26 §3). null = that list was unavailable.
+  const oosCount = d.dsum?.actions?.out_of_stock?.count ?? null;
   const newCustomers = cc.new_customers ?? cc.new ?? null;
   const newCustomersPrev = cp.new_customers ?? cp.new ?? null;
   // Processed refunds in range (refunds-series, dated on refunded_at) ÷ the orders the money
-  // counts. kpi-summary's `refund_rate` is NOT used: it read 1.9% for October 2026 with no
-  // refund processed that month (2026-11-26) — a different definition from the money above.
+  // counts. Since 2026-11-26 (backend §2) kpi-summary's `refund_rate` uses this same definition
+  // (October 0.0, 26 Oct–25 Nov 1.9 — measured equal); this page reads it from the two lists it
+  // already has rather than paying for a kpi-summary call.
   const refundPct = f ? refundRatePct(d.refunds, f.orders.value) : null;
   const unpaid = f ? unpaidBillsInRange(d.expenseRows, d.range, d.dsum.current.operating_expenses) : null;
   const why = (fig) => fig?.note || 'Not available for this range.';
@@ -613,7 +615,8 @@ function renderKpiStrip(d) {
     { label: 'Owed to us', how: 'owed', value: money(f.owed.value), raw: f.owed.value, prev: undefined, gst: GST_INCL,
       alert: f.owed.value != null && f.owed.value > 0, tooltip: f.owed.note },
     { label: 'Out of Stock', value: oosCount != null ? String(oosCount) : null, prev: undefined,
-      alert: oosCount > 0, tooltip: 'Genuine products the supplier feed shows at zero stock.' },
+      alert: oosCount > 0, missingWhy: 'The out-of-stock list could not load — this is not a zero.',
+      tooltip: 'Products a shopper sees as out of stock right now (active, stock 0), including packs whose parts are out. The supplier-feed view (genuine feed stock ≤ 0) is on Margins → Out of stock.' },
   ] : [];
 
   if (!f) {

@@ -476,12 +476,19 @@ function ensurePnl() {
 
 function ensureDailyRevenue() {
   if (!_dailyRevenuePromise) {
-    // The backend refuses days > 365 (VALIDATION_FAILED, measured 2026-11-26); asking for more
-    // returned nothing, which the chart drew as a flat $0 revenue line. Cap it, and the chart
-    // says when its range runs past what came back.
-    const days = Math.max(31, Math.min(FilterState.rangeDays(), 365));
-    _dailyRevenuePromise = AdminAPI.getAdminAnalyticsDailyRevenue(days)
-      .then(p => { _dailyRevenue = p; return p; })
+    // Daily revenue for the page's own NZ date range, from revenue-series (date_from/date_to, no
+    // day cap). It replaced daily-revenue?days=N, which refuses more than 365 days (backend reply
+    // 2026-11-26 §5). Since migration 221 each day's `revenue` is AFTER processed refunds (on their
+    // refund day) — the same figure as the P&L — with `sales` and `refunds` beside it.
+    // Resolves to { daily: [{ date, revenue, sales, refunds, … }] }, or null when it failed
+    // (the chart then says "could not load", never draws a $0 line).
+    const { from, to } = FilterState.getDateRange();
+    _dailyRevenuePromise = AdminAPI.getRevenueSeries(new URLSearchParams({ from, to }))
+      .then(p => {
+        const rows = Array.isArray(p) ? p : (Array.isArray(p?.series) ? p.series : null);
+        _dailyRevenue = rows ? { daily: rows } : null;
+        return _dailyRevenue;
+      })
       .catch(e => { warn('ensureDailyRevenue', e); return null; });
   }
   return _dailyRevenuePromise;

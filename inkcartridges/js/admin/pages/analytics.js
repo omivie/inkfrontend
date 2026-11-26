@@ -212,10 +212,7 @@ async function renderTabContent() {
           ${kpiCard({ label: 'Rev Volatility',value: cur.volatility!= null ? formatPrice(cur.volatility): null, sub: '\u03C3 daily revenue' })}
         </div>
         <div class="admin-card admin-mb-lg">
-          <div class="admin-card__title">Revenue Series <small>${FilterState.get('period')} · sales before refunds</small></div>
-          <!-- Measured 2026-11-26: revenue-series still sums sales BEFORE refunds (6,491.60 for
-               26 Oct–25 Nov) while the Revenue tile above is after them (6,432.20). Named here so the
-               gap reads as a definition, not an error, until the backend aligns it (outbox 2026-11-26). -->
+          <div class="admin-card__title">Revenue Series <small>${FilterState.get('period')} · after refunds</small></div>
           <div class="admin-chart-box"><canvas id="chart-revenue-detail"></canvas></div>
         </div>
         <div class="admin-grid-2 admin-mb-lg">

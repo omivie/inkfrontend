@@ -521,16 +521,19 @@ async function main() {
   // checks the backend's `billed` verdict against the owner's rule on EVERY
   // order, not the §1–§6 sample. It does not decide money: it only reports where
   // the backend's own decision disagrees with the rule. Measured 2026-11-26 it
-  // names 8 orders ($109 incl GST) — red until the backend ships §6, then 0.
+  // named 8 orders ($109 incl GST); the backend shipped §6 (bc40b01, 2026-11-26) and it must read 0.
   head('§7  Owner\'s rule: Augmento bills only when our cost incl GST is under $100; customers ship free at $100+ incl GST');
   const incl = (ex) => Math.round(Number(ex) * 115) / 100;
   const formatMoney = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : `$${Number(v).toFixed(2)}`);
   // ONE predicate, used on live data and on the negative control below.
   const augmentoDisagrees = (c) => {
     if (!c || !/augmento/i.test(String(c.supplier || '')) || c.unpriced) return false;
-    const goods = Number(c.goods_cost_ex_gst);
-    if (!Number.isFinite(goods)) return false;   // no goods cost ⇒ §6 reports it; no verdict to grade
-    const under = incl(goods) < 100;
+    // The backend's own incl-GST figure when it sends one (since bc40b01), else ex × 1.15.
+    const goodsIncl = c.goods_cost_incl_gst != null && Number.isFinite(Number(c.goods_cost_incl_gst))
+      ? Number(c.goods_cost_incl_gst)
+      : (Number.isFinite(Number(c.goods_cost_ex_gst)) ? incl(c.goods_cost_ex_gst) : NaN);
+    if (!Number.isFinite(goodsIncl)) return false;   // no goods cost ⇒ §6 reports it; no verdict to grade
+    const under = goodsIncl < 100;
     return c.billed === true ? !under : (c.billed === false ? under : false);
   };
   // Negative control: today's order 2026112601 shape must be flagged by the same predicate.

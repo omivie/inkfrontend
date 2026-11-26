@@ -5552,12 +5552,8 @@ const AdminAPI = {
       return resp?.data ?? null;
     } catch (e) { adminApiWarn('analytics/forecast-history', e); return null; }
   },
-  async getAdminAnalyticsDailyRevenue(days = 365) {
-    try {
-      const resp = await window.API.get(`/api/admin/analytics/daily-revenue?days=${days}`);
-      return resp?.data ?? null;
-    } catch (e) { adminApiWarn('analytics/daily-revenue', e); return null; }
-  },
+  // (getAdminAnalyticsDailyRevenue — `daily-revenue?days=N`, max 365 — was deleted 2026-11-26:
+  // its last caller moved to getRevenueSeries, which takes a date range and has no day cap.)
   async getAdminAnalyticsExpenses(limit = 50) {
     try {
       const resp = await window.API.get(`/api/admin/analytics/expenses?limit=${limit}`);

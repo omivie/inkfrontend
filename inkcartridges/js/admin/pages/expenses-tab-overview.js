@@ -263,19 +263,13 @@ async function renderTrendChart(ctx, seq) {
   if (_chartMode === 'revenue') {
     // Honest comparison: expenses stay PAID/cash-basis here regardless of the
     // table basis; revenue is by ORDER date as charged — labelled mixed bases.
-    chartSubtitle(`expenses by paid date (GST-netted) · revenue by order date (as charged) — mixed bases · ${range.grain} buckets`);
+    chartSubtitle(`expenses by paid date (GST-netted) · revenue after refunds, incl. GST (orders by order date, refunds by refund date) — mixed bases · ${range.grain} buckets`);
     const [expBuckets, dailyRes] = [bucketExpenses(ctx.getState().occurrences, range.fromMs, range.toMs, range.grain), await ctx.ensureDailyRevenue()];
     if (seq !== _renderSeq || !_host?.querySelector('#exp-trend')) return;
     const daily = Array.isArray(dailyRes?.daily) ? dailyRes.daily : null;
-    // Fail-soft LOUD: no revenue series is "could not load", never a flat $0 line; and a range
-    // longer than the backend's 365-day window says where the revenue line stops.
+    // Fail-soft LOUD: no revenue series is "could not load", never a flat $0 line.
     if (!daily) {
       chartSubtitle(`expenses by paid date (GST-netted) · revenue could not load — not a zero · ${range.grain} buckets`);
-    } else {
-      const firstMs = Math.min(...daily.map(d => parseUtcDate(d.date)).filter(Number.isFinite));
-      if (Number.isFinite(firstMs) && firstMs > range.fromMs + 864e5) {
-        chartSubtitle(`expenses by paid date (GST-netted) · revenue by order date from ${new Date(firstMs).toISOString().slice(0, 10)} only (backend max 365 days) — mixed bases · ${range.grain} buckets`);
-      }
     }
     const revMap = new Map();
     for (const d of daily || []) {
@@ -291,7 +285,7 @@ async function renderTrendChart(ctx, seq) {
       labels: keys,
       datasets: [
         { label: 'Expenses (paid, GST-netted)', data: keys.map(k => expByKey.get(k) || 0), backgroundColor: colors.magenta, borderRadius: 4, yAxisID: 'y' },
-        ...(daily ? [{ label: 'Revenue (order date)', data: keys.map(k => revMap.get(k) || 0), type: 'line', borderColor: colors.cyan, backgroundColor: 'transparent', tension: 0.25, yAxisID: 'y1', pointRadius: 2 }] : []),
+        ...(daily ? [{ label: 'Revenue after refunds', data: keys.map(k => revMap.get(k) || 0), type: 'line', borderColor: colors.cyan, backgroundColor: 'transparent', tension: 0.25, yAxisID: 'y1', pointRadius: 2 }] : []),
       ],
       options: {
         plugins: {

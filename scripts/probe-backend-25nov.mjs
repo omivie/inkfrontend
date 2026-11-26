@@ -163,17 +163,16 @@ for (const [name, range, k, ds] of [['October', OCT, kO, dsOct], ['2026-10-26..2
     const np = ((b.net_profit_series || {}).series) || [];
     eq(`${name} Σ bundle revenue_series.revenue == kpi revenue`, sum(rev, 'revenue'), k.revenue);
     eq(`${name} Σ bundle gross_profit_series.gross_profit == kpi gross_profit`, sum(gp, 'gross_profit'), k.gross_profit);
-    // Each bucket's net profit is rounded to the cent on its own, so a sum of n buckets can
-    // drift from the total by up to ½¢ per bucket (measured 2026-11-26: October −1890.77 vs
-    // −1890.79 over 31 days). That bound is the tolerance — anything past it is a real gap.
-    eq(`${name} Σ bundle net_profit_series.net_profit == kpi net_profit (±½¢ per bucket rounding)`, sum(np, 'net_profit'), k.net_profit, { tol: round2(Math.max(0.01, 0.005 * np.length)) });
+    // Exact since backend bc40b01 (reply 2026-11-26 §4): the rounding remainder is carried into the
+    // last bucket. Before it, October's 31 daily buckets summed to −1890.77 vs −1890.79.
+    eq(`${name} Σ bundle net_profit_series.net_profit == kpi net_profit, exact`, sum(np, 'net_profit'), k.net_profit);
     const opex = sum(np, 'operating_expenses');
-    eq(`${name} Σ bundle net_profit_series.operating_expenses == kpi operating_expenses (±0.01 rounding)`, opex, k.operating_expenses, { tol: 0.01 });
+    eq(`${name} Σ bundle net_profit_series.operating_expenses == kpi operating_expenses, exact`, opex, k.operating_expenses);
     if (opex !== k.operating_expenses) info(`${name} opex rounding drift ${round2(opex - k.operating_expenses)}`);
     const s = ds.series || [];
     eq(`${name} Σ dashboard-summary series.revenue == its current.revenue_incl_gst`, sum(s, 'revenue'), ds.current.revenue_incl_gst);
     eq(`${name} Σ dashboard-summary series.gross_profit == its current.gross_profit`, sum(s, 'gross_profit'), ds.current.gross_profit);
-    eq(`${name} Σ dashboard-summary series.net_profit == its current.net_profit (±½¢ per bucket rounding)`, sum(s, 'net_profit'), ds.current.net_profit, { tol: round2(Math.max(0.01, 0.005 * s.length)) });
+    eq(`${name} Σ dashboard-summary series.net_profit == its current.net_profit, exact`, sum(s, 'net_profit'), ds.current.net_profit);
 }
 
 // ── C. identities ────────────────────────────────────────────────────────────

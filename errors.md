@@ -40,6 +40,28 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-397 — Backend shipped the 26 Nov follow-up (bc40b01, migration 221): Augmento $100 incl GST live, revenue-series net of refunds, exact buckets — FE caught up (owner 2026-11-26) — SHIPPED (frontend); §7 resent
+
+**Trigger.** Backend reply `inbox/backend-asks-2026-11-26-dashboard-followup-backend-response.md` to §1–§6. Owner: verify and implement everything needed.
+
+**Measured live (GET only, owner login).**
+- §6: order 2026112601's Augmento consignment is `billed:false`, `goods_cost_incl_gst` 110.40, `free_threshold_incl_gst` 100, `free_threshold_ex_gst` 86.96. Take-home **$40.95** in the order view and Orders list (was $14.86). `probe:supplier-freight` §7: **194 of 194** Augmento consignments follow the rule; customer rule 246/246.
+- §1: revenue-series Σ revenue = kpi (6,432.20 / 5,877.15), with `sales`/`refunds` per day.
+- §2: kpi `refund_rate` October 0.0, 26 Oct–25 Nov 1.9.
+- §4: Σ daily buckets = totals exactly (October net now −1,878.61; it was −1,890.79 before the $14 of Augmento freight came off).
+- `probe:backend-26nov` **26/27**. The 1 FAIL is §7, deliberately.
+- **§7 (INV-3275's product-less line) is not in the reply.** The shadow order still has 0 items, so it was resent as the only section left in the outbox file.
+
+**FE changes.**
+- Dashboard Out of Stock tile = dashboard-summary `actions.out_of_stock` (**813**, what a shopper can't buy, packs included), per the backend's §3 recommendation. The supplier-feed read (608) left the Dashboard (Margins → Out of stock keeps it). The invoice list took over that promise slot, so no index shifted.
+- Expenses "vs Revenue" reads **revenue-series for the page's own date range** (no 365-day cap), labelled "Revenue after refunds". `getAdminAnalyticsDailyRevenue` (daily-revenue, max 365) deleted. All-time chart verified month by month against revenue-series = kpi (40,814.43).
+- Analytics → Revenue chart: "after refunds" (the "sales before refunds" label and note are gone).
+- Refund Rate comment: kpi now uses the same definition (no second call needed).
+- Probes: `probe:supplier-freight` §7 prefers the backend's `goods_cost_incl_gst`; `probe:backend-25nov` bucket sums back to exact; new `probe:backend-26nov` (READ-ONLY, negative control).
+
+**Guard.** `tests/backend-reply-26nov.test.js` (6). Full suite green. Two stray Finder `.DS_Store` files (untracked) tripped `no-ghost-files` and were removed.
+
+---
 ## ERR-396 — "Profit is AT MOST … INV-3275 has no cost of goods recorded": a freight-only invoice line the backend can't see (owner 2026-11-26) — DATA FIXED, backend asked
 
 **Ask.** Owner: check the Dashboard warning "Profit is AT MOST the figure shown: INV-3275 has no cost of goods recorded", then "why can't the backend see this?", then "do whatever is necessary — the customer had to pay extra shipping so we charged them for more shipping".

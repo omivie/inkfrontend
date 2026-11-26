@@ -7,17 +7,20 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 
 ## `outbox/` — the ONE outgoing file
 
-**2026-11-26:** `outbox/backend-asks-2026-11-26-dashboard-followup.md` — NOT sent yet. Follow-ups found while verifying the 25 Nov reply (ERR-394).
+**2026-11-26:** `outbox/backend-asks-2026-11-26-dashboard-followup.md` — §1–§6 **ANSWERED** by
+`inbox/backend-asks-2026-11-26-dashboard-followup-backend-response.md` (`bc40b01`, migration 221) and deleted from the file;
+measured 2026-11-26 by `npm run probe:backend-26nov` (26/27 — the 1 FAIL is §7) and `probe:supplier-freight` (all green).
+FE side ERR-397. **§7 was not in the reply** (added late 11-26, possibly after their copy) — the file now holds only §7, NOT sent yet.
 
 | § | Ask | Written | Status (2026-11-26) |
 |---|---|---|---|
-| 1 | `revenue-series` still gross of refunds (6,491.60 vs kpi 6,432.20 for 26 Oct–25 Nov); FE labels the chart "sales before refunds" | 2026-11-26 | open |
-| 2 | kpi `refund_rate` 1.9 for an October with no processed refund — say what it counts | 2026-11-26 | open; Dashboard tile uses processed refunds ÷ orders |
-| 3 | `out_of_stock` 813 vs `margin/out-of-stock` 608; `under_margin_floor` (rule floor, 4,125) ≠ FE low-margin (<10% net) | 2026-11-26 | open; FE keeps its own sources |
-| 4 | Σ daily `net_profit` −1,890.77 vs total −1,890.79 (per-bucket rounding; optional) | 2026-11-26 | open; probe allows ½¢/bucket |
-| 5 | `daily-revenue` refuses `days` > 365 (FE stopped asking for 372/750) | 2026-11-26 | info only |
-| 6 | Augmento free-shipping threshold → $100 INCL GST (owner 11-26); recompute history (8 orders, $109); add `goods_cost_incl_gst`/`free_threshold_incl_gst` | 2026-11-26 | open; `probe:supplier-freight` §7 names the 8 until shipped (ERR-395) |
-| 7 | Invoice lines with no product (INV-3275 "Freight & delivery") never reach the shadow order ⇒ cost unknown, Aug profit null/"at most"; copy them with their own cost | 2026-11-26 | open; INV-3275 cost set to $85.51 (pass-through) 11-26 (ERR-396) |
+| 1 | `revenue-series` net of refunds | 2026-11-26 | **shipped** — Σ = kpi (6,432.20 / 5,877.15); FE label "after refunds"; Expenses chart now uses it (no 365 cap) |
+| 2 | kpi `refund_rate` definition | 2026-11-26 | **shipped** — Oct 0.0, 30d 1.9 = processed ÷ orders |
+| 3 | `out_of_stock` 813 vs 608 | 2026-11-26 | **answered** — 813 = shopper view (genuine + packs), 608 = supplier feed; Dashboard tile now 813 |
+| 4 | Σ daily buckets = total | 2026-11-26 | **shipped** — exact (probes tightened) |
+| 5 | `daily-revenue` ≤ 365 | 2026-11-26 | **answered** — use revenue-series; FE wrapper deleted |
+| 6 | Augmento free at $100 INCL GST | 2026-11-26 | **shipped** — 8 orders free ($109); `goods_cost_incl_gst`/`free_threshold_incl_gst` live |
+| 7 | Product-less invoice lines (INV-3275) never reach the shadow order | 2026-11-26 | **open, resent** — still 0 items / `cost_complete:false` after `bc40b01` |
 
 **2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — SENT (owner deleted the file 2026-11-26) and **ANSWERED** by
 `inbox/backend-asks-2026-11-25-dashboard-backend-response.md` (all six sections shipped in one deploy, migrations 218–220).
