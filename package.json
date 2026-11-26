@@ -108,7 +108,8 @@
     "probe:handoff-2nov": "node scripts/probe-handoff-2nov.mjs",
     "probe:search-inactive": "node scripts/probe-search-inactive.mjs",
     "probe:guides": "node scripts/probe-guides.mjs",
-    "probe:receipt-rolls": "node scripts/probe-receipt-rolls.mjs"
+    "probe:receipt-rolls": "node scripts/probe-receipt-rolls.mjs",
+    "probe:seo-nov26": "node scripts/probe-seo-nov26.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

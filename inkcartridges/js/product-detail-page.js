@@ -2034,7 +2034,7 @@
                 ? Security.sanitizeUrl(typeof storageUrl === 'function' ? storageUrl(ps.image_url) : ps.image_url)
                 : null;
             const imgHtml = imgSrc && imgSrc !== '#'
-                ? `<img class="pack-upsell__thumb" src="${Security.escapeAttr(imgSrc)}" alt="" loading="lazy">`
+                ? `<img class="pack-upsell__thumb" src="${Security.escapeAttr(imgSrc)}" alt="" width="56" height="56" loading="lazy" decoding="async">`
                 : '';
             // "…vs buying the 4 separately" only with a real count from the
             // backend (`cartridge_count`, corrected 2026-09-23 along with

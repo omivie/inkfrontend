@@ -336,6 +336,9 @@
 }
 
 .ink-finder__brand-img {
+    /* width:auto — the width/height ATTRIBUTES (ERR-400) only reserve the aspect
+       ratio; the per-brand height below sets the size, as before. */
+    width: auto;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;

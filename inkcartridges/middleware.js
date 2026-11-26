@@ -314,6 +314,12 @@ export default async function middleware(request) {
 
   // Started before the prerender and awaited after it: see slugHop().
   const hopPromise = slugHopFor ? slugHop(slugHopFor, url) : null;
+  // Built OUTSIDE the try: a throw in here must never turn into a 503 for every bot.
+  const proxyHeaders = prerenderProxyHeaders(request);
+  // ERR-400 — says, on every bot answer, whether the crawler's IP was forwarded
+  // ('forwarded') or the backend saw only our egress IP ('shared': env var unset
+  // or no client IP). Never the IP, never the secret.
+  const clientMode = proxyHeaders['X-Prerender-Secret'] ? 'forwarded' : 'shared';
 
   try {
     // `redirect: 'manual'` — the backend 301s legacy-grammar SKUs
@@ -328,6 +334,9 @@ export default async function middleware(request) {
       headers: {
         'User-Agent': ua,
         'Accept': 'text/html',
+        // ERR-400 — the backend's 30/min limit keys on the crawler, not on our
+        // few Vercel egress IPs. Empty object when the env var is unset.
+        ...proxyHeaders,
       },
       redirect: 'manual',
       // A slow prerender used to hold the crawler until the edge gave up, and
@@ -362,7 +371,10 @@ export default async function middleware(request) {
     // A backend 5xx is an outage, not an answer: tell the crawler to come back
     // (ERR-296). A 4xx is an answer — a printer or product that does not exist —
     // and still falls through to the SPA, which renders its own not-found state.
-    if (response.status >= 500) return prerenderUnavailable();
+    // EXCEPT 429 (ERR-400): the prerender limit is a temporary refusal, not a
+    // missing page. Serving the shell with a 200 there is a Soft 404 — measured
+    // 2026-11-26 by the backend: requests 31–40 of a Googlebot burst got the shell.
+    if (response.status >= 500 || response.status === 429) return prerenderUnavailable(clientMode);
     if (!response.ok) return;
 
     // Headers are BUILT, never copied from upstream. The backend's prerender
@@ -384,13 +396,14 @@ export default async function middleware(request) {
       // immediately. Pinned by tests/dense-pack-rollout-may2026.test.js.
       'Cache-Control': 'public, s-maxage=3600, max-age=3600, stale-while-revalidate=86400',
       'X-Prerendered': 'true',
+      'X-Prerender-Client': clientMode,
     });
     headers.delete('x-robots-tag');
 
     return new Response(response.body, { status: 200, headers });
   } catch {
     // Timeout (AbortSignal.timeout → TimeoutError) or a network failure.
-    return prerenderUnavailable();
+    return prerenderUnavailable(clientMode);
   }
 }
 
@@ -452,7 +465,7 @@ async function slugHop({ path, sku }, requestUrl) {
  * consumer indexes an error body. Humans never reach here — the bot gate
  * returns before any prerender fetch.
  */
-function prerenderUnavailable() {
+function prerenderUnavailable(clientMode) {
   return new Response('Temporarily unavailable. Please retry shortly.', {
     status: 503,
     headers: {
@@ -461,8 +474,60 @@ function prerenderUnavailable() {
       'Cache-Control': 'no-store',
       'X-Robots-Tag': 'noindex',
       'X-Prerender-Unavailable': 'true',
+      'X-Prerender-Client': clientMode,
     },
   });
+}
+
+/*
+ * ERR-400 — per-crawler prerender limit (backend handoff fe-handoff-seo-nov26-2026 §P0).
+ *
+ * The backend allows 30 prerenders per minute per IP. Every bot page is fetched
+ * from a few Vercel egress IPs, so Googlebot, Bingbot and every AI crawler shared
+ * ONE bucket. The backend now keys the limit on `X-Prerender-Client-IP`, but only
+ * when `X-Prerender-Secret` equals its own PRERENDER_PROXY_SECRET (≥ 32 chars).
+ * Missing/wrong secret or a bad IP ⇒ the backend ignores both headers (today's
+ * behaviour), so every partial roll-out state is safe.
+ *
+ * www is behind Cloudflare, so Vercel's `x-real-ip` is a Cloudflare edge. The
+ * crawler is in `cf-connecting-ip` — trusted ONLY when the connection really came
+ * from Cloudflare; anyone can send that header straight to Vercel, and a scraper
+ * rotating a fake one per request would never hit the limit.
+ *
+ * Ranges checked against https://www.cloudflare.com/ips-v4 and /ips-v6 on
+ * 2026-11-26 (identical to the handoff). Re-check them if Cloudflare announces new ones.
+ * These headers go to BACKEND only — never to slugHop() or any other host.
+ */
+const CF_V4 = [
+  '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18',
+  '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17',
+  '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+];
+const CF_V6 = [/^2400:cb00:/i, /^2606:4700:/i, /^2803:f800:/i, /^2405:b500:/i, /^2405:8100:/i, /^2a06:98c[0-7]:/i, /^2c0f:f248:/i];
+
+const v4int = (ip) => ip.split('.').reduce((n, o) => n * 256 + Number(o), 0);
+function inV4(ip, cidr) {
+  const [base, bits] = cidr.split('/');
+  const size = 2 ** (32 - Number(bits));
+  return Math.floor(v4int(ip) / size) === Math.floor(v4int(base) / size);
+}
+function fromCloudflare(ip) {
+  if (!ip) return false;
+  return ip.includes(':') ? CF_V6.some((re) => re.test(ip)) : CF_V4.some((c) => inV4(ip, c));
+}
+
+/** The crawler's IP: cf-connecting-ip only when Cloudflare itself connected to us, else the connecting IP. */
+function crawlerIp(request) {
+  const edge = (request.headers.get('x-real-ip') || '').trim();
+  const viaCf = (request.headers.get('cf-connecting-ip') || '').trim();
+  return fromCloudflare(edge) && viaCf ? viaCf : edge;
+}
+
+/** `{}` when the env var is unset or there is no client IP. `globalThis.process?.` — never a ReferenceError at the edge. */
+function prerenderProxyHeaders(request) {
+  const secret = globalThis.process?.env?.PRERENDER_PROXY_SECRET;
+  const ip = crawlerIp(request);
+  return secret && ip ? { 'X-Prerender-Secret': secret, 'X-Prerender-Client-IP': ip } : {};
 }
 
 export const config = {

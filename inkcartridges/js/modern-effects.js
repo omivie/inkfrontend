@@ -10,7 +10,6 @@ const ModernEffects = {
         this.initImageLoading();
         this.initRippleEffect();
         this.initCartBounce();
-        this.initStaggeredLists();
         this.initParallax();
     },
 
@@ -206,43 +205,10 @@ const ModernEffects = {
         observer.observe(cartCountEl, { childList: true, characterData: true, subtree: true });
     },
 
-    // =========================================
-    // STAGGERED LIST ANIMATIONS
-    // Animate list items with delay
-    // =========================================
-    initStaggeredLists() {
-        const staggerSelectors = [
-            '.products-grid',
-            '#products-grid',
-            '.order-items',
-            '#order-items',
-            '.cart-items'
-        ];
-
-        staggerSelectors.forEach(selector => {
-            const container = document.querySelector(selector);
-            if (!container) return;
-
-            // Add stagger class
-            container.classList.add('stagger-children');
-
-            // Watch for new children being added
-            const observer = new MutationObserver((mutations) => {
-                mutations.forEach(mutation => {
-                    let delay = 0;
-                    mutation.addedNodes.forEach(node => {
-                        if (node.nodeType === 1) {
-                            node.style.opacity = '0';
-                            node.style.animation = `staggerFadeIn 0.5s ease-out ${delay}s forwards`;
-                            delay += 0.05;
-                        }
-                    });
-                });
-            });
-
-            observer.observe(container, { childList: true });
-        });
-    },
+    // STAGGERED LIST ANIMATIONS: deleted (ERR-400). Every child of a list present
+    // at init (.cart-items, .order-items, a .products-grid) started at opacity 0
+    // with a 20px slide: measured 2026-11-26 on live /cart, the cart lines, a
+    // first-screen entrance animation (checklist item 32). Never re-add.
 
     // =========================================
     // SUBTLE PARALLAX
