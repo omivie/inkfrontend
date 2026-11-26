@@ -49,6 +49,7 @@ const src = (over = {}) => ({
   ...over,
 });
 const oct = (over) => M.moneyTruth({ range: OCT, kpi: F.kpiOct, ...src(over) });
+const mtSum = (xs) => Math.round(xs.reduce((t, i) => t + i.amount, 0) * 100) / 100;
 const MONEY = ['revenueInclGst', 'revenueExGst', 'grossProfit', 'netProfit', 'orders'];
 
 // ── October, by hand ────────────────────────────────────────────────────────────────────
@@ -168,9 +169,28 @@ test('refunds: only PROCESSED, dated by refunded_at; switches off when kpi retur
   const a = m.adjustments.find((x) => x.id === 'refunds');
   assert.equal(a.applied, false);
   assert.equal(a.backendHasIt, true);
-  // Not silent: the switch-off is named so the owner (and FE) confirm before deleting §3.
-  assert.ok(m.warnings.some((w) => /^Check \(refunds\): kpi-summary now returns `refunds`/.test(w)));
-  assert.ok(!m.warnings.some((w) => /Not adjusted \(refunds\)/.test(w)));
+  // Measured 2026-11-26: the backend's revenue is net of processed refunds, so this is not a
+  // warning — the revenue breakdown shows both halves instead, and they still sum to the box.
+  assert.ok(!m.warnings.some((w) => /refunds/.test(w)));
+  const f = m.figures.revenueInclGst;
+  assert.equal(f.value, mtSum(f.inputs));
+  // fixture kpi revenue 6,073.14 (captured before the backend fix) + 10 refunded = 6,083.14 sales.
+  assert.deepEqual(f.inputs.slice(0, 2).map((i) => [i.amount, i.source]), [[6083.14, 'backend'], [-10, 'backend']]);
+});
+
+test('expense cross-check leaves out a raw gst_payment row, like kpi-summary does (2026-11-26)', () => {
+  // The owner moved G.S.T to the real gst_payment category; the backend dropped it from
+  // operating_expenses (3,491.40 − 724.51 = 2,766.89 for Oct, measured live).
+  const rows = expenseRows([GST_ROW]).map((r) => (r.id === GST_ROW ? { ...r, category: 'gst_payment' } : r));
+  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, operating_expenses: 2766.89, net_profit: -1890.79 } };
+  const m = M.moneyTruth({ range: OCT, kpi, ...src({ expenses: { rows, total: rows.length } }) });
+  const a = m.adjustments.find((x) => x.id === 'expenses-by-bill-date');
+  assert.equal(a.applied, true, a.reason);
+  // Every Oct bill was paid on its bill date, so by-bill-date moves nothing: same net as refused.
+  const refused = M.moneyTruth({ range: OCT, kpi, ...src({ expenses: null }) });
+  assert.equal(m.figures.netProfit.value, refused.figures.netProfit.value);
+  // Before the fix the cross-check counted the gst_payment row and refused (3491.40 vs 2766.89).
+  assert.ok(!m.warnings.some((w) => /do not reproduce/.test(w)));
 });
 
 test('kpi missing ⇒ every money figure null (never 0); owed still works', () => {

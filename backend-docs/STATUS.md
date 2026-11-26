@@ -7,15 +7,15 @@ Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, 
 
 ## `outbox/` — the ONE outgoing file
 
-**2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — NOT sent yet. Admin Dashboard numbers + speed (ERR-393). The new dashboard adjusts on screen until each § ships; tell FE which § shipped so the matching adjustment in `utils/money-truth.js` is deleted.
+**2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — SENT (owner deleted the file 2026-11-26). Admin Dashboard numbers + speed (ERR-393). The new dashboard adjusts on screen until each § ships; tell FE which § shipped so the matching adjustment in `utils/money-truth.js` is deleted.
 
-| § | Ask | Written | Status (2026-11-25) |
+| § | Ask | Written | Status (2026-11-26) |
 |---|---|---|---|
-| 1 | Invoice shadow orders dated by `issue_date` (INV-3298 issued 22 Nov, record 1 Oct; 13 invoices differ) + backfill | 2026-11-25 | open |
+| 1 | Invoice shadow orders dated by `issue_date` (INV-3298 issued 22 Nov, record 1 Oct; 13 invoices differ) + backfill | 2026-11-25 | **shipped** — measured 11-26: Oct kpi revenue 5,877.15 (INV-3298 gone); FE adjustment reconciles to 0 |
 | 2 | pnl buckets by NZ month like kpi-summary (Oct: 6073.14 vs 6019.65); bundle net series vs kpi net gap 10.66 | 2026-11-25 | open |
-| 3 | Subtract PROCESSED refunds on `refunded_at`; return `refunds` on kpi-summary (series counts a pending refund, dates by created_at) | 2026-11-25 | open |
-| 4 | Operating expenses by `expense_date`, paid or not (accrual) | 2026-11-25 | open |
-| 5 | Built-in `gst_payment` expense category excluded from operating expenses | 2026-11-25 | open |
+| 3 | Subtract PROCESSED refunds on `refunded_at`; return `refunds` on kpi-summary (series counts a pending refund, dates by created_at) | 2026-11-25 | **shipped** — measured 11-26: 28 Oct–26 Nov order totals 6,349.61 − refunds 59.40 = kpi revenue 6,290.21; all-time `refunds` 129.89 = the two processed (pending $14 out). FE no longer subtracts. Gross side (`refunds_ex_gst`) not measured |
+| 4 | Operating expenses by `expense_date`, paid or not (accrual) | 2026-11-25 | unknown — every bill so far was paid on its bill date, so the two rules give the same total; FE cross-check refuses if they ever differ |
+| 5 | Built-in `gst_payment` expense category excluded from operating expenses | 2026-11-25 | **shipped** — G.S.T row now saved raw `gst_payment`; all-time opex 9,791.77 − 724.51 = 9,067.26 to the cent |
 | 6 | One `dashboard-summary` endpoint (money + graph series + action counts); `traffic/timeseries` takes 10 s | 2026-11-25 | open |
 
 **2026-11-24:** `outbox/backend-asks-2026-11-24.md` — NOT sent yet.

@@ -78,6 +78,12 @@ Slow: the money boxes appeared after **17.0 s**, 147 requests, with four 429s. T
 **Guard.** `tests/money-truth-nov2026.test.js` (22, on a READ-ONLY live fixture; 4 mutants killed: no reconciliation, pending refunds counted, UTC date slice, kind ≠ order_linked), `tests/dashboard-new-nov2026.test.js`, `tests/analytics-trends-tab-nov2026.test.js`, `tests/admin-expenses-categories.test.js` (gst_payment).
 
 ---
+
+**Follow-up 2026-11-26 (owner: "where are the profit amounts?").** Measured live, READ-ONLY:
+- Gross and net profit showed "—" for All, 6m and 3m because kpi-summary returns `gross_profit: null` for any range that includes August 2026. The bundle's August bucket is also null. The cause is ONE sale with no cost: **INV-3275** (28 Aug, $98.34, invoice channel, `cost_complete: false`). The box face now says "blocked: no cost on INV-3275 — add it to see profit" (`noProfitWhy`, fed by the order-list `cost_complete` rows) instead of a bare "—". No profit is rebuilt or guessed.
+- The backend shipped outbox §1, §3 and §5 without a reply note. Two false warnings followed. (a) "Check (refunds)": revenue is now net of processed refunds (identity measured to the cent), so that switch-off is no longer a warning. The revenue breakdown shows "Sales" and "Refunds" as two backend lines. (b) "Not adjusted (expenses-by-bill-date) 9791.77 vs 9067.26": the cross-check did not know the backend now leaves raw `gst_payment` out of operating expenses (`BACKEND_EXCLUDED_RAW`).
+- Tests: +2 money-truth tests and +1 page wiring test. 4/4 mutants killed (the gst_payment exclusion, the refunds split, the warning gate, and the blocker refs).
+
 ## ERR-392 — Dashboard Net Profit: second line shows profit after unpaid bills (owner 2026-11-23) — SHIPPED (frontend)
 
 **Ask.** Owner, screenshot of `/admin#dashboard?period=all` (Net Profit −$2,957.43 "after $2,168.77 supplier freight"): is this profit counting every invoice and NOT yet taking off what we still owe? It should sit above the final profit after everything is paid.

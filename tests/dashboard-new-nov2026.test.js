@@ -55,3 +55,10 @@ test('refund order lookups pass only correctly-typed fields, and only for the sh
   assert.match(page, /loadRefunds\(signal, \(compare && previousRange\(range\)\?\.from\) \|\| range\.from\)/);
   assert.match(page, /m\.owedToUs\.value == null \? m\.owedToUs\.note/);
 });
+
+test('a blank profit box says why on its face and names the sale with no cost (owner 2026-11-26)', () => {
+  assert.match(page, /f\.grossProfit\.value == null \? noProfitWhy\(m\)/);
+  assert.match(page, /f\.netProfit\.value == null \? noProfitWhy\(m\)/);
+  assert.match(page, /blocked: no cost on \$\{b\.slice\(0, 3\)\.join/);
+  assert.match(page, /state\.money\.costBlockers = state\.todo\.missingCost \? state\.todo\.missingCost\.items\.map\(\(i\) => i\.ref\) : null;/);
+});

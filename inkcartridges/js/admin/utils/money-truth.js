@@ -36,6 +36,9 @@ const GST_SHARE = 3 / 23;               // GST share of a GST-inclusive amount
 const BACKEND = 'backend';
 const ADJUSTED = 'adjusted on this screen';
 const ORDER_LINKED_RAW = ['inventory', 'merchant_fees', 'customer_shipping'];
+// Raw categories kpi-summary leaves out of operating_expenses. `gst_payment` joined on the
+// backend by 2026-11-26 (measured: all-time 9,791.77 − the 724.51 IRD row = 9,067.26 to the cent).
+const BACKEND_EXCLUDED_RAW = [...ORDER_LINKED_RAW, 'gst_payment'];
 
 /** Cents, and never −0. A non-finite input stays NaN so a guard can see it — never a 0. */
 const mtCents = (n) => (Number.isFinite(n) ? Math.round(n * 100) / 100 || 0 : NaN);
@@ -150,7 +153,7 @@ function redateInvoices(k, range, invoices, shadows) {
 const REFUND_TYPES = ['refund', 'chargeback'];
 function refundsIn(k, range, refunds) {
   if (mtNum(k.refunds) != null) {
-    return { applied: false, backendHasIt: true, reason: 'kpi-summary now returns `refunds`, so this screen stopped taking refunds off. Confirm the backend’s revenue is net of refunds (outbox §3) and delete this adjustment' };
+    return { applied: false, backendHasIt: true, reason: 'the backend now takes processed refunds off revenue itself (measured 2026-11-26: order totals − refunds = kpi revenue to the cent), so this screen does not' };
   }
   if (!refunds) return refuse('the refunds list did not load');
   const bad = incomplete(refunds, 'refunds');
@@ -194,7 +197,7 @@ function opexByBillDate(k, range, expenses) {
   // Cross-check: our rows must reproduce the backend's own (paid-date) figure first. If they
   // don't, the backend changed its rule (or a row is missing) and we refuse rather than guess.
   const paidBasis = live
-    .filter((r) => !ORDER_LINKED_RAW.includes(r.category) && mtIn(r.paid_date, range))
+    .filter((r) => !BACKEND_EXCLUDED_RAW.includes(r.category) && mtIn(r.paid_date, range))
     .reduce((a, r) => a + mtCost(r), 0);
   if (!mtClose(mtCents(paidBasis), kOpex, 0.01)) {
     return refuse(`the expense rows do not reproduce the backend's figure (${mtCents(paidBasis).toFixed(2)} vs ${kOpex})`);
@@ -229,7 +232,7 @@ function windowFigures(k, range, src) {
   const kn = {
     revenue: mtNum(k.revenue), gross: mtNum(k.gross_profit), net: mtNum(k.net_profit), orders: mtNum(k.orders),
     stripe: mtNum(k.stripe_fees), freight: mtNum(k.supplier_freight), opex: mtNum(k.operating_expenses),
-    unpriced: mtNum(k.supplier_freight_unpriced_orders),
+    unpriced: mtNum(k.supplier_freight_unpriced_orders), refunds: mtNum(k.refunds),
   };
   const fin = (v) => (Number.isFinite(v) ? v : null);   // a NaN that slipped through is "not available", never 0
   const revIncl = kn.revenue == null ? null : fin(mtCents(kn.revenue + d(r1, 'revenueIncl') + d(r3, 'revenueIncl')));
@@ -276,7 +279,11 @@ const fig = (value, basis, inputs, extra = {}) => ({
 
 function revenueInclFigure(w) {
   if (w.revIncl == null) return fig(null, 'incl. GST', [], { note: 'The backend did not report revenue.' });
-  const inputs = [{ label: 'Sales the backend counted (every status except cancelled)', amount: w.kn.revenue, source: BACKEND }];
+  // The backend's revenue is already net of processed refunds when it reports `refunds`: show both halves.
+  const inputs = w.r3.backendHasIt && w.kn.refunds
+    ? [{ label: 'Sales the backend counted (every status except cancelled)', amount: mtCents(w.kn.revenue + w.kn.refunds), source: BACKEND },
+      { label: 'Refunds processed in this period (by refund date)', amount: mtCents(-w.kn.refunds), source: BACKEND }]
+    : [{ label: 'Sales the backend counted (every status except cancelled)', amount: w.kn.revenue, source: BACKEND }];
   if (w.r1.applied && w.r1.revenueIncl !== 0) {
     const parts = [
       w.r1.movedOut.length ? `moved out: ${w.r1.movedOut.join(', ')}` : '',
@@ -420,8 +427,8 @@ export function moneyTruth(src) {
   const warnings = [];
   if (!src.kpi?.current) warnings.push('The backend summary (kpi-summary) did not load, so no money figure can be shown.');
   for (const a of adjustments) {
-    if (a.backendHasIt) warnings.push(`Check (${a.id}): ${a.reason}.`);
-    else if (!a.applied) warnings.push(`Not adjusted (${a.id}): ${a.reason}. Showing the backend’s figure for that part.`);
+    // backendHasIt is not a warning: the backend does it, and the figure's inputs show it.
+    if (!a.applied && !a.backendHasIt) warnings.push(`Not adjusted (${a.id}): ${a.reason}. Showing the backend’s figure for that part.`);
   }
   if (cur?.r3.applied && cur.r3.skipped.length) {
     warnings.push(`Refund on ${cur.r3.skipped.join(', ')} not taken off: the order is cancelled or a test, so its sale was never counted.`);

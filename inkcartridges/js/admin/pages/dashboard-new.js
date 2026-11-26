@@ -108,11 +108,20 @@ async function loadRefunds(signal, since) {
   return { ...list, rows: list.rows.map((r) => ({ ...r, ...(found.get(r.order_number) || {}) })) };
 }
 
+// A blank profit box says why on its face. The backend drops profit for a whole range when one
+// sale in it has no cost (ERR-074); `costBlockers` is filled from the order list once it lands.
+function noProfitWhy(m) {
+  const b = m.costBlockers;
+  if (b == null) return 'not available — checking why…';
+  if (b.length) return `blocked: no cost on ${b.slice(0, 3).join(', ')}${b.length > 3 ? ` +${b.length - 3}` : ''} — add it to see profit`;
+  return 'not available — see How it’s calculated';
+}
+
 // ── money boxes ────────────────────────────────────────────────────────────────────────
 const BOXES = [
   { key: 'revenueExGst', label: 'Revenue', sub: (f) => `incl. GST ${money(f.revenueInclGst.value)}` },
-  { key: 'grossProfit', label: 'Gross profit', sub: (f) => `margin ${pct(f.grossMargin.value)}`, alertNeg: true },
-  { key: 'netProfit', label: 'Net profit', sub: (f) => `margin ${pct(f.netMargin.value)}`, alertNeg: true },
+  { key: 'grossProfit', label: 'Gross profit', sub: (f, m) => (f.grossProfit.value == null ? noProfitWhy(m) : `margin ${pct(f.grossMargin.value)}`), alertNeg: true },
+  { key: 'netProfit', label: 'Net profit', sub: (f, m) => (f.netProfit.value == null ? noProfitWhy(m) : `margin ${pct(f.netMargin.value)}`), alertNeg: true },
   { key: 'orders', label: 'Orders', fmt: (v) => (v == null ? '—' : String(v)) },
   { key: 'aov', label: 'Average order', sub: () => 'revenue ÷ orders' },
   { key: 'owed', label: 'Owed to us', sub: (f, m) => (m.owedToUs.value == null ? m.owedToUs.note : `${m.owedToUs.inputs.length} unpaid invoice${m.owedToUs.inputs.length === 1 ? '' : 's'} · any date`) },
@@ -210,6 +219,7 @@ function missingCostFromList(list) {
     unknown,
     incomplete: list.rows.length < list.total,
     items: culprits.map((o) => ({
+      ref: orderRef(o.order_number || o.id),
       label: `${orderRef(o.order_number || o.id)} · ${formatPrice(Number(o.total) || 0)}`,
       badge: (o.missing_cost_skus || []).slice(0, 2).join(', ') || 'no cost recorded',
       badgeCls: 'admin-badge--failed',
@@ -367,6 +377,11 @@ async function load() {
     if (!live()) return;
     state.todo.tracking = v(0) == null && v(1) == null ? null : computeTrackingAlert(v(0), v(1));
     state.todo.missingCost = missingCostFromList(v(2));
+    if (state.money) {
+      // Name the sales that blank the profit boxes; [] = list read, none found; null = unknown.
+      state.money.costBlockers = state.todo.missingCost ? state.todo.missingCost.items.map((i) => i.ref) : null;
+      paintMoney(state);
+    }
     state.todo.lowMargin = v(3) == null && v(4) == null ? null : computeLowMarginAlert(normalizeWorstMargin([v(3), v(4)]), null, false);
     const oos = v(5);
     const oosRows = oos == null ? null : firstArray(oos.data && !Array.isArray(oos.data) ? oos.data : oos, ['out_of_stock', 'items', 'products', 'data']);
