@@ -40,6 +40,51 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-400 — Crawlers shared ONE 30/min prerender bucket and got the 200 shell past it; trailing slash 404; logos without size (backend SEO handoff 2026-11-26) — SHIPPED (frontend) P0 + P2 + item 32; P1 on Preview only
+
+**Seen (backend, measured 2026-11-26).** The backend limits `/api/prerender/*` to 30 requests per minute per IP. The middleware fetched every bot page from a few Vercel egress IPs, so Googlebot, Bingbot and every AI crawler shared ONE bucket. The backend answered 429 once it was empty. `if (!response.ok) return;` then served the SPA shell with a **200**: an empty canonical and no content, which Google reads as a Soft 404. Their burst of 40: 30 prerendered, then 10 shells. Other problems found in the same check:
+- `/ink-cartridges/` returned 404.
+- The apex returned 307. It carries `x-vercel-id`, so it is the Vercel Domains setting.
+- The 27 ink-finder logos had no `width`/`height` and were raw 1200–3840 px PNGs.
+- The cart and order thumbnails had no size.
+
+**Fix.**
+- **P0, middleware.**
+  - The backend `/api/prerender/*` fetch, and ONLY that fetch (not `slugHop`), sends `X-Prerender-Secret` (env `PRERENDER_PROXY_SECRET`, read as `globalThis.process?.env?.…`, built outside the `try` so it can never 503 every bot) and `X-Prerender-Client-IP`.
+  - The IP is `cf-connecting-ip` only when `x-real-ip` is in a Cloudflare range (www is behind Cloudflare); otherwise it is `x-real-ip`. The ranges equal cloudflare.com/ips-v4|v6 on 2026-11-26.
+  - **429 ⇒ `prerenderUnavailable()`** (503, `Retry-After: 120`, no-store, noindex). A 404 still falls through.
+  - New response header **`X-Prerender-Client: forwarded|shared`** on every bot answer. It shows whether the env var reached the middleware (the handoff said "nothing will tell you").
+- **P2.** vercel.json `trailingSlash: false`.
+- **Item 32.**
+  - 27 logo tags get the displayed `width`/`height` plus `loading="lazy" decoding="async"`. Six 2× WebP files total 19.7 KB, against 218 KB of PNG; the PNGs are kept for shop-page.js and `/api/images/optimize`.
+  - **`.ink-finder__brand-img { width: auto }`**: without it, the width attribute became the CSS width at the ≤600px heights. Measured: epson 65→78, hp 28→36, oki 44→56. With it, every box is identical to HEAD.
+  - Cart thumbnails 70×70 (three templates), order-detail 80×80, pack-offer 56×56, all lazy/async.
+  - **`initStaggeredLists` + `.stagger-children` + `@keyframes staggerFadeIn` DELETED.** Live `/cart` lines started at opacity 0 with a 20px slide, a first-screen entrance animation. The series grid was NOT affected (its container is absent at init).
+- **P1** (six patches, FE-1…FE-4b): applied on `seo-phase2-preview` from 064879a5, tree `4ef169c7` matches, tests fail 0, Vercel Preview built. **Not merged.** The rebase onto main conflicts in `middleware.js` at 0002: P0's 429 line against FE-2's 404 block. Left for the backend, as their doc asks.
+
+**Not done, by decision.**
+- `pages.css` split/inline: the owner declined it again on 11-26 (first on 10-26).
+- PDP hero `width`/`height`: ERR-374 measured CLS 0.307 with 800×800 attributes; a test now pins "none, never lazy".
+- The "30 scripts without defer" claim was false: all are defer/async except the deliberate `scroll-restore.js`.
+- The "body/main fade" claim was false: deleted in ERR-370.
+
+**Measured.**
+- Tests 7,464, fail 0. `tests/seo-handoff-nov26-2026.test.js` has 16 tests; 6 are red against HEAD's middleware (`SEO_NOV26_MIDDLEWARE=<old copy>`).
+- Staged-tree run: 7,444 pass. The 1 fail was a peer's uncommitted ERR-398 in the memory log.
+- Live after deploy `eaa22f6e` (06:56 UTC):
+  - `x-prerender-client: forwarded`.
+  - Trailing slash 308 on 3 paths, query kept.
+  - `--burst 40`: 21 × `200 true`, then 19 × `503` re-timed at 0.24–0.32 s (the 429 path, not timeouts). **0 × `200 -`**, against 10 before the fix.
+- Logos: screenshots at 1366×768 visually identical (WebP vs PNG).
+- Lighthouse and rows 3/5: see `backend-docs/outbox/seo-nov26-2026-fe-reply.md`.
+
+**Rule.**
+- A backend refusal (429) is an outage for a crawler, never "fall through to the shell".
+- Proxy-identity headers go to `BACKEND` only.
+- A size attribute on an image whose CSS sets only `height` needs `width: auto`, or it resizes the box.
+- `probe:seo-nov26` (READ-ONLY default; `--burst` spends this network's bucket; `--backend-limit` reads the secret from env and never prints it; `VERCEL_BYPASS` goes only to `--base`).
+
+---
 ## ERR-399 — Ribbons are Streamline (backend fe97a98): Streamline label, "Unassigned", bulk "Set supplier" with preview, Streamline→ribbon round-trip (backend handoff 2026-11-26) — SHIPPED (frontend)
 
 **Trigger.** Backend handoff `inbox/product-supplier-streamline-FE-handoff-nov2026.md`. Ribbon products had no supplier, so the Orders page called every ribbon order Augmento. The backend moved them to supplier key `ribbon`, named "Streamline" (freight terms the same as Augmento: free from $100 incl GST), and shipped `POST /api/admin/products/bulk-supplier`. Owner: verify and implement.

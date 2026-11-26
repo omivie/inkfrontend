@@ -14,6 +14,7 @@
  *                    PRERENDER_PROXY_SECRET (never printed) and 35 distinct TEST-NET client IPs. Pass = 35 × 200.
  *   --base <url>     run the www rows against another deployment (e.g. the Vercel Preview).
  *   --preview        add the P1 §5 rows (bot vs Chrome head parity, FE-2 404s, 0005 home FAQ JSON-LD).
+ *                    A protected Preview needs env VERCEL_BYPASS (sent only to --base, never printed).
  *
  *   npm run probe:seo-nov26 [-- --burst] [-- --base https://<preview>.vercel.app --preview]
  */
@@ -33,7 +34,11 @@ console.log(`probe:seo-nov26 — MODE: ${mode.length ? mode.join(' + ') : 'READ-
 
 const results = { pass: 0, fail: 0 };
 const check = (ok, m) => { results[ok ? 'pass' : 'fail']++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${m}`); };
-const get = (url, ua = UA_C, extra = {}) => fetch(url, { redirect: 'manual', headers: { 'User-Agent': ua, ...extra } });
+// Vercel Deployment Protection on Previews: VERCEL_BYPASS (Settings → Deployment Protection → Protection Bypass
+// for Automation) is sent ONLY to the --base host, never printed, never to www/apex/backend.
+const BYPASS = process.env.VERCEL_BYPASS || '';
+const get = (url, ua = UA_C, extra = {}) => fetch(url, { redirect: 'manual', headers: {
+    'User-Agent': ua, ...(BYPASS && WWW !== 'https://www.inkcartridges.co.nz' && url.startsWith(WWW) ? { 'x-vercel-protection-bypass': BYPASS } : {}), ...extra } });
 const h = (res, name) => res.headers.get(name) || '-';
 
 // ── P2: redirects ──────────────────────────────────────────────────────────
