@@ -86,24 +86,34 @@ for (const ua of [UA_G, UA_M]) {
 
 // ── P1 §5 (Preview) ─────────────────────────────────────────────────────────
 if (flag('--preview')) {
+    // Same text, different escaping (&amp; vs &) and the bare-origin slash are NOT differences.
+    const ent = (v) => (v == null ? v : v.replace(/&amp;/g, '&').replace(/&#39;|&#x27;|&rsquo;/g, "'").replace(/&quot;/g, '"'));
+    const canon = (v) => (v == null ? v : ent(v).replace(/^(https:\/\/[^/]+)\/$/, '$1'));
     const head = (html) => ({
-        title: (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1]?.trim() || null,
-        canonical: (html.match(/<link\b[^>]*rel="canonical"[^>]*href="([^"]*)"/i) || [])[1] || null,
+        title: ent((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1]?.trim() || null),
+        canonical: canon((html.match(/<link\b[^>]*rel="canonical"[^>]*href="([^"]*)"/i) || [])[1] || null),
         canonicals: (html.match(/<link\b[^>]*rel="canonical"/gi) || []).length,
-        h1: ((html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() || null,
+        h1: ent(((html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() || null),
         ld: [...html.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)].flatMap((m) => {
             try { const j = JSON.parse(m[1]); return (Array.isArray(j) ? j : j['@graph'] || [j]).map((x) => x['@type']); } catch { return ['UNPARSEABLE']; }
         }).sort().join(','),
     });
+    let headInjectAbsent = true;
     console.log('\nP1 §5 — raw HTML, Googlebot vs Chrome (title / canonical / H1 / JSON-LD types must match)');
     for (const p of ['/ink-cartridges', '/ribbons', '/shop?brand=brother', '/shop?brand=hp&printer_slug=hp-1000cxi',
         '/products/canon-genuine-cart069hkbk-toner-cartridge-cart069hk-black/GCART069HKBK', '/']) {
         const rb = await get(`${WWW}${p}`, UA_G); const bot = head(await rb.text());
         const rc = await get(`${WWW}${p}`, UA_C); const chr = head(await rc.text());
+        if (rc.headers.get('x-head-inject')) headInjectAbsent = false;
         const diff = ['title', 'canonical', 'h1', 'ld'].filter((k) => bot[k] !== chr[k]);
         if (p === '/') diff.splice(diff.indexOf('h1') >>> 0, diff.includes('h1') ? 1 : 0); // home H1 is not injected by design (§4)
         check(rb.status === 200 && rc.status === 200 && diff.length === 0 && chr.canonicals === 1 && chr.canonical && !/\/shop$/.test(chr.canonical),
             `${p} → bot ${rb.status} / chrome ${rc.status} x-head-inject=${h(rc, 'x-head-inject')} canonical=${chr.canonical}${diff.length ? ` DIFF: ${diff.map((k) => `${k} bot=${JSON.stringify(bot[k])} chrome=${JSON.stringify(chr[k])}`).join('; ')}` : ''}`);
+    }
+    if (headInjectAbsent && WWW !== 'https://www.inkcartridges.co.nz') {
+        console.log('  NOTE  no X-Head-Inject header on any Chrome answer: FE-1 never ran. On a Vercel Deployment-Protected Preview the');
+        console.log('        middleware\'s own shell fetch (no bypass header) gets the SSO 302 and injectedShell() returns undefined');
+        console.log('        silently (seo-phase2-preview middleware.js:696). Parity rows are UNMEASURABLE here, not a patch verdict.');
     }
     console.log('\nP1 0005 — home FAQPage JSON-LD = exactly the 5 visible Q&As, no dispatch claim');
     const home = await (await get(`${WWW}/`, UA_C)).text();

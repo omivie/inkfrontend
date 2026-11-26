@@ -11,7 +11,7 @@ All times UTC, 2026-11-26. No deploy was made inside 13:55–15:30.
 | P0 crawler IP + secret, 429 ⇒ 503 | **LIVE** in production `eaa22f6e` (06:56). Secret set in Vercel (Production + Preview, Sensitive). **The match with Render is proved** (row 3 and the 25 = 30 − 5 test). |
 | P2 trailing slash 404 ⇒ 308 | **LIVE** (`trailingSlash: false`). |
 | P2 apex 307 ⇒ 308 | **LIVE.** It was a Vercel Domains setting (the 307 carried `x-vercel-id`). Now 308; see row 5. |
-| P1 FE-1…FE-4b | Applied on `seo-phase2-preview`, **tree matches** `4ef169c7`, tests fail 0, Vercel **Preview built**. Preview is behind Vercel Deployment Protection (see §P1). **Not merged.** The rebase onto main **conflicts in `middleware.js`** (one hunk; not resolved, as asked). |
+| P1 FE-1…FE-4b | Applied on `seo-phase2-preview`, **tree matches** `4ef169c7`, tests fail 0, Vercel **Preview built**. On the Preview, **FE-2 and 0005 PASS**. FE-1/FE-4 parity **could not be measured**: the protected Preview blocks FE-1's self-fetch, and that failure is silent (see §P1). **Not merged.** The rebase onto main **conflicts in `middleware.js`** (one hunk; not resolved, as asked). |
 | Item 32 | Logo sizes + WebP, cart/order thumbnails, staggered list fade removed: **LIVE**. pages.css split: **still declined by the owner**. PDP hero `width`/`height`: **not done, measured regression**. |
 
 ## P0: what we shipped
@@ -85,7 +85,26 @@ Before the fix you measured 30 × `200 true` then 10 × `200 -`. Now no bot gets
 2. Copy it to the clipboard and run:
    `VERCEL_BYPASS="$(pbpaste)" node scripts/probe-seo-nov26.mjs --base https://inkfrontend-93bsa68lh-omivies-projects.vercel.app --preview`
 
-The probe sends that header only to the `--base` host and never prints it. The §5 table, the bot-vs-Chrome parity rows and the 0005 FAQ check will follow from that run. PENDING the bypass secret.
+The probe sends that header only to the `--base` host and never prints it. The §5 table, the bot-vs-Chrome parity rows and the 0005 FAQ check will follow from that run.
+
+**Preview run (07:33, with the owner's automation-bypass token, which was never printed):**
+
+| Check | Result |
+|---|---|
+| **FE-2 real 404**, bot and browser | **PASS ×4**: `/shop?brand=hp&printer_slug=zz-not-a-printer` and `/products/zz-not-a-product/ZZNOTASKU` → `404`, `x-robots-tag: noindex` |
+| Valid printer, product, category, `/ribbons` | 200 for both UAs |
+| **0005 home FAQ** | **PASS**: 1 FAQPage block, 5 Questions, each visible on the page word for word; 0 "Auckland metro" / "same day" |
+| Bot raw HTML | correct title, canonical, H1 and JSON-LD on every row |
+| **FE-1 / FE-4 parity (Chrome raw HTML)** | **NOT MEASURABLE on this Preview.** No Chrome answer carried `X-Head-Inject` at all. |
+| Trailing slash, `X-Prerender-Client` | FAIL as expected: the branch is based on 064879a5 and does not contain ERR-400 |
+
+**Why FE-1 did not run on the Preview.** The project uses Vercel Deployment Protection (`all_except_custom_domains`). `injectedShell()` fetches the page's own shell with only `x-ic-shell` and `Accept`, and no `x-vercel-protection-bypass`. That self-fetch gets the SSO `302`, and line 696 (`if (shellRes.status !== 'fulfilled' || shellRes.value.status !== 200) return;`) returns `undefined`. The platform then serves the plain shell **with no `X-Head-Inject` header**.
+- Production `www` is a custom domain and is not protected, so this does not happen there.
+- But it means **one failure path of FE-1 is silent**, against the patch's own "fail-open, loudly".
+
+Two asks:
+1. **Make the shell-fetch failure loud.** For example, return a pass-through with `X-Head-Inject: miss-shell-<status>`.
+2. **Let FE-1 run on Previews.** For example, send `x-vercel-protection-bypass: process.env.VERCEL_AUTOMATION_BYPASS_SECRET` on the self-fetch when that system env var is set. Without one of these, FE-1/FE-4 parity can only be measured on production (Stage A/B) or on your local harness. The alternative is for the owner to switch off Preview protection for the run, which is the owner's call.
 
 **Rebase onto main: one conflict, in `middleware.js`, at 0002 (FE-2).** 0001 rebases cleanly. As you asked, we have not resolved it. The hunk, against main `eaa22f6e` (which has P0):
 ```
@@ -165,4 +184,5 @@ The runs varied: series LCP was 11.60 / 7.91 / 7.92 s and GLC233BK 14.46 / 8.31 
 
 ## What we need from you
 1. Confirm the conflict resolution above, or send a re-based 0002.
-2. Decide FE-1 and the limiter: the `api.inkcartridges.co.nz` human fetch.
+2. Make FE-1's shell-fetch failure loud, and let it run on protected Previews (see §P1).
+3. Decide FE-1 and the limiter: the `api.inkcartridges.co.nz` human fetch.
