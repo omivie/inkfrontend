@@ -216,101 +216,41 @@ test('a missing/blank kpi payload does not fabricate a profit', () => {
   assert.equal(recoverProfitFromSeries(undefined, LIVE_SERIES), null);
 });
 
-// ─── 4. Static wiring — the render path must actually use all this ───────────
+// ─── 4. Static wiring — the Dashboard no longer rebuilds profit (2026-11-26) ──
+//
+// recoverProfitFromSeries stays in utils/dash-charts.js for the Analytics Trends tab, which
+// still reads kpi-summary. The Dashboard now reads dashboard-summary, which ALWAYS returns
+// every figure and lists the un-costed sales in `cogs_unknown_orders` — so the Dashboard's
+// rebuild path, its "Rebuilt from the series" note and the ~120-GET "sales missing a cost"
+// scan were deleted. Their replacement is pinned here and in tests/money-truth-nov2026.test.js.
 
-test('the KPI tiles read the recovered figures, not cur.gross_profit directly', () => {
-  assert.match(
-    src, /const\s+recovered\s*=\s*recoverProfitFromSeries\(cur,\s*d\.sGrossProfit\)/,
-    'renderKpiStrip must attempt the recovery',
-  );
-  assert.match(src, /const grossProfit = cur\.gross_profit \?\? recovered\?\.gross \?\? null/);
-  assert.match(src, /const netProfit\s+= cur\.net_profit\s+\?\? recovered\?\.net\s+\?\? null/);
-  // Margins are derived from profit, so they must derive from the RECOVERED profit or they
-  // stay blank while their own profit tile shows a number.
-  assert.match(src, /marginOf\(grossProfit, cur\.revenue\)/);
-  assert.match(src, /marginOf\(netProfit, cur\.revenue\)/);
+const DASH_ONLY = fs.readFileSync(path.join(__dirname, '..', 'inkcartridges', 'js', 'admin', 'pages', 'dashboard.js'), 'utf8');
+
+test('the Dashboard reads profit from dashboard-summary, never rebuilt from a series', () => {
+  assert.match(DASH_ONLY, /AdminAPI\.getDashboardSummary\(range, dsumGrain, signal\)/);
+  assert.match(DASH_ONLY, /const m = dashboardMoney\(d\.dsum\)/);
+  assert.doesNotMatch(DASH_ONLY, /recoverProfitFromSeries|getDashboardKPIs|Rebuilt from the backend/);
 });
 
-test('a rebuilt tile says so — it is not passed off as kpi-summary’s own number', () => {
-  // Provenance is now PER FIGURE. A single shared flag stamped "Rebuilt…" on BOTH tiles
-  // whenever either was rebuilt, mislabelling a real backend number as reconstructed.
-  assert.match(src, /const grossNote = recovered\?\.grossRebuilt \? REBUILT : COGS_UNKNOWN/);
-  assert.match(src, /const netNote\s+= recovered\?\.netRebuilt\s+\? REBUILT : COGS_UNKNOWN/);
-  assert.doesNotMatch(src, /const profitNote =/, 'the shared note is what mislabelled tiles');
-  assert.match(src, /ERR-074/, 'the REBUILT note should cite the defect');
+test('an un-costed sale makes profit AT MOST, named — not a blank tile', () => {
+  assert.match(DASH_ONLY, /atMost: f\.grossProfit\.atMost/);
+  assert.match(DASH_ONLY, /atMost: f\.netProfit\.atMost/);
+  assert.match(DASH_ONLY, /at most<\/span>/, 'the tile itself carries the flag');
+  assert.match(DASH_ONLY, /for \(const w of m\.warnings\)/, 'and the warning is written under the strip');
 });
 
-// ─── 5. The alert card must never again state a falsehood ───────────────────
-
-test('the "add a cost" copy fires ONLY when culprits were actually found', () => {
-  // The bug: the card keyed off `cogsUnknown` (profit missing) rather than off having
-  // FOUND anything, so it instructed the owner to add costs to sales that all had one.
-  assert.doesNotMatch(
-    src, /showMissing\s*=\s*!!\(missingCost && \(missingCost\.count > 0 \|\| missingCost\.cogsUnknown\)\)/,
-    'the old cogsUnknown-keyed gate is what made the card lie (ERR-074)',
-  );
-  // The scan runs off the critical path now (ERR-121), so "found culprits" additionally
-  // requires a SETTLED scan — a pending or failed scan is not a count of zero.
-  assert.match(src, /const hasCulprits\s*=\s*scanSettled && missingCost\.count > 0/);
-  assert.match(src, /const scanSettled\s*=\s*!!missingCost && !scanPending && !scanFailed/);
-  assert.match(
-    src, /else if \(hasCulprits\) \{\s*cards\.push\(alertCard\(\s*'Sales missing a cost'/,
-    'the actionable "Sales missing a cost" card must be gated on hasCulprits',
-  );
+test('an unavailable list never reads as an all-clear (review 2026-11-26)', () => {
+  // dashboard-summary down ⇒ trackingOrders null ⇒ both tracking surfaces say "could not load",
+  // even when the customer tracking-request list loaded (it alone would undercount).
+  assert.match(DASH_ONLY, /const tracking = d\.trackingOrders == null \? null : computeTrackingAlert/);
+  assert.match(DASH_ONLY, /d\.trackingOrders == null[\s\S]{0,400}Could not load the orders awaiting tracking — this is not a zero/);
+  // An expense list cut short by its limit is "not loaded", so the to-dos never say "None found" on part of it.
+  assert.match(DASH_ONLY, /expResp\.items\.length >= expTotal\) \? expResp\.items : null/);
 });
 
-test('no culprits + unrecoverable profit → blames the endpoint, not the owner’s data', () => {
-  // `scanSettled &&` guard added with ERR-121: "we looked and found nothing" is only
-  // claimable once the scan has actually finished.
-  assert.match(src, /const showDegraded = scanSettled && !hasCulprits && cur\.gross_profit == null && !recovered/);
-  assert.match(src, /alertCard\('Profit unavailable'/);
-  // …and it must NOT show when the rebuild worked — the dashboard is functional then.
-  assert.match(src, /!recovered/);
-});
-
-test('a truncated or partly-failed scan is never reported as a clean bill of health', () => {
-  assert.match(src, /incomplete/, 'computeMissingCostAlert must report scan completeness');
-  assert.match(
-    src, /if \(res\.status !== 'fulfilled' \|\| !res\.value\) \{ incomplete = true; return; \}/,
-    'a detail call we could not make is an order we did NOT clear',
-  );
-  assert.match(src, /missingCost\?\.incomplete/, 'the card copy must branch on it');
-});
-
-// ─── 6. The scan must look where the culprits actually are ──────────────────
-
-test('the missing-cost scan owns its fetch and takes EVERY status', () => {
-  // ERR-121 moved the scan off the critical path, so the range now reaches it via
-  // startMissingCostScan rather than a direct awaited call — the contract is unchanged.
-  const call = src.match(/(?:computeMissingCostAlert|startMissingCostScan)\(([^)]*)\)/g) || [];
-  assert.ok(
-    call.some(c => c.includes('{ from, to }')),
-    'must pass a range and fetch its own orders — reusing the tracking list (paid|processing '
-    + 'only, limit 50) is what blinded it: 10 of 59 live orders are shipped/completed',
-  );
-  assert.doesNotMatch(
-    src, /(?:computeMissingCostAlert|startMissingCostScan)\(val\(8\)/,
-    'index 8 is the tracking card\'s paid|processing list — do not reuse it here',
-  );
-  // The fetch inside the scan must carry NO statuses key, or api.js re-adds the filter.
-  assert.match(src, /AdminAPI\.getOrders\(\{ from: range\.from, to: range\.to \}/);
-});
-
-test('every order is cost-checked, not just invoice-channel ones', () => {
-  // supplier_cost_snapshot is visible ONLY on the detail call (the list omits it, ERR-039),
-  // so gating the detail call on isInvoice() made an un-costed WEBSITE order undetectable.
-  const body = src.slice(src.indexOf('async function computeMissingCostAlert'));
-  const scan = body.slice(0, body.indexOf('\n}\n'));
-  assert.doesNotMatch(
-    scan, /else if \(isInvoice/,
-    'the isInvoice gate on the detail fan-out is the third blind spot (ERR-074)',
-  );
-  assert.match(scan, /supplier_cost_snapshot == null/);
-  assert.match(scan, /revenueOrders\.slice\(0, MISSING_COST_DETAIL_CAP\)/);
-});
-
-test('cancelled orders are excluded — the backend excludes them from COGS too', () => {
-  assert.match(src, /!== 'cancelled'/);
+test('the missing-cost scan is gone; the backend list replaces it', () => {
+  assert.doesNotMatch(DASH_ONLY, /computeMissingCostAlert|startMissingCostScan|MISSING_COST_DETAIL_CAP|AdminAPI\.getOrder\(/);
+  assert.match(DASH_ONLY, /missingCostItems\(d\.dsum\?\.actions\?\.missing_cost/);
 });
 
 // ─── 7. RETIRED: the ERR-106 proration ──────────────────────────────────────
@@ -412,8 +352,10 @@ test('traffic overlay: sessions + pageviews on a hidden, baseline-aligned scale,
 
 test('the dashboard fetches the traffic time-series and parses it null-honestly', () => {
   // Wired into the parallel load, with a wide fallback range so the all-time view still returns.
-  assert.match(src, /AdminAPI\.getTrafficTimeseries\(trafficFrom, trafficTo, signal\)/);
-  assert.match(src, /const trafficFrom = from \|\| '2000-01-01'/);
+  // The range is FilterState.getDateRange(), which is always concrete (All time starts at the
+  // store's first-data date), so no wide fallback is needed any more.
+  assert.match(src, /AdminAPI\.getTrafficTimeseries\(from, to, signal\)/);
+  assert.match(src, /const \{ from, to \} = FilterState\.getDateRange\(\)/);
   // Parsed through the shared normalizer → [] when absent (→ lines omit), never a fabricated zero.
-  assert.match(src, /sTraffic: normalizeSeries\(val\(12\)\)/);
+  assert.match(src, /sTraffic: normalizeSeries\(val\(11\)\)/);
 });

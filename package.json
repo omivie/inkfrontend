@@ -101,6 +101,7 @@
     "probe:chip-counts": "node scripts/probe-chip-counts.mjs",
     "probe:backend-17oct": "node scripts/probe-backend-17oct.mjs",
     "probe:backend-25oct": "node scripts/probe-backend-25oct.mjs",
+    "probe:backend-25nov": "node scripts/probe-backend-25nov.mjs",
     "probe:handoff-26oct": "node scripts/probe-handoff-26oct.mjs",
     "probe:handoff-2nov": "node scripts/probe-handoff-2nov.mjs",
     "probe:search-inactive": "node scripts/probe-search-inactive.mjs",

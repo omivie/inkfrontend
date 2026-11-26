@@ -7,6 +7,8 @@
  *
  *   1. /api/admin/analytics/traffic/timeseries?from&to
  *        → { ok, data: [ { date: 'YYYY-MM-DD', sessions, pageviews }, ... ] }
+ *        Buckets are NZ calendar days (Pacific/Auckland; hour buckets are NZ hours) —
+ *        the backend does the zone work and no timezone shift is applied here.
  *        Daily buckets only (the `granularity` param is ignored server-side).
  *        Backfilled to the day the first-party tracker launched; ranges with
  *        no data come back as `[]`.
@@ -94,8 +96,9 @@ export function seriesTotals(series) {
 // ─── Bucketing (chart granularity) ───────────────────────────────────────────
 //
 // The chart card lets the user choose 1 day / 1 week / 1 month per bar. The
-// backend timeseries is daily-only, so we re-bucket client-side. All math is
-// UTC day-arithmetic so DST never shifts a bucket boundary.
+// backend timeseries is daily-only, so we re-bucket client-side. The incoming `date`
+// strings are already NZ days; this is plain calendar arithmetic on them (done on UTC
+// midnight so DST never shifts a boundary) — no NZ/UTC conversion is applied.
 //
 //   bucketSeries(series, 'day')   → identity passthrough (one bar per day)
 //   bucketSeries(series, 'week')  → ISO Monday-start weeks

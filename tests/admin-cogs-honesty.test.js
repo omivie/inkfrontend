@@ -287,3 +287,32 @@ test('the dashboard never holds unpaid invoices out of revenue or profit (ERR-38
   assert.ok(!/invoice-cash-basis|_cashBasis|applyCashBasis|paid invoices only/.test(dashboardSrc),
     'dashboard.js deducts unpaid invoices again — owner reversed that 2026-11-22');
 });
+
+// ─── P&L backend contract, 2026-11-26 (migrations 218-220) ──────────────────
+test('P&L is requested by an NZ {from,to} range, never ?days=, and shows a Refunds row', () => {
+  const exp = fs.readFileSync(path.join(ADMIN, 'pages', 'expenses.js'), 'utf8');
+  assert.match(financeSrc, /getAdminAnalyticsPnL\(pnlRange\)/);
+  assert.match(financeSrc, /pnlRange = FilterState\.getDateRange\(\)/);
+  assert.doesNotMatch(financeSrc, /getAdminAnalyticsPnL\(days\)/);
+  assert.match(exp, /getAdminAnalyticsPnL\(\{ from: /);
+  assert.doesNotMatch(exp, /getAdminAnalyticsPnL\(days\)/);
+  assert.match(financeSrc, /'Refunds \(incl\. GST\)', cur\.refunds, prev\.refunds/);
+  // a missing/null refunds key reads "—", and never trips the "cost unknown" note
+  assert.match(financeSrc, /!label\.startsWith\('Refunds'\)/);
+});
+
+// ERR-394 (found 2026-11-26): the P&L table printed every row through Math.abs, so October
+// 2026's −$1,890.79 net LOSS read as "$1,890.79". Cost rows are shown as a deduction; every
+// other row keeps its own sign.
+test('ERR-394: a net loss keeps its minus sign in the P&L table', () => {
+  const m = financeSrc.match(/const fmt = \(v, neg\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(m, 'fmt must exist');
+  const fmt = new Function('known', 'num', 'formatPrice', 'MISSING', `return (v, neg) => {${m[1]}\n};`)(
+    (v) => v != null && Number.isFinite(Number(v)), Number,
+    (v) => `${v < 0 ? '-' : ''}$${Math.abs(v).toFixed(2)}`, '—');
+  assert.equal(fmt(-1890.79, false), '-$1890.79', 'a loss is a loss');
+  assert.equal(fmt(1413.32, false), '$1413.32');
+  assert.equal(fmt(3697.25, true), '-$3697.25', 'a cost row is shown as a deduction');
+  assert.equal(fmt(-14, true), '$14.00', 'a negative cost (a credit) shows as money back');
+  assert.equal(fmt(null, false), '—');
+});

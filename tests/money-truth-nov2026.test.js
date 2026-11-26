@@ -1,15 +1,24 @@
 /**
- * money-truth.js — the rebuilt Dashboard's money boxes (owner definitions, 2026-11-25).
+ * Dashboard money — utils/money-truth.js on the backend's dashboard-summary (2026-11-26)
+ * ===================================================================================
  *
- * Fixture: tests/fixtures/money-truth-nov2026.json, a READ-ONLY capture of the live admin API
- * (owner session, 2026-11-25): kpi-summary for Oct and 1–25 Nov, every invoice-channel order,
- * every invoice, every refund, every expense. Money fields only — no customer names/emails.
+ * The backend shipped every section of backend-asks-2026-11-25-dashboard (one deploy,
+ * migrations 218–220): invoices on their issue date, processed refunds off on refunded_at,
+ * expenses by bill date paid or not, GST payments not an expense, ONE P&L definition, and
+ * GET /api/admin/analytics/dashboard-summary. The FE adjustments that bridged those gaps
+ * (redateInvoices, refundsIn, opexByBillDate) were DELETED — re-adding one would subtract the
+ * same refund twice. These tests pin what replaced them, against the LIVE payloads measured
+ * 2026-11-26 (tests/fixtures/dashboard-summary-nov2026.json), whose figures equal the backend
+ * reply's own live-check table to the cent.
  *
- * Every expected value below was reconciled BY HAND from the fixture rows (see comments), and
- * independently by the chief review's prototype for the parts it shares.
+ * Also pins the Net Profit second line (supersedes ERR-392's "after $X unpaid bills"): net
+ * profit now INCLUDES unpaid bills dated in range, so the line says how much is unpaid and
+ * never subtracts it again.
  *
- * Run: node --test tests/money-truth-nov2026.test.js
+ * Run with: node --test tests/money-truth-nov2026.test.js
  */
+'use strict';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -18,9 +27,13 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const MODULE = path.join(ROOT, 'inkcartridges', 'js', 'admin', 'utils', 'money-truth.js');
-const F = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'money-truth-nov2026.json'), 'utf8'));
+const SRC = fs.readFileSync(MODULE, 'utf8');
+const DASH = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'admin', 'pages', 'dashboard.js'), 'utf8');
+const F = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'dashboard-summary-nov2026.json'), 'utf8'));
 
-// The module is import-free ESM; load it as .mjs from a temp copy.
+// The module is import-free ESM; load it as .mjs from a temp copy. normalizeDashboardSummary
+// lives in api.js (tested in admin-analytics-wiring); this mirrors its output shape for the
+// fields money-truth reads, so a raw payload can be fed through unchanged.
 let M;
 test.before(async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'money-truth-'));
@@ -29,415 +42,218 @@ test.before(async () => {
   M = await import('file://' + file);
 });
 
+const KEYS = ['revenue_incl_gst', 'revenue_ex_gst', 'refunds', 'cogs', 'gross_profit', 'stripe_fees',
+  'supplier_freight', 'operating_expenses', 'net_profit', 'orders', 'aov', 'owed_unpaid_invoices'];
+const win = (w) => (w ? { ...Object.fromEntries(KEYS.map((k) => [k, w[k] ?? null])), cogs_unknown_orders: w.cogs_unknown_orders ?? null } : null);
+const norm = (raw) => ({ ...raw, current: win(raw.current), previous: win(raw.previous) });
 const OCT = { from: '2026-10-01', to: '2026-10-31' };
-const NOV = { from: '2026-11-01', to: '2026-11-25' };
-const ORDER_LINKED = ['inventory', 'merchant_fees', 'customer_shipping'];
-const GST_ROW = F.expenses.items.find((r) => r.name === 'G.S.T').id;
+const D30 = { from: '2026-10-26', to: '2026-11-25' };
+const sum = (inputs) => Math.round(inputs.reduce((a, i) => a + i.amount, 0) * 100) / 100;
 
-// What the page does: the category registry gives each row a kind; a G.S.T row moved to the
-// new category resolves to 'not_expense'.
-const expenseRows = (notExpense = []) => F.expenses.items.map((r) => ({
-  ...r,
-  kind: notExpense.includes(r.id) ? 'not_expense' : (ORDER_LINKED.includes(r.category) ? 'order_linked' : 'operating'),
-}));
-const src = (over = {}) => ({
-  compare: true,
-  invoices: { rows: F.invoices.rows, total: F.invoices.total },
-  shadows: { rows: F.shadows, total: F.shadows.length },
-  refunds: { rows: F.refunds.rows, total: F.refunds.pagination.total },
-  expenses: { rows: expenseRows(), total: F.expenses.pagination.total, legacy: false },
-  ...over,
-});
-const oct = (over) => M.moneyTruth({ range: OCT, kpi: F.kpiOct, ...src(over) });
-const mtSum = (xs) => Math.round(xs.reduce((t, i) => t + i.amount, 0) * 100) / 100;
-const MONEY = ['revenueInclGst', 'revenueExGst', 'grossProfit', 'netProfit', 'orders'];
-
-// ── October, by hand ────────────────────────────────────────────────────────────────────
-test('October: every money box, reconciled by hand', () => {
-  const f = oct().figures;
-  // 6073.14 backend − 195.99 (INV-3298: issued 22 Nov, its sales record says 1 Oct).
-  // No processed refund in Oct: 70.49 was paid back 17 Sep (logged 25 Oct); 14.00 is pending.
+// ─── 1. The live October figures (the backend reply's live-check table) ─────────────────
+test('October: every tile equals the backend figure, untouched', () => {
+  const { figures: f, warnings } = M.dashboardMoney(norm(F.dsum_oct));
   assert.equal(f.revenueInclGst.value, 5877.15);
-  assert.equal(f.revenueExGst.value, 5110.57);                 // 5877.15 × 20/23
-  // 1443.94 − (195.99 × 20/23 − 139.80) = 1443.94 − 30.63. INV-3284 is in both sets: no effect.
-  assert.equal(f.grossProfit.value, 1413.31);
-  // 1413.31 − 122.41 Stripe − 414.80 freight − 3491.40 expenses (bill date = paid date in Oct).
-  assert.equal(f.netProfit.value, -2615.30);
-  assert.equal(f.orders.value, 52);                             // 53 − INV-3298
-  assert.equal(f.aov.value, 98.28);                             // 5110.57 / 52
-  assert.equal(Math.round(f.grossMargin.value * 10) / 10, 27.7);
-  assert.equal(Math.round(f.netMargin.value * 10) / 10, -51.2);
-  for (const k of MONEY) assert.equal(f[k].adjusted, true, k);
+  assert.equal(f.revenueExGst.value, 5110.57);
+  assert.equal(f.grossProfit.value, 1413.32);
+  assert.equal(f.netProfit.value, -1890.79);
+  assert.equal(f.orders.value, 52);
+  assert.equal(f.owed.value, 302.83);
+  assert.equal(f.revenueInclGst.refunds, 0);
+  assert.equal(f.grossProfit.atMost, false);
+  assert.equal(f.netProfit.atMost, false);
+  assert.deepEqual(warnings, []);
+  // previous window comes from the same payload (2026-08-31..2026-09-30)
+  assert.equal(typeof f.netProfit.prev, 'number');
 });
 
-test('October: the G.S.T payment moved to "GST payment to IRD" leaves net profit', () => {
-  const f = oct({ expenses: { rows: expenseRows([GST_ROW]), total: F.expenses.pagination.total } }).figures;
-  assert.equal(f.netProfit.value, -1890.79);                     // −2615.30 + 724.51
-  const opex = f.netProfit.inputs.find((i) => /Operating expenses/.test(i.label));
-  assert.equal(opex.amount, -2766.89);
-  assert.match(opex.label, /\$724\.51 of GST payments to IRD left out/);
-  assert.equal(f.grossProfit.value, 1413.31, 'gross never moves with expenses');
+test('30 days to 25 Nov: revenue is AFTER the $59.40 refund, and says so', () => {
+  const { figures: f } = M.dashboardMoney(norm(F.dsum_30));
+  assert.equal(f.revenueInclGst.value, 6432.20);
+  assert.equal(f.revenueInclGst.refunds, 59.40);
+  assert.equal(f.revenueExGst.value, 5593.22);
+  const [sales, refunds] = f.revenueInclGst.inputs;
+  assert.equal(sales.amount, 6491.60, 'sales before refunds');
+  assert.equal(refunds.amount, -59.40, 'the refund comes off once, from the backend figure');
+  assert.equal(f.grossProfit.value, 651.15);
+  assert.equal(f.netProfit.value, -1641.04);
 });
 
-test('November 1–25: INV-3298 moves IN; the 6 Nov refund comes off', () => {
-  const f = M.moneyTruth({ range: NOV, kpi: F.kpiNov, ...src() }).figures;
-  assert.equal(f.revenueInclGst.value, 5763.38);                // 5626.79 + 195.99 − 59.40
-  assert.equal(f.grossProfit.value, 468.67);                    // 489.69 + 30.63 − 51.65
-  assert.equal(f.orders.value, 47);
-});
-
-test('every money figure: inputs add up EXACTLY to the value', () => {
-  for (const m of [oct(), M.moneyTruth({ range: NOV, kpi: F.kpiNov, ...src() })]) {
-    for (const k of MONEY) {
-      const fig = m.figures[k];
-      const sum = Math.round(fig.inputs.reduce((a, i) => a + i.amount, 0) * 100) / 100;
-      assert.equal(sum, fig.value, k);
-      assert.ok(fig.inputs.every((i) => ['backend', 'adjusted on this screen', 'calculated'].includes(i.source)), k);
+// ─── 2. "How it's calculated": inputs add up EXACTLY ───────────────────────────────────
+test('every money figure: inputs add up exactly to the value (rounding shown, never hidden)', () => {
+  for (const raw of [F.dsum_oct, F.dsum_30]) {
+    const { figures: f } = M.dashboardMoney(norm(raw));
+    for (const key of ['revenueInclGst', 'revenueExGst', 'grossProfit', 'netProfit']) {
+      assert.ok(f[key].inputs.length >= 2, `${key} shows its steps`);
+      assert.equal(sum(f[key].inputs), f[key].value, `${key} inputs must sum to the value`);
+      for (const i of f[key].inputs) assert.ok(['backend', 'calculated'].includes(i.source), `${key}: source ${i.source}`);
+      assert.equal(f[key].unexplained, 0, `${key}: live figures have no unexplained gap`);
     }
   }
 });
 
-test('adjusted figures say what they replace', () => {
-  const f = oct().figures;
-  assert.equal(f.revenueInclGst.replaces, 'kpi-summary revenue');
-  assert.equal(f.netProfit.replaces, 'kpi-summary net_profit');
-  assert.ok(f.revenueInclGst.inputs.some((i) => /INV-3298 \(issued 2026-11-22\)/.test(i.label)));
+test('a 1–2¢ backend rounding gap is a labelled row; more than 2¢ is UNEXPLAINED and warned', () => {
+  const r = norm(F.dsum_oct);
+  // Live October: 1413.32 − 122.41 − 414.80 − 2766.89 = −1890.78; the backend says −1890.79.
+  let m = M.dashboardMoney(r);
+  assert.ok(m.figures.netProfit.inputs.some((i) => /Rounding/.test(i.label) && i.amount === -0.01),
+    'the live 1¢ is SHOWN as backend rounding');
+  r.current.net_profit = -1890.76;   // 2¢ the other way: still rounding
+  m = M.dashboardMoney(r);
+  assert.ok(m.figures.netProfit.inputs.some((i) => /Rounding/.test(i.label) && i.amount === 0.02));
+  assert.equal(m.figures.netProfit.unexplained, 0);
+  r.current.net_profit = -1880.78;   // $10 off
+  m = M.dashboardMoney(r);
+  assert.ok(m.figures.netProfit.inputs.some((i) => /UNEXPLAINED/.test(i.label)));
+  assert.equal(m.figures.netProfit.unexplained, 10);
+  assert.ok(m.warnings.some((w) => /Net profit: .*not rounding/.test(w)));
+  assert.equal(sum(m.figures.netProfit.inputs), -1880.78, 'still sums exactly');
 });
 
-// ── previous period ─────────────────────────────────────────────────────────────────────
-test('previousRange = same NZ day count, ending the day before (incl. across DST)', () => {
-  assert.deepEqual({ ...M.previousRange(OCT) }, { from: '2026-08-31', to: '2026-09-30' });
-  assert.deepEqual({ ...M.previousRange(NOV) }, { from: '2026-10-07', to: '2026-10-31' });
-  assert.deepEqual({ ...M.previousRange({ from: '2026-09-20', to: '2026-10-10' }) }, { from: '2026-08-30', to: '2026-09-19' });
-  assert.equal(M.previousRange({ from: null, to: '2026-11-25' }), null);
+// ─── 3. Fail-soft must be LOUD ───────────────────────────────────────────────────────────
+test('an un-costed sale ⇒ gross and net are AT MOST, the sale is named (INV-3275 case)', () => {
+  const r = norm(F.dsum_oct);
+  r.current.cogs_unknown_orders = [{ order_id: 'x', order_number: 'INV-3275', skus: [] }];
+  const m = M.dashboardMoney(r);
+  assert.equal(m.figures.grossProfit.atMost, true);
+  assert.equal(m.figures.netProfit.atMost, true);
+  assert.equal(m.figures.grossMargin.atMost, true);
+  assert.match(m.figures.grossProfit.note, /AT MOST.*INV-3275/);
+  assert.ok(m.warnings.some((w) => /AT MOST.*INV-3275/.test(w)));
+  assert.equal(m.figures.grossProfit.value, 1413.32, 'the figure is still shown — not a bare "—"');
 });
 
-test('previous window gets the same adjustments; the Sep refund lands there', () => {
-  const m = oct();
-  assert.equal(m.figures.revenueInclGst.prevComparable, true);
-  const refunds = m.adjustments.find((a) => a.id === 'refunds');
-  assert.equal(refunds.applied, true);
-  assert.equal(refunds.prev.applied, true);
-  // 31 Aug–30 Sep: the 70.49 refund (refunded_at 2026-09-17) is in this window.
-  const prevRev = m.figures.revenueInclGst.prev;
-  assert.equal(prevRev, 10538.58);   // 7590.13 + 3018.94 invoices by issue date − 70.49
+test('failed or unstated supplier freight qualifies net profit', () => {
+  const r = norm(F.dsum_oct);
+  r.supplier_freight_failed = true;
+  let m = M.dashboardMoney(r);
+  assert.equal(m.figures.netProfit.atMost, true);
+  assert.ok(m.warnings.some((w) => /freight.*AT MOST/.test(w)));
+  r.supplier_freight_failed = null;
+  m = M.dashboardMoney(r);
+  assert.match(m.figures.netProfit.note, /did not say whether supplier freight loaded/);
 });
 
-test('compare:false (All time) has no previous figures', () => {
-  const m = M.moneyTruth({ range: OCT, kpi: F.kpiOct, ...src({ compare: false }) });
-  assert.equal(m.previousRange, null);
-  assert.equal(m.figures.netProfit.prev, undefined);
+test('no payload ⇒ no figures and a reason — never a $0', () => {
+  for (const bad of [null, {}, { current: null }]) {
+    const m = M.dashboardMoney(bad);
+    assert.equal(m.figures, null);
+    assert.match(m.warnings[0], /did not load.*not a zero/);
+  }
+  const r = norm(F.dsum_oct);
+  r.current.gross_profit = null;
+  const m = M.dashboardMoney(r);
+  assert.equal(m.figures.grossProfit.value, null);
+  assert.match(m.figures.grossProfit.note, /did not report gross profit/);
+  assert.equal(m.figures.grossMargin.value, null);
 });
 
-// ── timezone ────────────────────────────────────────────────────────────────────────────
-test('NZ day, never the UTC slice (negative control included)', () => {
-  // A shadow at 2026-09-30T20:00Z is NZ 1 Oct. Shift INV-3284's record there: still in October.
-  const shadows = F.shadows.map((s) => (s.order_number === 'INV-3284' ? { ...s, created_at: '2026-09-30T20:00:00Z' } : s));
-  const m = oct({ shadows: { rows: shadows, total: shadows.length } });
-  assert.equal(m.adjustments[0].applied, true);
-  assert.equal('2026-09-30T20:00:00Z'.slice(0, 10), '2026-09-30', 'the UTC slice would have dropped it from October');
+test('margins are profit ÷ ex-GST revenue from the same payload', () => {
+  const { figures: f } = M.dashboardMoney(norm(F.dsum_oct));
+  assert.equal(Math.round(f.grossMargin.value * 100) / 100, Math.round((1413.32 / 5110.57) * 10000) / 100);
+  assert.deepEqual(f.netMargin.of, ['Net profit', 'Revenue (excl. GST)']);
 });
 
-// ── refusals: one input failing never becomes a zero ────────────────────────────────────
-test('§1 refuses when the backend’s invoice set does not reconcile', () => {
-  const shadows = F.shadows.filter((s) => s.order_number !== 'INV-3284');
-  const m = oct({ shadows: { rows: shadows, total: shadows.length } });
-  const a = m.adjustments.find((x) => x.id === 'invoice-dates');
-  assert.equal(a.applied, false);
-  assert.match(a.reason, /1074\.27 from 7 records vs 1270\.26 from 8/);
-  assert.equal(m.figures.revenueInclGst.value, 6073.14, 'backend figure, unadjusted');
-  assert.ok(m.warnings.some((w) => /invoice-dates/.test(w)));
+// ─── 4. The deleted adjustments stay deleted ────────────────────────────────────────────
+test('no FE adjustment survives: no re-dating, no refund subtraction, no expense re-count', () => {
+  // (The header names them, as history; no code may define or call them.)
+  assert.doesNotMatch(SRC, /function\s+(redateInvoices|refundsIn|opexByBillDate|moneyTruth)\b|\b(redateInvoices|refundsIn|opexByBillDate)\(/);
+  assert.doesNotMatch(SRC, /'adjusted on this screen'|REMOVAL MAP/);
+  assert.doesNotMatch(DASH, /adjusted on this screen/);
+  assert.doesNotMatch(SRC, /^import /m, 'import-free (pure, vm-testable)');
+  assert.doesNotMatch(SRC, /toISOString\(\)\.slice\(0, ?10\)/, 'NZ days only, never the UTC slice');
 });
 
-test('§1 refuses on a truncated list', () => {
-  const m = oct({ invoices: { rows: F.invoices.rows.slice(0, 30), total: F.invoices.total } });
-  assert.match(m.adjustments[0].reason, /30 of 37 invoices were read/);
+// ─── 5. Net Profit second line ───────────────────────────────────────────────────────────
+test('unpaid bills: the live October rows reproduce the backend opex to the cent first', () => {
+  const r = M.unpaidBillsInRange(F.expenses, OCT, 2766.89);
+  assert.deepEqual(r, { value: 0, count: 0 });
+  assert.equal(M.unpaidBillsLine(r), 'All bills in this period are paid');
+  assert.deepEqual(M.unpaidBillsInRange(F.expenses, D30, 1769.72), { value: 0, count: 0 });
 });
 
-test('refunds list missing: refused, named, revenue stays the backend figure for that part', () => {
-  const m = M.moneyTruth({ range: NOV, kpi: F.kpiNov, ...src({ refunds: null }) });
-  assert.equal(m.adjustments.find((a) => a.id === 'refunds').applied, false);
-  assert.equal(m.figures.revenueInclGst.value, 5822.78);        // 5626.79 + 195.99, no refund
-  assert.ok(m.warnings.some((w) => /refunds list did not load/.test(w)));
+test('an unpaid bill is counted at its ex-GST cost, and is NOT subtracted again', () => {
+  const rows = F.expenses.map((x) => ({ ...x }));
+  const target = rows.find((x) => x.expense_date >= '2026-10-01' && x.expense_date <= '2026-10-31' && x.gst_claimable && x.category !== 'gst_payment');
+  target.derived_status = 'due';
+  const r = M.unpaidBillsInRange(rows, OCT, 2766.89);
+  assert.equal(r.count, 1);
+  assert.equal(r.value, Math.round(target.amount * 20 / 23 * 100) / 100);
+  assert.match(M.unpaidBillsLine(r), /^Includes \$\d+\.\d{2} of bills not paid yet$/);
+  // The Dashboard never subtracts it: the old "after $X unpaid bills" arithmetic is gone.
+  assert.doesNotMatch(DASH, /unpaidBillsSub|netProfit - unpaid|after \$\{formatPrice\(unpaid\)\} unpaid bills/);
+  assert.match(DASH, /sub: unpaidBillsLine\(unpaid\)/);
 });
 
-test('refunds: only PROCESSED, dated by refunded_at; switches off when kpi returns refunds', () => {
-  const pendingOnly = { rows: [{ order_number: 'X', amount: 50, status: 'pending', created_at: '2026-10-10T00:00:00Z', refunded_at: null }], total: 1 };
-  assert.equal(oct({ refunds: pendingOnly }).figures.revenueInclGst.value, 5877.15);
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, refunds: 10 } };
-  const m = M.moneyTruth({ range: OCT, kpi, ...src() });
-  const a = m.adjustments.find((x) => x.id === 'refunds');
-  assert.equal(a.applied, false);
-  assert.equal(a.backendHasIt, true);
-  // Measured 2026-11-26: the backend's revenue is net of processed refunds, so this is not a
-  // warning — the revenue breakdown shows both halves instead, and they still sum to the box.
-  assert.ok(!m.warnings.some((w) => /refunds/.test(w)));
-  const f = m.figures.revenueInclGst;
-  assert.equal(f.value, mtSum(f.inputs));
-  // fixture kpi revenue 6,073.14 (captured before the backend fix) + 10 refunded = 6,083.14 sales.
-  assert.deepEqual(f.inputs.slice(0, 2).map((i) => [i.amount, i.source]), [[6083.14, 'backend'], [-10, 'backend']]);
+test('the gst_payment row (G.S.T $724.51) is not an expense — leaving it in breaks the proof', () => {
+  // 2766.89 already excludes it; counting it would make the rows add to 3491.40 and refuse.
+  const rows = F.expenses.map((x) => (x.category === 'gst_payment' ? { ...x, category: 'other' } : x));
+  const r = M.unpaidBillsInRange(rows, OCT, 2766.89);
+  assert.equal(r.value, null);
+  assert.match(r.reason, /add up to \$3491\.40, not the \$2766\.89/);
+  assert.match(M.unpaidBillsLine(r), /^Unpaid bills: could not confirm \(/);
 });
 
-test('expense cross-check leaves out a raw gst_payment row, like kpi-summary does (2026-11-26)', () => {
-  // The owner moved G.S.T to the real gst_payment category; the backend dropped it from
-  // operating_expenses (3,491.40 − 724.51 = 2,766.89 for Oct, measured live).
-  const rows = expenseRows([GST_ROW]).map((r) => (r.id === GST_ROW ? { ...r, category: 'gst_payment' } : r));
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, operating_expenses: 2766.89, net_profit: -1890.79 } };
-  const m = M.moneyTruth({ range: OCT, kpi, ...src({ expenses: { rows, total: rows.length } }) });
-  const a = m.adjustments.find((x) => x.id === 'expenses-by-bill-date');
-  assert.equal(a.applied, true, a.reason);
-  // Every Oct bill was paid on its bill date, so by-bill-date moves nothing: same net as refused.
-  const refused = M.moneyTruth({ range: OCT, kpi, ...src({ expenses: null }) });
-  assert.equal(m.figures.netProfit.value, refused.figures.netProfit.value);
-  // Before the fix the cross-check counted the gst_payment row and refused (3491.40 vs 2766.89).
-  assert.ok(!m.warnings.some((w) => /do not reproduce/.test(w)));
+test('unpaid bills refuses, loudly, when it cannot prove its total', () => {
+  assert.match(M.unpaidBillsInRange(null, OCT, 1).reason, /did not load/);
+  assert.match(M.unpaidBillsInRange(F.expenses, null, 1).reason, /no date range/);
+  assert.match(M.unpaidBillsInRange(F.expenses, OCT, null).reason, /did not report operating expenses/);
+  const recurring = F.expenses.map((x, i) => (i === 0 ? { ...x, expense_date: '2026-10-05', recurrence: 'monthly' } : x));
+  assert.match(M.unpaidBillsInRange(recurring, OCT, 2766.89).reason, /recurring/);
+  assert.equal(M.unpaidBillsLine(null), '');
 });
 
-test('kpi missing ⇒ every money figure null (never 0); owed still works', () => {
-  const m = M.moneyTruth({ range: OCT, kpi: null, ...src() });
-  assert.equal(m.figures, null);
-  assert.ok(m.warnings.some((w) => /kpi-summary\) did not load/.test(w)));
-  assert.equal(m.owedToUs.value, 2477.29);
-});
-
-test('gross dropped by the backend ⇒ gross, net, margins null with a reason', () => {
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, gross_profit: null, net_profit: null } };
-  const f = M.moneyTruth({ range: OCT, kpi, ...src() }).figures;
-  for (const k of ['grossProfit', 'netProfit', 'grossMargin', 'netMargin']) assert.equal(f[k].value, null, k);
-  assert.match(f.grossProfit.note, /did not return gross profit/);
-  assert.equal(f.revenueInclGst.value, 5877.15, 'revenue is unaffected');
-});
-
-test('§4 refuses: legacy list, truncated list, recurring row, cross-check mismatch', () => {
-  const rows = expenseRows();
-  const reason = (expenses) => oct({ expenses }).adjustments.find((a) => a.id === 'expenses-by-bill-date').reason;
-  assert.match(reason({ rows, total: rows.length, legacy: true }), /old endpoint/);
-  assert.match(reason({ rows: rows.slice(1), total: rows.length }), /75 of 76 expenses were read/);
-  assert.match(reason({ rows: rows.map((r, i) => (i ? r : { ...r, recurrence: 'monthly' })), total: rows.length }), /recurring/);
-  const noSupabase = rows.filter((r) => !(r.name === 'Supabase' && r.expense_date === '2026-10-07'));
-  assert.match(reason({ rows: noSupabase, total: noSupabase.length }), /3446\.05 vs 3491\.4/);
-});
-
-test('§4 counts an UNPAID bill on its bill date', () => {
-  const rows = [...expenseRows(), { id: 'u1', name: 'Accountant', payee: 'Accountant', amount: 115, gst_claimable: true, category: 'other', kind: 'operating', expense_date: '2026-10-15', paid_date: null, derived_status: 'due', recurrence: 'none' }];
-  const f = oct({ expenses: { rows, total: rows.length } }).figures;
-  assert.equal(f.netProfit.value, -2715.30);                    // −2615.30 − 115 × 20/23
-  assert.match(f.netProfit.inputs.find((i) => /Operating/.test(i.label)).label, /\$100\.00 not paid yet/);
-});
-
-// ── owed, to-dos ────────────────────────────────────────────────────────────────────────
-test('owed to us = unpaid invoices, any date; void and paid excluded (Invoices page rule)', () => {
-  const o = M.owedToUs({ rows: F.invoices.rows, total: F.invoices.total });
-  assert.equal(o.value, 2477.29);
-  assert.equal(o.inputs.length, 10);
-  assert.equal(M.owedToUs({ rows: F.invoices.rows.slice(1), total: F.invoices.total }).value, null);
-  const inv = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'admin', 'pages', 'invoices.js'), 'utf8');
-  assert.match(inv, /const isOutstanding = \(inv\) => !!inv && inv\.status !== 'paid' && inv\.status !== 'void';/,
-    'the Invoices page rule changed — change owedToUs with it');
-});
-
-test('to-dos: duplicate pairs, pending refund, tax row, invoice cost over price', () => {
-  const t = M.moneyTodos({ range: OCT, ...src() });
-  assert.deepEqual(t.duplicates.map((d) => d.label), [
-    'Google: $657.94 on 2026-10-05 and $657.94 on 2026-10-02',
-    'Render: $94.71 on 2026-10-05 and $94.00 on 2026-10-02',
-  ]);
+// ─── 6. To-dos and the action lists ─────────────────────────────────────────────────────
+test('to-dos read the live lists: one pending refund, no tax row filed as an expense', () => {
+  const t = M.moneyTodos({ range: OCT, expenses: F.expenses, refunds: F.refunds, invoices: F.invoices, orderRef: (n) => `#${n}` });
   assert.equal(t.pendingRefunds.length, 1);
-  assert.match(t.pendingRefunds[0].label, /2026100901: \$14\.00 pending since 2026-10-14/);
+  assert.match(t.pendingRefunds[0].label, /^2026100901: \$14\.00 pending since 2026-10-/);
+  assert.equal(t.pendingRefunds[0].href, 'orders?focus=%232026100901', 'links go through the order-number formatter');
+  assert.deepEqual(t.taxAsExpense, [], 'the G.S.T row is in gst_payment now');
+  assert.ok(Array.isArray(t.duplicates));
+  assert.ok(Array.isArray(t.invoiceCostOverPrice));
+});
+
+test('a tax payment still filed as an operating expense is flagged', () => {
+  const rows = F.expenses.map((x) => (x.category === 'gst_payment' ? { ...x, category: 'other' } : x));
+  const t = M.moneyTodos({ range: OCT, expenses: rows, refunds: [], invoices: [] });
   assert.equal(t.taxAsExpense.length, 1);
-  assert.deepEqual(t.invoiceCostOverPrice.map((i) => i.label.slice(0, 8)), ['INV-3289', 'INV-3294', 'INV-3296']);
+  assert.match(t.taxAsExpense[0].label, /G\.S\.T: \$724\.51 on 2026-10-20 — move to "GST \/ tax payment to IRD"/);
 });
 
-test('duplicate rule negatives', () => {
-  const r = (payee, amount, d) => ({ payee, name: payee, amount, expense_date: d });
-  const pairs = (rows) => M.possibleDuplicateExpenses(rows, null).length;
-  assert.equal(pairs([r('Google Ads', 1000, '2026-09-16'), r('Google Ads', 1000, '2026-10-14')]), 0, 'a month apart');
-  assert.equal(pairs([r('Google Works', 74, '2026-10-02'), r('Google Works', 45.54, '2026-10-05')]), 0, 'different amounts');
-  assert.equal(pairs([r('Render', 43.23, '2026-10-02'), r('Supabase', 43.21, '2026-10-02')]), 0, 'different payee');
-  assert.equal(pairs([r('Render', 94, '2026-10-02'), r('Render', 94.71, '2026-10-05')]), 1);
+test('a list that did not load is null ("could not load"), never an empty all-clear', () => {
+  const t = M.moneyTodos({ range: OCT, expenses: null, refunds: null, invoices: null });
+  assert.deepEqual(t, { duplicates: null, pendingRefunds: null, taxAsExpense: null, invoiceCostOverPrice: null });
 });
 
-// ── guards on the code around it ────────────────────────────────────────────────────────
-test('module stays pure: no imports, no UTC date slicing of timestamps', () => {
-  const s = fs.readFileSync(MODULE, 'utf8');
-  assert.doesNotMatch(s, /^import /m);
-  assert.doesNotMatch(s, /created_at\.slice\(0, ?10\)|refunded_at\.slice/);
+test('missing-cost action: unavailable is null; rows link to the invoice or the order', () => {
+  assert.equal(M.missingCostItems({ count: null, rows: [], error: 'unavailable' }), null);
+  assert.equal(M.missingCostItems(undefined), null);
+  const m = M.missingCostItems({ count: 3, rows: [
+    { order_id: 'a', order_number: 'INV-3275', skus: [] },
+    { order_id: 'b', order_number: '2026110601', skus: ['GLC135XLC'] },
+  ] }, (n) => `#${n}`);
+  assert.equal(m.count, 3);
+  assert.equal(m.truncated, true, 'count beyond the rows is said, not hidden');
+  assert.deepEqual(m.items[0], { label: 'INV-3275 — no cost recorded', href: 'invoices' });
+  assert.deepEqual(m.items[1], { label: '2026110601 — no cost on GLC135XLC', href: 'orders?focus=%232026110601' });
 });
 
-test('Expenses save path: a backend-pending built-in rides the override map', () => {
-  const s = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'admin', 'pages', 'expenses.js'), 'utf8');
-  assert.match(s, /EXPENSE_CATEGORIES\.some\(c => c\.key === key && !c\.backendPending\)/);
-  assert.match(s, /<optgroup label="Not an expense">\$\{notExpenseCategories\(\)/);
+test('refund rate = processed refunds in range ÷ the orders the money counts', () => {
+  const series = { series: [{ refund_count: 0 }, { refund_count: 1 }] };
+  assert.equal(Math.round(M.refundRatePct(series, 52) * 100) / 100, 1.92);
+  assert.equal(M.refundRatePct(series, 0), null);
+  assert.equal(M.refundRatePct(null, 52), null);
+  assert.equal(M.refundRatePct({ series: [{ refund_count: null }] }, 52), null, 'an unknown day is not a zero');
 });
 
-// ── chief verify findings (2026-11-25), each pinned ─────────────────────────────────────
-const NOVsrc = (over) => M.moneyTruth({ range: NOV, kpi: F.kpiNov, ...src(over) });
-const refundList = (rows) => ({ rows, total: rows.length });
-const novRefund = F.refunds.rows.find((r) => r.order_number === '2026110601');
-
-test('F1: a refund on a cancelled or test order is NOT taken off again (named instead)', () => {
-  const extra = { id: 'x1', order_number: 'C1', type: 'refund', amount: 120, status: 'processed', created_at: '2026-11-10T00:00:00Z', refunded_at: '2026-11-10T00:00:00Z', order_status: 'cancelled', order_is_test: false };
-  const m = NOVsrc({ refunds: refundList([...F.refunds.rows, extra]) });
-  assert.equal(m.figures.revenueInclGst.value, 5763.38);
-  assert.ok(m.warnings.some((w) => /Refund on C1 not taken off/.test(w)));
-});
-
-test('F1: an unknown order status behind a refund refuses the refunds part', () => {
-  const rows = F.refunds.rows.map((r) => (r === novRefund ? { ...r, order_status: undefined } : r));
-  const a = NOVsrc({ refunds: refundList(rows) }).adjustments.find((x) => x.id === 'refunds');
-  assert.equal(a.applied, false);
-  assert.match(a.reason, /order status behind refund 2026110601 could not be read/);
-});
-
-test('F2: unpriced supplier freight ⇒ "at most" net profit, loudly', () => {
-  const kpi = { ...F.kpiNov, current: { ...F.kpiNov.current, supplier_freight_unpriced_orders: 3 } };
-  const m = M.moneyTruth({ range: NOV, kpi, ...src() });
-  assert.match(m.figures.netProfit.note, /AT MOST/);
-  assert.ok(m.figures.netProfit.inputs.some((i) => /AT LEAST this: 3 unpriced/.test(i.label)));
-  assert.ok(m.warnings.some((w) => /could not price/.test(w)));
-});
-
-test('F3: a shadow with no total refuses §1 (never "applied" with revenue and gross disagreeing)', () => {
-  const shadows = F.shadows.map((x) => (x.order_number === 'INV-3284' ? { ...x, total: undefined } : x));
-  const a = oct({ shadows: { rows: shadows, total: shadows.length } }).adjustments[0];
-  assert.equal(a.applied, false);
-  assert.match(a.reason, /INV-3284 does not carry the invoice's total/);
-});
-
-test('F3: numeric strings from the backend are numbers; garbage is null, never 0', () => {
-  const str = Object.fromEntries(Object.entries(F.kpiOct.current).map(([k, v]) => [k, typeof v === 'number' ? String(v) : v]));
-  const f = M.moneyTruth({ range: OCT, kpi: { ...F.kpiOct, current: str }, ...src() }).figures;
-  assert.equal(f.grossProfit.value, 1413.31);
-  assert.equal(f.orders.value, 52);
-  const junk = { ...F.kpiOct.current, net_profit: 'n/a' };
-  assert.equal(M.moneyTruth({ range: OCT, kpi: { ...F.kpiOct, current: junk }, ...src() }).figures.netProfit.value, null);
-});
-
-test('F4: an expense with an unknown kind refuses §4 instead of vanishing from the total', () => {
-  const rows = expenseRows().map((r) => (r.name === 'Google Ads' && r.expense_date === '2026-10-14' ? { ...r, kind: undefined } : r));
-  const a = oct({ expenses: { rows, total: rows.length } }).adjustments.find((x) => x.id === 'expenses-by-bill-date');
-  assert.equal(a.applied, false);
-  assert.match(a.reason, /no known category kind/);
-});
-
-test('F5: a list without a total, or with a duplicated row, is refused', () => {
-  const noTotal = NOVsrc({ refunds: { rows: F.refunds.rows.filter((r) => r !== novRefund) } }).adjustments.find((x) => x.id === 'refunds');
-  assert.match(noTotal.reason, /did not say how many/);
-  const dup = NOVsrc({ refunds: refundList([...F.refunds.rows, novRefund]) }).adjustments.find((x) => x.id === 'refunds');
-  assert.match(dup.reason, /same row twice/);
-});
-
-test('F6a: zero deltas ⇒ not badged "adjusted" (Oct 7–31: every delta is 0)', () => {
-  const m = M.moneyTruth({ range: { from: '2026-10-07', to: '2026-10-31' }, kpi: { current: F.kpiNov.previous, previous: null }, ...src({ compare: false }) });
-  assert.equal(m.figures.netProfit.value, mtNet(F.kpiNov.previous));
-  assert.equal(m.figures.netProfit.adjusted, false);
-  assert.equal(m.figures.netMargin.adjusted, false);
-});
-function mtNet(k) { return k.net_profit; }
-
-test('F6b: a big gap in the backend identity is "unexplained", not "rounding"', () => {
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, net_profit: F.kpiOct.current.net_profit - 50 } };
-  const m = M.moneyTruth({ range: OCT, kpi, ...src() });
-  assert.ok(m.figures.netProfit.inputs.some((i) => /UNEXPLAINED/.test(i.label) && i.amount === -50));
-  assert.ok(m.warnings.some((w) => /unexplained/.test(w)));
-});
-
-test('F6c: chargebacks are labelled as chargebacks', () => {
-  const cb = { ...novRefund, id: 'cb1', type: 'chargeback', order_number: '2026110601' };
-  const rows = F.refunds.rows.map((r) => (r === novRefund ? cb : r));
-  const inp = NOVsrc({ refunds: refundList(rows) }).figures.revenueInclGst.inputs;
-  assert.ok(inp.some((i) => /Refunds and chargebacks \(1 chargeback\)/.test(i.label)));
-});
-
-test('F6d: two live sales records for one invoice refuse §1; a void invoice is named as voided', () => {
-  const twin = { ...F.shadows.find((x) => x.order_number === 'INV-3290'), id: 'twin' };
-  const a = oct({ shadows: { rows: [...F.shadows, twin], total: F.shadows.length + 1 } }).adjustments[0];
-  assert.match(a.reason, /INV-3290 has two live sales records/);
-  const invoices = F.invoices.rows.map((i) => (i.invoice_number === 3290 ? { ...i, status: 'void' } : i));
-  const inp = oct({ invoices: { rows: invoices, total: invoices.length } }).figures.revenueInclGst.inputs;
-  assert.ok(inp.some((i) => /voided: INV-3290/.test(i.label) && !/moved out: [^—]*INV-3290/.test(i.label)));
-});
-
-test('F6e: only net missing ⇒ the note says net, not gross', () => {
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, net_profit: null } };
-  assert.match(M.moneyTruth({ range: OCT, kpi, ...src() }).figures.netProfit.note, /did not return net profit/);
-});
-
-test('F7: a processed refund with no refund date refuses (never dated by created_at)', () => {
-  const rows = F.refunds.rows.map((r) => (r === novRefund ? { ...r, refunded_at: null } : r));
-  const a = NOVsrc({ refunds: refundList(rows) }).adjustments.find((x) => x.id === 'refunds');
-  assert.match(a.reason, /2026110601 is processed but has no refund date/);
-});
-
-test('mutation guards the chief found uncaught: cancelled shadow, void invoice, freight in invoice gross', () => {
-  // A cancelled shadow is not counted by the backend: keeping it would break reconciliation.
-  const cancelled = F.shadows.find((x) => x.status === 'cancelled');
-  assert.ok(cancelled, 'fixture holds the cancelled INV-3264 record');
-  // A void invoice issued in range must not be counted as revenue.
-  const invoices = F.invoices.rows.map((i) => (i.invoice_number === 3290 ? { ...i, status: 'void' } : i));
-  assert.equal(oct({ invoices: { rows: invoices, total: invoices.length } }).figures.revenueInclGst.value, mtRound(5877.15 - 46.99));
-  // INV-3290 carries a $7 freight line: moving it must move 46.99 × 20/23 − 23.00 = 17.86, not profit_excl_gst 11.77.
-  const shadows = F.shadows.map((x) => (x.order_number === 'INV-3290' ? { ...x, created_at: '2026-09-20T00:00:00Z' } : x));
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, invoice_revenue: mtRound(1270.26 - 46.99), invoice_orders: 7, revenue: mtRound(6073.14 - 46.99), gross_profit: mtRound(1443.94 - 17.86) } };
-  const f = M.moneyTruth({ range: OCT, kpi, ...src({ shadows: { rows: shadows, total: shadows.length } }) }).figures;
-  assert.equal(f.grossProfit.value, 1413.31, 'moving INV-3290 back in restores exactly 17.86');
-});
-function mtRound(n) { return Math.round(n * 100) / 100; }
-
-test('§1 reconciliation needs the COUNT too, not only the amount', () => {
-  const kpi = { ...F.kpiOct, current: { ...F.kpiOct.current, invoice_orders: 9 } };
-  const a = M.moneyTruth({ range: OCT, kpi, ...src() }).adjustments[0];
-  assert.equal(a.applied, false);
-  assert.match(a.reason, /from 8 records vs 1270\.26 from 9/);
-});
-
-test('§1 ignores a CANCELLED sales record (the backend does not count it)', () => {
-  // INV-3264's cancelled record, moved into October: it must not join the backend's set.
-  const shadows = F.shadows.map((x) => (x.status === 'cancelled' ? { ...x, created_at: '2026-10-10T00:00:00Z' } : x));
-  const m = oct({ shadows: { rows: shadows, total: shadows.length } });
-  assert.equal(m.adjustments[0].applied, true);
-  assert.equal(m.figures.revenueInclGst.value, 5877.15);
-});
-
-// ── chief re-verify (round 2) ───────────────────────────────────────────────────────────
-test('R2: a refund on a TEST order is not taken off', () => {
-  const t = { id: 't1', order_number: 'T1', type: 'refund', amount: 0.5, status: 'processed', created_at: '2026-11-10T00:00:00Z', refunded_at: '2026-11-10T00:00:00Z', order_status: 'paid', order_is_test: true };
-  const m = NOVsrc({ refunds: refundList([...F.refunds.rows, t]) });
-  assert.equal(m.figures.revenueInclGst.value, 5763.38);
-  assert.ok(m.warnings.some((w) => /Refund on T1 not taken off/.test(w)));
-});
-
-test('R2: a sales record whose total differs from its invoice refuses §1; a stale one OUTSIDE the period does not', () => {
-  const stale = (num) => F.shadows.map((x) => (x.order_number === num ? { ...x, total: Number(x.total) + 1 } : x));
-  const inOct = oct({ shadows: { rows: stale('INV-3285'), total: F.shadows.length } }).adjustments[0];
-  assert.match(inOct.reason, /INV-3285 does not carry the invoice's total/);
-  const july = oct({ shadows: { rows: stale('INV-3265'), total: F.shadows.length } }).adjustments[0];
-  assert.equal(july.applied, true, 'a July record must not block October');
-});
-
-test('R2: a record with no date refuses §1 instead of throwing', () => {
-  const shadows = F.shadows.map((x) => (x.order_number === 'INV-3285' ? { ...x, created_at: undefined } : x));
-  const m = oct({ shadows: { rows: shadows, total: shadows.length } });
-  assert.match(m.adjustments[0].reason, /INV-3285 has no date/);
-});
-
-test('R2: owed-to-us refuses a list without a whole total', () => {
-  const o = M.owedToUs({ rows: F.invoices.rows.slice(0, 30), total: NaN });
-  assert.equal(o.value, null);
-  assert.match(o.note, /did not say how many/);
-});
-
-test('R2: an unknown processed refund type is named, not silently skipped', () => {
-  const sc = { ...novRefund, id: 'sc1', type: 'store_credit', order_number: 'S1' };
-  const m = NOVsrc({ refunds: refundList([...F.refunds.rows, sc]) });
-  assert.ok(m.warnings.some((w) => /type store_credit are not taken off/.test(w)));
-});
-
-test('R2: a tax payment still filed as an expense is a MONEY warning (with its amount)', () => {
-  const m = oct();
-  assert.ok(m.warnings.some((w) => /Net profit includes \$724\.51 that looks like a tax payment \(G\.S\.T\)/.test(w)));
-  const moved = oct({ expenses: { rows: expenseRows([GST_ROW]), total: F.expenses.pagination.total } });
-  assert.ok(!moved.warnings.some((w) => /looks like a tax payment/.test(w)));
-  const renamed = expenseRows().map((r) => (r.id === GST_ROW ? { ...r, name: 'Tax payment', payee: 'Inland Revenue' } : r));
-  assert.ok(oct({ expenses: { rows: renamed, total: renamed.length } }).warnings.some((w) => /looks like a tax payment/.test(w)));
+test('possible duplicate expenses: same payee, similar amount, within 5 days', () => {
+  const rows = [
+    { id: 1, payee: 'Spark', amount: 100, expense_date: '2026-10-02' },
+    { id: 2, payee: 'spark ', amount: 100.5, expense_date: '2026-10-05' },
+    { id: 3, payee: 'Spark', amount: 100, expense_date: '2026-10-20' },
+  ];
+  const pairs = M.possibleDuplicateExpenses(rows, OCT);
+  assert.equal(pairs.length, 1);
+  assert.match(pairs[0].label, /Spark: \$100\.00 on 2026-10-02 and \$100\.50 on 2026-10-05/);
 });

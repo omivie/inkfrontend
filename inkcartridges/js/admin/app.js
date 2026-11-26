@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.11.25-dashboard-new';
+const APP_VERSION = '2026.11.26-dashboard-summary';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -102,8 +102,6 @@ function icon(name, w = 18, h = 18) {
 const NAV_ITEMS = [
   { section: 'Overview' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  // Rebuilt dashboard, side-by-side until the owner approves it (Nov 2026).
-  { key: 'dashboard-new', label: 'Dashboard (new)', icon: 'dashboard', ownerOnly: true },
 
   { section: 'Sales' },
   { key: 'orders', label: 'Orders', icon: 'orders' },
@@ -217,6 +215,8 @@ function isOwnerOnlyRoute(pageName) {
 
 // Legacy route redirects — old pages now merged into parent pages / hubs.
 const ROUTE_REDIRECTS = {
+  // "Dashboard (new)" was merged into the Dashboard (owner 2026-11-26) — keep the bookmark.
+  'dashboard-new': 'dashboard',
   'refunds': 'orders',
   'ribbons': 'products', // retired May 2026 — preserved so old bookmarks land on Products
   'reviews': 'customers',

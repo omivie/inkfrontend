@@ -89,15 +89,20 @@ test('reserved keys = built-ins + non-identity legacy keys, and nothing else', (
   assert.deepEqual(reserved, ['cogs', 'customer_shipping', 'gst_payment', 'inventory', 'merchant_fees', 'other', 'platform', 'salaries', 'shipping']);
 });
 
-test('gst_payment: not an expense, backend-pending, and the ONLY built-in an override may carry', () => {
+test('gst_payment: not an expense, accepted by the backend (no backendPending), label matches backend', () => {
   const g = sandbox.categoryByKey('gst_payment');
   assert.equal(g.kind, 'not_expense');
-  assert.equal(g.backendPending, true);
+  assert.equal(g.backendPending, undefined);
+  assert.equal(g.label, 'GST / tax payment to IRD');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.notExpenseCategories().map(c => c.key))), ['gst_payment']);
-  const ov = JSON.parse(JSON.stringify(sandbox.normalizeCategoryOverrides({ a: 'gst_payment', b: 'inventory', c: 'other' })));
-  assert.deepEqual(ov, { a: 'gst_payment' });
-  // A G.S.T row is stored as 'other'; the override resolves it.
-  assert.equal(sandbox.resolveRowCategory('other', 'a', { a: 'gst_payment' }), 'gst_payment');
+});
+
+test('overrides never name a built-in (gst_payment included); the raw row carries the real category', () => {
+  const ov = JSON.parse(JSON.stringify(sandbox.normalizeCategoryOverrides({ a: 'gst_payment', b: 'inventory', c: 'other', d: 'fuel' })));
+  assert.deepEqual(ov, { d: 'fuel' });
+  // An override only applies to a raw 'other' row; a raw gst_payment row is never relabelled.
+  assert.equal(sandbox.resolveRowCategory('gst_payment', 'a', { a: 'gst_tax' }), 'gst_payment');
+  assert.equal(sandbox.resolveRowCategory('other', 'd', { d: 'fuel' }), 'fuel');
 });
 
 // ─── slug + list normalisation ────────────────────────────────────────────────

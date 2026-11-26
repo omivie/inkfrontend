@@ -1,24 +1,37 @@
 # Backend correspondence — status index
 
-Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, answered docs deleted. Last updated **2026-10-28**.
+Audited **2026-09-09**; restructured **2026-10-15** (owner): one outgoing file, answered docs deleted. Last updated **2026-11-26**.
 `outbox/` = what we still need from the backend. `inbox/` = what the backend sent us. See `README.md`.
 
 ---
 
 ## `outbox/` — the ONE outgoing file
 
-**2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — SENT (owner deleted the file 2026-11-26). Admin Dashboard numbers + speed (ERR-393). The new dashboard adjusts on screen until each § ships; tell FE which § shipped so the matching adjustment in `utils/money-truth.js` is deleted.
+**2026-11-26:** `outbox/backend-asks-2026-11-26-dashboard-followup.md` — NOT sent yet. Follow-ups found while verifying the 25 Nov reply (ERR-394).
 
 | § | Ask | Written | Status (2026-11-26) |
 |---|---|---|---|
-| 1 | Invoice shadow orders dated by `issue_date` (INV-3298 issued 22 Nov, record 1 Oct; 13 invoices differ) + backfill | 2026-11-25 | **shipped** — measured 11-26: Oct kpi revenue 5,877.15 (INV-3298 gone); FE adjustment reconciles to 0 |
-| 2 | pnl buckets by NZ month like kpi-summary (Oct: 6073.14 vs 6019.65); bundle net series vs kpi net gap 10.66 | 2026-11-25 | open |
-| 3 | Subtract PROCESSED refunds on `refunded_at`; return `refunds` on kpi-summary (series counts a pending refund, dates by created_at) | 2026-11-25 | **shipped** — measured 11-26: 28 Oct–26 Nov order totals 6,349.61 − refunds 59.40 = kpi revenue 6,290.21; all-time `refunds` 129.89 = the two processed (pending $14 out). FE no longer subtracts. Gross side (`refunds_ex_gst`) not measured |
-| 4 | Operating expenses by `expense_date`, paid or not (accrual) | 2026-11-25 | unknown — every bill so far was paid on its bill date, so the two rules give the same total; FE cross-check refuses if they ever differ |
-| 5 | Built-in `gst_payment` expense category excluded from operating expenses | 2026-11-25 | **shipped** — G.S.T row now saved raw `gst_payment`; all-time opex 9,791.77 − 724.51 = 9,067.26 to the cent |
-| 6 | One `dashboard-summary` endpoint (money + graph series + action counts); `traffic/timeseries` takes 10 s | 2026-11-25 | open |
+| 1 | `revenue-series` still gross of refunds (6,491.60 vs kpi 6,432.20 for 26 Oct–25 Nov); FE labels the chart "sales before refunds" | 2026-11-26 | open |
+| 2 | kpi `refund_rate` 1.9 for an October with no processed refund — say what it counts | 2026-11-26 | open; Dashboard tile uses processed refunds ÷ orders |
+| 3 | `out_of_stock` 813 vs `margin/out-of-stock` 608; `under_margin_floor` (rule floor, 4,125) ≠ FE low-margin (<10% net) | 2026-11-26 | open; FE keeps its own sources |
+| 4 | Σ daily `net_profit` −1,890.77 vs total −1,890.79 (per-bucket rounding; optional) | 2026-11-26 | open; probe allows ½¢/bucket |
+| 5 | `daily-revenue` refuses `days` > 365 (FE stopped asking for 372/750) | 2026-11-26 | info only |
 
-**2026-11-24:** `outbox/backend-asks-2026-11-24.md` — NOT sent yet.
+**2026-11-25:** `outbox/backend-asks-2026-11-25-dashboard.md` — SENT (owner deleted the file 2026-11-26) and **ANSWERED** by
+`inbox/backend-asks-2026-11-25-dashboard-backend-response.md` (all six sections shipped in one deploy, migrations 218–220).
+Measured 2026-11-26 by `npm run probe:backend-25nov` (READ-ONLY): every figure in the reply's live-check table matches to the
+cent. FE side: ERR-394 — the Dashboard reads `dashboard-summary`, every money-truth adjustment is deleted, Dashboard (new) merged.
+
+| § | Ask | Written | Status (2026-11-26) |
+|---|---|---|---|
+| 1 | Invoice shadow orders dated by `issue_date` + backfill | 2026-11-25 | **shipped** — 37/37 shadow orders = issue date; Oct `invoice_revenue` 1,074.27 (7) |
+| 2 | One P&L definition (pnl by NZ month; bundle series = kpi) | 2026-11-25 | **shipped** — Oct pnl = kpi = dashboard-summary to the cent; pnl now IGNORES `?days` (FE sends `start_date`/`end_date`) |
+| 3 | Processed refunds off on `refunded_at`; `refunds` on kpi | 2026-11-25 | **shipped** — 30d revenue 6,432.20 after 59.40; refunds rows carry `order_status` |
+| 4 | Operating expenses by `expense_date` (accrual) | 2026-11-25 | **shipped** — Oct opex 2,766.89 reproduced from the expense rows by bill date |
+| 5 | Built-in `gst_payment` excluded from opex | 2026-11-25 | **shipped** — listed by `/expense-categories` (kind `tax_payment`); G.S.T row moved; FE `backendPending` removed |
+| 6 | One `dashboard-summary` endpoint; `traffic/timeseries` speed | 2026-11-25 | **shipped** — Dashboard cold load: money at 3.3 s, 21 API requests, 0 per-order GETs (was 17.0 s / 147) |
+
+**2026-11-24:** `outbox/backend-asks-2026-11-24.md` — SENT (owner deleted the file 2026-11-26); no reply yet — every § below is still open.
 
 | § | Ask | Written | Status (2026-11-24) |
 |---|---|---|---|

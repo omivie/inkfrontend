@@ -175,14 +175,16 @@ test('the badge CSS exists — .admin-badge has no colour of its own', () => {
 
 // ─── 4. The "sales missing a cost" alert ─────────────────────────────────────
 test('the dashboard names the sales that are blocking the profit calculation', () => {
+  // Since 2026-11-26 the backend lists them itself: dashboard-summary `actions.missing_cost`
+  // (= current.cogs_unknown_orders, [{order_id, order_number, skus}]). The ~120-GET client scan
+  // (computeMissingCostAlert) that used to find them is gone — never re-add it.
   const dash = fs.readFileSync(path.join(ADMIN, 'pages', 'dashboard.js'), 'utf8');
-  assert.ok(/computeMissingCostAlert/.test(dash),
-    'a Dashboard full of "—" profit tiles with no explanation is a dead end');
+  const money = fs.readFileSync(path.join(ADMIN, 'utils', 'money-truth.js'), 'utf8');
+  assert.ok(/missingCostItems\(d\.dsum\?\.actions\?\.missing_cost/.test(dash),
+    'a Dashboard with an un-costed sale must name it');
   assert.ok(/Sales missing a cost/.test(dash), 'the alert card must be rendered');
-  // Case 2 — the live cause: the backend materialised a shadow order with revenue
-  // but ZERO items, because the invoice line s SKU did not resolve.
-  assert.ok(/no items recorded/.test(dash),
-    'must detect the zero-items case — that is what is actually nulling COGS today');
-  assert.ok(/supplier_cost_snapshot == null/.test(dash),
-    'must also detect an item that simply has no cost');
+  assert.ok(!/computeMissingCostAlert|AdminAPI\.getOrder\(/.test(dash), 'the per-order scan must not come back');
+  // An unavailable list is "could not load", never an all-clear.
+  assert.ok(/action\.count == null\) return null/.test(money));
+  assert.ok(/failCard\('Sales missing a cost'/.test(dash));
 });

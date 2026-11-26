@@ -443,6 +443,9 @@ function normalizeKpiSummary(data) {
     'revenue', 'gross_profit', 'net_profit', 'gross_margin',
     'net_margin', 'stripe_fees', 'orders', 'aov',
     'supplier_freight', 'supplier_freight_incl_gst', 'supplier_freight_unpriced_orders',
+    // Since the 2026-11-25 deploy `revenue` is NET of processed refunds; these say by how
+    // much. The fallback branch must not drop them or the netting becomes invisible.
+    'refunds', 'refunds_ex_gst',
   ];
   const current = {};
   const previous = {};
@@ -474,6 +477,59 @@ function normalizeKpiSummary(data) {
   const out = { current, previous };
   if (data.fallback) out.fallback = true;
   return out;
+}
+
+// GET /api/admin/analytics/dashboard-summary (backend 2026-11-25 §6). ONE call for the
+// Dashboard's money boxes, its graph series and its action lists, on the owner's money
+// definitions (invoices on issue date, processed refunds off on refunded_at, expenses by
+// expense_date, GST payments not an expense).
+//
+// Fail-soft must be LOUD, so this normaliser never turns "not reported" into 0:
+//   - no `current` object                 ⇒ null (the caller shows "could not load")
+//   - a money field that is not a number  ⇒ null on that field (the box says so)
+//   - an action list that failed server-side ({count:null, error}) ⇒ {count:null, rows:[],
+//     error} kept as UNAVAILABLE, never { count: 0 }
+const DSUM_MONEY_KEYS = [
+  'revenue_incl_gst', 'revenue_ex_gst', 'refunds', 'cogs', 'gross_profit', 'stripe_fees',
+  'supplier_freight', 'operating_expenses', 'net_profit', 'orders', 'aov', 'owed_unpaid_invoices',
+];
+const DSUM_ACTION_KEYS = ['needs_tracking', 'missing_cost', 'under_margin_floor', 'out_of_stock'];
+function dsumNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function normalizeDashboardSummary(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  if (!data.current || typeof data.current !== 'object') return null;
+  const win = (w) => {
+    if (!w || typeof w !== 'object') return null;
+    const out = {};
+    for (const k of DSUM_MONEY_KEYS) out[k] = dsumNum(w[k]);
+    out.cogs_unknown_orders = Array.isArray(w.cogs_unknown_orders) ? w.cogs_unknown_orders : null;
+    return out;
+  };
+  const actions = {};
+  const rawActions = data.actions && typeof data.actions === 'object' ? data.actions : {};
+  for (const k of DSUM_ACTION_KEYS) {
+    const a = rawActions[k];
+    const count = a && typeof a === 'object' ? dsumNum(a.count) : null;
+    actions[k] = count == null
+      ? { count: null, rows: [], error: (a && a.error) || 'unavailable' }
+      : { count, rows: Array.isArray(a.rows) ? a.rows : [], error: null };
+  }
+  return {
+    date_range: data.date_range || null,
+    previous_range: data.previous_range || null,
+    current: win(data.current),
+    previous: win(data.previous),
+    series: Array.isArray(data.series) ? data.series : null,
+    actions,
+    // Strictly true/false. Anything else is "not said", which the money builder treats as
+    // a reason to qualify net profit rather than as "no failure".
+    supplier_freight_failed: data.supplier_freight_failed === true ? true
+      : data.supplier_freight_failed === false ? false : null,
+  };
 }
 
 // Adapt the always-on /summary/customers payload into the { current, previous }
@@ -1250,6 +1306,22 @@ const AdminAPI = {
     const res = noteAnalyticsHealth('kpi-summary',
       await analyticsHttpGetNamed(`/api/admin/analytics/kpi-summary?${qs}`, signal));
     return res.ok ? normalizeKpiSummary(res.data) : null;
+  },
+
+  /**
+   * The Dashboard's ONE money call (backend 2026-11-25 §6, `requireAdmin`, 60/min).
+   * `range` = { from, to } as plain NZ `YYYY-MM-DD` (FilterState.getDateRange()) — a
+   * timestamp would be read as ITS NZ day. Whole-business: it takes no brand/supplier
+   * filters. Returns normalizeDashboardSummary() or null.
+   */
+  async getDashboardSummary(range, granularity = 'day', signal) {
+    const q = new URLSearchParams();
+    if (range?.from) q.set('date_from', range.from);
+    if (range?.to) q.set('date_to', range.to);
+    q.set('granularity', ['day', 'week', 'month'].includes(granularity) ? granularity : 'day');
+    const res = noteAnalyticsHealth('dashboard-summary',
+      await analyticsHttpGetNamed(`/api/admin/analytics/dashboard-summary?${q}`, signal));
+    return res.ok ? normalizeDashboardSummary(res.data) : null;
   },
 
   async getRevenueSeries(filterParams, signal) {
@@ -5438,9 +5510,19 @@ const AdminAPI = {
       return resp?.data ?? null;
     } catch (e) { adminApiWarn('analytics/overview', e); return null; }
   },
-  async getAdminAnalyticsPnL(days = 30) {
+  /**
+   * P&L by NZ calendar month. `range` = { from, to } as plain NZ `YYYY-MM-DD`.
+   * Since the 2026-11-25 deploy the backend IGNORES `?days=` (measured 2026-11-26:
+   * days=120 came back as a 365-day window), so the window MUST be sent as
+   * start_date/end_date. A timestamp would be read as its NZ day (…T23:59:59Z on the
+   * 31st = the 1st of the next month). Months with no sales come back zero-filled.
+   */
+  async getAdminAnalyticsPnL(range) {
+    const q = new URLSearchParams();
+    if (range?.from) q.set('start_date', range.from);
+    if (range?.to) q.set('end_date', range.to);
     try {
-      const resp = await window.API.get(`/api/admin/analytics/pnl?days=${days}`);
+      const resp = await window.API.get(`/api/admin/analytics/pnl?${q}`);
       return resp?.data ?? null;
     } catch (e) { adminApiWarn('analytics/pnl', e); return null; }
   },
@@ -6092,7 +6174,7 @@ export {
   AdminAPI, PlannerAPI, PlannerNotesAPI,
   // Pure analytics-shape helpers — exported for unit tests (see
   // tests/admin-analytics-wiring.test.js).
-  analyticsQuery, normalizeKpiSummary, adaptCustomerSummary,
+  analyticsQuery, normalizeKpiSummary, normalizeDashboardSummary, adaptCustomerSummary,
   // ONE owner for the "your formatting did not save" sentence, so the drawer
   // and the full-page editor cannot drift (ERR-244).
   describeRichTextRepair, RICH_TEXT_PRODUCT_COLUMNS, RIBBON_PRODUCT_COLS,

@@ -1,0 +1,2839 @@
+{
+ "_about": "Live GET payloads, owner login, 2026-11-26 (READ-ONLY). dashboard-summary October 2026 and 2026-10-26..2026-11-25 (raw data, before normalizeDashboardSummary); expense rows 2026-09-20..2026-11-30 (fields the dashboard reads); all refunds; all invoices.",
+ "dsum_oct": {
+  "date_range": {
+   "date_from": "2026-10-01",
+   "date_to": "2026-10-31",
+   "granularity": "month",
+   "timezone": "Pacific/Auckland"
+  },
+  "previous_range": {
+   "date_from": "2026-08-31",
+   "date_to": "2026-09-30"
+  },
+  "current": {
+   "revenue_incl_gst": 5877.15,
+   "revenue_ex_gst": 5110.57,
+   "refunds": 0,
+   "cogs": 3697.25,
+   "gross_profit": 1413.32,
+   "stripe_fees": 122.41,
+   "supplier_freight": 414.8,
+   "operating_expenses": 2766.89,
+   "net_profit": -1890.79,
+   "orders": 52,
+   "aov": 113.02,
+   "owed_unpaid_invoices": 302.83,
+   "cogs_unknown_orders": []
+  },
+  "previous": {
+   "revenue_incl_gst": 10538.58,
+   "revenue_ex_gst": 9163.98,
+   "refunds": 70.49,
+   "cogs": 6949.46,
+   "gross_profit": 2214.52,
+   "stripe_fees": 149.16,
+   "supplier_freight": 476.5,
+   "operating_expenses": 1210.86,
+   "net_profit": 378.01,
+   "orders": 55,
+   "aov": 192.89,
+   "owed_unpaid_invoices": 0,
+   "cogs_unknown_orders": []
+  },
+  "series": [
+   {
+    "bucket_start": "2026-10-01",
+    "revenue": 5877.15,
+    "gross_profit": 1413.32,
+    "net_profit": -1890.79
+   }
+  ],
+  "actions": {
+   "needs_tracking": {
+    "count": 1,
+    "rows": [
+     {
+      "id": "77abb061-1b66-4349-8fe5-ac865e5fad93",
+      "order_number": "2026112501",
+      "status": "paid",
+      "channel": "web",
+      "total": 83.6,
+      "created_at": "2026-11-25T03:44:02.257079+00:00"
+     }
+    ]
+   },
+   "missing_cost": {
+    "count": 0,
+    "rows": []
+   },
+   "under_margin_floor": {
+    "count": 4125,
+    "rows": [
+     {
+      "id": "5c1547c7-1fce-4935-a489-9c91c26df238",
+      "sku": "10966.01",
+      "name": "OKI ML80 Compatible Label maker Ribbon 10966.01 BLACK",
+      "source": "compatible",
+      "cost_price": 7.82,
+      "retail_price": 11.99,
+      "net_margin": 22.35,
+      "margin_floor": 80,
+      "gap": 57.65
+     },
+     {
+      "id": "93fd7173-d627-4782-bc1e-4a24cfb671db",
+      "sku": "CGI690M",
+      "name": "GI690M Compatible Ink Bottle for Canon GI690 Magenta",
+      "source": "compatible",
+      "cost_price": 6.95,
+      "retail_price": 10.79,
+      "net_margin": 23.28,
+      "margin_floor": 80,
+      "gap": 56.72
+     },
+     {
+      "id": "c4425061-2596-4ba1-a1e3-a73979ef68de",
+      "sku": "CGI690C",
+      "name": "GI690C Compatible Ink Bottle for Canon GI690 Cyan",
+      "source": "compatible",
+      "cost_price": 6.95,
+      "retail_price": 10.79,
+      "net_margin": 23.28,
+      "margin_floor": 80,
+      "gap": 56.72
+     },
+     {
+      "id": "fc0646ff-9c60-4bc6-a2a9-0982a56e8c01",
+      "sku": "C273XLPBK",
+      "name": "273XLPBK Compatible Ink Cartridge for Epson 273XL Photo Black",
+      "source": "compatible",
+      "cost_price": 7.59,
+      "retail_price": 11.79,
+      "net_margin": 23.32,
+      "margin_floor": 80,
+      "gap": 56.68
+     },
+     {
+      "id": "03a76ef7-5c66-4b71-8e9b-17810b343c9c",
+      "sku": "691.01",
+      "name": "691.01 Compatible Printer Ribbon for STAR OEM Code LZ24HD",
+      "source": "compatible",
+      "cost_price": 4.5,
+      "retail_price": 7.95,
+      "net_margin": 32.26,
+      "margin_floor": 87,
+      "gap": 54.74
+     },
+     {
+      "id": "a429a109-547a-4899-bbd0-365b6d199ea7",
+      "sku": "CCLI526GY",
+      "name": "CLI526GY Compatible Ink Cartridge for Canon CLI526 Grey",
+      "source": "compatible",
+      "cost_price": 3.22,
+      "retail_price": 5.79,
+      "net_margin": 33.39,
+      "margin_floor": 87,
+      "gap": 53.61
+     },
+     {
+      "id": "f9e79df4-4cf3-4992-b60b-dc793780f151",
+      "sku": "72554.09",
+      "name": "ERC39 / ERC43 Compatible 72554.09 FN Purple Printer Ribbon for OEM ERC-39 / ERC-43",
+      "source": "compatible",
+      "cost_price": 4.9,
+      "retail_price": 8.95,
+      "net_margin": 34.39,
+      "margin_floor": 87,
+      "gap": 52.61
+     },
+     {
+      "id": "d02c8afa-cf58-49dd-a07c-28bda33e6d7d",
+      "sku": "CT522BK",
+      "name": "T522BK Compatible Ink Cartridge for Epson T522 Black",
+      "source": "compatible",
+      "cost_price": 8.95,
+      "retail_price": 13.79,
+      "net_margin": 22.71,
+      "margin_floor": 75,
+      "gap": 52.29
+     },
+     {
+      "id": "34cd49ea-d7c1-4169-bf99-e1bc7097ab2a",
+      "sku": "CPGI2600XLY",
+      "name": "PGI2600XLY Compatible Ink Cartridge for Canon PGI2600XL Yellow",
+      "source": "compatible",
+      "cost_price": 10,
+      "retail_price": 15.49,
+      "net_margin": 23.11,
+      "margin_floor": 75,
+      "gap": 51.89
+     },
+     {
+      "id": "68ca7167-f1be-4780-ae61-9f92a59e91e0",
+      "sku": "CPGI2600XLC",
+      "name": "PGI2600XLC Compatible Ink Cartridge for Canon PGI2600XL Cyan",
+      "source": "compatible",
+      "cost_price": 10,
+      "retail_price": 15.49,
+      "net_margin": 23.11,
+      "margin_floor": 75,
+      "gap": 51.89
+     },
+     {
+      "id": "db53b970-8ead-45fe-b1cc-a2f5b05f9338",
+      "sku": "CPGI2600XLM",
+      "name": "PGI2600XLM Compatible Ink Cartridge for Canon PGI2600XL Magenta",
+      "source": "compatible",
+      "cost_price": 10,
+      "retail_price": 15.49,
+      "net_margin": 23.11,
+      "margin_floor": 75,
+      "gap": 51.89
+     },
+     {
+      "id": "44a0da30-d8f4-4ce8-8bcc-403134475548",
+      "sku": "CLC3329XLY",
+      "name": "LC3329XLY Compatible Ink Cartridge for Brother LC3329XL Yellow",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 13.99,
+      "net_margin": 23.37,
+      "margin_floor": 75,
+      "gap": 51.63
+     },
+     {
+      "id": "a2cf5249-7817-47dd-a18d-d45d7f0fcc82",
+      "sku": "CLC3329XLM",
+      "name": "LC3329XLM Compatible Ink Cartridge for Brother LC3329XL Magenta",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 13.99,
+      "net_margin": 23.37,
+      "margin_floor": 75,
+      "gap": 51.63
+     },
+     {
+      "id": "b666443f-a0a2-4ebc-898b-3a4fbf2da59c",
+      "sku": "CLC3329XLC",
+      "name": "LC3329XLC Compatible Ink Cartridge for Brother LC3329XL Cyan",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 13.99,
+      "net_margin": 23.37,
+      "margin_floor": 75,
+      "gap": 51.63
+     },
+     {
+      "id": "803760e8-0122-4fa6-b80b-ffe977d56cf9",
+      "sku": "C-OKI-720-RIB-BK",
+      "name": "700RIB OKI Compatible ML720 Printer Ribbon Black",
+      "source": "compatible",
+      "cost_price": 3.74,
+      "retail_price": 6.95,
+      "net_margin": 35.47,
+      "margin_floor": 87,
+      "gap": 51.53
+     },
+     {
+      "id": "10f7a039-198e-447b-96cc-232db70e137f",
+      "sku": "C935XLY",
+      "name": "935XLY Compatible Ink Cartridge for HP 935XL (C2P26AA) Yellow",
+      "source": "compatible",
+      "cost_price": 10.87,
+      "retail_price": 16.99,
+      "net_margin": 23.77,
+      "margin_floor": 75,
+      "gap": 51.23
+     },
+     {
+      "id": "19b6077f-cadb-4924-82a4-be716ecd5991",
+      "sku": "C933XLM",
+      "name": "933XLM Compatible Ink Cartridge for HP 933XL (CN055AA) Magenta",
+      "source": "compatible",
+      "cost_price": 10.87,
+      "retail_price": 16.99,
+      "net_margin": 23.77,
+      "margin_floor": 75,
+      "gap": 51.23
+     },
+     {
+      "id": "c050fc60-6ba5-44b4-9cae-ddd5c9f0d05e",
+      "sku": "C933XLY",
+      "name": "933XLY Compatible Ink Cartridge for HP 933XL (CN056AA) Yellow",
+      "source": "compatible",
+      "cost_price": 10.87,
+      "retail_price": 16.99,
+      "net_margin": 23.77,
+      "margin_floor": 75,
+      "gap": 51.23
+     },
+     {
+      "id": "7e845665-e813-4028-ad6e-fcd288c7857c",
+      "sku": "C92BK",
+      "name": "92BK Compatible Ink Cartridge for HP 92 (C9362WA) Black",
+      "source": "compatible",
+      "cost_price": 11.96,
+      "retail_price": 18.79,
+      "net_margin": 24.15,
+      "margin_floor": 75,
+      "gap": 50.85
+     },
+     {
+      "id": "e5de1c55-5b48-434a-97c1-8cbdd2a1bcae",
+      "sku": "C27BK",
+      "name": "27BK Compatible Ink Cartridge for HP 27 (C8727AA) Black",
+      "source": "compatible",
+      "cost_price": 11.96,
+      "retail_price": 18.79,
+      "net_margin": 24.15,
+      "margin_floor": 75,
+      "gap": 50.85
+     },
+     {
+      "id": "a47d7e5b-b2de-4335-a13a-b7f1957b3f06",
+      "sku": "C-OKI-IO182-RIB-BK",
+      "name": "100RIB OKI Compatible Printer Ribbon Black for ML182",
+      "source": "compatible",
+      "cost_price": 4.21,
+      "retail_price": 7.95,
+      "net_margin": 36.45,
+      "margin_floor": 87,
+      "gap": 50.55
+     },
+     {
+      "id": "dba00ffc-7a4e-4c58-8ac1-7070fbb77f0f",
+      "sku": "72758.09",
+      "name": "IR-51 / IDP-562 Compatible Printer Ribbon Cartridge PURPLE   72758.09",
+      "source": "compatible",
+      "cost_price": 4.7,
+      "retail_price": 8.95,
+      "net_margin": 36.96,
+      "margin_floor": 87,
+      "gap": 50.04
+     },
+     {
+      "id": "bbd46f7c-1471-4b11-b409-e9af128c0693",
+      "sku": "C314LOT",
+      "name": "314LOT Olivetti Compatible Correction Ribbon Tape",
+      "source": "compatible",
+      "cost_price": 5.2,
+      "retail_price": 8.94,
+      "net_margin": 30.46,
+      "margin_floor": 80,
+      "gap": 49.54
+     },
+     {
+      "id": "40846cb7-20e0-4dd0-ac4f-d1f6a4976c75",
+      "sku": "644.01",
+      "name": "Fujitsu DMPG9 Compatible Printer Ribbon BLACK 644.01",
+      "source": "compatible",
+      "cost_price": 6.95,
+      "retail_price": 11.95,
+      "net_margin": 30.47,
+      "margin_floor": 80,
+      "gap": 49.53
+     },
+     {
+      "id": "21ec4849-c51d-482c-aff9-5de50e07467c",
+      "sku": "CCLI671XLC",
+      "name": "CLI671XLC Compatible Ink Cartridge for Canon CLI671XL Cyan",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "3cd74f15-7e2f-4211-918c-0896f5d6b9ed",
+      "sku": "CCLI671XLY",
+      "name": "CLI671XLY Compatible Ink Cartridge for Canon CLI671XL Yellow",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "5d34fd68-df98-4a6a-a20d-a4c296dbe2cc",
+      "sku": "CCLI671XLGY",
+      "name": "CLI671XLGY Compatible Ink Cartridge for Canon CLI671XL Grey",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "8652e5ee-d368-4128-9b29-5f5aa60851ab",
+      "sku": "CCLI671XLBK",
+      "name": "CLI671XLBK Compatible Ink Cartridge for Canon CLI671XL Black",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "8a3dade6-cf0e-487a-980a-01ff488be25d",
+      "sku": "CCLI671XLM",
+      "name": "CLI671XLM Compatible Ink Cartridge for Canon CLI671XL Magenta",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "86920bc2-2df0-4ba6-81a0-c50254da447e",
+      "sku": "651.01",
+      "name": "Epson LQ2550 Compatible  FN Black Printer Ribbon 651.01",
+      "source": "compatible",
+      "cost_price": 4.6,
+      "retail_price": 8.95,
+      "net_margin": 38.24,
+      "margin_floor": 87,
+      "gap": 48.76
+     },
+     {
+      "id": "f330dfdb-5a94-49e2-9a19-8c3afcb81ab4",
+      "sku": "621.01",
+      "name": "Citizen GSX140 Compatible Printer Ribbon BLACK 621.01",
+      "source": "compatible",
+      "cost_price": 4.6,
+      "retail_price": 8.95,
+      "net_margin": 38.24,
+      "margin_floor": 87,
+      "gap": 48.76
+     },
+     {
+      "id": "f6a30c64-31b6-4e45-8106-d46367a21207",
+      "sku": "72601.02",
+      "name": "Compatible IR-41RB Printer Ribbon 72601.02 FN Black/Red",
+      "source": "compatible",
+      "cost_price": 6.85,
+      "retail_price": 11.95,
+      "net_margin": 31.43,
+      "margin_floor": 80,
+      "gap": 48.57
+     },
+     {
+      "id": "30f808c5-edcd-4597-adb4-e29c8134c209",
+      "sku": "C564XLPBK",
+      "name": "564XLPBK Compatible Ink Cartridge for HP 564XL (CB322WA) Photo Black",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "8b5c2287-bb7b-477a-a5c2-294ddd932892",
+      "sku": "C564XLC",
+      "name": "564XLC Compatible Ink Cartridge for HP 564XL (CB323WA) Cyan (750 pages)",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "9c2dc5b8-1796-4359-b639-644ed5621c57",
+      "sku": "C564XLBK",
+      "name": "564XLBK Compatible Ink Cartridge for HP 564XL (CN684WA) Black (550 pages)",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "9ea177a2-d3bf-4b2a-8d1c-3d04f2e2827b",
+      "sku": "C564XLM",
+      "name": "564XLM Compatible Ink Cartridge for HP 564XL (CB324WA) Magenta",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "bfb06d25-2575-4f2c-abf1-f2b00b1f531d",
+      "sku": "C564XLY",
+      "name": "564XLY Compatible Ink Cartridge for HP 564XL (CB325WA) Yellow",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "36224f3d-4a26-4aff-a62a-0f4ed0bfc2b5",
+      "sku": "C143LOT",
+      "name": "Olympia Compatible 143LOT Correction Ribbon Tape",
+      "source": "compatible",
+      "cost_price": 6.83,
+      "retail_price": 11.95,
+      "net_margin": 31.62,
+      "margin_floor": 80,
+      "gap": 48.38
+     },
+     {
+      "id": "1aa29aa8-e8a7-45d5-b221-095c7b68fa0f",
+      "sku": "CCLI8BK",
+      "name": "CLI8BK Compatible Ink Cartridge for Canon CLI8 Black",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "6a01f469-cf41-41d4-87cf-3a91e5f746e6",
+      "sku": "CCLI8Y",
+      "name": "CLI8Y Compatible Ink Cartridge for Canon CLI8 Yellow",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "9fd22891-0869-4ca0-9b33-d001d40903ac",
+      "sku": "CCLI8C",
+      "name": "CLI8C Compatible Ink Cartridge for Canon CLI8 Cyan",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "beaac08c-45db-4878-bb94-b2473d7a1093",
+      "sku": "CCLI8M",
+      "name": "CLI8M Compatible Ink Cartridge for Canon CLI8 Magenta",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "8dea4f1c-9746-49ea-ac63-047b96b919c6",
+      "sku": "308.11",
+      "name": "Olympia Compatible 308.11 Typewriter Ribbon",
+      "source": "compatible",
+      "cost_price": 6.8,
+      "retail_price": 11.95,
+      "net_margin": 31.91,
+      "margin_floor": 80,
+      "gap": 48.09
+     },
+     {
+      "id": "b645d4fe-c698-41c7-bc29-16b356d5d9e8",
+      "sku": "72577.01",
+      "name": "ERC18 Compatible 72577.01 FN Black Cash Register Printer Ribbon",
+      "source": "compatible",
+      "cost_price": 7.93,
+      "retail_price": 13.95,
+      "net_margin": 31.98,
+      "margin_floor": 80,
+      "gap": 48.02
+     },
+     {
+      "id": "dacfbea2-1c24-49b1-8ca2-2a7a87f3d5e5",
+      "sku": "72748.09",
+      "name": "ERC-32P Compatible  Printer Ribbon PURPLE for EPSON  M820 72748.09 FN",
+      "source": "compatible",
+      "cost_price": 10.93,
+      "retail_price": 17.95,
+      "net_margin": 27.32,
+      "margin_floor": 75,
+      "gap": 47.68
+     },
+     {
+      "id": "d4a8446b-a187-4c2f-a399-f1d1aaae5f4e",
+      "sku": "CLC3317BK",
+      "name": "LC3317BK Compatible Ink Cartridge for Brother LC3317 Black",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 14.79,
+      "net_margin": 27.37,
+      "margin_floor": 75,
+      "gap": 47.63
+     },
+     {
+      "id": "583634a6-a70c-4a83-8d31-141575961cc5",
+      "sku": "657.01",
+      "name": "Epson ERC23 Compatible  FN Printer Ribbon BLACK 657.01",
+      "source": "compatible",
+      "cost_price": 3.5,
+      "retail_price": 6.95,
+      "net_margin": 39.44,
+      "margin_floor": 87,
+      "gap": 47.56
+     },
+     {
+      "id": "f4ce6d81-0f03-4c17-9ade-ec5140ee3aa8",
+      "sku": "657.02",
+      "name": "Epson ERC23 Compatible 657.02 FN RED/BLACK Printer Ribbon",
+      "source": "compatible",
+      "cost_price": 3.5,
+      "retail_price": 6.95,
+      "net_margin": 39.44,
+      "margin_floor": 87,
+      "gap": 47.56
+     },
+     {
+      "id": "2ac93825-0791-464b-9573-802560f53f04",
+      "sku": "659.01",
+      "name": "Fujitsu Compatible 659.01 Printer Ribbon",
+      "source": "compatible",
+      "cost_price": 4.5,
+      "retail_price": 8.95,
+      "net_margin": 39.53,
+      "margin_floor": 87,
+      "gap": 47.47
+     },
+     {
+      "id": "c2dace0f-df2a-40fd-bf4a-1bed45c898c0",
+      "sku": "72555.01",
+      "name": "Fujitzu CA02374-C104 / Tally 43837 Replacement Ribbon 72555.01",
+      "source": "compatible",
+      "cost_price": 11.5,
+      "retail_price": 18.95,
+      "net_margin": 27.56,
+      "margin_floor": 75,
+      "gap": 47.44
+     }
+    ]
+   },
+   "out_of_stock": {
+    "count": 813,
+    "rows": [
+     {
+      "id": "54acf6d9-1060-42e2-b19b-0be3dba8f19a",
+      "sku": "G-LEX-4227-RIB-BK",
+      "name": "Lexmark 4227 Printer Ribbon Black",
+      "source": "genuine",
+      "product_type": "printer_ribbon"
+     },
+     {
+      "id": "5d339191-c3de-4a16-964d-29e180425fcc",
+      "sku": "G013R00623BK",
+      "name": "Fuji Xerox Genuine 013R00623BK Drum Unit 013R00623 Black (55,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "440da640-f9c9-4a85-9d7e-2fca81303f84",
+      "sku": "G051BK",
+      "name": "Canon Genuine 051BK Drum Unit 051 Black",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "456733b9-044d-4f0e-b129-10e3af24798d",
+      "sku": "G106R01160C",
+      "name": "Fuji Xerox Genuine 106R01160C Toner Cartridge 106R01160 Cyan (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "31468bf6-e9e2-4800-879d-be81f9cf27a9",
+      "sku": "G106R01160CMY",
+      "name": "Fuji Xerox Genuine 106R01160CMY Toner Cartridge 106R01160 CMY-Pack (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "06671520-78d0-4ebc-85e7-45d316742003",
+      "sku": "G106R01160KCMY",
+      "name": "Fuji Xerox Genuine 106R01160KCMY Toner Cartridge 106R01160 KCMY-Pack (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "c007b9bd-714a-4335-aa77-6b6eaea19c6f",
+      "sku": "G106R01161M",
+      "name": "Fuji Xerox Genuine 106R01161M Toner Cartridge 106R01161 Magenta (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "1e9bcba1-dd25-411f-be55-0d4312d04c67",
+      "sku": "G106R01162Y",
+      "name": "Fuji Xerox Genuine 106R01162Y Toner Cartridge 106R01162 Yellow (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "b6eb2130-9016-4de8-949e-a83c83763cc2",
+      "sku": "G106R01163BK",
+      "name": "Fuji Xerox Genuine 106R01163BK Toner Cartridge 106R01163 Black (32,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "811434f5-0dff-4983-894a-c4f54c88f5a4",
+      "sku": "G106R01218CMY",
+      "name": "Fuji Xerox Genuine 106R01218CMY Toner Cartridge 106R01218 CMY-Pack (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "50cefb64-8da1-4a87-8cdd-cdd78bc234b4",
+      "sku": "G106R01220Y",
+      "name": "Fuji Xerox Genuine 106R01220Y Toner Cartridge 106R01220 Yellow (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "09c0e091-50b5-415b-99fa-23aea16336e8",
+      "sku": "G106R01221HYBK",
+      "name": "Fuji Xerox Genuine 106R01221HYBK Toner Cartridge 106R01221HY Black (18,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "36284391-d106-4f2c-a732-c42813e82194",
+      "sku": "G106R01515C",
+      "name": "Fuji Xerox Genuine 106R01515C Toner Cartridge 106R01515 Cyan (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "3009d96e-4a51-4b47-b771-4e9e619a0d83",
+      "sku": "G106R01515CMY",
+      "name": "Fuji Xerox Genuine 106R01515CMY Toner Cartridge 106R01515 CMY-Pack (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "0821fe20-a282-4cc8-9869-1d45f90f63f6",
+      "sku": "G106R01515KCMY",
+      "name": "Fuji Xerox Genuine 106R01515KCMY Toner Cartridge 106R01515 KCMY-Pack (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "545ab9a1-d762-485d-82f7-955df660f5ab",
+      "sku": "G106R01516M",
+      "name": "Fuji Xerox Genuine 106R01516M Toner Cartridge 106R01516 Magenta (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "a2ba81c8-87d8-4ed1-a7da-75df6209b6f5",
+      "sku": "G106R01517Y",
+      "name": "Fuji Xerox Genuine 106R01517Y Toner Cartridge 106R01517 Yellow (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "59900412-f94c-4a0d-bc58-8cfff5a859d9",
+      "sku": "G106R01548BK",
+      "name": "Fuji Xerox Genuine 106R01548BK Toner Cartridge 106R01548 Black (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "5e4101a6-81b3-4830-b129-2c3f0b220ecc",
+      "sku": "G106R01574C",
+      "name": "Fuji Xerox Genuine 106R01574C Toner Cartridge 106R01574 Cyan (17,200 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "395e28d1-1417-4fc0-bf2b-421a12cc7b98",
+      "sku": "G106R01582BK",
+      "name": "Fuji Xerox Genuine 106R01582BK Drum Unit 106R01582 Black (145,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "57501493-5603-4838-acac-187259b48c68",
+      "sku": "G106R02335BK",
+      "name": "Fuji Xerox Genuine 106R02335BK Toner Cartridge 106R02335 Black (11,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "2c394bed-6343-4e20-a704-dd46737d00d5",
+      "sku": "G106R02625BK",
+      "name": "Fuji Xerox Genuine 106R02625BK Toner Cartridge 106R02625 Black (40,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "ac66a984-1165-4cb3-8128-e2554071cec8",
+      "sku": "G108R00645BK",
+      "name": "Fuji Xerox Genuine 108R00645BK Drum Unit 108R00645 Black (35,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "e968bc31-083f-4e93-8479-d70f2fb50a2b",
+      "sku": "G108R00713BK",
+      "name": "Fuji Xerox Genuine 108R00713BK Drum Unit 108R00713 Black (35,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "288f94c9-e7a8-4198-9168-ad2cec1e80e9",
+      "sku": "G108R00718",
+      "name": "Fuji Xerox Genuine 108R00718 Fuser Unit (200,000 pages)",
+      "source": "genuine",
+      "product_type": "fuser_kit"
+     },
+     {
+      "id": "1d2622d7-3fc8-4556-98f4-61f60d3ed1e8",
+      "sku": "G108R00899M",
+      "name": "Fuji Xerox Genuine 108R00899M Ink Cartridge 108R00899 Magenta",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "6ea5389a-4a20-4e61-9b40-be1ad13f04c8",
+      "sku": "G108R00902BK",
+      "name": "Fuji Xerox Genuine 108R00902BK Ink Cartridge 108R00902 Black (6,000 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "ede36c97-6dd4-4be5-a501-6ac271d7bcf0",
+      "sku": "G108R00903C",
+      "name": "Fuji Xerox Genuine 108R00903C Ink Cartridge 108R00903 Cyan (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "1ba2adbd-ef8c-478c-9c54-9217c2063948",
+      "sku": "G108R00903CMY",
+      "name": "Fuji Xerox Genuine 108R00903CMY Ink Cartridge 108R00903 CMY-Pack (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "ecf2ba51-bbdb-4dc0-8869-926fb4f1de6f",
+      "sku": "G108R00903KCMY",
+      "name": "Fuji Xerox Genuine 108R00903KCMY Ink Cartridge 108R00903 KCMY-Pack (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "40f27e0a-21ed-40c2-a9fc-5389ce6b3e4c",
+      "sku": "G108R00904M",
+      "name": "Fuji Xerox Genuine 108R00904M Ink Cartridge 108R00904 Magenta (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "5e7aa05b-1a68-4690-8a57-f3d89b370dce",
+      "sku": "G108R00905Y",
+      "name": "Fuji Xerox Genuine 108R00905Y Ink Cartridge 108R00905 Yellow (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "ec1736a7-993b-480d-a824-a67c51154036",
+      "sku": "G108R00906BK",
+      "name": "Fuji Xerox Genuine 108R00906BK Ink Cartridge 108R00906 Black (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "31db91bf-3e97-4b61-8759-39aadeaca4c5",
+      "sku": "G108R00907BK",
+      "name": "Fuji Xerox Genuine 108R00907BK Ink Cartridge 108R00907 Black (6,800 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "661a70cf-6b4c-4dd0-9b4f-438f2632400b",
+      "sku": "G108R00942M",
+      "name": "Fuji Xerox Genuine 108R00942M Ink Cartridge 108R00942 Magenta (4,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "12f2ae2d-1b2f-4362-97a1-ac500db4c1f0",
+      "sku": "G108R00945BK",
+      "name": "Fuji Xerox Genuine 108R00945BK Ink Cartridge 108R00945 Black (8,600 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "15480add-298b-4756-9ae5-1fc4af7b68d3",
+      "sku": "G108R00971C",
+      "name": "Fuji Xerox Genuine 108R00971C Toner Cartridge 108R00971 Cyan (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "dd8c5f81-2bb2-4c2f-a9db-b29b6c94644c",
+      "sku": "G108R00971CMY",
+      "name": "Fuji Xerox Genuine 108R00971CMY Toner Cartridge 108R00971 CMY-Pack (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "d2c85c24-f632-414b-ac3b-5c8b2687e29b",
+      "sku": "G108R00972M",
+      "name": "Fuji Xerox Genuine 108R00972M Toner Cartridge 108R00972 Magenta (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "d0f4e557-f0e4-4e29-b7e1-62a68bb67638",
+      "sku": "G108R00973Y",
+      "name": "Fuji Xerox Genuine 108R00973Y Toner Cartridge 108R00973 Yellow (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "be6cacf2-2667-435a-a5e0-08dab497dcb0",
+      "sku": "G108R00985C",
+      "name": "Fuji Xerox Genuine 108R00985C Ink Cartridge 108R00985 Cyan (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "294a7966-a75e-4658-8743-7895d583140a",
+      "sku": "G108R00985CMY",
+      "name": "Fuji Xerox Genuine 108R00985CMY Ink Cartridge 108R00985 CMY-Pack (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "7a56e12e-9145-484a-bc51-ee99fdd61878",
+      "sku": "G108R00985KCMY",
+      "name": "Fuji Xerox Genuine 108R00985KCMY Ink Cartridge 108R00985 KCMY-Pack (16,700 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "dc0a43ba-1a86-4fac-9a56-c2fe60e4e1ae",
+      "sku": "G108R00986M",
+      "name": "Fuji Xerox Genuine 108R00986M Ink Cartridge 108R00986 Magenta (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "43cfbd16-de53-4474-9be9-70fcde4829b7",
+      "sku": "G108R00987Y",
+      "name": "Fuji Xerox Genuine 108R00987Y Ink Cartridge 108R00987 Yellow (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "68b61431-be20-4cc2-9fee-94fac7e83d78",
+      "sku": "G108R00988BK",
+      "name": "Fuji Xerox Genuine 108R00988BK Ink Cartridge 108R00988 Black (16,700 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "107aa22a-432c-4635-ac49-486343ee9c44",
+      "sku": "G108R01030C",
+      "name": "Fuji Xerox Genuine 108R01030C Ink Cartridge 108R01030 Cyan (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "acea1f71-64ab-48ff-8061-1547fc18c587",
+      "sku": "G108R01030CMY",
+      "name": "Fuji Xerox Genuine 108R01030CMY Ink Cartridge 108R01030 CMY-Pack (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "3f8a350e-bbd4-4026-9363-ec3e6857e434",
+      "sku": "G108R01030KCMY",
+      "name": "Fuji Xerox Genuine 108R01030KCMY Ink Cartridge 108R01030 KCMY-Pack (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "784f51a1-b155-459f-8682-0124465796cd",
+      "sku": "G108R01031M",
+      "name": "Fuji Xerox Genuine 108R01031M Ink Cartridge 108R01031 Magenta (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     }
+    ]
+   }
+  },
+  "supplier_freight_failed": false
+ },
+ "dsum_30": {
+  "date_range": {
+   "date_from": "2026-10-26",
+   "date_to": "2026-11-25",
+   "granularity": "day",
+   "timezone": "Pacific/Auckland"
+  },
+  "previous_range": {
+   "date_from": "2026-09-25",
+   "date_to": "2026-10-25"
+  },
+  "current": {
+   "revenue_incl_gst": 6432.2,
+   "revenue_ex_gst": 5593.22,
+   "refunds": 59.4,
+   "cogs": 4942.07,
+   "gross_profit": 651.15,
+   "stripe_fees": 106.81,
+   "supplier_freight": 415.66,
+   "operating_expenses": 1769.72,
+   "net_profit": -1641.04,
+   "orders": 52,
+   "aov": 124.84,
+   "owed_unpaid_invoices": 2477.29,
+   "cogs_unknown_orders": []
+  },
+  "previous": {
+   "revenue_incl_gst": 6122.12,
+   "revenue_ex_gst": 5323.58,
+   "refunds": 0,
+   "cogs": 3824.83,
+   "gross_profit": 1498.75,
+   "stripe_fees": 128.32,
+   "supplier_freight": 407.84,
+   "operating_expenses": 2729.56,
+   "net_profit": -1766.96,
+   "orders": 53,
+   "aov": 115.51,
+   "owed_unpaid_invoices": 302.83,
+   "cogs_unknown_orders": []
+  },
+  "series": [
+   {
+    "bucket_start": "2026-10-26",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-10-27",
+    "revenue": 141.99,
+    "gross_profit": 42.47,
+    "net_profit": -58.82
+   },
+   {
+    "bucket_start": "2026-10-28",
+    "revenue": 424.04,
+    "gross_profit": 107.63,
+    "net_profit": 60.55
+   },
+   {
+    "bucket_start": "2026-10-29",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-10-30",
+    "revenue": 102.79,
+    "gross_profit": 32.38,
+    "net_profit": 15.16
+   },
+   {
+    "bucket_start": "2026-10-31",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-01",
+    "revenue": 123.58,
+    "gross_profit": 27.56,
+    "net_profit": 14.02
+   },
+   {
+    "bucket_start": "2026-11-02",
+    "revenue": 850.2,
+    "gross_profit": 193.78,
+    "net_profit": 57.52
+   },
+   {
+    "bucket_start": "2026-11-03",
+    "revenue": 402.77,
+    "gross_profit": 100.53,
+    "net_profit": -855.59
+   },
+   {
+    "bucket_start": "2026-11-04",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-05",
+    "revenue": 27.37,
+    "gross_profit": 15.91,
+    "net_profit": 8.93
+   },
+   {
+    "bucket_start": "2026-11-06",
+    "revenue": 31.99,
+    "gross_profit": -14.63,
+    "net_profit": -35.52
+   },
+   {
+    "bucket_start": "2026-11-07",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-08",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-09",
+    "revenue": 327.24,
+    "gross_profit": 111.12,
+    "net_profit": 32.13
+   },
+   {
+    "bucket_start": "2026-11-10",
+    "revenue": 386.73,
+    "gross_profit": 128.26,
+    "net_profit": 8.37
+   },
+   {
+    "bucket_start": "2026-11-11",
+    "revenue": 392.22,
+    "gross_profit": 147.28,
+    "net_profit": 99.61
+   },
+   {
+    "bucket_start": "2026-11-12",
+    "revenue": 490.7,
+    "gross_profit": 23.66,
+    "net_profit": 1.18
+   },
+   {
+    "bucket_start": "2026-11-13",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-14",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-15",
+    "revenue": 147.98,
+    "gross_profit": 47.85,
+    "net_profit": 31.74
+   },
+   {
+    "bucket_start": "2026-11-16",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-17",
+    "revenue": 513.59,
+    "gross_profit": -737,
+    "net_profit": -781.49
+   },
+   {
+    "bucket_start": "2026-11-18",
+    "revenue": 627.28,
+    "gross_profit": 124.46,
+    "net_profit": -248.77
+   },
+   {
+    "bucket_start": "2026-11-19",
+    "revenue": 0,
+    "gross_profit": 0,
+    "net_profit": 0
+   },
+   {
+    "bucket_start": "2026-11-20",
+    "revenue": 767.33,
+    "gross_profit": 85.94,
+    "net_profit": 67.9
+   },
+   {
+    "bucket_start": "2026-11-21",
+    "revenue": 85.52,
+    "gross_profit": 40.01,
+    "net_profit": 27.34
+   },
+   {
+    "bucket_start": "2026-11-22",
+    "revenue": 269.48,
+    "gross_profit": 56.36,
+    "net_profit": 48.32
+   },
+   {
+    "bucket_start": "2026-11-23",
+    "revenue": 16.95,
+    "gross_profit": 11.36,
+    "net_profit": -195.38
+   },
+   {
+    "bucket_start": "2026-11-24",
+    "revenue": 102.57,
+    "gross_profit": 44.41,
+    "net_profit": 23
+   },
+   {
+    "bucket_start": "2026-11-25",
+    "revenue": 199.88,
+    "gross_profit": 61.81,
+    "net_profit": 38.76
+   }
+  ],
+  "actions": {
+   "needs_tracking": {
+    "count": 1,
+    "rows": [
+     {
+      "id": "77abb061-1b66-4349-8fe5-ac865e5fad93",
+      "order_number": "2026112501",
+      "status": "paid",
+      "channel": "web",
+      "total": 83.6,
+      "created_at": "2026-11-25T03:44:02.257079+00:00"
+     }
+    ]
+   },
+   "missing_cost": {
+    "count": 0,
+    "rows": []
+   },
+   "under_margin_floor": {
+    "count": 4125,
+    "rows": [
+     {
+      "id": "5c1547c7-1fce-4935-a489-9c91c26df238",
+      "sku": "10966.01",
+      "name": "OKI ML80 Compatible Label maker Ribbon 10966.01 BLACK",
+      "source": "compatible",
+      "cost_price": 7.82,
+      "retail_price": 11.99,
+      "net_margin": 22.35,
+      "margin_floor": 80,
+      "gap": 57.65
+     },
+     {
+      "id": "93fd7173-d627-4782-bc1e-4a24cfb671db",
+      "sku": "CGI690M",
+      "name": "GI690M Compatible Ink Bottle for Canon GI690 Magenta",
+      "source": "compatible",
+      "cost_price": 6.95,
+      "retail_price": 10.79,
+      "net_margin": 23.28,
+      "margin_floor": 80,
+      "gap": 56.72
+     },
+     {
+      "id": "c4425061-2596-4ba1-a1e3-a73979ef68de",
+      "sku": "CGI690C",
+      "name": "GI690C Compatible Ink Bottle for Canon GI690 Cyan",
+      "source": "compatible",
+      "cost_price": 6.95,
+      "retail_price": 10.79,
+      "net_margin": 23.28,
+      "margin_floor": 80,
+      "gap": 56.72
+     },
+     {
+      "id": "fc0646ff-9c60-4bc6-a2a9-0982a56e8c01",
+      "sku": "C273XLPBK",
+      "name": "273XLPBK Compatible Ink Cartridge for Epson 273XL Photo Black",
+      "source": "compatible",
+      "cost_price": 7.59,
+      "retail_price": 11.79,
+      "net_margin": 23.32,
+      "margin_floor": 80,
+      "gap": 56.68
+     },
+     {
+      "id": "03a76ef7-5c66-4b71-8e9b-17810b343c9c",
+      "sku": "691.01",
+      "name": "691.01 Compatible Printer Ribbon for STAR OEM Code LZ24HD",
+      "source": "compatible",
+      "cost_price": 4.5,
+      "retail_price": 7.95,
+      "net_margin": 32.26,
+      "margin_floor": 87,
+      "gap": 54.74
+     },
+     {
+      "id": "a429a109-547a-4899-bbd0-365b6d199ea7",
+      "sku": "CCLI526GY",
+      "name": "CLI526GY Compatible Ink Cartridge for Canon CLI526 Grey",
+      "source": "compatible",
+      "cost_price": 3.22,
+      "retail_price": 5.79,
+      "net_margin": 33.39,
+      "margin_floor": 87,
+      "gap": 53.61
+     },
+     {
+      "id": "f9e79df4-4cf3-4992-b60b-dc793780f151",
+      "sku": "72554.09",
+      "name": "ERC39 / ERC43 Compatible 72554.09 FN Purple Printer Ribbon for OEM ERC-39 / ERC-43",
+      "source": "compatible",
+      "cost_price": 4.9,
+      "retail_price": 8.95,
+      "net_margin": 34.39,
+      "margin_floor": 87,
+      "gap": 52.61
+     },
+     {
+      "id": "d02c8afa-cf58-49dd-a07c-28bda33e6d7d",
+      "sku": "CT522BK",
+      "name": "T522BK Compatible Ink Cartridge for Epson T522 Black",
+      "source": "compatible",
+      "cost_price": 8.95,
+      "retail_price": 13.79,
+      "net_margin": 22.71,
+      "margin_floor": 75,
+      "gap": 52.29
+     },
+     {
+      "id": "34cd49ea-d7c1-4169-bf99-e1bc7097ab2a",
+      "sku": "CPGI2600XLY",
+      "name": "PGI2600XLY Compatible Ink Cartridge for Canon PGI2600XL Yellow",
+      "source": "compatible",
+      "cost_price": 10,
+      "retail_price": 15.49,
+      "net_margin": 23.11,
+      "margin_floor": 75,
+      "gap": 51.89
+     },
+     {
+      "id": "68ca7167-f1be-4780-ae61-9f92a59e91e0",
+      "sku": "CPGI2600XLC",
+      "name": "PGI2600XLC Compatible Ink Cartridge for Canon PGI2600XL Cyan",
+      "source": "compatible",
+      "cost_price": 10,
+      "retail_price": 15.49,
+      "net_margin": 23.11,
+      "margin_floor": 75,
+      "gap": 51.89
+     },
+     {
+      "id": "db53b970-8ead-45fe-b1cc-a2f5b05f9338",
+      "sku": "CPGI2600XLM",
+      "name": "PGI2600XLM Compatible Ink Cartridge for Canon PGI2600XL Magenta",
+      "source": "compatible",
+      "cost_price": 10,
+      "retail_price": 15.49,
+      "net_margin": 23.11,
+      "margin_floor": 75,
+      "gap": 51.89
+     },
+     {
+      "id": "44a0da30-d8f4-4ce8-8bcc-403134475548",
+      "sku": "CLC3329XLY",
+      "name": "LC3329XLY Compatible Ink Cartridge for Brother LC3329XL Yellow",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 13.99,
+      "net_margin": 23.37,
+      "margin_floor": 75,
+      "gap": 51.63
+     },
+     {
+      "id": "a2cf5249-7817-47dd-a18d-d45d7f0fcc82",
+      "sku": "CLC3329XLM",
+      "name": "LC3329XLM Compatible Ink Cartridge for Brother LC3329XL Magenta",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 13.99,
+      "net_margin": 23.37,
+      "margin_floor": 75,
+      "gap": 51.63
+     },
+     {
+      "id": "b666443f-a0a2-4ebc-898b-3a4fbf2da59c",
+      "sku": "CLC3329XLC",
+      "name": "LC3329XLC Compatible Ink Cartridge for Brother LC3329XL Cyan",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 13.99,
+      "net_margin": 23.37,
+      "margin_floor": 75,
+      "gap": 51.63
+     },
+     {
+      "id": "803760e8-0122-4fa6-b80b-ffe977d56cf9",
+      "sku": "C-OKI-720-RIB-BK",
+      "name": "700RIB OKI Compatible ML720 Printer Ribbon Black",
+      "source": "compatible",
+      "cost_price": 3.74,
+      "retail_price": 6.95,
+      "net_margin": 35.47,
+      "margin_floor": 87,
+      "gap": 51.53
+     },
+     {
+      "id": "10f7a039-198e-447b-96cc-232db70e137f",
+      "sku": "C935XLY",
+      "name": "935XLY Compatible Ink Cartridge for HP 935XL (C2P26AA) Yellow",
+      "source": "compatible",
+      "cost_price": 10.87,
+      "retail_price": 16.99,
+      "net_margin": 23.77,
+      "margin_floor": 75,
+      "gap": 51.23
+     },
+     {
+      "id": "19b6077f-cadb-4924-82a4-be716ecd5991",
+      "sku": "C933XLM",
+      "name": "933XLM Compatible Ink Cartridge for HP 933XL (CN055AA) Magenta",
+      "source": "compatible",
+      "cost_price": 10.87,
+      "retail_price": 16.99,
+      "net_margin": 23.77,
+      "margin_floor": 75,
+      "gap": 51.23
+     },
+     {
+      "id": "c050fc60-6ba5-44b4-9cae-ddd5c9f0d05e",
+      "sku": "C933XLY",
+      "name": "933XLY Compatible Ink Cartridge for HP 933XL (CN056AA) Yellow",
+      "source": "compatible",
+      "cost_price": 10.87,
+      "retail_price": 16.99,
+      "net_margin": 23.77,
+      "margin_floor": 75,
+      "gap": 51.23
+     },
+     {
+      "id": "7e845665-e813-4028-ad6e-fcd288c7857c",
+      "sku": "C92BK",
+      "name": "92BK Compatible Ink Cartridge for HP 92 (C9362WA) Black",
+      "source": "compatible",
+      "cost_price": 11.96,
+      "retail_price": 18.79,
+      "net_margin": 24.15,
+      "margin_floor": 75,
+      "gap": 50.85
+     },
+     {
+      "id": "e5de1c55-5b48-434a-97c1-8cbdd2a1bcae",
+      "sku": "C27BK",
+      "name": "27BK Compatible Ink Cartridge for HP 27 (C8727AA) Black",
+      "source": "compatible",
+      "cost_price": 11.96,
+      "retail_price": 18.79,
+      "net_margin": 24.15,
+      "margin_floor": 75,
+      "gap": 50.85
+     },
+     {
+      "id": "a47d7e5b-b2de-4335-a13a-b7f1957b3f06",
+      "sku": "C-OKI-IO182-RIB-BK",
+      "name": "100RIB OKI Compatible Printer Ribbon Black for ML182",
+      "source": "compatible",
+      "cost_price": 4.21,
+      "retail_price": 7.95,
+      "net_margin": 36.45,
+      "margin_floor": 87,
+      "gap": 50.55
+     },
+     {
+      "id": "dba00ffc-7a4e-4c58-8ac1-7070fbb77f0f",
+      "sku": "72758.09",
+      "name": "IR-51 / IDP-562 Compatible Printer Ribbon Cartridge PURPLE   72758.09",
+      "source": "compatible",
+      "cost_price": 4.7,
+      "retail_price": 8.95,
+      "net_margin": 36.96,
+      "margin_floor": 87,
+      "gap": 50.04
+     },
+     {
+      "id": "bbd46f7c-1471-4b11-b409-e9af128c0693",
+      "sku": "C314LOT",
+      "name": "314LOT Olivetti Compatible Correction Ribbon Tape",
+      "source": "compatible",
+      "cost_price": 5.2,
+      "retail_price": 8.94,
+      "net_margin": 30.46,
+      "margin_floor": 80,
+      "gap": 49.54
+     },
+     {
+      "id": "40846cb7-20e0-4dd0-ac4f-d1f6a4976c75",
+      "sku": "644.01",
+      "name": "Fujitsu DMPG9 Compatible Printer Ribbon BLACK 644.01",
+      "source": "compatible",
+      "cost_price": 6.95,
+      "retail_price": 11.95,
+      "net_margin": 30.47,
+      "margin_floor": 80,
+      "gap": 49.53
+     },
+     {
+      "id": "21ec4849-c51d-482c-aff9-5de50e07467c",
+      "sku": "CCLI671XLC",
+      "name": "CLI671XLC Compatible Ink Cartridge for Canon CLI671XL Cyan",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "3cd74f15-7e2f-4211-918c-0896f5d6b9ed",
+      "sku": "CCLI671XLY",
+      "name": "CLI671XLY Compatible Ink Cartridge for Canon CLI671XL Yellow",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "5d34fd68-df98-4a6a-a20d-a4c296dbe2cc",
+      "sku": "CCLI671XLGY",
+      "name": "CLI671XLGY Compatible Ink Cartridge for Canon CLI671XL Grey",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "8652e5ee-d368-4128-9b29-5f5aa60851ab",
+      "sku": "CCLI671XLBK",
+      "name": "CLI671XLBK Compatible Ink Cartridge for Canon CLI671XL Black",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "8a3dade6-cf0e-487a-980a-01ff488be25d",
+      "sku": "CCLI671XLM",
+      "name": "CLI671XLM Compatible Ink Cartridge for Canon CLI671XL Magenta",
+      "source": "compatible",
+      "cost_price": 6.25,
+      "retail_price": 10.79,
+      "net_margin": 30.74,
+      "margin_floor": 80,
+      "gap": 49.26
+     },
+     {
+      "id": "86920bc2-2df0-4ba6-81a0-c50254da447e",
+      "sku": "651.01",
+      "name": "Epson LQ2550 Compatible  FN Black Printer Ribbon 651.01",
+      "source": "compatible",
+      "cost_price": 4.6,
+      "retail_price": 8.95,
+      "net_margin": 38.24,
+      "margin_floor": 87,
+      "gap": 48.76
+     },
+     {
+      "id": "f330dfdb-5a94-49e2-9a19-8c3afcb81ab4",
+      "sku": "621.01",
+      "name": "Citizen GSX140 Compatible Printer Ribbon BLACK 621.01",
+      "source": "compatible",
+      "cost_price": 4.6,
+      "retail_price": 8.95,
+      "net_margin": 38.24,
+      "margin_floor": 87,
+      "gap": 48.76
+     },
+     {
+      "id": "f6a30c64-31b6-4e45-8106-d46367a21207",
+      "sku": "72601.02",
+      "name": "Compatible IR-41RB Printer Ribbon 72601.02 FN Black/Red",
+      "source": "compatible",
+      "cost_price": 6.85,
+      "retail_price": 11.95,
+      "net_margin": 31.43,
+      "margin_floor": 80,
+      "gap": 48.57
+     },
+     {
+      "id": "30f808c5-edcd-4597-adb4-e29c8134c209",
+      "sku": "C564XLPBK",
+      "name": "564XLPBK Compatible Ink Cartridge for HP 564XL (CB322WA) Photo Black",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "8b5c2287-bb7b-477a-a5c2-294ddd932892",
+      "sku": "C564XLC",
+      "name": "564XLC Compatible Ink Cartridge for HP 564XL (CB323WA) Cyan (750 pages)",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "9c2dc5b8-1796-4359-b639-644ed5621c57",
+      "sku": "C564XLBK",
+      "name": "564XLBK Compatible Ink Cartridge for HP 564XL (CN684WA) Black (550 pages)",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "9ea177a2-d3bf-4b2a-8d1c-3d04f2e2827b",
+      "sku": "C564XLM",
+      "name": "564XLM Compatible Ink Cartridge for HP 564XL (CB324WA) Magenta",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "bfb06d25-2575-4f2c-abf1-f2b00b1f531d",
+      "sku": "C564XLY",
+      "name": "564XLY Compatible Ink Cartridge for HP 564XL (CB325WA) Yellow",
+      "source": "compatible",
+      "cost_price": 6,
+      "retail_price": 10.49,
+      "net_margin": 31.57,
+      "margin_floor": 80,
+      "gap": 48.43
+     },
+     {
+      "id": "36224f3d-4a26-4aff-a62a-0f4ed0bfc2b5",
+      "sku": "C143LOT",
+      "name": "Olympia Compatible 143LOT Correction Ribbon Tape",
+      "source": "compatible",
+      "cost_price": 6.83,
+      "retail_price": 11.95,
+      "net_margin": 31.62,
+      "margin_floor": 80,
+      "gap": 48.38
+     },
+     {
+      "id": "1aa29aa8-e8a7-45d5-b221-095c7b68fa0f",
+      "sku": "CCLI8BK",
+      "name": "CLI8BK Compatible Ink Cartridge for Canon CLI8 Black",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "6a01f469-cf41-41d4-87cf-3a91e5f746e6",
+      "sku": "CCLI8Y",
+      "name": "CLI8Y Compatible Ink Cartridge for Canon CLI8 Yellow",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "9fd22891-0869-4ca0-9b33-d001d40903ac",
+      "sku": "CCLI8C",
+      "name": "CLI8C Compatible Ink Cartridge for Canon CLI8 Cyan",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "beaac08c-45db-4878-bb94-b2473d7a1093",
+      "sku": "CCLI8M",
+      "name": "CLI8M Compatible Ink Cartridge for Canon CLI8 Magenta",
+      "source": "compatible",
+      "cost_price": 4.32,
+      "retail_price": 8.49,
+      "net_margin": 38.83,
+      "margin_floor": 87,
+      "gap": 48.17
+     },
+     {
+      "id": "8dea4f1c-9746-49ea-ac63-047b96b919c6",
+      "sku": "308.11",
+      "name": "Olympia Compatible 308.11 Typewriter Ribbon",
+      "source": "compatible",
+      "cost_price": 6.8,
+      "retail_price": 11.95,
+      "net_margin": 31.91,
+      "margin_floor": 80,
+      "gap": 48.09
+     },
+     {
+      "id": "b645d4fe-c698-41c7-bc29-16b356d5d9e8",
+      "sku": "72577.01",
+      "name": "ERC18 Compatible 72577.01 FN Black Cash Register Printer Ribbon",
+      "source": "compatible",
+      "cost_price": 7.93,
+      "retail_price": 13.95,
+      "net_margin": 31.98,
+      "margin_floor": 80,
+      "gap": 48.02
+     },
+     {
+      "id": "dacfbea2-1c24-49b1-8ca2-2a7a87f3d5e5",
+      "sku": "72748.09",
+      "name": "ERC-32P Compatible  Printer Ribbon PURPLE for EPSON  M820 72748.09 FN",
+      "source": "compatible",
+      "cost_price": 10.93,
+      "retail_price": 17.95,
+      "net_margin": 27.32,
+      "margin_floor": 75,
+      "gap": 47.68
+     },
+     {
+      "id": "d4a8446b-a187-4c2f-a399-f1d1aaae5f4e",
+      "sku": "CLC3317BK",
+      "name": "LC3317BK Compatible Ink Cartridge for Brother LC3317 Black",
+      "source": "compatible",
+      "cost_price": 9,
+      "retail_price": 14.79,
+      "net_margin": 27.37,
+      "margin_floor": 75,
+      "gap": 47.63
+     },
+     {
+      "id": "583634a6-a70c-4a83-8d31-141575961cc5",
+      "sku": "657.01",
+      "name": "Epson ERC23 Compatible  FN Printer Ribbon BLACK 657.01",
+      "source": "compatible",
+      "cost_price": 3.5,
+      "retail_price": 6.95,
+      "net_margin": 39.44,
+      "margin_floor": 87,
+      "gap": 47.56
+     },
+     {
+      "id": "f4ce6d81-0f03-4c17-9ade-ec5140ee3aa8",
+      "sku": "657.02",
+      "name": "Epson ERC23 Compatible 657.02 FN RED/BLACK Printer Ribbon",
+      "source": "compatible",
+      "cost_price": 3.5,
+      "retail_price": 6.95,
+      "net_margin": 39.44,
+      "margin_floor": 87,
+      "gap": 47.56
+     },
+     {
+      "id": "2ac93825-0791-464b-9573-802560f53f04",
+      "sku": "659.01",
+      "name": "Fujitsu Compatible 659.01 Printer Ribbon",
+      "source": "compatible",
+      "cost_price": 4.5,
+      "retail_price": 8.95,
+      "net_margin": 39.53,
+      "margin_floor": 87,
+      "gap": 47.47
+     },
+     {
+      "id": "c2dace0f-df2a-40fd-bf4a-1bed45c898c0",
+      "sku": "72555.01",
+      "name": "Fujitzu CA02374-C104 / Tally 43837 Replacement Ribbon 72555.01",
+      "source": "compatible",
+      "cost_price": 11.5,
+      "retail_price": 18.95,
+      "net_margin": 27.56,
+      "margin_floor": 75,
+      "gap": 47.44
+     }
+    ]
+   },
+   "out_of_stock": {
+    "count": 813,
+    "rows": [
+     {
+      "id": "54acf6d9-1060-42e2-b19b-0be3dba8f19a",
+      "sku": "G-LEX-4227-RIB-BK",
+      "name": "Lexmark 4227 Printer Ribbon Black",
+      "source": "genuine",
+      "product_type": "printer_ribbon"
+     },
+     {
+      "id": "5d339191-c3de-4a16-964d-29e180425fcc",
+      "sku": "G013R00623BK",
+      "name": "Fuji Xerox Genuine 013R00623BK Drum Unit 013R00623 Black (55,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "440da640-f9c9-4a85-9d7e-2fca81303f84",
+      "sku": "G051BK",
+      "name": "Canon Genuine 051BK Drum Unit 051 Black",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "456733b9-044d-4f0e-b129-10e3af24798d",
+      "sku": "G106R01160C",
+      "name": "Fuji Xerox Genuine 106R01160C Toner Cartridge 106R01160 Cyan (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "31468bf6-e9e2-4800-879d-be81f9cf27a9",
+      "sku": "G106R01160CMY",
+      "name": "Fuji Xerox Genuine 106R01160CMY Toner Cartridge 106R01160 CMY-Pack (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "06671520-78d0-4ebc-85e7-45d316742003",
+      "sku": "G106R01160KCMY",
+      "name": "Fuji Xerox Genuine 106R01160KCMY Toner Cartridge 106R01160 KCMY-Pack (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "c007b9bd-714a-4335-aa77-6b6eaea19c6f",
+      "sku": "G106R01161M",
+      "name": "Fuji Xerox Genuine 106R01161M Toner Cartridge 106R01161 Magenta (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "1e9bcba1-dd25-411f-be55-0d4312d04c67",
+      "sku": "G106R01162Y",
+      "name": "Fuji Xerox Genuine 106R01162Y Toner Cartridge 106R01162 Yellow (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "b6eb2130-9016-4de8-949e-a83c83763cc2",
+      "sku": "G106R01163BK",
+      "name": "Fuji Xerox Genuine 106R01163BK Toner Cartridge 106R01163 Black (32,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "811434f5-0dff-4983-894a-c4f54c88f5a4",
+      "sku": "G106R01218CMY",
+      "name": "Fuji Xerox Genuine 106R01218CMY Toner Cartridge 106R01218 CMY-Pack (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "50cefb64-8da1-4a87-8cdd-cdd78bc234b4",
+      "sku": "G106R01220Y",
+      "name": "Fuji Xerox Genuine 106R01220Y Toner Cartridge 106R01220 Yellow (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "09c0e091-50b5-415b-99fa-23aea16336e8",
+      "sku": "G106R01221HYBK",
+      "name": "Fuji Xerox Genuine 106R01221HYBK Toner Cartridge 106R01221HY Black (18,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "36284391-d106-4f2c-a732-c42813e82194",
+      "sku": "G106R01515C",
+      "name": "Fuji Xerox Genuine 106R01515C Toner Cartridge 106R01515 Cyan (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "3009d96e-4a51-4b47-b771-4e9e619a0d83",
+      "sku": "G106R01515CMY",
+      "name": "Fuji Xerox Genuine 106R01515CMY Toner Cartridge 106R01515 CMY-Pack (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "0821fe20-a282-4cc8-9869-1d45f90f63f6",
+      "sku": "G106R01515KCMY",
+      "name": "Fuji Xerox Genuine 106R01515KCMY Toner Cartridge 106R01515 KCMY-Pack (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "545ab9a1-d762-485d-82f7-955df660f5ab",
+      "sku": "G106R01516M",
+      "name": "Fuji Xerox Genuine 106R01516M Toner Cartridge 106R01516 Magenta (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "a2ba81c8-87d8-4ed1-a7da-75df6209b6f5",
+      "sku": "G106R01517Y",
+      "name": "Fuji Xerox Genuine 106R01517Y Toner Cartridge 106R01517 Yellow (12,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "59900412-f94c-4a0d-bc58-8cfff5a859d9",
+      "sku": "G106R01548BK",
+      "name": "Fuji Xerox Genuine 106R01548BK Toner Cartridge 106R01548 Black (25,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "5e4101a6-81b3-4830-b129-2c3f0b220ecc",
+      "sku": "G106R01574C",
+      "name": "Fuji Xerox Genuine 106R01574C Toner Cartridge 106R01574 Cyan (17,200 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "395e28d1-1417-4fc0-bf2b-421a12cc7b98",
+      "sku": "G106R01582BK",
+      "name": "Fuji Xerox Genuine 106R01582BK Drum Unit 106R01582 Black (145,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "57501493-5603-4838-acac-187259b48c68",
+      "sku": "G106R02335BK",
+      "name": "Fuji Xerox Genuine 106R02335BK Toner Cartridge 106R02335 Black (11,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "2c394bed-6343-4e20-a704-dd46737d00d5",
+      "sku": "G106R02625BK",
+      "name": "Fuji Xerox Genuine 106R02625BK Toner Cartridge 106R02625 Black (40,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "ac66a984-1165-4cb3-8128-e2554071cec8",
+      "sku": "G108R00645BK",
+      "name": "Fuji Xerox Genuine 108R00645BK Drum Unit 108R00645 Black (35,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "e968bc31-083f-4e93-8479-d70f2fb50a2b",
+      "sku": "G108R00713BK",
+      "name": "Fuji Xerox Genuine 108R00713BK Drum Unit 108R00713 Black (35,000 pages)",
+      "source": "genuine",
+      "product_type": "drum_unit"
+     },
+     {
+      "id": "288f94c9-e7a8-4198-9168-ad2cec1e80e9",
+      "sku": "G108R00718",
+      "name": "Fuji Xerox Genuine 108R00718 Fuser Unit (200,000 pages)",
+      "source": "genuine",
+      "product_type": "fuser_kit"
+     },
+     {
+      "id": "1d2622d7-3fc8-4556-98f4-61f60d3ed1e8",
+      "sku": "G108R00899M",
+      "name": "Fuji Xerox Genuine 108R00899M Ink Cartridge 108R00899 Magenta",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "6ea5389a-4a20-4e61-9b40-be1ad13f04c8",
+      "sku": "G108R00902BK",
+      "name": "Fuji Xerox Genuine 108R00902BK Ink Cartridge 108R00902 Black (6,000 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "ede36c97-6dd4-4be5-a501-6ac271d7bcf0",
+      "sku": "G108R00903C",
+      "name": "Fuji Xerox Genuine 108R00903C Ink Cartridge 108R00903 Cyan (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "1ba2adbd-ef8c-478c-9c54-9217c2063948",
+      "sku": "G108R00903CMY",
+      "name": "Fuji Xerox Genuine 108R00903CMY Ink Cartridge 108R00903 CMY-Pack (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "ecf2ba51-bbdb-4dc0-8869-926fb4f1de6f",
+      "sku": "G108R00903KCMY",
+      "name": "Fuji Xerox Genuine 108R00903KCMY Ink Cartridge 108R00903 KCMY-Pack (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "40f27e0a-21ed-40c2-a9fc-5389ce6b3e4c",
+      "sku": "G108R00904M",
+      "name": "Fuji Xerox Genuine 108R00904M Ink Cartridge 108R00904 Magenta (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "5e7aa05b-1a68-4690-8a57-f3d89b370dce",
+      "sku": "G108R00905Y",
+      "name": "Fuji Xerox Genuine 108R00905Y Ink Cartridge 108R00905 Yellow (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "ec1736a7-993b-480d-a824-a67c51154036",
+      "sku": "G108R00906BK",
+      "name": "Fuji Xerox Genuine 108R00906BK Ink Cartridge 108R00906 Black (3,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "31db91bf-3e97-4b61-8759-39aadeaca4c5",
+      "sku": "G108R00907BK",
+      "name": "Fuji Xerox Genuine 108R00907BK Ink Cartridge 108R00907 Black (6,800 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "661a70cf-6b4c-4dd0-9b4f-438f2632400b",
+      "sku": "G108R00942M",
+      "name": "Fuji Xerox Genuine 108R00942M Ink Cartridge 108R00942 Magenta (4,400 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "12f2ae2d-1b2f-4362-97a1-ac500db4c1f0",
+      "sku": "G108R00945BK",
+      "name": "Fuji Xerox Genuine 108R00945BK Ink Cartridge 108R00945 Black (8,600 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "15480add-298b-4756-9ae5-1fc4af7b68d3",
+      "sku": "G108R00971C",
+      "name": "Fuji Xerox Genuine 108R00971C Toner Cartridge 108R00971 Cyan (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "dd8c5f81-2bb2-4c2f-a9db-b29b6c94644c",
+      "sku": "G108R00971CMY",
+      "name": "Fuji Xerox Genuine 108R00971CMY Toner Cartridge 108R00971 CMY-Pack (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "d2c85c24-f632-414b-ac3b-5c8b2687e29b",
+      "sku": "G108R00972M",
+      "name": "Fuji Xerox Genuine 108R00972M Toner Cartridge 108R00972 Magenta (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "d0f4e557-f0e4-4e29-b7e1-62a68bb67638",
+      "sku": "G108R00973Y",
+      "name": "Fuji Xerox Genuine 108R00973Y Toner Cartridge 108R00973 Yellow (50,000 pages)",
+      "source": "genuine",
+      "product_type": "toner_cartridge"
+     },
+     {
+      "id": "be6cacf2-2667-435a-a5e0-08dab497dcb0",
+      "sku": "G108R00985C",
+      "name": "Fuji Xerox Genuine 108R00985C Ink Cartridge 108R00985 Cyan (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "294a7966-a75e-4658-8743-7895d583140a",
+      "sku": "G108R00985CMY",
+      "name": "Fuji Xerox Genuine 108R00985CMY Ink Cartridge 108R00985 CMY-Pack (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "7a56e12e-9145-484a-bc51-ee99fdd61878",
+      "sku": "G108R00985KCMY",
+      "name": "Fuji Xerox Genuine 108R00985KCMY Ink Cartridge 108R00985 KCMY-Pack (16,700 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "dc0a43ba-1a86-4fac-9a56-c2fe60e4e1ae",
+      "sku": "G108R00986M",
+      "name": "Fuji Xerox Genuine 108R00986M Ink Cartridge 108R00986 Magenta (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "43cfbd16-de53-4474-9be9-70fcde4829b7",
+      "sku": "G108R00987Y",
+      "name": "Fuji Xerox Genuine 108R00987Y Ink Cartridge 108R00987 Yellow (17,300 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "68b61431-be20-4cc2-9fee-94fac7e83d78",
+      "sku": "G108R00988BK",
+      "name": "Fuji Xerox Genuine 108R00988BK Ink Cartridge 108R00988 Black (16,700 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "107aa22a-432c-4635-ac49-486343ee9c44",
+      "sku": "G108R01030C",
+      "name": "Fuji Xerox Genuine 108R01030C Ink Cartridge 108R01030 Cyan (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "acea1f71-64ab-48ff-8061-1547fc18c587",
+      "sku": "G108R01030CMY",
+      "name": "Fuji Xerox Genuine 108R01030CMY Ink Cartridge 108R01030 CMY-Pack (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "3f8a350e-bbd4-4026-9363-ec3e6857e434",
+      "sku": "G108R01030KCMY",
+      "name": "Fuji Xerox Genuine 108R01030KCMY Ink Cartridge 108R01030 KCMY-Pack (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     },
+     {
+      "id": "784f51a1-b155-459f-8682-0124465796cd",
+      "sku": "G108R01031M",
+      "name": "Fuji Xerox Genuine 108R01031M Ink Cartridge 108R01031 Magenta (16,900 pages)",
+      "source": "genuine",
+      "product_type": "ink_cartridge"
+     }
+    ]
+   }
+  },
+  "supplier_freight_failed": false
+ },
+ "expenses": [
+  {
+   "id": "6d154892-fb57-43a7-9d40-f1f60b8680e1",
+   "name": "Anthropic",
+   "payee": "Anthropic",
+   "category": "other",
+   "amount": 200,
+   "gst_claimable": false,
+   "expense_date": "2026-11-23",
+   "paid_date": "2026-11-23",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "f0d02241-ed5a-4047-8396-0ac389f4465e",
+   "name": "S J S Accountant",
+   "payee": "",
+   "category": "other",
+   "amount": 400,
+   "gst_claimable": true,
+   "expense_date": "2026-11-18",
+   "paid_date": "2026-11-18",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "54adc4fa-aa33-4ca3-9b23-5a8b5114268e",
+   "name": "Mercury Nz Ltd",
+   "payee": "Mercury Nz Ltd",
+   "category": "other",
+   "amount": 91.1,
+   "gst_claimable": true,
+   "expense_date": "2026-11-10",
+   "paid_date": "2026-11-10",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "9f534dbc-ff17-4f1a-a8a3-15534ad7a3c3",
+   "name": "Supabase",
+   "payee": "Supabase",
+   "category": "software",
+   "amount": 46.31,
+   "gst_claimable": false,
+   "expense_date": "2026-11-09",
+   "paid_date": "2026-11-09",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "b7ad61af-a2e7-4114-bb77-a65b6c463ba0",
+   "name": "Google Works $45.54",
+   "payee": "Google",
+   "category": "software",
+   "amount": 45.54,
+   "gst_claimable": false,
+   "expense_date": "2026-11-03",
+   "paid_date": "2026-11-03",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "c047bf84-41a1-40c3-801d-0a89c52fe322",
+   "name": "Google Works $28.46",
+   "payee": "Google",
+   "category": "software",
+   "amount": 28.46,
+   "gst_claimable": false,
+   "expense_date": "2026-11-03",
+   "paid_date": "2026-11-03",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "901119c6-be74-45cf-8797-ffa9605b6b79",
+   "name": "Google Ads",
+   "payee": "Google",
+   "category": "other",
+   "amount": 809.15,
+   "gst_claimable": true,
+   "expense_date": "2026-11-03",
+   "paid_date": "2026-11-03",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "6fdf2b3f-294f-4868-a313-d244bd372dff",
+   "name": "Slingshot",
+   "payee": "",
+   "category": "other",
+   "amount": 116,
+   "gst_claimable": false,
+   "expense_date": "2026-11-03",
+   "paid_date": "2026-11-03",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "417b6b36-6fde-419e-8d8b-6a07111614b0",
+   "name": "Render.Com",
+   "payee": "Render",
+   "category": "software",
+   "amount": 52.71,
+   "gst_claimable": false,
+   "expense_date": "2026-11-03",
+   "paid_date": "2026-11-03",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "a26152b0-e3c7-48e2-b56b-3ba4dfe05c0e",
+   "name": "Vercel",
+   "payee": "Vercel",
+   "category": "software",
+   "amount": 54.22,
+   "gst_claimable": false,
+   "expense_date": "2026-11-02",
+   "paid_date": "2026-11-02",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "b1ccc4a1-abd3-4d6c-b695-b3605352db01",
+   "name": "Monthly A/C Fee",
+   "payee": "ANZ",
+   "category": "other",
+   "amount": 8.5,
+   "gst_claimable": false,
+   "expense_date": "2026-10-30",
+   "paid_date": "2026-10-30",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "9cd72d52-ab77-47a4-a4d8-95076505cdcd",
+   "name": "Mercury Nz Ltd",
+   "payee": "Mercury Nz Ltd",
+   "category": "other",
+   "amount": 100.43,
+   "gst_claimable": true,
+   "expense_date": "2026-10-27",
+   "paid_date": "2026-10-27",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "f957e3f9-76ad-464b-9912-167e192921f1",
+   "name": "Anthropic",
+   "payee": "Anthropic",
+   "category": "other",
+   "amount": 200,
+   "gst_claimable": true,
+   "expense_date": "2026-10-22",
+   "paid_date": "2026-10-22",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "fe17cafe-443a-4460-a202-b9362ebfd965",
+   "name": "G.S.T",
+   "payee": "IRD",
+   "category": "gst_payment",
+   "amount": 724.51,
+   "gst_claimable": false,
+   "expense_date": "2026-10-20",
+   "paid_date": "2026-10-20",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "2c9a48a8-5140-46bd-8450-e68722e75ab5",
+   "name": "Business Cards",
+   "payee": "copybooth.co.nz",
+   "category": "other",
+   "amount": 66.58,
+   "gst_claimable": false,
+   "expense_date": "2026-10-16",
+   "paid_date": "2026-10-16",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "c8d50183-c8fe-4d8f-94dd-d1895bfb64c5",
+   "name": "Google Ads",
+   "payee": "Google",
+   "category": "other",
+   "amount": 1000,
+   "gst_claimable": true,
+   "expense_date": "2026-10-14",
+   "paid_date": "2026-10-14",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "a7f717cb-15c3-46f1-8e75-3109be923371",
+   "name": "Supabase",
+   "payee": "Supabase",
+   "category": "software",
+   "amount": 45.35,
+   "gst_claimable": false,
+   "expense_date": "2026-10-07",
+   "paid_date": "2026-10-07",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "3d475e01-9417-48c2-80d2-86417a77c385",
+   "name": "Render.Com",
+   "payee": "Render",
+   "category": "software",
+   "amount": 94.71,
+   "gst_claimable": false,
+   "expense_date": "2026-10-05",
+   "paid_date": "2026-10-05",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "9c30c2a3-1ebe-4a54-ad5d-27e7e7d98d84",
+   "name": "Google Works",
+   "payee": "Google",
+   "category": "other",
+   "amount": 45.54,
+   "gst_claimable": true,
+   "expense_date": "2026-10-05",
+   "paid_date": "2026-10-05",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "38034b2a-cacb-44b5-a828-54352c41c320",
+   "name": "Google Ads",
+   "payee": "Google",
+   "category": "other",
+   "amount": 657.94,
+   "gst_claimable": true,
+   "expense_date": "2026-10-05",
+   "paid_date": "2026-10-05",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "8e4566f4-2920-4d0a-a5a9-50edb63ce2a4",
+   "name": "Google Workspace",
+   "payee": "",
+   "category": "other",
+   "amount": 28.46,
+   "gst_claimable": true,
+   "expense_date": "2026-10-05",
+   "paid_date": "2026-10-05",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "e7bc9cc6-925e-4e2b-b265-b504499d7ca8",
+   "name": "Vercel",
+   "payee": "Vercel",
+   "category": "software",
+   "amount": 54,
+   "gst_claimable": false,
+   "expense_date": "2026-10-02",
+   "paid_date": "2026-10-02",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "cb5d1acd-a14a-4e07-b548-1a9ec6c621c3",
+   "name": "Render.Com",
+   "payee": "Render",
+   "category": "software",
+   "amount": 94,
+   "gst_claimable": false,
+   "expense_date": "2026-10-02",
+   "paid_date": "2026-10-02",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "f45639b7-e7c5-47fb-a317-5ecbbfb819d0",
+   "name": "Google Ads",
+   "payee": "Google",
+   "category": "other",
+   "amount": 657.94,
+   "gst_claimable": true,
+   "expense_date": "2026-10-02",
+   "paid_date": "2026-10-02",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "639cc79a-fa21-4682-8bc0-a22ed91fbe1b",
+   "name": "Google Works",
+   "payee": "Google",
+   "category": "other",
+   "amount": 74,
+   "gst_claimable": true,
+   "expense_date": "2026-10-02",
+   "paid_date": "2026-10-02",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "86784836-76bb-4a72-94db-2e35e6b7dd98",
+   "name": "Monthly A/C Fee",
+   "payee": "ANZ",
+   "category": "other",
+   "amount": 8.5,
+   "gst_claimable": false,
+   "expense_date": "2026-09-30",
+   "paid_date": "2026-09-30",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "9ca67ea3-8994-4ad4-a8a4-6020ad03bd2a",
+   "name": "Bank Charge",
+   "payee": "",
+   "category": "other",
+   "amount": 50,
+   "gst_claimable": false,
+   "expense_date": "2026-09-29",
+   "paid_date": "2026-09-29",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  },
+  {
+   "id": "131e9c64-1ceb-4133-9f8a-a35f0468b06d",
+   "name": "Jiashan Silver Star for Ribbons",
+   "payee": "Jiashan Silver Star",
+   "category": "inventory",
+   "amount": 511.42,
+   "gst_claimable": true,
+   "expense_date": "2026-09-29",
+   "paid_date": "2026-09-29",
+   "derived_status": "paid",
+   "recurrence": "none",
+   "deleted_at": null
+  }
+ ],
+ "refunds": [
+  {
+   "id": "9de08181-e5a3-4780-84e4-39ee268c58d2",
+   "order_number": "2026110601",
+   "status": "processed",
+   "type": "refund",
+   "amount": 59.4,
+   "refunded_at": "2026-11-06T10:06:56.034+00:00",
+   "created_at": "2026-11-06T10:06:56.245433+00:00",
+   "order_status": "refunded"
+  },
+  {
+   "id": "e2c4bcf3-4056-4930-9282-74b4bdbc9646",
+   "order_number": "2026091503",
+   "status": "processed",
+   "type": "refund",
+   "amount": 70.49,
+   "refunded_at": "2026-09-17T06:03:25+00:00",
+   "created_at": "2026-10-25T13:24:28.358418+00:00",
+   "order_status": "refunded"
+  },
+  {
+   "id": "36fbcdb5-f896-463b-a278-95e885e45985",
+   "order_number": "2026100901",
+   "status": "pending",
+   "type": "refund",
+   "amount": 14,
+   "refunded_at": null,
+   "created_at": "2026-10-14T06:15:41.699028+00:00",
+   "order_status": "shipped"
+  }
+ ],
+ "invoices": [
+  {
+   "id": "d08cfcf1-ff43-4b9a-8159-6d5d3b504e73",
+   "invoice_number": 3299,
+   "issue_date": "2026-11-25",
+   "status": "unpaid",
+   "total_incl_gst": 116.28,
+   "cost_excl_gst": 69.9
+  },
+  {
+   "id": "ccca04ac-f11d-4229-9de6-a7ef3189f9ed",
+   "invoice_number": 3298,
+   "issue_date": "2026-11-22",
+   "status": "unpaid",
+   "total_incl_gst": 195.99,
+   "cost_excl_gst": 139.8
+  },
+  {
+   "id": "1e351785-6ca8-4f53-9750-b8676a8c2d5a",
+   "invoice_number": 3297,
+   "issue_date": "2026-11-20",
+   "status": "unpaid",
+   "total_incl_gst": 712.54,
+   "cost_excl_gst": 551.77
+  },
+  {
+   "id": "db70cfad-a93d-431d-a471-5e76eb0f8986",
+   "invoice_number": 3296,
+   "issue_date": "2026-11-17",
+   "status": "unpaid",
+   "total_incl_gst": 155.71,
+   "cost_excl_gst": 971.61
+  },
+  {
+   "id": "18d9e6f1-d62b-4f12-901b-9b5bd9536133",
+   "invoice_number": 3295,
+   "issue_date": "2026-11-17",
+   "status": "unpaid",
+   "total_incl_gst": 147.49,
+   "cost_excl_gst": 92.86
+  },
+  {
+   "id": "f5b53409-2291-4285-9ef4-37865bdefa6e",
+   "invoice_number": 3294,
+   "issue_date": "2026-11-12",
+   "status": "unpaid",
+   "total_incl_gst": 431.71,
+   "cost_excl_gst": 377.04
+  },
+  {
+   "id": "db61afe4-956d-4b4e-80c9-8d38388fd8d9",
+   "invoice_number": 3293,
+   "issue_date": "2026-11-11",
+   "status": "paid",
+   "total_incl_gst": 168.99,
+   "cost_excl_gst": 108.43
+  },
+  {
+   "id": "e0bb214c-adb7-4430-ac3f-112c9f5c19da",
+   "invoice_number": 3292,
+   "issue_date": "2026-11-02",
+   "status": "unpaid",
+   "total_incl_gst": 168.25,
+   "cost_excl_gst": 127.22
+  },
+  {
+   "id": "81dab242-4568-4d9a-932b-1a50eb69b5e6",
+   "invoice_number": 3291,
+   "issue_date": "2026-11-02",
+   "status": "unpaid",
+   "total_incl_gst": 246.49,
+   "cost_excl_gst": 187.95
+  },
+  {
+   "id": "de162b6f-13c3-4bd9-a6ef-6194afde7a65",
+   "invoice_number": 3290,
+   "issue_date": "2026-10-16",
+   "status": "paid",
+   "total_incl_gst": 46.99,
+   "cost_excl_gst": 23
+  },
+  {
+   "id": "01825c32-03f8-432b-985d-deb026367dce",
+   "invoice_number": 3289,
+   "issue_date": "2026-10-15",
+   "status": "unpaid",
+   "total_incl_gst": 106.84,
+   "cost_excl_gst": 376.6
+  },
+  {
+   "id": "8f7231ef-2a45-4967-962a-da838bb30698",
+   "invoice_number": 3288,
+   "issue_date": "2026-10-15",
+   "status": "paid",
+   "total_incl_gst": 85.49,
+   "cost_excl_gst": 44
+  },
+  {
+   "id": "1175d6c9-caf9-473d-ae60-4b6eb9aeb991",
+   "invoice_number": 3287,
+   "issue_date": "2026-10-13",
+   "status": "paid",
+   "total_incl_gst": 189.99,
+   "cost_excl_gst": 104.85
+  },
+  {
+   "id": "95e5683e-3f17-405c-b098-73abb64cae3a",
+   "invoice_number": 3286,
+   "issue_date": "2026-10-12",
+   "status": "paid",
+   "total_incl_gst": 202.48,
+   "cost_excl_gst": 104.85
+  },
+  {
+   "id": "b3330781-8cd7-41a6-9f17-99317b16307d",
+   "invoice_number": 3285,
+   "issue_date": "2026-10-12",
+   "status": "paid",
+   "total_incl_gst": 246.49,
+   "cost_excl_gst": 187.95
+  },
+  {
+   "id": "b01d3fc5-855c-481b-a135-561fdf486bfe",
+   "invoice_number": 3284,
+   "issue_date": "2026-10-02",
+   "status": "unpaid",
+   "total_incl_gst": 195.99,
+   "cost_excl_gst": 139.8
+  },
+  {
+   "id": "de747d1f-24ff-4c49-9865-289eab8673fe",
+   "invoice_number": 3283,
+   "issue_date": "2026-09-18",
+   "status": "paid",
+   "total_incl_gst": 321.79,
+   "cost_excl_gst": 199.8
+  },
+  {
+   "id": "3f1789c6-ba36-47a4-8be6-503443643adb",
+   "invoice_number": 3282,
+   "issue_date": "2026-09-18",
+   "status": "paid",
+   "total_incl_gst": 85.79,
+   "cost_excl_gst": 41
+  },
+  {
+   "id": "5dd31f7c-6c70-46db-969d-9a6267d738b7",
+   "invoice_number": 3281,
+   "issue_date": "2026-09-16",
+   "status": "paid",
+   "total_incl_gst": 266.97,
+   "cost_excl_gst": 169.2
+  },
+  {
+   "id": "60088ede-c88e-42de-98ea-fb67e7c4ae9f",
+   "invoice_number": 3280,
+   "issue_date": "2026-09-14",
+   "status": "paid",
+   "total_incl_gst": 249.55,
+   "cost_excl_gst": 187.95
+  },
+  {
+   "id": "957f39bb-749c-4f42-a76d-69b450fc7637",
+   "invoice_number": 3279,
+   "issue_date": "2026-09-14",
+   "status": "paid",
+   "total_incl_gst": 453.1,
+   "cost_excl_gst": 326.95
+  },
+  {
+   "id": "17c0ee9e-f114-4f08-a18a-7f7547462845",
+   "invoice_number": 3274,
+   "issue_date": "2026-09-02",
+   "status": "paid",
+   "total_incl_gst": 685.49,
+   "cost_excl_gst": 525.49
+  },
+  {
+   "id": "44fb5b45-cd15-4c1c-b0f2-7aed0e63ff8c",
+   "invoice_number": 3272,
+   "issue_date": "2026-09-02",
+   "status": "paid",
+   "total_incl_gst": 966,
+   "cost_excl_gst": 776.64
+  },
+  {
+   "id": "8e2d14f4-55dd-4350-ad05-741469cc6d4c",
+   "invoice_number": 3278,
+   "issue_date": "2026-09-01",
+   "status": "paid",
+   "total_incl_gst": 249.55,
+   "cost_excl_gst": 187.95
+  },
+  {
+   "id": "7b6ec9fe-6f4e-4c82-81ea-64d0e2e1ef1c",
+   "invoice_number": 3277,
+   "issue_date": "2026-09-01",
+   "status": "paid",
+   "total_incl_gst": 1325.95,
+   "cost_excl_gst": 1069.5
+  },
+  {
+   "id": "813f3d4b-93b2-433c-866e-2eb142f8525b",
+   "invoice_number": 3276,
+   "issue_date": "2026-08-31",
+   "status": "paid",
+   "total_incl_gst": 41.5,
+   "cost_excl_gst": 0
+  },
+  {
+   "id": "3071d1e6-9dd8-4be4-a890-f94e2835b5ce",
+   "invoice_number": 3275,
+   "issue_date": "2026-08-28",
+   "status": "paid",
+   "total_incl_gst": 98.34,
+   "cost_excl_gst": 0
+  },
+  {
+   "id": "d4baa2de-360f-4ae6-92e2-101a5cdc3fdb",
+   "invoice_number": 3273,
+   "issue_date": "2026-08-17",
+   "status": "paid",
+   "total_incl_gst": 104.47,
+   "cost_excl_gst": 59.97
+  },
+  {
+   "id": "711768d1-a1ed-4b4b-ab6b-e6a705c8d784",
+   "invoice_number": 3271,
+   "issue_date": "2026-08-07",
+   "status": "paid",
+   "total_incl_gst": 238.49,
+   "cost_excl_gst": 139.8
+  },
+  {
+   "id": "d5c0a768-a0d9-498c-84cf-14eb06d40b59",
+   "invoice_number": 3270,
+   "issue_date": "2026-08-05",
+   "status": "paid",
+   "total_incl_gst": 200.99,
+   "cost_excl_gst": 117.72
+  },
+  {
+   "id": "eae28be6-fb04-4159-86f5-a6aae4997989",
+   "invoice_number": 3269,
+   "issue_date": "2026-08-05",
+   "status": "paid",
+   "total_incl_gst": 150.79,
+   "cost_excl_gst": 95.35
+  },
+  {
+   "id": "2c97abfb-d882-43b2-9200-eaba4492452b",
+   "invoice_number": 3268,
+   "issue_date": "2026-08-01",
+   "status": "paid",
+   "total_incl_gst": 249.55,
+   "cost_excl_gst": 187.95
+  },
+  {
+   "id": "a7acdd3b-e951-4a53-848b-c8e92d660293",
+   "invoice_number": 3267,
+   "issue_date": "2026-07-27",
+   "status": "paid",
+   "total_incl_gst": 150.79,
+   "cost_excl_gst": 95.35
+  },
+  {
+   "id": "93dcb30e-e56d-434c-bbde-0ad5b226919d",
+   "invoice_number": 3266,
+   "issue_date": "2026-07-27",
+   "status": "paid",
+   "total_incl_gst": 34.79,
+   "cost_excl_gst": 14.96
+  },
+  {
+   "id": "576f0071-f19a-4b3e-b452-e5866c8ef212",
+   "invoice_number": 3265,
+   "issue_date": "2026-07-08",
+   "status": "paid",
+   "total_incl_gst": 966,
+   "cost_excl_gst": 776.64
+  },
+  {
+   "id": "0bb1f49c-7b75-44bc-aa6d-9fa0d351ae2f",
+   "invoice_number": 3264,
+   "issue_date": "2026-07-03",
+   "status": "void",
+   "total_incl_gst": 106.49,
+   "cost_excl_gst": null
+  },
+  {
+   "id": "8a4b7367-b9db-4959-bd7f-c5062cb3ac42",
+   "invoice_number": 3263,
+   "issue_date": "2026-06-22",
+   "status": "paid",
+   "total_incl_gst": 195.99,
+   "cost_excl_gst": 139.8
+  }
+ ]
+}

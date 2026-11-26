@@ -58,7 +58,7 @@ function kpiGrid(ctx) {
       // GST_MIXED, not GST_EXCL: claimable rows are netted, non-claimable ones
       // (foreign SaaS with no NZ GST to reclaim) enter at full gross.
       basis: GST_MIXED,
-      sub: `${deltaHtml(k, range)}<span class="exp-kpi__note" title="Cash basis: only expenses marked paid, on their paid date, GST-netted, operating only — the same figure Finance → P&amp;L books.">${esc(grossSub)}</span>`,
+      sub: `${deltaHtml(k, range)}<span class="exp-kpi__note" title="Cash basis: only expenses marked paid, on their paid date, GST-netted, operating only (GST payments to IRD excluded). Finance → P&amp;L counts operating expenses by bill date, paid or not, so the two can differ.">${esc(grossSub)}</span>`,
       tone: '',
     },
     { label: 'Overdue', value: money(k.overdue || 0), go: 'overdue', basis: GST_INCL, sub: k.overdue > 0 ? 'needs paying now — by due date' : 'all clear', tone: k.overdue > 0 ? 'bad' : 'good' },
@@ -66,10 +66,9 @@ function kpiGrid(ctx) {
     { label: 'Recurring commitment', value: money(k.recurringMonthly || 0), go: 'recurring-tab', basis: GST_INCL, sub: 'per month, active series only', tone: '' },
   ];
   const secondary = [
-    // No basis: expense-math.js asserts the denominator is ex-GST, but
-    // financial-health.js proves with live arithmetic that pnl.revenue is
-    // INCL-GST. Two files, opposite claims — see the backend brief.
-    { id: 'ratio', label: '% of revenue', value: '…', title: 'Period spend (GST-netted) ÷ revenue of the P&L months overlapping the window — approximate, monthly P&L granularity. Revenue basis unconfirmed.' },
+    // No basis badge: the numerator is GST-netted spend, the denominator pnl.revenue
+    // (GST-inclusive, after processed refunds), so the ratio is mixed-basis — the tooltip says so.
+    { id: 'ratio', label: '% of revenue', value: '…', title: 'Period spend (GST-netted) ÷ P&L revenue of the months overlapping the window — approximate, monthly P&L granularity. P&L revenue is GST-inclusive, after processed refunds, so the ratio is a little lower than a like-for-like ex-GST ratio.' },
     { label: 'Upcoming (next 30d)', value: money(k.upcoming30 || 0), basis: GST_INCL, title: 'Open amounts due in the next 30 days, gross.' },
     { label: 'Largest category', value: k.largestCategory ? `${categoryLabel(k.largestCategory.key)} · ${money(k.largestCategory.total)}` : '—', basis: GST_MIXED, title: 'Biggest paid operating category in the period, GST-netted.' },
     { label: 'Avg expense', value: k.avgExpense != null ? money(k.avgExpense) : '—', basis: GST_MIXED, title: `Average paid operating expense in the period (${k.txnCount || 0} transactions), GST-netted.` },
@@ -216,8 +215,8 @@ function bucketKey(ms, grain) {
 }
 
 const BASIS_SUBTITLE = {
-  paid: 'by paid date · cash basis — matches P&L',
-  incurred: 'by expense date · includes unpaid',
+  paid: 'by paid date · cash basis',
+  incurred: 'by expense date · includes unpaid — the P&L basis',
   due: 'by due date · includes unpaid',
 };
 
@@ -229,7 +228,9 @@ function trendBuckets(ctx) {
   if (basis === 'paid') return bucketExpenses(occurrences, range.fromMs, range.toMs, range.grain);
   const map = new Map();
   for (const o of occurrences) {
-    if (o.kind === 'order_linked') continue;
+    // Operating only — the same rule as the paid basis (expense-math isOperating): order-linked
+    // costs live in COGS, and a GST payment to IRD (not_expense) is not an expense at all.
+    if (o.kind !== 'operating') continue;
     if (o.status === 'cancelled' || o.status === 'skipped') continue;
     const ms = parseUtcDate(basis === 'due' ? (o.due_date || o.expense_date) : o.expense_date);
     if (!Number.isFinite(ms) || ms < range.fromMs || ms > range.toMs) continue;
@@ -265,9 +266,19 @@ async function renderTrendChart(ctx, seq) {
     chartSubtitle(`expenses by paid date (GST-netted) · revenue by order date (as charged) — mixed bases · ${range.grain} buckets`);
     const [expBuckets, dailyRes] = [bucketExpenses(ctx.getState().occurrences, range.fromMs, range.toMs, range.grain), await ctx.ensureDailyRevenue()];
     if (seq !== _renderSeq || !_host?.querySelector('#exp-trend')) return;
-    const daily = Array.isArray(dailyRes?.daily) ? dailyRes.daily : [];
+    const daily = Array.isArray(dailyRes?.daily) ? dailyRes.daily : null;
+    // Fail-soft LOUD: no revenue series is "could not load", never a flat $0 line; and a range
+    // longer than the backend's 365-day window says where the revenue line stops.
+    if (!daily) {
+      chartSubtitle(`expenses by paid date (GST-netted) · revenue could not load — not a zero · ${range.grain} buckets`);
+    } else {
+      const firstMs = Math.min(...daily.map(d => parseUtcDate(d.date)).filter(Number.isFinite));
+      if (Number.isFinite(firstMs) && firstMs > range.fromMs + 864e5) {
+        chartSubtitle(`expenses by paid date (GST-netted) · revenue by order date from ${new Date(firstMs).toISOString().slice(0, 10)} only (backend max 365 days) — mixed bases · ${range.grain} buckets`);
+      }
+    }
     const revMap = new Map();
-    for (const d of daily) {
+    for (const d of daily || []) {
       const ms = parseUtcDate(d.date);
       if (!Number.isFinite(ms) || ms < range.fromMs || ms > range.toMs) continue;
       const k = bucketKey(ms, range.grain);
@@ -280,7 +291,7 @@ async function renderTrendChart(ctx, seq) {
       labels: keys,
       datasets: [
         { label: 'Expenses (paid, GST-netted)', data: keys.map(k => expByKey.get(k) || 0), backgroundColor: colors.magenta, borderRadius: 4, yAxisID: 'y' },
-        { label: 'Revenue (order date)', data: keys.map(k => revMap.get(k) || 0), type: 'line', borderColor: colors.cyan, backgroundColor: 'transparent', tension: 0.25, yAxisID: 'y1', pointRadius: 2 },
+        ...(daily ? [{ label: 'Revenue (order date)', data: keys.map(k => revMap.get(k) || 0), type: 'line', borderColor: colors.cyan, backgroundColor: 'transparent', tension: 0.25, yAxisID: 'y1', pointRadius: 2 }] : []),
       ],
       options: {
         plugins: {

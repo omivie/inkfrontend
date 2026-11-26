@@ -207,12 +207,15 @@ async function renderTabContent() {
     case 'revenue': {
       el.innerHTML = `
         <div class="admin-kpi-grid admin-kpi-grid--3 admin-mb-lg">
-          ${kpiCard({ label: 'Revenue',       value: cur.revenue   != null ? formatPrice(cur.revenue) : null, raw: cur.revenue,   prevRaw: prev.revenue })}
+          ${kpiCard({ label: 'Revenue',       value: cur.revenue   != null ? formatPrice(cur.revenue) : null, raw: cur.revenue,   prevRaw: prev.revenue, sub: cur.refunds ? `after ${formatPrice(cur.refunds)} refunds` : undefined })}
           ${kpiCard({ label: 'AOV',           value: cur.aov       != null ? formatPrice(cur.aov)     : null, raw: cur.aov,       prevRaw: prev.aov })}
           ${kpiCard({ label: 'Rev Volatility',value: cur.volatility!= null ? formatPrice(cur.volatility): null, sub: '\u03C3 daily revenue' })}
         </div>
         <div class="admin-card admin-mb-lg">
-          <div class="admin-card__title">Revenue Series <small>${FilterState.get('period')}</small></div>
+          <div class="admin-card__title">Revenue Series <small>${FilterState.get('period')} · sales before refunds</small></div>
+          <!-- Measured 2026-11-26: revenue-series still sums sales BEFORE refunds (6,491.60 for
+               26 Oct–25 Nov) while the Revenue tile above is after them (6,432.20). Named here so the
+               gap reads as a definition, not an error, until the backend aligns it (outbox 2026-11-26). -->
           <div class="admin-chart-box"><canvas id="chart-revenue-detail"></canvas></div>
         </div>
         <div class="admin-grid-2 admin-mb-lg">

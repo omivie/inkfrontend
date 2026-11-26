@@ -99,17 +99,16 @@ sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
 vm.runInContext(
   [lift('numOrNull'), lift('resolveList'), lift('buildOverviewBuckets'),
-   lift('planProfitLine'), lift('checkNetDrift'), lift('checkMarginConsistency'),
+   lift('planProfitLine'), lift('checkNetDrift'),
    lift('recoverProfitFromSeries')].join('\n\n')
   + '\n;globalThis.buildOverviewBuckets = buildOverviewBuckets;'
   + '\n;globalThis.planProfitLine = planProfitLine;'
   + '\n;globalThis.checkNetDrift = checkNetDrift;'
-  + '\n;globalThis.checkMarginConsistency = checkMarginConsistency;'
   + '\n;globalThis.recoverProfitFromSeries = recoverProfitFromSeries;',
   ctx,
   { filename: 'dashboard-lifted.js' },
 );
-const { buildOverviewBuckets, planProfitLine, checkNetDrift, checkMarginConsistency,
+const { buildOverviewBuckets, planProfitLine, checkNetDrift,
         recoverProfitFromSeries } = sandbox;
 
 // trend-math is a real ES module with no DOM deps — strip `export` and run it.
@@ -459,81 +458,28 @@ test('a rebuilt gross does NOT stamp "rebuilt" on a real net tile', () => {
   assert.equal(r.netRebuilt, false, 'net came from kpi-summary — provenance must not leak across');
 });
 
-// ─── 10. Margin base (defect B) ─────────────────────────────────────────────
+// ─── 10. Margin base (defect B) — now in utils/money-truth.js ───────────────
+//
+// Since 2026-11-26 the Dashboard's margins are the ratio of two backend figures from ONE
+// payload (dashboard-summary): profit ÷ revenue_ex_gst. They cannot contradict the profit
+// tile beside them by construction, so the ERR-113 consistency gate (checkMarginConsistency)
+// was deleted with kpi-summary's margin_proxy. What must never regress is the BASE: ex-GST.
 
-test('margins prefer the backend’s own margin_proxy', () => {
-  assert.match(src, /cur\.margin_proxy\s*!=\s*null\s*\?\s*Number\(cur\.margin_proxy\)/);
-});
+const MONEY_SRC = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'js', 'admin', 'utils', 'money-truth.js'), 'utf8');
 
-test('the derived margin base is ex-GST revenue, not the GST-inclusive figure', () => {
-  const body = functionBody(src, 'renderKpiStrip');
-  assert.match(body, /\(20 \/ 23\)/, 'the margin base must strip GST from revenue');
-  assert.doesNotMatch(body, /marginOf\(grossProfit, cur\.revenue\)\s*;[\s\S]{0,40}\* 100/,
-    'dividing ex-GST profit by incl-GST revenue understates every margin by ~13%');
-  // Arithmetic proof of the live numbers this fixes: 19.07% → 21.94%.
+test('the margin base is ex-GST revenue from the same payload, not the GST-inclusive figure', () => {
+  assert.match(MONEY_SRC, /p\.value \/ revEx\) \* 100/, 'margins divide by revenue_ex_gst');
+  assert.doesNotMatch(MONEY_SRC, /\/ rev\) \* 100/, 'never by incl-GST revenue (understates every margin ~13%)');
+  // Arithmetic proof of the defect this guards: 19.07% (incl-GST base) vs 21.94% (ex-GST).
   const wrong = (1591.20 / 8342.15) * 100;
   const right = (1591.20 / (8342.15 * 20 / 23)) * 100;
   assert.equal(round(wrong), 19.07);
   assert.equal(round(right), 21.94);
-  assert.ok(Math.abs(right - LIVE_CURRENT.margin_proxy) < 0.05,
-    'the ex-GST base must agree with the backend’s margin_proxy');
 });
 
-// ─── 10b. Margin consistency gate (ERR-113) ─────────────────────────────────
-//
-// Live 2026-07-22, period=all: revenue 7728.48, gross_profit 1418.44, net_profit −19.67.
-// The Net Margin tile read −29.3% while −19.67 / (7728.48 × 20/23) = −0.29% — the tile
-// contradicted the Net Profit tile beside it by ~100×, and the frontend passed the backend's
-// figure through in silence. Preferring the backend is right; rendering it BLINDLY is not.
-
-const LIVE_0722 = { revenue: 7728.48, gross_profit: 1418.44, net_profit: -19.67 };
-const exGst = (rev) => rev * (20 / 23);
-const derivedMargin = (profit, rev) => (profit / exGst(rev)) * 100;
-
-test('the live −29.3% net margin is caught: it disagrees with its own profit tile', () => {
-  const derived = derivedMargin(LIVE_0722.net_profit, LIVE_0722.revenue);
-  assert.equal(round(derived), -0.29, 'the honest figure is −0.29%, not −29.3%');
-  const chk = checkMarginConsistency('Net Margin', -29.3, derived);
-  assert.ok(chk, 'a 100× disagreement must trip the gate');
-  assert.equal(chk.backend, -29.3);
-  assert.ok(Math.abs(Math.abs(chk.ratio) - 100) < 10, 'the ratio must name it as a scale bug');
-});
-
-test('an agreeing margin_proxy stays silent — this gate does not stop trusting the backend', () => {
-  // The live 2026-07-20 pair: margin_proxy 21.9 vs derived 21.94. Pure rounding.
-  const derived = derivedMargin(LIVE_CURRENT.gross_profit, LIVE_CURRENT.revenue);
-  assert.equal(round(derived), 21.94);
-  assert.equal(checkMarginConsistency('Gross Margin', LIVE_CURRENT.margin_proxy, derived), null);
-});
-
-test('the ERR-111 incl-GST basis error still trips the gate', () => {
-  // 19.07% (÷ GST-inclusive revenue) vs 21.94% (÷ ex-GST). The gate is a second net under
-  // the original defect: if the base ever regresses, the strip says so out loud.
-  assert.ok(checkMarginConsistency('Gross Margin', 19.07, 21.94));
-});
-
-test('ordinary rounding never trips it, and a near-zero margin does not explode', () => {
-  assert.equal(checkMarginConsistency('Gross Margin', 21.9, 21.94), null);
-  assert.equal(checkMarginConsistency('Net Margin', 0.01, 0.02), null, '0.5pp floor absorbs float noise');
-  const chk = checkMarginConsistency('Net Margin', 40, 0.0001);
-  assert.equal(chk.ratio, null, 'a ~0 denominator must not produce an absurd ratio');
-});
-
-test('unknown on either side is not a disagreement', () => {
-  assert.equal(checkMarginConsistency('Net Margin', null, 12), null);
-  assert.equal(checkMarginConsistency('Net Margin', 12, null), null);
-  assert.equal(checkMarginConsistency('Net Margin', NaN, 12), null);
-});
-
-test('renderKpiStrip shows the DERIVED figure when the gate trips, and says so loudly', () => {
-  const body = functionBody(src, 'renderKpiStrip');
-  assert.match(body, /grossMarginCheck\s*\?\s*grossMarginDerived/,
-    'a failing gross gate must fall back to the derived figure');
-  assert.match(body, /netMarginCheck\s*\?\s*netMarginDerived/,
-    'a failing net gate must fall back to the derived figure');
-  assert.match(body, /admin-dash-note--alert/,
-    'the disagreement must be surfaced in the UI, not just swapped silently');
-  assert.match(body, /esc\(fmtPct\(chk\.backend\)\)/, 'the note must name the backend’s own figure');
+test('the Dashboard no longer carries a second, contradictable margin source', () => {
+  assert.doesNotMatch(fs.readFileSync(DASHBOARD, 'utf8'), /margin_proxy|checkMarginConsistency/,
+    'kpi-summary margin_proxy and its consistency gate belong to the retired kpi-summary tiles');
 });
 
 // ─── 10c. Backend stripe_fees convention (ERR-114) ──────────────────────────

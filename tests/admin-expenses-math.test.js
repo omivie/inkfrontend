@@ -318,3 +318,23 @@ test('recurringMonthlyCommitment drops date-ended series when today is given', (
   approx(sandbox.recurringMonthlyCommitment(templates), 175);                       // no today → legacy behavior
   approx(sandbox.recurringMonthlyCommitment(templates, Date.UTC(2026, 6, 17)), 125); // date-ended series dropped
 });
+
+// ─── not_expense (gst_payment) is never spend ──────────────────────────────
+test('not_expense rows (GST payment to IRD) are excluded from spend, breakdown and KPIs', () => {
+  const gst = { category: 'gst_payment', kind: 'not_expense', amount: 724.51, gst_claimable: false,
+    expense_date: '2026-07-05', due_date: '2026-07-05', status: 'paid', paid: true, paid_date: '2026-07-05' };
+  const op = { category: 'software', kind: 'operating', amount: 100, gst_claimable: false,
+    expense_date: '2026-07-05', due_date: '2026-07-05', status: 'paid', paid: true, paid_date: '2026-07-05' };
+  const unpaidGst = { ...gst, status: 'overdue', paid: false, paid_date: null };
+  const bd = sandbox.categoryBreakdown([gst, op, unpaidGst]);
+  assert.deepEqual(JSON.parse(JSON.stringify(bd.map(b => b.key || b.category))), ['software']);
+  const k = sandbox.computeExpenseKpis([gst, op, unpaidGst], {
+    monthStart: Date.UTC(2026, 6, 1), monthEnd: Date.UTC(2026, 6, 31),
+    prevStart: Date.UTC(2026, 5, 1), prevEnd: Date.UTC(2026, 5, 30),
+    next30Start: Date.UTC(2026, 6, 1), next30End: Date.UTC(2026, 7, 30),
+  });
+  assert.equal(k.thisMonth, 100);
+  assert.equal(k.orderLinked, 0, 'a GST payment is not "order-linked" either');
+  assert.equal(k.overdue, 0);
+  assert.equal(k.unpaid, 0);
+});

@@ -7,7 +7,7 @@ const esc = (s) => typeof Security !== 'undefined' ? Security.escapeHtml(String(
 
 // YYYY-MM-DD as the calendar day in New Zealand. `toISOString()` is the UTC day, which is
 // YESTERDAY for every NZ morning (00:00–13:00 NZDT): the range then dropped NZ-today's orders,
-// and kpi-summary (UTC bounds) and the series (NZ bounds) split on them — the dashboard's
+// and kpi-summary (then UTC bounds; NZ days since backend migration 212) and the series (NZ bounds) split on them — the dashboard's
 // $6.10 net drift on 2026-10-20 was one 08:20 order (ERR-367).
 const nzDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(d);
 

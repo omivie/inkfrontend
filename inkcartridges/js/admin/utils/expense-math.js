@@ -4,7 +4,7 @@
  *
  * The ONE place expense numbers are computed, so the summary KPIs, the analytics
  * charts and the Financial-Health card can never disagree. Two accounting rules
- * are enforced here and must match the backend P&L aggregation (see the backend
+ * are enforced here and must match the backend aggregation (see the backend
  * spec):
  *
  *   1. DOUBLE-COUNT GUARD. Order-linked categories (inventory / merchant fees /
@@ -18,16 +18,22 @@
  *      profit at full face value. GST fraction of a GST-inclusive gross amount is
  *      3/23 (never × 0.15). See reference_shipping_gst_convention.
  *
- *   3. CASH BASIS (Jul 2026 — matches the backend). An expense counts toward
- *      spend / profit ONLY once it is marked PAID, and lands in the period of its
- *      `paid_date` — never its incurred date. This mirrors the backend's
- *      /api/admin/analytics/pnl `operating_expenses`, so the Expenses page, the
- *      Financial-Health card and Finance → P&L all report the same figure for the
- *      same month. Unpaid work (overdue / due / upcoming) is reported SEPARATELY
- *      off the DUE date and is never mixed into a spend total.
+ *   3. CASH BASIS for the Expenses page. An expense counts toward spend ONLY once
+ *      it is marked PAID, and lands in the period of its `paid_date`. Unpaid work
+ *      (overdue / due / upcoming) is reported SEPARATELY off the DUE date and is
+ *      never mixed into a spend total.
  *
- *      headline `thisMonth` === backend `summary.operating_paid`
- *                            === backend `pnl.operating_expenses`
+ *      headline `thisMonth` === backend `summary.operating_paid` (which, since
+ *                                2026-11-26, excludes the `gst_payment` category)
+ *
+ *      NOT the same as the P&L: the backend's /api/admin/analytics/pnl
+ *      `operating_expenses` is ACCRUAL since 2026-11-26 — by `expense_date`, paid or
+ *      not, order-linked categories and `gst_payment` excluded. So a month's paid
+ *      spend here can differ from that month's P&L operating expenses; do not
+ *      reconcile one against the other.
+ *
+ *   4. NOT-AN-EXPENSE. Rows of kind 'not_expense' (the GST payment to IRD) are out
+ *      of every spend / breakdown / KPI total, like order-linked rows.
  *
  * Occurrences passed in are ENRICHED objects (the page stamps these once):
  *   { amount:Number, category:String, kind:'operating'|'order_linked',
@@ -59,7 +65,9 @@ function amt(o) {
   return Number.isFinite(n) ? n : 0;
 }
 
-const isOperating = (o) => o && o.kind !== 'order_linked';
+// Operating = kind 'operating' ONLY. 'order_linked' (already in per-order COGS) and
+// 'not_expense' (the GST payment to IRD) never count as spend.
+const isOperating = (o) => !!o && o.kind === 'operating';
 const inRange = (ms, a, b) => Number.isFinite(ms) && ms >= a && ms <= b;
 
 /** Has this expense actually been paid? (Stored status wins; `paid` flag is a mirror.) */
@@ -72,7 +80,7 @@ export function isPaid(o) {
  * An UNPAID expense has no cash date (NaN) and is therefore excluded from every
  * spend/profit total — that is the whole point of the cash basis. Falling back to
  * the incurred date here would silently re-introduce accrual accounting and put us
- * back out of step with the backend's P&L.
+ * out of step with the backend's summary.operating_paid.
  */
 export function cashMs(o) {
   if (!isPaid(o)) return NaN;
@@ -139,7 +147,7 @@ export function recurringMonthlyCommitment(templates, todayMs = null) {
 /**
  * Category breakdown (largest first) — "where did the money actually go".
  * Cash-basis by default: PAID operating expenses only, GST-netted, so the doughnut
- * sums to the headline KPI and to Finance → P&L. Pass { paidOnly:false } for an
+ * sums to the headline KPI (the paid-spend figure, not the accrual P&L line). Pass { paidOnly:false } for an
  * accrual view (nothing ships that today).
  */
 export function categoryBreakdown(list, { operatingOnly = true, paidOnly = true, netted = true } = {}) {
@@ -200,7 +208,7 @@ function isoDay(ms) {
  * Spend figures (`thisMonth`, `lastMonth`, `orderLinked`, `largestCategory`) count
  * ONLY PAID expenses, placed on their `paid_date`, GST-netted and operating-only.
  * `thisMonth` is therefore the same number the backend reports as
- * `summary.operating_paid` / `pnl.operating_expenses`.
+ * `summary.operating_paid` (NOT `pnl.operating_expenses`, which is accrual by bill date).
  *
  * Forward-looking figures (`overdue`, `due`, `unpaid`, `upcoming30`) count UNPAID
  * work off the DUE date, at GROSS (that's the cash you must actually find). They
@@ -221,23 +229,23 @@ export function computeExpenseKpis(list, opts = {}) {
   } = opts;
 
   const op = rows.filter(isOperating);
-  const ol = rows.filter(o => !isOperating(o));
+  const ol = rows.filter(o => o && o.kind === 'order_linked');
 
   const sum = (arr, f) => arr.reduce((s, o) => s + f(o), 0);
   const net = (o) => pnlCost(amt(o), !!o.gst_claimable);
   // Paid, and the money left the bank inside [a,b].
   const paidIn = (arr, a, b) => arr.filter(o => inRange(cashMs(o), a, b));
 
-  // ── Cash-basis spend (reconciles with the backend P&L) ──
+  // ── Cash-basis spend (reconciles with backend summary.operating_paid) ──
   const opThis = paidIn(op, monthStart, monthEnd);
   const opPrev = paidIn(op, prevStart, prevEnd);
-  const thisMonth      = sum(opThis, net);   // ← the headline; === backend operating_paid
+  const thisMonth      = sum(opThis, net);   // ← the headline; === backend summary.operating_paid
   const thisMonthGross = sum(opThis, amt);   // what actually left the bank (incl GST)
   const lastMonth      = sum(opPrev, net);
   const pctChange = lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth) * 100
                   : (thisMonth > 0 ? null : 0); // null = "no prior baseline"
 
-  // Order-linked cash out this month — shown separately, NEVER in the P&L figure.
+  // Order-linked cash out this month — shown separately, NEVER in spend.
   const orderLinked = sum(paidIn(ol, monthStart, monthEnd), amt);
 
   const gstReclaim = sum(opThis, o => gstCredit(amt(o), !!o.gst_claimable));
@@ -257,7 +265,7 @@ export function computeExpenseKpis(list, opts = {}) {
 
   const recurringMonthly = recurringMonthlyCommitment(recurringTemplates);
 
-  // Both sides ex-GST: pnl.revenue is ex-GST and `thisMonth` is GST-netted.
+  // Caller supplies the revenue; `thisMonth` is GST-netted, so pass an ex-GST figure.
   const expenseToRevenuePct = (Number.isFinite(revenueThisMonth) && revenueThisMonth > 0)
     ? (thisMonth / revenueThisMonth) * 100
     : null;
@@ -301,7 +309,7 @@ export function computePeriodKpis(list, opts = {}) {
   } = opts;
 
   const op = rows.filter(isOperating);
-  const ol = rows.filter(o => !isOperating(o));
+  const ol = rows.filter(o => o && o.kind === 'order_linked');
   const sum = (arr, f) => arr.reduce((s, o) => s + f(o), 0);
   const net = (o) => pnlCost(amt(o), !!o.gst_claimable);
   const paidIn = (arr, a, b) => arr.filter(o => inRange(cashMs(o), a, b));

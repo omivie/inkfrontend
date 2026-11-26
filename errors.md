@@ -40,7 +40,35 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
-## ERR-393 — Admin Dashboard rebuilt: numbers wrong, too much on it, 17 s to load (owner 2026-11-25) — IN PROGRESS (frontend, side-by-side)
+## ERR-394 — Backend shipped the 25 Nov dashboard asks: ONE Dashboard on `dashboard-summary`, every FE money adjustment deleted (owner 2026-11-26) — SHIPPED (frontend)
+
+**Trigger.** The backend answered `backend-asks-2026-11-25-dashboard` §1–6 in one deploy (migrations 218–220; reply filed as `backend-docs/inbox/backend-asks-2026-11-25-dashboard-backend-response.md`). Owner: verify it, implement everything, and keep ONE Dashboard: "use the new one but design it to be like the old one … the smaller cards at the top and the information below … just change all the endpoints, connections and data." Net Profit second line: "show what's still unpaid".
+
+**Root cause of the FE work.** ERR-393 built three labelled adjustments (`redateInvoices`, `refundsIn`, `opexByBillDate`) to bridge backend gaps. With the backend fixed, keeping them would re-date already-dated invoices, subtract refunds a second time, and re-count expenses. The old Dashboard additionally ran a ~120 × `GET /orders/:id` "missing cost" scan and an ERR-392 line that subtracted unpaid bills from a net profit that (now accrual) already contains them.
+
+**Verified live first (2026-11-26, owner login, GET only).** Every figure in the reply's live-check table matched to the cent (October: 52 orders, 5,877.15 incl, 5,110.57 ex, COGS 3,697.25, Stripe 122.41, opex 2,766.89, net −1,890.79; 26 Oct–25 Nov: 6,432.20 after 59.40 refunds). dashboard-summary = kpi-summary = pnl (Oct) = Σ bundle series. 37/37 shadow orders on their issue date. Refund rows carry `order_status`. `gst_payment` listed; the G.S.T row already moved.
+
+**Found while verifying (each fixed or sent back):**
+1. **pnl now IGNORES `?days`** (days=120 returned 365 days). Financial Health and Expenses sent `days` ⇒ now `getAdminAnalyticsPnL({from,to})` → `start_date`/`end_date`.
+2. **Financial Health printed a net LOSS as a profit.** `fmt` ran every row through `Math.abs`, so October's −$1,890.79 read "$1,890.79". Pre-existing; cost rows keep the deduction sign, every other row keeps its own.
+3. **`daily-revenue` refuses `days` > 365.** Financial Health asked for 372 and never used the result (400 on every load) ⇒ call deleted. Expenses "vs Revenue" asked for up to 750 and drew the failure as a flat $0 line ⇒ capped at 365, and the chart says "could not load — not a zero" / where its revenue line stops.
+4. **revenue-series is still gross of refunds** (6,491.60 vs kpi 6,432.20) ⇒ Analytics chart labelled "sales before refunds", tile shows "after $X refunds"; outbox 2026-11-26 §1.
+5. **kpi `refund_rate` = 1.9 for an October with no processed refund** ⇒ Dashboard tile = processed refunds (refunds-series) ÷ orders; outbox §2.
+6. dashboard-summary `out_of_stock` (813) and `under_margin_floor` (4,125, per-rule floor) are different questions from the tiles/to-dos the owner had (608 genuine feed; < 10% net) ⇒ FE keeps its own sources; outbox §3.
+
+**Fix (frontend).**
+- `api.js`: `getDashboardSummary(range, grain)` + `normalizeDashboardSummary` (missing `current` ⇒ null; non-numbers ⇒ null; a failed action list stays `{count:null, error}`, never 0; `supplier_freight_failed` strictly true/false else null). pnl takes a date range. kpi fallback keeps `refunds`/`refunds_ex_gst`.
+- `utils/money-truth.js` rewritten: `dashboardMoney` shapes the backend figures and their How-it's-calculated inputs (adds up exactly; ≤ 2¢ shown as backend rounding, more = UNEXPLAINED + warning); an un-costed sale ⇒ gross/net "AT MOST" naming it (INV-3275 for any range with August); `unpaidBillsInRange` first proves the expense rows reproduce `operating_expenses` to the cent, then reports the unpaid part ("Includes $X of bills not paid yet" / "All bills in this period are paid" / "could not confirm (reason)") — never subtracts. All three adjustments deleted.
+- `pages/dashboard.js` = the old layout on new data: 10-cell KPI strip (+ "Owed to us"), money tiles are buttons that open "How it's calculated", Action needed reads `actions.missing_cost` / `needs_tracking`, new "Money housekeeping" row (tax filed as expense, duplicate expenses, pending refunds, invoice cost over price). Period + bar-width filters only (the money is whole-business). Missing-cost scan, profit rebuild, margin gate, `unpaidBillsOf/Sub` deleted. Cache schema 5.
+- `pages/dashboard-new.js` + nav entry deleted; `#dashboard-new` redirects to `#dashboard`. `dash2-*` CSS → `dash-how-*`.
+- `gst_payment`: `backendPending` removed, label "GST / tax payment to IRD"; `expense-math` `isOperating = kind === 'operating'` (client spend now equals the server's `operating_paid`). Chart opex fallback = accrual, operating-only.
+
+**Measured after (local admin, live backend, owner login, 1280 px).** October tiles 5,877.15 / 1,413.32 / −1,890.79 / 52 / AOV 113.02 / owed 302.83; every How panel sums (net shows the backend's 1¢ rounding row). Cold load: dashboard-summary answered at 3.3 s, 21 API requests in all, 0 per-order GETs, 0 kpi-summary calls (was 17.0 s / 147). All time: "AT MOST" with INV-3275 named. Phone 375 px: one column, no horizontal scroll. Financial Health October = the same figures, sent as `start_date`/`end_date`. One 429 seen (best-sellers, after three reloads inside a minute; retried).
+
+**Guard.** `tests/money-truth-nov2026.test.js` (19, live fixture `tests/fixtures/dashboard-summary-nov2026.json`), `tests/admin-analytics-wiring.test.js` (+5: normaliser, dates sent, pnl range, kpi refunds keys), `tests/admin-cogs-honesty.test.js` (sign of a loss; pnl never `days`), `tests/dashboard-profit-recovery.test.js` / `dashboard-net-series-jul2026` / `dashboard-kpi-tiles-oct2026` / `admin-invoice-orders` (scan + rebuild + margin gate stay gone), expense category/math tests. Deleted with their subjects: `dashboard-new-nov2026`, `dashboard-missing-cost-async-jul2026`, `dashboard-unpaid-bills-nov2026` (coverage moved into money-truth). Live: `npm run probe:backend-25nov` (READ-ONLY, negative control; Σ daily net allows ½¢ per bucket).
+
+---
+## ERR-393 — Admin Dashboard rebuilt: numbers wrong, too much on it, 17 s to load (owner 2026-11-25) — SUPERSEDED by ERR-394 (backend shipped; Dashboard (new) merged into Dashboard)
 
 **Ask.** Owner: "completely redo the admin dashboard … the numbers are most definitely wrong … make somewhere where I can see how everything is calculated … it loads very very slowly." First: revenue, gross profit, net profit and their percentages, then what the business needs to run and improve. Keep the graph and the money boxes; every other chart moves to Analytics.
 
@@ -84,7 +112,7 @@ Slow: the money boxes appeared after **17.0 s**, 147 requests, with four 429s. T
 - The backend shipped outbox §1, §3 and §5 without a reply note. Two false warnings followed. (a) "Check (refunds)": revenue is now net of processed refunds (identity measured to the cent), so that switch-off is no longer a warning. The revenue breakdown shows "Sales" and "Refunds" as two backend lines. (b) "Not adjusted (expenses-by-bill-date) 9791.77 vs 9067.26": the cross-check did not know the backend now leaves raw `gst_payment` out of operating expenses (`BACKEND_EXCLUDED_RAW`).
 - Tests: +2 money-truth tests and +1 page wiring test. 4/4 mutants killed (the gst_payment exclusion, the refunds split, the warning gate, and the blocker refs).
 
-## ERR-392 — Dashboard Net Profit: second line shows profit after unpaid bills (owner 2026-11-23) — SHIPPED (frontend)
+## ERR-392 — Dashboard Net Profit: second line shows profit after unpaid bills (owner 2026-11-23) — SUPERSEDED by ERR-394 (net profit is accrual now; the line says how much is unpaid, never subtracts)
 
 **Ask.** Owner, screenshot of `/admin#dashboard?period=all` (Net Profit −$2,957.43 "after $2,168.77 supplier freight"): is this profit counting every invoice and NOT yet taking off what we still owe? It should sit above the final profit after everything is paid.
 

@@ -462,7 +462,12 @@ function reconcileWithServer() {
 function ensurePnl() {
   if (!_pnlPromise) {
     const days = Math.max(31, Math.min(FilterState.rangeDays() * 2, 750));
-    _pnlPromise = AdminAPI.getAdminAnalyticsPnL(days)
+    // P&L takes plain NZ days. "to" is the NZ today from the shared range; day maths runs on
+    // UTC midnight of that day so DST can't shift it (never toISOString() of "now").
+    const to = FilterState.getDateRange().to;
+    const f = new Date(`${to}T00:00:00Z`);
+    f.setUTCDate(f.getUTCDate() - days);
+    _pnlPromise = AdminAPI.getAdminAnalyticsPnL({ from: f.toISOString().slice(0, 10), to })
       .then(p => { _pnl = p; return p; })
       .catch(e => { warn('ensurePnl', e); return null; });
   }
@@ -471,7 +476,10 @@ function ensurePnl() {
 
 function ensureDailyRevenue() {
   if (!_dailyRevenuePromise) {
-    const days = Math.max(31, Math.min(FilterState.rangeDays(), 750));
+    // The backend refuses days > 365 (VALIDATION_FAILED, measured 2026-11-26); asking for more
+    // returned nothing, which the chart drew as a flat $0 revenue line. Cap it, and the chart
+    // says when its range runs past what came back.
+    const days = Math.max(31, Math.min(FilterState.rangeDays(), 365));
     _dailyRevenuePromise = AdminAPI.getAdminAnalyticsDailyRevenue(days)
       .then(p => { _dailyRevenue = p; return p; })
       .catch(e => { warn('ensureDailyRevenue', e); return null; });
@@ -881,9 +889,8 @@ async function loadCategories() {
  */
 function backendAcceptsCategory(key) {
   if (_backendCatKeys) return _backendCatKeys.has(key);
-  // A built-in the backend has not shipped yet (gst_payment) must ride the override map,
-  // or the save is a 400 whenever the live enum read failed.
-  return EXPENSE_CATEGORIES.some(c => c.key === key && !c.backendPending) || !!RETIRED_CATEGORY_DEFAULTS[key];
+  // Live enum read failed: every built-in (gst_payment included, shipped 2026-11-26) is accepted.
+  return EXPENSE_CATEGORIES.some(c => c.key === key) || !!RETIRED_CATEGORY_DEFAULTS[key];
 }
 
 async function saveCategoryOverrides() {

@@ -29,13 +29,17 @@ let _catOverrides = {};   // { expenseId: customKey } — rows the backend store
 
 async function load() {
   const days = FilterState.periodToDays();
-  const [overview, burnRunway, forecasts, cashflow, daily, pnl, expenses, prefs] = await Promise.all([
+  // P&L takes plain NZ days (start_date/end_date) and ignores ?days=. For "All" the range
+  // starts at the store's first-data date, so the table covers the whole history.
+  const pnlRange = FilterState.getDateRange();
+  // (A daily-revenue read sat here, unused by anything on the page; since the 2026-11-25
+  // deploy the backend refuses its days=372 — max 365 — so it 400'd on every load. Removed.)
+  const [overview, burnRunway, forecasts, cashflow, pnl, expenses, prefs] = await Promise.all([
     AdminAPI.getAdminAnalyticsOverview(days),
     AdminAPI.getAdminAnalyticsBurnRunway(),
     AdminAPI.getAdminAnalyticsForecasts(),
     AdminAPI.getAdminAnalyticsCashflow(12),
-    AdminAPI.getAdminAnalyticsDailyRevenue(372),
-    AdminAPI.getAdminAnalyticsPnL(days),
+    AdminAPI.getAdminAnalyticsPnL(pnlRange),
     AdminAPI.expenses.list({ limit: 1000 }),
     // Owner's custom expense categories — fail-soft: P&L TOTALS are correct either
     // way (an unknown key normalises to 'other', which is operating, and GST is
@@ -48,7 +52,7 @@ async function load() {
   // NB the backend's P&L already includes invoiced (phone / walk-in / B2B) sales —
   // it returns includes_invoices: true. The frontend renders; it does not aggregate.
   // Invoices count from the day raised, paid or not — same basis as the Dashboard (ERR-387).
-  _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, expenses: expenses?.items || [] };
+  _state = { overview, burnRunway, forecasts, cashflow, pnl, expenses: expenses?.items || [] };
   render();
 }
 
@@ -241,6 +245,11 @@ function renderPnLOrdersSummary() {
   return `<div style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">${curN.toLocaleString('en-NZ')} orders this period${delta}</div>`;
 }
 
+function periodLabel(ym) {
+  const [y, m] = String(ym || '').split('-');
+  return (y && m) ? new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-NZ', { month: 'long', year: 'numeric' }) : 'this period';
+}
+
 function renderPnLTable() {
   const pnl = _state.pnl || {};
   const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
@@ -255,12 +264,16 @@ function renderPnLTable() {
     // Basis is per ROW here, not per column — which is exactly why the header
     // row above carries no sub-line and each label spells its own out. Wording
     // is the canon from utils/gst-basis.js so it matches every other surface.
-    ['Revenue (incl. GST)', cur.revenue, prev.revenue],
+    // `revenue` = sales incl. GST MINUS processed refunds (backend, migration 218+); the
+    // refunds row below is the part already taken off. null/absent = "—", never 0.
+    ['Revenue (incl. GST, after refunds)', cur.revenue, prev.revenue],
+    ['Refunds (incl. GST)', cur.refunds, prev.refunds, true],
     ['Cost of Goods Sold (excl. GST)', cur.cogs, prev.cogs, true],
     ['Gross Profit (excl. GST)', cur.gross_profit, prev.gross_profit],
     // Invoiced sales settle by bank transfer, so they add exactly $0 of card fees.
     ['Stripe Fees (excl. GST)', cur.stripe_fees, prev.stripe_fees, true],
-    ['Operating Expenses (excl. GST)', cur.operating_expenses, prev.operating_expenses, true],
+    // ACCRUAL: by expense date, paid or not. GST payments to IRD are not an expense.
+    ['Operating Expenses (excl. GST, by bill date)', cur.operating_expenses, prev.operating_expenses, true],
     // SUPPLIER FREIGHT (ERR-252) — what our SUPPLIERS bill US to send goods to us.
     // DSNZ charges it on every purchase order; Augmento only when that consignment's
     // goods cost under $100 ex-GST. Nothing in this P&L had ever counted the cost:
@@ -281,10 +294,13 @@ function renderPnLTable() {
   // line. Do NOT route those through num(v, 0): that renders "$0.00", which reads
   // as "we made nothing" when the truth is "we don't know". Unknown is "—".
   const known = (v) => v != null && Number.isFinite(typeof v === 'string' ? parseFloat(v) : v);
+  // Cost rows (neg) are stored positive and shown as a deduction. Every other row keeps its OWN
+  // sign: Math.abs on them printed October 2026's −$1,890.79 net LOSS as "$1,890.79" (found
+  // 2026-11-26, ERR-394) — a loss reading as a profit.
   const fmt = (v, neg) => {
     if (!known(v)) return MISSING;
     const n = num(v);
-    return (neg && n > 0 ? '-' : '') + formatPrice(Math.abs(n));
+    return neg ? (n > 0 ? '-' : '') + formatPrice(Math.abs(n)) : formatPrice(n);
   };
   const change = (c0, p0) => {
     // A change against an unknown value is itself unknown — not "0%" (which claims
@@ -296,7 +312,7 @@ function renderPnLTable() {
     return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
   };
 
-  const unknownRows = rows.filter(([, c]) => !known(c)).map(([label]) => label);
+  const unknownRows = rows.filter(([label, c]) => !known(c) && !label.startsWith('Refunds')).map(([label]) => label);
 
   let html = `<table class="admin-table" style="margin:0;width:100%">
     <thead><tr><th>Line</th><th style="text-align:right">Current</th><th style="text-align:right">Previous</th><th style="text-align:right">Change</th></tr></thead><tbody>`;
@@ -312,12 +328,14 @@ function renderPnLTable() {
   }
   html += '</tbody></table>';
   // Additive only — never routes a value through num(v, 0), so the "—" honesty above stands.
-  html += `<p class="fh-pnl-note">Revenue is GST-inclusive; cost of goods, fees, expenses and profit
-    are GST-exclusive. Gross profit = revenue ÷ 1.15 − cost of goods, so these rows don’t subtract
-    straight down the column. GST is collected on IRD’s behalf and remitted, so it was never income.</p>`;
+  html += `<p class="fh-pnl-note">Revenue is GST-inclusive and already has processed refunds taken off;
+    cost of goods, fees, expenses and profit are GST-exclusive. Gross profit = revenue (ex-GST, after
+    refunds) − cost of goods, so these rows don’t subtract straight down the column. GST is collected
+    on IRD’s behalf and remitted, so it was never income. Operating expenses are counted by the
+    date of the bill, paid or not; GST payments to IRD are not an expense.</p>`;
   if (unknownRows.length) {
     html += `<p class="fh-pnl-note">${esc(unknownRows.join(', '))} ${unknownRows.length === 1 ? 'is' : 'are'} unavailable —
-      at least one sale in this period has no cost of goods recorded, so profit can’t be calculated.
+      a sale in the current period (${esc(periodLabel(cur.period))}) has no cost recorded, so profit for it can’t be worked out.
       <a href="#dashboard">See which sales</a> to fix it.</p>`;
   }
   // A FLOOR, SAID OUT LOUD (ERR-252). `supplier_freight_unpriced_orders` counts orders

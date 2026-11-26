@@ -149,11 +149,12 @@ test('§4 the basis is not printed twice on a de-duplicated label', () => {
 
 test('§4 the Financial Health P&L rows all state a basis in canon wording', () => {
   for (const row of [
-    'Revenue (incl. GST)',
+    'Revenue (incl. GST, after refunds)',
+    'Refunds (incl. GST)',
     'Cost of Goods Sold (excl. GST)',
     'Gross Profit (excl. GST)',
     'Stripe Fees (excl. GST)',
-    'Operating Expenses (excl. GST)',
+    'Operating Expenses (excl. GST, by bill date)',
     'Net Profit (excl. GST)',
   ]) {
     assert.ok(FINHEALTH_SRC.includes(`'${row}'`), `P&L row "${row}" missing`);
@@ -191,9 +192,8 @@ test('§5 Control Center profit margin/gap columns carry no basis', () => {
 });
 
 test('§5 the Expenses "% of revenue" ratio carries no basis', () => {
-  // expense-math.js asserts the denominator is ex-GST; financial-health.js
-  // proves with live arithmetic that pnl.revenue is INCL-GST. Two files, two
-  // opposite claims — neither label would be defensible.
+  // The numerator is GST-netted spend, the denominator pnl.revenue (GST-inclusive, after
+  // refunds) — mixed bases, so no single badge is defensible.
   const strip = EXPOVER_SRC.slice(EXPOVER_SRC.indexOf("label: '% of revenue'"));
   assert.ok(!/basis: GST_/.test(strip.slice(0, strip.indexOf('},'))),
     'unresolved contradiction — must stay blank');

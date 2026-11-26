@@ -288,7 +288,7 @@ test('§4 the decoy measurement is documented at the method', () => {
 
 test('§5 the card is fetched and rendered on the dashboard', () => {
     assert.ok(/AdminAPI\.getConversionFunnel\(signal\)/.test(DASH));
-    assert.ok(/funnel: val\(13\)/.test(DASH));
+    assert.ok(/funnel: val\(12\)/.test(DASH));
     assert.ok(/\$\{renderFunnelCard\(d\.funnel\)\}/.test(DASH));
 });
 

@@ -5,7 +5,7 @@
 import { FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
 import { kpiCogsInclGst, COST_GST_GROSS_UP } from './trend-math.js';
-import { cashMs, pnlCost } from './expense-math.js';
+import { pnlCost } from './expense-math.js';
 import { METRICS, rankBy, metricIncomplete } from './best-sellers.js';
 
 // The grain the bundle ACTUALLY served at; drives fmtBucket so axis labels match the bars.
@@ -585,7 +585,7 @@ export function renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex, traf
     // plainly rather than implying the chart is at fault.
     notes.push(`<p class="fh-pnl-note admin-dash-note--alert"><strong>These two backend figures disagree.</strong>
       The per-period ${esc(plan.label.toLowerCase())} adds up to ${esc(formatPrice(drift.seriesTotal))},
-      but the backend's own net-profit summary (kpi-summary, before any adjustment on this screen) reads ${esc(formatPrice(drift.kpiNet))} (gap ${esc(formatPrice(Math.abs(drift.gap)))}).
+      but the backend's own net-profit total for the same range reads ${esc(formatPrice(drift.kpiNet))} (gap ${esc(formatPrice(Math.abs(drift.gap)))}).
       Neither figure can be trusted until this is resolved.</p>`);
   }
 
@@ -601,12 +601,16 @@ export function renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex, traf
 
   if (!hasBackendOpex) {
     notes.push(`<p class="fh-pnl-note">“${esc(opexLabel)}” is bucketed from your logged expenses in the
-      browser because the backend didn’t return per-period operating expenses for this range. It can
-      differ from the Net Profit tile’s expense figure, which also counts recurring charges.</p>`);
+      browser (by bill date, paid or not) because the backend didn’t return per-period operating
+      expenses for this range. It can differ from the Net Profit tile’s expense figure, which also
+      counts recurring charges.</p>`);
   }
 
   host.innerHTML = notes.join('');
 }
+
+// Categories the backend leaves out of operating expenses (order-linked + GST payment to IRD).
+const FALLBACK_EXCLUDED_RAW = ['inventory', 'merchant_fees', 'customer_shipping', 'gst_payment'];
 
 export function drawPerformanceOverview(d) {
   const canvasId = 'dash-c-overview';
@@ -695,11 +699,15 @@ export function drawPerformanceOverview(d) {
   };
   const loggedOpex = new Array(order.length).fill(0);
   if (!hasBackendOpex) {
-    // Cash-basis + GST-net + order-linked exclusion all come from expense-math
-    // (cashMs skips unpaid; order_linked is COGS).
+    // Same rule as the backend's operating expenses since 2026-11-25 (§4/§5): ACCRUAL — a
+    // bill counts on its expense_date, paid or not — GST-net, and order-linked costs (they
+    // live in COGS / fees / freight) and GST payments to IRD (`gst_payment`) left out. Rows
+    // may carry the FE `kind` (expenses page) or only the backend's raw `category` (dashboard).
     for (const row of (Array.isArray(d.expenseRows) ? d.expenseRows : [])) {
-      if (!row || row.kind === 'order_linked') continue; // order-linked lives in COGS
-      const i = indexFor(cashMs(row)); // NaN for unpaid → -1 → skipped
+      if (!row || row.deleted_at || row.derived_status === 'cancelled' || row.derived_status === 'skipped') continue;
+      if (row.kind ? row.kind !== 'operating' : FALLBACK_EXCLUDED_RAW.includes(row.category)) continue;
+      const day = row.expense_date || row.date;
+      const i = indexFor(day ? Date.parse(String(day).slice(0, 10)) : NaN);
       if (i < 0) continue;
       loggedOpex[i] += pnlCost(Number(row.amount), row.gst_claimable);
     }
@@ -1132,7 +1140,11 @@ export function renderFulfillmentCard(d) {
   }
   const rows = orders.map(o => {
     const id = o.order_number || o.id || '';
-    const who = o.customer_name || o.customer_email || o.email || 'Guest';
+    // dashboard-summary's needs-tracking rows carry no customer fields — show the order total
+    // there rather than calling a known customer "Guest".
+    const who = o.customer_name || o.customer_email || o.email
+      || (('customer_name' in o || 'customer_email' in o || 'email' in o) ? 'Guest'
+        : (o.total != null ? formatPrice(o.total) : '—'));
     const status = (o.status || 'pending').toLowerCase();
     const when = timeAgo(o.created_at || o.createdAt);
     return `

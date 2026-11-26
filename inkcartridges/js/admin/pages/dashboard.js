@@ -1,42 +1,43 @@
 /**
- * Dashboard — paired-row analytics (Jun 2026 redesign)
+ * Dashboard — small KPI cards on top, the analytics rows below (owner layout, 2026-11-26)
  *
- * KPI band (backend kpi-summary) + side-by-side graph rows, each one a labelled
- * section with two charts. EVERY data point is fetched pre-computed and
- * pre-bucketed from the backend — the frontend never aggregates, buckets, or
- * derives margins/profit itself (the project's "backend is the source of truth"
- * rule). Two independent filters drive the page: the data range (FilterState
- * period) and the bar width (FilterState granularity), the latter sent to the
- * backend so each series comes back one row per bucket.
+ * Money comes from ONE backend call, GET /api/admin/analytics/dashboard-summary (backend reply
+ * 2026-11-25 §6), on the owner's definitions: invoices on their issue date, processed refunds off
+ * on the refund date, expenses by bill date paid or not, GST payments to IRD not an expense.
+ * utils/money-truth.js shapes those figures into tiles and their "How it's calculated" inputs; it
+ * adjusts NOTHING. The graph rows still come pre-bucketed from the dashboard bundle, whose series
+ * share the same definition (§2). The frontend never aggregates, buckets or derives profit — the
+ * margins (a ratio of two backend figures) are its only arithmetic.
  *
- * Charts whose backend endpoint does not exist yet render a graceful
- * "awaiting data" empty state (the API client returns null) so the page never
- * crashes — they light up automatically once the backend ships each endpoint
- * (see docs/dashboard-graph-endpoints.md).
+ * The money is whole-business (dashboard-summary takes no brand/supplier filter), so this page
+ * shows only the period and bar-width filters, and sends every endpoint the date range alone.
+ *
+ * "Dashboard (new)" (pages/dashboard-new.js) was merged into this page and deleted (owner
+ * 2026-11-26): its money boxes became the KPI strip's data, its to-do items joined "Action
+ * needed", and the 120-request "sales missing a cost" scan became `actions.missing_cost`.
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
+import { Drawer } from '../components/drawer.js';
 import {
-  formatPrice, MISSING, numOrNull, timeAgo, firstArray, safeDiv, resolveGranularity,
-  rangeLabel, rowMarginPct, normalizeWorstMargin, orderRef, drawPerformanceOverview, buildOverviewBuckets,
+  formatPrice, MISSING, timeAgo, firstArray, resolveGranularity,
+  rangeLabel, rowMarginPct, normalizeWorstMargin, drawPerformanceOverview, buildOverviewBuckets,
   drawSeries, drawRanked, drawShare, drawRevenueProfit, drawForecast, bundleToGraphs, renderFunnelCard,
-  chartCard, row, rowN, renderFulfillmentCard, fmtPct, planProfitLine, recoverProfitFromSeries,
+  chartCard, row, rowN, renderFulfillmentCard, fmtPct, planProfitLine,
   renderRecentOrdersCard, wireOrderRowClicks, renderTopProductsCard, wireTopProductsToggle,
   setEffectiveGranularity,
 } from '../utils/dash-charts.js';
 import {
-  LOW_MARGIN_PCT, ZERO_SEARCH_MIN, isInvoiceOrder, outOfStockCount,
+  LOW_MARGIN_PCT, ZERO_SEARCH_MIN, outOfStockCount,
   computeTrackingAlert, computeZeroSearchAlert, computeLowMarginAlert, alertCard, wireAlertToggles,
 } from '../utils/dash-alerts.js';
+import {
+  dashboardMoney, unpaidBillsInRange, unpaidBillsLine, moneyTodos, missingCostItems, refundRatePct,
+} from '../utils/money-truth.js';
 // Robustly parse the traffic time-series (array | {data|series|points}) into
 // [{ date, sessions, pageviews }] for the Performance overview overlay.
 import { normalizeSeries } from '../utils/traffic-analytics.js';
 import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
-
-
-
-/** Money to the cent. Keeps a subtracted bucket from carrying float dust. */
-const round2 = (n) => Math.round(n * 100) / 100;
 
 let _container = null;
 // Race-guard for loadDashboard — see the same pattern in pages/website-traffic.js.
@@ -65,7 +66,7 @@ let _storageHydrated = false;   // seed the Map from localStorage exactly once p
 // payload can carry up to 1000 expense rows + 18 chart series).
 // BUMP DASH_CACHE_SCHEMA whenever the `payload` object shape (in loadDashboard) changes, so
 // a stale-shape blob from a previous deploy is ignored rather than fed to render().
-const DASH_CACHE_SCHEMA = 4; // 2: added payload.sTraffic (Performance overview traffic overlay); 3: topProducts is getBestSellers()' object, not a row array; 4: its rows are server-grouped (BF-089) and a failure is { error }
+const DASH_CACHE_SCHEMA = 5; // 2: added payload.sTraffic (Performance overview traffic overlay); 3: topProducts is getBestSellers()' object, not a row array; 4: its rows are server-grouped (BF-089) and a failure is { error }; 5: money from dashboard-summary (payload.dsum), no kpi-summary / missing-cost scan
 function _dashCacheKey() {
   const uid = (typeof Auth !== 'undefined' && Auth.user && Auth.user.id) ? Auth.user.id : 'anon';
   return `admin_dash_cache:${uid}`;
@@ -121,11 +122,6 @@ function missingValue(tooltip = 'Data unavailable') {
 
 
 
-function sumRefundAmounts(refunds) {
-  const series = firstArray(refunds, ['series', 'refunds', 'data']);
-  if (!series.length) return null;
-  return series.reduce((sum, r) => sum + Number(r.refund_amount ?? r.amount ?? r.total ?? 0), 0);
-}
 
 
 function drawAllCharts(d) {
@@ -196,11 +192,11 @@ async function loadDashboard() {
 }
 
 async function runDashboardLoad(mySeq) {
-  const params = FilterState.getParams();
   const signal = FilterState.getAbortSignal();
   const isOwner = AdminAuth.isOwner();
-  const g = resolveGranularity();
-  const cacheKey = params.toString();   // includes granularity via getParams()
+  // Range + bar width only: those are the only filters this page shows (see init).
+  const { from: keyFrom, to: keyTo } = FilterState.getDateRange();
+  const cacheKey = `${keyFrom}|${keyTo}|${FilterState.get('granularity') || ''}`;
 
   // On the very first load of this module life (i.e. a full page refresh — the in-memory
   // Map is empty), seed it from localStorage so the warm-cache branch below fires and we
@@ -245,42 +241,39 @@ async function runDashboardLoad(mySeq) {
     return;
   }
 
-  const from = params.get('from'), to = params.get('to');
-  // Traffic time-series feeds the Performance overview's Sessions/Pageviews overlay. Its endpoint
-  // needs an explicit from/to; the all-time view leaves both blank, so pass a wide fallback (the
-  // backend clamps to available data and out-of-range rows drop during client-side re-bucketing).
-  const trafficFrom = from || '2000-01-01';
-  const trafficTo   = to   || new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date());   // NZ day (ERR-367)
-  // One bundle call covers all 18 graph charts (backend's preferred path — avoids
-  // the parallel fan-out that tripped the rate limiter). The KPI band, tables and
-  // refund reasons stay on their existing dedicated endpoints. The last three feed the
-  // "Action needed" panel + worst-margin card, and the last two the cash-basis
-  // adjustment for invoiced sales, plus the unpaid-bills summary. 17 calls total (under the 60/min limit).
+  const { from, to } = FilterState.getDateRange();
+  const range = { from, to };
+  // Money is whole-business, so every call gets the date range alone — a brand/status left in
+  // the URL from another page must not silently filter the graphs under whole-business tiles.
+  const rangeParams = new URLSearchParams({ from, to });
+  // The bundle needs a real grain; the 'all' bar width is FE-only (cumulative plot).
+  const g = resolveGranularity();
+  const dsumGrain = ['day', 'week', 'month'].includes(g) ? g : 'month';
+  // 18 requests, none of them per-order (the old "sales missing a cost" scan made ~120 GETs).
   const promises = [
-    AdminAPI.getDashboardBundle(params, g, signal),          // 0  all graph charts
-    AdminAPI.getDashboardKPIs(params, signal),               // 1  KPI band
-    AdminAPI.getCustomerStats(params, signal),               // 2  new / returning KPI
-    AdminAPI.getRefundAnalytics(params, signal),             // 3  refund reasons + rate KPI
-    AdminAPI.getOutOfStock({ limit: 5 }, signal),            // 4  out-of-stock KPI
+    AdminAPI.getDashboardBundle(rangeParams, g, signal),     // 0  all graph charts
+    AdminAPI.getDashboardSummary(range, dsumGrain, signal),  // 1  money tiles + action lists (§6)
+    AdminAPI.getCustomerStats(rangeParams, signal),          // 2  new / returning KPI
+    AdminAPI.getRefundAnalytics(rangeParams, signal),        // 3  refund reasons + refund count
+    // 4  out-of-stock tile. NOT dashboard-summary's `out_of_stock` action: that counts every
+    // active product at stock 0 (813 on 2026-11-26) while this tile has always counted the
+    // genuine feed (608) — two definitions, so the tile keeps its own until the owner picks one.
+    AdminAPI.getOutOfStock({ limit: 5 }, signal),
     AdminAPI.getOrders({ from, to }, 1, 8, signal),          // 5  recent orders table
-    AdminAPI.getBestSellers(params, signal),                 // 6  most-bought card (revenue / units / orders)
-    AdminAPI.getTrackingRequests({ status: 'pending' }, signal), // 7  alert: orders needing tracking
-    AdminAPI.getOrders({ from, to, statuses: ['paid', 'processing'] }, 1, 50, signal), // 8  alert: untracked open orders
-    // Worst-margin SKUs + low-margin alert. The endpoint needs a concrete source ('' → 400),
-    // so fetch genuine + compatible worst-first and merge. limit:60 each gives a deep enough
-    // tail to count everything under the alert threshold accurately for this catalog.
-    AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc', signal),    // 9
-    AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc', signal), // 10
-    AdminAPI.expenses.list({ limit: 1000 }, signal),          // 11  raw expense records → trend lines
-    AdminAPI.getTrafficTimeseries(trafficFrom, trafficTo, signal), // 12  Performance overview traffic overlay
-    // 13  Conversion funnel. Takes NO params — its window is fixed at 30 days
-    // server-side and every filter it appears to accept is a decoy (see the
-    // method's comment). The card says so on its face rather than pretending to
-    // follow the page's range.
+    AdminAPI.getBestSellers(rangeParams, signal),            // 6  most-bought card
+    AdminAPI.getTrackingRequests({ status: 'pending' }, signal), // 7  customer tracking requests
+    // 8, 9  Worst-margin SKUs + low-margin alert (< LOW_MARGIN_PCT net). NOT dashboard-summary's
+    // `under_margin_floor`: that is "under its pricing rule's floor" (80% on compatibles ⇒ 4,125
+    // products), a different question. The endpoint needs a concrete source, so fetch both.
+    AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc', signal),
+    AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc', signal),
+    AdminAPI.expenses.list({ limit: 1000 }, signal),          // 10 expense rows: unpaid-bills line, to-dos, chart fallback
+    AdminAPI.getTrafficTimeseries(from, to, signal),         // 11 Performance overview traffic overlay
+    // 12 Conversion funnel. Takes NO params — its window is fixed at 30 days server-side and
+    // every filter it appears to accept is a decoy. The card says so on its face.
     AdminAPI.getConversionFunnel(signal),
-    // 14  Unpaid operating bills (overdue + due) for the Net Profit tile's second
-    // line (ERR-392). Net profit is cash basis — an unpaid bill is not in it yet.
-    AdminAPI.expenses.summary({ from, to }),
+    AdminAPI.getRefunds({}, 1, 100),                         // 13 pending refunds to-do
+    AdminAPI.listInvoices({}, 1, 100),                       // 14 invoice cost-over-price to-do
   ];
 
   const results = await Promise.allSettled(promises);
@@ -289,29 +282,16 @@ async function runDashboardLoad(mySeq) {
   // Race guard — bail if a newer loadDashboard() started or the page was destroyed.
   if (mySeq !== _loadSeq || !_container) return;
 
-  // Which sales are stopping the backend computing profit? This owns its own order fetch —
-  // it must see EVERY status, and index 8 is filtered to paid|processing for the tracking
-  // card. Reusing it is what made this scan blind (ERR-074).
-  //
-  // ⚠ It is DELIBERATELY NOT AWAITED HERE. The scan costs up to ~1 order-list page plus 120
-  // order-detail GETs; awaiting it put ~20 sequential round-trips between "all chart data has
-  // arrived" and "anything is on screen", which is what made the whole dashboard — the
-  // Performance overview most visibly — take seconds to paint for one alert card's sake.
-  // It now runs in the background and patches only its own card (see startMissingCostScan).
-  const missingCost = { pending: true, cogsUnknown: val(1)?.current ? val(1).current.gross_profit == null : false };
-
-  // Graphs come solely from the resilient bundle (per-chart isolation server-side;
-  // a failed sub-chart → null key → that one tile's empty state). We deliberately
-  // do NOT fan out to the per-chart endpoints on a bundle miss: that fan-out is
-  // exactly what trips the 60/min limiter, and api.js already retries the bundle
-  // on transient failures. A total bundle failure → all charts show their empty
-  // state, which self-heals on the next load.
+  // Graphs come solely from the resilient bundle (per-chart isolation server-side; a failed
+  // sub-chart → null key → that one tile's empty state). No per-chart fan-out on a miss: that
+  // is what trips the limiter, and api.js already retries the bundle on transient failures.
   const bundle = val(0);
   const graphs = bundleToGraphs(bundle);
+  const dsum = val(1);
   _container.classList.remove('admin-page--reloading');
 
   const UM_LIMIT = 60;
-  const umResponses = [val(9), val(10)];
+  const umResponses = [val(8), val(9)];
   const worstMargin = normalizeWorstMargin(umResponses);
   // The low-margin count is truncated (show "N+") when a source returned a full page whose
   // every row is still under the alert threshold — i.e. there are more below it than we fetched.
@@ -322,26 +302,53 @@ async function runDashboardLoad(mySeq) {
     return pcts.length > 0 && Math.max(...pcts) < LOW_MARGIN_PCT;
   });
 
+  // A list is only "loaded" when the whole of it arrived — a partial page must not read as an
+  // all-clear to-do, so anything short of its own total is treated as not loaded.
+  const wholeList = (resp, keys) => {
+    if (!resp) return null;
+    const rows = firstArray(resp, keys);
+    const total = Number(resp.pagination?.total ?? resp.total ?? rows.length);
+    return Number.isFinite(total) && rows.length >= total ? rows : null;
+  };
+  // Whole list or nothing: the to-dos scan these rows, so a list cut short by the 1000 limit
+  // must read "could not load", never "None found" (the unpaid-bills line also proves its total).
+  const expResp = val(10);
+  const expTotal = Number(expResp?.pagination?.total);
+  const expenseRows = Array.isArray(expResp?.items) && !expResp?._legacy
+    && (!Number.isFinite(expTotal) || expResp.items.length >= expTotal) ? expResp.items : null;
+  const needsTracking = dsum?.actions?.needs_tracking;
+
   const payload = {
     isOwner: true,
     // The grain the bundle ACTUALLY served at (getDashboardBundle may have escalated past
-    // a backend bucket-cap rejection). Carried in the payload — not just a module var — so
-    // a stale-while-revalidate cache repaint labels its x-axis to match its own bars.
+    // a backend bucket-cap rejection). Carried in the payload so a cache repaint labels its
+    // x-axis to match its own bars.
     _effectiveGranularity: (bundle && bundle._granularity) || g,
     _loadedAt: new Date().toISOString(),   // drives the "Updated …" stamp in the header
-    kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
-    recentOrders: val(5), topProducts: val(6), missingCost,
-    funnel: val(13),
-    // number | null. null = summary failed ⇒ the tile SAYS so (never "no unpaid bills").
-    unpaidBills: unpaidBillsOf(val(14)),
-    trackingReq: val(7), trackingOrders: val(8),
+    range,
+    dsum,
+    // The Performance overview's drift guard compares the net-profit series with the backend's
+    // own total; dashboard-summary's `current` is that total (same field names as kpi-summary).
+    kpis: dsum ? { current: dsum.current, previous: dsum.previous } : null,
+    custStats: val(2), refunds: val(3), outOfStock: val(4),
+    recentOrders: val(5), topProducts: val(6),
+    funnel: val(12),
+    trackingReq: val(7),
+    // Orders still needing a tracking number (dashboard-summary: paid/processing, not invoice or
+    // test, no tracking number). The rows don't repeat the empty field, so it is restated here
+    // for the shared tracking card. null = the list was unavailable — said so, never "all clear".
+    trackingOrders: needsTracking && needsTracking.count != null
+      ? { orders: needsTracking.rows.map(r => ({ ...r, tracking_number: null })), total: needsTracking.count }
+      : null,
     worstMarginSkus: worstMargin, worstMarginTruncated,
-    // Raw expense records for the performance chart's Added/Total expense lines.
-    // Fails soft to [] so a null expenses fetch just drops those two lines, never the page.
-    expenseRows: (val(11)?.items) || [],
+    // Raw expense rows (backend `category`). null = the list failed: the unpaid-bills line and
+    // the expense to-dos then say "could not load", and the chart drops its expense lines.
+    expenseRows,
+    refundRows: wholeList(val(13), ['refunds', 'data', 'items']),
+    invoiceRows: wholeList(val(14), ['invoices', 'data', 'items']),
     // Daily traffic rows for the Performance overview overlay; [] when the fetch failed or the
     // range has no data → both traffic lines omit and the card notes it (never a misleading zero).
-    sTraffic: normalizeSeries(val(12)),
+    sTraffic: normalizeSeries(val(11)),
     ...graphs,
   };
 
@@ -353,46 +360,6 @@ async function runDashboardLoad(mySeq) {
   }
   // Write through to localStorage so the next full page refresh paints this view instantly.
   _writePersistedPayload(cacheKey, payload);
-
-  // Everything above is on screen. NOW pay for the missing-cost scan, off the critical path.
-  startMissingCostScan({ from, to }, val(1), signal, mySeq, cacheKey, payload);
-}
-
-/**
- * Run the missing-cost scan in the background and patch its card in place when it lands.
- *
- * Not awaited by the caller — that is the entire point. The result is written back into the
- * payload object that is already banked in `_payloadCache` (same object reference) and
- * re-persisted, so a later stale-while-revalidate repaint shows the real count instead of a
- * frozen "checking…".
- */
-function startMissingCostScan(range, kpis, signal, mySeq, cacheKey, payload) {
-  computeMissingCostAlert(range, kpis, signal)
-    .then((result) => {
-      // A scan that resolved to nothing at all is not a clean bill of health.
-      applyMissingCost(payload, result || { failed: true, cogsUnknown: payload.missingCost?.cogsUnknown }, mySeq, cacheKey);
-    })
-    .catch((err) => {
-      if (err?.name === 'AbortError' || signal?.aborted) return;   // superseded load / left the page
-      window.DebugLog?.warn?.('[Dashboard] missing-cost scan failed', err?.message || err);
-      applyMissingCost(payload, { failed: true, cogsUnknown: payload.missingCost?.cogsUnknown }, mySeq, cacheKey);
-    });
-}
-
-// Patch the banked payload + the "Action needed" panel with a settled (or failed) scan.
-// Repaints ONLY that panel — re-rendering the whole dashboard would tear down and rebuild
-// all 18 Chart.js instances for one card.
-function applyMissingCost(payload, missingCost, mySeq, cacheKey) {
-  payload.missingCost = missingCost;
-  // Re-persist so a cold load repaints the settled count, not the pending placeholder.
-  if (_payloadCache.get(cacheKey) === payload) _writePersistedPayload(cacheKey, payload);
-
-  // Same race guard as the main load: a superseded scan must never paint over a newer one.
-  if (mySeq !== _loadSeq || !_container) return;
-  const mount = _container.querySelector(`#${ALERTS_MOUNT_ID}`);
-  if (!mount) return;   // page re-rendered from a different path; the banked payload still has it
-  mount.innerHTML = renderAlertsSection(payload);
-  wireAlertToggles(mount);
 }
 
 // ---------- render ----------
@@ -433,7 +400,11 @@ function render(d) {
       <div class="admin-dash-row__label admin-dash-row__label--success">Operations <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
         ${renderRecentOrdersCard(d.recentOrders)}
-        ${renderFulfillmentCard(d)}
+        ${d.trackingOrders == null
+          // Fail-soft LOUD: an unavailable list is not "Nothing awaiting tracking 🎉".
+          ? `<div class="admin-dash__cell--6 admin-card"><div class="admin-card__title">Needs tracking <small>paid · processing</small></div>
+              <div class="admin-dash-inline-empty">Could not load the orders awaiting tracking — this is not a zero. Reload to retry.</div></div>`
+          : renderFulfillmentCard(d)}
       </div>
     </section>
     <section class="admin-dash-row">
@@ -464,6 +435,7 @@ function render(d) {
   `;
 
   drawAllCharts(d);
+  wireHow(_container, d);
   wireOrderRowClicks(_container);
   wireTopProductsToggle(_container);
   wireAlertToggles(_container);
@@ -494,451 +466,162 @@ function renderOverviewSection(d) {
 
 // ---------- action alerts ----------
 
-
-// The "Action needed" panel is the ONE region that repaints on its own, after first paint:
-// the missing-cost scan is deliberately off the critical path (see runDashboardLoad), so the
-// panel first renders a pending state and is re-rendered in place when the scan lands.
 const ALERTS_MOUNT_ID = 'dash-alerts-mount';
 
+// A to-do whose list did not load. Neutral count, and it says it is not a zero.
+const failCard = (title, why, span) => alertCard(title, '—', `${why} — this is not a zero. Reload to retry.`, [], 'warning', '', span);
 
 function renderAlertsSection(d) {
-  const tracking = computeTrackingAlert(d.trackingReq, d.trackingOrders);
+  const span = 3;
+  // The orders list is the core of this card; without it the count would silently cover only
+  // customer requests, so the card says it could not load (even if the requests did).
+  const tracking = d.trackingOrders == null ? null : computeTrackingAlert(d.trackingReq, d.trackingOrders);
   const zero = computeZeroSearchAlert(d.searchZero);
   const lowMargin = computeLowMarginAlert(d.worstMarginSkus, d.marginBrand, d.worstMarginTruncated);
-  const missingCost = d.missingCost;   // computed in loadDashboard (needs order detail)
-
   const lowUnit = lowMargin.grain === 'brand' ? 'brands' : 'SKUs';
-  const lowWhy = `${lowUnit} under ${LOW_MARGIN_PCT}% net margin — reprice or drop`;
   const lowCount = `${lowMargin.count}${lowMargin.capped ? '+' : ''}`;
-
-  // The fourth card has TWO jobs, and conflating them is what made it lie (ERR-074):
-  //
-  //   • Culprits found → the owner can fix this: open the sale, add the cost. Actionable.
-  //   • No culprits, but the backend still won't hand over a profit → this is NOT the
-  //     owner's data. Telling them to "add a cost to every sale" when all 84 line items
-  //     already carry one sends them hunting for a problem that does not exist. That is
-  //     precisely what this card did, for as long as kpi-summary has been dropping profit
-  //     on ranges containing an invoiced sale.
-  //
-  // So the copy is chosen from what the scan actually FOUND, never from the mere fact that
-  // profit is missing. "Action needed" must mean the owner can act.
-  const cur = d.kpis?.current ?? {};
-  const recovered = recoverProfitFromSeries(cur, d.sGrossProfit);
-  // The scan no longer blocks first paint, so it has two states the card must not conflate
-  // with a result: still running, and failed. Neither is "0 sales missing a cost" — presenting
-  // an unfinished or failed scan as a clean bill of health is the ERR-074 bug wearing a new hat.
-  const scanPending = !!missingCost?.pending;
-  const scanFailed  = !!missingCost?.failed;
-  const scanSettled = !!missingCost && !scanPending && !scanFailed;
-  const hasCulprits  = scanSettled && missingCost.count > 0;
-  // Only cry "degraded" when the tiles are actually blank — if the series rebuild worked,
-  // the dashboard is functional and the tile's own tooltip carries the provenance. Requires a
-  // SETTLED scan: "no culprits" is only meaningful once we've actually looked.
-  const showDegraded = scanSettled && !hasCulprits && cur.gross_profit == null && !recovered;
-  const showFourth   = hasCulprits || showDegraded || scanPending || scanFailed;
-  const span = showFourth ? 3 : 4;
+  // dashboard-summary's own list of sales with no cost of goods (replaces the old ~120-GET scan).
+  // Order links go through the ONE order-number vocabulary (ERR-198).
+  const orderRefFor = (n) => window.OrderNumber.forDisplay(n) || n;
+  const missing = missingCostItems(d.dsum?.actions?.missing_cost, orderRefFor);
+  const todos = moneyTodos({ range: d.range, expenses: d.expenseRows, refunds: d.refundRows, invoices: d.invoiceRows, orderRef: orderRefFor });
 
   const cards = [
-    alertCard('Orders needing tracking', tracking.count,
-      'paid/processing orders awaiting tracking', tracking.items, tracking.count > 0 ? 'danger' : null, 'All caught up', span),
+    tracking == null
+      ? failCard('Orders needing tracking', 'the list of orders awaiting tracking could not load', span)
+      : alertCard('Orders needing tracking', tracking.count,
+        'paid/processing orders with no tracking number, plus customer tracking requests', tracking.items, tracking.count > 0 ? 'danger' : null, 'All caught up', span),
+    missing == null
+      ? failCard('Sales missing a cost', 'the backend could not list sales with no cost of goods', span)
+      : alertCard('Sales missing a cost', `${missing.count}`,
+        'these sales have no cost of goods recorded, so profit for any range containing them is AT MOST the figure shown — add the cost',
+        missing.items, missing.count > 0 ? 'danger' : null, 'Every sale has a cost', span),
+    alertCard('Low-margin products', lowCount,
+      `${lowUnit} under ${LOW_MARGIN_PCT}% net margin — reprice or drop`, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold', span),
     alertCard('Zero-result searches', zero.count,
       `searches with ≥${ZERO_SEARCH_MIN} hits returning nothing — add products/synonyms`, zero.items, zero.count > 0 ? 'warning' : null, 'No high-volume misses', span),
-    alertCard('Low-margin products', lowCount,
-      lowWhy, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold', span),
   ];
-
-  if (scanPending) {
-    // Neutral severity and an em-dash count: this says "not known yet", never "all clear".
-    cards.push(alertCard('Sales missing a cost', '—',
-      'checking every sale in this range for a recorded cost — the dashboard above is already up to date',
-      [], null, '', span));
-  } else if (scanFailed) {
-    cards.push(alertCard('Sales missing a cost', '—',
-      'the cost scan failed, so whether any sale is missing a cost is UNKNOWN — this is not a zero. Reload to retry',
-      [], 'warning', '', span));
-  } else if (hasCulprits) {
-    cards.push(alertCard(
-      'Sales missing a cost', missingCost.count,
-      'these sales have no cost of goods recorded, so profit can’t be computed for any range that contains them — add a cost to bring the figures back',
-      missingCost.items, 'danger', 'All sales are costed', span,
-    ));
-  } else if (showDegraded) {
-    // Every sale we could inspect is costed, yet profit is still missing. Name the real
-    // suspect instead of inventing a data problem, and say how far the scan actually got —
-    // a scan that couldn't finish must not be reported as a clean bill of health.
-    const scanned = missingCost?.scanned ?? 0;
-    const why = missingCost?.incomplete
-      ? `couldn’t check every sale (${scanned} scanned) — profit is unavailable and the cause is unconfirmed`
-      : `all ${scanned} sales in this range are costed, yet the backend still won’t return a profit — this is a kpi-summary defect, not your data (ERR-074)`;
-    cards.push(alertCard('Profit unavailable', '—', why, [], 'warning', '', span));
-  }
-
-  return rowN('Action needed', 'danger', cards);
+  // Money housekeeping, read from lists the page already has. Each list that failed says so.
+  const moneyCards = [
+    todos.taxAsExpense == null
+      ? failCard('Tax payment filed as an expense', 'the expense list could not load', span)
+      : alertCard('Tax payment filed as an expense', todos.taxAsExpense.length,
+        'it is subtracted from net profit until it is moved to “GST / tax payment to IRD”', todos.taxAsExpense, todos.taxAsExpense.length ? 'danger' : null, 'None found', span),
+    todos.duplicates == null
+      ? failCard('Possible duplicate expenses', 'the expense list could not load', span)
+      : alertCard('Possible duplicate expenses', todos.duplicates.length,
+        'same payee, similar amount, within 5 days — check before it doubles a cost', todos.duplicates, todos.duplicates.length ? 'warning' : null, 'None found', span),
+    todos.pendingRefunds == null
+      ? failCard('Refunds still pending', 'the refunds list could not load', span)
+      : alertCard('Refunds still pending', todos.pendingRefunds.length,
+        'not taken off revenue until processed', todos.pendingRefunds, todos.pendingRefunds.length ? 'warning' : null, 'None pending', span),
+    todos.invoiceCostOverPrice == null
+      ? failCard('Invoices costing more than their price', 'the invoice list could not load', span)
+      : alertCard('Invoices costing more than their price', todos.invoiceCostOverPrice.length,
+        'our cost is above the invoice price, both excl. GST', todos.invoiceCostOverPrice, todos.invoiceCostOverPrice.length ? 'danger' : null, 'None found', span),
+  ];
+  return rowN('Action needed', 'danger', cards) + rowN('Money housekeeping', 'danger', moneyCards);
 }
-
-/**
- * Find the sales that are stopping the backend from computing profit — if there are any.
- *
- * A sale is un-costed in one of two ways:
- *   1. It has items, and one of them has no `supplier_cost_snapshot`.
- *   2. It has a total but ZERO items — nothing to attach a cost to. (Historically caused by
- *      an invoice whose product_code didn't resolve; the backend now repairs those.)
- *
- * ⚠ This scan used to be blind, and a blind scan is worse than no scan: it reported "0", the
- * card printed "add a cost to every sale", and every sale already had one. Three holes, all
- * of them in WHICH orders it looked at (ERR-074):
- *   • it reused the *tracking* alert's order list — `statuses: ['paid','processing']` — so
- *     `shipped` and `completed` sales, 10 of 59 on the live store, were never examined;
- *   • page 1 / limit 50, against 59 revenue orders;
- *   • only invoice-channel rows got the detail call, and the detail call is the ONLY place
- *     `supplier_cost_snapshot` is visible (the list omits it, ERR-039) — so an un-costed
- *     WEBSITE order was structurally undetectable.
- *
- * So it now owns its fetch, takes every status, paginates, and details every order. The cost
- * is a bounded fan-out of cheap cached GETs, paid once per dashboard load.
- *
- * Reports `scanned` and `incomplete` so the caller can never present a truncated or partly
- * failed scan as a clean bill of health — that conflation is the whole bug.
- */
-const MISSING_COST_DETAIL_CAP = 120;   // ≫ the store's order count; a runaway backstop, not a filter
-const MISSING_COST_PAGE = 100;
-const MISSING_COST_MAX_PAGES = 3;
-const MISSING_COST_BATCH = 6;          // keep the detail fan-out under the 60/min limiter
-
-
-async function computeMissingCostAlert(range, kpis, signal) {
-  const cogsUnknown = kpis?.current ? kpis.current.gross_profit == null : false;
-  const base = { cogsUnknown, count: 0, items: [], scanned: 0, incomplete: false };
-
-  // Every status, not just the two the tracking card cares about. Cancelled orders carry no
-  // revenue and the backend excludes them from COGS, so they're excluded here too — counting
-  // them would invent culprits the backend never looks at.
-  //
-  // Page 1 first — its `pagination` tells us how many pages actually exist, so the remaining
-  // pages go out in ONE parallel batch instead of a serial walk. (The old loop paid a full
-  // round-trip per page just to discover whether a next page existed.)
-  const list = [];
-  let incomplete = false;
-  const fetchPage = (page) =>
-    AdminAPI.getOrders({ from: range.from, to: range.to }, page, MISSING_COST_PAGE, signal);
-
-  const first = await fetchPage(1);
-  const firstRows = firstArray(first, ['orders', 'data', 'items']);
-  list.push(...firstRows);
-
-  if (firstRows.length >= MISSING_COST_PAGE) {
-    // Trust the backend's page count when it gives one; otherwise fall back to walking to the
-    // cap. Either way MISSING_COST_MAX_PAGES is the hard ceiling.
-    const pg = first?.pagination || {};
-    const total = Number(pg.total_pages ?? (Number(pg.total) ? Math.ceil(Number(pg.total) / MISSING_COST_PAGE) : NaN));
-    const wanted = Number.isFinite(total) && total > 0 ? total : MISSING_COST_MAX_PAGES;
-    const last = Math.min(wanted, MISSING_COST_MAX_PAGES);
-    if (wanted > MISSING_COST_MAX_PAGES) incomplete = true;   // more pages exist than we read
-
-    const rest = [];
-    for (let page = 2; page <= last; page++) rest.push(fetchPage(page));
-    const settled = await Promise.allSettled(rest);
-    settled.forEach((res, idx) => {
-      // A page we failed to fetch is a page we did NOT scan. Say so.
-      if (res.status !== 'fulfilled') { incomplete = true; return; }
-      const rows = firstArray(res.value, ['orders', 'data', 'items']);
-      list.push(...rows);
-      // No page count came back and the last page we read was still full → there is more.
-      if (idx + 2 === last && !Number.isFinite(total) && rows.length >= MISSING_COST_PAGE) incomplete = true;
-    });
-  }
-  // An aborted fetch returns null → firstArray → [] → an EMPTY list that is indistinguishable
-  // from "this range genuinely has no orders". Reporting that as `count: 0` would print
-  // "All sales are costed" off the back of a scan that never ran — the ERR-074 conflation.
-  // Abort is not a result; say so and let the card render its unknown state.
-  if (signal?.aborted) return { cogsUnknown, failed: true };
-
-  const revenueOrders = list.filter(o => String(o.status || '').toLowerCase() !== 'cancelled');
-  if (!revenueOrders.length) return base;
-
-  const totalOf = (o) => Number(o.total_amount ?? o.total ?? 0) || 0;
-
-  const budget = revenueOrders.slice(0, MISSING_COST_DETAIL_CAP);
-  if (budget.length < revenueOrders.length) incomplete = true;
-
-  const culprits = [];
-  // Count what we ACTUALLY looked at — `budget.length` overstates it the moment the loop
-  // breaks early, and `scanned` is what the card prints to justify a clean bill of health.
-  let scanned = 0;
-  for (let i = 0; i < budget.length; i += MISSING_COST_BATCH) {
-    const batch = budget.slice(i, i + MISSING_COST_BATCH);
-    if (signal?.aborted) { incomplete = true; break; }   // superseded load / left the page
-    const results = await Promise.allSettled(batch.map(o => AdminAPI.getOrder(o.id, signal)));
-    scanned += batch.length;
-    results.forEach((res, j) => {
-      const order = batch[j];
-      // A detail call we couldn't make is an order we did NOT clear. Say so, don't assume.
-      if (res.status !== 'fulfilled' || !res.value) { incomplete = true; return; }
-      const items = res.value.items || res.value.order_items || [];
-      if (!items.length && totalOf(order) > 0) {
-        culprits.push({ order, reason: 'no items recorded' });
-        return;
-      }
-      const un = items.filter(it => it.supplier_cost_snapshot == null);
-      if (un.length) {
-        const skus = un.map(it => it.sku || it.product_sku).filter(Boolean).slice(0, 2).join(', ');
-        culprits.push({ order, reason: skus ? `no cost: ${skus}` : 'no cost recorded' });
-      }
-    });
-  }
-
-  return {
-    cogsUnknown,
-    incomplete,
-    scanned,
-    count: culprits.length,
-    items: culprits.map(({ order, reason }) => ({
-      label: `${orderRef(order.order_number || order.id)} · ${formatPrice(totalOf(order))}`,
-      badge: reason,
-      badgeCls: 'admin-badge--failed',
-      // Invoiced sales are fixed in the invoice editor ("Our Cost"); a website order's
-      // cost lives on the product.
-      // `?search=` was read by NOTHING — orders.js reads `focus` and `q` only, so
-      // this link had never once filtered the list it landed on (ERR-198). `focus`
-      // seeds the search AND opens the order.
-      href: isInvoiceOrder(order) ? 'invoices' : `orders?focus=${encodeURIComponent(window.OrderNumber.forDisplay(order.order_number))}`,
-    })),
-  };
-}
-
-
 
 // ---------- KPI band ----------
+
+function deltaFor(t, noDelta) {
+  if (noDelta || t.prev === undefined) return '';
+  return deltaBadge(t.raw, t.prev, t.deltaOpts || {});
+}
 
 function renderKpiTile(t, extraClass = '', noDelta = false) {
   const alertCls = t.alert ? ' admin-kpi--alert' : '';
   const tipAttr = t.tooltip ? ` data-tooltip="${esc(t.tooltip)}"` : '';
-  let h = `<div class="admin-kpi admin-kpi--compact${alertCls}${extraClass}">`;
-  h += `<div class="admin-kpi__label"${tipAttr}>${esc(t.label)}</div>`;
-  // GST basis under the label. Absent = basis not documented (Refund Rate's
-  // numerator, for one) — never assume "no line" means "no GST".
+  // A money tile opens "How it's calculated"; it is a button so the keyboard reaches it.
+  const tag = t.how ? 'button' : 'div';
+  const howAttr = t.how ? ` type="button" data-how="${esc(t.how)}" aria-label="${esc(`${t.label}: how it's calculated`)}"` : '';
+  let h = `<${tag} class="admin-kpi admin-kpi--compact${t.how ? ' admin-kpi--how' : ''}${alertCls}${extraClass}"${howAttr}>`;
+  h += `<div class="admin-kpi__label"${tipAttr}>${esc(t.label)}${t.atMost ? ' <span class="admin-kpi__flag">at most</span>' : ''}</div>`;
+  // GST basis under the label. Absent = basis not documented — never assume "no line" means "no GST".
   if (t.gst) h += `<div class="admin-kpi__basis">${esc(t.gst)}</div>`;
   if (t.value != null) {
     h += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
-    // Recognition basis, under the value. Distinct from __basis above, which
-    // states the GST basis — one says which dollars, the other says whose.
     if (t.sub) h += `<div class="admin-kpi__sub">${esc(t.sub)}</div>`;
-    // In all-time view every "previous" is 0, so deltas read "↑ new" everywhere — noise.
-    if (!noDelta) h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
+    h += deltaFor(t, noDelta);
   } else {
-    h += missingValue(t.tooltip || 'Data unavailable');
+    h += missingValue(t.missingWhy || t.tooltip || 'Data unavailable');
+    if (t.sub) h += `<div class="admin-kpi__sub">${esc(t.sub)}</div>`;
   }
-  h += '</div>';
+  h += `</${tag}>`;
   return h;
 }
 
-/**
- * Unpaid operating bills (ERR-392) from GET /api/admin/expenses/summary — the same
- * server `overdue_amount` + `due_amount` the Expenses page's Unpaid tile uses.
- * GLOBAL open amounts (not range-scoped) at GROSS. null when either is missing:
- * a half-read total would understate what is owed.
- */
-function unpaidBillsOf(resp) {
-  const s = resp?.summary ?? resp;
-  if (!s || typeof s !== 'object' || s.overdue_amount == null || s.due_amount == null) return null;
-  const total = Number(s.overdue_amount) + Number(s.due_amount);
-  return Number.isFinite(total) ? Math.round(total * 100) / 100 : null;
-}
-
-/**
- * Second line under Net Profit. Net profit is cash basis, so a bill still owed is
- * not in it — this line shows what is left once those bills are paid.
- *   undefined unpaid → '' (a cached payload from before this line existed)
- *   null unpaid      → says the read failed — never prints "no unpaid bills"
- */
-function unpaidBillsSub(netProfit, unpaid) {
-  if (unpaid === undefined || netProfit == null) return '';
-  if (unpaid === null) return 'unpaid bills: could not load — see Expenses';
-  if (unpaid === 0) return 'no unpaid bills';
-  return `${formatPrice(netProfit - unpaid)} after ${formatPrice(unpaid)} unpaid bills`;
-}
-
-/**
- * Guard: a margin the backend reports must agree with the profit tile sitting beside it.
- *
- * We prefer the backend's own `margin_proxy` / `gross_margin` / `net_margin` (ERR-111 — its
- * figure is authoritative and we do not want to re-derive what it already computed). But
- * "prefer" cannot mean "render blindly": live 2026-07-22 the Net Margin tile read −29.3%
- * while the Net Profit tile 40px away read −$19.67 on $7,728.48 of revenue, which is −0.29%.
- * The strip contradicted itself and said nothing, because the frontend passed `cur.net_margin`
- * straight through.
- *
- * So the backend figure now has to pass a consistency gate against the same profit and the
- * same ex-GST base the tile beside it uses. When it fails we render the DERIVED figure —
- * internal consistency across the strip beats deference to a number that disagrees with its
- * own inputs — and the caller says so on the card. This does NOT stop reading the backend:
- * an agreeing `margin_proxy` still wins, exactly as before.
- *
- * Tolerance is RELATIVE so it scales with the figure: a 100× scale error trips, a basis error
- * (the ~13% understatement from an incl-GST denominator) trips, ordinary rounding does not.
- * The 0.5pp floor keeps a near-zero margin from tripping on float noise.
- *
- * @returns null when the two agree (or either is unavailable), else the disagreement.
- */
-function checkMarginConsistency(label, backendPct, derivedPct) {
-  if (backendPct == null || !Number.isFinite(backendPct)) return null;
-  if (derivedPct == null || !Number.isFinite(derivedPct)) return null;
-  const tolerance = Math.max(0.5, Math.abs(derivedPct) * 0.05);
-  const gap = backendPct - derivedPct;
-  if (Math.abs(gap) <= tolerance) return null;
-  // Ratio is the tell that names the failure mode (~100 = a scale bug) — but it is
-  // meaningless when the derived figure is ~0, so it stays null there rather than exploding.
-  const ratio = Math.abs(derivedPct) > 0.001 ? backendPct / derivedPct : null;
-  return { label, backend: backendPct, derived: derivedPct, gap, tolerance, ratio };
-}
-
+const money = (v) => (v == null ? null : formatPrice(v));
 
 function renderKpiStrip(d) {
-  // Invoiced sales are counted by the BACKEND (kpi-summary carries
-  // includes_invoices: true). The frontend does not aggregate — it renders.
-  const cur  = d.kpis?.current ?? {};
-  const prev = d.kpis?.previous ?? {};
-  const cc   = d.custStats?.current  ?? {};
-  const cp   = d.custStats?.previous ?? {};
-
-  const aov     = cur.aov ?? safeDiv(cur.revenue, cur.orders);
-  const aovPrev = prev.aov ?? safeDiv(prev.revenue, prev.orders);
-
-  const refundTotal = sumRefundAmounts(d.refunds);
-  const refundPct   = cur.refund_rate != null
-    ? Number(cur.refund_rate)
-    : (refundTotal != null && cur.revenue ? (refundTotal / cur.revenue) * 100 : null);
-
-  const oosCount = outOfStockCount(d.outOfStock);
-  const newCustomers     = cc.new_customers ?? cc.new ?? null;
-  const newCustomersPrev = cp.new_customers ?? cp.new ?? null;
+  const m = dashboardMoney(d.dsum);
+  const f = m.figures;
+  const cc = d.custStats?.current ?? {};
+  const cp = d.custStats?.previous ?? {};
   const noDelta = FilterState.get('period') === 'all';   // all-time → deltas are meaningless
-
-  // kpi-summary drops profit for any range holding an invoiced sale (ERR-074). When it does,
-  // rebuild both figures from the backend's own weekly gross-profit series. Null → the tiles
-  // stay "—", exactly as before. There is no previous-period series, so `prev` is left alone
-  // and the delta badges simply don't render — honest, rather than a delta against a guess.
-  const recovered  = recoverProfitFromSeries(cur, d.sGrossProfit, d.sNetProfit);
-  const grossProfit = cur.gross_profit ?? recovered?.gross ?? null;
-  const netProfit   = cur.net_profit   ?? recovered?.net   ?? null;
-
-  // Backend kpi-summary omits gross_margin/net_margin → derive it. The base MUST be ex-GST
-  // revenue: profit is measured net of GST (migration 118), so dividing it by GST-inclusive
-  // revenue understates every margin by ~13%. Live 2026-07-20 that read 19.1% where the
-  // backend's own margin_proxy said 21.9% (1591.20 / 7254.04). Prefer the backend's figure
-  // when it ships one, exactly as we do for every other number on this page.
-  const exGst = (revenue) => (revenue != null && Number.isFinite(Number(revenue)))
-    ? Number(revenue) * (20 / 23)
-    : null;
-  const marginOf = (profit, revenue) => {
-    const base = exGst(revenue);
-    return (profit != null && base) ? (profit / base) * 100 : null;
-  };
-  // The backend's figure is preferred — but only once it agrees with the profit tile beside
-  // it (see checkMarginConsistency). A backend margin that contradicts its own profit and
-  // revenue is not authoritative, it is broken, and rendering it verbatim makes the strip lie.
-  const grossMarginBackend = cur.gross_margin  != null ? Number(cur.gross_margin)
-                           : cur.margin_proxy  != null ? Number(cur.margin_proxy)
-                           : null;
-  const grossMarginDerived = marginOf(grossProfit, cur.revenue);
-  const grossMarginCheck   = checkMarginConsistency('Gross Margin', grossMarginBackend, grossMarginDerived);
-  const grossMarginPct     = grossMarginCheck ? grossMarginDerived
-                           : (grossMarginBackend ?? grossMarginDerived);
-
-  const netMarginBackend   = cur.net_margin != null ? Number(cur.net_margin) : null;
-  const netMarginDerived   = marginOf(netProfit, cur.revenue);
-  const netMarginCheck     = checkMarginConsistency('Net Margin', netMarginBackend, netMarginDerived);
-  const netMarginPct       = netMarginCheck ? netMarginDerived
-                           : (netMarginBackend ?? netMarginDerived);
-
-  const grossMarginPctPrev = prev.gross_margin != null ? Number(prev.gross_margin)
-                           : prev.margin_proxy != null ? Number(prev.margin_proxy)
-                           : marginOf(prev.gross_profit, prev.revenue);
-  const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
-
-  // "—" on a profit tile is the honest answer when the backend can't compute COGS
-  // (a sale with an un-costed line). The Action-needed panel names the offenders.
-  const COGS_UNKNOWN = ' Shows "—" when any sale in the range has no cost of goods recorded — see "Sales missing a cost" under Action needed.';
-  // …but when we rebuilt the figure, say so on the tile rather than passing it off as the
-  // summary endpoint's own number.
-  const REBUILT = ' Rebuilt from the backend’s own per-period series because kpi-summary dropped this figure for the selected range (ERR-074).';
-  // Provenance PER FIGURE. One shared flag used to stamp "Rebuilt…" on both tiles whenever
-  // either was rebuilt — claiming a real backend number was reconstructed.
-  const grossNote = recovered?.grossRebuilt ? REBUILT : COGS_UNKNOWN;
-  const netNote   = recovered?.netRebuilt   ? REBUILT : COGS_UNKNOWN;
-
-  const tiles = [
-    { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
-      gst: GST_INCL,
-      tooltip: `Total sales (incl. GST) for the selected range. Includes invoiced (phone / walk-in / B2B) sales, paid or not.` },
-    {
-      label: 'Gross Profit', value: grossProfit != null ? formatPrice(grossProfit) : null,
-      raw: grossProfit, prev: prev.gross_profit, stackNext: true, gst: GST_EXCL,
-      tooltip: `Revenue (ex-GST) − cost of goods (ex-GST), computed by the backend.${grossNote}`,
-    },
-    {
-      label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
-      alert: grossMarginPct != null && grossMarginPct < 0, gst: GST_BASE,
-      tooltip: 'Gross profit ÷ revenue, both ex-GST. Profit quality, not size.',
-    },
-    {
-      label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
-      raw: netProfit, prev: prev.net_profit,
-      alert: netProfit != null && netProfit < 0, stackNext: true,
-      gst: GST_EXCL,
-      // No "after $X supplier freight" line (owner 2026-11-23, ERR-392): freight is one
-      // expense among several already inside net profit, and naming only it read as if
-      // the others were not. The tooltip still lists every deduction.
-      sub: unpaidBillsSub(netProfit, d.unpaidBills),
-      // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
-      // so GST is already outside this calculation rather than a line item inside it.
-      // The Stripe-basis divergence is named on BOTH sides of it (ERR-255). An
-      // operator comparing this tile against an order modal sees a difference of
-      // roughly $0.47 per card order, and it is the backend's ÷1.15 against our
-      // 2026-05-17 convention — not an error in either screen. Naming it only in
-      // the modal would leave whoever starts from the Dashboard re-deriving it.
-      tooltip: `Gross profit − Stripe fees − operating expenses − supplier freight, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer). KNOWN DIFFERENCE: this figure divides Stripe's 2.65% + $0.30 by 1.15; an order's own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower. Settled by reading a real Stripe payout, not by changing either screen. Operating expenses count only once marked PAID; the second line takes off bills still owed (overdue + due on the Expenses page, all dates, at the amount you will pay incl. GST — the GST part is reclaimable, so the true figure sits slightly higher).${netNote}`,
-    },
-    {
-      label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
-      alert: netMarginPct != null && netMarginPct < 0, gst: GST_BASE,
-      tooltip: 'Net profit ÷ revenue, both ex-GST. What you actually keep.',
-    },
-    { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
-      tooltip: `Orders placed in the selected range. Includes invoiced sales, paid or not.` },
-    { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev,
-      gst: GST_INCL,  // inherits revenue's basis
-      tooltip: `Revenue ÷ orders, both incl. GST.` },
+  const oosCount = outOfStockCount(d.outOfStock);
+  const newCustomers = cc.new_customers ?? cc.new ?? null;
+  const newCustomersPrev = cp.new_customers ?? cp.new ?? null;
+  // Processed refunds in range (refunds-series, dated on refunded_at) ÷ the orders the money
+  // counts. kpi-summary's `refund_rate` is NOT used: it read 1.9% for October 2026 with no
+  // refund processed that month (2026-11-26) — a different definition from the money above.
+  const refundPct = f ? refundRatePct(d.refunds, f.orders.value) : null;
+  const unpaid = f ? unpaidBillsInRange(d.expenseRows, d.range, d.dsum.current.operating_expenses) : null;
+  const why = (fig) => fig?.note || 'Not available for this range.';
+  const tiles = f ? [
+    { label: 'Revenue', how: 'revenueInclGst', value: money(f.revenueInclGst.value), raw: f.revenueInclGst.value, prev: f.revenueInclGst.prev,
+      gst: GST_INCL, missingWhy: why(f.revenueInclGst),
+      sub: f.revenueInclGst.refunds ? `after ${formatPrice(f.revenueInclGst.refunds)} refunds` : '',
+      tooltip: 'Sales incl. GST, minus refunds processed in the range (on the refund date). Invoices count on their issue date, paid or not. Click for how it’s calculated.' },
+    { label: 'Gross Profit', how: 'grossProfit', value: money(f.grossProfit.value), raw: f.grossProfit.value, prev: f.grossProfit.prev,
+      stackNext: true, gst: GST_EXCL, atMost: f.grossProfit.atMost, missingWhy: why(f.grossProfit),
+      alert: f.grossProfit.atMost,
+      tooltip: `Revenue after refunds − cost of goods, both excl. GST. A refund takes the whole ex-GST amount off; goods are not restocked.${f.grossProfit.note ? ` ${f.grossProfit.note}` : ''}` },
+    { label: 'Gross Margin', value: fmtPct(f.grossMargin.value), raw: f.grossMargin.value, prev: f.grossMargin.prev,
+      alert: f.grossMargin.value != null && f.grossMargin.value < 0, gst: GST_BASE,
+      tooltip: 'Gross profit ÷ revenue, both ex GST. Profit quality, not size.' },
+    { label: 'Net Profit', how: 'netProfit', value: money(f.netProfit.value), raw: f.netProfit.value, prev: f.netProfit.prev,
+      stackNext: true, gst: GST_EXCL, atMost: f.netProfit.atMost, missingWhy: why(f.netProfit),
+      alert: (f.netProfit.value != null && f.netProfit.value < 0) || f.netProfit.atMost,
+      // Net profit ALREADY includes every bill dated in the range, paid or not (accrual). The
+      // second line only says how much of that is still unpaid — it never subtracts again.
+      sub: unpaidBillsLine(unpaid),
+      tooltip: `Gross profit − Stripe fees − supplier freight − operating expenses, all ex-GST. Expenses count on their bill date, paid or not; a GST payment to IRD is not an expense. Invoiced sales carry no card fee. KNOWN DIFFERENCE: the backend divides Stripe’s 2.65% + $0.30 by 1.15, an order’s own modal deducts it as-is, so a modal take-home reads about $0.47 per card order lower (ERR-255).${f.netProfit.note ? ` ${f.netProfit.note}` : ''}` },
+    { label: 'Net Margin', value: fmtPct(f.netMargin.value), raw: f.netMargin.value, prev: f.netMargin.prev,
+      alert: f.netMargin.value != null && f.netMargin.value < 0, gst: GST_BASE,
+      tooltip: 'Net profit ÷ revenue, both ex GST. What you actually keep.' },
+    { label: 'Orders', how: 'orders', value: f.orders.value != null ? String(f.orders.value) : null, raw: f.orders.value, prev: f.orders.prev,
+      tooltip: f.orders.note },
+    { label: 'Avg Order Value', how: 'aov', value: money(f.aov.value), raw: f.aov.value, prev: f.aov.prev, gst: GST_INCL,
+      tooltip: f.aov.note },
     { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
       tooltip: 'First-time buyers in the range.' },
     {
       // The backend counts a buyer as returning when they ordered BEFORE the range. All time
-      // has no "before", so it answers 0 by construction (measured 2026-10-20: 0 of 205, while
-      // ~20 buyers have 2+ orders). Show "—" and say why rather than print that 0 (ERR-366).
+      // has no "before", so it answers 0 by construction (ERR-366): show "—" and say why.
       label: 'Returning %',
       value: noDelta ? null : (cc.returning_pct != null ? `${cc.returning_pct}%` : null),
       raw: noDelta ? null : cc.returning_pct, prev: cp.returning_pct,
       tooltip: noDelta
         ? 'Share of buyers who had ordered before the range. All time has no earlier period to return from, so pick a bounded range to see it.'
-        : 'Share of buyers who had ordered before the range. Requires GET /api/admin/analytics/customer-stats.',
+        : 'Share of buyers who had ordered before the range.',
     },
-    {
-      // No `gst`: the denominator is incl-GST revenue but no basis is documented
-      // anywhere for the refund amounts on top, so the ratio's basis is unknown.
-      label: 'Refund Rate', value: refundPct != null ? `${refundPct.toFixed(1)}%` : null,
-      // Backend `refund_rate` is a COUNT ratio: measured 2026-10-20 it read 0.4 for 1 refunded
-      // order of 226, where value ÷ revenue would be $14 / $34,630 = 0.04% (ERR-366).
-      alert: refundPct != null && refundPct > 3, tooltip: 'Refunded orders ÷ orders (a count, not a value). Flagged above 3%.',
-    },
-    {
-      label: 'Out of Stock', value: oosCount != null ? String(oosCount) : null,
-      alert: oosCount > 0, tooltip: 'Products currently flagged out of stock.',
-    },
-  ];
+    { label: 'Refund Rate', value: refundPct != null ? `${refundPct.toFixed(1)}%` : null,
+      alert: refundPct != null && refundPct > 3,
+      tooltip: 'Refunds processed in the range (on the refund date) ÷ orders. A count, not a value. Flagged above 3%.' },
+    { label: 'Owed to us', how: 'owed', value: money(f.owed.value), raw: f.owed.value, prev: undefined, gst: GST_INCL,
+      alert: f.owed.value != null && f.owed.value > 0, tooltip: f.owed.note },
+    { label: 'Out of Stock', value: oosCount != null ? String(oosCount) : null, prev: undefined,
+      alert: oosCount > 0, tooltip: 'Genuine products the supplier feed shows at zero stock.' },
+  ] : [];
 
-  // Each profit tile (stackNext) shares one grid cell with the margin % tile that follows it
-  // — so Gross/Net profit and their margins ride together and the strip stays at 9 cells.
-  let html = '<div class="admin-kpi-grid admin-kpi-grid--9">';
+  if (!f) {
+    return `<div class="admin-kpi-grid admin-kpi-grid--9"></div>
+      <p class="fh-pnl-note admin-dash-note--alert">${esc(m.warnings[0])}</p>`;
+  }
+  // Each profit tile (stackNext) shares one grid cell with the margin tile that follows it.
+  let html = '<div class="admin-kpi-grid admin-kpi-grid--10">';
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
     const next = tiles[i + 1];
@@ -953,22 +636,61 @@ function renderKpiStrip(d) {
     html += renderKpiTile(t, '', noDelta);
   }
   html += '</div>';
-
-  // Fail-soft must be LOUD. A margin that disagrees with the profit tile beside it is a
-  // data-integrity problem, not a footnote — the last time a backend figure silently
-  // contradicted its own inputs it went unnoticed for weeks (ERR-111). Say which number the
-  // backend sent, which one we're showing, and why.
-  for (const chk of [grossMarginCheck, netMarginCheck]) {
-    if (!chk) continue;
-    const scale = chk.ratio != null && Math.abs(Math.abs(chk.ratio) - 100) < 10
-      ? ' That is almost exactly 100× out, which is a scale bug at the source, not a rounding difference.'
-      : '';
-    html += `<p class="fh-pnl-note admin-dash-note--alert"><strong>${esc(chk.label)} doesn’t match its own profit figure.</strong>
-      The backend reported ${esc(fmtPct(chk.backend))}, but its own ${esc(chk.label === 'Net Margin' ? 'Net Profit' : 'Gross Profit')}
-      over ex-GST revenue gives ${esc(fmtPct(chk.derived))}. Showing the derived figure so this strip stays
-      internally consistent.${scale}</p>`;
-  }
+  // Fail-soft must be LOUD: an un-costed sale, failed freight or a backend figure that does
+  // not add up is written under the strip, not only in a tooltip.
+  for (const w of m.warnings) html += `<p class="fh-pnl-note admin-dash-note--alert">${esc(w)}</p>`;
   return html;
+}
+
+// ---------- How it's calculated ----------
+
+const HOW = {
+  revenueInclGst: { label: 'Revenue', formula: 'Sales incl. GST (shipping charged included) − refunds and chargebacks processed in this period. Web orders count on the day they were placed; invoices on their issue date, paid or not. Cancelled and test orders are left out.' },
+  grossProfit: { label: 'Gross Profit', formula: 'Revenue ex GST (after refunds) − cost of goods ex GST. An invoice counts its revenue and cost on its issue date. A refund takes the whole ex-GST amount off; the goods are not restocked.' },
+  netProfit: { label: 'Net Profit', formula: 'Gross profit − Stripe card fees − supplier freight − operating expenses, all ex GST. Expenses count on their bill date, paid or not. A GST payment to IRD is not an expense.' },
+  orders: { label: 'Orders', formula: 'Web orders placed in the period, plus invoices issued in it. A refunded order still counts; cancelled and test orders do not.' },
+  aov: { label: 'Avg Order Value', formula: 'Revenue incl. GST (after refunds) ÷ orders — the backend’s figure.' },
+  owed: { label: 'Owed to us', formula: 'Unpaid invoices issued on or before the last day of the period, incl. GST.' },
+};
+
+function inputsTable(inputs) {
+  if (!inputs.length) return '';
+  const rows = inputs.map((i) => `
+    <tr>
+      <td>${esc(i.label)}</td>
+      <td class="cell-mono dash-how-amt">${esc(formatPrice(i.amount))}</td>
+      <td class="dash-how-src">${esc(i.source)}</td>
+    </tr>`).join('');
+  return `<table class="admin-dash-table dash-how-table"><thead><tr><th>Input</th><th>Amount</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function openHow(d, key) {
+  const m = dashboardMoney(d.dsum);
+  const fig = m.figures?.[key];
+  const meta = HOW[key];
+  if (!meta) return;
+  const parts = [`<p class="dash-how-formula">${esc(meta.formula)}</p>`];
+  if (!fig || fig.value == null) {
+    parts.push(`<p class="fh-pnl-note admin-dash-note--alert">${esc(fig?.note || m.warnings[0] || 'Not available for this range.')}</p>`);
+  } else {
+    parts.push(inputsTable(fig.inputs || []));
+    parts.push(`<p class="dash-how-total">= <strong>${esc(key === 'orders' ? String(fig.value) : formatPrice(fig.value))}</strong>${fig.basis ? ` <small>${esc(fig.basis)}</small>` : ''}</p>`);
+    if (fig.note) parts.push(`<p class="fh-pnl-note${fig.atMost ? ' admin-dash-note--alert' : ''}">${esc(fig.note)}</p>`);
+    const ratio = key === 'grossProfit' ? m.figures.grossMargin : key === 'netProfit' ? m.figures.netMargin : null;
+    if (ratio?.value != null) parts.push(`<p>Margin: ${esc(fmtPct(ratio.value))} of revenue ex GST.</p>`);
+  }
+  const r = d.range ? `${d.range.from} – ${d.range.to}` : '';
+  parts.push(`<p class="fh-pnl-note">Source: the backend’s dashboard summary for ${esc(r)} (NZ days). This screen adjusts nothing; “calculated” rows are GST arithmetic only.</p>`);
+  const dr = Drawer.open({
+    title: `${meta.label} — how it’s calculated`,
+    body: `<div class="dash-how-body">${parts.join('')}</div>`,
+    footer: '<button class="admin-btn admin-btn--ghost" data-x="close">Close</button>',
+  });
+  dr?.footer?.querySelector('[data-x="close"]')?.addEventListener('click', () => Drawer.close());
+}
+
+function wireHow(root, d) {
+  root.querySelectorAll('[data-how]').forEach((btn) => btn.addEventListener('click', () => openHow(d, btn.dataset.how)));
 }
 
 
@@ -982,6 +704,10 @@ export default {
     // Dashboard-local defaults (range = all) applied only when the URL omits them,
     // and the bar-width control shown for this page only.
     FilterState.setDefaults({ period: 'all', granularity: 'all' });
+    // Money is whole-business (dashboard-summary takes no brand/supplier/status filter), so
+    // only the period and bar-width controls are shown — a filter that changed nothing above
+    // it would be a lie.
+    FilterState.setVisibleFilters(['period']);
     FilterState.setGranularityVisible(true);
     await loadDashboard();
   },
@@ -989,6 +715,7 @@ export default {
   destroy() {
     Charts.destroyAll();
     FilterState.setGranularityVisible(false);   // hide bar-width control on other pages
+    FilterState.setVisibleFilters(null);        // other pages show their own filters again
     // _loadSeq++ below makes any in-flight load decline to clear the spinner, so clear it
     // here — otherwise navigating away mid-load strands one in the next page's filter bar.
     FilterState.setBusy(false);

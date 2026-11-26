@@ -88,6 +88,11 @@ test('Returning % shows "—" on All, the backend 0 is by construction', () => {
 test('Refund Rate tooltip names the count basis the backend uses', () => {
   const tile = src.slice(src.indexOf("label: 'Refund Rate'"));
   const body = tile.slice(0, tile.indexOf('},'));
-  assert.match(body, /Refunded orders ÷ orders \(a count, not a value\)/);
+  // Since 2026-11-26 the count is processed refunds dated on refunded_at (refunds-series), over
+  // the orders the money counts (dashboard-summary) — kpi-summary's refund_rate read 1.9% for an
+  // October with no refund processed, a different definition from the money beside it.
+  assert.match(body, /Refunds processed in the range \(on the refund date\) ÷ orders\. A count, not a value/);
   assert.ok(!/Refunded value ÷ revenue/.test(body));
+  assert.match(src, /refundRatePct\(d\.refunds, f\.orders\.value\)/);
+  assert.doesNotMatch(src, /cur\.refund_rate/);
 });

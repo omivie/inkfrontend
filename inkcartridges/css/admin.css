@@ -4147,6 +4147,22 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 @media (max-width: 900px)  { .admin-kpi-grid--9 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 768px)  { .admin-kpi-grid--9 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 420px)  { .admin-kpi-grid--9 { grid-template-columns: 1fr; } }
+/* 10-cell variant (Nov 2026): the 9 cells plus "Owed to us" from dashboard-summary. */
+.admin-kpi-grid--10 {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 8px;
+  grid-column: span 12;
+  margin-bottom: 4px;
+}
+.admin-kpi-grid--10 > .admin-kpi:nth-child(5n+5)::before { background: var(--cyan); }
+.admin-kpi-grid--10 > .admin-kpi:nth-child(10n+6)::before { background: var(--magenta); }
+.admin-kpi-grid--10 > .admin-kpi:nth-child(10n+7)::before { background: var(--yellow); }
+.admin-kpi-grid--10 > .admin-kpi:nth-child(10n)::before   { background: var(--success); }
+@media (max-width: 1500px) { .admin-kpi-grid--10 { grid-template-columns: repeat(5, 1fr); } }
+@media (max-width: 900px)  { .admin-kpi-grid--10 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 768px)  { .admin-kpi-grid--10 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 420px)  { .admin-kpi-grid--10 { grid-template-columns: 1fr; } }
 
 /* Gross Profit + Net Profit stacked in one grid cell — two half-height cards.
    The stack stretches to its grid row height; each half flexes to fill half. */
@@ -7533,25 +7549,24 @@ button.order-sent:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .retention__total th, .retention__total td { font-weight: 700; border-top: 2px solid currentColor; }
 .retention__foot { margin: 10px 0 0; font-size: 12px; opacity: 0.8; }
 
-/* ---- Dashboard (new), Nov 2026: money boxes open "How it's calculated" ---- */
-.dash2-box { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
-.dash2-box:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.dash2-box .admin-kpi__value { font-size: 24px; }
-.dash2-how { margin-top: 6px; font-size: 11px; color: var(--cyan-text); opacity: 0.8; }
-.dash2-box:hover .dash2-how { opacity: 1; text-decoration: underline; }
-.dash2-adj {
-  display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: var(--radius-xs);
-  background: var(--cyan-dim); color: var(--cyan-text); font-size: 8.5px; letter-spacing: 0.04em;
+/* ---- Dashboard money tiles open "How it's calculated" (Nov 2026; was Dashboard (new)) ---- */
+/* A <button> centres its content vertically by default; lay it out like the <div> tiles. */
+button.admin-kpi--how {
+  display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch;
+  width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
 }
-.dash2-tag { font-size: 11px; font-weight: 600; color: var(--cyan-text); vertical-align: middle; }
-.dash2-how-body p { margin: 0 0 10px; line-height: 1.5; }
-.dash2-formula { font-size: 13px; }
-.dash2-how-table { width: 100%; margin: 6px 0 4px; }
-.dash2-how-table td { vertical-align: top; padding: 6px 8px; }
-.dash2-amt { text-align: right; white-space: nowrap; }
-.dash2-src { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.dash2-row--adj .dash2-src { color: var(--cyan-text); font-weight: 600; }
-.dash2-total { text-align: right; font-size: 15px; }
-.dash2-details { margin-top: 12px; font-size: 12px; color: var(--text-muted); }
-.dash2-details ul { margin: 6px 0 0; padding-left: 18px; }
-.dash2-how-body { max-width: 860px; margin: 0 auto; }
+button.admin-kpi--how:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+button.admin-kpi--how:hover .admin-kpi__label { text-decoration: underline; }
+.admin-kpi__flag {
+  display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: var(--radius-xs);
+  background: var(--danger-dim, rgba(220, 38, 38, 0.12)); color: var(--danger, #dc2626);
+  font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; vertical-align: middle;
+}
+.dash-how-body { max-width: 860px; margin: 0 auto; }
+.dash-how-body p { margin: 0 0 10px; line-height: 1.5; }
+.dash-how-formula { font-size: 13px; }
+.dash-how-table { width: 100%; margin: 6px 0 4px; }
+.dash-how-table td { vertical-align: top; padding: 6px 8px; }
+.dash-how-amt { text-align: right; white-space: nowrap; }
+.dash-how-src { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.dash-how-total { text-align: right; font-size: 15px; }

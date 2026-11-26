@@ -108,10 +108,10 @@ test('§5 the loader asks for the server cap and flags a full response as trunca
 test('§5 dashboard card: three rankings, "View all" to the hub tab, cache schema bumped', () => {
   // the Most Bought card moved to utils/dash-charts.js; the load + call sites stay in dashboard.js
   const dash = stripComments(read('utils', 'dash-charts.js') + '\n' + read('pages', 'dashboard.js'));
-  assert.match(dash, /AdminAPI\.getBestSellers\(params, signal\)/);
+  assert.match(dash, /AdminAPI\.getBestSellers\(rangeParams, signal\)/);
   assert.match(dash, /href="#analytics\?tab=best-sellers"/);
   assert.match(dash, /wireTopProductsToggle\(_container\);/);
-  assert.match(dash, /const DASH_CACHE_SCHEMA = 4;/, 'topProducts changed shape again (BF-089): an old cached payload must not reach render()');
+  assert.match(dash, /const DASH_CACHE_SCHEMA = ([4-9]|\d{2,});/, 'topProducts changed shape again (BF-089): an old cached payload must not reach render() (schema 4 or later)');
   assert.match(dash, /esc\(data\?\.error \|\| 'Top product data unavailable'\)/, 'a refusal is shown, escaped, not read as "no sales"');
   assert.doesNotMatch(dash, /\$\{p\.(name|brand|sku)\}/, 'every product field goes through esc()');
 });

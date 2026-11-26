@@ -11,9 +11,10 @@
  * is gone. Operating categories are now the OWNER'S OWN list, stored under the
  * `expenses.categories` key of admin_ui_prefs (same durable per-admin store as
  * expense presets) and loaded into this module at page init via
- * `setCustomCategories()`. Only four categories stay built-in:
- *   - the 3 order_linked ones (they carry the double-count protection), and
- *   - 'other' (the hard fallback every unknown key normalises onto).
+ * `setCustomCategories()`. Only five categories stay built-in:
+ *   - the 3 order_linked ones (they carry the double-count protection),
+ *   - 'other' (the hard fallback every unknown key normalises onto), and
+ *   - 'gst_payment' (kind 'not_expense' — the GST paid to IRD, never a cost).
  * The retired built-ins live on in RETIRED_CATEGORY_DEFAULTS purely so rows
  * saved under them can be SEEDED back into the owner's list with their original
  * label + GST default (see seedMissingCategories) instead of collapsing to
@@ -31,6 +32,11 @@
  *                      EXCLUDED from the operating-expense total and clearly
  *                      labelled "already counted in order costs". It stays
  *                      visible for cash-flow tracking only.
+ *   - 'not_expense'  → money out that is not a cost (the GST payment to IRD; the
+ *                      backend calls this kind 'tax_payment'). Excluded from
+ *                      operating spend, breakdowns, KPIs and net profit — see
+ *                      isOperating() in expense-math.js, which counts ONLY
+ *                      kind === 'operating'.
  *
  * RESERVED KEYS: a custom category may never claim a built-in key nor a
  * NON-IDENTITY legacy key (`cogs`/`shipping`/`platform`/`salaries`). If a
@@ -60,14 +66,12 @@ export const EXPENSE_CATEGORIES = [
   // ── The one built-in operating category: the unknown-key fallback ──
   { key: 'other',                label: 'Other',                  kind: 'operating', gstDefault: false, deductibleDefault: true },
 
-  // ── Not an expense (owner 2026-11-25) ──
+  // ── Not an expense (owner 2026-11-25; backend category shipped 2026-11-26) ──
   // Paying IRD the GST we collected is not a cost: revenue and profit are already ex-GST.
-  // The Dashboard's net profit (utils/money-truth.js) leaves this kind out. The Expenses
-  // page still counts it as cash paid out, so its totals keep matching the backend's
-  // operating_paid until backend ask §5 (outbox 2026-11-25) ships.
-  // `backendPending`: the backend's category enum does not know this key yet, so a save
-  // stores 'other' + a CATEGORY_OVERRIDES_KEY entry (pages/expenses.js backendAcceptsCategory).
-  { key: 'gst_payment',          label: 'GST payment to IRD',     kind: 'not_expense', gstDefault: false, deductibleDefault: false, backendPending: true, hint: 'Your GST return payment. Not a cost — left out of net profit on the Dashboard.' },
+  // The backend knows this key (GET /api/admin/expense-categories → kind 'tax_payment',
+  // label 'GST / tax payment to IRD'); the FE names that kind 'not_expense'. The backend's
+  // operating_paid and pnl.operating_expenses both leave it out, and so does expense-math.
+  { key: 'gst_payment',          label: 'GST / tax payment to IRD', kind: 'not_expense', gstDefault: false, deductibleDefault: false, hint: 'Your GST return payment to IRD. Not a cost — left out of operating expenses and net profit.' },
 ];
 
 /**
@@ -205,9 +209,10 @@ export function normalizeCategoryOverrides(raw) {
   const out = {};
   for (const id of Object.keys(raw)) {
     const key = raw[id];
-    // A built-in the backend does not accept yet (backendPending) can only be stored as an
-    // override, so it is the one reserved key allowed here.
-    if (!id || typeof key !== 'string' || !isValidKey(key) || (_RESERVED.has(key) && !_BY_KEY[key]?.backendPending)) continue;
+    // An override may only name a custom key; built-ins are reserved. gst_payment used to ride an
+    // override on an 'other' row before the backend accepted it — now the raw row carries the real
+    // category (and resolveRowCategory only applies an override to raw 'other'), so none is needed.
+    if (!id || typeof key !== 'string' || !isValidKey(key) || _RESERVED.has(key)) continue;
     out[id] = key;
   }
   return out;

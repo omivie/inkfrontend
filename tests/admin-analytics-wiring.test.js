@@ -403,3 +403,73 @@ test('refundAmount prefers total_amount over legacy keys and is 0-safe', () => {
   assert.equal(refundAmount({}), 0);
   assert.equal(refundAmount({ total_amount: 'oops' }), 0);
 });
+
+// =====================================================================
+// dashboard-summary (backend 2026-11-25 §6) + pnl dates + kpi refunds
+// =====================================================================
+import { normalizeDashboardSummary } from '../inkcartridges/js/admin/api.js';
+
+const DSUM_LIVE_OCT = {
+  date_range: { date_from: '2026-10-01', date_to: '2026-10-31', granularity: 'month', timezone: 'Pacific/Auckland' },
+  previous_range: { date_from: '2026-08-31', date_to: '2026-09-30' },
+  current: { revenue_incl_gst: 5877.15, revenue_ex_gst: 5110.57, refunds: 0, cogs: 3697.25, gross_profit: 1413.32,
+    stripe_fees: 122.41, supplier_freight: 414.8, operating_expenses: 2766.89, net_profit: -1890.79, orders: 52,
+    aov: 113.02, owed_unpaid_invoices: 302.83, cogs_unknown_orders: [] },
+  previous: null,
+  series: [{ bucket_start: '2026-10-01', revenue: 5877.15, gross_profit: 1413.32, net_profit: -1890.79 }],
+  actions: {
+    needs_tracking: { count: 1, rows: [{ id: 'o1', order_number: '2026112501' }] },
+    missing_cost: { count: 0, rows: [] },
+    under_margin_floor: { count: null, rows: [], error: 'unavailable' },
+    out_of_stock: { count: 813, rows: [] },
+  },
+  supplier_freight_failed: false,
+};
+
+test('normalizeDashboardSummary keeps the live payload and never turns "unavailable" into 0', () => {
+  const out = normalizeDashboardSummary(DSUM_LIVE_OCT);
+  assert.equal(out.current.net_profit, -1890.79);
+  assert.equal(out.current.orders, 52);
+  assert.deepEqual(out.current.cogs_unknown_orders, []);
+  assert.equal(out.previous, null);
+  assert.deepEqual(out.actions.under_margin_floor, { count: null, rows: [], error: 'unavailable' });
+  assert.equal(out.actions.needs_tracking.count, 1);
+  assert.equal(out.supplier_freight_failed, false);
+});
+
+test('normalizeDashboardSummary: garbage is null (not 0); no current ⇒ null', () => {
+  assert.equal(normalizeDashboardSummary(null), null);
+  assert.equal(normalizeDashboardSummary([]), null);
+  assert.equal(normalizeDashboardSummary({ actions: {} }), null);
+  const out = normalizeDashboardSummary({ current: { revenue_incl_gst: '12.50', cogs: 'n/a', net_profit: '' }, actions: {} });
+  assert.equal(out.current.revenue_incl_gst, 12.5, 'a numeric string is a number');
+  assert.equal(out.current.cogs, null, 'garbage is "not reported", never 0');
+  assert.equal(out.current.net_profit, null);
+  assert.equal(out.current.cogs_unknown_orders, null, 'an absent list is unknown, not "every sale costed"');
+  assert.equal(out.actions.missing_cost.count, null, 'an absent action is unavailable');
+  assert.equal(out.supplier_freight_failed, null, 'unstated is not "no failure"');
+});
+
+test('getDashboardSummary sends plain NZ dates and a real grain, and normalises', async () => {
+  const seen = [];
+  installGlobals({ apiGet: async (url) => { seen.push(url); return { ok: true, data: DSUM_LIVE_OCT }; } });
+  const out = await AdminAPI.getDashboardSummary({ from: '2026-10-01', to: '2026-10-31' }, 'all');
+  assert.equal(seen[0], '/api/admin/analytics/dashboard-summary?date_from=2026-10-01&date_to=2026-10-31&granularity=day');
+  assert.equal(out.current.revenue_incl_gst, 5877.15);
+  installGlobals({ apiGet: async () => ({ ok: false, code: 'RATE_LIMITED', retry_after: 5 }) });
+  assert.equal(await AdminAPI.getDashboardSummary({ from: '2026-10-01', to: '2026-10-31' }, 'month'), null);
+});
+
+test('pnl is asked for a DATE RANGE — the backend ignores ?days since 2026-11-25', async () => {
+  const seen = [];
+  installGlobals({ apiGet: async (url) => { seen.push(url); return { data: { periods: [] } }; } });
+  await AdminAPI.getAdminAnalyticsPnL({ from: '2026-07-01', to: '2026-11-25' });
+  assert.equal(seen[0], '/api/admin/analytics/pnl?start_date=2026-07-01&end_date=2026-11-25');
+  assert.doesNotMatch(seen[0], /days=/);
+});
+
+test('kpi-summary fallback shape keeps refunds and refunds_ex_gst', () => {
+  const out = normalizeKpiSummary({ revenue: { current: 6432.2, previous: 1 }, refunds: { current: 59.4, previous: 0 }, refunds_ex_gst: { current: 51.65, previous: 0 } });
+  assert.equal(out.current.refunds, 59.4);
+  assert.equal(out.current.refunds_ex_gst, 51.65);
+});
