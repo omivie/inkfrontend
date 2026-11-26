@@ -20,7 +20,11 @@ import {
   productDeleteFailureCopy, offersDeactivate, isAlreadyGone,
   summariseDeleteOutcome, nothingWasDeleted,
 } from '../utils/product-deletability.js';
-import { SUPPLIER_LABELS, PACK_PACK_TYPES } from '../utils/sourcing.js';
+import { SUPPLIER_LABELS, PACK_PACK_TYPES, UNASSIGNED_LABEL } from '../utils/sourcing.js';
+import {
+  canSetSupplier, setSupplierBlockedReason, normaliseBulkSupplierResult, chunkIds,
+  SUPPLIER_CHANGE_WARNING,
+} from '../utils/supplier-bulk.js';
 import {
   readStock, computeNewStock, stockAdjustPayload, ZEROING_NOTICE,
   STOCK_KNOWN, STOCK_UNKNOWN,
@@ -297,7 +301,7 @@ function buildColumns() {
 // 2026-11-26: CTN237CMY reads $41.54 here, order 2026112601 took home $14.86). This column is per
 // unit at list price; supplier freight is billed per ORDER by the backend and lands only there.
 const BEFORE_FREIGHT_TIP = 'Per unit at list price, before supplier freight. DSNZ bills freight on every order; '
-  + 'Augmento when our cost is under $100 incl GST. An order\'s own take-home is in its order view.';
+  + 'Augmento and Streamline when our cost is under $100 incl GST. An order\'s own take-home is in its order view.';
 
 const NET_SORT_KEY = { margin_pct: 'net_margin_incl_fixed_pct', profit_ex_gst: 'profit_incl_fixed_ex_gst' };
 
@@ -1215,6 +1219,7 @@ async function openProductDrawer(product) {
 
   // Build tabbed content
   buildProductModalTabs(modal, full, isOwner);
+  wireSupplierWarning(modal, full.supplier);
 
   // Populate the Ribbon Brands section (ribbon-family products only — no-ops
   // otherwise). Fire-and-forget: it self-renders into the static shell built
@@ -4701,11 +4706,15 @@ function updateBulkBar(selected) {
   // operator nothing, and hiding it is how "products cannot be deleted" stayed
   // invisible for months.
   const canDelete = canDeleteProducts(AdminAuth.role);
+  const canSupplier = canSetSupplier(AdminAuth.role);
   _bulkBar.innerHTML = `
     <span class="admin-bulk-bar__count">${count} selected</span>
     <div class="admin-bulk-bar__actions">
       <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="deactivate">Deactivate</button>
       <button class="admin-btn admin-btn--sm admin-btn--primary" data-bulk="activate">Activate</button>
+      ${canSupplier
+        ? '<button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="supplier">Set supplier</button>'
+        : `<button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="supplier" disabled title="${esc(setSupplierBlockedReason(AdminAuth.role) || '')}">Set supplier</button>`}
       <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
       ${canDelete
         ? '<button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>'
@@ -4718,6 +4727,7 @@ function updateBulkBar(selected) {
   // A disabled button still receives no click, but bind through the same gate
   // anyway — the affordance and the action must never disagree about who may act.
   if (canDelete) _bulkBar.querySelector('[data-bulk="delete"]')?.addEventListener('click', () => bulkDelete());
+  if (canSupplier) _bulkBar.querySelector('[data-bulk="supplier"]')?.addEventListener('click', () => bulkSetSupplier());
   _bulkBar.querySelector('[data-bulk="clear"]').addEventListener('click', () => {
     if (_table) _table.clearSelection();
     updateBulkBar(new Set());
@@ -4850,6 +4860,25 @@ async function bulkSetActiveFor(ids, activate) {
  * slug and the Origin column derives from it (utils/sourcing.js). A typed value
  * would break that derivation silently.
  */
+/** Every supplier an operator may pick: the known keys, then Unassigned. ONE list for drawer + bulk. */
+function supplierChoices() {
+  return Object.entries(SUPPLIER_LABELS).map(([value, label]) => ({ value, label }))
+    .concat([{ value: 'unknown', label: UNASSIGNED_LABEL }]);
+}
+
+/**
+ * Edit drawer: say what a supplier change risks, the moment one is made (ERR-399).
+ * Only when the value differs from what the row held — reading the warning on an
+ * untouched product is noise.
+ */
+function wireSupplierWarning(modal, original) {
+  const sel = modal.querySelector('#edit-supplier');
+  const warn = modal.querySelector('#edit-supplier-warning');
+  if (!sel || !warn) return;
+  const was = String(original ?? '').toLowerCase();
+  sel.addEventListener('change', () => { warn.hidden = sel.value.toLowerCase() === was; });
+}
+
 function sourcingFieldsHtml(formGroup, product = null) {
   const p = product || {};
   // buildSelect, not a hand-rolled list (ERR-315). Live rows also hold okin,
@@ -4857,16 +4886,19 @@ function sourcingFieldsHtml(formGroup, product = null) {
   // browser fell back to "— not recorded —" and Save sent `supplier: null`,
   // which the backend 500s ("Failed to update product"). buildSelect keeps an
   // unlisted slug selected as "(legacy)" so a save writes it back unchanged.
+  // `unknown` is listed as "Unassigned" (ERR-399) so a row that stores it reads
+  // as a choice, not as "unknown (legacy)". The '' option stays for CREATE only
+  // behaviour: a new product with nothing picked sends null, as it always has.
   const supplierSelect = buildSelect('edit-supplier',
     [{ value: '', label: '— not recorded —' }]
-      .concat(Object.entries(SUPPLIER_LABELS).map(([value, label]) => ({ value, label }))),
+      .concat(supplierChoices()),
     p.supplier);
   const packOptions = ['single'].concat(PACK_PACK_TYPES)
     .map(v => `<option value="${esc(v)}"${p.pack_type === v ? ' selected' : ''}>${esc(v.replace(/_/g, ' '))}</option>`)
     .join('');
   return `
     <div class="admin-form-row">
-      ${formGroup('Supplier', supplierSelect, 'supplier')}
+      ${formGroup('Supplier', `${supplierSelect}<p class="manual-price-override__hint" id="edit-supplier-warning" hidden>${esc(SUPPLIER_CHANGE_WARNING)}</p>`, 'supplier')}
       ${formGroup('Supplier SKU', `<input class="admin-input" id="edit-supplier-sku" value="${esc(p.supplier_sku || '')}" placeholder="their code for it">`, 'supplier_sku')}
     </div>
     <div class="admin-form-row">
@@ -5096,6 +5128,179 @@ async function bulkDelete() {
   const label = (id, sku) => sku || labelById.get(String(id)) || String(id);
 
   await runProductDelete(ids, label, { reloadAfter: true });
+}
+
+// ─── Bulk "Set supplier" (ERR-399, backend fe97a98) ──────────────────────────
+// pick → preview (dry run) → confirm → apply the SAME ids → report. The pure
+// half (contract, buckets, reconciliation) is utils/supplier-bulk.js.
+
+/** Supplier key → what the operator reads. */
+function supplierChoiceLabel(key) {
+  if (String(key || '').toLowerCase() === 'unknown') return UNASSIGNED_LABEL;
+  return supplierLabel(key) || (key ? String(key) : MISSING);
+}
+
+/**
+ * Run every chunk of one request. Stops at the first refusal, because on an
+ * APPLY the chunks before it have landed and the operator must be told exactly
+ * which — `doneIds` is the ids the payloads cover, `error` the refusal.
+ */
+async function runSupplierChunks(ids, supplier, dryRun) {
+  const payloads = [];
+  const doneIds = [];
+  for (const chunk of chunkIds(ids)) {
+    try {
+      payloads.push(await AdminAPI.bulkSetSupplier(chunk, supplier, { dryRun }));
+      doneIds.push(...chunk);
+    } catch (error) {
+      return { payloads, doneIds, error };
+    }
+  }
+  return { payloads, doneIds, error: null };
+}
+
+/** The buckets of a preview or a result, every one shown — nothing skipped silently. */
+function supplierPlanHtml(plan, { applied = false } = {}) {
+  const to = supplierChoiceLabel(plan.supplier);
+  const box = (title, inner, tint) => `
+    <div style="padding:10px 12px;border-radius:6px;background:${tint};margin-bottom:10px">
+      <div style="font-weight:600;margin-bottom:6px">${esc(title)}</div>${inner}
+    </div>`;
+  const list = (items) => `<ul style="margin:0;padding-left:18px;line-height:1.7;color:var(--text-secondary)">${items.join('')}</ul>`;
+  const parts = [];
+  if (plan.changeCount) {
+    const rows = plan.changes.map((c) => `<li><strong>${esc(c.sku || c.id || '?')}</strong> ${esc(c.name || '')}`
+      + ` — ${esc(supplierChoiceLabel(c.from))} → ${esc(supplierChoiceLabel(c.to))}</li>`);
+    parts.push(box(`${applied ? 'Changed' : 'Will change'} to ${to} (${plan.changeCount})`,
+      rows.length ? list(rows) : '', 'rgba(22,163,74,.08)'));
+  }
+  if (plan.unchangedCount) {
+    parts.push(box(`Already ${to} — left as is (${plan.unchangedCount})`, '', 'rgba(100,116,139,.10)'));
+  }
+  if (plan.refusedGenuine.length) {
+    parts.push(box(`Genuine — never changed (${plan.refusedGenuine.length})`,
+      `<p style="margin:0 0 6px;color:var(--text-secondary)">Genuine products always come from DSNZ. The server refuses to move them.</p>`
+      + list(plan.refusedGenuine.map((sku) => `<li>${esc(sku)}</li>`)), 'rgba(180,83,9,.08)'));
+  }
+  if (plan.notFoundCount) {
+    parts.push(box(`Not found (${plan.notFoundCount})`,
+      `<p style="margin:0;color:var(--text-secondary)">${esc(String(plan.notFoundCount))} selected product${plan.notFoundCount === 1 ? '' : 's'} matched nothing on the server (deleted since this page loaded?). Refresh the list.</p>`,
+      'rgba(180,83,9,.08)'));
+  }
+  if (plan.unaccounted || plan.countMismatch) {
+    parts.push(box('The server’s counts do not add up',
+      `<p style="margin:0;color:var(--text-secondary)">${plan.unaccounted
+        ? `${esc(String(plan.unaccounted))} of ${esc(String(plan.requested))} selected products are in none of the lists above. `
+        : ''}${plan.countMismatch ? 'The number it says will change differs from the products it listed. ' : ''}Refresh before relying on this.</p>`,
+      'rgba(220,38,38,.08)'));
+  }
+  if (!parts.length) parts.push('<p style="margin:0">The server reported nothing for these products.</p>');
+  return parts.join('');
+}
+
+async function bulkSetSupplier() {
+  if (!_table) return;
+  const selected = _table.getSelected();
+  if (selected.size === 0) return;
+  // Same gate as the button. Imported, never typeof-guarded (ERR-167).
+  if (!canSetSupplier(AdminAuth.role)) { Toast.error(setSupplierBlockedReason(AdminAuth.role)); return; }
+  const ids = [...selected].map(String);
+
+  const pick = Modal.open({
+    title: `Set supplier for ${ids.length} product${ids.length === 1 ? '' : 's'}`,
+    body: `
+      <label class="admin-label" for="bulk-supplier-select">New supplier</label>
+      ${buildSelect('bulk-supplier-select', supplierChoices(), 'ribbon')}
+      <p style="margin:10px 0 0;color:var(--text-secondary);line-height:1.6">Nothing changes yet. The server shows you what would change first.</p>`,
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+      <button class="admin-btn admin-btn--primary" data-action="preview">Preview</button>`,
+  });
+  if (!pick) return;
+  pick.footer.querySelector('[data-action="cancel"]')?.addEventListener('click', () => Modal.close());
+  pick.footer.querySelector('[data-action="preview"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const supplier = pick.body.querySelector('#bulk-supplier-select')?.value || '';
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    const run = await runSupplierChunks(ids, supplier, true);
+    if (run.error) {
+      Toast.error(`Could not preview: ${run.error.message}`);
+      btn.disabled = false;
+      btn.textContent = 'Preview';
+      return;
+    }
+    const plan = normaliseBulkSupplierResult(ids, run.payloads);
+    // A reply that does not say it was a preview is not one we may present as
+    // "nothing changed yet". Refuse to go further and say why.
+    if (plan.dryRun !== true) {
+      Modal.open({
+        title: 'Stopped — the server did not confirm a preview',
+        body: `<p style="margin:0 0 10px">The server’s reply did not say it was a dry run, so nothing more was sent. Refresh the list to see the products’ current suppliers.</p>${supplierPlanHtml(plan)}`,
+        footer: '<button class="admin-btn admin-btn--ghost" data-action="close">Close</button>',
+      })?.footer.querySelector('[data-action="close"]')?.addEventListener('click', () => { Modal.close(); loadProducts(); });
+      return;
+    }
+    showSupplierPlan(ids, supplier, plan);
+  });
+}
+
+function showSupplierPlan(ids, supplier, plan) {
+  const to = supplierChoiceLabel(supplier);
+  const modal = Modal.open({
+    title: plan.changeCount ? `Change ${plan.changeCount} to ${to}?` : `Nothing to change to ${to}`,
+    body: `
+      <p style="margin:0 0 12px;font-weight:600">Preview from the server — nothing has changed yet.</p>
+      ${supplierPlanHtml(plan)}
+      ${plan.changeCount ? `<div style="padding:10px 12px;border-radius:6px;border:1px solid var(--warning,#b45309);margin-top:4px">
+        <div style="font-weight:600;margin-bottom:4px;color:var(--warning,#b45309)">Before you confirm</div>
+        <p style="margin:0;line-height:1.6">${esc(SUPPLIER_CHANGE_WARNING)}</p>
+      </div>` : ''}`,
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="cancel">${plan.changeCount ? 'Cancel' : 'Close'}</button>
+      ${plan.changeCount ? `<button class="admin-btn admin-btn--primary" data-action="apply">Change ${esc(String(plan.changeCount))}</button>` : ''}`,
+  });
+  if (!modal) return;
+  modal.footer.querySelector('[data-action="cancel"]')?.addEventListener('click', () => Modal.close());
+  modal.footer.querySelector('[data-action="apply"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Changing…';
+    // The SAME ids the preview covered (handoff: "send the same request with
+    // dry_run:false"). Unchanged / genuine / missing rows are no-ops server-side.
+    const run = await runSupplierChunks(ids, supplier, false);
+    if (!run.doneIds.length) {
+      Toast.error(`Set supplier failed — nothing changed: ${run.error ? run.error.message : 'no reply'}`);
+      btn.disabled = false;
+      btn.textContent = `Change ${plan.changeCount}`;
+      return;
+    }
+    showSupplierResult(ids, run, plan, to);
+  });
+}
+
+function showSupplierResult(ids, run, plan, to) {
+  const result = normaliseBulkSupplierResult(run.doneIds, run.payloads);
+  const notSent = ids.length - run.doneIds.length;
+  const drift = result.changeCount !== plan.changeCount;
+  const clean = !run.error && result.dryRun === false && !drift && !result.unaccounted && !result.countMismatch
+    && !result.refusedGenuine.length && !result.notFoundCount;
+  if (_table) { _table.clearSelection(); updateBulkBar(new Set()); }
+  invalidateDiagCache();
+  loadProducts();
+  if (clean) {
+    Toast.success(`Supplier set to ${to} for ${result.changeCount} product${result.changeCount === 1 ? '' : 's'}${result.unchangedCount ? ` (${result.unchangedCount} already were)` : ''}.`);
+    return;
+  }
+  const notes = [];
+  if (result.dryRun !== false) notes.push('The server did not confirm the change was applied. Check the list before trying again.');
+  if (drift) notes.push(`The preview said ${plan.changeCount} would change; the server changed ${result.changeCount}. Something moved in between.`);
+  if (run.error) notes.push(`Stopped part-way: ${notSent} of ${ids.length} selected products were NOT sent (${run.error.message}). The rest landed.`);
+  Modal.open({
+    title: 'Set supplier — result',
+    body: `${notes.map((n) => `<p style="margin:0 0 10px;font-weight:600;color:var(--warning,#b45309)">${esc(n)}</p>`).join('')}${supplierPlanHtml(result, { applied: true })}`,
+    footer: '<button class="admin-btn admin-btn--ghost" data-action="close">Close</button>',
+  })?.footer.querySelector('[data-action="close"]')?.addEventListener('click', () => Modal.close());
 }
 
 /**

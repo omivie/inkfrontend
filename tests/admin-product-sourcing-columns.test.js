@@ -307,12 +307,16 @@ test('the filter <select> is built from the shared value list', () => {
   const html = S.supplierFilterOptions('augmento');
   assert.match(html, /<option value="">All Suppliers<\/option>/);
   assert.match(html, /<option value="augmento" selected>Augmento<\/option>/);
-  assert.match(html, /<option value="unknown">No supplier recorded<\/option>/);
+  assert.match(html, /<option value="ribbon">Streamline<\/option>/, 'ERR-399: ribbons are Streamline');
+  assert.match(html, /<option value="unknown">Unassigned<\/option>/, 'ERR-399: the handoff\'s label for unknown');
 });
 
 test('every filter value is a real products.supplier value', () => {
   // Live counts 2026-07-28: dsnz 3113, augmento 789, okin 18, unknown 104 = 4024.
-  assert.deepEqual(S.SUPPLIER_FILTER_VALUES, ['dsnz', 'augmento', 'okin', 'unknown']);
+  // 2026-11-26 (backend fe97a98, ERR-399), via the backend list incl. inactive:
+  // dsnz 3470, augmento 899, ribbon 96, okin 18, unknown 0. `unknown` stays: it
+  // is still the stored literal for "assigned to nobody" and Set supplier can write it.
+  assert.deepEqual(S.SUPPLIER_FILTER_VALUES, ['dsnz', 'augmento', 'ribbon', 'okin', 'unknown']);
 });
 
 // Inverted 2026-09-25 (ERR-286): /api/admin/products gained `supplier`

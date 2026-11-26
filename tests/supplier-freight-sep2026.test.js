@@ -539,7 +539,7 @@ test('ERR-395: the Products profit columns say they are before supplier freight'
   assert.match(productsSrc, /const BEFORE_FREIGHT_TIP = 'Per unit at list price, before supplier freight\./);
   assert.match(productsSrc, /key: 'profit_ex_gst', label: 'Profit \$', sortable: true, className: 'col-w-pct',\s*title: BEFORE_FREIGHT_TIP/);
   assert.match(productsSrc, /key: 'margin_pct'[\s\S]{0,140}title: BEFORE_FREIGHT_TIP/);
-  assert.match(productsSrc, /Augmento when our cost is under \$100 incl GST/);
+  assert.match(productsSrc, /Augmento and Streamline when our cost is under \$100 incl GST/);
 });
 
 test('the row NEVER says "estimated" — that state no longer exists', () => {

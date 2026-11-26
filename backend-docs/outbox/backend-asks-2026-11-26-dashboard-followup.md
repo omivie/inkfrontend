@@ -5,7 +5,7 @@ From FE. Thank you for `bc40b01` (migration 221): §1–§6 of this file are ans
 `npm run probe:backend-26nov` 26/27 and `npm run probe:supplier-freight` all green (194 Augmento consignments follow
 "billed only under $100 incl GST"; order 2026112601 now takes home $40.95). The answered sections are deleted here.
 
-**One section is not covered by your reply** — §7, which was added to this file late on 2026-11-26 (possibly after
+**§8 is new (2026-11-26, after `fe97a98`).** **One section is not covered by your reply** — §7, which was added to this file late on 2026-11-26 (possibly after
 the copy you worked from). It is resent below unchanged except for today's re-measurement.
 
 **Re-measured 2026-11-26 after `bc40b01`:** INV-3275's shadow order still has `items_count: 0`,
@@ -37,3 +37,31 @@ labour line has none, so it never becomes an order item, and its cost is never s
 `supplier_cost_excl_gst` as its cost snapshot. Alternatively, count the invoice's `cost_excl_gst` for invoice-channel
 orders. INV-3275 then counts $85.51 of cost, leaves `cogs_unknown_orders`, and stops blanking profit for August and
 every longer range. Please also check whether any other invoice has a product-less line.
+
+---
+
+## §8 `supplier_basis` carries two values the Streamline handoff does not list
+
+**Measured 2026-11-26 (GET only, 300 latest orders), after `fe97a98`.** Thank you for the Streamline move: 96 ribbon
+products hold `ribbon`, ribbon orders print "Streamline" with `supplier_basis: "product"`, and bulk-supplier previews
+match the handoff exactly (`npm run probe:supplier-streamline` 30/30, FE side ERR-399).
+
+The handoff says a consignment's `supplier_basis` is `snapshot`, `fulfillment` or (new) `product`. Live has two more:
+
+| `supplier_basis` | Consignments | Supplier | Example |
+|---|---|---|---|
+| `default` | 67 | all Augmento | 2026112602 — one line, CTN259CMY, an in-house compatible pack |
+| `source_rule` | 62 | all DSNZ | INV-3297 — one line, GTK5494KCMY, an in-house genuine pack |
+| `snapshot` | 97 | Augmento 57, DSNZ 40 | |
+| `product` | 44 | all Streamline | 2026112301 |
+| `fulfillment` | 36 | all Augmento | 20260829000001 |
+
+**Asks.**
+1. Please confirm what `default` and `source_rule` mean, and add them to the documented list. Our reading: the supplier
+   came from a rule on the product's `source` (compatible ⇒ Augmento, genuine ⇒ DSNZ), not from the product row.
+2. If that reading is right, is `default` the same rule that used to send ribbons to Augmento? An in-house pack built
+   from **ribbon** constituents would then still resolve to Augmento instead of Streamline. Please check whether any pack
+   has ribbon constituents, and if so resolve its supplier from the constituents' own `supplier`.
+
+The FE shows no basis label today, so nothing is broken on our side. `probe:supplier-streamline` fails if a sixth value
+appears.

@@ -40,6 +40,33 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-399 — Ribbons are Streamline (backend fe97a98): Streamline label, "Unassigned", bulk "Set supplier" with preview, Streamline→ribbon round-trip (backend handoff 2026-11-26) — SHIPPED (frontend)
+
+**Trigger.** Backend handoff `inbox/product-supplier-streamline-FE-handoff-nov2026.md`. Ribbon products had no supplier, so the Orders page called every ribbon order Augmento. The backend moved them to supplier key `ribbon`, named "Streamline" (freight terms the same as Augmento: free from $100 incl GST), and shipped `POST /api/admin/products/bulk-supplier`. Owner: verify and implement.
+
+**Measured live 2026-11-26 (GETs plus `dry_run:true` previews that change nothing, because the target is the supplier each row already has).**
+- `?supplier=ribbon`: 92 active + 4 inactive = **96**, as the handoff says. Every row is `ribbon` and compatible. Types: correction_tape, printer_ribbon, typewriter_ribbon. Other keys: dsnz 3,470, augmento 899, okin 18, internal 1, consumables_co_nz 2 (PostgREST; 0 through the API list), unknown **0** (104 in July).
+- Preview reply: `{dry_run, would_change:<n>, supplier, requested, not_found:<n>, unchanged:<n>, refused_genuine:[sku], products:[{id,sku,name,product_type,from,to}]}`. `unchanged` and `not_found` are COUNTS, not ids. A genuine row and a uuid that matches nothing gave `refused_genuine:["G-OKI-720-RIB-BK"]` and `not_found:1`. Bad key: 400 VALIDATION_FAILED (the server lowercases the key first). Empty list: 400. 501 ids: 400 "must contain less than or equal to 500 items".
+- Orders: ribbon lines now say "Streamline" (2026112301, 2026111702, 2026111106…), with consignment `supplier_basis:"product"` and `free_threshold_incl_gst:100`.
+- **The handoff lists three `supplier_basis` values (snapshot / fulfillment / product). Live has five.** Over 300 orders: `default` (67, all Augmento; in-house compatible packs such as 2026112602 CTN259CMY) and `source_rule` (62, all DSNZ; genuine packs such as INV-3297). The FE shows no basis label, so nothing breaks. Asked in outbox §8; the probe fails on any sixth value.
+
+**What already existed (reused, not rebuilt).** Supplier column, filter (sent to both list routes), and the drawer's Supplier select with the ERR-315 "keep a legacy slug" rule. Orders render supplier names as plain text with no colour map, so handoff §1 needed no Orders code.
+
+**Gaps found and fixed.**
+- `utils/sourcing.js`: `SUPPLIER_LABELS.ribbon = 'Streamline'`. Before this, the column title-cased the key to "Ribbon" with a "not in the known supplier list" tooltip, the drawer showed "ribbon (legacy)", and the filter had no option for it.
+- `supplierSlug("Streamline")` returned `streamline`, a slug no product holds. Its own contract is order-line NAME to products KEY. It now looks up the label first (`KEY_BY_LABEL`, built from `SUPPLIER_LABELS` so the two cannot disagree). Every label round-trips (test).
+- Stored `unknown` now reads a muted **"Unassigned"** (handoff label). A field the view never loaded keeps the loud em-dash; the two are different facts. `supplierLabel('unknown')` is still null. Filter option "No supplier recorded" became "Unassigned"; the drawer lists `unknown` as "Unassigned" instead of "(legacy)". The create form's empty option is unchanged.
+- New **bulk "Set supplier"** (Products bulk bar). Owner only: the UI knows only owner/admin, and stock_manager cannot sign in to it. Flow: pick (default Streamline), then **Preview** (dry run), then a confirm that shows every bucket — will change (SKU, name, from → to), already that supplier, **genuine refused** (SKUs), **not found**, and any count gap — plus the backend's warning text verbatim, then "Change N" (no button when N = 0). Apply re-sends the **same ids** with `dry_run:false`. Afterwards a result report: a clean run gets a toast; drift between preview and apply, a part-applied chunk, or a reply that does not confirm the write gets a modal. Pure half `utils/supplier-bulk.js`: `normaliseBulkSupplierResult` puts every id in exactly one bucket; ids in none are `unaccounted`, never "unchanged"; a reply without `dry_run` is unknown, never read as applied. `AdminAPI.bulkSetSupplier` ALWAYS sends `dry_run`, checks the key and the 1–500 range before any request, and throws on a refusal.
+- Edit drawer: changing the Supplier select shows the same import-deactivation warning under it.
+- Freight copy names Streamline beside Augmento: Products Profit $ tooltip; Dashboard net-profit step (`money-truth.js`).
+- A test caught one bug during the build: `[...].map(String).filter(Boolean)` turns a `null` id into the string `'null'`. Fixed in `chunkIds` and `bulkSetSupplier`: filter first, then stringify.
+
+**Verified.** `npm run probe:supplier-streamline` (new, READ-ONLY by construction: it only ever previews no-ops) **30/30**. `npm test` **7429 pass, 0 fail**, including new `tests/product-supplier-streamline-nov2026.test.js` (18) and updated sourcing, ERR-315, money-truth and supplier-freight pins. Browser (localhost:3000, owner login): the filter offers Streamline/Unassigned; 96 rows read "Streamline"; 2 ribbons → Streamline preview reads "Already Streamline (2)" with no apply button; 2 ribbons → Augmento preview lists both "Streamline → Augmento" with the warning (cancelled); C314LOT's drawer opens on Streamline and the warning appears only once the value changes. Only `dry_run:true` requests went out, no other admin writes were sent, and there were no page errors. Re-read after the run: both rows still `ribbon`. APP_VERSION `2026.11.26-backend-fe97a98`, `app.js?v=` restamped.
+
+**Rule.** Name to key goes through `supplierSlug`, never `.toLowerCase()`. A supplier change is previewed first and applied with the previewed ids. Probes never send `dry_run:false`.
+
+---
+
 ## ERR-397 — Backend shipped the 26 Nov follow-up (bc40b01, migration 221): Augmento $100 incl GST live, revenue-series net of refunds, exact buckets — FE caught up (owner 2026-11-26) — SHIPPED (frontend); §7 resent
 
 **Trigger.** Backend reply `inbox/backend-asks-2026-11-26-dashboard-followup-backend-response.md` to §1–§6. Owner: verify and implement everything needed.

@@ -11,6 +11,8 @@ import { INVOICE_SENT_KIND, INVOICE_SENT_MARK, isInvoiceSendEvent } from './util
 import { pgrstLike } from './utils/pgrst.js';
 import { PARTNER_TYPE, crossTypePlainCodes, plainCandidateCodes } from './utils/catalogue-pathway.js';
 import { TOP_PRODUCTS_MAX_LIMIT, normalizeRows } from './utils/best-sellers.js';
+import { SUPPLIER_KEY_RE } from './utils/sourcing.js';
+import { MAX_IDS_PER_CALL as SUPPLIER_BULK_MAX } from './utils/supplier-bulk.js';
 
 // The carrier registry (GET /api/admin/shipping/carriers) is a constant per
 // deploy — names, number labels, whether a product code is required, whether the
@@ -1990,6 +1992,25 @@ const AdminAPI = {
     // empty result that reads like "you selected nothing".
     if (!anySucceeded && firstError) throw firstError;
     return merged;
+  },
+
+  /**
+   * ONE bulk-supplier call (ERR-399; contract in utils/supplier-bulk.js).
+   * `dry_run` is ALWAYS sent: the server previews when it is missing, and a
+   * caller must never be one forgotten flag away from a write — or from a
+   * preview it believes was applied. Only `{ dryRun: false }` applies.
+   * The caller chunks (≤ MAX_IDS_PER_CALL) so a part-applied run can say which
+   * chunk landed. Returns the response `data`; throws on any refusal.
+   */
+  async bulkSetSupplier(productIds, supplier, { dryRun = true } = {}) {
+    const ids = [...new Set((productIds || []).filter((v) => v != null && v !== '').map(String))];
+    const key = String(supplier || '');
+    if (!SUPPLIER_KEY_RE.test(key)) throw new Error(`"${key}" is not a supplier key (lowercase letters, digits, _).`);
+    if (!ids.length || ids.length > SUPPLIER_BULK_MAX) throw new Error(`Send 1 to ${SUPPLIER_BULK_MAX} products per request (got ${ids.length}).`);
+    const resp = await window.API.post('/api/admin/products/bulk-supplier',
+      { product_ids: ids, supplier: key, dry_run: dryRun !== false });
+    if (!resp || resp.ok === false) throw productWriteError(resp, 'Set supplier failed');
+    return resp.data ?? null;
   },
 
   async deleteProductImage(productId, imageId) {

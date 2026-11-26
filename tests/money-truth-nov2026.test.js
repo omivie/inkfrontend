@@ -154,7 +154,7 @@ test('ERR-395: the freight row names no threshold figure, so it cannot go stale 
   const { figures: f } = M.dashboardMoney(norm(F.dsum_oct));
   const freight = f.netProfit.inputs.find((i) => /Supplier freight/.test(i.label));
   assert.ok(freight);
-  assert.match(freight.label, /Augmento only when our cost is under its free-shipping threshold/);
+  assert.match(freight.label, /Augmento and Streamline only when our cost is under their free-shipping threshold/);
   assert.doesNotMatch(freight.label, /\$100|ex GST of goods/);
 });
 

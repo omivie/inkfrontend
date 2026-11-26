@@ -19,7 +19,7 @@
  * not compute.
  *
  * PRODUCTS: there is no product-level `origin` column. `products` carries
- * `supplier` (a slug: dsnz / augmento / okin / unknown), `supplier_sku` (the
+ * `supplier` (a slug: dsnz / augmento / ribbon / okin / unknown), `supplier_sku` (the
  * supplier's own code for that SKU, or null) and `pack_type`
  * (single / value_pack / multipack). `productOrigin()` below DERIVES the origin
  * from those two real columns. That derivation is a frontend inference of a fact
@@ -100,17 +100,43 @@ export function supplierCell(item) {
  * casings are the ones we have actually seen rendered — so they are pinned here
  * rather than guessed from a rule.
  *
- * `unknown` (104 products) is NOT a supplier: it is the absence of one. It
- * returns null so the caller renders the em-dash instead of printing the word
- * "unknown", which would read as a real answer.
+ * `unknown` (104 products in Jul 2026; 0 since the 2026-11-26 reassignment) is
+ * NOT a supplier: it is the absence of one. It returns null so no caller prints
+ * the word "unknown" as if it were a supplier's name; the Products cell shows
+ * UNASSIGNED_LABEL for it instead.
  */
 export const SUPPLIER_LABELS = {
   dsnz: 'DSNZ',
   augmento: 'Augmento',
+  // Backend fe97a98 (2026-11-26, ERR-399): the ribbon supplier. The KEY is
+  // `ribbon`, the NAME order lines and freight consignments print is
+  // "Streamline" — the only supplier whose key is not its lowercased name, which
+  // is why supplierSlug() reverse-looks-up this map before lowercasing.
+  ribbon: 'Streamline',
 };
+
+/**
+ * What the stored literal `unknown` is called on screen (backend handoff
+ * 2026-11-26). It is still NOT a supplier — supplierLabel('unknown') stays null —
+ * but a row that stores it was ASSIGNED "nobody", which is a different fact from
+ * a row whose supplier field was never loaded. The first reads "Unassigned"; the
+ * second keeps the loud em-dash.
+ */
+export const UNASSIGNED_LABEL = 'Unassigned';
+
+/**
+ * The backend's own rule for a `products.supplier` key (bulk-supplier validator,
+ * measured 2026-11-26: `"bad-key" fails to match the required pattern
+ * /^[a-z0-9_]+$/`). Checked client-side so a bad key is refused before a request.
+ */
+export const SUPPLIER_KEY_RE = /^[a-z0-9_]+$/;
 
 /** Slugs that mean "we don't know", not "a supplier called this". */
 const NO_SUPPLIER = new Set(['unknown', 'none', 'n/a', 'na']);
+
+/** Display name -> key, built from SUPPLIER_LABELS so the two can never disagree. */
+const KEY_BY_LABEL = Object.freeze(Object.fromEntries(
+  Object.entries(SUPPLIER_LABELS).map(([key, label]) => [label.toLowerCase(), key])));
 
 /**
  * The inverse of supplierLabel(): a supplier as an ORDER LINE spells it
@@ -124,6 +150,11 @@ const NO_SUPPLIER = new Set(['unknown', 'none', 'n/a', 'na']);
  * 2026-09-09: exactly two names appear across 86 live order lines, "DSNZ" and
  * "Augmento", and both round-trip through here.
  *
+ * A KNOWN display name is reverse-looked-up first: since backend fe97a98
+ * (2026-11-26) ribbon lines print "Streamline" while the product row stores
+ * `ribbon`, so lowercasing alone would invent a slug ("streamline") that no
+ * product holds. Anything else is lowercased as before.
+ *
  * `unknown`/`none`/`n/a` are the ABSENCE of a supplier, not a supplier, so they
  * return null — the same rule supplierLabel() applies, from the same set.
  *
@@ -133,7 +164,7 @@ export function supplierSlug(nameOrSlug) {
   if (nameOrSlug == null) return null;
   const raw = String(nameOrSlug).trim().toLowerCase();
   if (!raw || NO_SUPPLIER.has(raw)) return null;
-  return raw;
+  return KEY_BY_LABEL[raw] || raw;
 }
 
 /**
@@ -154,6 +185,11 @@ export function supplierLabel(slug) {
 /** Cell for the Products-page Supplier column. Not recorded -> loud em-dash. */
 export function productSupplierCell(product) {
   const raw = product && product.supplier != null ? String(product.supplier).trim() : '';
+  // Stored `unknown` = assigned to nobody (a real answer, muted). Absent/empty =
+  // this view did not load the field (no answer, em-dash). Never the same cell.
+  if (raw.toLowerCase() === 'unknown') {
+    return `<span class="admin-text-muted" title="No supplier assigned (stored as &quot;unknown&quot;).">${UNASSIGNED_LABEL}</span>`;
+  }
   const label = supplierLabel(raw);
   if (!label) {
     return `<span class="admin-text-muted" title="No supplier recorded for this product.">${MISSING}</span>`;
@@ -177,13 +213,13 @@ export function productSupplierCell(product) {
  * Every row has a supplier: 'unknown' is a stored literal, not NULL, so it is
  * selected with the same .eq() as any other value.
  */
-export const SUPPLIER_FILTER_VALUES = ['dsnz', 'augmento', 'okin', 'unknown'];
+export const SUPPLIER_FILTER_VALUES = ['dsnz', 'augmento', 'ribbon', 'okin', 'unknown'];
 
 /** Build the <option> list for the Supplier filter, marking `selected`. */
 export function supplierFilterOptions(selected = '') {
   const opts = [`<option value="">All Suppliers</option>`];
   for (const value of SUPPLIER_FILTER_VALUES) {
-    const label = supplierLabel(value) || 'No supplier recorded';
+    const label = supplierLabel(value) || UNASSIGNED_LABEL;
     const sel = value === selected ? ' selected' : '';
     opts.push(`<option value="${escAttr(value)}"${sel}>${esc(label)}</option>`);
   }

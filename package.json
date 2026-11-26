@@ -29,6 +29,7 @@
     "probe:catalogue-pathway": "node scripts/probe-catalogue-pathway.mjs",
     "probe:lookalike": "node scripts/probe-lookalike-rows.mjs",
     "probe:supplier-freight": "node scripts/probe-supplier-freight.mjs",
+    "probe:supplier-streamline": "node scripts/probe-product-supplier-streamline.mjs",
     "probe:supplier-prices": "node scripts/probe-supplier-prices.mjs",
     "probe:ribbon-brands": "node scripts/probe-ribbon-brands.mjs",
     "probe:listing-phone-sweep": "node scripts/probe-listing-phone-sweep.mjs",
