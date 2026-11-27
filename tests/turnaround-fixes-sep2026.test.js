@@ -604,13 +604,38 @@ test('§12 /quote is linked from the PDP ladder and /bulk-pricing (turnaround do
     assert.match(read('html/bulk-pricing.html'), /<a href="\/quote">Get a business quote<\/a>/);
 });
 
-test('§12 sign-in and register show the LIVE rewards facts, hidden until value-props lands (#15)', () => {
+test('§12 sign-in and register carry NO rewards box (owner 2026-11-26, ERR-398; reverses #15)', () => {
+    // The owner removed the "Earn 1 point for every $1…" box from /account/login so
+    // the sign-in card fits one screen. The /account/loyalty page keeps the facts.
     const html = read('html/account/login.html');
-    const lines = html.match(/<p class="auth-form__points" data-value-prop-scope hidden>.*?<\/p>/g) || [];
-    assert.equal(lines.length, 2, 'one under each tab heading');
-    for (const l of lines) {
-        assert.match(l, /data-value-prop="loyalty\.headline"/);
-        assert.match(l, /data-value-prop="loyalty\.detail"/);
-        assert.ok(!/\d/.test(l.replace(/<[^>]+>/g, '')), 'no number is hard-coded');
+    assert.ok(!/auth-form__points|data-value-prop/.test(html), 'rewards box is gone from both tabs');
+    const css = read('css/pages.css');
+    assert.ok(!/\.auth-form__points\s*\{/.test(css), 'its CSS rule is gone too');
+    // Split screen: the ink photo (desktop + phone) framed as a print proof on
+    // the left, the form alone on the right (ERR-398). Every auth page carries it.
+    const auth = css.slice(css.indexOf('AUTH PAGES'), css.indexOf('.auth-panel[hidden]'));
+    assert.match(auth, /url\('\/assets\/images\/auth-ink\.webp'\)/);
+    assert.match(auth, /url\('\/assets\/images\/auth-ink-phone\.webp'\)/);
+    for (const f of ['assets/images/auth-ink.webp', 'assets/images/auth-ink-phone.webp']) {
+        assert.ok(fs.existsSync(path.join(ROOT, f)), f + ' exists');
     }
+    for (const page of ['html/account/login.html', 'html/account/forgot-password.html', 'html/account/reset-password.html']) {
+        assert.match(read(page), /<div class="auth-art" aria-hidden="true">/, page + ' has the photo panel');
+    }
+    // No CMYK swatch row on the photo (owner 2026-11-26).
+    assert.ok(!/auth-art__swatches/.test(css), 'swatch CSS gone');
+    // Create account fits one screen: fields pair up, labels float inside the box.
+    const login = read('html/account/login.html');
+    const reg = login.slice(login.indexOf('id="register-form"'), login.indexOf('</form>', login.indexOf('id="register-form"')));
+    assert.equal((reg.match(/form-row form-row--two-col/g) || []).length, 3, 'name, email|phone, password|confirm');
+    for (const page of ['html/account/login.html', 'html/account/forgot-password.html', 'html/account/reset-password.html']) {
+        const inputs = read(page).match(/<input type="(?:email|password|text|tel)"[^>]*class="form-input"[^>]*>/g) || [];
+        assert.ok(inputs.length > 0, page);
+        for (const i of inputs) assert.match(i, /placeholder=" "/, page + ': floating label needs placeholder=" " — ' + i.slice(0, 60));
+    }
+    assert.match(auth, /\.auth-page \.form-group:has\(\.form-input:placeholder-shown:not\(:focus\)\) > \.form-label/);
+    // The submit labels JS restores after a failed attempt match the markup.
+    assert.match(read('js/login-page.js'), /textContent = 'Sign in'/);
+    assert.match(read('js/login-page.js'), /textContent = 'Create account'/);
+    assert.ok(!/textContent = '(Sign In|Create Account)'/.test(read('js/login-page.js')), 'no Title Case reset left');
 });

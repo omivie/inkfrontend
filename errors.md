@@ -40,6 +40,23 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-401 — An admin opening the admin-only test product got the product but no Availability row and no Add button, so it could not be bought — **FIXED (frontend)** (2026-11-28)
+
+**Reported.** Owner, signed in as admin, opened `/products/admin-test-product/TEST-ADMIN-001`. The first view was "Product not found". On the next view the product showed ($0.50, SKU `TEST-ADMIN-001`), but the AVAILABILITY row was blank and there was no quantity selector or Add button.
+
+**Measured (live, Playwright as the super_admin, READ-ONLY: never clicked Add).**
+- Mirror `GET /api/admin/catalog/products/TEST-ADMIN-001` = 200, `in_stock:true`, `stock_quantity:100`, `stock_status:in_stock`, `retail_price:0.5`, `admin_only:true`. Public `/api/products/TEST-ADMIN-001` = 404. The data was fine.
+- In the page: `AdminPreview.state` = `granted`, `#add-to-cart-btn` existed, and the in-stock markup was in `#product-stock`. But `#product-stock` and `.product-info__actions` both carried `hidden`.
+
+**Cause.** An admin's first PDP load goes to the public route, because admin preview is never awaited before first paint (ERR-124). The public 404 calls `showError()`, which hides `.product-info__gst`, `#product-stock`, `.product-info__actions` and `#product-terms`. When `admin-preview:ready` fires, `_armAdminPreviewRetry` runs `init()` again. That render fills every part but never removes the `hidden` that `showError()` set. So every admin-only product was view-only for admins since ERR-234.
+
+**Fix.** `_armAdminPreviewRetry` (product-detail-page.js) un-hides exactly those four parts before it calls `init()`. `#product-promise` is left alone: `renderPromise` sets its own `hidden`.
+
+**Verified.** localhost:3000 against the live API, admin signed in: with the fix, `#product-stock` and `.product-info__actions` have no `hidden`. Negative control (fix stashed, same run): both `hidden`. Test `admin-only-test-product-sep2026` §3b reads the selectors `showError()` hides and fails if the retry misses one; red with the fix reverted (44 pass, 1 fail), green with it (45/45).
+
+**Not checked.** A real add to cart and checkout of the test product. The owner does that by hand.
+
+---
 ## ERR-400 — Crawlers shared ONE 30/min prerender bucket and got the 200 shell past it; trailing slash 404; logos without size (backend SEO handoff 2026-11-26) — SHIPPED (frontend) P0 + P2 + item 32; P1 on Preview only
 
 **Seen (backend, measured 2026-11-26).** The backend limits `/api/prerender/*` to 30 requests per minute per IP. The middleware fetched every bot page from a few Vercel egress IPs, so Googlebot, Bingbot and every AI crawler shared ONE bucket. The backend answered 429 once it was empty. `if (!response.ok) return;` then served the SPA shell with a **200**: an empty canonical and no content, which Google reads as a Soft 404. Their burst of 40: 30 prerendered, then 10 shells. Other problems found in the same check:
@@ -109,6 +126,60 @@ describing the same incident.
 **Verified.** `npm run probe:supplier-streamline` (new, READ-ONLY by construction: it only ever previews no-ops) **30/30**. `npm test` **7429 pass, 0 fail**, including new `tests/product-supplier-streamline-nov2026.test.js` (18) and updated sourcing, ERR-315, money-truth and supplier-freight pins. Browser (localhost:3000, owner login): the filter offers Streamline/Unassigned; 96 rows read "Streamline"; 2 ribbons → Streamline preview reads "Already Streamline (2)" with no apply button; 2 ribbons → Augmento preview lists both "Streamline → Augmento" with the warning (cancelled); C314LOT's drawer opens on Streamline and the warning appears only once the value changes. Only `dry_run:true` requests went out, no other admin writes were sent, and there were no page errors. Re-read after the run: both rows still `ribbon`. APP_VERSION `2026.11.26-backend-fe97a98`, `app.js?v=` restamped.
 
 **Rule.** Name to key goes through `supplierSlug`, never `.toLowerCase()`. A supplier change is previewed first and applied with the previewed ids. Probes never send `dry_run:false`.
+
+---
+
+## ERR-398 — Sign-in page redesigned as a split screen (ink photo | form); rewards box removed; fits one screen (owner 2026-11-26) — SHIPPED (frontend)
+
+**Trigger.** Owner screenshot of `/account/login` at about 1500x830. The "Earn 1 point for every $1 you spend…" box pushed the form below the fold, so the page needed a scroll. The owner asked to remove that box and make everything fit without scrolling. Four design rounds followed:
+1. The owner's ink-in-water photo full-bleed behind a card.
+2. A 4px, then 16px, dark blue frame round the card.
+3. The landing page in miniature: hero cartridge photo band, blue band, CMYK strip. The owner called it "tacky".
+4. "Modern, ergonomic, spacious, elegant". Images allowed; split the page if wanted. This gave a split screen: the ink photo framed as a print proof on the left, the form on the right.
+5. "Remove the image on the left and place the login in the centre."
+6. "Switch it back to having the image." Round 4 (split screen) was restored.
+7. "Remove the four squares" (the CMYK swatch row), and make both Sign in and Create account fit without scrolling. This round is final. find-skills found frontend-design (already installed); it was used for the plan.
+
+**Changes (final).**
+- `html/account/login.html`: both `.auth-form__points` boxes deleted, and so is the rule in `pages.css`. This reverses turnaround doc #15 (ERR-296) for sign-in only. `/account/loyalty` keeps the rewards facts.
+- `.auth-page` (login, forgot-password, reset-password) is a split screen. Columns are `1.1fr | 1fr`.
+  - **Left `.auth-art` (markup on all three pages, `aria-hidden`):** the owner's Unsplash ink photo, `auth-ink.webp` (2200px, 117 KB; below 900px `auth-ink-phone.webp`, 1000px, 41 KB). It is framed like a print proof: white crop marks and one caption. The four-square CMYK strip was removed at the owner's request. Caption: "Ink and toner for New Zealand printers." / "NZ owned & operated since 2008", the second line as on the landing hero. The panel is sticky and one screen tall, so on the long Create account form the photo and caption stay in view.
+  - **Right:** the form alone on white, with no card, shadow or frame. Max 456px, left-aligned.
+  - The Sign in / Create account tabs are a segmented control.
+  - Labels are sentence case and not all caps (scoped to `.auth-page`).
+  - **Floating labels** (the checkout pattern, cart-checkout.css): the label sits inside the 52px box and shrinks to its top edge once the field is focused or filled. Every input carries `placeholder=" "` so `:placeholder-shown` can tell; the forgot page's "you@example.com" placeholder was dropped. Without `:has()` support the label stays small at the top. Labels stay on one line and stop before the show-password eye.
+  - **Create account fields pair up:** First | Last, Email | Phone, Password | Confirm. On mouse screens (`pointer: fine`) the consent rows drop the 44px touch minimum to 28px; touch keeps 44px. Below 640px the pairs stack.
+  - The column is max 500px (it was 456px) so the half-width labels fit. Buttons are 52px with a soft cyan focus ring.
+  - The "Don't have an account? Create one" line is hidden on login and register, because the segmented control does the same job. Forgot/reset keep their "Sign in" link.
+  - **Below 900px:** the photo becomes a 150 to 240px band, and the form is a white sheet with 24px rounded top corners that overlaps it by 24px.
+- **Copy is sentence case:** tabs, headings ("Welcome back", "Create an account", "Reset your password", "Set a new password"), labels and buttons. The JS that restores button text after a failed attempt was changed to match: `login-page.js` 'Sign in' / 'Create account', `forgot-password-page.js` 'Send reset link', `reset-password-page.js` 'Update password'. Their `?v=` tokens were restamped.
+- **Kept from earlier rounds:** a checkbox label stays beside its box (it wrapped under the box at HEAD). On the remember-me row the box and label never split.
+- **Removed from earlier rounds:** the grain, the blue frame, the hero-photo band, the blue gradient, the CMYK card strip, and `auth-background*.webp` (never committed).
+
+**Measured (local, Playwright).** Bottom of each form vs viewport height:
+
+| Viewport | Sign in | Create account |
+|---|---|---|
+| 1500x830 | 728 / 830 | 783 / 830 |
+| 1440x900 | 762 / 900 | 818 / 900 |
+| 1366x768 | 696 / 768 | 752 / 768 |
+| 1280x720 | 22px past the bottom | 23px past the bottom |
+
+On phones both forms scroll under the photo band. On a first visit the 45px consent bar covers the last row until it is dismissed.
+
+**Guard.** `tests/turnaround-fixes-sep2026.test.js` §12 asserts:
+- the rewards box is gone;
+- the auth block uses `auth-ink(-phone).webp` and both files exist;
+- all three pages carry `.auth-art`;
+- no swatch CSS remains;
+- the register form has 3 two-column rows;
+- every text-type input carries `placeholder=" "`;
+- the floating-label rule exists;
+- the JS restore labels are sentence case.
+
+`probe:turnaround-fixes` has a static check, plus `--browser` §B5 (READ-ONLY), which checks for no box and that the Sign in AND Create account forms end inside the viewport at 1440x900 and 1366x768. Localhost passes; live fails until deploy (negative control). The `?v=` token was restamped by hand: `pages.css` in 51 HTML files, plus the three page scripts.
+
+**Not this change.** `probe:turnaround-fixes --browser` §B4 "Filter & Sort leaves the screen on a downward scroll" is red at HEAD too, on /shop. It was green on one HEAD run and red on the next, so it is flaky. It is not investigated here.
 
 ---
 

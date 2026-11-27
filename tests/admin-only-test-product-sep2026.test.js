@@ -223,6 +223,27 @@ test('§3 every catalogue transport routes through _catalogRoute (ERR-150/160)',
     'search.js fetchSmart is the highest-volume search surface and must route itself');
 });
 
+test('§3b ERR-401: the admin retry un-hides every buy-box part showError() hid', () => {
+  // The public 404 runs showError() first, which hides the buy box. The retry
+  // then rendered the product with no Availability row and no Add button, so
+  // the owner could not buy the test product. Measured live 2026-11-28.
+  const code = codeOnly(PDP_SRC);
+  const errAt = code.indexOf('showError(message) {');
+  assert.ok(errAt >= 0, 'showError must exist');
+  const errBody = code.slice(errAt, code.indexOf('product-error', errAt));
+  const hidden = [
+    ...[...errBody.matchAll(/querySelector\('([^']+)'\)\.hidden = true/g)].map((m) => m[1]),
+    ...[...errBody.matchAll(/getElementById\('([^']+)'\)\.hidden = true/g)].map((m) => '#' + m[1]),
+    ...[...errBody.matchAll(/getElementById\('([^']+)'\);\s*if \(\w+\) \w+\.hidden = true/g)].map((m) => '#' + m[1]),
+  ].filter((s) => s !== '#product-promise'); // renderPromise owns its own hidden
+  assert.ok(hidden.length >= 4, `parser found too few hidden parts: ${hidden}`);
+  const retryAt = code.indexOf('this._adminRetried = true;');
+  const retry = code.slice(retryAt, code.indexOf('this.init();', retryAt));
+  for (const sel of hidden) {
+    assert.ok(retry.includes(`'${sel}'`), `admin retry must un-hide ${sel} before init()`);
+  }
+});
+
 test('§3 the PDP and the shop grid repaint when admin preview arrives', () => {
   // Admin preview resolves over the network and is never awaited before first
   // paint, so an admin's FIRST render is the public one. Without a repaint the

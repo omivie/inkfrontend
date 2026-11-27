@@ -50,7 +50,7 @@
                             showError(error.message || 'Failed to send reset email. Please try again.');
                         }
                         submitBtn.disabled = false;
-                        submitBtn.textContent = 'Send Reset Link';
+                        submitBtn.textContent = 'Send reset link';
                     } else {
                         // Show success state
                         wrapper.innerHTML = `
@@ -79,7 +79,7 @@
                     DebugLog.error('Reset password error:', err);
                     showError('An error occurred. Please try again.');
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Send Reset Link';
+                    submitBtn.textContent = 'Send reset link';
                 }
             });
         });

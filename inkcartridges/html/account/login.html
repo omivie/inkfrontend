@@ -25,7 +25,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=f41e4f45">
     <link rel="stylesheet" href="/css/components.css?v=3c6ee8b9">
     <link rel="stylesheet" href="/css/modern-effects.css?v=9a8a4cf9">
-    <link rel="stylesheet" href="/css/pages.css?v=0cdd97bc">
+    <link rel="stylesheet" href="/css/pages.css?v=9f4c9aad">
     <link rel="stylesheet" href="/css/search.css?v=b65b9a06">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Login | InkCartridges.co.nz">
@@ -54,38 +54,41 @@
 
     <main id="main-content" class="site-main">
         <section class="auth-page">
+            <!-- Photo half of the split (owner 2026-11-26, ERR-398): the ink photo
+                 framed like a print proof. Decorative, so hidden from screen readers. -->
+            <div class="auth-art" aria-hidden="true">
+                <span class="auth-art__marks"></span>
+                <div class="auth-art__caption">
+                    <p class="auth-art__title">Ink and toner for New Zealand printers.</p>
+                    <p class="auth-art__note">NZ owned &amp; operated since 2008</p>
+                </div>
+            </div>
             <div class="container container--narrow">
 
                 <div class="auth-tabs" role="tablist">
                     <button role="tab" aria-selected="true" aria-controls="login-panel" id="login-tab" class="auth-tabs__tab auth-tabs__tab--active">
-                        Login
+                        Sign in
                     </button>
                     <button role="tab" aria-selected="false" aria-controls="register-panel" id="register-tab" class="auth-tabs__tab">
-                        Create Account
+                        Create account
                     </button>
                 </div>
 
                 <div role="tabpanel" id="login-panel" aria-labelledby="login-tab" class="auth-panel auth-panel--active">
                     <div class="auth-form-wrapper">
-                        <h1 class="auth-form__heading">Welcome Back</h1>
+                        <h1 class="auth-form__heading">Welcome back</h1>
                         <p class="auth-form__subheading">Sign in to access your account, track orders, and checkout faster.</p>
-                        <!-- Rewards facts from GET /api/site/value-props (ERR-296, turnaround
-                             doc #15), never hard-coded: loyalty.detail carries the welcome
-                             points and "checked out as a guest? … same email". Ships hidden;
-                             ValueProps.bindAll (utils.js) reveals it only when the fetch lands
-                             and the programme is active. -->
-                        <p class="auth-form__points" data-value-prop-scope hidden><strong data-value-prop="loyalty.headline"></strong>. <span data-value-prop="loyalty.detail"></span></p>
 
                         <form class="auth-form" id="login-form" novalidate>
                             <div class="form-group">
-                                <label for="login-email" class="form-label">Email Address</label>
-                                <input type="email" id="login-email" name="email" class="form-input" required autocomplete="email">
+                                <label for="login-email" class="form-label">Email address</label>
+                                <input type="email" id="login-email" name="email" class="form-input" placeholder=" " required autocomplete="email">
                             </div>
 
                             <div class="form-group">
                                 <label for="login-password" class="form-label">Password</label>
                                 <div class="password-input-wrapper">
-                                    <input type="password" id="login-password" name="password" class="form-input" required autocomplete="current-password">
+                                    <input type="password" id="login-password" name="password" class="form-input" placeholder=" " required autocomplete="current-password">
                                     <button type="button" class="password-toggle" aria-label="Show password">
                                         <svg class="password-toggle__show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
@@ -113,7 +116,7 @@
                             </div>
 
                             <button type="submit" class="btn btn--primary btn--large btn--full-width">
-                                Sign In
+                                Sign in
                             </button>
                         </form>
 
@@ -150,78 +153,76 @@
 
                 <div role="tabpanel" id="register-panel" aria-labelledby="register-tab" class="auth-panel" hidden>
                     <div class="auth-form-wrapper">
-                        <h1 class="auth-form__heading">Create Account</h1>
+                        <h1 class="auth-form__heading">Create an account</h1>
                         <p class="auth-form__subheading">Join us to track orders, save addresses, and get new-product updates.</p>
-                        <!-- Rewards facts from GET /api/site/value-props (ERR-296, turnaround
-                             doc #15), never hard-coded: loyalty.detail carries the welcome
-                             points and "checked out as a guest? … same email". Ships hidden;
-                             ValueProps.bindAll (utils.js) reveals it only when the fetch lands
-                             and the programme is active. -->
-                        <p class="auth-form__points" data-value-prop-scope hidden><strong data-value-prop="loyalty.headline"></strong>. <span data-value-prop="loyalty.detail"></span></p>
 
                         <form class="auth-form" id="register-form" novalidate>
                             <div class="form-row form-row--two-col">
                                 <div class="form-group">
-                                    <label for="register-first-name" class="form-label">First Name</label>
-                                    <input type="text" id="register-first-name" name="firstName" class="form-input" required autocomplete="given-name">
+                                    <label for="register-first-name" class="form-label">First name</label>
+                                    <input type="text" id="register-first-name" name="firstName" class="form-input" placeholder=" " required autocomplete="given-name">
                                     <span id="first-name-error" class="form-error" hidden>Please enter your first name.</span>
                                 </div>
                                 <div class="form-group">
-                                    <label for="register-last-name" class="form-label">Last Name</label>
-                                    <input type="text" id="register-last-name" name="lastName" class="form-input" required autocomplete="family-name">
+                                    <label for="register-last-name" class="form-label">Last name</label>
+                                    <input type="text" id="register-last-name" name="lastName" class="form-input" placeholder=" " required autocomplete="family-name">
                                     <span id="last-name-error" class="form-error" hidden>Please enter your last name.</span>
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label for="register-email" class="form-label">Email Address</label>
-                                <input type="email" id="register-email" name="email" class="form-input" required autocomplete="email">
-                                <span id="email-error" class="form-error" hidden>Please enter a valid email address.</span>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="register-phone" class="form-label">Phone Number <span class="form-label__optional">(optional)</span></label>
-                                <input type="tel" id="register-phone" name="phone" class="form-input" autocomplete="tel">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="register-password" class="form-label">Password</label>
-                                <div class="password-input-wrapper">
-                                    <input type="password" id="register-password" name="password" class="form-input" required autocomplete="new-password" minlength="8">
-                                    <button type="button" class="password-toggle" aria-label="Show password">
-                                        <svg class="password-toggle__show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                            <circle cx="12" cy="12" r="3"/>
-                                        </svg>
-                                        <svg class="password-toggle__hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                                            <line x1="1" y1="1" x2="23" y2="23"/>
-                                            <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
-                                        </svg>
-                                    </button>
+                            <div class="form-row form-row--two-col">
+                                <div class="form-group">
+                                    <label for="register-email" class="form-label">Email address</label>
+                                    <input type="email" id="register-email" name="email" class="form-input" placeholder=" " required autocomplete="email">
+                                    <span id="email-error" class="form-error" hidden>Please enter a valid email address.</span>
                                 </div>
-                                <span class="form-hint">At least 8 characters</span>
+
+                                <div class="form-group">
+                                    <label for="register-phone" class="form-label">Phone number <span class="form-label__optional">(optional)</span></label>
+                                    <input type="tel" id="register-phone" name="phone" class="form-input" placeholder=" " autocomplete="tel">
+                                </div>
                             </div>
 
-                            <div class="form-group">
-                                <label for="register-confirm-password" class="form-label">Confirm Password</label>
-                                <div class="password-input-wrapper">
-                                    <input type="password" id="register-confirm-password" name="confirmPassword" class="form-input" required autocomplete="new-password">
-                                    <button type="button" class="password-toggle" aria-label="Show password">
-                                        <svg class="password-toggle__show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                            <circle cx="12" cy="12" r="3"/>
-                                        </svg>
-                                        <svg class="password-toggle__hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                                            <line x1="1" y1="1" x2="23" y2="23"/>
-                                            <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
-                                        </svg>
-                                    </button>
+                            <div class="form-row form-row--two-col">
+                                <div class="form-group">
+                                    <label for="register-password" class="form-label">Password</label>
+                                    <div class="password-input-wrapper">
+                                        <input type="password" id="register-password" name="password" class="form-input" placeholder=" " required autocomplete="new-password" minlength="8">
+                                        <button type="button" class="password-toggle" aria-label="Show password">
+                                            <svg class="password-toggle__show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                <circle cx="12" cy="12" r="3"/>
+                                            </svg>
+                                            <svg class="password-toggle__hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                                <line x1="1" y1="1" x2="23" y2="23"/>
+                                                <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <span class="form-hint">At least 8 characters</span>
                                 </div>
-                                <span id="password-error" class="form-error" hidden>Please enter a password.</span>
+
+                                <div class="form-group">
+                                    <label for="register-confirm-password" class="form-label">Confirm password</label>
+                                    <div class="password-input-wrapper">
+                                        <input type="password" id="register-confirm-password" name="confirmPassword" class="form-input" placeholder=" " required autocomplete="new-password">
+                                        <button type="button" class="password-toggle" aria-label="Show password">
+                                            <svg class="password-toggle__show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                <circle cx="12" cy="12" r="3"/>
+                                            </svg>
+                                            <svg class="password-toggle__hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                                <line x1="1" y1="1" x2="23" y2="23"/>
+                                                <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <span id="password-error" class="form-error" hidden>Please enter a password.</span>
+                                </div>
                             </div>
 
                             <div class="form-group form-group--checkbox">
@@ -240,7 +241,7 @@
                             </div>
 
                             <button type="submit" class="btn btn--primary btn--large btn--full-width">
-                                Create Account
+                                Create account
                             </button>
                         </form>
 
@@ -296,7 +297,7 @@
     <script defer src="/js/legal-config.js?v=51bcb348"></script>
     <script defer src="/js/footer.js?v=0d5c3db4"></script>
     <script defer src="/js/modern-effects.js?v=2a4368fc"></script>
-    <script defer src="/js/login-page.js?v=110fec91"></script>
+    <script defer src="/js/login-page.js?v=75e1f3a6"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=fcfda757"></script>
 </body>

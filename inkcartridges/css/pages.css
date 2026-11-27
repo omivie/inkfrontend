@@ -6109,83 +6109,251 @@ a.account-review-card__product:focus-visible {
    AUTH PAGES (Login/Register)
    ========================================================================== */
 
+/* Sign-in / create account / forgot / reset (owner 2026-11-26, ERR-398).
+   Split screen under the minimal header: LEFT = the ink photo framed like a
+   print proof (crop marks, CMYK swatches, one quiet caption); RIGHT = open
+   white with the form alone — no card, no frame. Fills one screen
+   (measured header: 91px >=1100, 82px 768-1099, 64px <768; a wrong number
+   only moves the footer's top edge, never hides the form). Below 900px the
+   photo becomes a band and the form slides over it as a sheet. */
 .auth-page {
-    padding: var(--spacing-3xl) 0;
-    background-color: var(--steel-900);
-    min-height: calc(100vh - 200px);
-    display: flex;
-    align-items: center;
-    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    min-height: calc(100vh - 91px);
+    min-height: calc(100svh - 91px);
+    background: var(--white-primary, #fff);
+}
+@media (max-width: 1099px) {
+    .auth-page { min-height: calc(100svh - 82px); }
+    .auth-art { height: calc(100svh - 82px); }
 }
 
-/* Halftone dot pattern overlay */
-.auth-page::before {
+.auth-art {
+    /* Sticky + one screen tall: on the long Create account form the photo
+       and its caption stay in view while the form scrolls. */
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: calc(100vh - 91px);
+    height: calc(100svh - 91px);
+    overflow: hidden;
+    background: #3B3A46 url('/assets/images/auth-ink.webp') center / cover no-repeat;
+}
+/* Bottom scrim for the caption + a whisper of shade overall. */
+.auth-art::after {
     content: '';
     position: absolute;
     inset: 0;
-    background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
-    background-size: 20px 20px;
-    pointer-events: none;
+    background:
+        linear-gradient(to top, rgba(12, 18, 34, 0.62) 0%, rgba(12, 18, 34, 0) 48%),
+        rgba(12, 18, 34, 0.06);
+}
+/* Printer's crop marks, 28px in from each corner. */
+.auth-art__marks {
+    --m: rgba(255, 255, 255, 0.85);
+    position: absolute;
+    inset: 28px;
+    z-index: 1;
+    background:
+        linear-gradient(var(--m), var(--m)) left top / 22px 1px,
+        linear-gradient(var(--m), var(--m)) left top / 1px 22px,
+        linear-gradient(var(--m), var(--m)) right top / 22px 1px,
+        linear-gradient(var(--m), var(--m)) right top / 1px 22px,
+        linear-gradient(var(--m), var(--m)) left bottom / 22px 1px,
+        linear-gradient(var(--m), var(--m)) left bottom / 1px 22px,
+        linear-gradient(var(--m), var(--m)) right bottom / 22px 1px,
+        linear-gradient(var(--m), var(--m)) right bottom / 1px 22px;
+    background-repeat: no-repeat;
+}
+.auth-art__caption {
+    position: absolute;
+    z-index: 1;
+    left: clamp(40px, 5vw, 72px);
+    right: clamp(40px, 5vw, 72px);
+    bottom: clamp(44px, 6vh, 72px);
+    color: var(--white-primary, #fff);
+}
+.auth-art__title {
+    max-width: 17ch;
+    margin: 0;
+    font-family: var(--font-family-heading, inherit);
+    font-size: clamp(1.75rem, 1rem + 1.6vw, 2.5rem);
+    font-weight: var(--font-weight-bold);
+    line-height: 1.12;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+}
+.auth-art__note {
+    margin: 12px 0 0;
+    font-size: var(--font-size-sm);
+    color: rgba(255, 255, 255, 0.78);
 }
 
+/* Form column. */
+.auth-page .container--narrow {
+    align-self: center;
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
+    padding: var(--spacing-sm) var(--spacing-xl);
+}
 
+/* Segmented control for the two modes. */
 .auth-tabs {
     display: flex;
-    margin-bottom: var(--spacing-xl);
-    border-bottom: 2px solid var(--color-border);
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 24px;
+    background: var(--steel-100);
+    border-radius: 12px;
 }
-
 .auth-tabs__tab {
     flex: 1;
-    padding: var(--spacing-md);
-    font-weight: var(--font-weight-medium);
+    padding: 9px 12px;
+    border-radius: 9px;
+    font-size: 15px;
+    font-weight: var(--font-weight-semibold);
     text-align: center;
-    color: var(--color-text-light);
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    transition: border-bottom-color var(--transition-fast), color var(--transition-fast);
+    color: var(--steel-500);
+    transition: background-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
-
-.auth-tabs__tab:hover {
-    color: var(--color-primary);
-}
-
+.auth-tabs__tab:hover { color: var(--steel-800); }
+.auth-tabs__tab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .auth-tabs__tab--active {
-    border-bottom-color: var(--color-primary);
-    color: var(--color-primary);
+    background: var(--white-primary, #fff);
+    color: var(--steel-900);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.auth-form-wrapper {
+    position: relative;
 }
 
 .auth-form__heading {
-    text-align: center;
-    margin-bottom: var(--spacing-sm);
+    margin: 0 0 8px;
+    font-size: clamp(1.75rem, 1.3rem + 0.9vw, 2.125rem);
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+    color: var(--steel-900);
 }
 
 .auth-form__subheading {
-    text-align: center;
-    color: var(--color-text-light);
-    margin-bottom: var(--spacing-xl);
+    margin: 0 0 20px;
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    color: var(--steel-500);
 }
 
-/* Live rewards facts under the auth heading (ERR-296, turnaround doc #15). */
-.auth-form__points {
-    margin: -0.5rem 0 1.25rem;
-    padding: 0.625rem 0.75rem;
-    border-radius: 6px;
-    background: var(--cyan-light, #D4E8F5);
-    font-size: var(--font-size-sm);
-    line-height: 1.45;
-    color: var(--steel-600, #475569);
+/* Fields: sentence-case labels, roomy inputs, a soft focus ring. Scoped so
+   the shared form classes keep their look on every other page. */
+.auth-page .form-group { margin-bottom: 14px; }
+.auth-page .form-label {
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--steel-700);
+}
+/* Floating labels, the checkout pattern (cart-checkout.css): the label sits
+   inside the box and shrinks to its top edge once the field is focused or
+   filled. Inputs carry placeholder=" " so :placeholder-shown can tell. No
+   :has() support ⇒ the label just stays small at the top. Saves a label
+   row per field, which is what lets Create account fit one screen. */
+.auth-page .form-group:not(.form-group--checkbox) { position: relative; }
+.auth-page .form-group:not(.form-group--checkbox) > .form-label {
+    position: absolute;
+    z-index: 1;
+    top: 8px;
+    left: 15px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.2;
+    color: var(--steel-500);
+    pointer-events: none;
+    transition: top 0.12s ease, font-size 0.12s ease;
+}
+.auth-page .form-group:has(.form-input:placeholder-shown:not(:focus)) > .form-label {
+    top: 17px;
+    font-size: 15px;
+}
+/* One line, and never under the show-password eye. */
+.auth-page .form-group:not(.form-group--checkbox) > .form-label {
+    right: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.auth-page .form-group:has(.password-toggle) > .form-label { right: 48px; }
+.auth-page .form-label__optional { font-size: 12px; }
+.auth-page .form-row--two-col .form-group:has(.form-input:placeholder-shown:not(:focus)) > .form-label { font-size: 14px; }
+.auth-page .form-label__optional { text-transform: none; letter-spacing: 0; }
+.auth-page .form-input {
+    height: 52px;
+    padding: 20px 14px 4px;
+    font-size: 16px;
+    border: 1px solid var(--steel-200);
+    border-radius: 10px;
+    background: var(--white-primary, #fff);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.auth-page .form-input:hover { border-color: var(--steel-300); }
+.auth-page .form-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 4px rgba(38, 127, 181, 0.16);
+}
+.auth-page .password-input-wrapper .form-input { padding-right: 48px; }
+.auth-page .form-hint { margin-top: 6px; }
+
+/* Checkbox rows: box centred beside its label. */
+.auth-page .form-group--checkbox { align-items: center; }
+.auth-page .form-label--checkbox {
+    flex: 1 1 0;
+    margin: 0;
+    font-weight: var(--font-weight-normal);
+    color: var(--steel-600);
+}
+.auth-page .form-row--split {
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-bottom: 24px;
+}
+.auth-page .form-row--split .form-group { margin-bottom: 0; }
+/* First / last name: the groups already carry the 20px gap. */
+.auth-page .form-row--two-col { margin-bottom: 0; column-gap: 16px; row-gap: 0; }
+/* Create account fits one screen too (owner 2026-11-26): fields pair up in
+   rows above, and on mouse screens the two consent rows drop the 44px touch
+   minimum (touch keeps it). */
+@media (pointer: fine) {
+    .auth-page .form-group--checkbox,
+    .auth-page .form-label--checkbox { min-height: 28px; }
+    .auth-page .auth-form .form-group--checkbox { margin-bottom: 6px; }
+    .auth-page .auth-form .form-group--checkbox + .btn { margin-top: 10px; }
+}
+/* Remember-me: box + label never split; "Forgot password?" gives way. */
+.auth-page .form-row--split .form-group--checkbox { flex-wrap: nowrap; flex-shrink: 0; }
+.auth-page .form-row--split .form-label--checkbox { flex: none; }
+
+.auth-page .btn--large {
+    height: 52px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .auth-form__forgot {
     display: block;
     text-align: right;
-    font-size: var(--font-size-sm);
-    margin-top: var(--spacing-sm);
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
 }
 
 .auth-social {
-    margin: var(--spacing-xl) 0;
+    margin: 22px 0 0;
     text-align: center;
 }
 
@@ -6193,9 +6361,9 @@ a.account-review-card__product:focus-visible {
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    margin-bottom: var(--spacing-lg);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
+    margin-bottom: 14px;
+    color: var(--steel-400);
+    font-size: 13px;
 }
 
 .auth-social__divider::before,
@@ -6203,13 +6371,37 @@ a.account-review-card__product:focus-visible {
     content: '';
     flex: 1;
     height: 1px;
-    background-color: var(--color-border);
+    background-color: var(--steel-200);
 }
 
 .auth-social__buttons {
     display: flex;
-    gap: var(--spacing-md);
+    gap: 12px;
 }
+.auth-page .btn--social {
+    flex: 1;
+    height: 46px;
+    border: 1px solid var(--steel-200);
+    border-radius: 10px;
+    background: var(--white-primary, #fff);
+    font-size: 15px;
+    font-weight: var(--font-weight-medium);
+    color: var(--steel-800);
+    letter-spacing: 0;
+    text-transform: none;
+}
+.auth-page .btn--social:hover { border-color: var(--steel-300); background: var(--steel-50); }
+
+.auth-page .auth-form__switch {
+    margin: 28px 0 0;
+    text-align: left;
+    font-size: 14px;
+    color: var(--steel-500);
+}
+/* On sign-in / create account the segmented control already switches
+   modes, so the "Don't have an account? Create one" line is a duplicate.
+   Forgot / reset keep their "Sign in" link. */
+.auth-page .auth-panel .auth-form__switch { display: none; }
 
 /* Small phones: "Google"/"Microsoft" are single words that can't wrap, so
    the side-by-side pair clips at ~320px — stack them full-width instead
@@ -6220,16 +6412,33 @@ a.account-review-card__product:focus-visible {
     }
 }
 
-
-/* Auth Form Wrapper */
-.auth-form-wrapper {
-    background-color: var(--color-background);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-2xl);
-    padding: var(--spacing-2xl);
-    position: relative;
-    z-index: 1;
+/* Below 900px: photo band on top, form sheet slides over it. */
+@media (max-width: 899px) {
+    .auth-page {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        min-height: 0;
+    }
+    .auth-art {
+        position: relative;
+        height: clamp(150px, 26vh, 240px);
+        background-image: url('/assets/images/auth-ink-phone.webp');
+    }
+    .auth-art__marks { inset: 18px 18px 42px; }
+    .auth-art__caption { display: none; }
+    .auth-page .container--narrow {
+        position: relative;
+        z-index: 1;
+        align-self: start;
+        max-width: none;
+        margin-top: -24px;
+        padding: 28px 24px 40px;
+        background: var(--white-primary, #fff);
+        border-radius: 24px 24px 0 0;
+    }
+    .auth-page .container--narrow > * { max-width: 500px; margin-left: auto; margin-right: auto; }
 }
+
 
 .auth-panel[hidden] {
     display: none;

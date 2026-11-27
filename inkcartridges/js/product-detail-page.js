@@ -121,6 +121,13 @@
                 window.addEventListener('admin-preview:ready', () => {
                     if (this.product || this._adminRetried) return;
                     this._adminRetried = true;
+                    // ERR-401: the public 404 already ran showError(), which hides
+                    // the buy box. The render below never un-hides it, so an admin
+                    // got the product with no Availability and no Add button.
+                    // Undo exactly what showError() hid (#product-promise has its
+                    // own writer, renderPromise, which sets its hidden itself).
+                    ['.product-info__gst', '#product-stock', '.product-info__actions', '#product-terms']
+                        .forEach((s) => { const el = document.querySelector(s); if (el) el.hidden = false; });
                     this.init();
                 }, { once: true });
             } catch (_) { /* no window (tests) */ }

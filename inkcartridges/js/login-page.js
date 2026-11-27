@@ -211,7 +211,7 @@
                         loginError.hidden = false;
 
                         submitBtn.disabled = false;
-                        submitBtn.textContent = 'Sign In';
+                        submitBtn.textContent = 'Sign in';
                     } else {
                         // Merge guest cart into user cart immediately after login
                         // This transfers items from the guest cart cookie to the user's cart
@@ -374,7 +374,7 @@
                                 emailError.hidden = false;
                             }
                             submitBtn.disabled = false;
-                            submitBtn.textContent = 'Create Account';
+                            submitBtn.textContent = 'Create account';
                             return;
                         }
                     } catch (valErr) {
@@ -447,7 +447,7 @@
                     }
                     } finally {
                         submitBtn.disabled = false;
-                        submitBtn.textContent = 'Create Account';
+                        submitBtn.textContent = 'Create account';
                     }
                 });
             }

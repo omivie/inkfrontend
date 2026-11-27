@@ -152,7 +152,7 @@
                         passwordError.textContent = msg;
                         passwordError.hidden = false;
                         submitBtn.disabled = false;
-                        submitBtn.textContent = 'Update Password';
+                        submitBtn.textContent = 'Update password';
                         return;
                     }
 
@@ -181,7 +181,7 @@
                     passwordError.textContent = 'An error occurred. Please try again.';
                     passwordError.hidden = false;
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Update Password';
+                    submitBtn.textContent = 'Update password';
                 }
             });
         });

@@ -120,7 +120,8 @@ async function page(p) { await pause(200); const r = await fetch(`${BASE}${p}`).
     check('/bulk-pricing links /quote', /<a href="\/quote">Get a business quote<\/a>/.test(bulk));
     check('/value-packs mounts the brand chips', /id="value-page-brands"/.test(await page('/value-packs')));
     const login = await page('/account/login');
-    check('/account/login: two rewards lines, data-bound, no number in markup', (login.match(/data-value-prop="loyalty\.detail"/g) || []).length === 2);
+    // Owner removed the rewards box from sign-in 2026-11-26 (ERR-398; reverses #15).
+    check('/account/login: no rewards box (ERR-398)', !/auth-form__points|data-value-prop=/.test(login));
     const conf = await page('/order-confirmation');
     check('/order-confirmation: one-field form + business offer card, both hidden by default',
         /id="confirmation-account-form" hidden/.test(conf) && /id="business-account-offer" hidden/.test(conf) && /id="save-printer-prompt" hidden/.test(conf));
@@ -274,13 +275,29 @@ if (!argv.has('--browser')) {
         }
     }
 
-    head('§B5 sign-in rewards line renders live text (#15)');
-    {
-        const { ctx, p } = await newPage({ viewport: { width: 1440, height: 900 } });
+    head('§B5 sign-in has NO rewards box and the card fits one screen (ERR-398, reverses #15)');
+    for (const [w, h] of [[1440, 900], [1366, 768]]) {
+        const { ctx, p } = await newPage({ viewport: { width: w, height: h } });
         await p.goto(`${BASE}/account/login`, { waitUntil: 'domcontentloaded' });
-        await p.waitForFunction(() => { const e = document.querySelector('#login-panel .auth-form__points'); return e && !e.hidden; }, null, { timeout: 30000 }).catch(() => {});
-        const txt = await p.locator('#login-panel .auth-form__points').innerText().catch(() => '');
-        check('visible, and states the welcome points + guest claim from the API', /welcome/i.test(txt) && /same email/i.test(txt), txt.slice(0, 140));
+        await p.waitForSelector('#login-panel .auth-form-wrapper', { timeout: 30000 }).catch(() => {});
+        const m = await p.evaluate(() => {
+            const card = document.querySelector('#login-panel .auth-form-wrapper');
+            return { points: document.querySelectorAll('.auth-form__points').length,
+                bottom: card ? Math.round(card.getBoundingClientRect().bottom) : null, vh: innerHeight };
+        }).catch(() => null);
+        if (!m || m.bottom === null) skip(`${w}x${h} sign-in card`, "card not found");
+        else {
+            check(`${w}x${h}: no rewards box`, m.points === 0, `${m.points} found`);
+            check(`${w}x${h}: sign-in card bottom inside the viewport`, m.bottom <= m.vh, `bottom ${m.bottom} / vh ${m.vh}`);
+            // Create account must fit too (owner 2026-11-26): switch tab, measure the panel.
+            await p.click('#register-tab').catch(() => {});
+            const r = await p.evaluate(() => {
+                const el = document.querySelector('#register-panel .auth-form-wrapper');
+                return el && !el.closest('[hidden]') ? Math.round(el.getBoundingClientRect().bottom) : null;
+            }).catch(() => null);
+            if (r === null) skip(`${w}x${h} create-account panel`, 'panel not shown after tab click');
+            else check(`${w}x${h}: create-account form bottom inside the viewport`, r <= m.vh, `bottom ${r} / vh ${m.vh}`);
+        }
         await ctx.close();
     }
     await browser.close();
