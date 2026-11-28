@@ -436,10 +436,14 @@
             // left only as much as needed to stay on-screen. 1120px carries six
             // cards across: either one six-up row, or two three-up columns when
             // both a Compatible and a Genuine section came back.
+            // The panel is never narrower than the search bar above it: the
+            // header bar now spans the whole container (~1800px at 1920), and a
+            // fixed 1120px panel hung short of its right edge. So the width is
+            // max(form width, 1120), still clamped to the viewport.
             const DESKTOP_PANEL = 1120;
             const width = isMobile
                 ? (window.innerWidth - 32)
-                : Math.min(DESKTOP_PANEL, window.innerWidth - 32);
+                : Math.min(Math.max(DESKTOP_PANEL, Math.round(formRect.width)), window.innerWidth - 32);
             const left = isMobile
                 ? 16
                 : Math.min(Math.max(16, Math.round(formRect.left)), window.innerWidth - width - 16);

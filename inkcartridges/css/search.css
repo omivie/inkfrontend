@@ -790,7 +790,7 @@ mark.smart-ac__mark {
     transform: none;
     width: var(--smart-ac-width, 100%);
     min-width: 0;
-    max-width: 96vw;
+    max-width: calc(100vw - 32px); /* = search.js positionDropdown clamp */
     /* Height is set by search.js positionDropdown() to fill the viewport
        below the search input (window.innerHeight - top - 16px), so two
        full rows of product cards + the sticky View-all footer always fit.

@@ -61,6 +61,17 @@ describing the same incident.
 **Measured:** Playwright on localhost:3000 (live API): silver-reed-tw-3000 crumb `Shop › Silver Reed TW-3000`, `data-brand-page="no"`, schema Home › Shop › Silver Reed TW-3000, `dateModified` present. verifone-p250 also had no brand crumb. Brother MFC-J870 kept its brand crumb with 0 collection requests (control). Okin = `yes`. `/shop?q=<b>bold</b>` showed literal text. On port 3017 (not in backend CORS) the check failed and the page showed `unknown` with the crumb kept (fail-soft seen live). `npm run probe:brandless-printers`: 39 PASS, 0 FAIL, 2 NOT MEASURED (backend claims 1 and 3 name no sample URL). Tests on main: new file 16/16, red at HEAD 15/15. Worktree: 7,489 / fail 0.
 
 ---
+## ERR-402 — The search dropdown stayed 1120px wide under a search bar that now spans the whole container, so it stopped short of the bar's right edge — **FIXED (frontend)** (2026-11-28)
+
+**Symptom (owner screenshot, localhost, ~1515px window):** typing `tn258` in the header search opened the product panel aligned to the bar's left edge but ending ~300px before the bar's right edge (the yellow search button).
+
+**Cause:** `positionDropdown()` in `js/search.js` sized the desktop panel as `min(1120, innerWidth - 32)`. 1120 was chosen when the header search box was narrower than a row of cards. The bar has since been widened to the full `--container-max-width`, so above ~1150px the bar outgrew the fixed panel. `css/search.css` also capped the panel at `max-width: 96vw`, which is narrower than the JS clamp at small widths.
+
+**Fix:** desktop width = `min(max(1120, form width), innerWidth - 32)`; CSS `max-width` = `calc(100vw - 32px)` to match the JS clamp. One function serves every page with the header box and the 404 in-page box, so no per-page change. Card track counts are unchanged (3 per column split, 6 single), so cards just get wider.
+
+**Measured (Playwright, localhost, query `tn258`, pages `/`, `/shop`, `/cart`, 404):** panel left/right = bar left/right exactly at 1920 (99/1822), 1515 (68/1447), 1280 (40/1240). At 1024 the 1120 floor still wins (panel 16–1008, wider than the 88–996 bar, same as before). 375 unchanged (16–359). Tests: asset-cache-tokens + search-dropdown-* + fe-master-v2 + compat-wrong-family 141 pass / 0 fail / 11 skipped. `?v=` restamped for search.js and search.css on all 48 pages.
+
+---
 ## ERR-401 — An admin opening the admin-only test product got the product but no Availability row and no Add button, so it could not be bought — **FIXED (frontend)** (2026-11-28)
 
 **Reported.** Owner, signed in as admin, opened `/products/admin-test-product/TEST-ADMIN-001`. The first view was "Product not found". On the next view the product showed ($0.50, SKU `TEST-ADMIN-001`), but the AVAILABILITY row was blank and there was no quantity selector or Add button.

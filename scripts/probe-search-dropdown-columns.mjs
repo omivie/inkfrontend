@@ -50,7 +50,7 @@ const TWO_SOURCE_QUERY = process.env.PROBE_QUERY || 'lc531';
 // with a single section, and says so if none does.
 const SINGLE_SOURCE_CANDIDATES = ['ap830', 'kx-p', 'dpk', 'maintenance box', 'sp650'];
 
-// Per-viewport expectation. The panel is min(1120, innerWidth - 32), a split
+// Per-viewport expectation. The panel is min(max(1120, bar width), innerWidth - 32) (ERR-402), a split
 // column is half of that, and the card count per row steps down as the column
 // narrows — 3 while the column can hold three readable cards, then 2, then 1.
 // MEASURED, not assumed — and 960px is in this list because it is where the
