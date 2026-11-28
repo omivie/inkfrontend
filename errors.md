@@ -40,6 +40,27 @@ since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ app
 describing the same incident.
 
 ---
+## ERR-403 — 26 printer pages linked a brand crumb to a brand with no page (empty listing now, a 404 under FE-2b); `#shop-schema` had two writers and the surviving one dropped `dateModified` — **FIXED (frontend, main)**; FE-2b built on `seo-phase2-preview`, not shipped (2026-11-28)
+
+**Source:** backend update 2026-11-27 (`backend-docs/inbox/backend-update-2026-11-27.md`): "nothing for you to ship now" + guidance for FE-2b.
+
+**Symptom:** `/shop?brand=silver-reed&printer_slug=silver-reed-tw-3000` showed `Shop › Silver Reed › …`. The Silver Reed crumb opened `/shop?brand=silver-reed`, which is an empty listing (`/api/shop` 200, empty `counts`) and becomes a 404 once FE-2b ships. Same for the 26 printers of acroprint, axiohm, hypercom, optima, silver-reed, verifone, vertex (measured: exactly 26 in `sitemap-printers.xml`).
+
+**Cause:** the crumb assumed every `?brand=` has a brand page. Only `/api/schema/collection?brand=` can tell (404 = no page). `/api/shop` answers 200 for these brands, and `/api/brands` lists neither them nor Okin, which does have a page.
+
+**Second finding, same area:** `#shop-schema` had two writers. `updateBreadcrumb()` called `updateSchemaLD()`, and `updateSEO()` always ran after it (`loadCurrentLevel` :1596 → :1599) and overwrote it. So `updateSchemaLD`'s per-level crumb URLs and its May 2026 `dateModified` never reached the page after load. The surviving writer pointed every crumb at the page's own canonical, and on printer pages named the last crumb "Printing Supplies".
+
+**Fix (main, `js/shop-page.js`):**
+- `_brandPage(slug)` → `'yes' | 'no' | 'unknown'`, the ONE reader. A known brand (`/api/brands` row, or the local `brandInfo` map, because printer pages never load `/api/brands`) ⇒ `'yes'` with no request. Otherwise `API.getCollectionSchema` once per slug: `NOT_FOUND` ⇒ `'no'` (memoised, re-renders crumb + schema). A failure ⇒ `'unknown'`: crumb kept as before, not memoised (ERR-264), warned once. `init()` asks right after `parseURLState()`.
+- `updateBreadcrumb()` drops the brand crumb when it is a link to a `'no'` brand (the brand as current page stays). It writes `data-brand-page` on the list.
+- `updateSchemaLD()` DELETED. `updateSEO()` is the one `#shop-schema` writer: brand item = `/shop?brand=<slug>` (left out for `'no'`), printer page's last item = the printer name, `dateModified` moved in.
+- `createBreadcrumbItem()`: the current crumb is `textContent`, not `innerHTML`. The search crumb carried the raw `?q=`. CSP already blocked inline script, so this was markup injection only.
+
+**FE-2b (branch `seo-phase2-preview`, commit 3ecf030a, LOCAL, not pushed):** `middleware.js` checks `/api/schema/collection` on the plain brand arm only. Printer URLs are FE-2's, and the `okin&category=receipt` arm is not checked. `'no'` ⇒ 404 + `X-Robots-Tag: noindex` for every UA. A 5xx/timeout is never a 404: `X-Brand-Check: miss-<reason>`. `HEAD~1^{tree}` is still 4ef169c7. Needs owner approval after P1 stages A–C.
+
+**Measured:** Playwright on localhost:3000 (live API): silver-reed-tw-3000 crumb `Shop › Silver Reed TW-3000`, `data-brand-page="no"`, schema Home › Shop › Silver Reed TW-3000, `dateModified` present. verifone-p250 also had no brand crumb. Brother MFC-J870 kept its brand crumb with 0 collection requests (control). Okin = `yes`. `/shop?q=<b>bold</b>` showed literal text. On port 3017 (not in backend CORS) the check failed and the page showed `unknown` with the crumb kept (fail-soft seen live). `npm run probe:brandless-printers`: 39 PASS, 0 FAIL, 2 NOT MEASURED (backend claims 1 and 3 name no sample URL). Tests on main: new file 16/16, red at HEAD 15/15. Worktree: 7,489 / fail 0.
+
+---
 ## ERR-401 — An admin opening the admin-only test product got the product but no Availability row and no Add button, so it could not be bought — **FIXED (frontend)** (2026-11-28)
 
 **Reported.** Owner, signed in as admin, opened `/products/admin-test-product/TEST-ADMIN-001`. The first view was "Product not found". On the next view the product showed ($0.50, SKU `TEST-ADMIN-001`), but the AVAILABILITY row was blank and there was no quantity selector or Add button.

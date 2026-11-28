@@ -109,7 +109,8 @@
     "probe:search-inactive": "node scripts/probe-search-inactive.mjs",
     "probe:guides": "node scripts/probe-guides.mjs",
     "probe:receipt-rolls": "node scripts/probe-receipt-rolls.mjs",
-    "probe:seo-nov26": "node scripts/probe-seo-nov26.mjs"
+    "probe:seo-nov26": "node scripts/probe-seo-nov26.mjs",
+    "probe:brandless-printers": "node scripts/probe-brandless-printers.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

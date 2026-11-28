@@ -677,6 +677,10 @@
             // Parse URL params to restore state
             this.parseURLState();
 
+            // ERR-403 — ask early whether the brand has a page, so the answer is
+            // usually in before the level renders its breadcrumb.
+            if (this.state.brand) this._brandPage(this.state.brand);
+
             // Inject CollectionPage / BreadcrumbList JSON-LD for the current
             // view BEFORE the level loads (backend handoff 2026-09-28 §3): it
             // needs only brand/category/printer, which parseURLState has just
@@ -1928,6 +1932,51 @@
             if (!Array.isArray(list)) return null;
             const key = String(slug || '');
             return list.find(b => (b.slug || b.id || '') === key) || null;
+        },
+
+        /**
+         * ERR-403 — does `/shop?brand=<slug>` exist as a page? 'yes' | 'no' | 'unknown'.
+         *
+         * 26 printers of 7 brands (silver-reed, verifone, …) have a printer page but
+         * no brand page (backend update 2026-11-27). Their brand crumb led to an empty
+         * listing, and FE-2b turns that URL into a 404. Only /api/schema/collection
+         * can tell (404 = no page): /api/shop answers 200 for those brands, and
+         * /api/brands lists neither them nor Okin, which DOES have a page.
+         *
+         * A brand we know (an /api/brands row, or the local brandInfo map — printer
+         * pages never load /api/brands) has a page; probe:brandless-printers §2
+         * pins both lists, so the common case costs no request. Otherwise the first call
+         * starts the check and answers 'unknown'; a 'no' re-renders the crumb and
+         * #shop-schema. A failed check is 'unknown' (crumb kept, as before), is
+         * never memoised (ERR-264), and says so once.
+         */
+        _brandPage(slug) {
+            const key = String(slug || '').toLowerCase();
+            if (!key) return 'unknown';
+            if (this._knowsBrand(key)) return 'yes';
+            const memo = this._brandPageMemo || (this._brandPageMemo = {});
+            if (memo[key]) return memo[key] === 'pending' ? 'unknown' : memo[key];
+            if (typeof API === 'undefined' || !API.getCollectionSchema) return 'unknown';
+            memo[key] = 'pending';
+            Promise.resolve(API.getCollectionSchema({ brand: key })).catch(() => null).then((res) => {
+                const answer = res && res.collectionPage ? 'yes'
+                    : (res && res.code === 'NOT_FOUND') ? 'no' : 'unknown';
+                if (answer === 'unknown') {
+                    delete memo[key];
+                    if (!this._warnedBrandPage) {
+                        this._warnedBrandPage = true;
+                        DebugLog.warn(`[brands] could not tell whether "${key}" has a brand page; its crumb stays.`);
+                    }
+                    return;
+                }
+                memo[key] = answer;
+                // Same brand still on screen (any later level load reads the memo itself).
+                if (answer === 'no' && String((this.state && this.state.brand) || '').toLowerCase() === key) {
+                    this.updateBreadcrumb();
+                    this.updateSEO();
+                }
+            });
+            return 'unknown';
         },
 
         /**
@@ -5978,9 +6027,14 @@
 
             // Brand level. Never on the roll listing (ERR-368): Okin is kept out
             // of the brand nav on purpose — its brand copy is about cartridges.
-            if (this.state.brand && this.state.category !== 'receipt') {
+            // ERR-403 — nor as a link to a brand with no page of its own (the 26
+            // silver-reed/verifone/… printer pages): that URL is empty, then a 404.
+            const brandPage = this.state.brand ? this._brandPage(this.state.brand) : '';
+            list.dataset.brandPage = brandPage;
+            const isBrandCurrent = this.state.level === 'categories';
+            if (this.state.brand && this.state.category !== 'receipt' && (isBrandCurrent || brandPage !== 'no')) {
                 const brandName = this.brandName(this.state.brand);
-                const isCurrent = this.state.level === 'categories';
+                const isCurrent = isBrandCurrent;
                 const brandItem = this.createBreadcrumbItem(brandName, isCurrent, () => {
                     this.navigateTo('categories', { brand: this.state.brand });
                 });
@@ -6021,53 +6075,6 @@
                 const searchItem = this.createBreadcrumbItem(`Search: "${this.state.search}"`, true);
                 list.appendChild(searchItem);
             }
-
-            this.updateSchemaLD();
-        },
-
-        updateSchemaLD() {
-            const el = document.getElementById('shop-schema');
-            if (!el) return;
-            const base = 'https://www.inkcartridges.co.nz';
-            const shopUrl = base + '/shop';
-            const items = [
-                { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
-                { "@type": "ListItem", "position": 2, "name": "Shop", "item": shopUrl }
-            ];
-            let pageUrl = shopUrl;
-            let pageName = 'Shop Ink Cartridges & Toner NZ';
-            // The roll listing names no brand (ERR-368, Okin stays out of nav).
-            const rolls = this.state.category === 'receipt';
-            if (rolls) pageName = 'Receipt Rolls NZ';
-            if (this.state.brand && !rolls) {
-                const brandName = this.brandName(this.state.brand);
-                pageUrl = shopUrl + '?brand=' + encodeURIComponent(this.state.brand);
-                pageName = brandName + ' Ink Cartridges';
-                items.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": pageUrl });
-            }
-            if (this.state.category) {
-                const cat = this.categories?.find(c => c.id === this.state.category);
-                const catName = cat?.name || (rolls ? 'Receipt Rolls' : this.state.category);
-                // Canonical slug in the URL, internal id for the display name.
-                pageUrl += (pageUrl.includes('?') ? '&' : '?') + 'category=' + encodeURIComponent(this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
-                if (!rolls) pageName = pageName + ' \u2014 ' + catName;
-                items.push({ "@type": "ListItem", "position": items.length + 1, "name": catName, "item": pageUrl });
-            }
-            el.textContent = JSON.stringify({
-                "@context": "https://schema.org",
-                "@type": "CollectionPage",
-                "name": pageName,
-                "url": pageUrl,
-                // dateModified — May 2026 AI search readiness.
-                // The backend prerender already emits MAX(items.updated_at)
-                // for crawlers; AI agents that read the rendered DOM (Gemini
-                // live, Bing live) should see a matching freshness signal
-                // here instead of a stale, static stamp. The SPA doesn't
-                // have a single MAX(updated_at), so render time is the
-                // honest proxy — products were fetched moments ago.
-                "dateModified": this._collectionDateModified(),
-                "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": items }
-            });
         },
 
         // Returns MAX(updated_at) across products in the current view if
@@ -6095,7 +6102,10 @@
 
             if (isCurrent) {
                 li.classList.add('drilldown-breadcrumb__item--current');
-                li.innerHTML = `<span>${text}</span>`;
+                // textContent: the search crumb carries the raw ?q= (ERR-403).
+                const span = document.createElement('span');
+                span.textContent = text;
+                li.appendChild(span);
             } else {
                 const link = document.createElement('button');
                 link.className = 'drilldown-breadcrumb__link';
@@ -6345,19 +6355,29 @@
                     { "@type": "ListItem", "position": 1, "name": "Home", "item": `${BASE}/` },
                     { "@type": "ListItem", "position": 2, "name": "Shop", "item": `${BASE}/shop` }
                 ];
+                const crumb = (name, item) => breadcrumbItems.push({ "@type": "ListItem", "position": breadcrumbItems.length + 1, name, item });
                 if (receiptListing) {
-                    breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": catLabel, "item": canonical });
+                    crumb(catLabel, canonical);
                 } else {
-                    if (brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": canonical });
-                    if (catLabel && brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 4, "name": catLabel, "item": canonical });
+                    // ERR-403 — the brand crumb points at the brand's own page, and
+                    // is left out for a brand that has none (silver-reed, …).
+                    if (brandName && this._brandPage(brand) !== 'no') crumb(brandName, `${BASE}/shop?brand=${encodeURIComponent(lc(brand))}`);
+                    // Last crumb = this page. A printer page names the printer, not
+                    // the 'Printing Supplies' default the category label falls back to.
+                    if (catLabel && brandName) crumb((this.state.printer && this.state.printerName) || catLabel, canonical);
                 }
 
+                // The ONE #shop-schema writer (ERR-403 deleted updateSchemaLD, whose
+                // output this block always overwrote — including the dateModified
+                // below, which therefore never reached the page until it moved here).
                 schemaEl.textContent = JSON.stringify({
                     "@context": "https://schema.org",
                     "@type": "CollectionPage",
                     "name": title.replace(' | InkCartridges.co.nz', ''),
                     "description": description,
                     "url": canonical,
+                    // May 2026 AI search readiness: DOM-reading agents see freshness.
+                    "dateModified": this._collectionDateModified(),
                     "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": breadcrumbItems }
                 }, null, 2);
             }

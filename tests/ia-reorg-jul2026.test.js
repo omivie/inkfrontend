@@ -297,9 +297,10 @@ test('§7 parseURLState canonicalizes the incoming param and repairs the URL', (
 test('§7 updateURL and schema/SEO builders emit canonical slugs', () => {
     const emissions = [...stripComments(SHOP_JS).matchAll(/CATEGORY_CANONICAL_BY_INTERNAL\[/g)];
     // map declaration + parseURLState is INTERNAL_BY_CANONICAL; the canonical
-    // emitter appears in updateURL, updateSchemaLD and updateSEO = 3 sites.
-    assert.ok(emissions.length >= 3,
-        `expected >=3 canonical-emission sites, found ${emissions.length}`);
+    // emitter appears in updateURL and updateSEO = 2 sites. (updateSchemaLD was
+    // a third until ERR-403 deleted it: updateSEO always overwrote its output.)
+    assert.ok(emissions.length >= 2,
+        `expected >=2 canonical-emission sites, found ${emissions.length}`);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
